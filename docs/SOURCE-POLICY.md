@@ -49,10 +49,6 @@ Track them from day one. Bridging to `@cornerstonejs/codec-charls` is fine and
 so are OpenJPEG, CharLS and OpenJPH, all permissive. Grok is not. Attribution
 files are cheap to maintain incrementally and expensive to reconstruct.
 
-## Extensions to the table
-
-Decisions made after the policy was written, in the same form.
-
 ## The rule for anything not yet listed
 
 **No licence is not the same as permissive.** A repository with no LICENSE
@@ -61,8 +57,8 @@ default under the Berne Convention. It may be read as a person reads any
 published page. It may not be copied into this repository, in whole or in
 part, and its text may not be used as the base for a file here.
 
-Before taking anything from a source not in either table, check three things
-and record the answer:
+Before taking anything from a source not in the table above, check three
+things and record the answer:
 
 1. Is there a LICENSE, LICENCE, COPYING or NOTICE file at the repository root?
 2. Does the hosting platform's metadata report a licence?
@@ -71,45 +67,33 @@ and record the answer:
 
 If 1 and 2 are both absent, the answer is no.
 
-## Extensions to the C.2.1 table
+## Extensions to the table
 
-| Source | Licence | Read? | Copy or derive? | Decided |
-|--------|---------|-------|-----------------|---------|
-| `aurabx/skills` (`skills/dicom-processing`) | **None declared.** No LICENSE, LICENCE, COPYING or NOTICE at the root, and the GitHub API reports `license: null` | yes, as a published page | **NO** | Bootstrap |
+None yet. A source assessed after this policy was written gets a row here, in
+the same form as the table above, with the date it was decided.
 
-### Why `aurabx/skills` is listed
+## One defect worth naming, because it is everywhere
 
-It was proposed as a source for a DICOM skill. It is a useful pydicom and
-DCMTK reference and it is **not** copyleft, so it is not a clean-room hazard in
-the way dwv and Horos are. It is simply unlicensed, which means copying it here
-would be a plain infringement rather than a subtle one.
-
-`.claude/skills/dicom-tooling/SKILL.md` covers the same ground for this
-project's actual need, which is corpus and fixture work, and it was written
-from the DICOM standard, the pydicom documentation and the DCMTK manual pages.
-It is not derived from that repository.
-
-### One technical note worth keeping
-
-That skill's window and level example computes
+Reference material for DICOM windowing very commonly computes:
 
 ```python
+# WRONG. Neither LINEAR nor LINEAR_EXACT. Do not copy this shape.
 img_min = window_center - window_width // 2
 img_max = window_center + window_width // 2
 ```
 
-**This is neither `LINEAR` nor `LINEAR_EXACT`.** It is the naive formula, and
-it is the single most common way a DICOM viewer gets windowing wrong. Against
-PS3.3 C.11.2.1.2 it omits the `c - 0.5` and `w - 1` adjustment, and against
-C.11.2.1.3.2 it omits the `+ 0.5` centring term, so it disagrees with both.
+**This is neither `LINEAR` nor `LINEAR_EXACT`.** Against PS3.3 C.11.2.1.2 it
+omits the `c - 0.5` and `w - 1` adjustment, and against C.11.2.1.3.2 it omits
+the `+ 0.5` centring term, so it disagrees with both.
 
-It is recorded here not as criticism of that repository, whose purpose is to
-show a reader how to get a picture on the screen, but because it is a live
-example of the exact defect class `docs/hld/15-lut-chain.md` section 18.3
-exists to catch: code that produces an entirely plausible image with values
-that are wrong by a fraction of a level, invisible to a screenshot review and
-immediate to a pixel diff.
+It is extremely common in tutorials, blog posts and example code, and it
+survives because it produces a picture that looks entirely correct. It is a
+live instance of the exact defect class `docs/hld/15-lut-chain.md` section 18.3
+exists to catch: values wrong by a fraction of a level, invisible to a
+screenshot review and immediate to a pixel diff.
 
-**Any window and level implementation that reaches this repository must match
-one of the three formulas in section 18.2 exactly, and must be proved against
-the four-row fixture in section 18.3 before the shader is written.**
+**Any window and level implementation reaching this repository must match one
+of the three formulas in section 18.2 exactly, and must be proved against the
+four-row fixture in section 18.3 before the shader is written.** If a reference
+you are consulting contains the shape above, it is not authoritative on the
+LUT chain, whatever else it gets right.
