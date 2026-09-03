@@ -295,6 +295,19 @@ SUBSECTION_RE = re.compile(r"^(\d+\.\d+)\s+(.*\S)\s*$")
 PART_RE = re.compile(r"^(Part [IVX]+|Appendix [A-Z])\s*[—-]\s*(.*\S)\s*$")
 
 
+ABS_MEDIA = re.compile(r'src="[^"]*/(media/[^"]+)"')
+
+
+def relativise_media(lines: list[str]) -> list[str]:
+    """Rewrite absolute figure paths to repository-relative ones.
+
+    pandoc's --extract-media is given an absolute directory, so it emits
+    `src="/Users/.../docs/hld/media/x.png"`. That link resolves on exactly one
+    machine, and it publishes that machine's directory layout and username.
+    """
+    return [ABS_MEDIA.sub(r'src="\1"', line) for line in lines]
+
+
 def convert() -> list[str]:
     if shutil.which("pandoc") is None:
         sys.exit("pandoc is required to split the HLD")
@@ -447,7 +460,7 @@ def main() -> int:
         print("passed, which is why this exits 3 and not 0.")
         return EXIT_SKIPPED
 
-    lines = fence_blockquotes(convert())
+    lines = relativise_media(fence_blockquotes(convert()))
     bodies, front, owner = cut(lines)
 
     orphans = [

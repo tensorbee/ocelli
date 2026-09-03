@@ -40,7 +40,7 @@ INCLUDE_PREFIXES = (".claude/plans/", ".claude/reviews/", ".claude/commands/",
 INCLUDE_EXACT = {"README.md", "CLAUDE.md", "AGENTS.md", ".claude/WORKFLOW.md",
                  "corpus/README.md", "docs/hld/DEVIATIONS.md",
                  "docs/RELEASE.md", "docs/SOURCE-POLICY.md",
-                 "docs/DEVELOPER_SETUP.md"}
+                 "docs/DEVELOPER_SETUP.md", "CONTRIBUTING.md", "SECURITY.md"}
 
 EM_DASH = re.compile(r"[—–]")
 SEMICOLON = re.compile(r";")

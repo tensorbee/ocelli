@@ -6,7 +6,7 @@ this CLONE rather than of the project. Three sources, first match wins:
 
   1. $OCELLI_SOURCE_DIR                  per-invocation override
   2. .ocelli-source-path                 per-clone, gitignored, survives a move
-  3. ~/Desktop/ocelli/source-documents   the bootstrap default
+  3. ../ocelli-source-documents          a machine-neutral fallback
 
 Recording it in a file rather than relying on an exported variable matters:
 an env var has to be remembered every session, and forgetting it makes the
@@ -28,7 +28,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / ".ocelli-source-path"
-DEFAULT = "~/Desktop/ocelli/source-documents"
+# A sibling of the checkout, so the default is machine-neutral. The real
+# location is recorded per clone in .ocelli-source-path.
+DEFAULT = str(ROOT.parent / "ocelli-source-documents")
 EXPECTED = ["Ocelli-HLD.docx", "Rust-WASM-Imaging-Backlog.xlsx"]
 
 

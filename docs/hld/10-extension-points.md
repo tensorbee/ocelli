@@ -19,7 +19,7 @@ held outside this repository, see `docs/SOURCE-POLICY.md`.
 
 ## 13. Designed-in extension points
 
-<img src="/Users/atulsharma/Documents/projects/tensorbee/ocelli/docs/hld/media/07403708d15c3e1231f6152ada07099062c761a5.png" style="width:6.39583in;height:1.46875in" />
+<img src="media/07403708d15c3e1231f6152ada07099062c761a5.png" style="width:6.39583in;height:1.46875in" />
 
 *Figure 3 — The single-bindgen-crate rule turns Phases 2 and 3 into new entry points rather than new implementations. It costs nothing in Phase 1 and cannot be retrofitted cheaply.*
 

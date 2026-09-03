@@ -35,7 +35,7 @@ A fixed-size ring in linear memory, drained once per frame rather than invoking 
 
 ## 6. The data path
 
-<img src="/Users/atulsharma/Documents/projects/tensorbee/ocelli/docs/hld/media/b48f203411e0f3bd2aa583de8f134f8207d7829b.png" style="width:6.39583in;height:1.875in" />
+<img src="media/b48f203411e0f3bd2aa583de8f134f8207d7829b.png" style="width:6.39583in;height:1.875in" />
 
 *Figure 2 — One hop disappears and one constraint disappears with it. Decoded frames stop becoming JavaScript objects, and a single GPUDevice replaces the pooled WebGL contexts cornerstone works around with an entire rendering-engine variant.*
 

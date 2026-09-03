@@ -19,7 +19,7 @@ held outside this repository, see `docs/SOURCE-POLICY.md`.
 
 ## 3. System architecture
 
-<img src="/Users/atulsharma/Documents/projects/tensorbee/ocelli/docs/hld/media/633ac206e180a7e68141dcb3f0ac27eaa624f80d.png" style="width:6.39583in;height:3.01042in" />
+<img src="media/633ac206e180a7e68141dcb3f0ac27eaa624f80d.png" style="width:6.39583in;height:3.01042in" />
 
 *Figure 1 — The shell owns everything the DOM touches; the core owns everything a pixel touches. Only three kinds of thing cross the boundary, and none of them is an image.*
 

@@ -1,0 +1,17 @@
+Ocelli is dual-licensed under either of
+
+  * Apache License, Version 2.0  (LICENSE-APACHE, http://www.apache.org/licenses/LICENSE-2.0)
+  * MIT license                  (LICENSE-MIT,    http://opensource.org/licenses/MIT)
+
+at your option.
+
+This is the Rust ecosystem norm and it is deliberate. Integrators embed an
+engine like this inside closed products, and a disclosure obligation ends that
+conversation before it starts. See the Licence section of README.md.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this work by you, as defined in the Apache-2.0 licence, shall
+be dual-licensed as above, without any additional terms or conditions.
+
+Third-party sources this project may read or depend on are governed separately
+by docs/SOURCE-POLICY.md, which is enforced on every commit.

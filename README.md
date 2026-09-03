@@ -102,7 +102,7 @@ examples/
 tools/oracle/       the differential harness against cornerstone3D
 corpus/             manifest only. The data is not in git
 
-docs/hld/           the specification, cut from docs/Ocelli-HLD.docx
+docs/hld/           the specification, cut from the authored document
 docs/sprints/       backlog, sprint plan, trackers
 .claude/            the workflow: commands, skills, plans, reviews
 .agents/skills/     generated Codex adapters for the same workflow
@@ -149,14 +149,20 @@ gate refuses them when they drift.
 the only command that publishes anything. `.claude/WORKFLOW.md` is the law of
 the project.
 
+## Contributing
+
+`CONTRIBUTING.md`, and please read it before writing code. Two rules there are
+absolute rather than careful: no patient data ever enters this repository, and
+the source-provenance policy governs which third-party projects may be read at
+all, not merely depended on.
+
+Security issues, including a wrong pixel value or wrong geometry, go through
+`SECURITY.md`.
+
 ## Licence
 
-MIT OR Apache-2.0. Permissive on purpose: integrators embed an engine like this
-in closed products, and a disclosure obligation ends that conversation before it
-starts.
+Dual-licensed under **MIT** or **Apache-2.0** at your option, texts in
+`LICENSE-MIT` and `LICENSE-APACHE`.
 
-Contributors: this project has a source-provenance policy governing which
-third-party sources may be read and which may be depended on.
-`docs/SOURCE-POLICY.md` is the policy and
-`scripts/source_provenance_check.py` enforces it on every commit. Read it
-before taking an implementation approach from anywhere.
+Permissive on purpose: integrators embed an engine like this inside closed
+products, and a disclosure obligation ends that conversation before it starts.
