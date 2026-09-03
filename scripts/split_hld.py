@@ -49,6 +49,45 @@ DOCX = SOURCE_DIR / "Ocelli-HLD.docx"
 # extracted into docs/SOURCE-POLICY.md before this exclusion was added, so the
 # read-block on dwv, Horos and Grok survives and the guard still enforces it.
 PRIVATE_SECTIONS = {"C-competitive-position.md"}
+
+# Commercial product names are competitive intelligence and are not published
+# with the library. Each replacement keeps the ENGINEERING point intact, which
+# is the whole reason the sentence is in a design document: a named vendor's
+# published memory constant, or a named viewer's extension requirement, is
+# evidence for a design decision, and the evidence survives without the name.
+#
+# The unredacted text stays in the authored .docx and in the private folder.
+# Applied to repository-bound output only.
+REDACTIONS: list[tuple[str, str]] = [
+    ("Visage 7, the acknowledged performance leader in this market, is not a "
+     "browser application. Their own FAQ says it \"does not run in a "
+     "browser\"",
+     "The acknowledged performance leader in this market is not a browser "
+     "application. Its own documentation states that it does not run in a "
+     "browser"),
+    ("Visage 7 - the acknowledged performance leader - is a native "
+     "smart-client, not a browser application. Its own FAQ states it \"does "
+     "not run in a browser\"",
+     "The acknowledged performance leader is a native smart-client, not a "
+     "browser application. Its own documentation states that it does not run "
+     "in a browser"),
+    ("Fovia, the CPU-only server-side renderer sold to GE, IBM and J&J, "
+     "publishes its memory constant",
+     "A leading CPU-only server-side renderer, sold to several major imaging "
+     "vendors, publishes its memory constant"),
+    ("MedDream ships a Chrome extension solely to place windows across them, "
+     "and it requires every connected display to have matching resolution",
+     "One commercial viewer ships a browser extension solely to place windows "
+     "across them, and it requires every connected display to have matching "
+     "resolution"),
+]
+
+
+def redact(text: str) -> str:
+    """Strip commercial product names from repository-bound output."""
+    for old, new in REDACTIONS:
+        text = text.replace(old, new)
+    return text
 EXIT_SKIPPED = 3
 
 # Top-level section key -> output filename. Keys are matched against the
@@ -434,7 +473,7 @@ def main() -> int:
             if name in PRIVATE_SECTIONS:
                 continue
             path = HLD / name
-            if not path.exists() or path.read_text() != text:
+            if not path.exists() or path.read_text() != redact(text):
                 drift.append(name)
         if drift:
             print("FAIL: docs/hld drifted from the .docx: " + ", ".join(drift))
@@ -452,7 +491,7 @@ def main() -> int:
             private_dir.mkdir(parents=True, exist_ok=True)
             (private_dir / name).write_text(text)
             continue
-        (HLD / name).write_text(text)
+        (HLD / name).write_text(redact(text))
         written += 1
     print(f"wrote {written} files to docs/hld/, "
           f"{len(PRIVATE_SECTIONS)} to {private_dir}")

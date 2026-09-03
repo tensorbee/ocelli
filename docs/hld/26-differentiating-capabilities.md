@@ -25,7 +25,7 @@ What matters architecturally is §38: four of these need a hook inside Phase 1, 
 
 |  |
 |----|
-| **THE REFRAMING FACT** Visage 7, the acknowledged performance leader in this market, is not a browser application. Their own FAQ says it "does not run in a browser" - zero-footprint there means no data at rest. The fastest product in the category concluded the browser was the wrong container. Several of the capabilities below exist specifically to prove that conclusion out of date. |
+| **THE REFRAMING FACT** The acknowledged performance leader in this market is not a browser application. Its own documentation states that it does not run in a browser - zero-footprint there means no data at rest. The fastest product in the category concluded the browser was the wrong container. Several of the capabilities below exist specifically to prove that conclusion out of date. |
 
 ## 30. Out-of-core volume streaming
 
@@ -56,7 +56,7 @@ fn correct_opacity(alpha: f32, ds: f32, ds_ref: f32) -> f32 {
 
 |  |
 |----|
-| **THE CLAIM THIS BUYS** Fovia, the CPU-only server-side renderer sold to GE, IBM and J&J, publishes its memory constant: roughly 40% above dataset size. A bounded-residency client renderer has no dataset-proportional footprint at all. That is a stronger claim than beating 1.4x, it is checkable, and it is the direct answer to the reason server-side rendering exists. |
+| **THE CLAIM THIS BUYS** A leading CPU-only server-side renderer, sold to several major imaging vendors, publishes its memory constant: roughly 40% above dataset size. A bounded-residency client renderer has no dataset-proportional footprint at all. That is a stronger claim than beating 1.4x, it is checkable, and it is the direct answer to the reason server-side rendering exists. |
 
 ## 31. The compute subsystem
 
@@ -97,7 +97,7 @@ ONNX Runtime Web on the WebGPU execution provider, with the model's input tensor
 
 ## 33. Multi-monitor
 
-A radiologist reads on two to four calibrated displays. MedDream ships a Chrome extension solely to place windows across them, and it requires every connected display to have matching resolution. That fragility is a large part of why the market leader left the browser.
+A radiologist reads on two to four calibrated displays. One commercial viewer ships a browser extension solely to place windows across them, and it requires every connected display to have matching resolution. That fragility is a large part of why the market leader left the browser.
 
 - The **Window Management API** enumerates displays and places viewport windows across them; the layout persists per user.
 

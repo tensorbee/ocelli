@@ -2720,7 +2720,7 @@
    "depends_eids": [
     "E16.3"
    ],
-   "notes": "MedDream needs a Chrome extension with matched resolutions",
+   "notes": "One commercial viewer needs a browser extension with matched resolutions",
    "milestone": "M17",
    "sprint": "S57",
    "depends_fids": [

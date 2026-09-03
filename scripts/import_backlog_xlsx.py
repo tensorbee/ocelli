@@ -164,6 +164,20 @@ CRATE_RENAMES = {
 }
 
 
+# Commercial product names in the spreadsheet's Notes column. Same reasoning
+# as the redactions in split_hld.py: the engineering point survives the name.
+COMMERCIAL_REDACTIONS = [
+    ("MedDream needs a Chrome extension with matched resolutions",
+     "One commercial viewer needs a browser extension with matched resolutions"),
+]
+
+
+def redact_commercial(text: str) -> str:
+    for old, new in COMMERCIAL_REDACTIONS:
+        text = text.replace(old, new)
+    return text
+
+
 def normalise_crate_names(text: str) -> str:
     """Apply deviation D-02: `tb-*` crate names become `ocelli-*`."""
     for old, new in CRATE_RENAMES.items():
@@ -209,8 +223,8 @@ def load_rows() -> list[dict]:
             "layer": (row["Layer"] or "").strip(),
             "weeks": int(row["Est (eng-weeks)"]),
             "depends_eids": [d.strip() for d in deps.split(",") if d.strip()],
-            "notes": annotate_blocked_sources(
-                normalise_crate_names((row["Notes"] or "").strip())),
+            "notes": redact_commercial(annotate_blocked_sources(
+                normalise_crate_names((row["Notes"] or "").strip()))),
         })
     return out
 

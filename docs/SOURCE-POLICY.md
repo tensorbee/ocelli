@@ -49,6 +49,26 @@ Track them from day one. Bridging to `@cornerstonejs/codec-charls` is fine and
 so are OpenJPEG, CharLS and OpenJPH, all permissive. Grok is not. Attribution
 files are cheap to maintain incrementally and expensive to reconstruct.
 
+## Which product names appear here, and why
+
+Three categories, and only one of them is redacted.
+
+**Commercial competitor names are removed.** They are competitive intelligence
+rather than engineering, and `scripts/split_hld.py` strips them from the
+generated specification on the way into this repository. Each replacement keeps
+the point the sentence was making, because a vendor's published memory constant
+is evidence for a design decision and the evidence survives without the name.
+The unredacted text stays in the authored document, outside this repository.
+
+**Read-blocked projects are named, deliberately.** A policy whose function is to
+say what must not be opened cannot do that without naming them. HLD gate A6
+requires this agreed in writing, and an unnamed prohibition is not one.
+
+**Dependencies are named, necessarily.** `Cargo.toml` declares several by name,
+the codec registry is specified in terms of its decoders, and two of the six
+spike gates are questions about specific libraries. Removing them would stop
+the documents describing the software.
+
 ## The rule for anything not yet listed
 
 **No licence is not the same as permissive.** A repository with no LICENSE
