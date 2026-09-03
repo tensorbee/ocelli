@@ -155,20 +155,8 @@ MIT OR Apache-2.0. Permissive on purpose: integrators embed an engine like this
 in closed products, and a disclosure obligation ends that conversation before it
 starts.
 
-### Source hygiene
-
-Translating source into Rust is a translation, which is an exclusive right of
-the copyright holder, so a copyleft licence constrains **reading** and not only
-depending. Under agent-assisted development that exposure cannot be disproved
-after the fact.
-
-So two well-regarded projects, **dwv** and **Horos**, are out of bounds to read
-on this project, purely because of their licences and not because of their
-quality. Where their ideas are worth having, and dwv's annotations-as-DICOM-SR
-certainly is, we take them from the standard, which is where dwv took them from
-too.
-
-cornerstone3D, dicom-rs, wgpu, VTK, ITK, elastix, DCMTK, OpenJPEG, CharLS,
-OpenJPH, BlueLight, dicom-microscopy-viewer, NiiVue and Neuroglancer are all in
-bounds to read and to depend on. `docs/SOURCE-POLICY.md` is the policy and
-`scripts/source_provenance_check.py` enforces it.
+Contributors: this project has a source-provenance policy governing which
+third-party sources may be read and which may be depended on.
+`docs/SOURCE-POLICY.md` is the policy and
+`scripts/source_provenance_check.py` enforces it on every commit. Read it
+before taking an implementation approach from anywhere.
