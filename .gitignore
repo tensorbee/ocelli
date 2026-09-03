@@ -70,3 +70,7 @@ test-results/
 .idea/
 .vscode/
 .playwright-mcp/
+
+# Where the private source documents live on THIS machine. Per-clone, because
+# it is a property of the checkout and not of the project.
+.ocelli-source-path

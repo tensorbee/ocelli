@@ -34,9 +34,10 @@ HLD = ROOT / "docs" / "hld"
 # The authored .docx lives OUTSIDE the repository. It carries Appendix C, the
 # competitive and commercial analysis, which is not published with the library.
 # See the private folder's README. Default location, overridable:
-SOURCE_DIR = Path(
-    os.environ.get("OCELLI_SOURCE_DIR", "~/Desktop/ocelli/source-documents")
-).expanduser()
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from source_dir import resolve as _resolve_source  # noqa: E402
+
+SOURCE_DIR, _SOURCE_ORIGIN = _resolve_source()
 DOCX = SOURCE_DIR / "Ocelli-HLD.docx"
 
 # Sections cut from the .docx but NOT written into the repository. They are
@@ -354,9 +355,13 @@ def render_readme(bodies: dict[str, list[str]], front: list[str]) -> str:
         "To regenerate or verify, point at the source and re-run:",
         "",
         "```bash",
-        "export OCELLI_SOURCE_DIR=~/Desktop/ocelli/source-documents",
+        "python3 scripts/source_dir.py --set /path/to/source-documents",
         "python3 scripts/split_hld.py",
         "```",
+        "",
+        "The path is recorded per clone in `.ocelli-source-path`, which is",
+        "gitignored, so moving the documents is a one-command fix rather than",
+        "an environment variable to remember every session.",
         "",
         "Without it the `docs` gate SKIPS with a stated reason. A check that",
         "cannot run is not a check that passed.",
@@ -395,8 +400,10 @@ def main() -> int:
 
     if not DOCX.exists():
         print(f"SKIPPED: the authored source is not present at {DOCX}.")
-        print("It lives outside the repository because it carries Appendix C,")
-        print("the commercial analysis. Set OCELLI_SOURCE_DIR to regenerate or")
+        print(f"Resolved from: {_SOURCE_ORIGIN}. It lives outside the")
+        print("repository because it carries Appendix C,")
+        print("commercial analysis. Record its location with")
+        print("`python3 scripts/source_dir.py --set PATH` to regenerate or")
         print("verify docs/hld. A check that cannot run is NOT a check that")
         print("passed, which is why this exits 3 and not 0.")
         return EXIT_SKIPPED

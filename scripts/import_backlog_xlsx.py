@@ -38,9 +38,10 @@ ROOT = Path(__file__).resolve().parent.parent
 # The spreadsheet lives OUTSIDE the repository. It carries the full 190-story
 # plan with engineer-week estimates, which publishes the scale and shape of the
 # investment. The DERIVED backlog stays tracked, so the workflow is unaffected.
-SOURCE_DIR = Path(
-    os.environ.get("OCELLI_SOURCE_DIR", "~/Desktop/ocelli/source-documents")
-).expanduser()
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from source_dir import resolve as _resolve_source  # noqa: E402
+
+SOURCE_DIR, _SOURCE_ORIGIN = _resolve_source()
 XLSX = SOURCE_DIR / "Rust-WASM-Imaging-Backlog.xlsx"
 EXIT_SKIPPED = 3
 BACKLOG = ROOT / "docs" / "sprints" / "BACKLOG.md"
@@ -465,8 +466,10 @@ def main() -> int:
 
     if not XLSX.exists():
         print(f"SKIPPED: the backlog spreadsheet is not present at {XLSX}.")
-        print("It lives outside the repository because it carries the full")
-        print("effort plan. Set OCELLI_SOURCE_DIR to regenerate or verify the")
+        print(f"Resolved from: {_SOURCE_ORIGIN}. It lives outside the")
+        print("repository because it carries the full")
+        print("effort plan. Record its location with")
+        print("`python3 scripts/source_dir.py --set PATH` to verify the")
         print("backlog. A check that cannot run is NOT a check that passed,")
         print("which is why this exits 3 and not 0.")
         return EXIT_SKIPPED

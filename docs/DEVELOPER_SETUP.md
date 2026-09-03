@@ -38,6 +38,20 @@ bin/ocelli.sh gate --floor             # everything that needs no GPU
 provenance trailer. A clone without them can commit patient data and can push
 a head CI will reject.
 
+## The private source documents
+
+The authored `.docx` and the backlog `.xlsx` are held outside the repository.
+Record where they live, once per clone:
+
+```bash
+python3 scripts/source_dir.py --set /path/to/source-documents
+python3 scripts/source_dir.py --check
+```
+
+Without them the `docs` gate **skips with a stated reason** rather than passing
+or failing, and says which of the three sources it resolved the path from. You
+only need them to regenerate or verify `docs/hld/` and the backlog.
+
 ## The corpus
 
 Not in git. See `corpus/README.md`.

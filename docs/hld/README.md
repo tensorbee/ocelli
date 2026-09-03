@@ -12,9 +12,13 @@ one normative part, the source-provenance table, lives in
 To regenerate or verify, point at the source and re-run:
 
 ```bash
-export OCELLI_SOURCE_DIR=~/Desktop/ocelli/source-documents
+python3 scripts/source_dir.py --set /path/to/source-documents
 python3 scripts/split_hld.py
 ```
+
+The path is recorded per clone in `.ocelli-source-path`, which is
+gitignored, so moving the documents is a one-command fix rather than
+an environment variable to remember every session.
 
 Without it the `docs` gate SKIPS with a stated reason. A check that
 cannot run is not a check that passed.
