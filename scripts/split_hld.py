@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import os
 import shutil
@@ -52,40 +53,23 @@ PRIVATE_SECTIONS = {"C-competitive-position.md"}
 
 # Commercial product names are competitive intelligence and are not published
 # with the library. Each replacement keeps the ENGINEERING point intact, which
-# is the whole reason the sentence is in a design document: a named vendor's
-# published memory constant, or a named viewer's extension requirement, is
-# evidence for a design decision, and the evidence survives without the name.
-#
-# The unredacted text stays in the authored .docx and in the private folder.
-# Applied to repository-bound output only.
-REDACTIONS: list[tuple[str, str]] = [
-    ("Visage 7, the acknowledged performance leader in this market, is not a "
-     "browser application. Their own FAQ says it \"does not run in a "
-     "browser\"",
-     "The acknowledged performance leader in this market is not a browser "
-     "application. Its own documentation states that it does not run in a "
-     "browser"),
-    ("Visage 7 - the acknowledged performance leader - is a native "
-     "smart-client, not a browser application. Its own FAQ states it \"does "
-     "not run in a browser\"",
-     "The acknowledged performance leader is a native smart-client, not a "
-     "browser application. Its own documentation states that it does not run "
-     "in a browser"),
-    ("Fovia, the CPU-only server-side renderer sold to GE, IBM and J&J, "
-     "publishes its memory constant",
-     "A leading CPU-only server-side renderer, sold to several major imaging "
-     "vendors, publishes its memory constant"),
-    ("MedDream ships a Chrome extension solely to place windows across them, "
-     "and it requires every connected display to have matching resolution",
-     "One commercial viewer ships a browser extension solely to place windows "
-     "across them, and it requires every connected display to have matching "
-     "resolution"),
-]
+# is the whole reason the sentence is in a design document: a vendor's
+# published memory constant is evidence for a design decision, and the
+# evidence survives without the name.
 
+# Redaction rules live with the private source documents, NOT here. A map of
+# what was redacted still contains what was redacted, so publishing it would
+# undo the redaction it performs. The generators cannot run without the private
+# source anyway, so the rules travel with it.
+def _load_redactions() -> list[tuple[str, str]]:
+    path = SOURCE_DIR / "redactions.json"
+    if not path.exists():
+        return []
+    return [(r[0], r[1]) for r in json.loads(path.read_text())["rules"]]
 
 def redact(text: str) -> str:
     """Strip commercial product names from repository-bound output."""
-    for old, new in REDACTIONS:
+    for old, new in _load_redactions():
         text = text.replace(old, new)
     return text
 EXIT_SKIPPED = 3

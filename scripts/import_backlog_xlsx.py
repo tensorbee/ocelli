@@ -164,16 +164,18 @@ CRATE_RENAMES = {
 }
 
 
-# Commercial product names in the spreadsheet's Notes column. Same reasoning
-# as the redactions in split_hld.py: the engineering point survives the name.
-COMMERCIAL_REDACTIONS = [
-    ("MedDream needs a Chrome extension with matched resolutions",
-     "One commercial viewer needs a browser extension with matched resolutions"),
-]
+# Commercial product names in the spreadsheet's Notes column. The rules live
+# with the private source documents for the reason given in split_hld.py: a
+# map of what was redacted still contains it.
+def _load_redactions() -> list[tuple[str, str]]:
+    path = SOURCE_DIR / "redactions.json"
+    if not path.exists():
+        return []
+    return [(r[0], r[1]) for r in json.loads(path.read_text())["rules"]]
 
 
 def redact_commercial(text: str) -> str:
-    for old, new in COMMERCIAL_REDACTIONS:
+    for old, new in _load_redactions():
         text = text.replace(old, new)
     return text
 
