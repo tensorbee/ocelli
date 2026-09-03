@@ -1,0 +1,6 @@
+interface:
+  display_name: "Dicom Expert"
+  short_description: "Deep DICOM reference for Ocelli. The information model, data elemen..."
+  default_prompt: "Load $dicom-expert as reference material before acting."
+policy:
+  allow_implicit_invocation: true

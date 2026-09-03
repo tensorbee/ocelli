@@ -1,0 +1,94 @@
+{
+  "_comment": [
+    "Stories added AFTER the spreadsheet import. F-001 to F-190 are the",
+    "imported range and are re-derived from docs/Rust-WASM-Imaging-Backlog.xlsx",
+    "by scripts/import_backlog_xlsx.py, so nothing may be hand-added there.",
+    "Project-added stories take F-X IDs and live here instead. The importer",
+    "merges them, so `--check` still re-derives BACKLOG.md byte for byte.",
+    "",
+    "Every addition names the deviation or the decision that created it, so a",
+    "reader can tell a story that came from the specification from one that",
+    "came from a later conversation."
+  ],
+  "stories": [
+    {
+      "fid": "F-X001",
+      "ref": "X1.1",
+      "phase": "P1",
+      "milestone": "M1",
+      "epic": "EX Tier C, CPU rendering",
+      "story": "Tier C, software-adapter detection, and the feature-availability contract",
+      "layer": "Rust",
+      "weeks": 4,
+      "sprint": "S04",
+      "depends_fids": [
+        "F-004"
+      ],
+      "notes": "Deviation D-07, and spike answer docs/spikes/A7-tier-c.md. HLD section 7 declares TWO tiers and both are GPU, so a machine with neither WebGPU nor WebGL2 renders nothing. Adds Tier::Cpu, and generalises the section 31 kernel rule to every tier-gated feature: a feature that cannot run on the resolved tier reports UNAVAILABLE and never silently produces a different answer. SCOPE ADDED BY A7.1: tier resolution must distinguish a HARDWARE adapter from a SOFTWARE one. On a host with no GPU a software rasteriser presents a conforming WebGL2 context, so Caps as specified resolves tier B and runs GPU paths on a rasteriser that is slower than our own CPU path and burns more CPU, which on a shared host is the resource that decides session density. Detect by renderer string, adapter type AND a startup micro-benchmark, and trust the benchmark: a renderer string is a claim and increasingly masked, a measured fill rate is a fact. Always allow an operator override."
+    },
+    {
+      "fid": "F-X002",
+      "ref": "X1.2",
+      "phase": "P1",
+      "milestone": "M3",
+      "epic": "EX Tier C, CPU rendering",
+      "story": "Three-layer GPU-less render testing: lavapipe in CI and Chrome with SwiftShader nightly",
+      "layer": "Build",
+      "weeks": 3,
+      "sprint": "S14",
+      "depends_fids": [
+        "F-037"
+      ],
+      "notes": "Spike answer A7.2. Layer 1, tier C raster, needs NO adapter and is a plain cargo test on every PR, which is why the bulk of tier C correctness is free in CI. This story builds layers 2 and 3. Layer 2 is lavapipe via wgpu force_fallback_adapter on ubuntu-latest, catching pipeline construction, bind-group layouts, WGSL compilation and the tier-B shader variants at no GPU cost. Layer 3 is headless Chrome with SwiftShader, nightly or manual, and it is the only layer that says anything about what a GPU-less session actually does. DO NOT describe layer 2 as a simulator of a real GPU-less session: lavapipe is Vulkan through wgpu, a GPU-less browser session is SwiftShader through Chrome WebGL2. NO layer is an oracle, the reference is cornerstone3D per section 11. ACCEPTANCE: prove lavapipe actually resolves as a fallback adapter under the pinned wgpu version on ubuntu-latest. If it does not, layer 2 drops and layers 1 and 3 stand."
+    },
+    {
+      "fid": "F-X003",
+      "ref": "X1.3",
+      "phase": "P1",
+      "milestone": "M4",
+      "epic": "EX Tier C, CPU rendering",
+      "story": "CPU raster for the stack viewport, progressive refinement, and the tier A against C bound",
+      "layer": "Rust+TS",
+      "weeks": 6,
+      "sprint": "S16",
+      "depends_fids": [
+        "F-029",
+        "F-045",
+        "F-X001"
+      ],
+      "notes": "HLD section 18 requires the LUT chain to exist once in ocelli-pixel with the shader reading its parameters, so the CPU path reuses that implementation and does not use the shader. One arithmetic implementation, three presentation paths. Inner loops use wasm SIMD128, and the no-SIMD runtime is measured separately as the worst case. A7.3b, PROGRESSIVE REFINEMENT: reduced resolution during a window/level drag or scroll, full resolution on settle. Same idiom as sections 8 and 30. It cuts CPU when the budget is under pressure AND cuts full-frame changes for a remoted session's display encoder, which is the second cost and the easy one to forget. Two constraints follow: the SETTLED frame is what the divergence bound is measured on, an interaction frame is explicitly not claimed to match tier A, and the user must be able to tell settled from refining because a radiologist must never measure from a frame that is still refining. A7.3, CPU BUDGET: measure the incumbent viewer on a representative GPU-less session, budget is no worse than its interactive AND idle cost, then record and gate on regression using the same mechanism as ci/wasm-size-budget.json. Report interactive and idle separately. Idle must be indistinguishable from zero because it multiplies by every open session on the host. A7.1b, DIVERGENCE: the estate is mixed, so decision D14's published bound must cover tier A against tier C. The oracle diffs the two over the corpus."
+    },
+    {
+      "fid": "F-X004",
+      "ref": "X1.4",
+      "phase": "P1",
+      "milestone": "M5",
+      "epic": "EX Tier C, CPU rendering",
+      "story": "CPU MPR and oblique reslicing, with SIMD inner loops",
+      "layer": "Rust",
+      "weeks": 5,
+      "sprint": "S21",
+      "depends_fids": [
+        "F-052",
+        "F-X003"
+      ],
+      "notes": "REQUIRED, not optional, and split from the volume decision by spike answer A7.1b. GPU passthrough is not assumed, so a user on a GPU-less session has no other route to a reformat at all: without this, that whole deployment class gets stack viewing and nothing else. Reslicing is a resampling problem and is CPU-tractable for a single plane at interactive rates. Inner loops use wasm SIMD128, and the no-SIMD runtime is measured separately because that combination is the genuine worst case. Judged on CPU cost per session as well as latency, because on a shared host density is sessions per host."
+    },
+    {
+      "fid": "F-X005",
+      "ref": "X1.5",
+      "phase": "P1",
+      "milestone": "M5",
+      "epic": "EX Tier C, CPU rendering",
+      "story": "The CPU volume-rendering decision, and honest unavailability",
+      "layer": "Rust+TS",
+      "weeks": 2,
+      "sprint": "S21",
+      "depends_fids": [
+        "F-059",
+        "F-X003"
+      ],
+      "notes": "A DECISION story, not an implementation one. Interactive volume ray-casting on CPU is very likely not achievable inside a GPU-less session's CPU budget, and the expected outcome is that VOLUME_3D reports UNAVAILABLE on tier C. That is a legitimate outcome and it is the whole point of the feature-availability contract in F-X001. What it must NOT do is the third thing: a slow CPU path that quietly produces a different image from the GPU one. Whichever way it goes, the shell must say so to the user in terms a radiologist can act on, because a 3D tab that is simply absent is a support call and a 3D tab that renders wrongly is a patient-safety issue."
+    }
+  ]
+}

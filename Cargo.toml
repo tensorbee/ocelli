@@ -1,0 +1,60 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "tools/oracle"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# HLD section 15.2 gives 1.85, the dicom-rs MSRV floor. We pin 1.97.1, which
+# is above that floor so the floor is still satisfied. Recorded as D-01 in
+# docs/hld/DEVIATIONS.md.
+rust-version = "1.97.1"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/tensorbee/ocelli"
+authors = ["Tensorbee"]
+
+# HLD section 27.1. The dangerous defect class in this project is arithmetic,
+# and `as` casts are where silent arithmetic errors live. Every conversion
+# should be a deliberate, visible choice.
+[workspace.lints.clippy]
+cast_possible_truncation = "deny"
+cast_precision_loss = "deny"
+cast_sign_loss = "deny"
+float_cmp = "deny"
+indexing_slicing = "warn"
+# Not from section 27.1. These follow from section 23's panic policy: a panic
+# inside WebAssembly poisons the module instance, so a panic reachable from an
+# exported function is a defect and not an error path. Denying the three
+# common ways one arrives is cheaper than finding it at runtime.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+# HLD section 15.2, verbatim. The exact wgpu pin is not fussiness: agents
+# reliably emit wgpu 0.19-era pipeline code, and a caret range lets that
+# compile against something subtly different from what the shader expects.
+#
+# Nothing here is referenced by a crate yet. Cargo does not resolve an unused
+# workspace dependency, so the skeleton builds with no network. Each entry
+# activates with the story that needs it, F-016 for dicom, F-039 for wgpu.
+[workspace.dependencies]
+wgpu = "=30.0.1"
+dicom = { version = "0.10", default-features = false }
+glam = "0.30"
+bytemuck = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+# DICOM-RS FEATURES, HLD section 15.2. Disable default features. The defaults
+# are rayon and simd, and the gdcm feature is native-only. On wasm you want
+# default-features = false, then jpeg, rle, deflate and openjp2 selected
+# explicitly. The inventory-based transfer-syntax plugin registry does not
+# work on wasm at all, which is why section 21 specifies an explicit runtime
+# registry instead.
+
+# HLD section 15.2, verbatim.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

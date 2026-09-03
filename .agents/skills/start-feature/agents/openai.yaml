@@ -1,0 +1,6 @@
+interface:
+  display_name: "Start Feature"
+  short_description: "Mark an F-ID in progress, create its branch context and test stubs,..."
+  default_prompt: "Use $start-feature to follow the repository workflow."
+policy:
+  allow_implicit_invocation: false

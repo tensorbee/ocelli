@@ -1,0 +1,3850 @@
+{
+ "milestones": [
+  {
+   "key": "M1",
+   "title": "Foundations and the differential oracle",
+   "epics": [
+    "E1",
+    "E2"
+   ],
+   "goal": "The workspace builds to wasm and to native, and the oracle renders the corpus through cornerstone3D before any port code exists."
+  },
+  {
+   "key": "M2",
+   "title": "DICOM ingest and the pixel pipeline",
+   "epics": [
+    "E3",
+    "E4"
+   ],
+   "goal": "A frame parses, decodes and passes the hand-computed LUT fixtures of HLD section 18.3."
+  },
+  {
+   "key": "M3",
+   "title": "Cache and the render core",
+   "epics": [
+    "E5",
+    "E6"
+   ],
+   "goal": "One budgeted cache, one wgpu device, the LUT chain running as a shader stage on both capability tiers."
+  },
+  {
+   "key": "M4",
+   "title": "Public API, the boundary, and the stack viewport",
+   "epics": [
+    "E16",
+    "E7"
+   ],
+   "goal": "The three-channel boundary is real and a stack viewport diffs clean against cornerstone3D. This is the Phase 1 credibility gate."
+  },
+  {
+   "key": "M5",
+   "title": "Volume, MPR and 3D rendering",
+   "epics": [
+    "E8",
+    "E9"
+   ],
+   "goal": "Volumes assemble progressively, reslice obliquely and ray-cast on both tiers."
+  },
+  {
+   "key": "M6",
+   "title": "Segmentation rendering",
+   "epics": [
+    "E10"
+   ],
+   "goal": "All three representations render: labelmap, contour, surface."
+  },
+  {
+   "key": "M7",
+   "title": "Tool framework and geometry",
+   "epics": [
+    "E11"
+   ],
+   "goal": "Interaction state in TypeScript, hit-testing and measurement mathematics in Rust."
+  },
+  {
+   "key": "M8",
+   "title": "Annotation tools",
+   "epics": [
+    "E12"
+   ],
+   "goal": "The 26 annotation classes and the ROI statistics engine."
+  },
+  {
+   "key": "M9",
+   "title": "Segmentation tools",
+   "epics": [
+    "E13"
+   ],
+   "goal": "The 12 segmentation classes."
+  },
+  {
+   "key": "M10",
+   "title": "Manipulation and utility tools",
+   "epics": [
+    "E14"
+   ],
+   "goal": "The 25 manipulation and utility classes."
+  },
+  {
+   "key": "M11",
+   "title": "Annotation state and DICOM interop",
+   "epics": [
+    "E15"
+   ],
+   "goal": "SR is the native annotation type, and SEG, RTSTRUCT and TID 1500 round trip."
+  },
+  {
+   "key": "M12",
+   "title": "Migration and rollout",
+   "epics": [
+    "E17"
+   ],
+   "goal": "Both libraries coexist, viewport by viewport, with shadow mode before each cutover."
+  },
+  {
+   "key": "M13",
+   "title": "Performance, hardening and release",
+   "epics": [
+    "E18",
+    "E19"
+   ],
+   "goal": "Binary size and cold start inside budget, the browser matrix certified, semver and provenance policy in force."
+  },
+  {
+   "key": "M14",
+   "title": "Out-of-core volume streaming",
+   "epics": [
+    "E30"
+   ],
+   "goal": "Bounded GPU residency on unbounded data. The first of the three checkable claims in HLD C.7."
+  },
+  {
+   "key": "M15",
+   "title": "The WebGPU compute subsystem",
+   "epics": [
+    "E31"
+   ],
+   "goal": "Kernels sharing the renderer's device, every tier-A kernel carrying a declared fallback."
+  },
+  {
+   "key": "M16",
+   "title": "Prompted segmentation and standards-native annotations",
+   "epics": [
+    "E32",
+    "E34"
+   ],
+   "goal": "SAM2-class prompting against GPU-resident tensors, and GSPS write with coded concepts."
+  },
+  {
+   "key": "M17",
+   "title": "Multi-monitor, attestation and live sessions",
+   "epics": [
+    "E33",
+    "E36",
+    "E37"
+   ],
+   "goal": "Real multi-monitor, a published divergence bound, and a CRDT over state that is already a serialisable struct."
+  },
+  {
+   "key": "M18",
+   "title": "Whole-slide imaging and the unified scene graph",
+   "epics": [
+    "E35"
+   ],
+   "goal": "Radiology and pathology in one scene graph, sharing one annotation coordinate model."
+  }
+ ],
+ "stories": [
+  {
+   "fid": "F-001",
+   "eid": "E1.1",
+   "phase": "P1",
+   "epic": "E1 Foundations & toolchain",
+   "epic_key": "E1",
+   "story": "Cargo workspace, crate skeleton, lint/CI baseline",
+   "layer": "Build",
+   "weeks": 2,
+   "depends_eids": [],
+   "notes": "Core crates must not depend on wasm-bindgen \u2014 see HLD \u00a74",
+   "milestone": "M1",
+   "sprint": "S01",
+   "depends_fids": []
+  },
+  {
+   "fid": "F-002",
+   "eid": "E1.2",
+   "phase": "P1",
+   "epic": "E1 Foundations & toolchain",
+   "epic_key": "E1",
+   "story": "wasm-pack build pipeline with a hard size budget gate",
+   "layer": "Build",
+   "weeks": 2,
+   "depends_eids": [
+    "E1.1"
+   ],
+   "notes": "CI fails if the module exceeds the agreed budget",
+   "milestone": "M1",
+   "sprint": "S02",
+   "depends_fids": [
+    "F-001"
+   ]
+  },
+  {
+   "fid": "F-003",
+   "eid": "E1.3",
+   "phase": "P1",
+   "epic": "E1 Foundations & toolchain",
+   "epic_key": "E1",
+   "story": "TS package scaffold, bundling, npm publish pipeline",
+   "layer": "Build",
+   "weeks": 2,
+   "depends_eids": [
+    "E1.1"
+   ],
+   "notes": "",
+   "milestone": "M1",
+   "sprint": "S02",
+   "depends_fids": [
+    "F-001"
+   ]
+  },
+  {
+   "fid": "F-004",
+   "eid": "E1.4",
+   "phase": "P1",
+   "epic": "E1 Foundations & toolchain",
+   "epic_key": "E1",
+   "story": "Runtime capability detection & tiering (WebGPU / WebGL2 / SIMD / threads)",
+   "layer": "Build",
+   "weeks": 2,
+   "depends_eids": [
+    "E1.2"
+   ],
+   "notes": "Tier A = compute available; Tier B = fragment-only",
+   "milestone": "M1",
+   "sprint": "S03",
+   "depends_fids": [
+    "F-002"
+   ]
+  },
+  {
+   "fid": "F-005",
+   "eid": "E1.5",
+   "phase": "P1",
+   "epic": "E1 Foundations & toolchain",
+   "epic_key": "E1",
+   "story": "Error model, panic-to-JS mapping, structured logging",
+   "layer": "Build",
+   "weeks": 2,
+   "depends_eids": [
+    "E1.2"
+   ],
+   "notes": "A panic must never leave a viewport in an undefined state",
+   "milestone": "M1",
+   "sprint": "S03",
+   "depends_fids": [
+    "F-002"
+   ]
+  },
+  {
+   "fid": "F-006",
+   "eid": "E1.6",
+   "phase": "P1",
+   "epic": "E1 Foundations & toolchain",
+   "epic_key": "E1",
+   "story": "Benchmark harness: decode, first frame, interaction latency",
+   "layer": "Build",
+   "weeks": 2,
+   "depends_eids": [
+    "E1.3"
+   ],
+   "notes": "Numbers feed the P0 kill criteria",
+   "milestone": "M1",
+   "sprint": "S03",
+   "depends_fids": [
+    "F-003"
+   ]
+  },
+  {
+   "fid": "F-007",
+   "eid": "E1.7",
+   "phase": "P1",
+   "epic": "E1 Foundations & toolchain",
+   "epic_key": "E1",
+   "story": "Cross-target build proof: native desktop + server binary",
+   "layer": "Build",
+   "weeks": 2,
+   "depends_eids": [
+    "E1.1"
+   ],
+   "notes": "Guards the shared-core promise before code accumulates",
+   "milestone": "M1",
+   "sprint": "S02",
+   "depends_fids": [
+    "F-001"
+   ]
+  },
+  {
+   "fid": "F-008",
+   "eid": "E1.8",
+   "phase": "P1",
+   "epic": "E1 Foundations & toolchain",
+   "epic_key": "E1",
+   "story": "ocelli-compute crate skeleton and GPU device-sharing contract",
+   "layer": "Build",
+   "weeks": 2,
+   "depends_eids": [
+    "E1.1"
+   ],
+   "notes": "Declares the compute subsystem so E31 has somewhere to land",
+   "milestone": "M1",
+   "sprint": "S02",
+   "depends_fids": [
+    "F-001"
+   ]
+  },
+  {
+   "fid": "F-009",
+   "eid": "E2.1",
+   "phase": "P1",
+   "epic": "E2 Differential oracle & corpus",
+   "epic_key": "E2",
+   "story": "Golden corpus ingest and de-identified fixture store",
+   "layer": "Test",
+   "weeks": 3,
+   "depends_eids": [],
+   "notes": "Multi-vendor, multi-modality; grows for the life of the project",
+   "milestone": "M1",
+   "sprint": "S01",
+   "depends_fids": []
+  },
+  {
+   "fid": "F-010",
+   "eid": "E2.2",
+   "phase": "P1",
+   "epic": "E2 Differential oracle & corpus",
+   "epic_key": "E2",
+   "story": "Headless cornerstone3D reference renderer",
+   "layer": "Test",
+   "weeks": 4,
+   "depends_eids": [
+    "E2.1"
+   ],
+   "notes": "Playwright-driven; produces the reference frames",
+   "milestone": "M1",
+   "sprint": "S02",
+   "depends_fids": [
+    "F-009"
+   ]
+  },
+  {
+   "fid": "F-011",
+   "eid": "E2.3",
+   "phase": "P1",
+   "epic": "E2 Differential oracle & corpus",
+   "epic_key": "E2",
+   "story": "Pixel-diff comparator with per-modality tolerance policy",
+   "layer": "Test",
+   "weeks": 3,
+   "depends_eids": [
+    "E2.2"
+   ],
+   "notes": "Tolerance is a written policy, not a magic number",
+   "milestone": "M1",
+   "sprint": "S03",
+   "depends_fids": [
+    "F-010"
+   ]
+  },
+  {
+   "fid": "F-012",
+   "eid": "E2.4",
+   "phase": "P1",
+   "epic": "E2 Differential oracle & corpus",
+   "epic_key": "E2",
+   "story": "CI gate: every PR renders the full corpus",
+   "layer": "Test",
+   "weeks": 3,
+   "depends_eids": [
+    "E2.3"
+   ],
+   "notes": "The gate that makes agent-generated code safe to merge",
+   "milestone": "M1",
+   "sprint": "S04",
+   "depends_fids": [
+    "F-011"
+   ]
+  },
+  {
+   "fid": "F-013",
+   "eid": "E2.5",
+   "phase": "P1",
+   "epic": "E2 Differential oracle & corpus",
+   "epic_key": "E2",
+   "story": "Metadata diff harness (LUT values, geometry, spacing)",
+   "layer": "Test",
+   "weeks": 2,
+   "depends_eids": [
+    "E2.3"
+   ],
+   "notes": "Catches wrongness that pixels alone hide",
+   "milestone": "M1",
+   "sprint": "S04",
+   "depends_fids": [
+    "F-011"
+   ]
+  },
+  {
+   "fid": "F-014",
+   "eid": "E2.6",
+   "phase": "P1",
+   "epic": "E2 Differential oracle & corpus",
+   "epic_key": "E2",
+   "story": "Quirk-capture workflow: every field bug becomes a fixture",
+   "layer": "Test",
+   "weeks": 3,
+   "depends_eids": [
+    "E2.4"
+   ],
+   "notes": "Also the evidence base for a future regulatory submission",
+   "milestone": "M1",
+   "sprint": "S05",
+   "depends_fids": [
+    "F-012"
+   ]
+  },
+  {
+   "fid": "F-015",
+   "eid": "E2.7",
+   "phase": "P1",
+   "epic": "E2 Differential oracle & corpus",
+   "epic_key": "E2",
+   "story": "Stable render-hash emission from the comparator",
+   "layer": "Test",
+   "weeks": 2,
+   "depends_eids": [
+    "E2.3"
+   ],
+   "notes": "Near-free here; it is the foundation E36 attestation builds on",
+   "milestone": "M1",
+   "sprint": "S04",
+   "depends_fids": [
+    "F-011"
+   ]
+  },
+  {
+   "fid": "F-016",
+   "eid": "E3.1",
+   "phase": "P1",
+   "epic": "E3 DICOM ingest & metadata",
+   "epic_key": "E3",
+   "story": "ocelli-dicom: parse and transfer-syntax dispatch over dicom-rs",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E1.1"
+   ],
+   "notes": "",
+   "milestone": "M2",
+   "sprint": "S06",
+   "depends_fids": [
+    "F-001"
+   ]
+  },
+  {
+   "fid": "F-017",
+   "eid": "E3.2",
+   "phase": "P1",
+   "epic": "E3 DICOM ingest & metadata",
+   "epic_key": "E3",
+   "story": "Metadata model and provider registry",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E3.1"
+   ],
+   "notes": "Replaces @cornerstonejs/metadata; 6,395 LOC equivalent",
+   "milestone": "M2",
+   "sprint": "S07",
+   "depends_fids": [
+    "F-016"
+   ]
+  },
+  {
+   "fid": "F-018",
+   "eid": "E3.3",
+   "phase": "P1",
+   "epic": "E3 DICOM ingest & metadata",
+   "epic_key": "E3",
+   "story": "Image plane, pixel, modality-LUT and VOI-LUT modules",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E3.2"
+   ],
+   "notes": "",
+   "milestone": "M2",
+   "sprint": "S08",
+   "depends_fids": [
+    "F-017"
+   ]
+  },
+  {
+   "fid": "F-019",
+   "eid": "E3.4",
+   "phase": "P1",
+   "epic": "E3 DICOM ingest & metadata",
+   "epic_key": "E3",
+   "story": "Multiframe and enhanced SOP class handling",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E3.2"
+   ],
+   "notes": "Historically the richest source of vendor quirks",
+   "milestone": "M2",
+   "sprint": "S08",
+   "depends_fids": [
+    "F-017"
+   ]
+  },
+  {
+   "fid": "F-020",
+   "eid": "E3.5",
+   "phase": "P1",
+   "epic": "E3 DICOM ingest & metadata",
+   "epic_key": "E3",
+   "story": "Per-frame functional groups, gantry tilt, spacing calibration",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E3.4"
+   ],
+   "notes": "",
+   "milestone": "M2",
+   "sprint": "S09",
+   "depends_fids": [
+    "F-019"
+   ]
+  },
+  {
+   "fid": "F-021",
+   "eid": "E3.6",
+   "phase": "P1",
+   "epic": "E3 DICOM ingest & metadata",
+   "epic_key": "E3",
+   "story": "DICOMweb client: WADO-RS, WADO-URI, QIDO-RS",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E3.1"
+   ],
+   "notes": "Fetch stays in JS; bytes cross into wasm once",
+   "milestone": "M2",
+   "sprint": "S07",
+   "depends_fids": [
+    "F-016"
+   ]
+  },
+  {
+   "fid": "F-022",
+   "eid": "E3.7",
+   "phase": "P1",
+   "epic": "E3 DICOM ingest & metadata",
+   "epic_key": "E3",
+   "story": "NIfTI volume ingest",
+   "layer": "Rust",
+   "weeks": 2,
+   "depends_eids": [
+    "E3.1"
+   ],
+   "notes": "",
+   "milestone": "M2",
+   "sprint": "S07",
+   "depends_fids": [
+    "F-016"
+   ]
+  },
+  {
+   "fid": "F-023",
+   "eid": "E4.1",
+   "phase": "P1",
+   "epic": "E4 Pixel pipeline & codecs",
+   "epic_key": "E4",
+   "story": "Codec dispatch layer and capability registry",
+   "layer": "Rust",
+   "weeks": 2,
+   "depends_eids": [
+    "E3.1"
+   ],
+   "notes": "",
+   "milestone": "M2",
+   "sprint": "S07",
+   "depends_fids": [
+    "F-016"
+   ]
+  },
+  {
+   "fid": "F-024",
+   "eid": "E4.2",
+   "phase": "P1",
+   "epic": "E4 Pixel pipeline & codecs",
+   "epic_key": "E4",
+   "story": "JPEG baseline / extended / lossless via jpeg-decoder",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E4.1"
+   ],
+   "notes": "Beats cornerstone outright: SV1 is pure JS there",
+   "milestone": "M2",
+   "sprint": "S08",
+   "depends_fids": [
+    "F-023"
+   ]
+  },
+  {
+   "fid": "F-025",
+   "eid": "E4.3",
+   "phase": "P1",
+   "epic": "E4 Pixel pipeline & codecs",
+   "epic_key": "E4",
+   "story": "RLE, deflate, raw little- and big-endian",
+   "layer": "Rust",
+   "weeks": 2,
+   "depends_eids": [
+    "E4.1"
+   ],
+   "notes": "",
+   "milestone": "M2",
+   "sprint": "S08",
+   "depends_fids": [
+    "F-023"
+   ]
+  },
+  {
+   "fid": "F-026",
+   "eid": "E4.4",
+   "phase": "P1",
+   "epic": "E4 Pixel pipeline & codecs",
+   "epic_key": "E4",
+   "story": "JPEG 2000 via openjp2, validated against the corpus",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E4.1"
+   ],
+   "notes": "openjp2 is a machine-translated port \u2014 validate hard",
+   "milestone": "M2",
+   "sprint": "S08",
+   "depends_fids": [
+    "F-023"
+   ]
+  },
+  {
+   "fid": "F-027",
+   "eid": "E4.5",
+   "phase": "P1",
+   "epic": "E4 Pixel pipeline & codecs",
+   "epic_key": "E4",
+   "story": "HTJ2K: spike, then integrate or bridge to openjph wasm",
+   "layer": "Rust",
+   "weeks": 5,
+   "depends_eids": [
+    "E4.4"
+   ],
+   "notes": "P0 KILL CRITERION \u2014 unverified in Rust today",
+   "milestone": "M2",
+   "sprint": "S09",
+   "depends_fids": [
+    "F-026"
+   ]
+  },
+  {
+   "fid": "F-028",
+   "eid": "E4.6",
+   "phase": "P1",
+   "epic": "E4 Pixel pipeline & codecs",
+   "epic_key": "E4",
+   "story": "JPEG-LS: decide CharLS bridge vs pure Rust, then integrate",
+   "layer": "Rust",
+   "weeks": 5,
+   "depends_eids": [
+    "E4.1"
+   ],
+   "notes": "P0 KILL CRITERION \u2014 no credible pure-Rust path",
+   "milestone": "M2",
+   "sprint": "S09",
+   "depends_fids": [
+    "F-023"
+   ]
+  },
+  {
+   "fid": "F-029",
+   "eid": "E4.7",
+   "phase": "P1",
+   "epic": "E4 Pixel pipeline & codecs",
+   "epic_key": "E4",
+   "story": "LUT chain: modality, VOI (linear / exact / sigmoid), presentation, invert",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E4.1"
+   ],
+   "notes": "Highest-risk arithmetic in the project",
+   "milestone": "M2",
+   "sprint": "S09",
+   "depends_fids": [
+    "F-023"
+   ]
+  },
+  {
+   "fid": "F-030",
+   "eid": "E4.8",
+   "phase": "P1",
+   "epic": "E4 Pixel pipeline & codecs",
+   "epic_key": "E4",
+   "story": "Palette colour, planar configuration, photometric interpretation, YBR",
+   "layer": "Rust",
+   "weeks": 2,
+   "depends_eids": [
+    "E4.7"
+   ],
+   "notes": "",
+   "milestone": "M2",
+   "sprint": "S10",
+   "depends_fids": [
+    "F-029"
+   ]
+  },
+  {
+   "fid": "F-031",
+   "eid": "E5.1",
+   "phase": "P1",
+   "epic": "E5 Cache & memory",
+   "epic_key": "E5",
+   "story": "ocelli-cache: budgeted LRU across encoded, decoded and GPU tiers",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E1.1"
+   ],
+   "notes": "",
+   "milestone": "M3",
+   "sprint": "S11",
+   "depends_fids": [
+    "F-001"
+   ]
+  },
+  {
+   "fid": "F-032",
+   "eid": "E5.2",
+   "phase": "P1",
+   "epic": "E5 Cache & memory",
+   "epic_key": "E5",
+   "story": "Image cache with eviction events surfaced to JS",
+   "layer": "Rust",
+   "weeks": 2,
+   "depends_eids": [
+    "E5.1"
+   ],
+   "notes": "",
+   "milestone": "M3",
+   "sprint": "S12",
+   "depends_fids": [
+    "F-031"
+   ]
+  },
+  {
+   "fid": "F-033",
+   "eid": "E5.3",
+   "phase": "P1",
+   "epic": "E5 Cache & memory",
+   "epic_key": "E5",
+   "story": "Volume cache and progressive volume assembly",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E5.1"
+   ],
+   "notes": "",
+   "milestone": "M3",
+   "sprint": "S12",
+   "depends_fids": [
+    "F-031"
+   ]
+  },
+  {
+   "fid": "F-034",
+   "eid": "E5.4",
+   "phase": "P1",
+   "epic": "E5 Cache & memory",
+   "epic_key": "E5",
+   "story": "Memory-pressure telemetry and JS-visible budget controls",
+   "layer": "Rust",
+   "weeks": 2,
+   "depends_eids": [
+    "E5.1"
+   ],
+   "notes": "",
+   "milestone": "M3",
+   "sprint": "S12",
+   "depends_fids": [
+    "F-031"
+   ]
+  },
+  {
+   "fid": "F-035",
+   "eid": "E5.5",
+   "phase": "P1",
+   "epic": "E5 Cache & memory",
+   "epic_key": "E5",
+   "story": "Zero-copy handoff strategy from decode worker to renderer",
+   "layer": "Rust",
+   "weeks": 2,
+   "depends_eids": [
+    "E5.3"
+   ],
+   "notes": "Uint8Array views detach on memory growth \u2014 see HLD \u00a75",
+   "milestone": "M3",
+   "sprint": "S13",
+   "depends_fids": [
+    "F-033"
+   ]
+  },
+  {
+   "fid": "F-036",
+   "eid": "E5.6",
+   "phase": "P1",
+   "epic": "E5 Cache & memory",
+   "epic_key": "E5",
+   "story": "Chunked residency model and brick addressing in the cache",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E5.1"
+   ],
+   "notes": "ARCHITECTURE HOOK - retrofitting this is the rewrite cornerstone3D cannot afford",
+   "milestone": "M3",
+   "sprint": "S12",
+   "depends_fids": [
+    "F-031"
+   ]
+  },
+  {
+   "fid": "F-037",
+   "eid": "E6.1",
+   "phase": "P1",
+   "epic": "E6 Render core (wgpu)",
+   "epic_key": "E6",
+   "story": "ocelli-render: device init, capability tiering, device-lost recovery",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E1.4"
+   ],
+   "notes": "",
+   "milestone": "M3",
+   "sprint": "S11",
+   "depends_fids": [
+    "F-004"
+   ]
+  },
+  {
+   "fid": "F-038",
+   "eid": "E6.2",
+   "phase": "P1",
+   "epic": "E6 Render core (wgpu)",
+   "epic_key": "E6",
+   "story": "Render graph and frame scheduler with dirty tracking",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E6.1"
+   ],
+   "notes": "",
+   "milestone": "M3",
+   "sprint": "S12",
+   "depends_fids": [
+    "F-037"
+   ]
+  },
+  {
+   "fid": "F-039",
+   "eid": "E6.3",
+   "phase": "P1",
+   "epic": "E6 Render core (wgpu)",
+   "epic_key": "E6",
+   "story": "OffscreenCanvas in a render worker; resize and DPR handling",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E6.1"
+   ],
+   "notes": "One GPUDevice serves N viewports \u2014 no context pool",
+   "milestone": "M3",
+   "sprint": "S13",
+   "depends_fids": [
+    "F-037"
+   ]
+  },
+  {
+   "fid": "F-040",
+   "eid": "E6.4",
+   "phase": "P1",
+   "epic": "E6 Render core (wgpu)",
+   "epic_key": "E6",
+   "story": "Texture upload path: decode straight to write_texture",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E6.1"
+   ],
+   "notes": "The architectural win \u2014 pixels never become JS objects",
+   "milestone": "M3",
+   "sprint": "S13",
+   "depends_fids": [
+    "F-037"
+   ]
+  },
+  {
+   "fid": "F-041",
+   "eid": "E6.5",
+   "phase": "P1",
+   "epic": "E6 Render core (wgpu)",
+   "epic_key": "E6",
+   "story": "WGSL LUT-chain shader",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E4.7"
+   ],
+   "notes": "",
+   "milestone": "M3",
+   "sprint": "S11",
+   "depends_fids": [
+    "F-029"
+   ]
+  },
+  {
+   "fid": "F-042",
+   "eid": "E6.6",
+   "phase": "P1",
+   "epic": "E6 Render core (wgpu)",
+   "epic_key": "E6",
+   "story": "WebGL2 fallback and tier-B shader variants",
+   "layer": "Rust",
+   "weeks": 5,
+   "depends_eids": [
+    "E6.5"
+   ],
+   "notes": "No compute, no storage buffers on this tier",
+   "milestone": "M3",
+   "sprint": "S13",
+   "depends_fids": [
+    "F-041"
+   ]
+  },
+  {
+   "fid": "F-043",
+   "eid": "E6.7",
+   "phase": "P1",
+   "epic": "E6 Render core (wgpu)",
+   "epic_key": "E6",
+   "story": "Chunked brick residency as the default upload path",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E6.4"
+   ],
+   "notes": "Not only above a threshold - bounded GPU residency is the product claim",
+   "milestone": "M3",
+   "sprint": "S14",
+   "depends_fids": [
+    "F-040"
+   ]
+  },
+  {
+   "fid": "F-044",
+   "eid": "E6.8",
+   "phase": "P1",
+   "epic": "E6 Render core (wgpu)",
+   "epic_key": "E6",
+   "story": "Colour LUT / transfer function upload and preset library",
+   "layer": "Rust",
+   "weeks": 2,
+   "depends_eids": [
+    "E6.5"
+   ],
+   "notes": "",
+   "milestone": "M3",
+   "sprint": "S13",
+   "depends_fids": [
+    "F-041"
+   ]
+  },
+  {
+   "fid": "F-045",
+   "eid": "E7.1",
+   "phase": "P1",
+   "epic": "E7 Stack viewport",
+   "epic_key": "E7",
+   "story": "Stack viewport: display, fit, pan, zoom, rotate, flip",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E6.3"
+   ],
+   "notes": "",
+   "milestone": "M4",
+   "sprint": "S15",
+   "depends_fids": [
+    "F-039"
+   ]
+  },
+  {
+   "fid": "F-046",
+   "eid": "E7.2",
+   "phase": "P1",
+   "epic": "E7 Stack viewport",
+   "epic_key": "E7",
+   "story": "Window/level, VOI presets, invert, colormap",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E6.5"
+   ],
+   "notes": "",
+   "milestone": "M4",
+   "sprint": "S15",
+   "depends_fids": [
+    "F-041"
+   ]
+  },
+  {
+   "fid": "F-047",
+   "eid": "E7.3",
+   "phase": "P1",
+   "epic": "E7 Stack viewport",
+   "epic_key": "E7",
+   "story": "Stack scroll, prefetch strategy, image sequencing",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E5.2"
+   ],
+   "notes": "",
+   "milestone": "M4",
+   "sprint": "S15",
+   "depends_fids": [
+    "F-032"
+   ]
+  },
+  {
+   "fid": "F-048",
+   "eid": "E7.4",
+   "phase": "P1",
+   "epic": "E7 Stack viewport",
+   "epic_key": "E7",
+   "story": "Coordinate transforms: canvas / world / index",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E7.1"
+   ],
+   "notes": "Every tool depends on this being exactly right",
+   "milestone": "M4",
+   "sprint": "S16",
+   "depends_fids": [
+    "F-045"
+   ]
+  },
+  {
+   "fid": "F-049",
+   "eid": "E7.5",
+   "phase": "P1",
+   "epic": "E7 Stack viewport",
+   "epic_key": "E7",
+   "story": "Calibration, spacing and gantry-tilt correction",
+   "layer": "Rust+TS",
+   "weeks": 2,
+   "depends_eids": [
+    "E3.5"
+   ],
+   "notes": "",
+   "milestone": "M4",
+   "sprint": "S15",
+   "depends_fids": [
+    "F-020"
+   ]
+  },
+  {
+   "fid": "F-050",
+   "eid": "E7.6",
+   "phase": "P1",
+   "epic": "E7 Stack viewport",
+   "epic_key": "E7",
+   "story": "Camera, display-area and presentation-state serialisation",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E7.4"
+   ],
+   "notes": "",
+   "milestone": "M4",
+   "sprint": "S17",
+   "depends_fids": [
+    "F-048"
+   ]
+  },
+  {
+   "fid": "F-051",
+   "eid": "E8.1",
+   "phase": "P1",
+   "epic": "E8 Volume viewport & MPR",
+   "epic_key": "E8",
+   "story": "Volume construction from a stack: geometry, orientation, spacing",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E5.3"
+   ],
+   "notes": "",
+   "milestone": "M5",
+   "sprint": "S18",
+   "depends_fids": [
+    "F-033"
+   ]
+  },
+  {
+   "fid": "F-052",
+   "eid": "E8.2",
+   "phase": "P1",
+   "epic": "E8 Volume viewport & MPR",
+   "epic_key": "E8",
+   "story": "Orthographic viewport: axial, sagittal, coronal",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E8.1"
+   ],
+   "notes": "",
+   "milestone": "M5",
+   "sprint": "S19",
+   "depends_fids": [
+    "F-051"
+   ]
+  },
+  {
+   "fid": "F-053",
+   "eid": "E8.3",
+   "phase": "P1",
+   "epic": "E8 Volume viewport & MPR",
+   "epic_key": "E8",
+   "story": "Oblique / arbitrary-plane reslicing",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E8.2"
+   ],
+   "notes": "",
+   "milestone": "M5",
+   "sprint": "S20",
+   "depends_fids": [
+    "F-052"
+   ]
+  },
+  {
+   "fid": "F-054",
+   "eid": "E8.4",
+   "phase": "P1",
+   "epic": "E8 Volume viewport & MPR",
+   "epic_key": "E8",
+   "story": "Thick slab with composite, MIP, MinIP and average blend modes",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E8.2"
+   ],
+   "notes": "",
+   "milestone": "M5",
+   "sprint": "S20",
+   "depends_fids": [
+    "F-052"
+   ]
+  },
+  {
+   "fid": "F-055",
+   "eid": "E8.5",
+   "phase": "P1",
+   "epic": "E8 Volume viewport & MPR",
+   "epic_key": "E8",
+   "story": "Slice-position sync and frame-of-reference handling",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E8.2"
+   ],
+   "notes": "",
+   "milestone": "M5",
+   "sprint": "S20",
+   "depends_fids": [
+    "F-052"
+   ]
+  },
+  {
+   "fid": "F-056",
+   "eid": "E8.6",
+   "phase": "P1",
+   "epic": "E8 Volume viewport & MPR",
+   "epic_key": "E8",
+   "story": "Multi-volume fusion with per-volume opacity and colormap (PET-CT)",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E8.2"
+   ],
+   "notes": "",
+   "milestone": "M5",
+   "sprint": "S20",
+   "depends_fids": [
+    "F-052"
+   ]
+  },
+  {
+   "fid": "F-057",
+   "eid": "E8.7",
+   "phase": "P1",
+   "epic": "E8 Volume viewport & MPR",
+   "epic_key": "E8",
+   "story": "Progressive volume rendering while the series still loads",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E8.1"
+   ],
+   "notes": "",
+   "milestone": "M5",
+   "sprint": "S19",
+   "depends_fids": [
+    "F-051"
+   ]
+  },
+  {
+   "fid": "F-058",
+   "eid": "E8.8",
+   "phase": "P1",
+   "epic": "E8 Volume viewport & MPR",
+   "epic_key": "E8",
+   "story": "Multiscale pyramid hooks in the volume model",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E8.1"
+   ],
+   "notes": "ARCHITECTURE HOOK - E30 needs a level axis to exist from the start",
+   "milestone": "M5",
+   "sprint": "S19",
+   "depends_fids": [
+    "F-051"
+   ]
+  },
+  {
+   "fid": "F-059",
+   "eid": "E9.1",
+   "phase": "P1",
+   "epic": "E9 3D volume rendering",
+   "epic_key": "E9",
+   "story": "VOLUME_3D viewport with ray-cast direct volume rendering",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E8.1"
+   ],
+   "notes": "",
+   "milestone": "M5",
+   "sprint": "S19",
+   "depends_fids": [
+    "F-051"
+   ]
+  },
+  {
+   "fid": "F-060",
+   "eid": "E9.2",
+   "phase": "P1",
+   "epic": "E9 3D volume rendering",
+   "epic_key": "E9",
+   "story": "Transfer-function editing surface and preset library",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E9.1"
+   ],
+   "notes": "",
+   "milestone": "M5",
+   "sprint": "S21",
+   "depends_fids": [
+    "F-059"
+   ]
+  },
+  {
+   "fid": "F-061",
+   "eid": "E9.3",
+   "phase": "P1",
+   "epic": "E9 3D volume rendering",
+   "epic_key": "E9",
+   "story": "Lighting, shading and gradient opacity",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E9.1"
+   ],
+   "notes": "",
+   "milestone": "M5",
+   "sprint": "S21",
+   "depends_fids": [
+    "F-059"
+   ]
+  },
+  {
+   "fid": "F-062",
+   "eid": "E9.4",
+   "phase": "P1",
+   "epic": "E9 3D volume rendering",
+   "epic_key": "E9",
+   "story": "Cropping planes and volume clipping",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E9.1"
+   ],
+   "notes": "",
+   "milestone": "M5",
+   "sprint": "S21",
+   "depends_fids": [
+    "F-059"
+   ]
+  },
+  {
+   "fid": "F-063",
+   "eid": "E10.1",
+   "phase": "P1",
+   "epic": "E10 Segmentation rendering",
+   "epic_key": "E10",
+   "story": "Labelmap representation: colour LUT, fill and outline rendering",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E6.5"
+   ],
+   "notes": "",
+   "milestone": "M6",
+   "sprint": "S22",
+   "depends_fids": [
+    "F-041"
+   ]
+  },
+  {
+   "fid": "F-064",
+   "eid": "E10.2",
+   "phase": "P1",
+   "epic": "E10 Segmentation rendering",
+   "epic_key": "E10",
+   "story": "Contour representation",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E10.1"
+   ],
+   "notes": "",
+   "milestone": "M6",
+   "sprint": "S23",
+   "depends_fids": [
+    "F-063"
+   ]
+  },
+  {
+   "fid": "F-065",
+   "eid": "E10.3",
+   "phase": "P1",
+   "epic": "E10 Segmentation rendering",
+   "epic_key": "E10",
+   "story": "Surface representation",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E10.1"
+   ],
+   "notes": "",
+   "milestone": "M6",
+   "sprint": "S23",
+   "depends_fids": [
+    "F-063"
+   ]
+  },
+  {
+   "fid": "F-066",
+   "eid": "E10.4",
+   "phase": "P1",
+   "epic": "E10 Segmentation rendering",
+   "epic_key": "E10",
+   "story": "Segmentation state model and per-viewport representation registry",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E10.1"
+   ],
+   "notes": "",
+   "milestone": "M6",
+   "sprint": "S23",
+   "depends_fids": [
+    "F-063"
+   ]
+  },
+  {
+   "fid": "F-067",
+   "eid": "E10.5",
+   "phase": "P1",
+   "epic": "E10 Segmentation rendering",
+   "epic_key": "E10",
+   "story": "Segmentation intersection and labelmap edge-projection blend",
+   "layer": "Rust",
+   "weeks": 2,
+   "depends_eids": [
+    "E10.2"
+   ],
+   "notes": "",
+   "milestone": "M6",
+   "sprint": "S24",
+   "depends_fids": [
+    "F-064"
+   ]
+  },
+  {
+   "fid": "F-068",
+   "eid": "E11.1",
+   "phase": "P1",
+   "epic": "E11 Tool framework & geometry",
+   "epic_key": "E11",
+   "story": "Tool lifecycle, tool groups, bindings and modes",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E16.1"
+   ],
+   "notes": "TS \u2014 this is interaction state, not pixels",
+   "milestone": "M7",
+   "sprint": "S25",
+   "depends_fids": [
+    "F-100"
+   ]
+  },
+  {
+   "fid": "F-069",
+   "eid": "E11.2",
+   "phase": "P1",
+   "epic": "E11 Tool framework & geometry",
+   "epic_key": "E11",
+   "story": "Pointer, touch and wheel event normalisation and dispatch",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E11.1"
+   ],
+   "notes": "TS \u2014 531 listener sites in cornerstone live here",
+   "milestone": "M7",
+   "sprint": "S26",
+   "depends_fids": [
+    "F-068"
+   ]
+  },
+  {
+   "fid": "F-070",
+   "eid": "E11.3",
+   "phase": "P1",
+   "epic": "E11 Tool framework & geometry",
+   "epic_key": "E11",
+   "story": "ocelli-geom: hit-testing, projection and measurement mathematics",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E7.4"
+   ],
+   "notes": "Rust \u2014 the part worth moving",
+   "milestone": "M7",
+   "sprint": "S25",
+   "depends_fids": [
+    "F-048"
+   ]
+  },
+  {
+   "fid": "F-071",
+   "eid": "E11.4",
+   "phase": "P1",
+   "epic": "E11 Tool framework & geometry",
+   "epic_key": "E11",
+   "story": "SVG annotation drawing layer",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E11.2"
+   ],
+   "notes": "TS \u2014 DOM-native, stays out of wasm",
+   "milestone": "M7",
+   "sprint": "S27",
+   "depends_fids": [
+    "F-069"
+   ]
+  },
+  {
+   "fid": "F-072",
+   "eid": "E11.5",
+   "phase": "P1",
+   "epic": "E11 Tool framework & geometry",
+   "epic_key": "E11",
+   "story": "Cursor management and tool state machine",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E11.1"
+   ],
+   "notes": "",
+   "milestone": "M7",
+   "sprint": "S26",
+   "depends_fids": [
+    "F-068"
+   ]
+  },
+  {
+   "fid": "F-073",
+   "eid": "E12.1",
+   "phase": "P1",
+   "epic": "E12 Annotation tools (26 classes)",
+   "epic_key": "E12",
+   "story": "Length, Height, Angle, CobbAngle, Bidirectional",
+   "layer": "Rust+TS",
+   "weeks": 5,
+   "depends_eids": [
+    "E11.3"
+   ],
+   "notes": "",
+   "milestone": "M8",
+   "sprint": "S28",
+   "depends_fids": [
+    "F-070"
+   ]
+  },
+  {
+   "fid": "F-074",
+   "eid": "E12.2",
+   "phase": "P1",
+   "epic": "E12 Annotation tools (26 classes)",
+   "epic_key": "E12",
+   "story": "Probe, DragProbe, RectangleROI, EllipticalROI, CircleROI",
+   "layer": "Rust+TS",
+   "weeks": 5,
+   "depends_eids": [
+    "E11.3"
+   ],
+   "notes": "",
+   "milestone": "M8",
+   "sprint": "S28",
+   "depends_fids": [
+    "F-070"
+   ]
+  },
+  {
+   "fid": "F-075",
+   "eid": "E12.3",
+   "phase": "P1",
+   "epic": "E12 Annotation tools (26 classes)",
+   "epic_key": "E12",
+   "story": "ROI statistics engine: mean, SD, min, max, area, SUV, histogram",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E12.2"
+   ],
+   "notes": "",
+   "milestone": "M8",
+   "sprint": "S29",
+   "depends_fids": [
+    "F-074"
+   ]
+  },
+  {
+   "fid": "F-076",
+   "eid": "E12.4",
+   "phase": "P1",
+   "epic": "E12 Annotation tools (26 classes)",
+   "epic_key": "E12",
+   "story": "PlanarFreehandROI, SplineROI and spline mathematics",
+   "layer": "Rust+TS",
+   "weeks": 5,
+   "depends_eids": [
+    "E11.3"
+   ],
+   "notes": "",
+   "milestone": "M8",
+   "sprint": "S28",
+   "depends_fids": [
+    "F-070"
+   ]
+  },
+  {
+   "fid": "F-077",
+   "eid": "E12.5",
+   "phase": "P1",
+   "epic": "E12 Annotation tools (26 classes)",
+   "epic_key": "E12",
+   "story": "LivewireContour and LivewireContourSegmentation",
+   "layer": "Rust+TS",
+   "weeks": 5,
+   "depends_eids": [
+    "E12.4"
+   ],
+   "notes": "",
+   "milestone": "M8",
+   "sprint": "S29",
+   "depends_fids": [
+    "F-076"
+   ]
+  },
+  {
+   "fid": "F-078",
+   "eid": "E12.6",
+   "phase": "P1",
+   "epic": "E12 Annotation tools (26 classes)",
+   "epic_key": "E12",
+   "story": "ArrowAnnotate, Label, KeyImage, ETDRSGrid",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E11.4"
+   ],
+   "notes": "",
+   "milestone": "M8",
+   "sprint": "S29",
+   "depends_fids": [
+    "F-071"
+   ]
+  },
+  {
+   "fid": "F-079",
+   "eid": "E12.7",
+   "phase": "P1",
+   "epic": "E12 Annotation tools (26 classes)",
+   "epic_key": "E12",
+   "story": "UltrasoundDirectional, VideoRedaction",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E11.3"
+   ],
+   "notes": "",
+   "milestone": "M8",
+   "sprint": "S29",
+   "depends_fids": [
+    "F-070"
+   ]
+  },
+  {
+   "fid": "F-080",
+   "eid": "E13.1",
+   "phase": "P1",
+   "epic": "E13 Segmentation tools (12 classes)",
+   "epic_key": "E13",
+   "story": "Brush with sphere and circle brush geometry",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E10.1"
+   ],
+   "notes": "",
+   "milestone": "M9",
+   "sprint": "S30",
+   "depends_fids": [
+    "F-063"
+   ]
+  },
+  {
+   "fid": "F-081",
+   "eid": "E13.2",
+   "phase": "P1",
+   "epic": "E13 Segmentation tools (12 classes)",
+   "epic_key": "E13",
+   "story": "Rectangle, Circle and Sphere scissors",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E13.1"
+   ],
+   "notes": "",
+   "milestone": "M9",
+   "sprint": "S31",
+   "depends_fids": [
+    "F-080"
+   ]
+  },
+  {
+   "fid": "F-082",
+   "eid": "E13.3",
+   "phase": "P1",
+   "epic": "E13 Segmentation tools (12 classes)",
+   "epic_key": "E13",
+   "story": "PaintFill and flood fill",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E13.1"
+   ],
+   "notes": "",
+   "milestone": "M9",
+   "sprint": "S31",
+   "depends_fids": [
+    "F-080"
+   ]
+  },
+  {
+   "fid": "F-083",
+   "eid": "E13.4",
+   "phase": "P1",
+   "epic": "E13 Segmentation tools (12 classes)",
+   "epic_key": "E13",
+   "story": "RectangleROI and CircleROI start-end threshold tools",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E13.1"
+   ],
+   "notes": "",
+   "milestone": "M9",
+   "sprint": "S31",
+   "depends_fids": [
+    "F-080"
+   ]
+  },
+  {
+   "fid": "F-084",
+   "eid": "E13.5",
+   "phase": "P1",
+   "epic": "E13 Segmentation tools (12 classes)",
+   "epic_key": "E13",
+   "story": "SegmentSelect, SegmentLabel, SegmentBidirectional",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E10.4"
+   ],
+   "notes": "",
+   "milestone": "M9",
+   "sprint": "S30",
+   "depends_fids": [
+    "F-066"
+   ]
+  },
+  {
+   "fid": "F-085",
+   "eid": "E13.6",
+   "phase": "P1",
+   "epic": "E13 Segmentation tools (12 classes)",
+   "epic_key": "E13",
+   "story": "LabelmapEditWithContour",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E13.1"
+   ],
+   "notes": "",
+   "milestone": "M9",
+   "sprint": "S31",
+   "depends_fids": [
+    "F-080"
+   ]
+  },
+  {
+   "fid": "F-086",
+   "eid": "E13.7",
+   "phase": "P1",
+   "epic": "E13 Segmentation tools (12 classes)",
+   "epic_key": "E13",
+   "story": "Between-slice labelmap interpolation",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E13.1"
+   ],
+   "notes": "",
+   "milestone": "M9",
+   "sprint": "S32",
+   "depends_fids": [
+    "F-080"
+   ]
+  },
+  {
+   "fid": "F-087",
+   "eid": "E14.1",
+   "phase": "P1",
+   "epic": "E14 Manipulation & utility tools (25 classes)",
+   "epic_key": "E14",
+   "story": "Pan, Zoom, WindowLevel, WindowLevelRegion, StackScroll",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E11.1"
+   ],
+   "notes": "",
+   "milestone": "M10",
+   "sprint": "S33",
+   "depends_fids": [
+    "F-068"
+   ]
+  },
+  {
+   "fid": "F-088",
+   "eid": "E14.2",
+   "phase": "P1",
+   "epic": "E14 Manipulation & utility tools (25 classes)",
+   "epic_key": "E14",
+   "story": "Crosshairs, WorldCrosshair, ReferenceLines, ReferenceCursors",
+   "layer": "Rust+TS",
+   "weeks": 5,
+   "depends_eids": [
+    "E8.5"
+   ],
+   "notes": "",
+   "milestone": "M10",
+   "sprint": "S33",
+   "depends_fids": [
+    "F-055"
+   ]
+  },
+  {
+   "fid": "F-089",
+   "eid": "E14.3",
+   "phase": "P1",
+   "epic": "E14 Manipulation & utility tools (25 classes)",
+   "epic_key": "E14",
+   "story": "SliceIntersection, SegmentationIntersection, OverlayGrid",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E14.2"
+   ],
+   "notes": "",
+   "milestone": "M10",
+   "sprint": "S34",
+   "depends_fids": [
+    "F-088"
+   ]
+  },
+  {
+   "fid": "F-090",
+   "eid": "E14.4",
+   "phase": "P1",
+   "epic": "E14 Manipulation & utility tools (25 classes)",
+   "epic_key": "E14",
+   "story": "TrackballRotate, VolumeRotate, PlanarRotate, OrientationController",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E9.1"
+   ],
+   "notes": "",
+   "milestone": "M10",
+   "sprint": "S33",
+   "depends_fids": [
+    "F-059"
+   ]
+  },
+  {
+   "fid": "F-091",
+   "eid": "E14.5",
+   "phase": "P1",
+   "epic": "E14 Manipulation & utility tools (25 classes)",
+   "epic_key": "E14",
+   "story": "Magnify, AdvancedMagnify, ScaleOverlay, OrientationMarker",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E11.4"
+   ],
+   "notes": "",
+   "milestone": "M10",
+   "sprint": "S33",
+   "depends_fids": [
+    "F-071"
+   ]
+  },
+  {
+   "fid": "F-092",
+   "eid": "E14.6",
+   "phase": "P1",
+   "epic": "E14 Manipulation & utility tools (25 classes)",
+   "epic_key": "E14",
+   "story": "VolumeCropping and VolumeCroppingControl",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E9.4"
+   ],
+   "notes": "",
+   "milestone": "M10",
+   "sprint": "S34",
+   "depends_fids": [
+    "F-062"
+   ]
+  },
+  {
+   "fid": "F-093",
+   "eid": "E14.7",
+   "phase": "P1",
+   "epic": "E14 Manipulation & utility tools (25 classes)",
+   "epic_key": "E14",
+   "story": "Sculptor, AnnotationEraser, MIPJumpToClick",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E12.4"
+   ],
+   "notes": "",
+   "milestone": "M10",
+   "sprint": "S34",
+   "depends_fids": [
+    "F-076"
+   ]
+  },
+  {
+   "fid": "F-094",
+   "eid": "E15.1",
+   "phase": "P1",
+   "epic": "E15 Annotation state & DICOM interop",
+   "epic_key": "E15",
+   "story": "DICOM SR as the native in-memory annotation model",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E11.3"
+   ],
+   "notes": "ARCHITECTURE HOOK - dwv and SLIM both converged here; free now, costly later [SOURCE POLICY: dwv is GPL-3.0 and must NOT be read by anyone on this project, human or agent. Take the idea from DICOM PS3.3 and PS3.16, which is where dwv took it from. See docs/hld/C-competitive-position.md.]",
+   "milestone": "M11",
+   "sprint": "S35",
+   "depends_fids": [
+    "F-070"
+   ]
+  },
+  {
+   "fid": "F-095",
+   "eid": "E15.2",
+   "phase": "P1",
+   "epic": "E15 Annotation state & DICOM interop",
+   "epic_key": "E15",
+   "story": "Annotation state manager, frame-of-reference indexing, undo/redo",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E11.3"
+   ],
+   "notes": "",
+   "milestone": "M11",
+   "sprint": "S35",
+   "depends_fids": [
+    "F-070"
+   ]
+  },
+  {
+   "fid": "F-096",
+   "eid": "E15.3",
+   "phase": "P1",
+   "epic": "E15 Annotation state & DICOM interop",
+   "epic_key": "E15",
+   "story": "Measurement persistence and serialisation format",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E15.1"
+   ],
+   "notes": "",
+   "milestone": "M11",
+   "sprint": "S36",
+   "depends_fids": [
+    "F-094"
+   ]
+  },
+  {
+   "fid": "F-097",
+   "eid": "E15.4",
+   "phase": "P1",
+   "epic": "E15 Annotation state & DICOM interop",
+   "epic_key": "E15",
+   "story": "DICOM SR TID 1500 round-trip",
+   "layer": "Rust+TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E15.2"
+   ],
+   "notes": "Keep the dcmjs bridge \u2014 rewriting buys nothing",
+   "milestone": "M11",
+   "sprint": "S36",
+   "depends_fids": [
+    "F-095"
+   ]
+  },
+  {
+   "fid": "F-098",
+   "eid": "E15.5",
+   "phase": "P1",
+   "epic": "E15 Annotation state & DICOM interop",
+   "epic_key": "E15",
+   "story": "DICOM SEG round-trip",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E10.4"
+   ],
+   "notes": "",
+   "milestone": "M11",
+   "sprint": "S35",
+   "depends_fids": [
+    "F-066"
+   ]
+  },
+  {
+   "fid": "F-099",
+   "eid": "E15.6",
+   "phase": "P1",
+   "epic": "E15 Annotation state & DICOM interop",
+   "epic_key": "E15",
+   "story": "RTSTRUCT import to contour representation",
+   "layer": "Rust+TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E10.2"
+   ],
+   "notes": "",
+   "milestone": "M11",
+   "sprint": "S35",
+   "depends_fids": [
+    "F-064"
+   ]
+  },
+  {
+   "fid": "F-100",
+   "eid": "E16.1",
+   "phase": "P1",
+   "epic": "E16 Public API & TypeScript shell",
+   "epic_key": "E16",
+   "story": "API design: viewport, scene and tool surface, documented",
+   "layer": "TS",
+   "weeks": 4,
+   "depends_eids": [],
+   "notes": "New API by decision \u2014 see HLD \u00a72",
+   "milestone": "M4",
+   "sprint": "S15",
+   "depends_fids": []
+  },
+  {
+   "fid": "F-101",
+   "eid": "E16.2",
+   "phase": "P1",
+   "epic": "E16 Public API & TypeScript shell",
+   "epic_key": "E16",
+   "story": "wasm boundary: command channel, event ring buffer, state readback",
+   "layer": "TS",
+   "weeks": 5,
+   "depends_eids": [
+    "E16.1"
+   ],
+   "notes": "Events are polled per frame, not called per event",
+   "milestone": "M4",
+   "sprint": "S16",
+   "depends_fids": [
+    "F-100"
+   ]
+  },
+  {
+   "fid": "F-102",
+   "eid": "E16.3",
+   "phase": "P1",
+   "epic": "E16 Public API & TypeScript shell",
+   "epic_key": "E16",
+   "story": "Framework bindings (React first)",
+   "layer": "TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E16.2"
+   ],
+   "notes": "",
+   "milestone": "M4",
+   "sprint": "S17",
+   "depends_fids": [
+    "F-101"
+   ]
+  },
+  {
+   "fid": "F-103",
+   "eid": "E16.4",
+   "phase": "P1",
+   "epic": "E16 Public API & TypeScript shell",
+   "epic_key": "E16",
+   "story": "Event model: the ~103 cornerstone events, re-shaped and documented",
+   "layer": "TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E16.2"
+   ],
+   "notes": "",
+   "milestone": "M4",
+   "sprint": "S17",
+   "depends_fids": [
+    "F-101"
+   ]
+  },
+  {
+   "fid": "F-104",
+   "eid": "E16.5",
+   "phase": "P1",
+   "epic": "E16 Public API & TypeScript shell",
+   "epic_key": "E16",
+   "story": "TypeScript type generation from Rust definitions",
+   "layer": "TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E16.2"
+   ],
+   "notes": "One source of truth for the boundary types",
+   "milestone": "M4",
+   "sprint": "S17",
+   "depends_fids": [
+    "F-101"
+   ]
+  },
+  {
+   "fid": "F-105",
+   "eid": "E17.1",
+   "phase": "P1",
+   "epic": "E17 Migration & rollout",
+   "epic_key": "E17",
+   "story": "Integration seam: DOM-element contract identical to cornerstone",
+   "layer": "TS",
+   "weeks": 3,
+   "depends_eids": [
+    "E16.1"
+   ],
+   "notes": "Lets the existing app migrate one viewport at a time",
+   "milestone": "M12",
+   "sprint": "S37",
+   "depends_fids": [
+    "F-100"
+   ]
+  },
+  {
+   "fid": "F-106",
+   "eid": "E17.2",
+   "phase": "P1",
+   "epic": "E17 Migration & rollout",
+   "epic_key": "E17",
+   "story": "Side-by-side runtime: both libraries alive in one application",
+   "layer": "TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E17.1"
+   ],
+   "notes": "",
+   "milestone": "M12",
+   "sprint": "S38",
+   "depends_fids": [
+    "F-105"
+   ]
+  },
+  {
+   "fid": "F-107",
+   "eid": "E17.3",
+   "phase": "P1",
+   "epic": "E17 Migration & rollout",
+   "epic_key": "E17",
+   "story": "Per-viewport strangler migration behind feature flags",
+   "layer": "TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E17.2"
+   ],
+   "notes": "",
+   "milestone": "M12",
+   "sprint": "S39",
+   "depends_fids": [
+    "F-106"
+   ]
+  },
+  {
+   "fid": "F-108",
+   "eid": "E17.4",
+   "phase": "P1",
+   "epic": "E17 Migration & rollout",
+   "epic_key": "E17",
+   "story": "Migration guide and codemods for the existing product",
+   "layer": "TS",
+   "weeks": 4,
+   "depends_eids": [
+    "E16.4"
+   ],
+   "notes": "",
+   "milestone": "M12",
+   "sprint": "S37",
+   "depends_fids": [
+    "F-103"
+   ]
+  },
+  {
+   "fid": "F-109",
+   "eid": "E17.5",
+   "phase": "P1",
+   "epic": "E17 Migration & rollout",
+   "epic_key": "E17",
+   "story": "Shadow mode: render both in production, alert on divergence",
+   "layer": "TS",
+   "weeks": 5,
+   "depends_eids": [
+    "E17.2"
+   ],
+   "notes": "The oracle, running against real clinical traffic",
+   "milestone": "M12",
+   "sprint": "S39",
+   "depends_fids": [
+    "F-106"
+   ]
+  },
+  {
+   "fid": "F-110",
+   "eid": "E18.1",
+   "phase": "P1",
+   "epic": "E18 Performance & binary size",
+   "epic_key": "E18",
+   "story": "Binary size budget: Naga trimming, wasm-opt, split builds",
+   "layer": "Build",
+   "weeks": 4,
+   "depends_eids": [
+    "E6.6"
+   ],
+   "notes": "Naga dominates the profile \u2014 biggest single lever",
+   "milestone": "M13",
+   "sprint": "S40",
+   "depends_fids": [
+    "F-042"
+   ]
+  },
+  {
+   "fid": "F-111",
+   "eid": "E18.2",
+   "phase": "P1",
+   "epic": "E18 Performance & binary size",
+   "epic_key": "E18",
+   "story": "Cold-start and first-frame optimisation",
+   "layer": "Build",
+   "weeks": 3,
+   "depends_eids": [
+    "E18.1"
+   ],
+   "notes": "Cornerstone lazy-loads 7 codec modules; measure honestly",
+   "milestone": "M13",
+   "sprint": "S41",
+   "depends_fids": [
+    "F-110"
+   ]
+  },
+  {
+   "fid": "F-112",
+   "eid": "E18.3",
+   "phase": "P1",
+   "epic": "E18 Performance & binary size",
+   "epic_key": "E18",
+   "story": "Worker pool tuning and the threading escalation decision",
+   "layer": "Build",
+   "weeks": 4,
+   "depends_eids": [
+    "E5.5"
+   ],
+   "notes": "Stay on stable Rust unless measurements force nightly",
+   "milestone": "M13",
+   "sprint": "S40",
+   "depends_fids": [
+    "F-035"
+   ]
+  },
+  {
+   "fid": "F-113",
+   "eid": "E18.4",
+   "phase": "P1",
+   "epic": "E18 Performance & binary size",
+   "epic_key": "E18",
+   "story": "Memory profiling under 4D and large-volume load",
+   "layer": "Build",
+   "weeks": 3,
+   "depends_eids": [
+    "E5.4"
+   ],
+   "notes": "",
+   "milestone": "M13",
+   "sprint": "S40",
+   "depends_fids": [
+    "F-034"
+   ]
+  },
+  {
+   "fid": "F-114",
+   "eid": "E19.1",
+   "phase": "P1",
+   "epic": "E19 Hardening & release",
+   "epic_key": "E19",
+   "story": "Browser matrix validation and WebGL2 tier certification",
+   "layer": "All",
+   "weeks": 4,
+   "depends_eids": [
+    "E6.6"
+   ],
+   "notes": "",
+   "milestone": "M13",
+   "sprint": "S40",
+   "depends_fids": [
+    "F-042"
+   ]
+  },
+  {
+   "fid": "F-115",
+   "eid": "E19.2",
+   "phase": "P1",
+   "epic": "E19 Hardening & release",
+   "epic_key": "E19",
+   "story": "Accessibility and keyboard interaction parity",
+   "layer": "All",
+   "weeks": 3,
+   "depends_eids": [
+    "E11.5"
+   ],
+   "notes": "",
+   "milestone": "M13",
+   "sprint": "S41",
+   "depends_fids": [
+    "F-072"
+   ]
+  },
+  {
+   "fid": "F-116",
+   "eid": "E19.3",
+   "phase": "P1",
+   "epic": "E19 Hardening & release",
+   "epic_key": "E19",
+   "story": "Documentation, examples and the migration playbook",
+   "layer": "All",
+   "weeks": 4,
+   "depends_eids": [
+    "E17.4"
+   ],
+   "notes": "",
+   "milestone": "M13",
+   "sprint": "S41",
+   "depends_fids": [
+    "F-108"
+   ]
+  },
+  {
+   "fid": "F-117",
+   "eid": "E19.4",
+   "phase": "P1",
+   "epic": "E19 Hardening & release",
+   "epic_key": "E19",
+   "story": "Release engineering: semver, changelog, deprecation policy",
+   "layer": "All",
+   "weeks": 2,
+   "depends_eids": [
+    "E16.1"
+   ],
+   "notes": "",
+   "milestone": "M13",
+   "sprint": "S41",
+   "depends_fids": [
+    "F-100"
+   ]
+  },
+  {
+   "fid": "F-118",
+   "eid": "E19.5",
+   "phase": "P1",
+   "epic": "E19 Hardening & release",
+   "epic_key": "E19",
+   "story": "Provenance recording for agent-generated code",
+   "layer": "All",
+   "weeks": 3,
+   "depends_eids": [
+    "E1.1"
+   ],
+   "notes": "Cheap now; a retrofit across 60k lines is not",
+   "milestone": "M13",
+   "sprint": "S41",
+   "depends_fids": [
+    "F-001"
+   ]
+  },
+  {
+   "fid": "F-119",
+   "eid": "E30.1",
+   "phase": "P1.5",
+   "epic": "E30 Out-of-core volume streaming",
+   "epic_key": "E30",
+   "story": "Brick decomposition and multiscale pyramid generation",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E8.8"
+   ],
+   "notes": "Neuroglancer's design; nothing in DICOM does this",
+   "milestone": "M14",
+   "sprint": "S42",
+   "depends_fids": [
+    "F-058"
+   ]
+  },
+  {
+   "fid": "F-120",
+   "eid": "E30.2",
+   "phase": "P1.5",
+   "epic": "E30 Out-of-core volume streaming",
+   "epic_key": "E30",
+   "story": "Frustum and LOD chunk selection",
+   "layer": "Rust",
+   "weeks": 8,
+   "depends_eids": [
+    "E30.1"
+   ],
+   "notes": "",
+   "milestone": "M14",
+   "sprint": "S43",
+   "depends_fids": [
+    "F-119"
+   ]
+  },
+  {
+   "fid": "F-121",
+   "eid": "E30.3",
+   "phase": "P1.5",
+   "epic": "E30 Out-of-core volume streaming",
+   "epic_key": "E30",
+   "story": "Adaptive per-LOD sample count with opacity correction",
+   "layer": "Rust",
+   "weeks": 8,
+   "depends_eids": [
+    "E30.2"
+   ],
+   "notes": "The subtle part most implementations get wrong",
+   "milestone": "M14",
+   "sprint": "S44",
+   "depends_fids": [
+    "F-120"
+   ]
+  },
+  {
+   "fid": "F-122",
+   "eid": "E30.4",
+   "phase": "P1.5",
+   "epic": "E30 Out-of-core volume streaming",
+   "epic_key": "E30",
+   "story": "Residency budget, prefetch and eviction policy",
+   "layer": "Rust",
+   "weeks": 8,
+   "depends_eids": [
+    "E30.2"
+   ],
+   "notes": "GPU memory becomes a configured number, not a function of series size",
+   "milestone": "M14",
+   "sprint": "S44",
+   "depends_fids": [
+    "F-120"
+   ]
+  },
+  {
+   "fid": "F-123",
+   "eid": "E30.5",
+   "phase": "P1.5",
+   "epic": "E30 Out-of-core volume streaming",
+   "epic_key": "E30",
+   "story": "Chunk-cost indicator surface",
+   "layer": "Rust",
+   "weeks": 3,
+   "depends_eids": [
+    "E30.4"
+   ],
+   "notes": "Show the cost before the user commits to a resolution",
+   "milestone": "M14",
+   "sprint": "S45",
+   "depends_fids": [
+    "F-122"
+   ]
+  },
+  {
+   "fid": "F-124",
+   "eid": "E30.6",
+   "phase": "P1.5",
+   "epic": "E30 Out-of-core volume streaming",
+   "epic_key": "E30",
+   "story": "4D and time-series as a first-class chunked axis",
+   "layer": "Rust",
+   "weeks": 12,
+   "depends_eids": [
+    "E30.4"
+   ],
+   "notes": "Stops being a special case of the memory problem",
+   "milestone": "M14",
+   "sprint": "S45",
+   "depends_fids": [
+    "F-122"
+   ]
+  },
+  {
+   "fid": "F-125",
+   "eid": "E31.1",
+   "phase": "P1.5",
+   "epic": "E31 WebGPU compute subsystem",
+   "epic_key": "E31",
+   "story": "ocelli-compute: dispatch, buffer pools, device sharing with the renderer",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E1.8"
+   ],
+   "notes": "",
+   "milestone": "M15",
+   "sprint": "S46",
+   "depends_fids": [
+    "F-008"
+   ]
+  },
+  {
+   "fid": "F-126",
+   "eid": "E31.2",
+   "phase": "P1.5",
+   "epic": "E31 WebGPU compute subsystem",
+   "epic_key": "E31",
+   "story": "Region growing and interactive segmentation kernels",
+   "layer": "Rust",
+   "weeks": 12,
+   "depends_eids": [
+    "E31.1"
+   ],
+   "notes": "NiiVue proves the value fighting WebGL2; ordinary code in WGSL",
+   "milestone": "M15",
+   "sprint": "S47",
+   "depends_fids": [
+    "F-125"
+   ]
+  },
+  {
+   "fid": "F-127",
+   "eid": "E31.3",
+   "phase": "P1.5",
+   "epic": "E31 WebGPU compute subsystem",
+   "epic_key": "E31",
+   "story": "Filtering: denoise, smooth, sharpen, gradient",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E31.1"
+   ],
+   "notes": "",
+   "milestone": "M15",
+   "sprint": "S48",
+   "depends_fids": [
+    "F-125"
+   ]
+  },
+  {
+   "fid": "F-128",
+   "eid": "E31.4",
+   "phase": "P1.5",
+   "epic": "E31 WebGPU compute subsystem",
+   "epic_key": "E31",
+   "story": "Per-frame histogram and ROI statistics on GPU",
+   "layer": "Rust",
+   "weeks": 8,
+   "depends_eids": [
+    "E31.1"
+   ],
+   "notes": "",
+   "milestone": "M15",
+   "sprint": "S49",
+   "depends_fids": [
+    "F-125"
+   ]
+  },
+  {
+   "fid": "F-129",
+   "eid": "E31.5",
+   "phase": "P1.5",
+   "epic": "E31 WebGPU compute subsystem",
+   "epic_key": "E31",
+   "story": "Full-resolution MPR and oblique resampling on compute",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E31.1"
+   ],
+   "notes": "",
+   "milestone": "M15",
+   "sprint": "S50",
+   "depends_fids": [
+    "F-125"
+   ]
+  },
+  {
+   "fid": "F-130",
+   "eid": "E31.6",
+   "phase": "P1.5",
+   "epic": "E31 WebGPU compute subsystem",
+   "epic_key": "E31",
+   "story": "Registration refinement kernels",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E31.3"
+   ],
+   "notes": "",
+   "milestone": "M15",
+   "sprint": "S51",
+   "depends_fids": [
+    "F-127"
+   ]
+  },
+  {
+   "fid": "F-131",
+   "eid": "E31.7",
+   "phase": "P1.5",
+   "epic": "E31 WebGPU compute subsystem",
+   "epic_key": "E31",
+   "story": "Tier-B fallback path for every kernel",
+   "layer": "Rust",
+   "weeks": 8,
+   "depends_eids": [
+    "E31.2"
+   ],
+   "notes": "WebGL2 has no compute; degrade, never fail",
+   "milestone": "M15",
+   "sprint": "S49",
+   "depends_fids": [
+    "F-126"
+   ]
+  },
+  {
+   "fid": "F-132",
+   "eid": "E32.1",
+   "phase": "P1.5",
+   "epic": "E32 In-browser prompted segmentation",
+   "epic_key": "E32",
+   "story": "ONNX Runtime Web on WebGPU with GPU-resident tensors",
+   "layer": "Rust+TS",
+   "weeks": 10,
+   "depends_eids": [
+    "E31.1"
+   ],
+   "notes": "",
+   "milestone": "M16",
+   "sprint": "S52",
+   "depends_fids": [
+    "F-125"
+   ]
+  },
+  {
+   "fid": "F-133",
+   "eid": "E32.2",
+   "phase": "P1.5",
+   "epic": "E32 In-browser prompted segmentation",
+   "epic_key": "E32",
+   "story": "Zero-copy bridge from volume textures to model input",
+   "layer": "Rust+TS",
+   "weeks": 8,
+   "depends_eids": [
+    "E32.1"
+   ],
+   "notes": "The reason to do this in-engine rather than beside it",
+   "milestone": "M16",
+   "sprint": "S53",
+   "depends_fids": [
+    "F-132"
+   ]
+  },
+  {
+   "fid": "F-134",
+   "eid": "E32.3",
+   "phase": "P1.5",
+   "epic": "E32 In-browser prompted segmentation",
+   "epic_key": "E32",
+   "story": "Prompt surface: point, box, and 3D propagation",
+   "layer": "Rust+TS",
+   "weeks": 8,
+   "depends_eids": [
+    "E32.2"
+   ],
+   "notes": "",
+   "milestone": "M16",
+   "sprint": "S54",
+   "depends_fids": [
+    "F-133"
+   ]
+  },
+  {
+   "fid": "F-135",
+   "eid": "E32.4",
+   "phase": "P1.5",
+   "epic": "E32 In-browser prompted segmentation",
+   "epic_key": "E32",
+   "story": "Result to DICOM SEG with model and prompt provenance",
+   "layer": "Rust+TS",
+   "weeks": 6,
+   "depends_eids": [
+    "E34.4"
+   ],
+   "notes": "No PHI leaves the browser - a compliance story, not just a feature",
+   "milestone": "M16",
+   "sprint": "S56",
+   "depends_fids": [
+    "F-142"
+   ]
+  },
+  {
+   "fid": "F-136",
+   "eid": "E33.1",
+   "phase": "P1.5",
+   "epic": "E33 Multi-monitor and display calibration",
+   "epic_key": "E33",
+   "story": "Window Management API: enumeration, placement, persistence",
+   "layer": "TS",
+   "weeks": 8,
+   "depends_eids": [
+    "E16.3"
+   ],
+   "notes": "MedDream needs a Chrome extension with matched resolutions",
+   "milestone": "M17",
+   "sprint": "S57",
+   "depends_fids": [
+    "F-102"
+   ]
+  },
+  {
+   "fid": "F-137",
+   "eid": "E33.2",
+   "phase": "P1.5",
+   "epic": "E33 Multi-monitor and display calibration",
+   "epic_key": "E33",
+   "story": "Multi-window session state sync across displays",
+   "layer": "TS",
+   "weeks": 7,
+   "depends_eids": [
+    "E33.1"
+   ],
+   "notes": "",
+   "milestone": "M17",
+   "sprint": "S58",
+   "depends_fids": [
+    "F-136"
+   ]
+  },
+  {
+   "fid": "F-138",
+   "eid": "E33.3",
+   "phase": "P1.5",
+   "epic": "E33 Multi-monitor and display calibration",
+   "epic_key": "E33",
+   "story": "Per-display calibration probe and DICOM Part 14 reporting",
+   "layer": "TS",
+   "weeks": 8,
+   "depends_eids": [
+    "E33.1"
+   ],
+   "notes": "A browser cannot fully calibrate; report honestly what it can measure",
+   "milestone": "M17",
+   "sprint": "S58",
+   "depends_fids": [
+    "F-136"
+   ]
+  },
+  {
+   "fid": "F-139",
+   "eid": "E34.1",
+   "phase": "P1.5",
+   "epic": "E34 Standards-native annotations, completed",
+   "epic_key": "E34",
+   "story": "GSPS write",
+   "layer": "Rust",
+   "weeks": 6,
+   "depends_eids": [
+    "E15.1"
+   ],
+   "notes": "BlueLight has it; cornerstone3D does not",
+   "milestone": "M16",
+   "sprint": "S52",
+   "depends_fids": [
+    "F-094"
+   ]
+  },
+  {
+   "fid": "F-140",
+   "eid": "E34.2",
+   "phase": "P1.5",
+   "epic": "E34 Standards-native annotations, completed",
+   "epic_key": "E34",
+   "story": "SNOMED CT and UCUM coded concept library",
+   "layer": "Rust",
+   "weeks": 6,
+   "depends_eids": [
+    "E15.2"
+   ],
+   "notes": "Makes every measurement training-data-grade by construction",
+   "milestone": "M16",
+   "sprint": "S53",
+   "depends_fids": [
+    "F-095"
+   ]
+  },
+  {
+   "fid": "F-141",
+   "eid": "E34.3",
+   "phase": "P1.5",
+   "epic": "E34 Standards-native annotations, completed",
+   "epic_key": "E34",
+   "story": "Bulk annotations tier for very large object counts",
+   "layer": "Rust",
+   "weeks": 8,
+   "depends_eids": [
+    "E34.2"
+   ],
+   "notes": "SLIM's second tier; needed the moment AI generates annotations",
+   "milestone": "M16",
+   "sprint": "S54",
+   "depends_fids": [
+    "F-140"
+   ]
+  },
+  {
+   "fid": "F-142",
+   "eid": "E34.4",
+   "phase": "P1.5",
+   "epic": "E34 Standards-native annotations, completed",
+   "epic_key": "E34",
+   "story": "Annotation provenance: tool, version, algorithm, operator",
+   "layer": "Rust",
+   "weeks": 5,
+   "depends_eids": [
+    "E15.1"
+   ],
+   "notes": "",
+   "milestone": "M16",
+   "sprint": "S55",
+   "depends_fids": [
+    "F-094"
+   ]
+  },
+  {
+   "fid": "F-143",
+   "eid": "E35.1",
+   "phase": "P1.5",
+   "epic": "E35 Whole-slide imaging and the unified scene graph",
+   "epic_key": "E35",
+   "story": "Runtime pyramid discovery from VL Whole Slide Microscopy metadata",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E30.1"
+   ],
+   "notes": "Pyramids are discovered, not assumed - variable factors, missing frames",
+   "milestone": "M18",
+   "sprint": "S66",
+   "depends_fids": [
+    "F-119"
+   ]
+  },
+  {
+   "fid": "F-144",
+   "eid": "E35.2",
+   "phase": "P1.5",
+   "epic": "E35 Whole-slide imaging and the unified scene graph",
+   "epic_key": "E35",
+   "story": "Frame-level DICOMweb tile retrieval and tile cache",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E35.1"
+   ],
+   "notes": "",
+   "milestone": "M18",
+   "sprint": "S67",
+   "depends_fids": [
+    "F-143"
+   ]
+  },
+  {
+   "fid": "F-145",
+   "eid": "E35.3",
+   "phase": "P1.5",
+   "epic": "E35 Whole-slide imaging and the unified scene graph",
+   "epic_key": "E35",
+   "story": "ICC colour management pipeline",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E4.9"
+   ],
+   "notes": "Radiology ignores this; pathology cannot",
+   "milestone": "M18",
+   "sprint": "S68",
+   "depends_fids": [
+    "E4.9 (UNRESOLVED)"
+   ]
+  },
+  {
+   "fid": "F-146",
+   "eid": "E35.4",
+   "phase": "P1.5",
+   "epic": "E35 Whole-slide imaging and the unified scene graph",
+   "epic_key": "E35",
+   "story": "Additive multi-channel blending for immunofluorescence",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E35.3"
+   ],
+   "notes": "",
+   "milestone": "M18",
+   "sprint": "S69",
+   "depends_fids": [
+    "F-145"
+   ]
+  },
+  {
+   "fid": "F-147",
+   "eid": "E35.5",
+   "phase": "P1.5",
+   "epic": "E35 Whole-slide imaging and the unified scene graph",
+   "epic_key": "E35",
+   "story": "Unified viewport model: WSI and volume in one scene graph",
+   "layer": "Rust",
+   "weeks": 14,
+   "depends_eids": [
+    "E35.2"
+   ],
+   "notes": "The open niche - IDC runs two separate viewer forks",
+   "milestone": "M18",
+   "sprint": "S70",
+   "depends_fids": [
+    "F-144"
+   ]
+  },
+  {
+   "fid": "F-148",
+   "eid": "E35.6",
+   "phase": "P1.5",
+   "epic": "E35 Whole-slide imaging and the unified scene graph",
+   "epic_key": "E35",
+   "story": "Cross-modality annotation correlation",
+   "layer": "Rust",
+   "weeks": 12,
+   "depends_eids": [
+    "E35.5"
+   ],
+   "notes": "A lesion on CT to its biopsy; a real workflow with no good tool",
+   "milestone": "M18",
+   "sprint": "S71",
+   "depends_fids": [
+    "F-147"
+   ]
+  },
+  {
+   "fid": "F-149",
+   "eid": "E35.7",
+   "phase": "P1.5",
+   "epic": "E35 Whole-slide imaging and the unified scene graph",
+   "epic_key": "E35",
+   "story": "Multi-server data sources within one study",
+   "layer": "Rust",
+   "weeks": 8,
+   "depends_eids": [
+    "E35.2"
+   ],
+   "notes": "Images, annotations and AI results on three DICOMweb servers",
+   "milestone": "M18",
+   "sprint": "S72",
+   "depends_fids": [
+    "F-144"
+   ]
+  },
+  {
+   "fid": "F-150",
+   "eid": "E36.1",
+   "phase": "P1.5",
+   "epic": "E36 Attestable rendering",
+   "epic_key": "E36",
+   "story": "Deterministic pipeline audit: pin every source of variance",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E6.1"
+   ],
+   "notes": "Measure divergence rather than assume it away",
+   "milestone": "M17",
+   "sprint": "S59",
+   "depends_fids": [
+    "F-037"
+   ]
+  },
+  {
+   "fid": "F-151",
+   "eid": "E36.2",
+   "phase": "P1.5",
+   "epic": "E36 Attestable rendering",
+   "epic_key": "E36",
+   "story": "Render attestation: presentation state plus output hash",
+   "layer": "Rust",
+   "weeks": 8,
+   "depends_eids": [
+    "E2.7"
+   ],
+   "notes": "",
+   "milestone": "M17",
+   "sprint": "S57",
+   "depends_fids": [
+    "F-015"
+   ]
+  },
+  {
+   "fid": "F-152",
+   "eid": "E36.3",
+   "phase": "P1.5",
+   "epic": "E36 Attestable rendering",
+   "epic_key": "E36",
+   "story": "Cross-target reproducibility harness: browser, desktop, server",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E23.1"
+   ],
+   "notes": "Only possible because one core serves all three targets",
+   "milestone": "M17",
+   "sprint": "S60",
+   "depends_fids": [
+    "F-169"
+   ]
+  },
+  {
+   "fid": "F-153",
+   "eid": "E36.4",
+   "phase": "P1.5",
+   "epic": "E36 Attestable rendering",
+   "epic_key": "E36",
+   "story": "Divergence measurement and reporting",
+   "layer": "Rust",
+   "weeks": 6,
+   "depends_eids": [
+    "E36.3"
+   ],
+   "notes": "",
+   "milestone": "M17",
+   "sprint": "S61",
+   "depends_fids": [
+    "F-152"
+   ]
+  },
+  {
+   "fid": "F-154",
+   "eid": "E37.1",
+   "phase": "P1.5",
+   "epic": "E37 Live multi-user sessions",
+   "epic_key": "E37",
+   "story": "CRDT over viewport presentation state",
+   "layer": "Rust+TS",
+   "weeks": 12,
+   "depends_eids": [
+    "E7.6"
+   ],
+   "notes": "The state is already a serialisable struct",
+   "milestone": "M17",
+   "sprint": "S62",
+   "depends_fids": [
+    "F-050"
+   ]
+  },
+  {
+   "fid": "F-155",
+   "eid": "E37.2",
+   "phase": "P1.5",
+   "epic": "E37 Live multi-user sessions",
+   "epic_key": "E37",
+   "story": "Shared annotation editing with conflict resolution",
+   "layer": "Rust+TS",
+   "weeks": 14,
+   "depends_eids": [
+    "E37.1"
+   ],
+   "notes": "",
+   "milestone": "M17",
+   "sprint": "S63",
+   "depends_fids": [
+    "F-154"
+   ]
+  },
+  {
+   "fid": "F-156",
+   "eid": "E37.3",
+   "phase": "P1.5",
+   "epic": "E37 Live multi-user sessions",
+   "epic_key": "E37",
+   "story": "Presence: cursors, viewport follow, participant list",
+   "layer": "Rust+TS",
+   "weeks": 10,
+   "depends_eids": [
+    "E37.1"
+   ],
+   "notes": "",
+   "milestone": "M17",
+   "sprint": "S64",
+   "depends_fids": [
+    "F-154"
+   ]
+  },
+  {
+   "fid": "F-157",
+   "eid": "E37.4",
+   "phase": "P1.5",
+   "epic": "E37 Live multi-user sessions",
+   "epic_key": "E37",
+   "story": "Transport, auth and session lifecycle",
+   "layer": "Rust+TS",
+   "weeks": 11,
+   "depends_eids": [
+    "E37.1"
+   ],
+   "notes": "",
+   "milestone": "M17",
+   "sprint": "S65",
+   "depends_fids": [
+    "F-154"
+   ]
+  },
+  {
+   "fid": "F-158",
+   "eid": "E20.1",
+   "phase": "P2",
+   "epic": "E20 DICOM gateway (adopt, do not build)",
+   "epic_key": "E20",
+   "story": "Deploy and harden Orthanc or dcm4che as the DIMSE edge",
+   "layer": "Server",
+   "weeks": 6,
+   "depends_eids": [],
+   "notes": "Building this on dicom-ul costs 3-5x and is worse",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": []
+  },
+  {
+   "fid": "F-159",
+   "eid": "E20.2",
+   "phase": "P2",
+   "epic": "E20 DICOM gateway (adopt, do not build)",
+   "epic_key": "E20",
+   "story": "C-STORE, C-FIND, C-MOVE and C-ECHO configuration with TLS",
+   "layer": "Server",
+   "weeks": 5,
+   "depends_eids": [
+    "E20.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-158"
+   ]
+  },
+  {
+   "fid": "F-160",
+   "eid": "E20.3",
+   "phase": "P2",
+   "epic": "E20 DICOM gateway (adopt, do not build)",
+   "epic_key": "E20",
+   "story": "Autorouting rules and always-on listener operations",
+   "layer": "Server",
+   "weeks": 5,
+   "depends_eids": [
+    "E20.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-158"
+   ]
+  },
+  {
+   "fid": "F-161",
+   "eid": "E20.4",
+   "phase": "P2",
+   "epic": "E20 DICOM gateway (adopt, do not build)",
+   "epic_key": "E20",
+   "story": "Modality worklist and storage commitment (absent from dicom-rs)",
+   "layer": "Server",
+   "weeks": 8,
+   "depends_eids": [
+    "E20.2"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-159"
+   ]
+  },
+  {
+   "fid": "F-162",
+   "eid": "E21.1",
+   "phase": "P2",
+   "epic": "E21 Study service & DICOMweb",
+   "epic_key": "E21",
+   "story": "Study database schema, indexing and search",
+   "layer": "Server",
+   "weeks": 8,
+   "depends_eids": [
+    "E20.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-158"
+   ]
+  },
+  {
+   "fid": "F-163",
+   "eid": "E21.2",
+   "phase": "P2",
+   "epic": "E21 Study service & DICOMweb",
+   "epic_key": "E21",
+   "story": "QIDO-RS, WADO-RS and STOW-RS surface",
+   "layer": "Server",
+   "weeks": 8,
+   "depends_eids": [
+    "E21.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-162"
+   ]
+  },
+  {
+   "fid": "F-164",
+   "eid": "E21.3",
+   "phase": "P2",
+   "epic": "E21 Study service & DICOMweb",
+   "epic_key": "E21",
+   "story": "Authentication, authorisation and audit logging",
+   "layer": "Server",
+   "weeks": 6,
+   "depends_eids": [
+    "E21.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-162"
+   ]
+  },
+  {
+   "fid": "F-165",
+   "eid": "E21.4",
+   "phase": "P2",
+   "epic": "E21 Study service & DICOMweb",
+   "epic_key": "E21",
+   "story": "Albums, smart filters and study status model",
+   "layer": "Server",
+   "weeks": 6,
+   "depends_eids": [
+    "E21.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-162"
+   ]
+  },
+  {
+   "fid": "F-166",
+   "eid": "E22.1",
+   "phase": "P2",
+   "epic": "E22 De-identification",
+   "epic_key": "E22",
+   "story": "PS3.15 Basic Application Level Confidentiality Profile",
+   "layer": "Server",
+   "weeks": 10,
+   "depends_eids": [
+    "E21.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-162"
+   ]
+  },
+  {
+   "fid": "F-167",
+   "eid": "E22.2",
+   "phase": "P2",
+   "epic": "E22 De-identification",
+   "epic_key": "E22",
+   "story": "Retain-* profile options and consistent longitudinal UID remapping",
+   "layer": "Server",
+   "weeks": 8,
+   "depends_eids": [
+    "E22.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-166"
+   ]
+  },
+  {
+   "fid": "F-168",
+   "eid": "E22.3",
+   "phase": "P2",
+   "epic": "E22 De-identification",
+   "epic_key": "E22",
+   "story": "Burned-in pixel annotation detection and redaction",
+   "layer": "Server",
+   "weeks": 12,
+   "depends_eids": [
+    "E22.1"
+   ],
+   "notes": "Original work in any language; no library does this well",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-166"
+   ]
+  },
+  {
+   "fid": "F-169",
+   "eid": "E23.1",
+   "phase": "P2",
+   "epic": "E23 Server-side rendering & compute",
+   "epic_key": "E23",
+   "story": "Headless wgpu render target reusing the Phase 1 crates",
+   "layer": "Server",
+   "weeks": 8,
+   "depends_eids": [],
+   "notes": "The payoff for keeping core crates wasm-agnostic",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": []
+  },
+  {
+   "fid": "F-170",
+   "eid": "E23.2",
+   "phase": "P2",
+   "epic": "E23 Server-side rendering & compute",
+   "epic_key": "E23",
+   "story": "Thumbnail, key-image and report-figure generation",
+   "layer": "Server",
+   "weeks": 6,
+   "depends_eids": [
+    "E23.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-169"
+   ]
+  },
+  {
+   "fid": "F-171",
+   "eid": "E23.3",
+   "phase": "P2",
+   "epic": "E23 Server-side rendering & compute",
+   "epic_key": "E23",
+   "story": "Batch compute jobs for large-volume preprocessing",
+   "layer": "Server",
+   "weeks": 6,
+   "depends_eids": [
+    "E23.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-169"
+   ]
+  },
+  {
+   "fid": "F-172",
+   "eid": "E24.1",
+   "phase": "P3",
+   "epic": "E24 Curved MPR & centerline",
+   "epic_key": "E24",
+   "story": "Vesselness filtering and centerline extraction",
+   "layer": "Rust",
+   "weeks": 16,
+   "depends_eids": [],
+   "notes": "No Rust prior art; hardest item in the roadmap",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": []
+  },
+  {
+   "fid": "F-173",
+   "eid": "E24.2",
+   "phase": "P3",
+   "epic": "E24 Curved MPR & centerline",
+   "epic_key": "E24",
+   "story": "Curved planar reformation: projected, stretched and straightened",
+   "layer": "Rust",
+   "weeks": 12,
+   "depends_eids": [
+    "E24.1"
+   ],
+   "notes": "Kanitsar et al., IEEE Vis 2002",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-172"
+   ]
+  },
+  {
+   "fid": "F-174",
+   "eid": "E24.3",
+   "phase": "P3",
+   "epic": "E24 Curved MPR & centerline",
+   "epic_key": "E24",
+   "story": "CPR measurement and annotation support",
+   "layer": "Rust",
+   "weeks": 8,
+   "depends_eids": [
+    "E24.2"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-173"
+   ]
+  },
+  {
+   "fid": "F-175",
+   "eid": "E25.1",
+   "phase": "P3",
+   "epic": "E25 Surface rendering & mesh",
+   "epic_key": "E25",
+   "story": "Marching cubes / isosurface extraction",
+   "layer": "Rust",
+   "weeks": 6,
+   "depends_eids": [],
+   "notes": "Or adopt VTK.wasm rather than writing it",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": []
+  },
+  {
+   "fid": "F-176",
+   "eid": "E25.2",
+   "phase": "P3",
+   "epic": "E25 Surface rendering & mesh",
+   "epic_key": "E25",
+   "story": "Mesh decimation, smoothing and repair",
+   "layer": "Rust",
+   "weeks": 6,
+   "depends_eids": [
+    "E25.1"
+   ],
+   "notes": "@itk-wasm/mesh-filters is the cheaper answer",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-175"
+   ]
+  },
+  {
+   "fid": "F-177",
+   "eid": "E25.3",
+   "phase": "P3",
+   "epic": "E25 Surface rendering & mesh",
+   "epic_key": "E25",
+   "story": "STL export and 3D-print preparation",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E25.2"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-176"
+   ]
+  },
+  {
+   "fid": "F-178",
+   "eid": "E25.4",
+   "phase": "P3",
+   "epic": "E25 Surface rendering & mesh",
+   "epic_key": "E25",
+   "story": "Virtual endoscopy and fly-through path animation",
+   "layer": "Rust",
+   "weeks": 8,
+   "depends_eids": [
+    "E24.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-172"
+   ]
+  },
+  {
+   "fid": "F-179",
+   "eid": "E26.1",
+   "phase": "P3",
+   "epic": "E26 Registration & fusion",
+   "epic_key": "E26",
+   "story": "Integrate @itk-wasm/elastix for rigid and affine registration",
+   "layer": "Integrate",
+   "weeks": 8,
+   "depends_eids": [],
+   "notes": "Do not write registration in Rust",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": []
+  },
+  {
+   "fid": "F-180",
+   "eid": "E26.2",
+   "phase": "P3",
+   "epic": "E26 Registration & fusion",
+   "epic_key": "E26",
+   "story": "Deformable registration workflow and QC surface",
+   "layer": "Integrate",
+   "weeks": 8,
+   "depends_eids": [
+    "E26.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-179"
+   ]
+  },
+  {
+   "fid": "F-181",
+   "eid": "E27.1",
+   "phase": "P3",
+   "epic": "E27 Study library & workstation UI",
+   "epic_key": "E27",
+   "story": "Study browser: list, search, filters, albums, status flags",
+   "layer": "TS",
+   "weeks": 16,
+   "depends_eids": [
+    "E21.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-162"
+   ]
+  },
+  {
+   "fid": "F-182",
+   "eid": "E27.2",
+   "phase": "P3",
+   "epic": "E27 Study library & workstation UI",
+   "epic_key": "E27",
+   "story": "Hanging protocols with multi-monitor assignment",
+   "layer": "TS",
+   "weeks": 14,
+   "depends_eids": [
+    "E27.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-181"
+   ]
+  },
+  {
+   "fid": "F-183",
+   "eid": "E27.3",
+   "phase": "P3",
+   "epic": "E27 Study library & workstation UI",
+   "epic_key": "E27",
+   "story": "DICOM tag editor and study repair tools",
+   "layer": "TS",
+   "weeks": 8,
+   "depends_eids": [
+    "E27.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-181"
+   ]
+  },
+  {
+   "fid": "F-184",
+   "eid": "E27.4",
+   "phase": "P3",
+   "epic": "E27 Study library & workstation UI",
+   "epic_key": "E27",
+   "story": "Worklist and reading-workflow surfaces",
+   "layer": "TS",
+   "weeks": 8,
+   "depends_eids": [
+    "E27.2"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-182"
+   ]
+  },
+  {
+   "fid": "F-185",
+   "eid": "E27.5",
+   "phase": "P3",
+   "epic": "E27 Study library & workstation UI",
+   "epic_key": "E27",
+   "story": "Preferences, hotkeys and localisation",
+   "layer": "TS",
+   "weeks": 6,
+   "depends_eids": [
+    "E27.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-181"
+   ]
+  },
+  {
+   "fid": "F-186",
+   "eid": "E28.1",
+   "phase": "P3",
+   "epic": "E28 Native desktop shell",
+   "epic_key": "E28",
+   "story": "Tauri or native shell reusing the Phase 1 crates",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E23.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-169"
+   ]
+  },
+  {
+   "fid": "F-187",
+   "eid": "E28.2",
+   "phase": "P3",
+   "epic": "E28 Native desktop shell",
+   "epic_key": "E28",
+   "story": "Per-display calibration and DICOM Part 14 greyscale presentation",
+   "layer": "Rust",
+   "weeks": 10,
+   "depends_eids": [
+    "E28.1"
+   ],
+   "notes": "Unreachable in a browser; the real reason to go native",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-186"
+   ]
+  },
+  {
+   "fid": "F-188",
+   "eid": "E28.3",
+   "phase": "P3",
+   "epic": "E28 Native desktop shell",
+   "epic_key": "E28",
+   "story": "Local study cache and offline operation",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [
+    "E28.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-186"
+   ]
+  },
+  {
+   "fid": "F-189",
+   "eid": "E29.1",
+   "phase": "P3",
+   "epic": "E29 Plugin host",
+   "epic_key": "E29",
+   "story": "Sandboxed wasm/JS plugin runtime and capability model",
+   "layer": "TS+Rust",
+   "weeks": 12,
+   "depends_eids": [
+    "E16.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-100"
+   ]
+  },
+  {
+   "fid": "F-190",
+   "eid": "E29.2",
+   "phase": "P3",
+   "epic": "E29 Plugin host",
+   "epic_key": "E29",
+   "story": "Plugin API surface, versioning and distribution",
+   "layer": "TS+Rust",
+   "weeks": 8,
+   "depends_eids": [
+    "E29.1"
+   ],
+   "notes": "",
+   "milestone": "",
+   "sprint": "",
+   "depends_fids": [
+    "F-189"
+   ]
+  },
+  {
+   "fid": "F-X001",
+   "eid": "X1.1",
+   "phase": "P1",
+   "epic": "EX Tier C, CPU rendering",
+   "epic_key": "EX",
+   "story": "Tier C, software-adapter detection, and the feature-availability contract",
+   "layer": "Rust",
+   "weeks": 4,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-004"
+   ],
+   "notes": "Deviation D-07, and spike answer docs/spikes/A7-tier-c.md. HLD section 7 declares TWO tiers and both are GPU, so a machine with neither WebGPU nor WebGL2 renders nothing. Adds Tier::Cpu, and generalises the section 31 kernel rule to every tier-gated feature: a feature that cannot run on the resolved tier reports UNAVAILABLE and never silently produces a different answer. SCOPE ADDED BY A7.1: tier resolution must distinguish a HARDWARE adapter from a SOFTWARE one. On a host with no GPU a software rasteriser presents a conforming WebGL2 context, so Caps as specified resolves tier B and runs GPU paths on a rasteriser that is slower than our own CPU path and burns more CPU, which on a shared host is the resource that decides session density. Detect by renderer string, adapter type AND a startup micro-benchmark, and trust the benchmark: a renderer string is a claim and increasingly masked, a measured fill rate is a fact. Always allow an operator override.",
+   "milestone": "M1",
+   "sprint": "S04",
+   "added": true,
+   "depends_fids": [
+    "F-004"
+   ]
+  },
+  {
+   "fid": "F-X002",
+   "eid": "X1.2",
+   "phase": "P1",
+   "epic": "EX Tier C, CPU rendering",
+   "epic_key": "EX",
+   "story": "Three-layer GPU-less render testing: lavapipe in CI and Chrome with SwiftShader nightly",
+   "layer": "Build",
+   "weeks": 3,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-037"
+   ],
+   "notes": "Spike answer A7.2. Layer 1, tier C raster, needs NO adapter and is a plain cargo test on every PR, which is why the bulk of tier C correctness is free in CI. This story builds layers 2 and 3. Layer 2 is lavapipe via wgpu force_fallback_adapter on ubuntu-latest, catching pipeline construction, bind-group layouts, WGSL compilation and the tier-B shader variants at no GPU cost. Layer 3 is headless Chrome with SwiftShader, nightly or manual, and it is the only layer that says anything about what a GPU-less session actually does. DO NOT describe layer 2 as a simulator of a real GPU-less session: lavapipe is Vulkan through wgpu, a GPU-less browser session is SwiftShader through Chrome WebGL2. NO layer is an oracle, the reference is cornerstone3D per section 11. ACCEPTANCE: prove lavapipe actually resolves as a fallback adapter under the pinned wgpu version on ubuntu-latest. If it does not, layer 2 drops and layers 1 and 3 stand.",
+   "milestone": "M3",
+   "sprint": "S14",
+   "added": true,
+   "depends_fids": [
+    "F-037"
+   ]
+  },
+  {
+   "fid": "F-X003",
+   "eid": "X1.3",
+   "phase": "P1",
+   "epic": "EX Tier C, CPU rendering",
+   "epic_key": "EX",
+   "story": "CPU raster for the stack viewport, progressive refinement, and the tier A against C bound",
+   "layer": "Rust+TS",
+   "weeks": 6,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-029",
+    "F-045",
+    "F-X001"
+   ],
+   "notes": "HLD section 18 requires the LUT chain to exist once in ocelli-pixel with the shader reading its parameters, so the CPU path reuses that implementation and does not use the shader. One arithmetic implementation, three presentation paths. Inner loops use wasm SIMD128, and the no-SIMD runtime is measured separately as the worst case. A7.3b, PROGRESSIVE REFINEMENT: reduced resolution during a window/level drag or scroll, full resolution on settle. Same idiom as sections 8 and 30. It cuts CPU when the budget is under pressure AND cuts full-frame changes for a remoted session's display encoder, which is the second cost and the easy one to forget. Two constraints follow: the SETTLED frame is what the divergence bound is measured on, an interaction frame is explicitly not claimed to match tier A, and the user must be able to tell settled from refining because a radiologist must never measure from a frame that is still refining. A7.3, CPU BUDGET: measure the incumbent viewer on a representative GPU-less session, budget is no worse than its interactive AND idle cost, then record and gate on regression using the same mechanism as ci/wasm-size-budget.json. Report interactive and idle separately. Idle must be indistinguishable from zero because it multiplies by every open session on the host. A7.1b, DIVERGENCE: the estate is mixed, so decision D14's published bound must cover tier A against tier C. The oracle diffs the two over the corpus.",
+   "milestone": "M4",
+   "sprint": "S16",
+   "added": true,
+   "depends_fids": [
+    "F-029",
+    "F-045",
+    "F-X001"
+   ]
+  },
+  {
+   "fid": "F-X004",
+   "eid": "X1.4",
+   "phase": "P1",
+   "epic": "EX Tier C, CPU rendering",
+   "epic_key": "EX",
+   "story": "CPU MPR and oblique reslicing, with SIMD inner loops",
+   "layer": "Rust",
+   "weeks": 5,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-052",
+    "F-X003"
+   ],
+   "notes": "REQUIRED, not optional, and split from the volume decision by spike answer A7.1b. GPU passthrough is not assumed, so a user on a GPU-less session has no other route to a reformat at all: without this, that whole deployment class gets stack viewing and nothing else. Reslicing is a resampling problem and is CPU-tractable for a single plane at interactive rates. Inner loops use wasm SIMD128, and the no-SIMD runtime is measured separately because that combination is the genuine worst case. Judged on CPU cost per session as well as latency, because on a shared host density is sessions per host.",
+   "milestone": "M5",
+   "sprint": "S21",
+   "added": true,
+   "depends_fids": [
+    "F-052",
+    "F-X003"
+   ]
+  },
+  {
+   "fid": "F-X005",
+   "eid": "X1.5",
+   "phase": "P1",
+   "epic": "EX Tier C, CPU rendering",
+   "epic_key": "EX",
+   "story": "The CPU volume-rendering decision, and honest unavailability",
+   "layer": "Rust+TS",
+   "weeks": 2,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-059",
+    "F-X003"
+   ],
+   "notes": "A DECISION story, not an implementation one. Interactive volume ray-casting on CPU is very likely not achievable inside a GPU-less session's CPU budget, and the expected outcome is that VOLUME_3D reports UNAVAILABLE on tier C. That is a legitimate outcome and it is the whole point of the feature-availability contract in F-X001. What it must NOT do is the third thing: a slow CPU path that quietly produces a different image from the GPU one. Whichever way it goes, the shell must say so to the user in terms a radiologist can act on, because a 3D tab that is simply absent is a support call and a 3D tab that renders wrongly is a patient-safety issue.",
+   "milestone": "M5",
+   "sprint": "S21",
+   "added": true,
+   "depends_fids": [
+    "F-059",
+    "F-X003"
+   ]
+  }
+ ]
+}

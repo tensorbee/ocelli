@@ -1,0 +1,6 @@
+interface:
+  display_name: "Complete Feature"
+  short_description: "Close one F-ID. Updates every ledger, the LLD, and commits with the..."
+  default_prompt: "Use $complete-feature to follow the repository workflow."
+policy:
+  allow_implicit_invocation: false

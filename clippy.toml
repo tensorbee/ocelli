@@ -1,0 +1,3 @@
+# Keep a reviewer's eye on anything that could hide arithmetic.
+# HLD section 27.3, "every `as` cast and every rounding decision".
+avoid-breaking-exported-api = false

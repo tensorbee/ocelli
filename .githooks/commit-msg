@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Append the provenance trailers from the verify ledger, and check the message.
+#
+# HLD 27.2 R6: a provenance trailer on every commit. "Cheap now, a retrofit
+# across sixty thousand lines is not, and a device pathway may require it."
+#
+# The trailers are written HERE, from a ledger entry keyed on the staged tree,
+# and never by hand. That is what makes them evidence rather than assertion.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+MSG="$1"
+
+python3 scripts/prose_check.py --commit-msg "$MSG" || exit 1
+
+if grep -qi '^Co-Authored-By:.*\(Claude\|Codex\|GPT\|Copilot\)' "$MSG"; then
+  echo "FAIL: no agent co-author trailer. Provenance is recorded by the"
+  echo "      Ocelli-Generated-By trailer, which this hook writes."
+  exit 1
+fi
+
+if grep -q '^Ocelli-Verify:' "$MSG"; then
+  echo "FAIL: Ocelli-Verify is written by this hook from the verify ledger."
+  echo "      A hand-written one asserts a check that may not have run."
+  exit 1
+fi
+
+if TRAILERS=$(python3 scripts/verify_ledger.py trailer 2>/dev/null); then
+  printf '\n%s\n' "$TRAILERS" >> "$MSG"
+fi
+
+exit 0

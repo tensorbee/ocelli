@@ -1,0 +1,6 @@
+interface:
+  display_name: "Verify"
+  short_description: "The completion gate. Runs the gate set for a profile and records th..."
+  default_prompt: "Use $verify to follow the repository workflow."
+policy:
+  allow_implicit_invocation: false

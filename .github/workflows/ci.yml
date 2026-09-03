@@ -1,0 +1,139 @@
+name: CI
+
+# THE CI FLOOR. NO GPU JOBS, DELIBERATELY.
+#
+# This is deviation D-04 in docs/hld/DEVIATIONS.md. HLD section 11 says every
+# pull request renders the corpus in CI. GPU runners are expensive, so the
+# corpus and the oracle run locally in `/verify` instead, and CI verifies the
+# EVIDENCE rather than re-running the work.
+#
+# The `evidence` job below is what makes that honest. It costs no GPU and it
+# cannot be satisfied by intention: the trailer it reads is written by
+# .githooks/commit-msg from a ledger entry that a real gate run produced, and
+# it must name the same tree hash as the commit it sits in.
+#
+# Do NOT add a GPU job here. If cheap GPU CI ever exists, revisit D-04 first
+# so the deviation and the workflow change together.
+
+on:
+  push:
+    branches: ["main", "sprint/**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence:
+    name: Verification evidence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Head carries an Ocelli-Verify trailer for its own tree
+        run: python3 scripts/verify_ledger.py check-commit HEAD
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+      # Story E1.7, the cross-target build proof. This is what keeps decision
+      # D2 honest over time: if the core stopped being WebAssembly-agnostic,
+      # it shows up here first.
+      - name: Cross-target proof, native
+        run: cargo build -p ocelli-native
+      - name: Cross-target proof, wasm32
+        run: cargo check -p ocelli-wasm --target wasm32-unknown-unknown
+
+  guards:
+    name: Guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install openpyxl
+
+      # Decision D2. The one that is worthless unless enforced.
+      - run: ci/check-bindgen-isolation.sh
+      # HLD 27.2 R5, two permitted files.
+      - run: python3 scripts/unsafe_allowlist_check.py
+      # HLD 15.2 and 27.2 R4, wgpu pinned exactly.
+      - run: python3 scripts/pin_and_size_check.py
+      # docs/SOURCE-POLICY.md and HLD gate A6. No allowlist.
+      - run: python3 scripts/source_provenance_check.py
+      - run: python3 scripts/staged_content_check.py --tracked
+      - run: python3 scripts/prose_check.py
+      - run: python3 scripts/deviation_check.py
+      - run: python3 scripts/backlog_check.py
+      - run: python3 scripts/gen_sprint_plan.py --check
+      # docs/hld must still match the .docx it was cut from, and the backlog
+      # must still match the spreadsheet. Both sources are held OUTSIDE this
+      # repository (they carry Appendix C and the full effort plan), so both
+      # checks SKIP here with a stated reason and exit 3. The gate runner
+      # reports a skip as a skip. It is never reported as a pass.
+      #
+      # This is the one gate CI genuinely cannot run. Whoever holds the source
+      # documents runs `bin/ocelli.sh gate docs` before a release.
+      - run: bin/ocelli.sh gate docs
+      # One workflow, two hosts. A stale adapter serves Codex old instructions.
+      - run: python3 scripts/sync_agent_skills.py --check
+      # The manifest's shape, without needing the corpus itself.
+      - run: python3 scripts/corpus_check.py --manifest-only
+
+  frontend:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      # Includes the cached-wasm-view ban of HLD 17.2, which is a silent
+      # failure mode and therefore a lint rather than a convention.
+      - run: npm run lint
+      - run: npm run typecheck
+
+  wasm:
+    name: wasm size budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
+
+      # Story E1.2's note is "CI fails if the module exceeds the agreed
+      # budget", and a wasm-pack build needs no GPU. Release profile only:
+      # HLD 15.2's opt-level "z", fat LTO and strip apply to release, so a
+      # dev-profile measurement is meaningless against Appendix A gate A4.
+      #
+      # Until F-096 adds wasm-bindgen, wasm-pack cannot build ocelli-wasm at
+      # all, so this gate SKIPS with a stated reason. Going through the gate
+      # runner rather than calling wasm-pack directly is what keeps that a
+      # visible skip instead of a red job nobody can act on.
+      - run: bin/ocelli.sh gate wasm

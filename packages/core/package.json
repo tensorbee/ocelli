@@ -1,0 +1,13 @@
+{
+  "name": "@ocelli/core",
+  "version": "0.1.0",
+  "description": "The TypeScript shell. DOM, pointer events, the annotation layer, and the boundary to the Rust core.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist"],
+  "scripts": { "build": "tsc --build", "clean": "rm -rf dist" },
+  "publishConfig": { "access": "public" }
+}

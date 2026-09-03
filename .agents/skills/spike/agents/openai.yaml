@@ -1,0 +1,6 @@
+interface:
+  display_name: "Spike"
+  short_description: "Run one of the six Appendix A spike gates and record its answer. Ea..."
+  default_prompt: "Use $spike to follow the repository workflow."
+policy:
+  allow_implicit_invocation: false

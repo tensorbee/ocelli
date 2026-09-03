@@ -1,0 +1,16 @@
+[package]
+name = "ocelli-oracle"
+description = "Differential harness. Renders the corpus through Ocelli and cornerstone3D and compares."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# HLD decision D7 and section 11. This is built BEFORE any port code. It is
+# the mechanism that makes generated Rust safe to merge at volume, so it is
+# infrastructure and not a phase.
+[dependencies]

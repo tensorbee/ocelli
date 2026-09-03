@@ -1,0 +1,6 @@
+interface:
+  display_name: "Release Notes"
+  short_description: "Draft, validate or render the CHANGELOG section for a release tag...."
+  default_prompt: "Use $release-notes to follow the repository workflow."
+policy:
+  allow_implicit_invocation: false

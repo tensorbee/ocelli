@@ -1,0 +1,6 @@
+interface:
+  display_name: "Dicom Tooling"
+  short_description: "Python and command-line DICOM tooling for Ocelli's corpus and fixtu..."
+  default_prompt: "Load $dicom-tooling as reference material before acting."
+policy:
+  allow_implicit_invocation: true

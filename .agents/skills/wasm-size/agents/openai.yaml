@@ -1,0 +1,6 @@
+interface:
+  display_name: "Wasm Size"
+  short_description: "Build the wasm module, measure it against the recorded budget, and..."
+  default_prompt: "Use $wasm-size to follow the repository workflow."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,18 @@
+[package]
+name = "ocelli-native"
+description = "Desktop and server entry points. Phase 2 and 3, stubbed now."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+# HLD section 13. This crate exists in Phase 1 so that Phase 2 and Phase 3 are
+# new ENTRY POINTS rather than new implementations. It stays stubbed, and
+# F-007 (E1.7) proves the workspace still builds for a native target, which is
+# the only thing that keeps decision D2 honest over time.
+[dependencies]

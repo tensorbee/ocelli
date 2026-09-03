@@ -1,0 +1,14 @@
+[package]
+name = "ocelli-compute"
+description = "WGSL compute kernels. Shares the renderer's device, never creates one."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

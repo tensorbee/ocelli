@@ -1,0 +1,6 @@
+interface:
+  display_name: "Microscope"
+  short_description: "Independently review one F-ID's diff against the normative HLD and..."
+  default_prompt: "Use $microscope to follow the repository workflow."
+policy:
+  allow_implicit_invocation: false

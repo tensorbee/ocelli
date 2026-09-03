@@ -1,0 +1,29 @@
+[package]
+name = "ocelli-wasm"
+description = "The only crate that may import wasm-bindgen. Boundary, commands, event ring."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# HLD decision D2, and the CI invariant of section 15.3. wasm-bindgen appears
+# in exactly ONE crate, this one. `ci/check-bindgen-isolation.sh` runs on every
+# push and fails if any other crate reaches it.
+#
+# The dependency is target-gated so `cargo check --workspace` on the host does
+# not build wasm-bindgen at all. That is a build convenience and NOT the
+# isolation mechanism, which is the script.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# wasm-bindgen lands with F-096 (E16.2, the boundary). Declaring it before
+# there is a boundary to bind would put the one dependency this project most
+# wants to control into the tree for no reason.
+
+[dependencies]

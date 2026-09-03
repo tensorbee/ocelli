@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Enable once per clone:  git config core.hooksPath .githooks
+#
+# Three jobs, in order of what they prevent:
+#
+# 1. Refuse patient data and build artefacts. A DICOM in history is not
+#    removed by a later commit, and there is no allowlist.
+# 2. Refuse a source-provenance or voice-rule violation in the staged set.
+# 3. Look up the STAGED TREE in the verify ledger and append the provenance
+#    trailers from it. HLD 27.2 R6.
+#
+# Job 3 is the load-bearing one. CI runs no GPU and no corpus
+# (docs/hld/DEVIATIONS.md D-04), so the trailer this hook writes is the only
+# evidence CI has that the corpus ran. The trailer is emitted from a ledger
+# entry that a real gate run wrote, so it cannot be hand-forged.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+fail=0
+
+python3 scripts/staged_content_check.py       || fail=1
+python3 scripts/source_provenance_check.py --staged || fail=1
+python3 scripts/prose_check.py --staged       || fail=1
+
+if [ "$fail" -ne 0 ]; then
+  echo
+  echo "Commit refused. Nothing above is an allowlist candidate."
+  exit 1
+fi
+
+# The commit-msg hook writes the trailers. This hook only warns, because a
+# commit with no verification is legitimate mid-story, and refusing it would
+# make the ledger an obstacle rather than a record. The gate that actually
+# bites is on push and in CI.
+if ! python3 scripts/verify_ledger.py assert >/dev/null 2>&1; then
+  echo "NOTE: no /verify record for this exact tree."
+  echo "      The commit will carry no Ocelli-Verify trailer, and CI will"
+  echo "      refuse the push. Run bin/ocelli.sh gate --all before pushing."
+fi
+
+exit 0

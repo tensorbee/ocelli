@@ -1,0 +1,72 @@
+# Lockfiles ARE committed, both of them, and deliberately.
+#
+# Cargo.lock is committed even though this workspace publishes libraries, where
+# the older convention was to omit it. This project pins wgpu exactly (HLD
+# 15.2) because agents emit APIs from the wrong era, and section 36 wants
+# reproducible output across three targets. A floating transitive dependency
+# would undo both. package-lock.json is committed because CI runs `npm ci`,
+# which refuses to run without it.
+
+# Rust
+/target/
+**/*.rs.bk
+
+# Python bytecode from the guard scripts. Appears the moment one is imported
+# as a module rather than run as a script.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# wasm-pack output. Built by bin/ocelli.sh wasm, never committed.
+crates/ocelli-wasm/pkg/
+crates/ocelli-wasm/target/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+
+# The corpus. See corpus/README.md. The manifest IS committed, the data is not.
+corpus/data/
+*.dcm
+*.dicom
+*.DCM
+
+# Oracle output: rendered frames, diffs, hashes for one run.
+tools/oracle/out/
+tools/oracle/node_modules/
+.playwright/
+playwright-report/
+test-results/
+
+# Verification ledger is per-clone evidence, not shared history.
+.claude/verify-ledger.json
+
+# In-flight agent notes. Everything else under .claude/ IS committed:
+# plans, reviews, commands and handoffs are tracked, agent-neutral artefacts.
+.claude/scratch/
+
+# Local settings override
+.claude/settings.local.json
+
+# Credentials. Nothing here should ever exist in this repository, and the
+# patterns are cheap insurance rather than a substitute for not creating them.
+# A crates.io or npm token lives in CI secrets, never on disk.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+.npmrc
+.cargo/credentials
+.cargo/credentials.toml
+
+# OS and editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+.playwright-mcp/
