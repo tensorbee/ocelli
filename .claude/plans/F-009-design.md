@@ -88,7 +88,7 @@ the two open gates, verbatim:
 > registered decoder, so choosing that route costs an adapter rather than a
 > redesign.
 
-So the fifteen rows below are **not** transcribed from the HLD. They are the
+So the rows below are **not** transcribed from the HLD. They are the
 DICOM PS3.5 transfer syntax UIDs, with the registry column taken from the
 `dicom-expert` skill's table, which is this project's own reading of PS3.5 and
 not a normative document. The two rows the HLD does pin, HTJ2K and JPEG-LS as
@@ -118,8 +118,18 @@ list, PS3.5 is the authority and the list below is the transcription of it.
 | `1.2.840.10008.1.2.4.202` | HTJ2K Lossless Only, RPCL | open gate A1 |
 | `1.2.840.10008.1.2.4.203` | HTJ2K | open gate A1 |
 
-Fifteen syntaxes. Condition 4 is therefore fifteen rows at minimum, not a
-gesture at "the common ones".
+**Count the rows rather than trusting this sentence.** There are sixteen, and
+an earlier draft of this plan said fifteen in seven places while the table
+below it had sixteen rows, which is precisely the failure
+`.claude/commands/sync-sprint.md` warns about when it says to write the command
+that produces a count rather than the number. So:
+
+```bash
+grep -c '^| `1\.2\.840\.10008' .claude/plans/F-009-design.md
+```
+
+Condition 4 is therefore one row per syntax that command counts, not a gesture
+at "the common ones".
 
 ## What the specification does not cover
 
@@ -154,7 +164,7 @@ bytes come from, and this is where the whole story lives.
    and the assessment is recorded as a table row in `docs/SOURCE-POLICY.md`
    under "Extensions to the table", which that file explicitly provides for.
 5. **A widely used source that this policy refuses.** The pydicom project ships
-   176 test files covering most of the fifteen syntaxes, and it would be the
+   176 test files covering most of those syntaxes, and it would be the
    obvious shortcut. Its own `test_files/README.txt` says of them, verbatim,
    "I believe there is no restriction on using any of these files in this
    manner", and traces individual files to NEMA WG04, `dclunie.com`,
@@ -216,7 +226,7 @@ each syntax needs, measured on this machine rather than assumed:
 | JPEG Baseline, Extended, Lossless 57 and 70 | DCMTK `dcmcjpeg` | installed for this story |
 | HTJ2K 201, 202, 203 | OpenJPH `ojph_compress`, encapsulated by hand | installed for this story |
 
-All fifteen are reachable. The last two rows were the open question below and
+All of them are reachable. The last two rows were the open question below and
 the answer was to install both formulae, so this story owes every syntax the
 registry will claim rather than a subset.
 
@@ -244,7 +254,8 @@ class.
 Reads the manifest only. Fails, naming what is absent, when any of these is not
 satisfied:
 
-- every one of the fifteen registry transfer syntaxes has at least one row
+- every registry transfer syntax in the table above has at least one row, the
+  check reading that set from a single list rather than from a repeated count
 - both tolerance classes of section 25.1 are represented, monochrome 16-bit
   and colour or ultrasound
 - at least one row is not synthetic, so the corpus has seen a real file, and
@@ -322,12 +333,12 @@ Recorded here rather than deleted, because the answer is the reason the plan
 looks the way it does.
 
 1. **May Homebrew install `dcmtk` and `openjph` on this machine?**
-   **Answered: install both.** So all fifteen registry transfer syntaxes are in
+   **Answered: install both.** So every registry transfer syntax is in
    scope for this story, `dcmcjpeg` supplies 50, 51, 57 and 70, and
    `ojph_compress` supplies the codestream for 201, 202 and 203. Condition 4 is
    met in full rather than partially, and both open gates, A1 for HTJ2K and A2
    for JPEG-LS, get cases to be answered against. `--coverage` therefore
-   requires all fifteen and reports no permitted gap.
+   requires every one of them and reports no permitted gap.
 
 2. **How much real clinical data should this run download?**
    **Answered: one small series per class.** One CT, one MR, one CR or DR, and
