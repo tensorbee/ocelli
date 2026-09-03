@@ -41,6 +41,26 @@ lint then has an opinion about inside the one place an exact comparison is
 correct. Deriving on the markers instead leaves §16's listing untouched and
 keeps the float comparison inside a derive expansion, where it belongs.
 
+**The side effect, which the F-001 review caught and which is easy to miss.**
+Deriving `Clone` and `Copy` on the markers retires §16's own note as well.
+That note says `derive(Clone, Copy)` on `Pt<S>` "would add an S: Clone bound
+that the marker types do not satisfy", and after this deviation they satisfy
+it. Confirmed against rustc 1.97.1: with the markers deriving,
+`#[derive(Debug, PartialEq, Clone, Copy)]` on `Pt<S>` compiles and works for
+all three spaces.
+
+So §16's note is preserved in the source as the quotation it is, and the
+hand-written impls stay, but **the reason they stay has changed and the source
+says so.** It is no longer that a derive would not compile. It is that
+`impl<S> Clone for Pt<S>` and `impl<S> Copy for Pt<S>` are unconditional, so a
+`Pt` is `Copy` whatever a future marker does or does not derive. A marker added
+later without `Copy` would silently make `Pt` of that space non-`Copy` under a
+derive, and the hand-written impls are what stop that.
+
+This is worth writing down because it is the shape a deviation most often goes
+wrong in: not by being wrong, but by leaving the reasoning around it describing
+the world before it was applied.
+
 ## D-07, tier C, and what it does and does not claim
 
 HLD §7 says "Two capability tiers, one codebase", and both are GPU. §31 already
