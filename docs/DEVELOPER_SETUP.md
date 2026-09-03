@@ -52,6 +52,28 @@ Without them the `docs` gate **skips with a stated reason** rather than passing
 or failing, and says which of the three sources it resolved the path from. You
 only need them to regenerate or verify `docs/hld/` and the backlog.
 
+**That folder holds three things, not two.** The `.docx`, the `.xlsx`, and
+`redactions.json`, which carries the commercial product names stripped from the
+published specification. The rules live with the private source rather than in
+this repository, because a map of what was redacted still contains what was
+redacted.
+
+So **a folder holding only the two documents is not the private source folder**,
+and pointing this setting at one is worse than leaving it unset. It was worse
+silently until `split_hld.py` was taught to refuse: with the rules absent the
+redaction step became the identity function and a regenerate wrote the product
+names back into `docs/hld/`, with normal-looking output and nothing said.
+`scripts/split_hld.py` now stops instead, and `docs/runbooks/guard-verification.md`
+carries the probe that proves it.
+
+One more thing to expect on a machine that is not the author's. The `docs` gate
+asserts byte-identity against a freshly converted document, so a **different
+pandoc version reports drift that is not drift**. pandoc 3.11 emits horizontal
+rules where the version that generated the tracked files did not, which shows up
+as a dozen changed files whose formulas, signatures and tables are all
+identical. Diff before believing it, and never regenerate to make the gate
+green.
+
 ## The corpus
 
 Not in git. See `corpus/README.md`.

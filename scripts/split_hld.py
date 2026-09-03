@@ -62,9 +62,28 @@ PRIVATE_SECTIONS = {"C-competitive-position.md"}
 # undo the redaction it performs. The generators cannot run without the private
 # source anyway, so the rules travel with it.
 def _load_redactions() -> list[tuple[str, str]]:
+    """The rules, or a refusal. Never an empty list standing in for them.
+
+    Returning [] when the file is absent makes this guard fail OPEN: the split
+    runs, redact() becomes the identity function, and the commercial names go
+    straight back into docs/hld with nothing said. The output looks normal,
+    because unredacted text is what the .docx contains. That is the quietest
+    possible way to undo a redaction, so absence is an error and not a default.
+    """
     path = SOURCE_DIR / "redactions.json"
     if not path.exists():
-        return []
+        sys.exit(
+            f"FAIL: no redactions.json beside the authored source at {path}.\n"
+            "The rules travel with the private source because a map of what\n"
+            "was redacted still contains what was redacted. Without them this\n"
+            "script would write the commercial product names back into\n"
+            "docs/hld, so it stops instead.\n"
+            "\n"
+            "If the resolved source directory is wrong, that is the actual\n"
+            "problem. A folder holding the .docx but not the rules is not the\n"
+            "private source folder. Check it with:\n"
+            "  python3 scripts/source_dir.py\n"
+            "  python3 scripts/source_dir.py --set PATH")
     return [(r[0], r[1]) for r in json.loads(path.read_text())["rules"]]
 
 def redact(text: str) -> str:

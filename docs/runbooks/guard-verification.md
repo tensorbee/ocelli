@@ -100,6 +100,26 @@ fails on nothing.
 | 15 | `verify_ledger.py assert` | Any tree with no recorded gate run | `no verification recorded for the staged tree`, exit 1 |
 | 16 | `verify_ledger.py trailer` | The same tree | Exit 1, and no trailer emitted, which is what makes the trailer unforgeable |
 | 17 | `ci/check-bindgen-isolation.sh` | `wasm-bindgen = "0.2"` added to `crates/ocelli-geom/Cargo.toml` | `FAIL: ocelli-geom reaches wasm-bindgen`, exit 1 |
+| 18 | `split_hld.py` | Resolve the source directory to a folder holding the `.docx` but no `redactions.json` | `FAIL: no redactions.json beside the authored source`, exit 1, and `docs/hld/` untouched |
+
+### Probe 18 was a guard that failed open, and the probe is why it does not
+
+Probe 18 did not exist when this runbook was started. It was added because
+running the other probes surfaced the thing it now checks.
+
+`split_hld.py` regenerates `docs/hld/` from the authored document and strips
+the commercial product names on the way through. The rules for that live beside
+the private source rather than in this repository, because a map of what was
+redacted still contains what was redacted. The loader returned an empty rule
+list when the file was absent, so `redact()` quietly became the identity
+function and a regenerate would have written the product names straight back
+into tracked documentation, with output that looks entirely normal because
+unredacted text is what the source says.
+
+**That is the shape to watch for in every guard here: not one that fails
+wrongly, but one that has nothing to check and says so by succeeding.** Probes
+15 and 16 are the same shape from the other side, which is why they are the
+pair called out below.
 
 ### The control that matters most
 
@@ -124,4 +144,5 @@ embedded inside an archive, and nothing in this repository claims it does.
 
 | Date | Sprint | Guards probed | Result |
 |------|--------|---------------|--------|
-| 2026-09-04 | S01 | All 17 rows above | Every probe went red with a specific message, every control returned green |
+| 2026-09-04 | S01 | Rows 1 to 17 | Every probe went red with a specific message, every control returned green |
+| 2026-09-04 | S01 | Row 18 | Added during the same run, after the exercise surfaced the fail-open redaction loader. Red with a specific message, and `docs/hld/` provably untouched |
