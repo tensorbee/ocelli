@@ -76,8 +76,28 @@ done until both classes are present.
 
 ### The transfer syntaxes the codec registry will claim
 
-From the `dicom-expert` skill's table, which is `docs/hld/18-codec-registry.md`
-plus PS3.5, and from the `Ocelli` column of that table:
+**Where this list comes from, precisely.** `docs/hld/18-codec-registry.md`
+section 21 specifies the registry as a trait and an explicit runtime map keyed
+on transfer syntax, and it enumerates no syntaxes at all. What it does name is
+the two open gates, verbatim:
+
+> **TWO OPEN GATES** HTJ2K through openjp2 is registered in dicom-rs but
+> unverified under wasm32 - test it bit-exact against OpenJPH output in week
+> one. JPEG-LS has no credible pure-Rust path, the registry design deliberately
+> allows a JS-side bridge to a permissively licensed CharLS decoder as a
+> registered decoder, so choosing that route costs an adapter rather than a
+> redesign.
+
+So the fifteen rows below are **not** transcribed from the HLD. They are the
+DICOM PS3.5 transfer syntax UIDs, with the registry column taken from the
+`dicom-expert` skill's table, which is this project's own reading of PS3.5 and
+not a normative document. The two rows the HLD does pin, HTJ2K and JPEG-LS as
+the open gates, agree with it.
+
+`docs/hld/B-parity-surface.md` gives a different number, "Transfer syntaxes
+~13". That is a count of cornerstone3D's surface rather than of ours, and the
+two are not in conflict. Where this story's coverage check needs a definitive
+list, PS3.5 is the authority and the list below is the transcription of it.
 
 | UID | Name | Registry |
 |-----|------|----------|
