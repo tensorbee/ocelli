@@ -22,6 +22,24 @@ a plan has no row here.
 | D-05 | §11 and E2.1 imply a corpus the project holds | The corpus lives outside git at `$OCELLI_CORPUS_DIR`, with a committed manifest of per-case checksums and metadata | Operator constraint. A TCIA-derived corpus is large and its redistribution terms are not ours to assume. The manifest makes the corpus verifiable without being present. | Bootstrap |
 | D-06 | The .docx code listings carry Word paragraph formatting | `docs/hld/*.md` code fences are re-indented from bracket depth and de-double-spaced | Word stored indentation and line spacing as formatting rather than characters, so pandoc emits every listing flush-left and double-spaced. Presentation only. The .docx wins where exact bytes matter. | Bootstrap |
 | D-07 | §7, "Two capability tiers, one codebase", both of them GPU | A third tier, **C, CPU**. The resolved tier may be `Cpu`, and every tier-gated feature declares its CPU answer | §7 leaves a machine with neither WebGPU nor WebGL2 rendering nothing at all, which is a failure mode the specification does not name and does not intend. Operator decision, and spike A7.1 establishes GPU-less sessions as a primary clinical path rather than a fallback. F-X001 to F-X004. | Post-bootstrap |
+| D-08 | §16, the marker spaces are `pub enum Canvas {}` and `Pt<S>` carries `#[derive(Debug, PartialEq)]` | The three marker enums derive `Debug, Clone, Copy, PartialEq, Eq, Hash`. The `Pt<S>` block is otherwise unchanged | A `derive` on a generic struct bounds the parameter, so `#[derive(Debug, PartialEq)]` expands to `impl<S: Debug> Debug for Pt<S>` and `Pt<Canvas>` satisfies neither trait while `Canvas` is bare. `assert_eq!` on two `Pt<Canvas>` fails to compile with E0369 and E0277, verified against rustc rather than reasoned about. §16's own note identifies exactly this trap for `Clone` and `Copy` and stops there. Deriving on the markers is the smaller change, because it leaves §16's `Pt` listing character for character as written. | F-001 |
+| D-09 | §15.2, `glam = "0.30"` | `glam = { version = "0.30", default-features = false, features = ["libm"] }` | Every core crate carries `#![cfg_attr(not(test), no_std)]`, which the HLD neither requires nor forbids. glam's default feature is `std`, and glam needs either `std` or its optional `libm` dependency to compile at all, so the default entry silently defeats the `no_std` posture the crates declare. The pin itself is untouched and only the feature set changes. | F-001 |
+
+## D-08, and why a derive is not a formatting detail
+
+§16's payoff is that a whole class of tool bugs stops compiling. The mechanism
+is `PhantomData<S>` over an uninhabited marker, and the cost of that mechanism
+is that every `derive` on `Pt<S>` bounds `S`. `PhantomData` itself implements
+`Debug` and `PartialEq` for any `S`, bound-free, which is why the definition
+compiles and only the call site fails. That gap is the whole trap: the crate
+builds, and the first test that compares two points does not.
+
+The two available fixes are not equivalent. Hand-implementing `Debug` and
+`PartialEq` on `Pt<S>` keeps the markers bare, and its `PartialEq` body
+compares `f64` fields directly, which the workspace's `float_cmp = "deny"`
+lint then has an opinion about inside the one place an exact comparison is
+correct. Deriving on the markers instead leaves §16's listing untouched and
+keeps the float comparison inside a derive expansion, where it belongs.
 
 ## D-07, tier C, and what it does and does not claim
 
