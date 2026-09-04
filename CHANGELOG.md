@@ -15,6 +15,10 @@ Repository bootstrap. Nothing is published.
   `ci/check-bindgen-isolation.sh`.
 - The npm workspaces `@ocelli/core` and `@ocelli/react`, and the example
   viewer at `examples/viewer-react`.
+- Strongly typed canvas, world and voxel-index points, composable transforms,
+  and pixel-value newtypes in `ocelli-core`.
+- A manifest-backed DICOM corpus with deterministic synthetic fixtures,
+  transfer-syntax conformance checks, metadata auditing and digest verification.
 - `docs/hld/`, cut from the authored `.docx` by `scripts/split_hld.py` with a
   check that asserts no section is lost. The authored document and Appendix C,
   the commercial analysis, are held outside the repository.
