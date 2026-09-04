@@ -123,7 +123,16 @@ commit messages.
 
 **`docs/hld/` is exempt.** Those files are cut from the author's document with
 nothing reworded, and editing a specification to satisfy a lint is the wrong
-way round. `CHANGELOG.md` released sections are exempt for the same reason.
+way round.
+
+**`CHANGELOG.md` is not covered at all**, and that is worth stating precisely,
+because the obvious reading of the sentence above is wrong. It is not that
+released sections are exempt and unreleased ones are checked. The file is
+absent from the checker's include list entirely, so nothing in it is checked,
+`## Unreleased` included. S01 found a stale gate count sitting there for
+exactly that reason. If the unreleased section should be covered, that needs
+section-aware logic in `scripts/prose_check.py`, and it is a change to this
+file rather than a one-line include.
 
 ## Source provenance, and the two projects nobody may open
 

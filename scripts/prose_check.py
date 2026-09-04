@@ -13,8 +13,13 @@ markdown, and commit messages.
 **`docs/hld/` is exempt and that is not an oversight.** Those files are cut
 from the author's `.docx` by `scripts/split_hld.py` with nothing reworded.
 Applying a voice rule to them would mean editing the specification to satisfy
-a lint, which is the wrong way round. Same for `CHANGELOG.md`, whose released
-sections are frozen once published.
+a lint, which is the wrong way round.
+
+**`CHANGELOG.md` is not in scope at all.** Not "its released sections are
+exempt", which is what an earlier version of this docstring implied and what
+`.claude/WORKFLOW.md` repeated. The file is not in INCLUDE_EXACT and does not
+sit under an INCLUDE_PREFIXES directory, so `## Unreleased` is unchecked too.
+S01 found a stale gate count there that nothing would have caught.
 
 Code, identifiers and fenced blocks are exempt everywhere.
 
