@@ -1,0 +1,11 @@
+error[E0599]: no method named `into_device` found for struct `GpuContext` in the current scope
+  --> tests/ui/no_owned_device_out_of_context.rs:18:40
+   |
+18 |     let _owned: wgpu::Device = context.into_device();
+   |                                        ^^^^^^^^^^^
+   |
+help: there is a method `device` with a similar name
+   |
+18 -     let _owned: wgpu::Device = context.into_device();
+18 +     let _owned: wgpu::Device = context.device();
+   |

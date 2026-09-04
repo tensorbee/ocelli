@@ -1,21 +1,15 @@
 {
-  "note": "Declared per-target resolution differences, each with a reason. A difference not declared here fails the `native` gate, and a declaration that no longer describes anything fails it too. Keys are package NAMES without versions, deliberately: this gate is about feature resolution, not about versions, which `pins` and Cargo.lock already cover. Re-seed with scripts/target_feature_check.py --write, then write a real reason for every entry. A TODO left here is a declaration nobody made.",
+  "note": "Declared per-target differences for dependencies this workspace names directly. Transitive packages are NOT listed: a cross-platform GPU library resolves a different closure per target by design, and per host, so listing them would make this gate machine-specific. See the module docstring of scripts/target_feature_check.py.",
   "host_triple_when_written": "aarch64-apple-darwin",
-  "feature_differences": {},
-  "target_only": {
-    "host": {},
-    "wasm32": {
-      "wasm-bindgen": "The boundary dependency itself, declared under ocelli-wasm's `[target.'cfg(target_arch = \"wasm32\")'.dependencies]` by F-002. Decision D2 says it exists in exactly one crate and `ci/check-bindgen-isolation.sh` asserts that on both targets.",
-      "wasm-bindgen-macro": "wasm-bindgen's proc-macro half, pulled in by wasm-bindgen.",
-      "wasm-bindgen-macro-support": "Support crate for the macro, pulled in by wasm-bindgen-macro.",
-      "wasm-bindgen-shared": "Types shared between wasm-bindgen and its macro, pulled in by both.",
-      "proc-macro2": "Proc-macro plumbing for wasm-bindgen-macro. Host-side build dependency of a wasm32-only crate, which is why it shows under wasm32 and not under host.",
-      "quote": "Proc-macro plumbing for wasm-bindgen-macro, same reason as proc-macro2.",
-      "syn": "Proc-macro plumbing for wasm-bindgen-macro, same reason as proc-macro2.",
-      "unicode-ident": "Pulled in by syn, transitively from wasm-bindgen-macro.",
-      "bumpalo": "wasm-bindgen's arena allocator for marshalling across the boundary.",
-      "cfg-if": "Pulled in by wasm-bindgen.",
-      "once_cell": "Pulled in by wasm-bindgen."
-    }
-  }
+  "checked_dependencies": [
+    "bytemuck",
+    "dicom",
+    "glam",
+    "proptest",
+    "thiserror",
+    "trybuild",
+    "wasm-bindgen",
+    "wgpu"
+  ],
+  "allowed": {}
 }

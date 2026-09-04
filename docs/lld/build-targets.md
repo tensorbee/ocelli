@@ -1,6 +1,6 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-007
+**F-IDs that contributed:** F-002, F-007, F-008
 **Last updated:** 2026-09-05
 
 The wasm build pipeline, the size budget, and the invariants that keep the
@@ -120,31 +120,46 @@ split rather than a fill.
 ### Step 4, and why a build proof is not enough on its own
 
 A build proof catches a target that stops compiling. It does not catch **both
-targets compiling while one quietly resolved a different feature set**, which
-is the sprint's stated false-portability defect and the more dangerous half,
+targets compiling while one quietly resolved a different feature set**, which is
+the sprint's stated false-portability defect and the more dangerous half,
 because nothing goes red and the difference is in the artefact rather than in
 the log.
 
-`scripts/target_feature_check.py` compares `cargo tree`'s resolved features for
-the host and for wasm32 and reports three things separately: a package on both
-targets whose features differ, a package present on only one target, and a
-declaration in `ci/target-feature-baseline.json` that no longer describes
-anything. All three fail. The third is there because a stale allowance is as
-misleading as a missing one.
+`scripts/target_feature_check.py` makes **one** claim: every dependency this
+workspace declares directly, meaning the entries in
+`[workspace.dependencies]`, resolves the same features on both targets. A
+difference there is our decision and we have to say so, in
+`ci/target-feature-baseline.json`.
 
-**Keys are package names without versions.** This gate is about feature
-resolution, not about versions, which `pins` and `Cargo.lock` already cover.
-Keying on the version would turn every routine `cargo update` of a transitive
-like `syn` into a red gate reporting a stale declaration, and a gate that goes
-red for reasons nobody can act on is a gate people learn to re-baseline.
+**It was broader in F-007 and F-008 narrowed it. That was a correction, not a
+retreat.** The first version compared the whole transitive closure, which was
+easy to believe when the only dependency was `glam`. Activating wgpu produced
+42 findings, 32 of them packages present on one target only, and every one of
+them legitimate. Worse, **most were specific to the machine**: `objc2-metal`
+and `raw-window-metal` are macOS host-only, where a Linux runner reports `ash`
+and `gpu-alloc`. A baseline listing them would have been correct on one laptop
+and red in CI, and the fix for a red CI would have been to re-declare it. That
+is tolerance-tuning wearing a different hat, and it is the exact thing
+`docs/hld/22-testing-and-tolerance.md` section 25.1 says destroys a suite.
 
-**Today it declares eleven wasm32-only packages and zero feature differences.**
-The eleven are the `wasm-bindgen` chain and its proc-macro plumbing, each with
-its reason. Zero differences means the guard currently proves a negative over a
-small graph, which is what it should say, and its value arrives with the first
-dependency somebody adds without thinking about the other target.
+The transitive closure of a cross-platform GPU library differs per target by
+design. That is wgpu doing its job, and asserting otherwise measures the
+dependency rather than this project.
 
-## The size budget
+**A parsing bug went with it.** `cargo tree` marks an already-printed subtree
+with a trailing ` (*)`, which lands after the `--format` string and so arrives
+inside the feature field, turning `default` into `default (*)`. It produced
+four phantom differences between a package and itself. Stripped before the
+split.
+
+**Step 4 does not assert section 4's crate table**, and an earlier draft tried
+to. `cargo tree` lists every workspace member whatever target it is given,
+because nothing in a manifest restricts a member to a target, so the assertion
+reported `ocelli-native` present under wasm32 and could not tell that from a
+real violation. The table is enforced where it can be: the `compile_error!` in
+`ocelli-native`, and steps 1 to 3 building each target for real.
+
+## The size budget## The size budget
 
 `ci/wasm-size-budget.json` holds a recorded measurement and a 5% tolerance.
 `scripts/pin_and_size_check.py --with-size` compares the built module against

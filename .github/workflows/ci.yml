@@ -86,6 +86,11 @@ jobs:
 
       # Decision D2. The one that is worthless unless enforced.
       - run: ci/check-bindgen-isolation.sh
+      # HLD section 31 and the section 38 hook. Only ocelli-render creates a
+      # device. The compile-fail cases under crates/ocelli-compute/tests/ui/
+      # are the strong half and run in the `test` gate. This catches the case
+      # no type can: a crate creating a device it never puts in a GpuContext.
+      - run: ci/check-device-ownership.sh
       # HLD 27.2 R5, two permitted files.
       - run: python3 scripts/unsafe_allowlist_check.py
       # HLD 15.2 and 27.2 R4, wgpu pinned exactly.

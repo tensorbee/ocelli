@@ -69,6 +69,7 @@ GATES=(
   "types|no|tsc --build across the TypeScript workspaces"
   "wasm|no|wasm-pack build and the size budget (E1.2, gate A4)"
   "native|no|the cross-target build proof and per-target features (E1.7, HLD 4)"
+  "device|no|only ocelli-render creates a GPU device (E1.8, HLD 31)"
   "corpus-tests|no|the corpus generator and coverage suites, a skip fails it"
   "corpus|no|corpus coverage over the codec registry, then presence and digests"
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
@@ -115,6 +116,7 @@ run_gate() {
     # Chained on `&&` for the reason the backlog arm gives.
     wasm)        "$0" wasm && python3 scripts/pin_and_size_check.py --with-size ;;
     native)      "$0" native ;;
+    device)      ci/check-device-ownership.sh ;;
     # Needs no corpus, so it is IN the floor. The runner fails on a skipped
     # test rather than on the exit status, because the suites exit 0 under an
     # interpreter with no pydicom while reporting a skip, and this project's

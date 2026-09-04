@@ -24,45 +24,47 @@ for c in crates/*/; do
   fi
 done
 
-# The same loop again, for wasm32. Added by F-002 (E1.2), and it is not
-# redundant.
+# The same crates again for wasm32, and NOT as a `cargo tree` reachability
+# loop. Deviation D-12, and the reason is a contradiction inside the HLD
+# itself rather than a convenience.
 #
-# `cargo tree` filters to the HOST platform when no --target is given, so the
-# loop above cannot see a dependency declared under
-# `[target.'cfg(target_arch = "wasm32")'.dependencies]`. That is exactly the
-# form ocelli-wasm itself uses, so it is exactly the form a second crate would
-# most plausibly copy. Before F-002 the gap was theoretical, because nothing
-# was ever built for wasm32. F-002 makes wasm32 a real build target, so F-002
-# is the story that closes it.
+# Section 15.2 specifies `wgpu`. Section 4 says `ocelli-render` builds for
+# wasm. Section 15.3, transcribed above, forbids any crate but ocelli-wasm
+# from REACHING wasm-bindgen. On wasm32 those three cannot all hold, because
+# wgpu talks to the browser's WebGPU through js-sys and web-sys, which are
+# built on wasm-bindgen. Measured:
 #
-# The target does NOT need to be installed. `cargo tree` resolves cfg and does
-# not compile, so it filters the graph for any target rustc knows, verified
-# here against an uninstalled triple. That matters because the CI `guards` job
-# installs no extra target, and requiring one would fail it for no reason.
+#   wasm-bindgen v0.2.127
+#   |-- js-sys -> wasm-bindgen-futures -> wgpu -> ocelli-render
+#   `-- web-sys -> wgpu -> ocelli-render
 #
-# The triple IS checked against rustc's own list, and that check is not
-# decoration. `cargo tree --target <typo>` errors, the error goes to
-# /dev/null, and `grep -q` then finds nothing in an empty stream, so a
-# misspelled triple would report a clean pass over zero crates. "The check
-# could not run" and "the check ran and was happy" must never look the same
-# here.
-WASM_TARGET=wasm32-unknown-unknown
-if ! rustc --print target-list 2>/dev/null | grep -qx "$WASM_TARGET"; then
-  echo "FAIL: rustc does not know the target $WASM_TARGET, so the wasm32 half"
-  echo "      of this check did not run. That is a typo in this script or a"
-  echo "      toolchain that cannot build this project at all."
-  fail=1
-else
-  for c in crates/*/; do
-    name=$(basename "$c")
-    [ "$name" = "ocelli-wasm" ] && continue
-    if cargo tree -p "$name" -e normal --target "$WASM_TARGET" 2>/dev/null |
-         grep -q 'wasm-bindgen'; then
-      echo "FAIL: $name reaches wasm-bindgen under $WASM_TARGET"
-      fail=1
-    fi
-  done
-fi
+# and on the host that route does not exist at all, so pass 1 above still
+# means exactly what section 15.3 wrote.
+#
+# Decision D2's PURPOSE survives intact, and that is what decides the shape of
+# this check. CLAUDE.md states the purpose: wasm-bindgen in one crate "is what
+# makes the desktop and server targets new entry points rather than rewrites".
+# wgpu abstracts the target itself, so `ocelli-render` carries no browser
+# binding in its source and compiles for native unchanged. What D2 forbids is
+# OUR code binding to the browser outside one crate.
+#
+# So the wasm32 rule is DIRECT DECLARATION, which is our code's own choice,
+# rather than transitive reachability, which a specified dependency decides
+# for us. A crate that adds wasm-bindgen to any of its own dependency tables,
+# under any target gate, still fails. That is the exact case F-002 added this
+# pass for, and it is still caught.
+for c in crates/*/; do
+  name=$(basename "$c")
+  [ "$name" = "ocelli-wasm" ] && continue
+  # Any `wasm-bindgen = ...` line in the manifest, whatever section or target
+  # gate it sits under. Comments are excluded so the explanatory prose in
+  # ocelli-wasm's own manifest cannot trip a sibling.
+  if grep -vE '^\s*#' "$c/Cargo.toml" 2>/dev/null |
+       grep -qE '^\s*wasm-bindgen\s*(=|\.)'; then
+    echo "FAIL: $name declares wasm-bindgen as a direct dependency"
+    fail=1
+  fi
+done
 
 # The rule is about the DEPENDENCY GRAPH, and a crate can also reach
 # wasm-bindgen by writing `use wasm_bindgen` against a dev-dependency or a

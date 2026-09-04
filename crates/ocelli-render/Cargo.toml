@@ -11,4 +11,15 @@ authors.workspace = true
 [lints]
 workspace = true
 
+# Deviation D-10. HLD section 15.2 lists wgpu among the workspace dependencies
+# and this repository's Cargo.toml said the entry activates with F-039. F-008
+# activates it two sprints earlier, because section 38's device-sharing hook is
+# stated in wgpu types and a contract expressed only in prose is not a
+# mechanism. The pin is untouched.
+#
+# THIS CRATE IS THE ONLY ONE PERMITTED TO CREATE A DEVICE. wgpu::Instance,
+# request_adapter and request_device appear here and nowhere else, and
+# `ci/check-device-ownership.sh` asserts it on every push. Section 31: "Two
+# devices cannot share textures, which would defeat the entire point."
 [dependencies]
+wgpu = { workspace = true }

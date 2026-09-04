@@ -26,6 +26,7 @@ a plan has no row here.
 | D-09 | §15.2, `glam = "0.30"` | `glam = { version = "0.30", default-features = false, features = ["libm"] }` | Every core crate carries `#![cfg_attr(not(test), no_std)]`, which the HLD neither requires nor forbids. glam's default feature is `std`, and glam needs either `std` or its optional `libm` dependency to compile at all, so the default entry silently defeats the `no_std` posture the crates declare. The pin itself is untouched and only the feature set changes. | F-001 |
 | D-10 | §15.2 lists `wgpu = "=30.0.1"` among the workspace dependencies, and this repository's `Cargo.toml` comment says the entry activates with F-039 | `wgpu` is activated in `ocelli-render` and `ocelli-compute` at F-008, two sprints earlier, and both crates drop `#![cfg_attr(not(test), no_std)]` | §38 makes "ocelli-compute crate exists" a Phase 1 hook whose alternative is "a device-sharing retrofit across the renderer", and §31 states the contract in wgpu terms: ocelli-compute never creates a `wgpu::Device`, it borrows the one ocelli-render owns. A contract expressed only in prose is not a mechanism, so the hook is types and compile errors or it is nothing. The pin itself is untouched, and wgpu needs `std`, which is why the two crates lose a `no_std` posture the HLD neither requires nor forbids. | F-008 |
 | D-11 | Appendix B, "Measured from cornerstone3D v5.8.9 source", and the parity target stated as v5.8.9 | The oracle pins `@cornerstonejs/core`, `@cornerstonejs/tools` and `@cornerstonejs/dicom-image-loader` at exactly `5.8.2` | **v5.8.9 does not exist.** Checked against the npm registry on 2026-09-04: `@cornerstonejs/core` has 1124 published versions, the highest is 5.8.2, and the same holds for the other two packages. 5.8.2 is the highest published 5.8.x and therefore the nearest installable reference. The Appendix B surface counts are left as the author measured them and are re-checked against 5.8.2 by `/parity`. | F-010 |
+| D-12 | §15.3's CI invariant, `cargo tree -p <crate> -e normal | grep -q wasm-bindgen` must find nothing for every crate but `ocelli-wasm` | That loop runs unchanged for the HOST. For wasm32 the rule is DIRECT DECLARATION in a crate's own manifest, not transitive reachability | **The HLD contradicts itself here and something has to give.** §15.2 specifies `wgpu`, §4 says `ocelli-render` builds for wasm, and §15.3 forbids reaching wasm-bindgen. On wasm32 all three cannot hold: wgpu reaches the browser's WebGPU through js-sys and web-sys, which are built on wasm-bindgen. Measured, the only route is `wgpu -> js-sys/web-sys -> wasm-bindgen`, and on the host that route does not exist, so the transcribed loop still means exactly what it says. D2's PURPOSE is untouched: CLAUDE.md says one bindgen crate "is what makes the desktop and server targets new entry points rather than rewrites", and wgpu abstracts the target itself, so `ocelli-render` carries no browser binding in its source and compiles for native unchanged. What D2 forbids is OUR code binding to the browser outside one crate, and direct declaration is our code's own choice where transitive reachability is a specified dependency's. | F-008 |
 
 ## D-08, and why a derive is not a formatting detail
 
@@ -199,3 +200,31 @@ rather than inherited.
 matter which way it went. The pin is on a version that exists, the reason is
 here, and if the operator later identifies what v5.8.9 referred to, this row
 is what makes the change a one-line correction instead of an investigation.
+
+## D-12, and the part of it that is easy to get backwards
+
+The tempting reading is that this weakens D2. It does not, and the distinction
+is worth being precise about, because the next person to add a dependency will
+have to make the same call.
+
+**D2 is a rule about this repository's source, not about the transitive
+closure.** Its payoff, stated in `CLAUDE.md`, is that the desktop and server
+targets are new entry points rather than rewrites. That payoff is destroyed by
+`ocelli-render` importing `wasm_bindgen` and writing browser-specific code,
+because then a native build needs a second implementation. It is **not**
+touched by wgpu using web-sys internally on one target, because wgpu is what
+makes the target difference somebody else's problem. `ocelli-render`'s source
+is identical for both targets, which is the whole thing D2 is protecting.
+
+**The check that matters is therefore the one that was always there.** The
+source grep for `wasm_bindgen` under `crates/`, exempting `ocelli-wasm`, is
+unchanged and is the strongest of the three passes. Direct declaration in a
+manifest is the second. Host-side transitive reachability is the third and is
+still section 15.3's loop character for character.
+
+**What this deviation gives up**, stated plainly: a crate that acquires
+wasm-bindgen transitively on wasm32 through some route other than wgpu will no
+longer fail the wasm32 pass. It would still have to name it in source or in a
+manifest to be useful, and both of those still fail. The residual case is a
+crate reaching wasm-bindgen through a dependency that re-exports it, which the
+source grep catches at the point of use.

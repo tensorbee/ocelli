@@ -379,3 +379,88 @@ browser session resolves to when it has no GPU.
   difference and did not, so the gate correctly stayed green. It was replaced
   with a `glam` `scalar-math` target gate, which does. Check that a mutation
   actually changed the thing under test before reading the result.
+
+## F-008, ocelli-compute crate skeleton and GPU device-sharing contract, completed 2026-09-05
+
+**What was built.** HLD section 38's Phase 1 hook, as types and compile errors
+rather than as prose. `ocelli-render` gained `Tier`, `Caps` and `GpuContext`,
+and is the only crate permitted to create a device. `ocelli-compute` gained
+`ComputeCtx<'a>`, `ComputeError` and section 31's `Kernel` trait, and depends
+on `ocelli-render` because section 31 fixes that direction. Three mechanisms
+enforce the contract, and none needs a GPU: the types, two trybuild
+compile-fail cases, and `ci/check-device-ownership.sh` behind a new `device`
+gate.
+
+**wgpu is activated two sprints early. That is deviation D-10**, approved in
+the sprint design round, on section 38's own argument that this hook costs a
+few weeks now and a device-sharing retrofit later. `ocelli-render` and
+`ocelli-compute` drop `no_std` because wgpu needs `std`. The pin is untouched
+and `ocelli-wasm` does not reach wgpu, so the wasm size budget is unchanged.
+
+**Activating wgpu exposed a contradiction inside the HLD, which is deviation
+D-12.** Section 15.2 specifies wgpu, section 4 says `ocelli-render` builds for
+wasm, and section 15.3 forbids any crate but `ocelli-wasm` from reaching
+wasm-bindgen. On wasm32 all three cannot hold, because wgpu talks to the
+browser's WebGPU through js-sys and web-sys. The route was traced, not assumed:
+`wgpu -> js-sys/web-sys -> wasm-bindgen`, and on the host no such route exists.
+Section 15.3's loop is unchanged for the host. For wasm32 the rule became
+direct declaration in a crate's own manifest, because D2 is a rule about this
+repository's source and wgpu abstracts the target for us.
+
+**HLD sections implemented.** `docs/hld/26-differentiating-capabilities.md`
+section 31, the trait and the device-sharing rule.
+`docs/hld/19-render-graph.md` section 22's `Caps`.
+`docs/hld/27-phase1-hooks.md` section 38's E1.8 row.
+**Deviations.** D-10 and D-12, both added by this story. D-07 relied on for the
+third tier.
+**Crates / packages modified.** `crates/ocelli-render/`,
+`crates/ocelli-compute/`, `ci/check-device-ownership.sh`,
+`ci/check-bindgen-isolation.sh`, `scripts/target_feature_check.py`,
+`scripts/no_std_check.py`, `bin/ocelli.sh`, `.github/workflows/ci.yml`.
+**Tests added.** Six. `cargo test -p ocelli-render` reports 4 and
+`-p ocelli-compute` reports 2 plus the trybuild harness driving 2 UI cases.
+**Fixture provenance.** No pixel arithmetic and no geometry. HLD 27.2 R3 does
+not apply, and the design plan's test table names the row rather than omitting
+it.
+**Verification.** `/verify --profile feature`, 20 gates green and none skipped.
+**Corpus.** pass. 91 rows verified, 0 missing, 0 mismatched.
+**Tier coverage.** A (WebGPU) full, compute kernels are tier A by definition
+and `Caps.compute` says so. B (WebGL2) the contract holds and no kernel runs,
+because tier B has no compute shaders, and a kernel with no fallback marks its
+feature unavailable. C (CPU) the contract is not constructible, because a tier
+C session has no device and therefore no `GpuContext`. `ComputeError::Unavailable`
+names both the required and the resolved tier, because "unavailable" without
+them is a message nobody can act on.
+**LLD updated.** `docs/lld/gpu-ownership.md`, created.
+`docs/lld/build-targets.md`, corrected. `docs/lld/README.md` gained a row.
+**Deviations from the design plan.** One correction to landed work.
+**F-007's feature guard was machine-specific and only wgpu could show it.**
+Step 4 of `gate native` reported 42 findings, 32 of them packages on one target
+only, and every one legitimate. Most were host-specific: `objc2-metal` and
+`raw-window-metal` on macOS, where a Linux runner reports `ash` and
+`gpu-alloc`. A baseline listing them would have been correct on one laptop and
+red in CI, and the fix for a red CI would have been to re-declare it, which is
+tolerance-tuning wearing a different hat. The check now makes one claim, that
+every dependency `[workspace.dependencies]` names directly resolves the same
+features on both targets. A `cargo tree` parsing bug went with it: the ` (*)`
+dedup marker lands inside the feature field and produced four phantom
+differences between a package and itself.
+**Notes for future sessions.**
+- **`wgpu::Device` is `Clone`**, measured, and it is a refcounted handle, so a
+  clone is the SAME device. Section 31's "two devices cannot share textures" is
+  about a second `request_device`, which the guard script refuses. Do not read
+  the absence of `Clone` on `GpuContext` as the defence against a second
+  device. It is the one-owner rule for the triple, and it is a separate
+  smaller claim.
+- **Three tests that could not fail appeared in this one story**, and two of
+  them appeared while fixing something else, when attention was on the fix
+  rather than on whether the new assertion discriminates. Mutate every test,
+  including one written during a remediation.
+- **`Kernel` has no implementers and `AGENTS.md` forbids that shape.** The
+  collision is real and was decided in the sprint design round rather than
+  resolved silently. Section 31 prescribes the signature and HLD Part II says a
+  given signature is the intended implementation. F-125 (E31.1) supplies the
+  kernels.
+- **`scripts/no_std_check.py` carries no exemption list**, by design. It reads
+  the attribute from each crate's source, so the two crates that dropped
+  `no_std` here left the check by construction.

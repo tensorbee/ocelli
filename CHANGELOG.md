@@ -43,3 +43,8 @@ Repository bootstrap. Nothing is published.
   across the two targets against a declared baseline. `ocelli-native` is now a
   compile error under wasm32 rather than a crate that merely should not be
   there.
+- The GPU device-sharing contract of HLD section 31. `ocelli-render` owns
+  `GpuContext`, holding one device, one queue and the resolved `Caps`, and is
+  the only crate permitted to create a device. `ocelli-compute` borrows it
+  through `ComputeCtx` and declares the `Kernel` trait. Enforced by the types,
+  by compile-fail cases that need no GPU, and by the `device` gate.

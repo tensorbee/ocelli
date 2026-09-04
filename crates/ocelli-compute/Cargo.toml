@@ -11,4 +11,20 @@ authors.workspace = true
 [lints]
 workspace = true
 
+# Deviation D-10, same as ocelli-render.
+#
+# The dependency on ocelli-render is the direction HLD section 31 fixes:
+# "ocelli-compute never creates a wgpu::Device; it borrows the one
+# ocelli-render owns." It is not a cycle. The renderer CONSUMES compute
+# results, it does not call kernels, and the caller that drives both is
+# ocelli-viewport.
 [dependencies]
+ocelli-render = { path = "../ocelli-render" }
+wgpu = { workspace = true }
+thiserror = { workspace = true }
+
+# trybuild drives the compile-fail cases under tests/ui/. They are the payoff
+# of the device-ownership contract: the defect stops COMPILING rather than
+# being caught in review. Needs no GPU, so it runs in the CI floor.
+[dev-dependencies]
+trybuild = { workspace = true }
