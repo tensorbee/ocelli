@@ -180,3 +180,16 @@ tool reports that limitation and the synthetic layer supplies the YBR cases.
 - The review loop took seven passes: 4 defects and 4 smells, 3 and 2, 4 and 2,
   1 and 1, 0 and 2, 1 and 1, then clean. Pass 7 also recorded two non-blocking
   nitpicks.
+
+## Correction to F-009, S01 verification profile, recorded 2026-09-04
+
+The F-009 entry was already committed when consolidated sprint verification
+found a bootstrap contradiction. `/run-sprint` required the strict oracle gate
+in S01, but F-010 in S02 is the story that builds the oracle. The operator chose
+a narrow workflow exception rather than moving F-010 into S01.
+
+`gate --sprint` now records the absent oracle as a named skip only while the
+active sprint is S01 and F-010 remains pending in S02. S01 contains no port
+code and builds the corpus the oracle will consume. `gate --all` and release
+remain strict, and the exception stops applying when F-010 moves from pending.
+This is the workflow-change trigger required by `.claude/WORKFLOW.md`.

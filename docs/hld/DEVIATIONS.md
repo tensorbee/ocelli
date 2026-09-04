@@ -147,7 +147,8 @@ gate off CI moves it onto a human remembering to run it.
 
 Three things carry the load instead, and all three are mechanical:
 
-1. **`/verify` runs the oracle locally and `push` is refused without it.**
+1. **Outside the bootstrap exception below, `/verify` runs the oracle locally
+   and `push` is refused without it.**
    `scripts/verify_ledger.py` records the corpus result against the exact head
    commit. A push whose head has no green corpus record for it is refused by
    `.githooks/pre-push`. A record for an ancestor commit does not count.
@@ -157,6 +158,13 @@ Three things carry the load instead, and all three are mechanical:
 3. **A GPU corpus run is available on manual dispatch** for a release or when
    a divergence is suspected, so the expensive path exists and is simply not
    automatic.
+
+**Bootstrap exception.** S01 builds the corpus the oracle consumes, and F-010
+in S02 builds the oracle itself. S01 contains no port code to validate. Its
+sprint profile therefore records the absent oracle as a named skip while F-010
+remains pending in S02. The strict `--all` profile has no exception, release
+still requires it, and the sprint exception stops applying as soon as F-010
+moves from pending.
 
 This is weaker than the HLD's design and it should be revisited if the project
 ever has cheap GPU CI. It is recorded here rather than in a commit message

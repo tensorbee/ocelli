@@ -40,6 +40,7 @@ Gates
   gate --list            what each gate covers
   gate <name>...         run named gates
   gate --floor           the gates CI runs: no GPU, no corpus, no browser
+  gate --sprint          sprint gate, with the S01 pre-oracle exception
   gate --all             every gate, including the GPU and corpus tiers
 
 Environment
@@ -139,8 +140,15 @@ run_gate() {
 # summary it did not watch produce.
 skip() { echo "SKIPPED: $*"; return 3; }
 
+s01_pre_oracle() {
+  grep -qx '# Current sprint, S01' docs/sprints/CURRENT_SPRINT.md &&
+    grep -Eq '^\| F-010 \| E2\.2 \| S02 \| .* \| Test \| 4w \| F-009 \| pending \|$' \
+      docs/sprints/BACKLOG.md
+}
+
 gates_cmd() {
   local selected=() entry name gpu desc failed=() skipped=() passed=0 status
+  local profile=named
 
   case "${1:-}" in
     --list)
@@ -151,6 +159,7 @@ gates_cmd() {
       done
       return 0 ;;
     --floor)
+      profile=floor
       for entry in "${GATES[@]}"; do
         IFS='|' read -r name gpu desc <<<"$entry"
         # The CI floor. `oracle` needs a GPU and a browser. `corpus` needs the
@@ -160,7 +169,11 @@ gates_cmd() {
         case "$name" in oracle|corpus) continue ;; esac
         selected+=("$name")
       done ;;
+    --sprint)
+      profile=sprint
+      for entry in "${GATES[@]}"; do selected+=("${entry%%|*}"); done ;;
     --all)
+      profile=all
       for entry in "${GATES[@]}"; do selected+=("${entry%%|*}"); done ;;
     "")  usage; return 2 ;;
     *)   selected=("$@") ;;
@@ -169,7 +182,13 @@ gates_cmd() {
   for name in "${selected[@]}"; do
     printf '%s>> %s%s\n' "$DIM" "$name" "$OFF"
     status=0
-    run_gate "$name" || status=$?
+    if [ "$name" = oracle ] && [ "$profile" = sprint ] &&
+       [ ! -d tools/oracle/node_modules ] && s01_pre_oracle; then
+      skip "S01 precedes F-010, so no oracle exists yet. This exception is" \
+        "limited to the sprint profile while F-010 remains pending in S02." || status=$?
+    else
+      run_gate "$name" || status=$?
+    fi
     case "$status" in
       0) passed=$((passed + 1)) ;;
       3) skipped+=("$name") ;;

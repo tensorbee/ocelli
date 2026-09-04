@@ -78,11 +78,15 @@ was broken.
 ## The gate
 
 `/verify` is the completion gate. `bin/ocelli.sh gate --list` shows what each
-gate covers. Three profiles:
+gate covers. Four profiles:
 
 - **`--floor`**, everything needing no GPU and no corpus. This is what CI runs.
+- **`--sprint`**, everything in `--all`, with one bootstrap exception. On S01
+  only, while F-010 remains pending in S02, the absent oracle is a named skip.
+  S01 builds the corpus the oracle needs and contains no port code. The
+  exception cannot apply once F-010 moves from pending.
 - **`--all`**, the floor plus `corpus` and `oracle`. This is what a human runs
-  before a push, and what `/release` requires.
+  before a release. It has no bootstrap exception.
 - **named gates**, the inner loop.
 
 ### Everything runs natively, and there is no container path

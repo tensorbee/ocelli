@@ -54,6 +54,7 @@ bin/ocelli.sh corpus                 # verify the corpus against its manifest
 
 bin/ocelli.sh gate --list            # what each gate covers
 bin/ocelli.sh gate --floor           # what CI runs
+bin/ocelli.sh gate --sprint          # sprint profile, including bootstrap policy
 bin/ocelli.sh gate --all             # everything
 
 npm run lint | typecheck | test | dev

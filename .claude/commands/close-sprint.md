@@ -17,7 +17,9 @@ Refuse if any fails:
 1. Every story in the sprint is `done`, or is explicitly carried forward with a
    recorded reason in `CURRENT_SPRINT.md`.
 2. `python3 scripts/sprint_workflow.py close-preflight SNN` passes.
-3. `bin/ocelli.sh gate --all` is green at the current HEAD.
+3. `bin/ocelli.sh gate --sprint` is green at the current HEAD. The only
+   difference from `--all` is S01's named pre-oracle skip while F-010 remains
+   pending in S02. Release verification stays strict.
 4. `python3 scripts/verify_ledger.py check-commit HEAD` passes.
 5. `/sync-status` reports no drift.
 6. No handoff file remains in `.claude/handoffs/`.

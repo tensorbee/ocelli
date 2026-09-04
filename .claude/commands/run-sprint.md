@@ -143,12 +143,17 @@ waves.
 After every branch is integrated:
 
 ```bash
-bin/ocelli.sh gate --all
+bin/ocelli.sh gate --sprint
 ```
 
 **Run the whole set, not the diff-selected subset.** The per-story checks were
 scoped to one story's changes. This run is the first time the sprint's changes
 are seen together, and the interactions are the point.
+
+The sprint profile differs from `--all` in one state only. On S01, while F-010
+is still pending in S02, the absent oracle is a named skip because S01 builds
+the corpus the oracle consumes and contains no port code. `--all` remains
+strict, and every later sprint must run the oracle.
 
 Record it: `python3 scripts/verify_ledger.py record --profile sprint --gates
 <what ran> --corpus <result>`.

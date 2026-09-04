@@ -7,7 +7,7 @@ description: "The completion gate. Runs the gate set for a profile and records t
 
 Canonical source: `.claude/commands/verify.md`.
 
-Source SHA-256: `3db61dcaa62cb9157a0c13aa260f82ed97a480340dea450d0569b4ff1a763b8a`.
+Source SHA-256: `e729e923fd5dcddea232ab7c185bea148432f423b7b5de2028146aa2c77755e5`.
 
 Before acting, read the canonical source completely and follow it using this
 host's available tools. Treat invocation arguments as arguments to that
