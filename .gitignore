@@ -10,6 +10,11 @@
 # Rust
 /target/
 **/*.rs.bk
+# proptest writes a seed file next to a failing property test so the
+# failure can be replayed. Useful locally, and noise in a diff: the
+# ones that appear during a review's mutation runs record deliberately
+# broken code.
+**/*.proptest-regressions
 
 # Python bytecode from the guard scripts. Appears the moment one is imported
 # as a module rather than run as a script.
