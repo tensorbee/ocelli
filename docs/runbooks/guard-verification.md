@@ -101,7 +101,25 @@ fails on nothing.
 | 16 | `verify_ledger.py trailer` | The same tree | Exit 1, and no trailer emitted, which is what makes the trailer unforgeable |
 | 17 | `ci/check-bindgen-isolation.sh` | `wasm-bindgen = "0.2"` added to `crates/ocelli-geom/Cargo.toml` | `FAIL: ocelli-geom reaches wasm-bindgen`, exit 1 |
 | 18 | `split_hld.py` | Resolve the source directory to a folder holding the `.docx` but no `redactions.json` | `FAIL: no redactions.json beside the authored source`, exit 1, and `docs/hld/` untouched |
+| 19a | `staged_content_check.py` | Stage a DICOM with `git add -N` rather than `git add` | **GREEN**, `OK: no patient data or build artefacts staged`. See the note below, this is a hole in the evidence and not in the hook |
 | 19 | `no_std_check.py` | Add `glam = "0.30"`, default features on, to a crate that declares `no_std` | `ocelli-geom declares no_std and reaches a std feature`, exit 1. Green again with `default-features = false, features = ["libm"]` |
+
+### Probe 19a is a green that means nothing, and the distinction matters
+
+A file staged with `git add -N` appears in `git status` as `A` and in
+`git diff --cached --name-only` as nothing at all. Every `--staged` guard here
+reads the second one. So running them over an intent-to-add tree returns
+`OK` while a DICOM sits in it.
+
+**That is not a way to commit a DICOM.** Git refuses to commit an
+intent-to-add-only path, and `git commit -a` updates the index before the hook
+runs, so the guard sees the content either way. Both were tested.
+
+What it is, is a way to obtain a green that answered a question about an empty
+set. An agent that stages with `add -N`, runs `bin/ocelli.sh gate content` and
+reads `OK` has learned nothing and believes it has learned something. That is
+the same shape as probe 18 and probe 19, arriving from a third direction, and
+it is why `AGENTS.md` now says `git add -N` does not count as staging.
 
 ### Probe 18 was a guard that failed open, and the probe is why it does not
 

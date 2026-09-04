@@ -77,6 +77,16 @@ npm run lint | typecheck | test | dev
   from 14 files to 23, `provenance` from 191 to 205 and `prose` from 44 to 49,
   and the first ledger record certified a tree byte-identical to the base
   commit's. The order is write, stage, gate, record, commit.
+- **`git add -N` does not count as staging for any of this.** An intent-to-add
+  entry shows in `git status` as `A`, and shows in
+  `git diff --cached --name-only` as nothing at all, which is what every
+  `--staged` guard reads. So `bin/ocelli.sh gate content` over an `add -N`
+  tree reports `OK: no patient data or build artefacts staged` while a DICOM
+  sits in it. Measured. **This is not a hole in the hook**, because git itself
+  refuses to commit an intent-to-add-only path and `git commit -a` updates the
+  index before the hook runs, so nothing lands unchecked. It is a hole in the
+  evidence: the guard answered a question about an empty set and said so in the
+  language of success. Use `git add` when you want to be checked.
 - **Set `OCELLI_AGENT`, or pass `--agent`, before recording a verification.**
   `verify_ledger.py` defaults it to `unknown`, and the commit-msg hook then
   writes `Ocelli-Generated-By: unknown`, which is a provenance trailer that
