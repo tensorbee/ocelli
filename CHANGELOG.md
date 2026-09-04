@@ -20,7 +20,10 @@ Repository bootstrap. Nothing is published.
   the commercial analysis, are held outside the repository.
 - `docs/sprints/`, with 190 F-IDs imported from the backlog spreadsheet and
   157 of them allocated across 72 sprints and 18 milestones.
-- Seventeen gates behind `bin/ocelli.sh gate`, and a CI floor that runs every
-  one that needs no GPU and no corpus.
+- The gate set behind `bin/ocelli.sh gate`, and a CI floor that runs every one
+  of them that needs no GPU and no corpus. `bin/ocelli.sh gate --list` is the
+  list, and this line deliberately does not repeat the count, because a number
+  written here is a second list that goes stale the first time a gate is
+  added.
 - The workflow: `.claude/WORKFLOW.md`, eighteen commands, and generated Codex
   adapters under `.agents/skills/`.
