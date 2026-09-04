@@ -194,6 +194,12 @@ jobs:
         with:
           node-version: "24"
           cache: npm
+      # `gate packages` runs scripts/package_check.py. The runner image ships a
+      # python3, and pinning it means this job does not depend on that staying
+      # true. Same reason the rust job pins it for `gate native`.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - run: npm ci
       # Includes the cached-wasm-view ban of HLD 17.2, which is a silent
       # failure mode and therefore a lint rather than a convention.
