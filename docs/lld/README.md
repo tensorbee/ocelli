@@ -16,3 +16,4 @@ Each file carries a `**F-IDs that contributed:**` line and a
 | [corpus.md](corpus.md) | Golden corpus layout, generation and verification | F-009 |
 | [build-targets.md](build-targets.md) | The wasm pipeline, the size budget, the cross-target proof and the isolation invariant | F-002, F-007, F-008 |
 | [gpu-ownership.md](gpu-ownership.md) | One device, one queue, one owner. The section 31 contract | F-008 |
+| [typescript-packaging.md](typescript-packaging.md) | What the npm packages publish, and what proves it | F-003 |

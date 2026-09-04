@@ -195,6 +195,13 @@ jobs:
       # failure mode and therefore a lint rather than a convention.
       - run: npm run lint
       - run: npm run typecheck
+      # Story E1.3. tsc proves the TypeScript compiles. This proves what a
+      # CONSUMER receives: the tarball carries every path the exports map
+      # advertises and both licence files, and a project outside the workspace
+      # installs and imports it under bundler and node16 resolution. It also
+      # runs `npm publish --dry-run`, which publishes nothing and which
+      # scripts/package_check.py refuses to run where a token exists.
+      - run: bin/ocelli.sh gate packages
 
   wasm:
     name: wasm size budget

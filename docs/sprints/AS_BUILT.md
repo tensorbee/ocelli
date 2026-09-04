@@ -464,3 +464,73 @@ differences between a package and itself.
 - **`scripts/no_std_check.py` carries no exemption list**, by design. It reads
   the attribute from each crate's source, so the two crates that dropped
   `no_std` here left the check by construction.
+
+## F-003, TS package scaffold, bundling, npm publish pipeline, completed 2026-09-05
+
+**What was built.** `scripts/package_check.py` and a `packages` gate that
+proves what a consumer receives rather than what compiles. It builds the real
+tarballs, asserts their contents against what the manifests advertise,
+installs them into a temporary project **outside the npm workspace**, imports
+them under `node` and type-checks them under both `bundler` and `node16`
+resolution, then runs `npm publish --dry-run`. Both packages gained a
+`README.md` and both licence files. `vitest.config.ts` and the first two
+TypeScript tests landed with it.
+
+**No bundler, and that was the sprint design round's decision.** `@ocelli/core`
+has no runtime dependency and already emits ESM with declarations. What the
+story needs from the word "bundling" is that a consumer's resolver handles the
+published tarball, which is a property of the tarball rather than of a build
+step here, so the pipeline proves it directly. The revisit condition is named:
+`wasm-pack --target web` emits a `.wasm` asset that bundlers treat specially,
+so F-096 decides again with a real reason.
+
+**The packages shipped no licence text and nobody had looked.** `npm pack
+--dry-run` before this story listed `dist/` and `package.json` and nothing
+else, while both manifests declare `MIT OR Apache-2.0`. A tarball carrying
+neither licence makes that a claim rather than a grant.
+
+**HLD sections implemented.** `docs/hld/07-concurrency-and-typescript.md`
+section 10, what stays TypeScript. `docs/hld/12-workspace-and-build.md` section
+15.1's `packages/` entries.
+**Deviations.** None.
+**Crates / packages modified.** `packages/core/`, `packages/react/`,
+`scripts/package_check.py`, `vitest.config.ts`, `bin/ocelli.sh`,
+`.github/workflows/ci.yml`.
+**Tests added.** Two vitest cases in `packages/core/src/index.test.ts`, plus
+six assertions in the packaging check.
+**Fixture provenance.** No pixel arithmetic and no geometry. HLD 27.2 R3 does
+not apply, and the design plan's test table names the row rather than omitting
+it.
+**Verification.** `/verify --profile feature`, 21 gates green and none skipped.
+**Corpus.** pass. 91 rows verified, 0 missing, 0 mismatched.
+**Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. A packaging
+pipeline resolves no tier.
+**LLD updated.** `docs/lld/typescript-packaging.md`, created.
+`docs/lld/README.md` gained a row.
+**Deviations from the design plan.** None on decisions. One guard was designed,
+built and then removed before it landed, and the reasoning is kept because the
+next person will have the same idea. The check originally refused to run when
+`NPM_TOKEN` or an authenticated `.npmrc` existed. `npm publish --dry-run`
+cannot publish, so that defends against a hypothetical future edit while
+failing for every developer logged into npm for an unrelated project, with no
+action available except deleting credentials or disabling the gate. Building a
+gate that invites being disabled is the wrong trade.
+**Notes for future sessions.**
+- **The consumer install is outside the npm workspace and that is the whole
+  point.** Inside it, `@ocelli/core` resolves through the workspace link to
+  `src/` and the tarball is never consulted, so the check would pass while the
+  defect it exists for was present.
+- **Both resolution modes are checked because an `exports` map can satisfy one
+  and not the other.** `bundler` is what a Vite or webpack consumer uses,
+  `node16` is what a plain `tsc` consumer uses and is the stricter.
+- **`@ocelli/react` resolves `@ocelli/core` from the sibling tarball**, not
+  from the registry, where `0.1.0` does not exist. If that npm behaviour ever
+  changes, the failure will look like a network problem rather than a
+  resolution one.
+- **`vitest.config.ts` sets `passWithNoTests: false`.** Vitest passes an empty
+  run by default, which would have made the whole TypeScript suite vacuous the
+  first time a config change stopped matching the test files.
+- **`VERSION` is asserted against a literal**, for the same reason
+  `ocelli_version()` is in `crates/ocelli-wasm`. Comparing a constant to the
+  file it was copied from restates it. Comparing the two files is
+  `package_check.py`'s job.

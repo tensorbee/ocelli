@@ -48,3 +48,9 @@ Repository bootstrap. Nothing is published.
   the only crate permitted to create a device. `ocelli-compute` borrows it
   through `ComputeCtx` and declares the `Kernel` trait. Enforced by the types,
   by compile-fail cases that need no GPU, and by the `device` gate.
+- The npm packaging pipeline and the `packages` gate. It proves what a
+  consumer receives rather than what compiles: the tarball carries every path
+  its exports map advertises and both licence files, a project outside the
+  workspace installs and imports it under `bundler` and `node16` resolution,
+  and `npm publish --dry-run` exercises the registry path without publishing.
+  `@ocelli/core` and `@ocelli/react` now ship a README and their licences.
