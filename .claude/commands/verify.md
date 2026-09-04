@@ -24,9 +24,10 @@ inner loop and **is not acceptable for completion**.
 bin/ocelli.sh gate --list     # the authoritative list, with what each covers
 ```
 
-Seventeen gates. `bin/ocelli.sh` is the definition. This file does not
-duplicate the list, because two lists drift and then nobody knows which is the
-gate.
+Run that command for the count and the coverage. `bin/ocelli.sh` is the
+definition. This file does not duplicate the list, and it does not state how
+many there are either, because two lists drift and then nobody knows which is
+the gate, and a number is just the shortest possible second list.
 
 ## The GPU tier, and why it is not optional here
 

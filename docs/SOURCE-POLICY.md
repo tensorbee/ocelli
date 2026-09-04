@@ -89,8 +89,70 @@ If 1 and 2 are both absent, the answer is no.
 
 ## Extensions to the table
 
-None yet. A source assessed after this policy was written gets a row here, in
-the same form as the table above, with the date it was decided.
+A source assessed after this policy was written gets a row here, in the same
+form as the table above, with the date it was decided.
+
+| Source | Licence | Read? | Depend? | Decided |
+|--------|---------|-------|---------|---------|
+| TCIA collection CMB-MML | CC BY 4.0 | yes | yes | 2026-09-04 |
+| TCIA collection EAY131 | CC BY 4.0 | yes | yes | 2026-09-04 |
+| TCIA collection VAREPOP-APOLLO | CC BY 4.0 | yes | yes | 2026-09-04 |
+| TCIA collection CMB-CRC | CC BY 4.0 | yes | yes | 2026-09-04 |
+| pydicom bundled test files | not stated | yes | **NO** | 2026-09-04 |
+
+### The four TCIA collections, against the three questions
+
+These are the real layer of the golden corpus (F-009, deviation D-05). They are
+data rather than source, so "depend" here means "may a case be redistributed
+and cited", which is what `corpus/manifest.tsv` records per row.
+
+1. **Is there a licence file?** Yes. Every series archive TCIA serves carries a
+   `LICENSE` file naming the collection and its licence.
+2. **Does the platform's metadata report a licence?** Yes for every series
+   taken. The NBIA REST service returns `LicenseName` and `LicenseURI` per
+   series, and for each of the four `SeriesInstanceUID` values recorded in
+   `corpus/README.md` it returns the Creative Commons Attribution 4.0
+   International License at `https://creativecommons.org/licenses/by/4.0/`.
+   Both sources were checked for those four and they agree.
+
+   **The claim is per series and not per collection, because for one
+   collection it would be false per collection.** CMB-MML (1,156 series),
+   VAREPOP-APOLLO (1,549) and CMB-CRC (2,537) report CC BY 4.0 on every
+   series. EAY131 reports it on 14,494 of its 30,293 and returns null for both
+   fields on the other 15,799, all of which are RTSTRUCT (14,395) or SEG
+   (1,404) third-party analysis objects rather than acquired images. The image
+   series carry the licence. Anyone extending the corpus into EAY131's
+   derived objects has to answer question 2 again for those, and this note is
+   here so they know to.
+3. **Does the licence permit the use?** Yes. CC BY 4.0 permits redistribution
+   and derivative works with attribution, and TCIA's data usage policy adds a
+   citation requirement, which the manifest's `source` column satisfies by
+   carrying each collection's DOI.
+
+Collections under Attribution-NonCommercial were available and were **not**
+taken. A non-commercial restriction on a corpus used to validate an engine
+intended for commercial embedding is exactly the kind of term that is cheap to
+avoid now and expensive to unwind later.
+
+### The pydicom test files, and why they are refused
+
+The pydicom project ships a large set of DICOM test files covering most of the
+transfer syntaxes the codec registry claims, and it is the obvious shortcut for
+anyone assembling this corpus. Its own `test_files/README.txt` says of them,
+verbatim, "I believe there is no restriction on using any of these files in
+this manner", and traces individual files to several upstream sources with
+differing terms.
+
+**A belief is not a grant.** Against question 3 above, the answer is not yes,
+and `corpus/manifest.tsv` requires a per-case `licence_url` that someone could
+act on, which cannot be written from that sentence. So the files are not used
+as corpus cases. This is recorded rather than left as a silent absence, because
+the next person assembling a corpus will find them first and deserves the
+reason.
+
+Reading them, and depending on pydicom itself, is a separate question and the
+answer to both is yes. pydicom is MIT licensed, and this repository uses it as
+tooling around the corpus rather than as a source of code or of fixtures.
 
 ## One defect worth naming, because it is everywhere
 
