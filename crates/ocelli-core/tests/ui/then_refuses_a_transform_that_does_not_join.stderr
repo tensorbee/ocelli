@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/then_refuses_a_transform_that_does_not_join.rs:11:34
+   |
+11 |     let _ = canvas_to_world.then(&index_to_world);
+   |                             ---- ^^^^^^^^^^^^^^^ expected `&Transform<World, _>`, found `&Transform<Index, World>`
+   |                             |
+   |                             arguments to this method are incorrect
+   |
+   = note: expected reference `&Transform<World, _>`
+              found reference `&Transform<ocelli_core::Index, World>`
+note: method defined here
+  --> src/space.rs
+   |
+   |     pub fn then<C>(&self, next: &Transform<B, C>) -> Transform<A, C> {
+   |            ^^^^

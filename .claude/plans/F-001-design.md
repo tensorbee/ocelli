@@ -21,7 +21,14 @@ this story.
 | 2 | `crates/ocelli-core/src/value.rs` | Stored, Modality and Display newtypes |
 
 Nothing else in this story touches build tooling. The workspace manifest is
-edited in exactly one place, to make `glam` usable from a `no_std` crate.
+edited in three places: `glam` is made usable from a `no_std` crate, and
+`proptest` and `trybuild` are added for the tests the Tests section names.
+Only the `glam` edit is a deviation.
+
+> Corrected during implementation, from review pass 1 finding N4. This
+> paragraph said "exactly one place" and counted only the `glam` edit, while
+> the plan's own Tests section already required both test tools. No decision
+> changed.
 
 ## Normative source, transcribed
 
@@ -137,6 +144,15 @@ Six things, and each one is a decision this plan makes rather than finds.
    private field. **Decision**: `Transform::from_mat4(glam::DMat4)` and
    `Transform::identity()`, nothing else, because nothing else has a caller
    today. A viewport camera constructor belongs to F-023, not here.
+
+   > Corrected during implementation, from review pass 1 finding S1.
+   > `identity` is on `impl<S> Transform<S, S>` and not on
+   > `impl<A, B> Transform<A, B>`. On the wider impl it is a free cross-space
+   > cast: `Transform::<Canvas, World>::identity()` would compile and turn a
+   > canvas point into a world point with no arithmetic, which is the
+   > interchange section 16 exists to prevent. The count is unchanged at two
+   > constructors, and this is a narrowing of one of them. A trybuild case
+   > holds the narrowing in place.
 3. **Whether `apply` divides by w.** The parity surface lists a `PERSPECTIVE`
    viewport type, so a `Transform<World, Canvas>` will not always be affine.
    **Decision**: `glam::DMat4::project_point3`, which transforms the point as
@@ -175,9 +191,22 @@ the three elided method bodies filled in:
 - `inverse` is `Transform::from_mat4(self.m.inverse())`.
 - `then` is `Transform::from_mat4(next.m * self.m)`.
 
-`Clone` and `Copy` are hand-implemented on `Transform` too, for the reason the
-HLD's note gives for `Pt`. `Debug` is derived on both, which works because the
-markers derive it.
+`Clone` and `Copy` are hand-implemented on `Transform` too, for the same
+reason they are on `Pt`, which is that the impls are unconditional where a
+derive would bound `A` and `B`. `Debug` is derived on both.
+
+> Corrected during implementation, from review pass 2 finding D2. This
+> paragraph said the hand-written impls were there "for the reason the HLD's
+> note gives for `Pt`", which review pass 1 established is false in this tree:
+> D-08 gives the markers `Clone` and `Copy`, so they do satisfy the `S: Clone`
+> bound section 16's note says they do not, and the derived form compiles. The
+> corrected reasoning is in `crates/ocelli-core/src/space.rs` above the impls
+> and in the D-08 note in `docs/hld/DEVIATIONS.md`. It also said `Debug` on
+> `Transform` "works because the markers derive it", which is loose:
+> `#[derive(Debug)]` on `Transform<A, B>` compiles either way, because the
+> derive bounds the parameters rather than requiring them. What the markers
+> deriving `Debug` buys is a usable `Pt<Canvas>: Debug` at a call site. No
+> decision changed.
 
 No `as` cast appears in this file. `Pt` is `f64` throughout and `glam::DVec3`
 is `f64` throughout, so there is no conversion to review.
@@ -197,11 +226,12 @@ the existing `CRATE_NAME` scaffold constant and its test.
 
 ### `Cargo.toml`
 
-Two edits. The `glam` workspace entry gains `default-features = false,
-features = ["libm"]` (D-09), and `proptest` is added to
+Three edits. The `glam` workspace entry gains `default-features = false,
+features = ["libm"]` (D-09). `proptest` is added to
 `[workspace.dependencies]` so the round-trip property test the HLD's section 25
-specifies has a dependency to inherit. `proptest` is a dev-dependency of
-`ocelli-core`, never a normal one.
+specifies has a dependency to inherit, and `trybuild` is added for the
+compile-fail row of the Tests table below. Both are dev-dependencies of
+`ocelli-core`, never normal ones.
 
 ### Lints this file has to live under
 
@@ -233,7 +263,30 @@ denied, so no test uses them.
 | `unit` | The three value newtypes carry their field unchanged and are `Copy` | `crates/ocelli-core/src/value.rs` under `#[cfg(test)]` |
 | `fixture` | `Transform<Index, World>` built from a hand-written IPP, IOP and non-square `PixelSpacing` maps four named voxel indices to patient coordinates computed by hand from **DICOM PS3.3 C.7.6.2.1.1**, within 1e-6 mm | `crates/ocelli-core/tests/geometry_ps3_3_c7_6_2.rs` |
 | `property` | Round trip `Pt<Canvas>` to `World` and back is within 1e-6, per HLD 25.1, over the HLD's own `-1e4..1e4` range | `crates/ocelli-core/tests/roundtrip.rs` |
-| `compile-fail` | `Transform<Canvas, World>::apply` refuses a `Pt<Index>`, and `Transform<Canvas, World>::then` refuses a `Transform<Index, World>` | `crates/ocelli-core/tests/` with `trybuild` |
+| `compile-fail` | Four cases: `Transform<Canvas, World>::apply` refuses a `Pt<Index>`, `Transform<Canvas, World>::then` refuses a `Transform<Index, World>`, `identity` refuses to name two different spaces, and the three value spaces of section 16.1 refuse to interconvert | `crates/ocelli-core/tests/ui/` with `trybuild` |
+
+> Corrected during implementation, from review pass 3 finding N5. This row has
+> been one behind the tree in three consecutive passes, which is a pattern
+> rather than an accident. The count is now stated explicitly and the
+> directory is named, so the next reader can check the row against `ls` in one
+> step. The rule for anyone adding a ui case: add the row here in the same
+> change.
+
+Two guards were added during implementation that this table did not
+originally plan for. Both exist because a claim the story makes was exercised
+by nothing, which is the defect class this story produced three times.
+
+| Category | What it proves | Where |
+|----------|----------------|-------|
+| `unit` | D-08 is load bearing. All six marker derives are reached, so neither a full revert to bare markers nor a partial revert to `#[derive(Debug, PartialEq)]` can pass | `crates/ocelli-core/src/space.rs`, `d_08_keeps_the_marker_derives_load_bearing` |
+| `compile-fail` | Section 16.1's "you cannot accidentally window a stored value", which no test that runs can observe | `crates/ocelli-core/tests/ui/value_spaces_do_not_interconvert.rs` |
+
+> Added during implementation, from review pass 2 finding S1 and review pass 3
+> finding S1. D-08 is this story's headline deviation and nothing exercised
+> it: the crate compiled and every test passed with the derives deleted. The
+> first guard closed the `Debug` and `PartialEq` half, the second pass showed
+> a partial revert still passed, and the bound assertion closed the rest. No
+> decision changed, and the deviation itself is unaltered.
 
 ### Why the fixture is not optional here
 

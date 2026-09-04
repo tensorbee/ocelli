@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/apply_refuses_a_point_from_another_space.rs:17:21
+   |
+17 |     let _ = t.apply(voxel);
+   |               ----- ^^^^^ expected `Pt<Canvas>`, found `Pt<Index>`
+   |               |
+   |               arguments to this method are incorrect
+   |
+   = note: expected struct `Pt<Canvas>`
+              found struct `Pt<ocelli_core::Index>`
+note: method defined here
+  --> src/space.rs
+   |
+   |     pub fn apply(&self, p: Pt<A>) -> Pt<B> {
+   |            ^^^^^

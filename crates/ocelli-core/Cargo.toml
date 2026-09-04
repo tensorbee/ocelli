@@ -12,3 +12,12 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# HLD section 16: `pub struct Transform<A, B> { m: glam::DMat4, ... }`.
+glam = { workspace = true }
+
+[dev-dependencies]
+# HLD section 25's round-trip listing is written against proptest.
+proptest = { workspace = true }
+# HLD section 16's claim is that a mixed-space call "stops compiling", and the
+# only way to check that is a test that tries to compile one.
+trybuild = { workspace = true }
