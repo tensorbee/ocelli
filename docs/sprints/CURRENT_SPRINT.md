@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-001 | E1.1 | Cargo workspace, crate skeleton, lint/CI baseline | Build | 2w | pending |
+| F-001 | E1.1 | Cargo workspace, crate skeleton, lint/CI baseline | Build | 2w | done |
 | F-009 | E2.1 | Golden corpus ingest and de-identified fixture store | Test | 3w | pending |
 
 ## What this sprint is
