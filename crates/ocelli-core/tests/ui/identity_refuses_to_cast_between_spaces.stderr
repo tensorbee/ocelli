@@ -1,0 +1,12 @@
+error[E0599]: no associated function or constant named `identity` found for struct `Transform<Canvas, World>` in the current scope
+  --> tests/ui/identity_refuses_to_cast_between_spaces.rs:13:41
+   |
+13 |     let _ = Transform::<Canvas, World>::identity();
+   |                                         ^^^^^^^^ associated function or constant not found in `Transform<Canvas, World>`
+   |
+note: if you're trying to build a new `Transform<Canvas, World>`, consider using `Transform::<A, B>::from_mat4` which returns `Transform<_, _>`
+  --> src/space.rs
+   |
+   |     pub const fn from_mat4(m: DMat4) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: the associated function or constant was found for `Transform<S, S>`

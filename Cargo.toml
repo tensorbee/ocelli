@@ -30,19 +30,40 @@ unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 
-# HLD section 15.2, verbatim. The exact wgpu pin is not fussiness: agents
-# reliably emit wgpu 0.19-era pipeline code, and a caret range lets that
-# compile against something subtly different from what the shader expects.
+# HLD section 15.2's dependency list, no longer verbatim. Section 15.2 gives
+# five entries and this block has seven: `glam` differs under D-09, and
+# `proptest` and `trybuild` are dev-only tools section 15.2 does not cover.
+# Every departure is commented at the entry it belongs to. The `[profile.release]`
+# block further down is still verbatim and still says so.
 #
-# Nothing here is referenced by a crate yet. Cargo does not resolve an unused
-# workspace dependency, so the skeleton builds with no network. Each entry
-# activates with the story that needs it, F-016 for dicom, F-039 for wgpu.
+# The exact wgpu pin is not fussiness: agents reliably emit wgpu 0.19-era
+# pipeline code, and a caret range lets that compile against something subtly
+# different from what the shader expects.
+#
+# Cargo does not resolve an unused workspace dependency, so an entry costs
+# nothing until a crate names it. Each activates with the story that needs it,
+# F-016 for dicom and F-039 for wgpu. F-001 activates glam, for the
+# `Transform<A, B>` matrix of HLD section 16.
 [workspace.dependencies]
 wgpu = "=30.0.1"
 dicom = { version = "0.10", default-features = false }
-glam = "0.30"
+# HLD section 15.2 writes `glam = "0.30"`. The version is untouched and only
+# the feature set differs, which is deviation D-09: every core crate carries
+# `#![cfg_attr(not(test), no_std)]`, glam's default feature is `std`, and glam
+# needs either `std` or its optional `libm` dependency to compile at all, so
+# the default entry would silently defeat the no_std posture the crates
+# declare.
+glam = { version = "0.30", default-features = false, features = ["libm"] }
 bytemuck = { version = "1", features = ["derive"] }
 thiserror = "2"
+
+# Dev-dependencies, not part of HLD section 15.2's list, which covers what
+# ships. `proptest` is the harness section 25's round-trip listing is written
+# against. `trybuild` is what asserts that a section 16 space mismatch fails
+# to COMPILE, which is the payoff section 16 claims and which no runtime test
+# can observe.
+proptest = "1"
+trybuild = "1"
 
 # DICOM-RS FEATURES, HLD section 15.2. Disable default features. The defaults
 # are rayon and simd, and the gdcm feature is native-only. On wasm you want
