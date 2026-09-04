@@ -98,8 +98,82 @@ jobs:
       - run: bin/ocelli.sh gate docs
       # One workflow, two hosts. A stale adapter serves Codex old instructions.
       - run: python3 scripts/sync_agent_skills.py --check
-      # The manifest's shape, without needing the corpus itself.
-      - run: python3 scripts/corpus_check.py --manifest-only
+      # The manifest's shape AND its coverage, neither of which needs the
+      # corpus itself. `--coverage` calls load() first, so it subsumes
+      # `--manifest-only` rather than replacing it. This is the half of the
+      # corpus gate that survives D-04: a manifest that stops covering a
+      # transfer syntax the codec registry claims, or stops covering one of
+      # HLD 25.1's two tolerance classes, fails on the pull request instead
+      # of at the moment someone tries to answer spike gate A1.
+      - run: python3 scripts/corpus_check.py --coverage
+
+  corpus-tooling:
+    name: Corpus tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The generator writes real DICOM in every transfer syntax the codec
+      # registry claims, so it needs real encoders. Every Python package below
+      # is pinned and so is OpenJPH. DCMTK is NOT, see the step below.
+      - name: Python DICOM tooling
+        run: |
+          python3 -m pip install \
+            "pydicom==3.0.2" "numpy==2.5.2" \
+            "pylibjpeg==2.1.0" "pylibjpeg-libjpeg==2.4.0" \
+            "pylibjpeg-openjpeg==2.5.0" "pylibjpeg-rle==2.2.0" \
+            "pyjpegls==1.5.1"
+
+      # DCMTK comes from the distribution and is therefore NOT pinned. On
+      # ubuntu-latest (24.04) that is 3.6.7, against the 3.7.0 that
+      # corpus_synth.BUILT_WITH records. They do not agree and this comment is
+      # not going to pretend they do.
+      #
+      # What follows from it, precisely: this job never compares a digest
+      # against corpus/manifest.tsv. It generates into a temporary directory
+      # and checks internal consistency, round-trips and byte-determinism
+      # WITHIN one toolchain, none of which depends on the DCMTK version. What
+      # a 3.6.7 here would break is regenerating the manifest, which is a local
+      # operation on the machine that holds the corpus, and which
+      # `python3 scripts/corpus_synth.py --tool-versions` guards. Running that
+      # here would fail on this one row and tell nobody anything they can act
+      # on, so it is deliberately not a step.
+      #
+      # Pinning it would mean building DCMTK from the 3.7.0 tag on every run.
+      # If a DCMTK-version-sensitive defect ever appears, that is the fix.
+      - name: DCMTK, for the four JPEG syntaxes pydicom cannot encode
+        run: sudo apt-get update && sudo apt-get install -y dcmtk
+
+      # TIFF support is explicitly off: OJPH_ENABLE_TIFF_SUPPORT defaults ON
+      # in this tag and would need a libtiff development package that nothing
+      # here installs. Nothing in this corpus reads or writes TIFF, the
+      # generator feeds ojph_compress a PGM.
+      - name: OpenJPH, for the three HTJ2K syntaxes
+        run: |
+          git clone --depth 1 --branch 0.31.0 \
+            https://github.com/aous72/OpenJPH.git /tmp/openjph
+          cmake -S /tmp/openjph -B /tmp/openjph/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOJPH_ENABLE_TIFF_SUPPORT=OFF
+          cmake --build /tmp/openjph/build --parallel
+          sudo cmake --install /tmp/openjph/build
+          sudo ldconfig
+          command -v ojph_compress
+
+      # The hand-computed PS3.3 C.7.6.3.1.4 fixture, the byte-determinism
+      # proof and the conformance assertions.
+      #
+      # NOT `bin/ocelli.sh gate corpus-tests`, deliberately. The gate runner
+      # returns 0 when a gate skips, which is right for `docs` and `wasm`
+      # whose skips are permanent, and wrong here: the three steps above exist
+      # precisely to remove every reason to skip, so a skip in this job means
+      # an install half-succeeded and the fixture did not run. That must be
+      # red, not a green tick. `--require-prerequisites` says so, and it is
+      # the same runner a developer gets through the gate.
+      - run: python3 scripts/corpus_tests.py --require-prerequisites
 
   frontend:
     name: TypeScript

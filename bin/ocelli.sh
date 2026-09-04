@@ -34,6 +34,7 @@ Targets
 Validation
   oracle [args]          the differential harness against cornerstone3D (GPU)
   corpus                 verify $OCELLI_CORPUS_DIR against corpus/manifest.tsv
+  corpus-tests           the corpus tooling suites (see OCELLI_PYTHON below)
 
 Gates
   gate --list            what each gate covers
@@ -43,6 +44,8 @@ Gates
 
 Environment
   OCELLI_CORPUS_DIR      corpus location, default corpus/data
+  OCELLI_PYTHON          interpreter with pydicom for `gate corpus-tests`,
+                         default resolved by scripts/corpus_tests.py
   OCELLI_AGENT           recorded in the provenance trailer
 USAGE
 }
@@ -65,7 +68,8 @@ GATES=(
   "lint|no|eslint, including the cached-wasm-view ban (HLD 17.2)"
   "types|no|tsc --build across the TypeScript workspaces"
   "wasm|no|wasm-pack build and the size budget (E1.2, gate A4)"
-  "corpus|no|corpus present and matching its manifest digests"
+  "corpus-tests|no|the corpus generator and coverage suites, a skip fails it"
+  "corpus|no|corpus coverage over the codec registry, then presence and digests"
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
 )
 
@@ -110,7 +114,20 @@ run_gate() {
                    return 3
                  }
                  "$0" wasm && python3 scripts/pin_and_size_check.py --with-size ;;
-    corpus)      python3 scripts/corpus_check.py ;;
+    # Needs no corpus, so it is IN the floor. The runner fails on a skipped
+    # test rather than on the exit status, because the suites exit 0 under an
+    # interpreter with no pydicom while reporting a skip, and this project's
+    # rule is that a skip is not a pass. It exits 3, a named skip, only when a
+    # prerequisite is genuinely absent.
+    corpus-tests) python3 scripts/corpus_tests.py ;;
+    # Coverage FIRST, then the digests. Coverage reads the manifest and nothing
+    # else, so it answers "does this corpus still cover every transfer syntax
+    # the codec registry claims, and both tolerance classes of HLD 25.1" even
+    # where the data is absent. Chained on `&&` for the reason the backlog arm
+    # gives: a case arm returns the status of its LAST command, so an unchained
+    # first command can fail and be reported green.
+    corpus)      python3 scripts/corpus_check.py --coverage &&
+                 python3 scripts/corpus_check.py ;;
     oracle)      "$0" oracle ;;
     *)           echo "unknown gate: $name" >&2; return 2 ;;
   esac

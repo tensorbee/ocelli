@@ -74,3 +74,7 @@ test-results/
 # Where the private source documents live on THIS machine. Per-clone, because
 # it is a property of the checkout and not of the project.
 .ocelli-source-path
+
+# Which interpreter has pydicom and the codec plugins on THIS machine, for
+# `bin/ocelli.sh gate corpus-tests`. Per-clone, for the same reason.
+.ocelli-python-path
