@@ -14,6 +14,39 @@ workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# wasm-opt runs, and is NOT disabled. HLD section 15.2's release profile is
+# `opt-level = "z"` with fat LTO, and the size budget of gate A4 is a claim
+# about the artefact that ships. Turning the optimiser off to get a green
+# build would inflate the measured number and quietly change what the budget
+# means, which is the same defect class as widening a tolerance to pass.
+#
+# The flags are needed because rustc for wasm32-unknown-unknown enables these
+# WebAssembly proposals by default and the wasm-opt wasm-pack downloads
+# validates without them, so a stock build fails with
+# "Bulk memory operations require bulk memory [--enable-bulk-memory]".
+# Measured on rustc 1.97.1 and wasm-pack 0.15.0.
+#
+# The list is NOT copied from a blog post. It is exactly what
+# `rustc --print cfg --target wasm32-unknown-unknown | grep target_feature`
+# reports, one flag per default feature, with `nontrapping-fptoint` written in
+# wasm-opt's spelling. Re-run that command if the toolchain moves.
+#
+# Only --enable-bulk-memory is needed to build TODAY, because this module is
+# one function and emits nothing else. The other five are here because the
+# module they will have to validate is the one F-096 and the render stories
+# build, and discovering each missing flag one failed build at a time is worse
+# than reading them off rustc once.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = [
+  "-O",
+  "--enable-bulk-memory",
+  "--enable-mutable-globals",
+  "--enable-nontrapping-float-to-int",
+  "--enable-sign-ext",
+  "--enable-reference-types",
+  "--enable-multivalue",
+]
+
 # HLD decision D2, and the CI invariant of section 15.3. wasm-bindgen appears
 # in exactly ONE crate, this one. `ci/check-bindgen-isolation.sh` runs on every
 # push and fails if any other crate reaches it.
@@ -22,8 +55,14 @@ crate-type = ["cdylib", "rlib"]
 # not build wasm-bindgen at all. That is a build convenience and NOT the
 # isolation mechanism, which is the script.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# wasm-bindgen lands with F-096 (E16.2, the boundary). Declaring it before
-# there is a boundary to bind would put the one dependency this project most
-# wants to control into the tree for no reason.
+# Activated by F-002 (E1.2), the build-pipeline story, and not by F-096 as an
+# earlier comment here said. The reason is mechanical: `wasm-pack` refuses to
+# build a crate that does not depend on wasm-bindgen, so the pipeline and the
+# size budget cannot exist at all until the dependency does. F-096 (E16.2)
+# still builds the boundary that uses it.
+#
+# Pinned exactly in [workspace.dependencies]. `scripts/pin_and_size_check.py`
+# refuses a range form here for the same reason it refuses one for wgpu.
+wasm-bindgen = { workspace = true }
 
 [dependencies]

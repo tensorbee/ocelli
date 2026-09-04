@@ -196,8 +196,12 @@ jobs:
       # HLD 15.2's opt-level "z", fat LTO and strip apply to release, so a
       # dev-profile measurement is meaningless against Appendix A gate A4.
       #
-      # Until F-096 adds wasm-bindgen, wasm-pack cannot build ocelli-wasm at
-      # all, so this gate SKIPS with a stated reason. Going through the gate
-      # runner rather than calling wasm-pack directly is what keeps that a
-      # visible skip instead of a red job nobody can act on.
+      # F-002 (E1.2) removed the skip that used to sit here. ocelli-wasm now
+      # declares wasm-bindgen, wasm-pack builds it, and there is a release
+      # artefact to measure, so this job runs the build rather than reporting
+      # a skipped gate as a green tick.
+      #
+      # It still goes through the gate runner rather than calling wasm-pack
+      # directly, so that the size check and the build stay one definition
+      # that CI and a developer both get.
       - run: bin/ocelli.sh gate wasm

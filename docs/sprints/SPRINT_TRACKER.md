@@ -32,3 +32,4 @@ of the volume port work in M2 onward.
 |------|-------|--------|-----|-------------|-----------|
 | F-001 | Cargo workspace, crate skeleton, lint/CI baseline | S01 | 2w | 0.37d measured, 2h58m wall clock from the design commit to the F-ID commit, across four review passes | 2026-09-04 |
 | F-009 | Golden corpus ingest and de-identified fixture store | S01 | 3w | 0.76d measured, 6h03m wall clock from the design commit to the F-ID commit, across seven review passes | 2026-09-04 |
+| F-002 | wasm-pack build pipeline with a hard size budget gate | S02 | 2w | not measured, wall clock from the S02 design commit to this F-ID commit spans concurrent work on F-010 and is not attributable to this story | 2026-09-04 |

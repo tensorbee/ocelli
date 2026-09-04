@@ -234,3 +234,82 @@ The former implicit source-document sibling fallback was also removed. The
 tracked Markdown and JSON remain authoritative, while the dormant bootstrap
 converters require an explicit source path if someone deliberately runs them.
 This entry records the corresponding `.claude/WORKFLOW.md` wording change.
+
+## F-002, wasm-pack build pipeline with a hard size budget gate, completed 2026-09-04
+
+**What was built.** The wasm build pipeline, end to end, and the first size
+measurement this project has ever had. `ocelli-wasm` declares `wasm-bindgen`
+under its existing wasm32 target gate and exports one function,
+`ocelli_version()`. `wasm-pack build --target web` produces
+`crates/ocelli-wasm/pkg` under HLD section 15.2's release profile, and
+`scripts/pin_and_size_check.py --with-size` measures it. The `wasm` gate no
+longer skips, so `gate --floor` now reports 17 gates green with no skips.
+
+**The story that lands wasm-bindgen changed, and the tree said otherwise.**
+Both `bin/ocelli.sh` and `crates/ocelli-wasm/Cargo.toml` named F-096 as the
+story that would declare the dependency. That is not workable: `wasm-pack`
+refuses to build a crate that does not depend on `wasm-bindgen`, so the
+pipeline and the budget cannot exist before the dependency does.
+`CURRENT_SPRINT.md` assigns the removal of the skip to F-002 and is the later
+authority. Both comments are corrected rather than left to mislead. F-096
+still builds the boundary.
+
+**HLD sections implemented.** `docs/hld/12-workspace-and-build.md` sections
+15.2 and 15.3. `docs/hld/A-spike-gates.md` gate A4, first measurement only, and
+the gate stays open.
+**Deviations.** None. D-10 is cited by the design plan's `Cargo.toml` comment
+correction for wgpu's activating story and is F-008's deviation, not this
+story's.
+**Crates / packages modified.** `crates/ocelli-wasm/`, the root `Cargo.toml`
+for the `wasm-bindgen` exact pin, `ci/check-bindgen-isolation.sh`,
+`scripts/pin_and_size_check.py`, `bin/ocelli.sh`, `.github/workflows/ci.yml`.
+**Tests added.** One, `exported_version_is_the_workspace_version`, plus four
+mutation proofs that are evidence rather than tests. `cargo test -p
+ocelli-wasm` reports 2.
+**Fixture provenance.** No pixel arithmetic and no geometry. This story
+computes no value that a DICOM section governs, so HLD 27.2 R3 does not apply
+and the design plan's test table says so explicitly rather than omitting the
+row.
+**Verification.** `/verify --profile feature` at tree `4e67a07cb781`, 18 gates
+green and none skipped.
+**Corpus.** pass. 91 rows verified, 0 missing, 0 mismatched, and the metadata
+audit agrees.
+**Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. A build
+pipeline resolves no tier. The rows are named rather than omitted because an
+omission and a deliberate "no tier here" read identically later.
+**LLD updated.** `docs/lld/build-targets.md`, created. `docs/lld/README.md`
+gained a row.
+**Deviations from the design plan.** None on decisions. Two facts the plan did
+not know, both discovered by building rather than by reading:
+
+- **`wasm-opt` fails out of the box.** rustc for wasm32-unknown-unknown enables
+  six WebAssembly proposals by default and the `wasm-opt` wasm-pack downloads
+  validates without them, so a stock build dies on
+  `Bulk memory operations require bulk memory`. Fixed with an explicit flag
+  list in `[package.metadata.wasm-pack.profile.release]`, read off
+  `rustc --print cfg` rather than from memory. **`wasm-opt = false` is the
+  other documented fix and it is the wrong one**, because it produces a green
+  build and a larger artefact, so the recorded number would stop describing
+  what ships.
+- **The isolation check the HLD gives is target-blind.** `cargo tree` filters
+  to the host platform by default, so section 15.3's loop cannot see a
+  `wasm-bindgen` declared under `[target.'cfg(target_arch = "wasm32")'.dependencies]`,
+  which is the form `ocelli-wasm` itself uses. A second pass over wasm32 was
+  added beneath the transcribed one.
+
+**Notes for future sessions.**
+- **The 14,104 byte baseline is not an answer to gate A4** and must not be
+  cited as one. A4 estimates 3 to 8 MB with Naga dominating. This module has
+  one function, no wgpu and no Naga.
+- **Re-baselining is the expected path for the whole build-out phase.** A 5%
+  tolerance on a 14 KB module is blown by the first story that adds anything
+  real. During buildup the gate means "the module changed size and nobody said
+  so", not "you exceeded a budget". `--accept-size` is the declaration and the
+  design plan that used it says why.
+- **Reverting a mutation with `mv file.bak file` restores an older mtime** and
+  cargo then reuses the build from the mutated source. It surfaced here as a
+  false red on reverted code, which is the harmless direction. The same
+  mechanism can produce a false green. `touch` after any revert.
+- **A missing `wasm-pack` now fails `gate --floor`** rather than skipping it.
+  Deliberate, and it matches how CI already treats an absent documented
+  prerequisite for the corpus tooling.

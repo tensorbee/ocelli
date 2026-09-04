@@ -8,7 +8,7 @@ produce headless cornerstone3D reference renders from the corpus.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-002 | E1.2 | wasm-pack build pipeline with a hard size budget gate | Build | 2w | pending |
+| F-002 | E1.2 | wasm-pack build pipeline with a hard size budget gate | Build | 2w | done |
 | F-003 | E1.3 | TS package scaffold, bundling, npm publish pipeline | Build | 2w | pending |
 | F-007 | E1.7 | Cross-target build proof: native desktop + server binary | Build | 2w | pending |
 | F-008 | E1.8 | ocelli-compute crate skeleton and GPU device-sharing contract | Build | 2w | pending |

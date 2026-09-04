@@ -30,3 +30,10 @@ Repository bootstrap. Nothing is published.
   added.
 - The workflow: `.claude/WORKFLOW.md`, eighteen commands, and generated Codex
   adapters under `.agents/skills/`.
+- The wasm build pipeline. `bin/ocelli.sh wasm` produces
+  `crates/ocelli-wasm/pkg` through `wasm-pack` under HLD section 15.2's release
+  profile, and the `wasm` gate measures that artefact against a recorded size
+  budget in `ci/wasm-size-budget.json`. The module exports `ocelli_version()`
+  and nothing else until the boundary lands. First measurement 14,104 bytes,
+  which is a baseline for regression detection and not an answer to Appendix A
+  gate A4.

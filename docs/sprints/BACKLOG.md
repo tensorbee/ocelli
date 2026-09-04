@@ -69,7 +69,7 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
 | F-001 | E1.1 | S01 | Cargo workspace, crate skeleton, lint/CI baseline | Build | 2w | - | done |
-| F-002 | E1.2 | S02 | wasm-pack build pipeline with a hard size budget gate | Build | 2w | F-001 | pending |
+| F-002 | E1.2 | S02 | wasm-pack build pipeline with a hard size budget gate | Build | 2w | F-001 | done |
 | F-003 | E1.3 | S02 | TS package scaffold, bundling, npm publish pipeline | Build | 2w | F-001 | pending |
 | F-004 | E1.4 | S03 | Runtime capability detection & tiering (WebGPU / WebGL2 / SIMD / threads) | Build | 2w | F-002 | pending |
 | F-005 | E1.5 | S03 | Error model, panic-to-JS mapping, structured logging | Build | 2w | F-002 | pending |

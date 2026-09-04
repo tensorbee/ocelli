@@ -105,11 +105,14 @@ run_gate() {
                  npm run lint ;;
     types)       [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
                  npm run typecheck ;;
-    wasm)        grep -qE '^\s*wasm-bindgen\s*=' crates/ocelli-wasm/Cargo.toml || {
-                   skip "ocelli-wasm declares no wasm-bindgen yet, so wasm-pack cannot build it. It lands with F-096 (E16.2, the boundary)."
-                   return 3
-                 }
-                 "$0" wasm && python3 scripts/pin_and_size_check.py --with-size ;;
+    # No skip. F-002 (E1.2) declared wasm-bindgen in ocelli-wasm, so wasm-pack
+    # can build it and there is a release artefact to measure. The skip that
+    # used to sit here named F-096 as the story that would land the dependency,
+    # and it was wrong about which story: the pipeline needs the dependency
+    # before the boundary does, because wasm-pack refuses a crate without one.
+    #
+    # Chained on `&&` for the reason the backlog arm gives.
+    wasm)        "$0" wasm && python3 scripts/pin_and_size_check.py --with-size ;;
     # Needs no corpus, so it is IN the floor. The runner fails on a skipped
     # test rather than on the exit status, because the suites exit 0 under an
     # interpreter with no pydicom while reporting a skip, and this project's
