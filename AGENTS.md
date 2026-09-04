@@ -66,7 +66,21 @@ npm run lint | typecheck | test | dev
   GPU for WebGPU and a browser for the oracle.
 - **Read every exit code from the command itself, never from the end of a
   pipe.** `cmd | tail -2; echo $?` reports `tail`'s status, and that has hidden
-  real clippy failures inside runs reported as passing.
+  real clippy failures inside runs reported as passing. In zsh, which is the
+  shell here, `${PIPESTATUS[0]}` is **empty** and `${pipestatus[1]}` is the one
+  you want, so the bash idiom silently reports nothing at all.
+- **Stage before you gate, and gate before you record.** Several guards read
+  `git ls-files`, and `scripts/verify_ledger.py` keys on `git write-tree`,
+  which hashes the **index**. Both are blind to an untracked file. Running them
+  over new work that has not been staged checks the previous content and says
+  so in the language of success. Measured in S01: staging first moved `unsafe`
+  from 14 files to 23, `provenance` from 191 to 205 and `prose` from 44 to 49,
+  and the first ledger record certified a tree byte-identical to the base
+  commit's. The order is write, stage, gate, record, commit.
+- **Set `OCELLI_AGENT`, or pass `--agent`, before recording a verification.**
+  `verify_ledger.py` defaults it to `unknown`, and the commit-msg hook then
+  writes `Ocelli-Generated-By: unknown`, which is a provenance trailer that
+  records no provenance. HLD 27.2 R6 wants the generator named.
 - A release build is the only meaningful one for size. HLD section 15.2's
   profile applies to release only, so a dev-profile measurement against the
   size budget is meaningless.
