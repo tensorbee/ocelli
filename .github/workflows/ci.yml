@@ -49,6 +49,12 @@ jobs:
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      # `gate native` step 4 runs scripts/target_feature_check.py. The runner
+      # image ships a python3, and pinning it here means this job does not
+      # depend on that staying true.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -57,10 +63,15 @@ jobs:
       # Story E1.7, the cross-target build proof. This is what keeps decision
       # D2 honest over time: if the core stopped being WebAssembly-agnostic,
       # it shows up here first.
-      - name: Cross-target proof, native
-        run: cargo build -p ocelli-native
-      - name: Cross-target proof, wasm32
-        run: cargo check -p ocelli-wasm --target wasm32-unknown-unknown
+      #
+      # F-007 replaced two hand-written steps with the gate. The old pair built
+      # ocelli-native on the host and checked ocelli-wasm for wasm32, which
+      # left the other eleven crates unproved on both targets and said nothing
+      # about feature resolution. Going through the gate also means CI and a
+      # developer get ONE definition of the proof rather than a shell script
+      # and a workflow that drift apart.
+      - name: Cross-target proof
+        run: bin/ocelli.sh gate native
 
   guards:
     name: Guards

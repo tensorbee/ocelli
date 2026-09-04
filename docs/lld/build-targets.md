@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002
-**Last updated:** 2026-09-04
+**F-IDs that contributed:** F-002, F-007
+**Last updated:** 2026-09-05
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -17,6 +17,23 @@ shared-core promise.
 | `ocelli-wasm` | yes | no |
 | `ocelli-native` | no | yes |
 | everything else | yes | yes |
+
+### The two `no` cells are not symmetric, and the asymmetry is deliberate
+
+**`ocelli-native` is `wasm: no` and that is enforced.** Its `lib.rs` carries a
+`#[cfg(target_arch = "wasm32")] compile_error!` naming section 4 as the source.
+Before F-007 the cell was not enforceable at all: `cargo check -p ocelli-native
+--target wasm32-unknown-unknown` **succeeded**, because the crate is a stub
+with no native-only dependency and nothing declared it native-only. A guard
+asserting "it does not build for wasm32" would have been asserting something
+untrue. F-007 made it true instead of asserting it.
+
+**`ocelli-wasm` is `native: no` and that is NOT enforced, on purpose.** The
+crate compiles natively today, because `wasm-bindgen` is target-gated, and
+`cargo test -p ocelli-wasm` depends on that. The cell means the crate is not
+*shipped* natively. Its native compilation is what lets the boundary's logic be
+unit-tested without a browser, which the project needs, so a `compile_error`
+here would cost real coverage to enforce a claim the table is not making.
 
 ## The wasm pipeline
 
@@ -65,6 +82,67 @@ Its test asserts the literal `"0.1.0"` rather than `env!("CARGO_PKG_VERSION")`.
 The obvious form restates the function body, so it passes whatever the body
 returns, which is HLD 27.2 R2's failure exactly. `/release` updates the
 literal with the version bump.
+
+## The cross-target proof
+
+```bash
+bin/ocelli.sh native           # the proof
+bin/ocelli.sh gate native      # the same thing, as a gate, in the floor
+```
+
+Four steps, each exit code read from the command itself.
+
+| Step | What it proves |
+|------|----------------|
+| 1 | `cargo build -p ocelli-native --bins`. The two entry points **link**, not merely type-check |
+| 2 | `cargo check --workspace --exclude ocelli-native --target wasm32-unknown-unknown`. Every crate the table marks `wasm: yes` builds for wasm32 |
+| 3 | `cargo check --workspace --all-targets`. Every crate the table marks `native: yes` builds natively, tests included |
+| 4 | `scripts/target_feature_check.py`. Resolved features agree across the two targets, or the difference is declared |
+
+**Step 2 deliberately omits `--all-targets` and step 3 keeps it.** For wasm32
+that flag pulls in dev-dependencies, and `proptest` reaches `wait-timeout`,
+which does not compile for wasm32 and is not meant to. What ships to a browser
+is the lib. Running the test suite under wasm32 needs `wasm-bindgen-test` and a
+browser runner, which is the oracle's and F-096's ground. A native build does
+run its tests, so step 3 has to compile them.
+
+### The two entry points
+
+`crates/ocelli-native/src/bin/ocelli-desktop.rs` and `ocelli-server.rs`. Both
+are stubs that print `entry_point_banner()`, which names the binary and the
+four extension points of HLD section 13 that Phase 2 and Phase 3 will fill.
+
+They are two binaries rather than one with a subcommand because section 13
+names two entry points, and because the server one is what the render-target
+trait exists to serve. Collapsing them would make the first Phase 3 story a
+split rather than a fill.
+
+### Step 4, and why a build proof is not enough on its own
+
+A build proof catches a target that stops compiling. It does not catch **both
+targets compiling while one quietly resolved a different feature set**, which
+is the sprint's stated false-portability defect and the more dangerous half,
+because nothing goes red and the difference is in the artefact rather than in
+the log.
+
+`scripts/target_feature_check.py` compares `cargo tree`'s resolved features for
+the host and for wasm32 and reports three things separately: a package on both
+targets whose features differ, a package present on only one target, and a
+declaration in `ci/target-feature-baseline.json` that no longer describes
+anything. All three fail. The third is there because a stale allowance is as
+misleading as a missing one.
+
+**Keys are package names without versions.** This gate is about feature
+resolution, not about versions, which `pins` and `Cargo.lock` already cover.
+Keying on the version would turn every routine `cargo update` of a transitive
+like `syn` into a red gate reporting a stale declaration, and a gate that goes
+red for reasons nobody can act on is a gate people learn to re-baseline.
+
+**Today it declares eleven wasm32-only packages and zero feature differences.**
+The eleven are the `wasm-bindgen` chain and its proc-macro plumbing, each with
+its reason. Zero differences means the guard currently proves a negative over a
+small graph, which is what it should say, and its value arrives with the first
+dependency somebody adds without thinking about the other target.
 
 ## The size budget
 
@@ -132,4 +210,9 @@ not run" and "the check ran and was happy" must not look the same.
   licences are at the repository root. The generated `pkg/` is not published
   by anything today, and whether it is published at all is F-096's and
   `/release`'s question, not this one.
-- The native half of the cross-target proof is F-007 and is not here yet.
+- **Step 4 starts vacuous.** Eleven crates that are currently scaffolds with
+  one dependency between them show no feature difference at all, so the guard
+  proves a negative over a small graph. It was built anyway, and proved red by
+  construction, because its value is entirely in the moment a dependency is
+  added and nobody is looking, which is precisely the moment nobody would
+  build it.

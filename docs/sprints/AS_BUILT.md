@@ -313,3 +313,69 @@ not know, both discovered by building rather than by reading:
 - **A missing `wasm-pack` now fails `gate --floor`** rather than skipping it.
   Deliberate, and it matches how CI already treats an absent documented
   prerequisite for the corpus tooling.
+
+## F-007, Cross-target build proof, native desktop and server binary, completed 2026-09-05
+
+**What was built.** `ocelli-native` gained two binary entry points,
+`ocelli-desktop` and `ocelli-server`, both stubs that print the four extension
+points of HLD section 13 they will implement. `bin/ocelli.sh native` became a
+four-step proof and a gate in the floor, replacing a single host build of one
+crate. `scripts/target_feature_check.py` compares resolved features across the
+host and wasm32 against a declared baseline.
+
+**The plan was wrong about two facts and the code says what is true instead.**
+
+- The plan asserted `cargo tree -p ocelli-native --target
+  wasm32-unknown-unknown` must not resolve. It resolves, and
+  `cargo check` for that target **succeeded**, because nothing declared the
+  crate native-only. Rather than assert something untrue, `lib.rs` now carries
+  a `#[cfg(target_arch = "wasm32")] compile_error!` naming section 4 as its
+  source, so the table cell is true instead of claimed.
+- The plan assumed the two targets' package sets are comparable. The wasm32
+  tree legitimately carries eleven packages the host does not, the
+  `wasm-bindgen` chain and its proc-macro plumbing. A naive set comparison
+  would have reported eleven differences on day one and been re-baselined
+  immediately.
+
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section
+4's crate table, both `no` cells. `docs/hld/10-extension-points.md` section 13,
+named by the entry points rather than implemented. `docs/hld/12-workspace-and-build.md`
+section 15.1's `ocelli-native` entry.
+**Deviations.** None.
+**Crates / packages modified.** `crates/ocelli-native/`, `bin/ocelli.sh`,
+`scripts/target_feature_check.py`, `ci/target-feature-baseline.json`,
+`.github/workflows/ci.yml`.
+**Tests added.** Two, `banner_names_the_binary_and_all_four_extension_points`
+and `the_two_entry_points_are_distinguishable`. `cargo test -p ocelli-native`
+reports 3.
+**Fixture provenance.** No pixel arithmetic and no geometry. HLD 27.2 R3 does
+not apply, and the design plan's test table names the row rather than omitting
+it.
+**Verification.** `/verify --profile feature`, 19 gates green and none skipped.
+**Corpus.** pass. 91 rows verified, 0 missing, 0 mismatched.
+**Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. A build proof
+resolves no tier. Worth naming here because it is easy to confuse a build
+TARGET with a rendering TIER: `ocelli-native` is a target, and tier C is what a
+browser session resolves to when it has no GPU.
+**LLD updated.** `docs/lld/build-targets.md`, extended with the native half.
+`docs/lld/README.md` row updated.
+**Deviations from the design plan.** The two facts above. No decision changed.
+**Notes for future sessions.**
+- **Step 2 omits `--all-targets` and step 3 keeps it, deliberately.** For
+  wasm32 the flag pulls in dev-dependencies and `proptest` reaches
+  `wait-timeout`, which does not compile for wasm32 and is not meant to.
+  Observed, not anticipated. Running the suite under wasm32 needs
+  `wasm-bindgen-test` and a browser runner.
+- **The feature check starts vacuous**, zero differences over sixteen shared
+  packages, and that is expected while the crates are scaffolds. Its value
+  arrives with the first dependency somebody adds without thinking about the
+  other target. It was proved red by construction rather than left unproved.
+- **`ocelli-wasm`'s `native: no` is deliberately NOT enforced**, unlike
+  `ocelli-native`'s `wasm: no`. The crate compiles natively so its logic can be
+  unit-tested without a browser, and the table cell means "not shipped
+  natively". The asymmetry is in the LLD.
+- **A mutation that does not mutate proves nothing.** One attempt here, adding
+  `rand` with default features off, was meant to create a per-target feature
+  difference and did not, so the gate correctly stayed green. It was replaced
+  with a `glam` `scalar-math` target gate, which does. Check that a mutation
+  actually changed the thing under test before reading the result.

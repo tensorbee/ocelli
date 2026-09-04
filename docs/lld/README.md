@@ -14,4 +14,4 @@ Each file carries a `**F-IDs that contributed:**` line and a
 |------|------|-------|
 | [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001 |
 | [corpus.md](corpus.md) | Golden corpus layout, generation and verification | F-009 |
-| [build-targets.md](build-targets.md) | The wasm pipeline, the size budget and the isolation invariant | F-002 |
+| [build-targets.md](build-targets.md) | The wasm pipeline, the size budget, the cross-target proof and the isolation invariant | F-002, F-007 |

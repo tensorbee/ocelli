@@ -37,3 +37,9 @@ Repository bootstrap. Nothing is published.
   and nothing else until the boundary lands. First measurement 14,104 bytes,
   which is a baseline for regression detection and not an answer to Appendix A
   gate A4.
+- The cross-target build proof, `bin/ocelli.sh native` and the `native` gate.
+  It links the `ocelli-desktop` and `ocelli-server` entry points, builds every
+  shared crate for both wasm32 and the host, and compares resolved features
+  across the two targets against a declared baseline. `ocelli-native` is now a
+  compile error under wasm32 rather than a crate that merely should not be
+  there.

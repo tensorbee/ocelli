@@ -29,7 +29,7 @@ Inner loop
 
 Targets
   wasm [--release]       wasm-pack build crates/ocelli-wasm, then the size gate
-  native                 cargo build -p ocelli-native, the cross-target proof
+  native                 the cross-target proof: both targets, and features
 
 Validation
   oracle [args]          the differential harness against cornerstone3D (GPU)
@@ -68,6 +68,7 @@ GATES=(
   "lint|no|eslint, including the cached-wasm-view ban (HLD 17.2)"
   "types|no|tsc --build across the TypeScript workspaces"
   "wasm|no|wasm-pack build and the size budget (E1.2, gate A4)"
+  "native|no|the cross-target build proof and per-target features (E1.7, HLD 4)"
   "corpus-tests|no|the corpus generator and coverage suites, a skip fails it"
   "corpus|no|corpus coverage over the codec registry, then presence and digests"
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
@@ -113,6 +114,7 @@ run_gate() {
     #
     # Chained on `&&` for the reason the backlog arm gives.
     wasm)        "$0" wasm && python3 scripts/pin_and_size_check.py --with-size ;;
+    native)      "$0" native ;;
     # Needs no corpus, so it is IN the floor. The runner fails on a skipped
     # test rather than on the exit status, because the suites exit 0 under an
     # interpreter with no pydicom while reporting a skip, and this project's
@@ -238,10 +240,51 @@ case "$command" in
     ;;
 
   native)
-    # HLD story E1.7. The cross-target build proof is what keeps decision D2
-    # honest over time: if the core stopped being WebAssembly-agnostic, this
-    # is where it shows up first.
-    cargo build -p ocelli-native
+    # HLD story E1.7, the cross-target build proof. It is what keeps decision
+    # D2 honest over time: if the core stopped being WebAssembly-agnostic,
+    # this is where it shows up first.
+    #
+    # Four steps, and each one's exit code is read from the command itself
+    # rather than from the end of a pipe. `set -e` is on, so the first failure
+    # ends the arm.
+    #
+    # Before F-007 this was `cargo build -p ocelli-native` alone, which is a
+    # HOST build of ONE crate and proves nothing about wasm32 or about the
+    # other eleven.
+
+    # 1. The two entry points LINK, not merely type-check. A stub that only
+    #    checks would hide a missing symbol until Phase 2.
+    echo "  1/4 native entry points link"
+    cargo build -p ocelli-native --bins
+
+    # 2. Every crate HLD section 4 marks `wasm: yes` builds for wasm32.
+    #    ocelli-native is excluded because that same table marks it `wasm: no`,
+    #    and its lib.rs turns that cell into a compile_error rather than
+    #    leaving it as a claim.
+    #
+    #    NOT --all-targets here, and step 3 is where that flag belongs. For
+    #    wasm32 it pulls in dev-dependencies, and `proptest` reaches
+    #    `wait-timeout`, which does not compile for wasm32 and is not supposed
+    #    to. What ships to a browser is the lib, so that is what is proved.
+    #    Running the tests under wasm32 needs wasm-bindgen-test and a browser
+    #    runner, which is F-096's and the oracle's ground, not this gate's.
+    echo "  2/4 eleven shared crates plus ocelli-wasm build for wasm32"
+    cargo check --workspace --exclude ocelli-native \
+      --target wasm32-unknown-unknown
+
+    # 3. Every crate the table marks `native: yes` builds natively.
+    #    --all-targets IS right here: a native build runs the test suite, so
+    #    the tests have to compile.
+    echo "  3/4 the same crates build natively, tests included"
+    cargo check --workspace --all-targets
+
+    # 4. Resolved features agree across the two targets, or the difference is
+    #    declared with a reason. This is the half a build proof cannot cover:
+    #    both targets compiling while one quietly resolved a different feature
+    #    set is the sprint's stated false-portability defect, and nothing goes
+    #    red on its own.
+    echo "  4/4 resolved features agree across targets"
+    python3 scripts/target_feature_check.py
     ;;
 
   oracle)

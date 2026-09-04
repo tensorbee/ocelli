@@ -74,7 +74,7 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-004 | E1.4 | S03 | Runtime capability detection & tiering (WebGPU / WebGL2 / SIMD / threads) | Build | 2w | F-002 | pending |
 | F-005 | E1.5 | S03 | Error model, panic-to-JS mapping, structured logging | Build | 2w | F-002 | pending |
 | F-006 | E1.6 | S03 | Benchmark harness: decode, first frame, interaction latency | Build | 2w | F-003 | pending |
-| F-007 | E1.7 | S02 | Cross-target build proof: native desktop + server binary | Build | 2w | F-001 | pending |
+| F-007 | E1.7 | S02 | Cross-target build proof: native desktop + server binary | Build | 2w | F-001 | done |
 | F-008 | E1.8 | S02 | ocelli-compute crate skeleton and GPU device-sharing contract | Build | 2w | F-001 | pending |
 | F-009 | E2.1 | S01 | Golden corpus ingest and de-identified fixture store | Test | 3w | - | done |
 | F-010 | E2.2 | S02 | Headless cornerstone3D reference renderer | Test | 4w | F-009 | pending |
