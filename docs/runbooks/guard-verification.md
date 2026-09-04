@@ -101,6 +101,7 @@ fails on nothing.
 | 16 | `verify_ledger.py trailer` | The same tree | Exit 1, and no trailer emitted, which is what makes the trailer unforgeable |
 | 17 | `ci/check-bindgen-isolation.sh` | `wasm-bindgen = "0.2"` added to `crates/ocelli-geom/Cargo.toml` | `FAIL: ocelli-geom reaches wasm-bindgen`, exit 1 |
 | 18 | `split_hld.py` | Resolve the source directory to a folder holding the `.docx` but no `redactions.json` | `FAIL: no redactions.json beside the authored source`, exit 1, and `docs/hld/` untouched |
+| 19 | `no_std_check.py` | Add `glam = "0.30"`, default features on, to a crate that declares `no_std` | `ocelli-geom declares no_std and reaches a std feature`, exit 1. Green again with `default-features = false, features = ["libm"]` |
 
 ### Probe 18 was a guard that failed open, and the probe is why it does not
 
@@ -120,6 +121,30 @@ unredacted text is what the source says.
 wrongly, but one that has nothing to check and says so by succeeding.** Probes
 15 and 16 are the same shape from the other side, which is why they are the
 pair called out below.
+
+### Probe 19 caught its own guard failing open, on the first run
+
+Probe 19 was written for deviation D-09, which disables glam's default `std`
+feature so the core crates stay `no_std`. The obvious check, compiling for
+`wasm32-unknown-unknown`, does not catch a D-09 revert: that target ships a
+`std` implementation and a `no_std` crate may depend on a `std` crate without
+error, so it exits 0 either way. That was measured, by reverting the workspace
+entry and watching every gate stay green.
+
+The replacement reads the dependency graph instead. **Its first version
+reported clean on a tree that was not**, because `cargo tree` prefixes every
+line below the root with box-drawing characters and the pattern was anchored at
+the start of the line, so it matched nothing at all.
+
+It said `OK: 11 no_std crate(s) reach no std feature` while a crate reached
+`std`. Nothing about that output looks wrong. It was found in the minute after
+the script was written, by this procedure, and it would otherwise have been
+found by whoever eventually shipped a bloated wasm module and went looking for
+why.
+
+**Two guards in this table now exist because running the table found them.**
+That is the argument for the procedure, and it is stronger than the argument
+the runbook opened with.
 
 ### The control that matters most
 
@@ -146,3 +171,4 @@ embedded inside an archive, and nothing in this repository claims it does.
 |------|--------|---------------|--------|
 | 2026-09-04 | S01 | Rows 1 to 17 | Every probe went red with a specific message, every control returned green |
 | 2026-09-04 | S01 | Row 18 | Added during the same run, after the exercise surfaced the fail-open redaction loader. Red with a specific message, and `docs/hld/` provably untouched |
+| 2026-09-04 | S01 | Row 19 | Added for deviation D-09. Its first version reported clean on a broken tree, was corrected, and then went red with a specific message and green on the correct shape |
