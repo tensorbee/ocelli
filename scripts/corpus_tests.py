@@ -21,11 +21,10 @@ hand-computed PS3.3 fixture, the determinism proof and every conformance
 assertion did not run. So this reads the skip COUNT out of the result object,
 not the exit status.
 
-**The interpreter is a property of the machine, not of the project.** The
-generator needs pydicom, numpy and the codec plugins, and the checkout cannot
-know where that lives. The resolver records an explicit per-clone choice so an
-exported variable does not have to be remembered every session. Forgetting it
-must not quietly change what ran.
+**The interpreter is part of the project tooling.** The generator needs
+pydicom, numpy and the codec plugins. `uv sync --locked` installs the locked
+set into `.venv`, which is the local default. An explicit `OCELLI_PYTHON`
+remains available for CI and unusual automation.
 
 ## The one skip that is allowed, where it is allowed, and where it is not
 
@@ -49,9 +48,8 @@ so it always runs and can always fail. Only the generator suite has
 prerequisites to be absent.
 
 Usage:
-  python3 scripts/corpus_tests.py                 # run both suites
-  python3 scripts/corpus_tests.py --which         # show the resolved interpreter
-  python3 scripts/corpus_tests.py --set PATH      # record it for this clone
+  uv run scripts/corpus_tests.py                 # run both suites
+  uv run scripts/corpus_tests.py --which         # show the resolved interpreter
 """
 
 from __future__ import annotations
@@ -66,17 +64,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTS = ROOT / "scripts" / "tests"
-CONFIG = ROOT / ".ocelli-python-path"
 ENV_VAR = "OCELLI_PYTHON"
-
-# A sibling of the checkout, so the default is machine-neutral. `ocelli-tools`
-# sits beside the repository because a virtualenv full of DICOM codecs is not
-# a thing to commit. Both the canonical checkout and a linked worktree are
-# covered, since a worktree lives one level deeper.
-FALLBACKS = (
-    ROOT.parent / "ocelli-tools" / "venv" / "bin" / "python",
-    ROOT.parent.parent / "ocelli-tools" / "venv" / "bin" / "python",
-)
+VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 
 # What the generator suite needs beyond the standard library.
 REQUIRED_MODULES = ("pydicom", "numpy")
@@ -121,14 +110,10 @@ def candidates() -> list[tuple[Path, str, bool]]:
     override = os.environ.get(ENV_VAR)
     if override:
         found.append((Path(override).expanduser(), ENV_VAR, True))
-    if CONFIG.exists():
-        recorded = CONFIG.read_text(encoding="utf-8").strip()
-        if recorded:
-            found.append((Path(recorded).expanduser(), CONFIG.name, True))
-    # The interpreter running this script, which is the whole answer in CI
-    # where the packages are installed into the runner's own Python.
+    found.append((VENV_PYTHON, ".venv", False))
+    # `uv run` executes this script with the project environment. Keep the
+    # running interpreter as a final fallback for CI and equivalent runners.
     found.append((Path(sys.executable), "the running interpreter", False))
-    found += [(path, "default", False) for path in FALLBACKS]
     return found
 
 
@@ -215,8 +200,6 @@ def run_suite(interpreter: Path, pattern: str) -> tuple[bool, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--set", metavar="PATH",
-                        help="record the interpreter for this clone")
     parser.add_argument("--which", action="store_true",
                         help="print the resolved interpreter and its origin")
     parser.add_argument("--require-prerequisites", action="store_true",
@@ -231,21 +214,6 @@ def main() -> int:
 
     if args.run_suite:
         return run_suite_here(args.run_suite)
-
-    if args.set:
-        target = Path(args.set).expanduser()
-        if not target.exists():
-            print(f"FAIL: {target} does not exist")
-            return 1
-        if not has_modules(target):
-            print(f"FAIL: {target} cannot import "
-                  f"{' and '.join(REQUIRED_MODULES)}")
-            print("Point --set at the interpreter of the environment that has")
-            print("the DICOM tooling, see corpus/README.md.")
-            return 1
-        CONFIG.write_text(str(target) + "\n", encoding="utf-8")
-        print(f"recorded {target} in {CONFIG.name}")
-        return 0
 
     interpreter, origin = resolve()
     if args.metadata_check:
@@ -281,8 +249,8 @@ def main() -> int:
         verdicts.append(
             f"{TOOLED_SUITE}: SKIPPED, no interpreter can import "
             f"{' and '.join(REQUIRED_MODULES)}. Tried:\n{origin}\n"
-            f"  Record one with: python3 scripts/corpus_tests.py --set PATH, "
-            f"or export {ENV_VAR}.")
+            f"  Run `uv sync --locked`, or export "
+            f"{ENV_VAR} for CI.")
     elif absent:
         skipped = True
         verdicts.append(

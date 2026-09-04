@@ -216,3 +216,21 @@ The external DOCX, XLSX and private redaction bundle are no longer project
 inputs. The `docs` gate and the spreadsheet step in `/sync-status` were removed.
 Repository-native backlog, sprint-plan, deviation, provenance, prose and content
 guards continue to validate the tracked sources.
+
+## Repository-local corpus tooling correction after S01, recorded 2026-09-04
+
+The operator required both untracked runtime assets to live inside the
+checkout. Corpus bytes now have one fixed location under ignored
+`corpus/data`, and Python tooling now uses a locked uv project with an ignored
+`.venv`. Sibling `ocelli-corpus` and `ocelli-tools` fallbacks were removed.
+
+`scripts/populate_corpus.py` can acquire the four public TCIA series, rebuild
+the deterministic synthetic layer, and run the corpus gate. It can also seed
+from an existing directory in offline mode, but copies only manifest-matching
+bytes. CI uses `uv sync --locked`, and the corpus pin test reads the uv project
+metadata instead of duplicated install commands.
+
+The former implicit source-document sibling fallback was also removed. The
+tracked Markdown and JSON remain authoritative, while the dormant bootstrap
+converters require an explicit source path if someone deliberately runs them.
+This entry records the corresponding `.claude/WORKFLOW.md` wording change.

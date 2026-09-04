@@ -17,18 +17,17 @@ requirement, and the answer to "may we redistribute this" should not require
 archaeology.
 
 Usage:
-  python3 scripts/corpus_check.py                      # verify presence + digests
-  python3 scripts/corpus_check.py --manifest-only      # shape only, no data needed
-  python3 scripts/corpus_check.py --coverage           # what the corpus is MISSING
-  python3 scripts/corpus_check.py --fetch              # download rows carrying a url
-  python3 scripts/corpus_check.py --add FILE --modality CT --category stack-window
+  uv run scripts/corpus_check.py                      # verify presence + digests
+  uv run scripts/corpus_check.py --manifest-only      # shape only, no data needed
+  uv run scripts/corpus_check.py --coverage           # what the corpus is MISSING
+  uv run scripts/corpus_check.py --fetch              # download rows carrying a url
+  uv run scripts/corpus_check.py --add FILE --modality CT --category stack-window
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
-import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -93,8 +92,7 @@ COLOUR_PHOTOMETRIC = {
 
 
 def corpus_dir() -> Path:
-    override = os.environ.get("OCELLI_CORPUS_DIR")
-    return Path(override).expanduser() if override else ROOT / "corpus" / "data"
+    return ROOT / "corpus" / "data"
 
 
 def load() -> list[dict[str, str]]:
@@ -384,8 +382,8 @@ def verify(rows: list[dict[str, str]], fetch: bool) -> int:
 
     if missing:
         print("\nFAIL: corpus cases are absent.")
-        print("Set OCELLI_CORPUS_DIR, or run with --fetch for rows that")
-        print("carry a url. See corpus/README.md.")
+        print("Run scripts/populate_corpus.py, with --seed when real cases")
+        print("are not directly fetchable. See corpus/README.md.")
         for path in missing[:20]:
             print(f"  {path}")
         if len(missing) > 20:

@@ -72,8 +72,8 @@ def main() -> int:
             problems.append(
                 f"{name}: this is DICOM. No patient data enters this "
                 f"repository, ever. There is no allowlist. Put it under "
-                f"$OCELLI_CORPUS_DIR and add a manifest row with "
-                f"`python3 scripts/corpus_check.py --add`.")
+                f"the ignored corpus/data directory and add a manifest row "
+                f"with `uv run scripts/corpus_check.py --add`.")
             continue
 
         if parts & ARTEFACT_PARTS:

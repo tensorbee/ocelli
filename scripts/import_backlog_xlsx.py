@@ -34,7 +34,7 @@ from pathlib import Path
 try:
     import openpyxl
 except ImportError:  # pragma: no cover
-    sys.exit("openpyxl is required: pip install openpyxl")
+    sys.exit("openpyxl is required: run `uv sync --locked`")
 
 ROOT = Path(__file__).resolve().parent.parent
 

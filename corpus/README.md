@@ -1,16 +1,20 @@
 # The golden corpus
 
-The corpus is **not in git**, deliberately. `corpus/manifest.tsv` is, and it is
-what makes the corpus verifiable without being present.
+The corpus bytes are **not in git**, deliberately. They live at the fixed,
+gitignored path `corpus/data`. `corpus/manifest.tsv` is tracked, and it is what
+makes the local corpus verifiable.
 
 ## Where it lives
 
 ```bash
-export OCELLI_CORPUS_DIR=/path/to/your/corpus
-python3 scripts/corpus_check.py            # verify against the manifest
+uv sync --locked
+uv run scripts/populate_corpus.py
 ```
 
-Default when the variable is unset: `corpus/data/`, which is gitignored.
+`populate_corpus.py` downloads the four public TCIA series, regenerates the
+synthetic layer, and runs the corpus gates. To reuse a previously populated
+directory without network access, pass `--seed /path/to/corpus --offline`.
+Only files whose SHA-256 digest matches the manifest are copied from a seed.
 
 ## Why it is not committed
 
@@ -78,10 +82,9 @@ the `category` column records which.
 ### Layer 1, synthetic, regenerated from a committed script
 
 ```bash
-export OCELLI_CORPUS_DIR=/path/to/your/corpus
-python3 scripts/corpus_synth.py                  # writes synthetic/ and syntax/
-python3 scripts/corpus_synth.py --write-manifest # refresh those rows only
-python3 scripts/corpus_check.py                  # digests must still match
+uv run scripts/corpus_synth.py                  # writes synthetic/ and syntax/
+uv run scripts/corpus_synth.py --write-manifest # refresh those rows only
+uv run scripts/corpus_check.py                  # digests must still match
 ```
 
 Prerequisites, all native:
@@ -101,7 +104,7 @@ Prerequisites, all native:
 them, covering the ones that can move a digest rather than every package above:
 
 ```bash
-python3 scripts/corpus_synth.py --tool-versions   # what you have, against those
+uv run scripts/corpus_synth.py --tool-versions   # what you have, against those
 ```
 
 That command asks each tool rather than trusting anything written down, and it
@@ -176,24 +179,10 @@ addition, not something F-009 owed. Separately, HLD 25.1 states no tolerance
 for 8-bit monochrome at all, and this file is absorbed into class two by
 modality.
 
-To reproduce the acquisition, series by series:
+To reproduce the acquisition and verify every resulting file:
 
 ```bash
-export OCELLI_CORPUS_DIR=/path/to/your/corpus
-API=https://services.cancerimagingarchive.net/nbia-api/services/v1
-
-# The four series, by SeriesInstanceUID.
-CT=1.3.6.1.4.1.14519.5.2.1.108975852603347259500108190173730050021
-MR=1.3.6.1.4.1.14519.5.2.1.1620.1226.229417808443818737599259533657
-DX=1.3.6.1.4.1.14519.5.2.1.111496736574540772816177955707250560822
-US=1.3.6.1.4.1.14519.5.2.1.1.56314755871495081827678310314743171188
-
-for pair in ct_cmb_mml:$CT mr_eay131:$MR dx_varepop:$DX us_cmb_crc:$US; do
-  name=${pair%%:*}; uid=${pair#*:}
-  mkdir -p "$OCELLI_CORPUS_DIR/real/$name"
-  curl -s -o "/tmp/$name.zip" "$API/getImage?SeriesInstanceUID=$uid"
-  ( cd "$OCELLI_CORPUS_DIR/real/$name" && unzip -q "/tmp/$name.zip" )
-done
+uv run scripts/populate_corpus.py
 ```
 
 Each archive contains the instances plus a `LICENSE` file naming the
@@ -204,14 +193,14 @@ The per-series licence can also be read back from the API, which is where the
 manifest's values came from:
 
 ```bash
-curl -s "$API/getSeries?Collection=CMB-MML" | python3 -m json.tool | \
+curl -s "$API/getSeries?Collection=CMB-MML" | uv run python -m json.tool | \
   grep -E 'License|SeriesInstanceUID'
 ```
 
 Then add each file with the digest computed for you:
 
 ```bash
-python3 scripts/corpus_check.py --add "$OCELLI_CORPUS_DIR/real/ct_cmb_mml/00000001.dcm" \
+uv run scripts/corpus_check.py --add "corpus/data/real/ct_cmb_mml/00000001.dcm" \
   --modality CT --transfer-syntax 1.2.840.10008.1.2.1 \
   --category "real, mono16, series, burned-in-unchecked" \
   --source "TCIA CMB-MML, https://doi.org/10.7937/SZKB-SW39" \
@@ -233,7 +222,7 @@ cases have no patient identity to remove and carry no such marker.
 ## Coverage, and how it is checked
 
 ```bash
-python3 scripts/corpus_check.py --coverage   # manifest only, no data needed
+uv run scripts/corpus_check.py --coverage   # manifest only, no data needed
 bin/ocelli.sh gate corpus                    # coverage, then the digests
 ```
 
@@ -262,7 +251,7 @@ bin/ocelli.sh gate corpus-tests      # what /verify runs, see below for CI
 That is the gate. It is in the CI floor, because it needs no corpus and no GPU:
 the generator writes into a temporary directory of its own.
 
-Under the hood it is `python3 scripts/corpus_tests.py`, and there are two
+Under the hood it is `uv run scripts/corpus_tests.py`, and there are two
 reasons it is a script rather than a line of shell.
 
 **It fails on a skipped test rather than on the exit status.** Run the suites
@@ -270,22 +259,20 @@ under an interpreter with no pydicom and the generator suite reports a single
 skip, the process exits 0, and the hand-computed PS3.3 fixture did not run. A
 skip is not a pass anywhere else in this project and it is not one here.
 
-**It resolves the interpreter, because that is a property of the machine.** The
-generator needs pydicom, numpy and the codec plugins, and a checkout cannot know
-where that lives. First match wins, and each candidate is accepted only if it
-can actually import what is needed:
+**It resolves the locked project interpreter.** The generator needs pydicom,
+numpy and the codec plugins. `uv sync --locked` installs them in `.venv`.
+First match wins, and each candidate is accepted only if it can import what is
+needed:
 
-1. `$OCELLI_PYTHON`
-2. `.ocelli-python-path`, per clone and gitignored
-3. the interpreter running the script, which is the whole answer in CI
-4. `ocelli-tools/venv/bin/python` beside the checkout or beside its parent
+1. `$OCELLI_PYTHON`, for an explicit CI or automation override
+2. `.venv/bin/python`
+3. the interpreter running the script, including `uv run`
 
 ```bash
-python3 scripts/corpus_tests.py --which          # what it resolved, and from where
-python3 scripts/corpus_tests.py --set /path/to/python   # record it for this clone
+uv run scripts/corpus_tests.py --which
 ```
 
-The first two are authoritative: if one is set and cannot import pydicom, no
+The environment override is authoritative: if it cannot import pydicom, no
 fallback is tried **for the generator suite**, because running a different
 interpreter from the one asked for and reporting success is its own quiet
 failure. The coverage suite needs nothing but the standard library, so it runs
@@ -299,7 +286,7 @@ When nothing resolves, or DCMTK or OpenJPH is absent, the generator half exits
 CI is such a caller:
 
 ```bash
-python3 scripts/corpus_tests.py --require-prerequisites   # a skip is a failure
+uv run scripts/corpus_tests.py --require-prerequisites   # a skip is a failure
 ```
 
 `bin/ocelli.sh` returns 0 for a skipped gate, which is right for `docs` and
@@ -330,8 +317,8 @@ is worth more than a row nobody can evidence.
 Every field bug becomes a permanent fixture (HLD section 11, story E2.6). To
 add one:
 
-1. Put the file under `$OCELLI_CORPUS_DIR`.
-2. `python3 scripts/corpus_check.py --add <file> --modality CT
+1. Put the file under `corpus/data`.
+2. `uv run scripts/corpus_check.py --add <file> --modality CT
    --transfer-syntax <uid> --category ...` appends the row with a computed
    digest. Three of those are load-bearing and all three default to empty:
    `--transfer-syntax` is what condition 4 is counted from, and `--category`

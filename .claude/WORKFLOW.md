@@ -161,7 +161,7 @@ file and every manifest. There is no allowlist.
 
 ## No patient data, ever
 
-The corpus lives outside git behind a committed manifest
+The corpus lives under ignored `corpus/data` behind a committed manifest
 (`corpus/README.md`). `.githooks/pre-commit` refuses a staged DICOM by magic
 bytes as well as by suffix, because `anon001` with no extension is a very
 normal way to receive one. There is no allowlist and no escape hatch.

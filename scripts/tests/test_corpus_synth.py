@@ -35,6 +35,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -662,34 +663,41 @@ class EncoderProvenance(unittest.TestCase):
 
 
 class ToolchainPins(unittest.TestCase):
-    """`BUILT_WITH` and the CI job's install pins are the same versions twice.
+    """`BUILT_WITH` and the uv project pins are the same versions twice.
 
     The README's copy was deleted, because a reader can be sent to the source.
-    CI's cannot be: the job has to name versions to install them. So the two
-    are joined here instead, which is the only remaining way this pair can
+    CI installs the checked-in lockfile, so the project metadata and generator
+    table are joined here instead. This is the only remaining way the pair can
     drift without something noticing.
     """
 
     WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+    PROJECT = ROOT / "pyproject.toml"
 
     def workflow(self) -> str:
         return self.WORKFLOW.read_text(encoding="utf-8")
 
-    # BUILT_WITH entries CI does not install with pip. OpenJPH and DCMTK have
+    # BUILT_WITH entries uv does not install directly. OpenJPH and DCMTK have
     # a test below each. OpenJPEG has none, because it ships inside the pinned
-    # pylibjpeg-openjpeg wheel. Everything else must appear as a pip pin.
-    NOT_PIP = ("OpenJPEG (the library inside it)", "DCMTK", "OpenJPH")
+    # pylibjpeg-openjpeg wheel. Everything else must be a project pin.
+    NOT_UV = ("OpenJPEG (the library inside it)", "DCMTK", "OpenJPH")
 
-    def test_ci_pins_agree_with_built_with(self) -> None:
-        pinned = dict(re.findall(r'"([A-Za-z0-9_-]+)==([0-9][0-9A-Za-z.]*)"',
-                                 self.workflow()))
-        expected = set(corpus_synth.BUILT_WITH) - set(self.NOT_PIP)
+    def test_uv_pins_agree_with_built_with(self) -> None:
+        project = tomllib.loads(self.PROJECT.read_text(encoding="utf-8"))
+        pinned = dict(re.findall(
+            r"^([A-Za-z0-9_-]+)==([0-9][0-9A-Za-z.]*)$",
+            "\n".join(project["project"]["dependencies"]), re.MULTILINE,
+        ))
+        expected = set(corpus_synth.BUILT_WITH) - set(self.NOT_UV)
         self.assertEqual(set(pinned) & set(corpus_synth.BUILT_WITH), expected,
                          "a pin was dropped, or BUILT_WITH gained an entry CI "
                          "does not install")
         for name in sorted(expected):
             with self.subTest(package=name):
                 self.assertEqual(pinned[name], corpus_synth.BUILT_WITH[name])
+
+        self.assertIn("uv sync --locked", self.workflow())
+        self.assertTrue((ROOT / "uv.lock").is_file())
 
     def test_ci_pins_openjph_to_the_version_it_was_built_with(self) -> None:
         tag = re.search(r"--branch\s+([0-9][0-9A-Za-z.]*)", self.workflow())

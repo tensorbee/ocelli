@@ -7,7 +7,7 @@ description: "Python and command-line DICOM tooling for Ocelli's corpus and fixt
 
 Canonical source: `.claude/skills/dicom-tooling/SKILL.md`.
 
-Source SHA-256: `c2afcb7ce0b6f5bf7e126a11905fa17fda19d4da9ced8b707e9a9ea8df00e109`.
+Source SHA-256: `91cce22ba09fde5dcf805dd17499b67acf23ef2ba443fff96bc1cfdc8fbd59b5`.
 
 Before acting, read the canonical source completely and follow it using this
 host's available tools. Treat invocation arguments as arguments to that

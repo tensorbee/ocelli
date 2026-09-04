@@ -79,7 +79,8 @@ stories.
 
 ## Hard rules
 
-- **No patient data in this repository, ever.** The corpus lives outside git
+- **No patient data in git, ever.** The corpus lives under ignored
+  `corpus/data`
   behind `corpus/manifest.tsv`. The pre-commit hook refuses staged DICOM by
   magic bytes as well as by suffix. No allowlist.
 - **dwv and Horos must not be opened**, by a person or an agent. GPL-3 and

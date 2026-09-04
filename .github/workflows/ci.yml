@@ -72,7 +72,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python3 -m pip install openpyxl
 
       # Decision D2. The one that is worthless unless enforced.
       - run: ci/check-bindgen-isolation.sh
@@ -110,15 +109,13 @@ jobs:
           python-version: "3.12"
 
       # The generator writes real DICOM in every transfer syntax the codec
-      # registry claims, so it needs real encoders. Every Python package below
-      # is pinned and so is OpenJPH. DCMTK is NOT, see the step below.
+      # registry claims, so it needs real encoders. The Python environment is
+      # the same locked uv environment used by developers. OpenJPH is pinned.
+      # DCMTK is NOT, see the step below.
       - name: Python DICOM tooling
         run: |
-          python3 -m pip install \
-            "pydicom==3.0.2" "numpy==2.5.2" \
-            "pylibjpeg==2.1.0" "pylibjpeg-libjpeg==2.4.0" \
-            "pylibjpeg-openjpeg==2.5.0" "pylibjpeg-rle==2.2.0" \
-            "pyjpegls==1.5.1"
+          python3 -m pip install "uv==0.11.19"
+          uv sync --locked
 
       # DCMTK comes from the distribution and is therefore NOT pinned. On
       # ubuntu-latest (24.04) that is 3.6.7, against the 3.7.0 that
@@ -166,7 +163,7 @@ jobs:
       # an install half-succeeded and the fixture did not run. That must be
       # red, not a green tick. `--require-prerequisites` says so, and it is
       # the same runner a developer gets through the gate.
-      - run: python3 scripts/corpus_tests.py --require-prerequisites
+      - run: uv run scripts/corpus_tests.py --require-prerequisites
 
   frontend:
     name: TypeScript

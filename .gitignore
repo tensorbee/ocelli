@@ -18,6 +18,7 @@
 
 # Python bytecode from the guard scripts. Appears the moment one is imported
 # as a module rather than run as a script.
+.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -79,7 +80,3 @@ test-results/
 # Historical bootstrap converters may record an external source location.
 # No gate or workflow requires it.
 .ocelli-source-path
-
-# Which interpreter has pydicom and the codec plugins on THIS machine, for
-# `bin/ocelli.sh gate corpus-tests`. Per-clone, for the same reason.
-.ocelli-python-path

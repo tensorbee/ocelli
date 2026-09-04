@@ -33,7 +33,7 @@ Targets
 
 Validation
   oracle [args]          the differential harness against cornerstone3D (GPU)
-  corpus                 verify $OCELLI_CORPUS_DIR against corpus/manifest.tsv
+  corpus                 verify corpus/data against corpus/manifest.tsv
   corpus-tests           the corpus tooling suites (see OCELLI_PYTHON below)
 
 Gates
@@ -44,9 +44,8 @@ Gates
   gate --all             every gate, including the GPU and corpus tiers
 
 Environment
-  OCELLI_CORPUS_DIR      corpus location, default corpus/data
   OCELLI_PYTHON          interpreter with pydicom for `gate corpus-tests`,
-                         default resolved by scripts/corpus_tests.py
+                         CI override, local default is .venv/bin/python
   OCELLI_AGENT           recorded in the provenance trailer
 USAGE
 }

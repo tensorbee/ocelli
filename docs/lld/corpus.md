@@ -4,7 +4,7 @@
 **Last updated:** 2026-09-04
 
 The corpus is the input every later correctness claim is measured on. It lives
-outside git at `$OCELLI_CORPUS_DIR` behind `corpus/manifest.tsv`, which is
+outside git under ignored `corpus/data` behind `corpus/manifest.tsv`, which is
 deviation **D-05**. `corpus/README.md` is the operator-facing guide. This file
 is the design behind it.
 
