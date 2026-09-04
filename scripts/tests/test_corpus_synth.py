@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import os
 import re
 import struct
 import subprocess
@@ -128,6 +129,11 @@ def digest(path: Path) -> str:
 def tree_digests(base: Path) -> dict[str, str]:
     return {p.relative_to(base).as_posix(): digest(p)
             for p in sorted(base.rglob("*")) if p.is_file()}
+
+
+def generated_manifest_rows() -> list[dict[str, str]]:
+    return [dict(zip(corpus_check.COLUMNS, line.split("\t")))
+            for line in corpus_synth.manifest_rows(CORPUS)]
 
 
 _TMP: tempfile.TemporaryDirectory | None = None
@@ -281,6 +287,72 @@ class Determinism(unittest.TestCase):
                             ds.file_meta.ImplementationClassUID):
                     self.assertTrue(str(uid).startswith(INSTANCE_UID_ARC),
                                     f"{uid} is not in the {INSTANCE_UID_ARC} arc")
+
+
+class MetadataAudit(unittest.TestCase):
+    """Manifest coverage labels must agree with PS3.3 and PS3.10 metadata."""
+
+    def problems(self, rows: list[dict[str, str]]) -> list[str]:
+        return corpus_check.metadata_problems(rows, CORPUS)
+
+    def test_generated_manifest_labels_match_every_file(self) -> None:
+        self.assertEqual(self.problems(generated_manifest_rows()), [])
+
+    def test_a_wrong_modality_is_named_by_relative_path(self) -> None:
+        rows = generated_manifest_rows()
+        rows[0] = {**rows[0], "modality": "MR"}
+        self.assertEqual(
+            self.problems(rows),
+            [f"{rows[0]['path']}: manifest modality does not match the file"])
+
+    def test_a_wrong_transfer_syntax_is_named_by_relative_path(self) -> None:
+        rows = generated_manifest_rows()
+        rows[0] = {**rows[0],
+                   "transfer_syntax": "1.2.840.10008.1.2"}
+        self.assertEqual(
+            self.problems(rows),
+            [f"{rows[0]['path']}: manifest transfer syntax does not match "
+             "the file"])
+
+    def test_mono16_must_match_the_pixel_module(self) -> None:
+        rows = generated_manifest_rows()
+        row = next(r for r in rows if r["path"].endswith("reference_rgb8.dcm"))
+        row["category"] = "synthetic, mono16"
+        self.assertEqual(
+            self.problems([row]),
+            [f"{row['path']}: mono16 category does not match the pixel module"])
+
+    def test_colour_must_match_the_pixel_module(self) -> None:
+        rows = generated_manifest_rows()
+        row = next(r for r in rows if r["path"].endswith("reference_mono12.dcm"))
+        row["category"] = "synthetic, colour"
+        self.assertEqual(
+            self.problems([row]),
+            [f"{row['path']}: colour category does not match the pixel module"])
+
+    def test_us_must_match_modality(self) -> None:
+        rows = generated_manifest_rows()
+        row = next(r for r in rows if r["path"].endswith("reference_mono12.dcm"))
+        row["category"] = "synthetic, us"
+        self.assertEqual(
+            self.problems([row]),
+            [f"{row['path']}: us category does not match Modality"])
+
+    def test_metadata_dispatch_fails_when_the_interpreter_is_absent(self) -> None:
+        environment = os.environ.copy()
+        environment["OCELLI_PYTHON"] = "/definitely/missing/ocelli-python"
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "corpus_tests.py"),
+             "--metadata-check"],
+            cwd=ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAIL: no interpreter can import", result.stdout)
+        self.assertIn("absent reader is a failure rather than a skip",
+                      result.stdout)
 
 
 class Conformance(unittest.TestCase):

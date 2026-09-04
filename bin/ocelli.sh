@@ -59,6 +59,7 @@ GATES=(
   "bindgen|no|wasm-bindgen confined to ocelli-wasm (HLD 15.3, decision D2)"
   "unsafe|no|no unsafe outside the two permitted files (HLD 27.2 R5)"
   "pins|no|wgpu pinned exactly (HLD 15.2, 27.2 R4)"
+  "nostd|no|no_std crates reach no dependency std feature (D-09)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "prose|no|voice rules over operator-facing prose"
   "content|no|no DICOM and no build artefacts tracked"
@@ -91,6 +92,7 @@ run_gate() {
     bindgen)     ci/check-bindgen-isolation.sh ;;
     unsafe)      python3 scripts/unsafe_allowlist_check.py ;;
     pins)        python3 scripts/pin_and_size_check.py ;;
+    nostd)       python3 scripts/no_std_check.py ;;
     provenance)  python3 scripts/source_provenance_check.py ;;
     prose)       python3 scripts/prose_check.py ;;
     content)     python3 scripts/staged_content_check.py --tracked ;;
@@ -128,7 +130,8 @@ run_gate() {
     # gives: a case arm returns the status of its LAST command, so an unchained
     # first command can fail and be reported green.
     corpus)      python3 scripts/corpus_check.py --coverage &&
-                 python3 scripts/corpus_check.py ;;
+                 python3 scripts/corpus_check.py &&
+                 python3 scripts/corpus_tests.py --metadata-check ;;
     oracle)      "$0" oracle ;;
     *)           echo "unknown gate: $name" >&2; return 2 ;;
   esac

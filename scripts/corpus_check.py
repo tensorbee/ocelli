@@ -85,6 +85,12 @@ CLASS_TOKENS = (MONOCHROME_16_BIT,) + COLOUR_OR_ULTRASOUND
 # one would read as a live gap forever.
 CONTRADICTORY_TOKENS = (("colour", "chroma-untested"),)
 
+MONOCHROME_PHOTOMETRIC = {"MONOCHROME1", "MONOCHROME2"}
+COLOUR_PHOTOMETRIC = {
+    "PALETTE COLOR", "RGB", "YBR_FULL", "YBR_FULL_422",
+    "YBR_PARTIAL_422", "YBR_ICT", "YBR_RCT",
+}
+
 
 def corpus_dir() -> Path:
     override = os.environ.get("OCELLI_CORPUS_DIR")
@@ -137,6 +143,76 @@ def digest(path: Path) -> str:
 
 def tokens(row: dict[str, str]) -> set[str]:
     return {part.strip() for part in row["category"].split(",") if part.strip()}
+
+
+def metadata_problems(rows: list[dict[str, str]], base: Path) -> list[str]:
+    """Compare coverage-driving labels with non-patient DICOM attributes."""
+    import pydicom
+    from pydicom.errors import InvalidDicomError
+
+    problems: list[str] = []
+    tags = ["Modality", "SamplesPerPixel", "PhotometricInterpretation",
+            "BitsAllocated"]
+    for row in rows:
+        relative = row["path"]
+        path = base / relative
+        if not path.is_file():
+            problems.append(f"{relative}: file is absent for metadata audit")
+            continue
+        try:
+            ds = pydicom.dcmread(path, stop_before_pixels=True,
+                                 specific_tags=tags)
+            modality = str(ds.get("Modality", "")).strip()
+            syntax = str(ds.file_meta.get("TransferSyntaxUID", "")).strip()
+            samples = int(ds.get("SamplesPerPixel", 0))
+            photometric = str(ds.get("PhotometricInterpretation", "")).strip()
+            bits_allocated = int(ds.get("BitsAllocated", 0))
+        except (InvalidDicomError, OSError, TypeError, ValueError) as error:
+            problems.append(f"{relative}: metadata cannot be read, "
+                            f"{type(error).__name__}")
+            continue
+
+        if modality != row["modality"].strip():
+            problems.append(
+                f"{relative}: manifest modality does not match the file")
+        if syntax != row["transfer_syntax"].strip():
+            problems.append(
+                f"{relative}: manifest transfer syntax does not match the file")
+
+        claimed = tokens(row)
+        if MONOCHROME_16_BIT in claimed and not (
+                samples == 1 and bits_allocated == 16 and
+                photometric in MONOCHROME_PHOTOMETRIC):
+            problems.append(
+                f"{relative}: mono16 category does not match the pixel module")
+
+        is_colour = (
+            (photometric == "PALETTE COLOR" and samples == 1) or
+            (photometric in COLOUR_PHOTOMETRIC - {"PALETTE COLOR"} and
+             samples == 3)
+        )
+        if "colour" in claimed and not is_colour:
+            problems.append(
+                f"{relative}: colour category does not match the pixel module")
+        if "us" in claimed and modality != "US":
+            problems.append(
+                f"{relative}: us category does not match Modality")
+    return problems
+
+
+def audit_metadata(rows: list[dict[str, str]]) -> int:
+    """Audit only the attributes used by corpus coverage policy."""
+    problems = metadata_problems(rows, corpus_dir())
+    print(f"metadata audit over {len(rows)} corpus rows")
+    if problems:
+        print("\nFAIL: manifest labels do not match DICOM metadata")
+        for problem in problems:
+            print(f"  {problem}")
+        print("\nOnly relative paths and non-patient attribute names are "
+              "reported.")
+        return 1
+    print("OK: modality, transfer syntax and tolerance-class metadata agree")
+    return 0
 
 
 def coverage(rows: list[dict[str, str]]) -> int:
@@ -353,6 +429,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest-only", action="store_true")
     parser.add_argument("--coverage", action="store_true")
+    parser.add_argument("--metadata", action="store_true")
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--add", metavar="FILE")
     parser.add_argument("--modality", default="")
@@ -368,6 +445,8 @@ def main() -> int:
         return add(args)
 
     rows = load()
+    if args.metadata:
+        return audit_metadata(rows)
     if args.coverage:
         return coverage(rows)
     if args.manifest_only:

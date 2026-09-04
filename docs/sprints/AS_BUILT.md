@@ -193,3 +193,17 @@ active sprint is S01 and F-010 remains pending in S02. S01 contains no port
 code and builds the corpus the oracle will consume. `gate --all` and release
 remain strict, and the exception stops applying when F-010 moves from pending.
 This is the workflow-change trigger required by `.claude/WORKFLOW.md`.
+
+## Corrections from S01 sprint review, recorded 2026-09-04
+
+The F-001 entry says `scripts/no_std_check.py` holds D-09. The script existed
+but no gate, hook or CI job invoked it, so the claim was false at completion.
+Sprint review pass 1 wired it into the floor as the `nostd` gate and added the
+same check to CI. The guard now runs in feature, sprint and release profiles.
+
+The F-009 entry records 56 corpus tooling tests. Sprint review added six
+metadata-audit tests and one fail-closed dispatch test, making the current total
+63. The corpus gate now compares each manifest row's coverage-driving labels
+with non-patient DICOM metadata in the corresponding file. A digest-valid row
+can no longer claim the wrong modality, transfer syntax or tolerance class
+silently.

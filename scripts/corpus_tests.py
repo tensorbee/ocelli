@@ -223,6 +223,9 @@ def main() -> int:
     parser.add_argument("--require-prerequisites", action="store_true",
                         help="treat an absent prerequisite as a failure rather "
                              "than a skip. For a caller that installed them.")
+    parser.add_argument("--metadata-check", action="store_true",
+                        help="run the corpus metadata audit with the resolved "
+                             "DICOM interpreter")
     parser.add_argument("--run-suite", metavar="PATTERN",
                         help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -246,6 +249,18 @@ def main() -> int:
         return 0
 
     interpreter, origin = resolve()
+    if args.metadata_check:
+        if interpreter is None:
+            print(f"FAIL: no interpreter can import "
+                  f"{' and '.join(REQUIRED_MODULES)}. Tried:\n{origin}")
+            print("The corpus metadata audit is part of the integrity gate, "
+                  "so an absent reader is a failure rather than a skip.")
+            return 1
+        result = subprocess.run(
+            [str(interpreter), str(ROOT / "scripts" / "corpus_check.py"),
+             "--metadata"], cwd=ROOT)
+        return result.returncode
+
     if args.which:
         if interpreter is None:
             print(f"no interpreter with {' and '.join(REQUIRED_MODULES)}. "

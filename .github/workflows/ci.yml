@@ -80,6 +80,8 @@ jobs:
       - run: python3 scripts/unsafe_allowlist_check.py
       # HLD 15.2 and 27.2 R4, wgpu pinned exactly.
       - run: python3 scripts/pin_and_size_check.py
+      # D-09. A wasm32 build still succeeds when a no_std crate reaches std.
+      - run: python3 scripts/no_std_check.py
       # docs/SOURCE-POLICY.md and HLD gate A6. No allowlist.
       - run: python3 scripts/source_provenance_check.py
       - run: python3 scripts/staged_content_check.py --tracked

@@ -99,9 +99,8 @@ proptest! {
     /// The same round trip under a projective transform. `z` is bounded so
     /// that `w` stays in [0.75, 1.25] and the case is well conditioned. A
     /// transform that ignored the `w` divide comes back tens of CSS pixels
-    /// away from where it started. How far depends on the point proptest
-    /// happens to shrink to, and it has reported drifts of 51.1 and 71.4 on
-    /// different runs. The fixed case below is the one with a stated number.
+    /// away from where it started. The fixed case below carries the
+    /// reproducible measured drift.
     #[test]
     fn canvas_world_roundtrip_under_perspective(
         x in -1e4f64..1e4,

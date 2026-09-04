@@ -35,6 +35,13 @@ tolerance policy was written against or it is not, and `scripts/corpus_check.py`
 says which. A silently different corpus is how a green suite stops meaning
 anything.
 
+`bin/ocelli.sh gate corpus` also reads the non-patient DICOM attributes that
+drive coverage. It compares Modality, Transfer Syntax UID and the pixel-module
+facts behind `mono16`, `colour` and `us` with each manifest row. A correct
+digest with a mistyped label therefore fails rather than claiming coverage the
+corpus does not have. Failure output contains only the relative corpus path and
+the mismatched attribute name.
+
 Columns: `path`, `modality`, `transfer_syntax`, `category`, `source`,
 `licence`, `licence_url`, `sha256`, `url`.
 
@@ -337,7 +344,10 @@ add one:
    ```bash
    dcmdump +P "0002,0010" <file>      # or ask pydicom, either way ask
    ```
-3. Commit the manifest row, never the file.
+3. Run `bin/ocelli.sh gate corpus`. This checks the digest and compares the
+   coverage labels with the file metadata using the configured DICOM Python
+   interpreter.
+4. Commit the manifest row, never the file.
 
 A synthetic case is added by teaching `scripts/corpus_synth.py` to write it and
 re-running `--write-manifest`, not by hand. That command replaces only the rows

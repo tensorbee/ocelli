@@ -47,8 +47,13 @@ row carries a claim and its own contradiction (`colour` beside
 `chroma-untested`), when either tolerance class is unrepresented in the corpus
 or in the real layer alone, or when every row is synthetic.
 
-`bin/ocelli.sh gate corpus` runs `--coverage` and then the digest verification,
-chained so that a coverage break with intact digests still fails.
+`bin/ocelli.sh gate corpus` runs `--coverage`, digest verification and a
+corpus-present metadata audit, chained so that any failure remains a failure.
+The audit uses pydicom through the configured tooling interpreter and reads
+only Modality, Transfer Syntax UID, Samples per Pixel, Photometric
+Interpretation and Bits Allocated. Those are the non-patient attributes that
+decide the manifest's modality and tolerance-class claims. It reports only a
+relative corpus path and the mismatched attribute name.
 
 ## Byte-determinism is a hard requirement
 

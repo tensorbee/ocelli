@@ -189,4 +189,4 @@ embedded inside an archive, and nothing in this repository claims it does.
 |------|--------|---------------|--------|
 | 2026-09-04 | S01 | Rows 1 to 17 | Every probe went red with a specific message, every control returned green |
 | 2026-09-04 | S01 | Row 18 | Added during the same run, after the exercise surfaced the fail-open redaction loader. Red with a specific message, and `docs/hld/` provably untouched |
-| 2026-09-04 | S01 | Row 19 | Added for deviation D-09. Its first version reported clean on a broken tree, was corrected, and then went red with a specific message and green on the correct shape |
+| 2026-09-04 | S01 | Row 19 | Added for deviation D-09. Its first version reported clean on a broken tree, was corrected, then went red with a specific message and green on the correct shape. The S01 sprint review wired it into the `nostd` gate and CI |
