@@ -131,3 +131,52 @@ go red under the mutation.
   to record here. Two triggers: it stated that `CHANGELOG.md` released sections
   are exempt from the voice rules, which reads as though unreleased sections are
   checked, and `scripts/prose_check.py` does not cover that file at all.
+
+## F-009, Golden corpus ingest and de-identified fixture store, completed 2026-09-04
+
+**What was built.** A 91-case golden corpus behind a committed manifest, with
+47 byte-deterministic synthetic cases and 44 real cases from four TCIA series.
+The manifest covers all 16 transfer syntaxes in the declared codec registry,
+both tolerance classes, case digests and actionable licence records while the
+DICOM bytes remain outside git.
+
+**HLD sections implemented.** None. Built against
+`docs/hld/08-validation-architecture.md` section 11 and
+`docs/hld/22-testing-and-tolerance.md` section 25.1.
+**Deviations.** None new. D-05 is implemented and D-04 is relied on.
+**Crates / packages modified.** `corpus/`, `scripts/corpus_check.py`,
+`scripts/corpus_synth.py`, `scripts/corpus_tests.py`, their Python tests,
+`.github/workflows/ci.yml`, `bin/ocelli.sh`, `docs/SOURCE-POLICY.md` and the
+verification workflow.
+**Tests added.** 56 Python tests behind `gate corpus-tests`: 17 coverage and
+registry unit tests, and 39 generator tests covering deterministic output,
+stored-value fixtures, synthetic traps, encoder provenance and codestream
+conformance. The corpus gate separately verifies coverage and all 91 digests.
+**Fixture provenance.** DICOM PS3.3 C.7.6.3.1.4 and PS3.5 section 8.1.1. The
+stored-value tests unpack eight hand-chosen 12-bit signed words in both right
+and left alignment, with the expected values computed from the standard.
+**Verification.** `/verify --profile feature` at tree `026fed3ec8e5`, with 14
+gates green. The `Ocelli-Verify` trailer on commit `f36b3db` records
+`gates=backlog,bindgen,clippy,content,corpus,corpus-tests,deviations,fmt,pins,prose,provenance,skills,test,unsafe`.
+**Corpus.** pass with 91 cases, 16 of 16 declared transfer syntaxes, 85
+monochrome 16-bit rows and 6 colour or ultrasound rows.
+**Tier coverage.** A (WebGPU) n/a, B (WebGL2 downlevel) n/a, C (CPU) n/a. The
+corpus and its verification tools are tier-independent inputs to later parity
+work and contain no rendering or compute path.
+**LLD updated.** `docs/lld/corpus.md`, created, and `docs/lld/README.md`, which
+indexes it.
+**Deviations from the design plan.** The real class-two case is 8-bit
+monochrome ultrasound rather than colour. It meets the approved colour or
+ultrasound condition, but does not exercise real-world chroma. The coverage
+tool reports that limitation and the synthetic layer supplies the YBR cases.
+**Notes for future sessions.**
+- The real layer has no chroma, so chroma subsampling and YBR conversion are
+  covered only by deterministic synthetic cases.
+- The JPEG 2000 and JPEG-LS generator cases are encoded and decoded by the
+  same libraries. Independent decoder conformance remains work for the codec
+  stories.
+- Encapsulation edge cases are absent. Multi-fragment frames, encapsulated
+  multiframe instances and empty Basic Offset Tables belong to E2.6.
+- The review loop took seven passes: 4 defects and 4 smells, 3 and 2, 4 and 2,
+  1 and 1, 0 and 2, 1 and 1, then clean. Pass 7 also recorded two non-blocking
+  nitpicks.

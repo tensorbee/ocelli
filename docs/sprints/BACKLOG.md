@@ -77,7 +77,7 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-006 | E1.6 | S03 | Benchmark harness: decode, first frame, interaction latency | Build | 2w | F-003 | pending |
 | F-007 | E1.7 | S02 | Cross-target build proof: native desktop + server binary | Build | 2w | F-001 | pending |
 | F-008 | E1.8 | S02 | ocelli-compute crate skeleton and GPU device-sharing contract | Build | 2w | F-001 | pending |
-| F-009 | E2.1 | S01 | Golden corpus ingest and de-identified fixture store | Test | 3w | - | pending |
+| F-009 | E2.1 | S01 | Golden corpus ingest and de-identified fixture store | Test | 3w | - | done |
 | F-010 | E2.2 | S02 | Headless cornerstone3D reference renderer | Test | 4w | F-009 | pending |
 | F-011 | E2.3 | S03 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w | F-010 | pending |
 | F-012 | E2.4 | S04 | CI gate: every PR renders the full corpus | Test | 3w | F-011 | pending |
@@ -393,4 +393,3 @@ section 13.
 | F-188 | E28.3 | P3 | E28 Native desktop shell | Local study cache and offline operation | Rust | 4w | pending |
 | F-189 | E29.1 | P3 | E29 Plugin host | Sandboxed wasm/JS plugin runtime and capability model | TS+Rust | 12w | pending |
 | F-190 | E29.2 | P3 | E29 Plugin host | Plugin API surface, versioning and distribution | TS+Rust | 8w | pending |
-

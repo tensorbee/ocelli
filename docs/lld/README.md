@@ -13,3 +13,4 @@ Each file carries a `**F-IDs that contributed:**` line and a
 | File | Area | F-IDs |
 |------|------|-------|
 | [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001 |
+| [corpus.md](corpus.md) | Golden corpus layout, generation and verification | F-009 |
