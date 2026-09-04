@@ -11,7 +11,7 @@ The gate. Nothing is completed, pushed or released without it.
 | Profile | Gates | Used by |
 |---------|-------|---------|
 | `feature` (default) | `--floor` plus `corpus` | `/complete-feature` |
-| `sprint` | `--all` | `/run-sprint` consolidated verification |
+| `sprint` | `--sprint` | `/run-sprint` consolidated verification |
 | `release` | `--all`, corpus required to PASS | `/release` |
 
 `--fast` runs `fmt clippy` and the changed crate's tests only. It is for the
@@ -24,9 +24,10 @@ inner loop and **is not acceptable for completion**.
 bin/ocelli.sh gate --list     # the authoritative list, with what each covers
 ```
 
-Seventeen gates. `bin/ocelli.sh` is the definition. This file does not
-duplicate the list, because two lists drift and then nobody knows which is the
-gate.
+Run that command for the count and the coverage. `bin/ocelli.sh` is the
+definition. This file does not duplicate the list, and it does not state how
+many there are either, because two lists drift and then nobody knows which is
+the gate, and a number is just the shortest possible second list.
 
 ## The GPU tier, and why it is not optional here
 
@@ -37,6 +38,12 @@ HLD decision D7 is that the oracle exists before port code because it is the
 mechanism that makes generated Rust safe to merge at volume. A `/verify` that
 skips it is not a weaker gate, it is a different gate that does not check the
 thing this project is most likely to get wrong.
+
+There is one bootstrap exception. S01 builds the corpus and contains no port
+code, while F-010 in S02 builds the oracle. `gate --sprint` reports the absent
+oracle as a named skip only when the active sprint is S01 and F-010 is still
+pending in S02. `gate --all` has no exception. Once F-010 moves from pending,
+the sprint profile is strict too.
 
 So: `corpus=absent` is permitted while the corpus is being assembled in S01 and
 is recorded honestly as `absent`. It is **not** permitted at

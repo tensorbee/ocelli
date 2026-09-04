@@ -1,10 +1,9 @@
 {
   "_comment": [
-    "Stories added AFTER the spreadsheet import. F-001 to F-190 are the",
-    "imported range and are re-derived from docs/Rust-WASM-Imaging-Backlog.xlsx",
-    "by scripts/import_backlog_xlsx.py, so nothing may be hand-added there.",
-    "Project-added stories take F-X IDs and live here instead. The importer",
-    "merges them, so `--check` still re-derives BACKLOG.md byte for byte.",
+    "Stories added after the bootstrap import. F-001 to F-190 are the frozen",
+    "imported range, so nothing may be hand-added there. Project-added stories",
+    "take F-X IDs and live here instead. The tracked backlog, allocation and",
+    "sprint plan are authoritative and their consistency gates must agree.",
     "",
     "Every addition names the deviation or the decision that created it, so a",
     "reader can tell a story that came from the specification from one that",

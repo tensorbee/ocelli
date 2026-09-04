@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""One-shot importer, docs/Rust-WASM-Imaging-Backlog.xlsx -> docs/sprints/BACKLOG.md.
+"""Historical one-shot importer for the tracked sprint planning data.
+
+No gate or workflow calls this script. The tracked Markdown and JSON files are
+authoritative.
 
 Run once at repo bootstrap. After the import, `docs/sprints/BACKLOG.md` is the
 source of truth for story status and this script is kept for provenance only,

@@ -22,6 +22,44 @@ a plan has no row here.
 | D-05 | §11 and E2.1 imply a corpus the project holds | The corpus lives outside git at `$OCELLI_CORPUS_DIR`, with a committed manifest of per-case checksums and metadata | Operator constraint. A TCIA-derived corpus is large and its redistribution terms are not ours to assume. The manifest makes the corpus verifiable without being present. | Bootstrap |
 | D-06 | The .docx code listings carry Word paragraph formatting | `docs/hld/*.md` code fences are re-indented from bracket depth and de-double-spaced | Word stored indentation and line spacing as formatting rather than characters, so pandoc emits every listing flush-left and double-spaced. Presentation only. The .docx wins where exact bytes matter. | Bootstrap |
 | D-07 | §7, "Two capability tiers, one codebase", both of them GPU | A third tier, **C, CPU**. The resolved tier may be `Cpu`, and every tier-gated feature declares its CPU answer | §7 leaves a machine with neither WebGPU nor WebGL2 rendering nothing at all, which is a failure mode the specification does not name and does not intend. Operator decision, and spike A7.1 establishes GPU-less sessions as a primary clinical path rather than a fallback. F-X001 to F-X004. | Post-bootstrap |
+| D-08 | §16, the marker spaces are `pub enum Canvas {}` and `Pt<S>` carries `#[derive(Debug, PartialEq)]` | The three marker enums derive `Debug, Clone, Copy, PartialEq, Eq, Hash`. The `Pt<S>` block is otherwise unchanged | A `derive` on a generic struct bounds the parameter, so `#[derive(Debug, PartialEq)]` expands to `impl<S: Debug> Debug for Pt<S>` and `Pt<Canvas>` satisfies neither trait while `Canvas` is bare. `assert_eq!` on two `Pt<Canvas>` fails to compile with E0369 and E0277, verified against rustc rather than reasoned about. §16's own note identifies exactly this trap for `Clone` and `Copy` and stops there. Deriving on the markers is the smaller change, because it leaves §16's `Pt` listing character for character as written. | F-001 |
+| D-09 | §15.2, `glam = "0.30"` | `glam = { version = "0.30", default-features = false, features = ["libm"] }` | Every core crate carries `#![cfg_attr(not(test), no_std)]`, which the HLD neither requires nor forbids. glam's default feature is `std`, and glam needs either `std` or its optional `libm` dependency to compile at all, so the default entry silently defeats the `no_std` posture the crates declare. The pin itself is untouched and only the feature set changes. | F-001 |
+
+## D-08, and why a derive is not a formatting detail
+
+§16's payoff is that a whole class of tool bugs stops compiling. The mechanism
+is `PhantomData<S>` over an uninhabited marker, and the cost of that mechanism
+is that every `derive` on `Pt<S>` bounds `S`. `PhantomData` itself implements
+`Debug` and `PartialEq` for any `S`, bound-free, which is why the definition
+compiles and only the call site fails. That gap is the whole trap: the crate
+builds, and the first test that compares two points does not.
+
+The two available fixes are not equivalent. Hand-implementing `Debug` and
+`PartialEq` on `Pt<S>` keeps the markers bare, and its `PartialEq` body
+compares `f64` fields directly, which the workspace's `float_cmp = "deny"`
+lint then has an opinion about inside the one place an exact comparison is
+correct. Deriving on the markers instead leaves §16's listing untouched and
+keeps the float comparison inside a derive expansion, where it belongs.
+
+**The side effect, which the F-001 review caught and which is easy to miss.**
+Deriving `Clone` and `Copy` on the markers retires §16's own note as well.
+That note says `derive(Clone, Copy)` on `Pt<S>` "would add an S: Clone bound
+that the marker types do not satisfy", and after this deviation they satisfy
+it. Confirmed against rustc 1.97.1: with the markers deriving,
+`#[derive(Debug, PartialEq, Clone, Copy)]` on `Pt<S>` compiles and works for
+all three spaces.
+
+So §16's note is preserved in the source as the quotation it is, and the
+hand-written impls stay, but **the reason they stay has changed and the source
+says so.** It is no longer that a derive would not compile. It is that
+`impl<S> Clone for Pt<S>` and `impl<S> Copy for Pt<S>` are unconditional, so a
+`Pt` is `Copy` whatever a future marker does or does not derive. A marker added
+later without `Copy` would silently make `Pt` of that space non-`Copy` under a
+derive, and the hand-written impls are what stop that.
+
+This is worth writing down because it is the shape a deviation most often goes
+wrong in: not by being wrong, but by leaving the reasoning around it describing
+the world before it was applied.
 
 ## D-07, tier C, and what it does and does not claim
 
@@ -109,7 +147,8 @@ gate off CI moves it onto a human remembering to run it.
 
 Three things carry the load instead, and all three are mechanical:
 
-1. **`/verify` runs the oracle locally and `push` is refused without it.**
+1. **Outside the bootstrap exception below, `/verify` runs the oracle locally
+   and `push` is refused without it.**
    `scripts/verify_ledger.py` records the corpus result against the exact head
    commit. A push whose head has no green corpus record for it is refused by
    `.githooks/pre-push`. A record for an ancestor commit does not count.
@@ -119,6 +158,13 @@ Three things carry the load instead, and all three are mechanical:
 3. **A GPU corpus run is available on manual dispatch** for a release or when
    a divergence is suspected, so the expensive path exists and is simply not
    automatic.
+
+**Bootstrap exception.** S01 builds the corpus the oracle consumes, and F-010
+in S02 builds the oracle itself. S01 contains no port code to validate. Its
+sprint profile therefore records the absent oracle as a named skip while F-010
+remains pending in S02. The strict `--all` profile has no exception, release
+still requires it, and the sprint exception stops applying as soon as F-010
+moves from pending.
 
 This is weaker than the HLD's design and it should be revisited if the project
 ever has cheap GPU CI. It is recorded here rather than in a commit message

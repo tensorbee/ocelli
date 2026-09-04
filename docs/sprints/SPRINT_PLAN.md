@@ -9,27 +9,24 @@ with cornerstone3D v5.8.9. **Phase 1.5 is S42 to S72**, 39 stories and 352
 engineer-weeks, the eight differentiating capabilities of HLD Part III. Phase 2
 and Phase 3 carry F-IDs in `BACKLOG.md` and no sprint, deliberately.
 
-Those two totals are the HLD's own figures, section 38 and the Part III
-preamble respectively, reached independently by summing the imported
-spreadsheet. They agree exactly, which is the only reason to trust either.
+Those two totals agree with HLD section 38 and the Part III preamble. The
+tracked backlog and allocation are now the authoritative planning data.
 
 ## How sprints were allocated
 
-`scripts/import_backlog_xlsx.py` packs stories into sprints inside a milestone
-under two caps, at most six stories and at most sixteen estimated
-engineer-weeks, and never places a story in a sprint at or before the sprint
-holding something it depends on.
+Stories were initially packed into sprints inside a milestone under two caps,
+at most six stories and at most sixteen estimated engineer-weeks. The tracked
+allocation never places a story in a sprint at or before the sprint holding
+something it depends on.
 
 **Some sprints hold one story and that is not a packing failure.** It is the
 head or the tail of a dependency chain. S06 holds only F-016, because every
 other story in M2 depends on it. Several Phase 1.5 sprints hold one story
 because that story alone is ten to fourteen engineer-weeks.
 
-**Sprint effort is not sprint duration.** The engineer-week estimates are the
-spreadsheet's, made for a team. They are kept unmodified because they are what
-the HLD's totals are built from, and rewriting them would break the only
-cross-check available. Treat them as relative size, and let the sprint clock
-measure the real thing.
+**Sprint effort is not sprint duration.** The engineer-week estimates were made
+for a team. Treat them as relative size, and let the sprint clock measure the
+real thing.
 
 ## What re-planning looks like
 
@@ -831,4 +828,3 @@ _S66 to S72, 7 stories, 74 engineer-weeks._
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
 | F-149 | E35.7 | Multi-server data sources within one study | Rust | 8w |
-

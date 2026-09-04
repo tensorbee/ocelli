@@ -19,6 +19,7 @@ archaeology.
 Usage:
   python3 scripts/corpus_check.py                      # verify presence + digests
   python3 scripts/corpus_check.py --manifest-only      # shape only, no data needed
+  python3 scripts/corpus_check.py --coverage           # what the corpus is MISSING
   python3 scripts/corpus_check.py --fetch              # download rows carrying a url
   python3 scripts/corpus_check.py --add FILE --modality CT --category stack-window
 """
@@ -37,6 +38,58 @@ MANIFEST = ROOT / "corpus" / "manifest.tsv"
 COLUMNS = ["path", "modality", "transfer_syntax", "category", "source",
            "licence", "licence_url", "sha256", "url"]
 HEADER = "\t".join(COLUMNS)
+
+# Every transfer syntax the codec registry will claim. The UIDs and their names
+# are PS3.5 Annex A, which is the authority for them. HLD section 21
+# (docs/hld/18-codec-registry.md) specifies the registry that claims them and
+# names the two open Appendix A gates, A1 for HTJ2K and A2 for JPEG-LS, but it
+# carries no list of syntaxes, so this list is not a transcription of it.
+#
+# Sixteen of them. Condition 4 of F-009 is therefore sixteen rows at minimum
+# rather than a gesture at the common ones, and neither open gate has anything
+# to be answered against until its syntaxes have cases.
+REGISTRY_TRANSFER_SYNTAXES = (
+    "1.2.840.10008.1.2",          # Implicit VR Little Endian
+    "1.2.840.10008.1.2.1",        # Explicit VR Little Endian
+    "1.2.840.10008.1.2.1.99",     # Deflated Explicit VR Little Endian
+    "1.2.840.10008.1.2.2",        # Explicit VR Big Endian, retired
+    "1.2.840.10008.1.2.5",        # RLE Lossless
+    "1.2.840.10008.1.2.4.50",     # JPEG Baseline, process 1
+    "1.2.840.10008.1.2.4.51",     # JPEG Extended, process 2 and 4
+    "1.2.840.10008.1.2.4.57",     # JPEG Lossless, process 14
+    "1.2.840.10008.1.2.4.70",     # JPEG Lossless, process 14 SV1
+    "1.2.840.10008.1.2.4.80",     # JPEG-LS Lossless
+    "1.2.840.10008.1.2.4.81",     # JPEG-LS Near-Lossless
+    "1.2.840.10008.1.2.4.90",     # JPEG 2000 Lossless Only
+    "1.2.840.10008.1.2.4.91",     # JPEG 2000
+    "1.2.840.10008.1.2.4.201",    # HTJ2K Lossless Only
+    "1.2.840.10008.1.2.4.202",    # HTJ2K Lossless Only, RPCL
+    "1.2.840.10008.1.2.4.203",    # HTJ2K
+)
+
+# The `category` column is a comma-separated token list. Two facts are read out
+# of it, and both are properties the manifest can be asked about with no corpus
+# present, which is what makes them survivable under deviation D-04.
+LAYER_TOKENS = ("synthetic", "real")
+
+# HLD section 25.1 sets one tolerance for monochrome 16-bit and a different one
+# for colour and ultrasound. An untested class has an untested tolerance, so
+# the corpus is not done until both are present.
+MONOCHROME_16_BIT = "mono16"
+COLOUR_OR_ULTRASOUND = ("colour", "us")
+CLASS_TOKENS = (MONOCHROME_16_BIT,) + COLOUR_OR_ULTRASOUND
+
+# Documentary tokens that a later edit to the SAME row can falsify. Unlike
+# `burned-in-unchecked`, which only story E22.3 can settle, `chroma-untested`
+# is settled the moment someone adds a `colour` token beside it, and a stale
+# one would read as a live gap forever.
+CONTRADICTORY_TOKENS = (("colour", "chroma-untested"),)
+
+MONOCHROME_PHOTOMETRIC = {"MONOCHROME1", "MONOCHROME2"}
+COLOUR_PHOTOMETRIC = {
+    "PALETTE COLOR", "RGB", "YBR_FULL", "YBR_FULL_422",
+    "YBR_PARTIAL_422", "YBR_ICT", "YBR_RCT",
+}
 
 
 def corpus_dir() -> Path:
@@ -86,6 +139,214 @@ def digest(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def tokens(row: dict[str, str]) -> set[str]:
+    return {part.strip() for part in row["category"].split(",") if part.strip()}
+
+
+def metadata_problems(rows: list[dict[str, str]], base: Path) -> list[str]:
+    """Compare coverage-driving labels with non-patient DICOM attributes."""
+    import pydicom
+    from pydicom.errors import InvalidDicomError
+
+    problems: list[str] = []
+    tags = ["Modality", "SamplesPerPixel", "PhotometricInterpretation",
+            "BitsAllocated"]
+    for row in rows:
+        relative = row["path"]
+        path = base / relative
+        if not path.is_file():
+            problems.append(f"{relative}: file is absent for metadata audit")
+            continue
+        try:
+            ds = pydicom.dcmread(path, stop_before_pixels=True,
+                                 specific_tags=tags)
+            modality = str(ds.get("Modality", "")).strip()
+            syntax = str(ds.file_meta.get("TransferSyntaxUID", "")).strip()
+            samples = int(ds.get("SamplesPerPixel", 0))
+            photometric = str(ds.get("PhotometricInterpretation", "")).strip()
+            bits_allocated = int(ds.get("BitsAllocated", 0))
+        except (InvalidDicomError, OSError, TypeError, ValueError) as error:
+            problems.append(f"{relative}: metadata cannot be read, "
+                            f"{type(error).__name__}")
+            continue
+
+        if modality != row["modality"].strip():
+            problems.append(
+                f"{relative}: manifest modality does not match the file")
+        if syntax != row["transfer_syntax"].strip():
+            problems.append(
+                f"{relative}: manifest transfer syntax does not match the file")
+
+        claimed = tokens(row)
+        if MONOCHROME_16_BIT in claimed and not (
+                samples == 1 and bits_allocated == 16 and
+                photometric in MONOCHROME_PHOTOMETRIC):
+            problems.append(
+                f"{relative}: mono16 category does not match the pixel module")
+
+        is_colour = (
+            (photometric == "PALETTE COLOR" and samples == 1) or
+            (photometric in COLOUR_PHOTOMETRIC - {"PALETTE COLOR"} and
+             samples == 3)
+        )
+        if "colour" in claimed and not is_colour:
+            problems.append(
+                f"{relative}: colour category does not match the pixel module")
+        if "us" in claimed and modality != "US":
+            problems.append(
+                f"{relative}: us category does not match Modality")
+    return problems
+
+
+def audit_metadata(rows: list[dict[str, str]]) -> int:
+    """Audit only the attributes used by corpus coverage policy."""
+    problems = metadata_problems(rows, corpus_dir())
+    print(f"metadata audit over {len(rows)} corpus rows")
+    if problems:
+        print("\nFAIL: manifest labels do not match DICOM metadata")
+        for problem in problems:
+            print(f"  {problem}")
+        print("\nOnly relative paths and non-patient attribute names are "
+              "reported.")
+        return 1
+    print("OK: modality, transfer syntax and tolerance-class metadata agree")
+    return 0
+
+
+def coverage(rows: list[dict[str, str]]) -> int:
+    """Answer the two coverage conditions from the manifest alone.
+
+    This mode reads no DICOM and needs no corpus directory, deliberately.
+    Deviation D-04 means CI has neither a GPU nor the corpus, so coverage is
+    the part of F-009 that CI can still see. A manifest that has stopped
+    covering the codec registry then fails on the pull request rather than at
+    the moment someone tries to answer gate A1.
+
+    That is a claim about a file, so here is the file: it runs in the `guards`
+    job of `.github/workflows/ci.yml`. The `corpus` gate stays out of
+    `--floor` because its other half verifies digests against a corpus CI
+    does not have.
+
+    Everything reported here names what is absent. "Coverage is incomplete" is
+    a sentence nobody can act on.
+    """
+    problems: list[str] = []
+
+    # A blank transfer syntax is named per path rather than discarded. `load()`
+    # does not require the column to be non-empty and `--add` defaults the flag
+    # to the empty string, so such a row is reachable through the documented
+    # path, and silently dropping it would leave it counted for nothing and
+    # reported as nothing. Condition 4 of this story is "at least one case per
+    # transfer syntax", and a row claiming none is exactly as much of a hole as
+    # a row claiming no tolerance class.
+    for row in rows:
+        if not row["transfer_syntax"].strip():
+            problems.append(
+                f"{row['path']}: declares no transfer syntax. The column is "
+                f"what condition 4 is counted from, so a blank one is a case "
+                f"that covers nothing. `--add` defaults --transfer-syntax to "
+                f"empty, so read it out of the file rather than omitting it.")
+
+    present = {row["transfer_syntax"].strip() for row in rows} - {""}
+    missing = [uid for uid in REGISTRY_TRANSFER_SYNTAXES if uid not in present]
+    if missing:
+        problems.append(
+            "no case for these transfer syntaxes the codec registry claims:")
+        problems += [f"    {uid}" for uid in missing]
+
+    unknown = sorted(present - set(REGISTRY_TRANSFER_SYNTAXES))
+    if unknown:
+        problems.append(
+            "these transfer syntaxes are in the manifest and not in the "
+            "registry, so either the registry list or the row is wrong:")
+        problems += [f"    {uid}" for uid in unknown]
+
+    for row in rows:
+        found = tokens(row)
+        layers = found & set(LAYER_TOKENS)
+        if len(layers) != 1:
+            problems.append(
+                f"{row['path']}: category declares {len(layers)} layer tokens, "
+                f"needs exactly one of {', '.join(LAYER_TOKENS)}. A case is "
+                f"generated by this repository or it is not, and 'at least one "
+                f"row is not synthetic' is otherwise unanswerable.")
+        if not found & set(CLASS_TOKENS):
+            problems.append(
+                f"{row['path']}: category declares no tolerance class. One of "
+                f"{', '.join(CLASS_TOKENS)} is required by HLD section 25.1, "
+                f"and a row in neither class is a hole rather than a case.")
+        for claim, gap in CONTRADICTORY_TOKENS:
+            if {claim, gap} <= found:
+                problems.append(
+                    f"{row['path']}: carries both '{claim}' and '{gap}', which "
+                    f"contradict. The gap this row recorded has been closed, "
+                    f"so drop '{gap}' rather than leaving it to read as a live "
+                    f"gap that nothing checks.")
+
+    def satisfies(subset: list[dict[str, str]], wanted: tuple[str, ...]) -> bool:
+        return any(tokens(row) & set(wanted) for row in subset)
+
+    real = [row for row in rows if "real" in tokens(row)]
+    for label, subset, why in (
+            ("the corpus", rows, "an untested class has an untested tolerance"),
+            ("the real layer", real,
+             "a class only ever exercised against bytes this repository "
+             "generated has never seen a vendor's padding or odd-length "
+             "values")):
+        if not satisfies(subset, (MONOCHROME_16_BIT,)):
+            problems.append(f"{label} has no monochrome 16-bit case "
+                            f"(HLD 25.1 class one), and {why}")
+        if not satisfies(subset, COLOUR_OR_ULTRASOUND):
+            problems.append(f"{label} has no colour or ultrasound case "
+                            f"(HLD 25.1 class two), and {why}")
+
+    if not real:
+        problems.append(
+            "every row is synthetic. At least one row must be not synthetic, "
+            "because a corpus built only from generated cases has never seen "
+            "a real vendor's padding, private blocks or odd-length values.")
+
+    print(f"coverage over {len(rows)} manifest rows, "
+          f"{len(real)} of them real")
+    print(f"  transfer syntaxes: {len(REGISTRY_TRANSFER_SYNTAXES) - len(missing)}"
+          f" of {len(REGISTRY_TRANSFER_SYNTAXES)}")
+    print(f"  monochrome 16-bit rows: "
+          f"{sum(1 for r in rows if MONOCHROME_16_BIT in tokens(r))}")
+    class_two = [r for r in rows if tokens(r) & set(COLOUR_OR_ULTRASOUND)]
+    real_class_two = [r for r in class_two if "real" in tokens(r)]
+    real_chroma = [r for r in real_class_two if "colour" in tokens(r)]
+    print(f"  colour or ultrasound rows: {len(class_two)} "
+          f"({len(real_class_two)} real, of which {len(real_chroma)} carry "
+          f"chroma)")
+
+    # Not a failure, and deliberately not one. HLD 25.1's class two is
+    # "Colour and ultrasound", and a greyscale ultrasound satisfies that as
+    # written, so failing here would be the check disagreeing with the policy
+    # it implements. But 25.1 gives the REASON for the class as "chroma
+    # subsampling and YBR conversion legitimately differ", and a greyscale
+    # ultrasound exercises neither. Printing `colour or ultrasound rows: 6`
+    # and stopping would let a reader conclude the class is covered against
+    # real data when no real case has any chroma in it at all.
+    if real_class_two and not real_chroma:
+        print("  NOTE: every real class-two case is greyscale, so no real "
+              "case exercises chroma")
+        print("        subsampling or YBR conversion, which HLD 25.1 gives as "
+              "the reason for")
+        print("        the class. The only chroma in the corpus is generated "
+              "by this repository.")
+        print("        See corpus/README.md, the real-layer table.")
+
+    if problems:
+        print("\nFAIL: corpus coverage")
+        for problem in problems:
+            print(f"  {problem}")
+        print("\nSee corpus/README.md for what each condition is for. Do not")
+        print("close the gap by relaxing this check.")
+        return 1
+    print("OK: coverage complete")
+    return 0
 
 
 def verify(rows: list[dict[str, str]], fetch: bool) -> int:
@@ -167,6 +428,8 @@ def add(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest-only", action="store_true")
+    parser.add_argument("--coverage", action="store_true")
+    parser.add_argument("--metadata", action="store_true")
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--add", metavar="FILE")
     parser.add_argument("--modality", default="")
@@ -182,6 +445,10 @@ def main() -> int:
         return add(args)
 
     rows = load()
+    if args.metadata:
+        return audit_metadata(rows)
+    if args.coverage:
+        return coverage(rows)
     if args.manifest_only:
         print(f"OK: manifest shape valid, {len(rows)} rows")
         return 0

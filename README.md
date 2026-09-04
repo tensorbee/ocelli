@@ -102,7 +102,7 @@ examples/
 tools/oracle/       the differential harness against cornerstone3D
 corpus/             manifest only. The data is not in git
 
-docs/hld/           the specification, cut from the authored document
+docs/hld/           the authoritative Markdown specification
 docs/sprints/       backlog, sprint plan, trackers
 .claude/            the workflow: commands, skills, plans, reviews
 .agents/skills/     generated Codex adapters for the same workflow

@@ -7,4 +7,6 @@ Expected as the project matures: releasing, re-baselining the corpus,
 responding to an oracle divergence in production shadow mode, and rebuilding
 a poisoned wasm instance.
 
-Empty until there is something to operate.
+| Runbook | For |
+|---------|-----|
+| [Seeing every guard go red](guard-verification.md) | Proving the repository's guards actually bite, rather than that nothing was wrong |

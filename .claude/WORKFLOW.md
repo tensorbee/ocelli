@@ -56,11 +56,11 @@ was broken.
 
 | Artefact | Location | Written by | Lifetime |
 |----------|----------|-----------|----------|
-| Specification | `docs/hld/*.md` | `scripts/split_hld.py` from the .docx | Permanent |
+| Specification | `docs/hld/*.md` | Hand, through a reviewed design plan | Permanent |
 | Deviations from it | `docs/hld/DEVIATIONS.md` | Hand, via a design plan | Permanent |
 | Backlog status | `docs/sprints/BACKLOG.md` | `/complete-feature`, `/sync-status` | Live |
 | Sprint roadmap | `docs/sprints/SPRINT_PLAN.md` | Hand-curated | Live |
-| Sprint allocation | `docs/sprints/allocation.json` | `scripts/import_backlog_xlsx.py` | Generated |
+| Sprint allocation | `docs/sprints/allocation.json` | Hand, with backlog and plan checks | Live |
 | Active sprint | `docs/sprints/CURRENT_SPRINT.md` | `/sync-sprint SNN` | Per sprint |
 | Velocity log | `docs/sprints/SPRINT_TRACKER.md` | `/complete-feature` | Append |
 | Completion log | `docs/sprints/AS_BUILT.md` | `/complete-feature` | Append-only |
@@ -78,11 +78,15 @@ was broken.
 ## The gate
 
 `/verify` is the completion gate. `bin/ocelli.sh gate --list` shows what each
-gate covers. Three profiles:
+gate covers. Four profiles:
 
 - **`--floor`**, everything needing no GPU and no corpus. This is what CI runs.
+- **`--sprint`**, everything in `--all`, with one bootstrap exception. On S01
+  only, while F-010 remains pending in S02, the absent oracle is a named skip.
+  S01 builds the corpus the oracle needs and contains no port code. The
+  exception cannot apply once F-010 moves from pending.
 - **`--all`**, the floor plus `corpus` and `oracle`. This is what a human runs
-  before a push, and what `/release` requires.
+  before a release. It has no bootstrap exception.
 - **named gates**, the inner loop.
 
 ### Everything runs natively, and there is no container path
@@ -123,7 +127,16 @@ commit messages.
 
 **`docs/hld/` is exempt.** Those files are cut from the author's document with
 nothing reworded, and editing a specification to satisfy a lint is the wrong
-way round. `CHANGELOG.md` released sections are exempt for the same reason.
+way round.
+
+**`CHANGELOG.md` is not covered at all**, and that is worth stating precisely,
+because the obvious reading of the sentence above is wrong. It is not that
+released sections are exempt and unreleased ones are checked. The file is
+absent from the checker's include list entirely, so nothing in it is checked,
+`## Unreleased` included. S01 found a stale gate count sitting there for
+exactly that reason. If the unreleased section should be covered, that needs
+section-aware logic in `scripts/prose_check.py`, and it is a change to this
+file rather than a one-line include.
 
 ## Source provenance, and the two projects nobody may open
 

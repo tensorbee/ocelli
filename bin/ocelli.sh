@@ -34,15 +34,19 @@ Targets
 Validation
   oracle [args]          the differential harness against cornerstone3D (GPU)
   corpus                 verify $OCELLI_CORPUS_DIR against corpus/manifest.tsv
+  corpus-tests           the corpus tooling suites (see OCELLI_PYTHON below)
 
 Gates
   gate --list            what each gate covers
   gate <name>...         run named gates
   gate --floor           the gates CI runs: no GPU, no corpus, no browser
+  gate --sprint          sprint gate, with the S01 pre-oracle exception
   gate --all             every gate, including the GPU and corpus tiers
 
 Environment
   OCELLI_CORPUS_DIR      corpus location, default corpus/data
+  OCELLI_PYTHON          interpreter with pydicom for `gate corpus-tests`,
+                         default resolved by scripts/corpus_tests.py
   OCELLI_AGENT           recorded in the provenance trailer
 USAGE
 }
@@ -55,17 +59,18 @@ GATES=(
   "bindgen|no|wasm-bindgen confined to ocelli-wasm (HLD 15.3, decision D2)"
   "unsafe|no|no unsafe outside the two permitted files (HLD 27.2 R5)"
   "pins|no|wgpu pinned exactly (HLD 15.2, 27.2 R4)"
+  "nostd|no|no_std crates reach no dependency std feature (D-09)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "prose|no|voice rules over operator-facing prose"
   "content|no|no DICOM and no build artefacts tracked"
   "backlog|no|BACKLOG, SPRINT_PLAN, tracker and as-built agree"
   "deviations|no|every HLD deviation declared and still true"
-  "docs|no|docs/hld matches the .docx, no section lost"
   "skills|no|Codex adapters match their canonical command and skill files"
   "lint|no|eslint, including the cached-wasm-view ban (HLD 17.2)"
   "types|no|tsc --build across the TypeScript workspaces"
   "wasm|no|wasm-pack build and the size budget (E1.2, gate A4)"
-  "corpus|no|corpus present and matching its manifest digests"
+  "corpus-tests|no|the corpus generator and coverage suites, a skip fails it"
+  "corpus|no|corpus coverage over the codec registry, then presence and digests"
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
 )
 
@@ -86,6 +91,7 @@ run_gate() {
     bindgen)     ci/check-bindgen-isolation.sh ;;
     unsafe)      python3 scripts/unsafe_allowlist_check.py ;;
     pins)        python3 scripts/pin_and_size_check.py ;;
+    nostd)       python3 scripts/no_std_check.py ;;
     provenance)  python3 scripts/source_provenance_check.py ;;
     prose)       python3 scripts/prose_check.py ;;
     content)     python3 scripts/staged_content_check.py --tracked ;;
@@ -95,11 +101,6 @@ run_gate() {
     backlog)     python3 scripts/backlog_check.py &&
                  python3 scripts/gen_sprint_plan.py --check ;;
     deviations)  python3 scripts/deviation_check.py ;;
-    # Both sources live outside the repository, so both may legitimately
-    # SKIP with exit 3. Chain on && so a real failure still fails, and pass a
-    # skip through rather than converting it to a pass.
-    docs)        python3 scripts/split_hld.py --check || return $?
-                 python3 scripts/import_backlog_xlsx.py --check || return $? ;;
     skills)      python3 scripts/sync_agent_skills.py --check ;;
     lint)        [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
                  npm run lint ;;
@@ -110,7 +111,21 @@ run_gate() {
                    return 3
                  }
                  "$0" wasm && python3 scripts/pin_and_size_check.py --with-size ;;
-    corpus)      python3 scripts/corpus_check.py ;;
+    # Needs no corpus, so it is IN the floor. The runner fails on a skipped
+    # test rather than on the exit status, because the suites exit 0 under an
+    # interpreter with no pydicom while reporting a skip, and this project's
+    # rule is that a skip is not a pass. It exits 3, a named skip, only when a
+    # prerequisite is genuinely absent.
+    corpus-tests) python3 scripts/corpus_tests.py ;;
+    # Coverage FIRST, then the digests. Coverage reads the manifest and nothing
+    # else, so it answers "does this corpus still cover every transfer syntax
+    # the codec registry claims, and both tolerance classes of HLD 25.1" even
+    # where the data is absent. Chained on `&&` for the reason the backlog arm
+    # gives: a case arm returns the status of its LAST command, so an unchained
+    # first command can fail and be reported green.
+    corpus)      python3 scripts/corpus_check.py --coverage &&
+                 python3 scripts/corpus_check.py &&
+                 python3 scripts/corpus_tests.py --metadata-check ;;
     oracle)      "$0" oracle ;;
     *)           echo "unknown gate: $name" >&2; return 2 ;;
   esac
@@ -122,8 +137,15 @@ run_gate() {
 # summary it did not watch produce.
 skip() { echo "SKIPPED: $*"; return 3; }
 
+s01_pre_oracle() {
+  grep -qx '# Current sprint, S01' docs/sprints/CURRENT_SPRINT.md &&
+    grep -Eq '^\| F-010 \| E2\.2 \| S02 \| .* \| Test \| 4w \| F-009 \| pending \|$' \
+      docs/sprints/BACKLOG.md
+}
+
 gates_cmd() {
   local selected=() entry name gpu desc failed=() skipped=() passed=0 status
+  local profile=named
 
   case "${1:-}" in
     --list)
@@ -134,6 +156,7 @@ gates_cmd() {
       done
       return 0 ;;
     --floor)
+      profile=floor
       for entry in "${GATES[@]}"; do
         IFS='|' read -r name gpu desc <<<"$entry"
         # The CI floor. `oracle` needs a GPU and a browser. `corpus` needs the
@@ -143,7 +166,11 @@ gates_cmd() {
         case "$name" in oracle|corpus) continue ;; esac
         selected+=("$name")
       done ;;
+    --sprint)
+      profile=sprint
+      for entry in "${GATES[@]}"; do selected+=("${entry%%|*}"); done ;;
     --all)
+      profile=all
       for entry in "${GATES[@]}"; do selected+=("${entry%%|*}"); done ;;
     "")  usage; return 2 ;;
     *)   selected=("$@") ;;
@@ -152,7 +179,13 @@ gates_cmd() {
   for name in "${selected[@]}"; do
     printf '%s>> %s%s\n' "$DIM" "$name" "$OFF"
     status=0
-    run_gate "$name" || status=$?
+    if [ "$name" = oracle ] && [ "$profile" = sprint ] &&
+       [ ! -d tools/oracle/node_modules ] && s01_pre_oracle; then
+      skip "S01 precedes F-010, so no oracle exists yet. This exception is" \
+        "limited to the sprint profile while F-010 remains pending in S02." || status=$?
+    else
+      run_gate "$name" || status=$?
+    fi
     case "$status" in
       0) passed=$((passed + 1)) ;;
       3) skipped+=("$name") ;;

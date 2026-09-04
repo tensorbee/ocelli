@@ -15,12 +15,18 @@ Repository bootstrap. Nothing is published.
   `ci/check-bindgen-isolation.sh`.
 - The npm workspaces `@ocelli/core` and `@ocelli/react`, and the example
   viewer at `examples/viewer-react`.
-- `docs/hld/`, cut from the authored `.docx` by `scripts/split_hld.py` with a
-  check that asserts no section is lost. The authored document and Appendix C,
-  the commercial analysis, are held outside the repository.
+- Strongly typed canvas, world and voxel-index points, composable transforms,
+  and pixel-value newtypes in `ocelli-core`.
+- A manifest-backed DICOM corpus with deterministic synthetic fixtures,
+  transfer-syntax conformance checks, metadata auditing and digest verification.
+- The authoritative Markdown specification under `docs/hld/`, sanitized during
+  bootstrap so no external source-document bundle is needed by the workflow.
 - `docs/sprints/`, with 190 F-IDs imported from the backlog spreadsheet and
   157 of them allocated across 72 sprints and 18 milestones.
-- Seventeen gates behind `bin/ocelli.sh gate`, and a CI floor that runs every
-  one that needs no GPU and no corpus.
+- The gate set behind `bin/ocelli.sh gate`, and a CI floor that runs every one
+  of them that needs no GPU and no corpus. `bin/ocelli.sh gate --list` is the
+  list, and this line deliberately does not repeat the count, because a number
+  written here is a second list that goes stale the first time a gate is
+  added.
 - The workflow: `.claude/WORKFLOW.md`, eighteen commands, and generated Codex
   adapters under `.agents/skills/`.

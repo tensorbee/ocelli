@@ -10,4 +10,7 @@ section in an LLD file is a defect: the history is in `AS_BUILT.md` and in
 Each file carries a `**F-IDs that contributed:**` line and a
 `**Last updated:**` date. Both are maintained mechanically at completion.
 
-Empty until the first story lands.
+| File | Area | F-IDs |
+|------|------|-------|
+| [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001 |
+| [corpus.md](corpus.md) | Golden corpus layout, generation and verification | F-009 |

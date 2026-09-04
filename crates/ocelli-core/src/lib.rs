@@ -2,9 +2,18 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
-//! Scaffold only. F-001 creates the crate, later stories fill it.
+//! F-001 adds the two modules HLD section 28 puts first, [`space`] and
+//! [`value`]. Everything downstream depends on them, and both are re-exported
+//! at the crate root so a caller writes `ocelli_core::Pt` rather than
+//! `ocelli_core::space::Pt`.
 
 #![cfg_attr(not(test), no_std)]
+
+pub mod space;
+pub mod value;
+
+pub use space::{Canvas, Index, Pt, Transform, World};
+pub use value::{Display, Modality, Stored};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.

@@ -84,7 +84,7 @@ Plus, selected by what the diff touches:
 | a shader, a pipeline or a tier decision | `bin/ocelli.sh gate wasm` and exercise BOTH tiers |
 | pixel or geometry arithmetic | `bin/ocelli.sh gate oracle` |
 | `packages/` or `examples/` | `npm run lint && npm run typecheck` |
-| `docs/hld/` or the spreadsheet | `bin/ocelli.sh gate docs` |
+| `docs/hld/` or sprint planning data | `bin/ocelli.sh gate backlog deviations` |
 | any tracked prose | `bin/ocelli.sh gate prose` |
 
 **Read every exit code from the command itself, never from the end of a pipe.**

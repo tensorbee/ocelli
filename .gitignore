@@ -10,6 +10,11 @@
 # Rust
 /target/
 **/*.rs.bk
+# proptest writes a seed file next to a failing property test so the
+# failure can be replayed. Useful locally, and noise in a diff: the
+# ones that appear during a review's mutation runs record deliberately
+# broken code.
+**/*.proptest-regressions
 
 # Python bytecode from the guard scripts. Appears the moment one is imported
 # as a module rather than run as a script.
@@ -71,6 +76,10 @@ test-results/
 .vscode/
 .playwright-mcp/
 
-# Where the private source documents live on THIS machine. Per-clone, because
-# it is a property of the checkout and not of the project.
+# Historical bootstrap converters may record an external source location.
+# No gate or workflow requires it.
 .ocelli-source-path
+
+# Which interpreter has pydicom and the codec plugins on THIS machine, for
+# `bin/ocelli.sh gate corpus-tests`. Per-clone, for the same reason.
+.ocelli-python-path

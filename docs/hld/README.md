@@ -1,31 +1,18 @@
 # Ocelli high-level design
 
-The authored document is `Ocelli-HLD.docx`, held **outside this
-repository**. These files are cut from it by `scripts/split_hld.py`,
-in document order, with nothing reordered or reworded.
+The files in this directory are the authoritative project specification. They
+were sanitized and converted to Markdown during repository bootstrap. The
+original source document and private redaction rules are not required to build,
+verify or release Ocelli.
 
 **Appendix C is deliberately absent.** It is competitor pricing and
 go-to-market analysis, and it is not published with the library. Its
 one normative part, the source-provenance table, lives in
 `docs/SOURCE-POLICY.md` and the build still enforces it.
 
-To regenerate or verify, point at the source and re-run:
-
-```bash
-python3 scripts/source_dir.py --set /path/to/source-documents
-python3 scripts/split_hld.py
-```
-
-The path is recorded per clone in `.ocelli-source-path`, which is
-gitignored, so moving the documents is a one-command fix rather than
-an environment variable to remember every session.
-
-Without it the `docs` gate SKIPS with a stated reason. A check that
-cannot run is not a check that passed.
-
-`python3 scripts/split_hld.py --check` asserts every line of the
-converted document lands in exactly one file here, so a mapping edit
-cannot silently drop a section.
+Change these Markdown files through a reviewed design plan. Record an
+implementation departure in `DEVIATIONS.md` rather than rewriting the
+specification to match the code.
 
 ## Document header
 
@@ -76,4 +63,3 @@ Tensorbee · September 2026
 ## Deviations from this document
 
 Recorded rather than silently applied. See `docs/hld/DEVIATIONS.md`.
-

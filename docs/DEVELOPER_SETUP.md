@@ -13,14 +13,13 @@ gives it neither.
 | wasm-pack | 0.15+ | Builds `crates/ocelli-wasm` |
 | Node | 24+ | The TypeScript workspaces |
 | Python | 3.12+ | The guard scripts, and corpus and fixture work |
-| pandoc | | Cuts `docs/hld/` from the authored `.docx` |
 | A WebGPU-capable browser | | Chrome or Edge. Required for the oracle |
 
 ```bash
 rustup toolchain install 1.97.1
 cargo install wasm-pack
-python3 -m pip install openpyxl 'pydicom[all]' numpy
-brew install pandoc dcmtk           # macOS
+python3 -m pip install 'pydicom[all]' numpy
+brew install dcmtk                  # macOS
 npm ci
 ```
 
@@ -38,19 +37,16 @@ bin/ocelli.sh gate --floor             # everything that needs no GPU
 provenance trailer. A clone without them can commit patient data and can push
 a head CI will reject.
 
-## The private source documents
+## The specification and delivery plan
 
-The authored `.docx` and the backlog `.xlsx` are held outside the repository.
-Record where they live, once per clone:
+`docs/hld/`, `docs/sprints/BACKLOG.md`, `docs/sprints/SPRINT_PLAN.md` and
+`docs/sprints/allocation.json` are the authoritative project sources. They were
+sanitized and converted to tracked repository formats during bootstrap. A clone
+does not need the original DOCX, XLSX or private redaction rules.
 
-```bash
-python3 scripts/source_dir.py --set /path/to/source-documents
-python3 scripts/source_dir.py --check
-```
-
-Without them the `docs` gate **skips with a stated reason** rather than passing
-or failing, and says which of the three sources it resolved the path from. You
-only need them to regenerate or verify `docs/hld/` and the backlog.
+Changes to the HLD go through a reviewed design plan and a declared deviation
+where implementation departs from the specification. Backlog, sprint plan and
+allocation changes must keep `backlog` and `deviations` gates green.
 
 ## The corpus
 

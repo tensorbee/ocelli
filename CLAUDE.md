@@ -107,6 +107,7 @@ stories.
 bin/ocelli.sh check <crate>        # inner loop
 bin/ocelli.sh gate --list          # what each gate covers
 bin/ocelli.sh gate --floor         # what CI runs: no GPU, no corpus
+bin/ocelli.sh gate --sprint        # sprint verification, including bootstrap policy
 bin/ocelli.sh gate --all           # everything, including oracle and corpus
 bin/ocelli.sh wasm                 # wasm-pack build + size budget
 bin/ocelli.sh oracle               # the differential harness (needs a GPU)
