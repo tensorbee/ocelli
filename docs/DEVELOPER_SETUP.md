@@ -13,14 +13,13 @@ gives it neither.
 | wasm-pack | 0.15+ | Builds `crates/ocelli-wasm` |
 | Node | 24+ | The TypeScript workspaces |
 | Python | 3.12+ | The guard scripts, and corpus and fixture work |
-| pandoc | | Cuts `docs/hld/` from the authored `.docx` |
 | A WebGPU-capable browser | | Chrome or Edge. Required for the oracle |
 
 ```bash
 rustup toolchain install 1.97.1
 cargo install wasm-pack
-python3 -m pip install openpyxl 'pydicom[all]' numpy
-brew install pandoc dcmtk           # macOS
+python3 -m pip install 'pydicom[all]' numpy
+brew install dcmtk                  # macOS
 npm ci
 ```
 
@@ -38,41 +37,16 @@ bin/ocelli.sh gate --floor             # everything that needs no GPU
 provenance trailer. A clone without them can commit patient data and can push
 a head CI will reject.
 
-## The private source documents
+## The specification and delivery plan
 
-The authored `.docx` and the backlog `.xlsx` are held outside the repository.
-Record where they live, once per clone:
+`docs/hld/`, `docs/sprints/BACKLOG.md`, `docs/sprints/SPRINT_PLAN.md` and
+`docs/sprints/allocation.json` are the authoritative project sources. They were
+sanitized and converted to tracked repository formats during bootstrap. A clone
+does not need the original DOCX, XLSX or private redaction rules.
 
-```bash
-python3 scripts/source_dir.py --set /path/to/source-documents
-python3 scripts/source_dir.py --check
-```
-
-Without them the `docs` gate **skips with a stated reason** rather than passing
-or failing, and says which of the three sources it resolved the path from. You
-only need them to regenerate or verify `docs/hld/` and the backlog.
-
-**That folder holds three things, not two.** The `.docx`, the `.xlsx`, and
-`redactions.json`, which carries the commercial product names stripped from the
-published specification. The rules live with the private source rather than in
-this repository, because a map of what was redacted still contains what was
-redacted.
-
-So **a folder holding only the two documents is not the private source folder**,
-and pointing this setting at one is worse than leaving it unset. It was worse
-silently until `split_hld.py` was taught to refuse: with the rules absent the
-redaction step became the identity function and a regenerate wrote the product
-names back into `docs/hld/`, with normal-looking output and nothing said.
-`scripts/split_hld.py` now stops instead, and `docs/runbooks/guard-verification.md`
-carries the probe that proves it.
-
-One more thing to expect on a machine that is not the author's. The `docs` gate
-asserts byte-identity against a freshly converted document, so a **different
-pandoc version reports drift that is not drift**. pandoc 3.11 emits horizontal
-rules where the version that generated the tracked files did not, which shows up
-as a dozen changed files whose formulas, signatures and tables are all
-identical. Diff before believing it, and never regenerate to make the gate
-green.
+Changes to the HLD go through a reviewed design plan and a declared deviation
+where implementation departs from the specification. Backlog, sprint plan and
+allocation changes must keep `backlog` and `deviations` gates green.
 
 ## The corpus
 

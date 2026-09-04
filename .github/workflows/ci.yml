@@ -89,15 +89,6 @@ jobs:
       - run: python3 scripts/deviation_check.py
       - run: python3 scripts/backlog_check.py
       - run: python3 scripts/gen_sprint_plan.py --check
-      # docs/hld must still match the .docx it was cut from, and the backlog
-      # must still match the spreadsheet. Both sources are held OUTSIDE this
-      # repository (they carry Appendix C and the full effort plan), so both
-      # checks SKIP here with a stated reason and exit 3. The gate runner
-      # reports a skip as a skip. It is never reported as a pass.
-      #
-      # This is the one gate CI genuinely cannot run. Whoever holds the source
-      # documents runs `bin/ocelli.sh gate docs` before a release.
-      - run: bin/ocelli.sh gate docs
       # One workflow, two hosts. A stale adapter serves Codex old instructions.
       - run: python3 scripts/sync_agent_skills.py --check
       # The manifest's shape AND its coverage, neither of which needs the

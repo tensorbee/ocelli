@@ -207,3 +207,12 @@ metadata-audit tests and one fail-closed dispatch test, making the current total
 with non-patient DICOM metadata in the corresponding file. A digest-valid row
 can no longer claim the wrong modality, transfer syntax or tolerance class
 silently.
+
+## Workflow source authority corrected after S01, recorded 2026-09-04
+
+The operator confirmed that the HLD and backlog source material was sanitized
+and fully converted into the tracked Markdown and JSON files during bootstrap.
+The external DOCX, XLSX and private redaction bundle are no longer project
+inputs. The `docs` gate and the spreadsheet step in `/sync-status` were removed.
+Repository-native backlog, sprint-plan, deviation, provenance, prose and content
+guards continue to validate the tracked sources.

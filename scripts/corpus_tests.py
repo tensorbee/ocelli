@@ -23,10 +23,9 @@ not the exit status.
 
 **The interpreter is a property of the machine, not of the project.** The
 generator needs pydicom, numpy and the codec plugins, and the checkout cannot
-know where that lives. Resolved the way `scripts/source_dir.py` resolves the
-private source documents, and for the same reason: an exported variable has to
-be remembered every session, and forgetting it should not quietly change what
-ran.
+know where that lives. The resolver records an explicit per-clone choice so an
+exported variable does not have to be remembered every session. Forgetting it
+must not quietly change what ran.
 
 ## The one skip that is allowed, where it is allowed, and where it is not
 
@@ -38,8 +37,8 @@ which is a failure here.
 
 **`--require-prerequisites` turns that skip into a failure**, and CI passes it.
 The reason is that `gates_cmd` in `bin/ocelli.sh` returns 0 when a gate skips,
-which is right for `docs` and `wasm` whose skips are permanent and expected,
-and wrong for a CI job whose earlier steps exist precisely to install these
+which is right for declared bootstrap skips such as `wasm`, and wrong for a CI
+job whose earlier steps exist precisely to install these
 prerequisites. Without the flag, an OpenJPH build that installed outside PATH
 would give that job a green tick having run only the stdlib suite. A developer
 running `bin/ocelli.sh gate --floor` on a machine with no DCMTK still gets the

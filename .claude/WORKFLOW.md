@@ -56,11 +56,11 @@ was broken.
 
 | Artefact | Location | Written by | Lifetime |
 |----------|----------|-----------|----------|
-| Specification | `docs/hld/*.md` | `scripts/split_hld.py` from the .docx | Permanent |
+| Specification | `docs/hld/*.md` | Hand, through a reviewed design plan | Permanent |
 | Deviations from it | `docs/hld/DEVIATIONS.md` | Hand, via a design plan | Permanent |
 | Backlog status | `docs/sprints/BACKLOG.md` | `/complete-feature`, `/sync-status` | Live |
 | Sprint roadmap | `docs/sprints/SPRINT_PLAN.md` | Hand-curated | Live |
-| Sprint allocation | `docs/sprints/allocation.json` | `scripts/import_backlog_xlsx.py` | Generated |
+| Sprint allocation | `docs/sprints/allocation.json` | Hand, with backlog and plan checks | Live |
 | Active sprint | `docs/sprints/CURRENT_SPRINT.md` | `/sync-sprint SNN` | Per sprint |
 | Velocity log | `docs/sprints/SPRINT_TRACKER.md` | `/complete-feature` | Append |
 | Completion log | `docs/sprints/AS_BUILT.md` | `/complete-feature` | Append-only |

@@ -54,11 +54,10 @@ files are cheap to maintain incrementally and expensive to reconstruct.
 Three categories, and only one of them is redacted.
 
 **Commercial competitor names are removed.** They are competitive intelligence
-rather than engineering, and `scripts/split_hld.py` strips them from the
-generated specification on the way into this repository. Each replacement keeps
-the point the sentence was making, because a vendor's published memory constant
-is evidence for a design decision and the evidence survives without the name.
-The unredacted text stays in the authored document, outside this repository.
+rather than engineering. The source material was sanitized before the tracked
+Markdown became authoritative. Each replacement keeps the point the sentence
+was making, because a vendor's published memory constant is evidence for a
+design decision and the evidence survives without the name.
 
 **Read-blocked projects are named, deliberately.** A policy whose function is to
 say what must not be opened cannot do that without naming them. HLD gate A6

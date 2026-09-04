@@ -100,7 +100,7 @@ fails on nothing.
 | 15 | `verify_ledger.py assert` | Any tree with no recorded gate run | `no verification recorded for the staged tree`, exit 1 |
 | 16 | `verify_ledger.py trailer` | The same tree | Exit 1, and no trailer emitted, which is what makes the trailer unforgeable |
 | 17 | `ci/check-bindgen-isolation.sh` | `wasm-bindgen = "0.2"` added to `crates/ocelli-geom/Cargo.toml` | `FAIL: ocelli-geom reaches wasm-bindgen`, exit 1 |
-| 18 | `split_hld.py` | Resolve the source directory to a folder holding the `.docx` but no `redactions.json` | `FAIL: no redactions.json beside the authored source`, exit 1, and `docs/hld/` untouched |
+| 18 | Retired bootstrap converter | Omit its private redaction map | Failed closed before writing tracked Markdown. The converter and its external inputs left the verification path after S01 |
 | 19a | `staged_content_check.py` | Stage a DICOM with `git add -N` rather than `git add` | **GREEN**, `OK: no patient data or build artefacts staged`. See the note below, this is a hole in the evidence and not in the hook |
 | 19 | `no_std_check.py` | Add `glam = "0.30"`, default features on, to a crate that declares `no_std` | `ocelli-geom declares no_std and reaches a std feature`, exit 1. Green again with `default-features = false, features = ["libm"]` |
 
@@ -121,19 +121,17 @@ reads `OK` has learned nothing and believes it has learned something. That is
 the same shape as probe 18 and probe 19, arriving from a third direction, and
 it is why `AGENTS.md` now says `git add -N` does not count as staging.
 
-### Probe 18 was a guard that failed open, and the probe is why it does not
+### Probe 18 was a bootstrap lesson, not a current gate
 
 Probe 18 did not exist when this runbook was started. It was added because
 running the other probes surfaced the thing it now checks.
 
-`split_hld.py` regenerates `docs/hld/` from the authored document and strips
-the commercial product names on the way through. The rules for that live beside
-the private source rather than in this repository, because a map of what was
-redacted still contains what was redacted. The loader returned an empty rule
-list when the file was absent, so `redact()` quietly became the identity
-function and a regenerate would have written the product names straight back
-into tracked documentation, with output that looks entirely normal because
-unredacted text is what the source says.
+During bootstrap, the HLD converter stripped commercial product names before
+writing Markdown. Its loader originally returned an empty rule list when the
+private map was absent, so redaction quietly became the identity function. The
+fail-closed probe prevented unsanitized text from reaching the repository.
+After S01 the tracked Markdown became authoritative and the converter left the
+gate, so no external source or redaction map is part of verification now.
 
 **That is the shape to watch for in every guard here: not one that fails
 wrongly, but one that has nothing to check and says so by succeeding.** Probes

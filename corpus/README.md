@@ -272,9 +272,8 @@ skip is not a pass anywhere else in this project and it is not one here.
 
 **It resolves the interpreter, because that is a property of the machine.** The
 generator needs pydicom, numpy and the codec plugins, and a checkout cannot know
-where that lives. Resolution is the same shape `scripts/source_dir.py` uses for
-the private source documents. First match wins, and each candidate is accepted
-only if it can actually import what is needed:
+where that lives. First match wins, and each candidate is accepted only if it
+can actually import what is needed:
 
 1. `$OCELLI_PYTHON`
 2. `.ocelli-python-path`, per clone and gitignored

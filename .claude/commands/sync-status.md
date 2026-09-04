@@ -12,9 +12,12 @@ interrupted sprint, or before a close.
 ```bash
 python3 scripts/backlog_check.py
 python3 scripts/gen_sprint_plan.py --check
-python3 scripts/import_backlog_xlsx.py --check
 python3 scripts/deviation_check.py
 ```
+
+The tracked Markdown and JSON files are authoritative. The original DOCX and
+XLSX were sanitized into this repository during bootstrap and are not runtime
+or verification inputs.
 
 Then, beyond what those cover:
 

@@ -19,9 +19,8 @@ Repository bootstrap. Nothing is published.
   and pixel-value newtypes in `ocelli-core`.
 - A manifest-backed DICOM corpus with deterministic synthetic fixtures,
   transfer-syntax conformance checks, metadata auditing and digest verification.
-- `docs/hld/`, cut from the authored `.docx` by `scripts/split_hld.py` with a
-  check that asserts no section is lost. The authored document and Appendix C,
-  the commercial analysis, are held outside the repository.
+- The authoritative Markdown specification under `docs/hld/`, sanitized during
+  bootstrap so no external source-document bundle is needed by the workflow.
 - `docs/sprints/`, with 190 F-IDs imported from the backlog spreadsheet and
   157 of them allocated across 72 sprints and 18 milestones.
 - The gate set behind `bin/ocelli.sh gate`, and a CI floor that runs every one

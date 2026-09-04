@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Resolve where the private source documents live.
+"""Resolve source documents for the historical bootstrap converters.
+
+No gate or workflow calls this module. The tracked Markdown and JSON files are
+authoritative.
 
 They are outside the repository on purpose, so their location is a property of
 this CLONE rather than of the project. Three sources, first match wins:

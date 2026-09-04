@@ -76,8 +76,8 @@ test-results/
 .vscode/
 .playwright-mcp/
 
-# Where the private source documents live on THIS machine. Per-clone, because
-# it is a property of the checkout and not of the project.
+# Historical bootstrap converters may record an external source location.
+# No gate or workflow requires it.
 .ocelli-source-path
 
 # Which interpreter has pydicom and the codec plugins on THIS machine, for

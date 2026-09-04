@@ -7,7 +7,7 @@ description: "Audit consistency across the backlog, sprint plan, tracker, as-bui
 
 Canonical source: `.claude/commands/sync-status.md`.
 
-Source SHA-256: `808753e629cf84b3c7f1bce0bf882aa1678346f2afb595d51087900ec53c2972`.
+Source SHA-256: `b60cbb231a14012e76c8a807b491749a0674af59a6483c8b0f8e60e180ba106f`.
 
 Before acting, read the canonical source completely and follow it using this
 host's available tools. Treat invocation arguments as arguments to that
