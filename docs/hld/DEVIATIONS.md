@@ -24,6 +24,8 @@ a plan has no row here.
 | D-07 | §7, "Two capability tiers, one codebase", both of them GPU | A third tier, **C, CPU**. The resolved tier may be `Cpu`, and every tier-gated feature declares its CPU answer | §7 leaves a machine with neither WebGPU nor WebGL2 rendering nothing at all, which is a failure mode the specification does not name and does not intend. Operator decision, and spike A7.1 establishes GPU-less sessions as a primary clinical path rather than a fallback. F-X001 to F-X004. | Post-bootstrap |
 | D-08 | §16, the marker spaces are `pub enum Canvas {}` and `Pt<S>` carries `#[derive(Debug, PartialEq)]` | The three marker enums derive `Debug, Clone, Copy, PartialEq, Eq, Hash`. The `Pt<S>` block is otherwise unchanged | A `derive` on a generic struct bounds the parameter, so `#[derive(Debug, PartialEq)]` expands to `impl<S: Debug> Debug for Pt<S>` and `Pt<Canvas>` satisfies neither trait while `Canvas` is bare. `assert_eq!` on two `Pt<Canvas>` fails to compile with E0369 and E0277, verified against rustc rather than reasoned about. §16's own note identifies exactly this trap for `Clone` and `Copy` and stops there. Deriving on the markers is the smaller change, because it leaves §16's `Pt` listing character for character as written. | F-001 |
 | D-09 | §15.2, `glam = "0.30"` | `glam = { version = "0.30", default-features = false, features = ["libm"] }` | Every core crate carries `#![cfg_attr(not(test), no_std)]`, which the HLD neither requires nor forbids. glam's default feature is `std`, and glam needs either `std` or its optional `libm` dependency to compile at all, so the default entry silently defeats the `no_std` posture the crates declare. The pin itself is untouched and only the feature set changes. | F-001 |
+| D-10 | §15.2 lists `wgpu = "=30.0.1"` among the workspace dependencies, and this repository's `Cargo.toml` comment says the entry activates with F-039 | `wgpu` is activated in `ocelli-render` and `ocelli-compute` at F-008, two sprints earlier, and both crates drop `#![cfg_attr(not(test), no_std)]` | §38 makes "ocelli-compute crate exists" a Phase 1 hook whose alternative is "a device-sharing retrofit across the renderer", and §31 states the contract in wgpu terms: ocelli-compute never creates a `wgpu::Device`, it borrows the one ocelli-render owns. A contract expressed only in prose is not a mechanism, so the hook is types and compile errors or it is nothing. The pin itself is untouched, and wgpu needs `std`, which is why the two crates lose a `no_std` posture the HLD neither requires nor forbids. | F-008 |
+| D-11 | Appendix B, "Measured from cornerstone3D v5.8.9 source", and the parity target stated as v5.8.9 | The oracle pins `@cornerstonejs/core`, `@cornerstonejs/tools` and `@cornerstonejs/dicom-image-loader` at exactly `5.8.2` | **v5.8.9 does not exist.** Checked against the npm registry on 2026-09-04: `@cornerstonejs/core` has 1124 published versions, the highest is 5.8.2, and the same holds for the other two packages. 5.8.2 is the highest published 5.8.x and therefore the nearest installable reference. The Appendix B surface counts are left as the author measured them and are re-checked against 5.8.2 by `/parity`. | F-010 |
 
 ## D-08, and why a derive is not a formatting detail
 
@@ -170,3 +172,30 @@ This is weaker than the HLD's design and it should be revisited if the project
 ever has cheap GPU CI. It is recorded here rather than in a commit message
 because the next person to ask "why is the corpus not in CI" deserves the
 answer without archaeology.
+
+## D-11, and what it does and does not change
+
+The version in Appendix B is not decoration. Decision D7 makes the oracle the
+thing that has to exist before port code, and §11 makes cornerstone3D the
+reference the oracle measures against. So the pinned version is the definition
+of correct for this project, and discovering that the stated one is not
+installable is a fact about the specification rather than about the build.
+
+**What is not claimed.** That 5.8.2 and v5.8.9 are the same software. Nobody
+can check that, because one of them cannot be obtained. What is claimed is
+narrower and checkable: 5.8.2 is the highest published version in the 5.8
+series, so it is the closest thing to the stated reference that this project
+can actually pin, install and hold still.
+
+**What follows.** Appendix B's counts, twelve viewport types, roughly
+sixty-three tool classes and the rest, were measured by the author against a
+version this repository has never seen. They are left exactly as written,
+because editing a measurement nobody re-took would be worse than carrying one
+with a known provenance. `/parity` reports against the checklist, and the
+first run that reads 5.8.2's source is the first time those counts are checked
+rather than inherited.
+
+**The most likely explanation is a transcription artefact**, and it does not
+matter which way it went. The pin is on a version that exists, the reason is
+here, and if the operator later identifies what v5.8.9 referred to, this row
+is what makes the change a one-line correction instead of an investigation.
