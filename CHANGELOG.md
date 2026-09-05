@@ -82,3 +82,12 @@ Repository bootstrap. Nothing is published.
   codestream when forced to, so HTJ2K reports unavailable until F-X013 prices a
   route. HLD section 15.2 names `openjp2` as the wasm choice, and that is
   measured not to work.
+- A standing probe for every repository guard. `bin/ocelli.sh gate guards`
+  drives each declared refusal into its rejected state in a disposable
+  repository and requires it to fire, and a probe whose guard exits zero is a
+  failure of the harness rather than a pass. The census refuses in both
+  directions, so a refusal no entry claims and an entry claiming no refusal both
+  fail, and it currently reports zero refusals watched by nothing. Four holes in
+  existing guards are declared rather than hidden, and a declared hole whose
+  probe starts passing also fails, so the record cannot go stale in either
+  direction.

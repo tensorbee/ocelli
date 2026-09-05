@@ -1111,3 +1111,87 @@ the input contract's third hash and the plan's write set named only `serde`.
   inferred.
 - **Two refusals are named as honest gaps that cannot be exercised yet.** One
   waits on a SIGMOID corpus row, which is F-X012.
+
+## F-X009, A standing test for every repository guard, completed 2026-09-05
+
+**What was built.** Discovery, declaration, probe and census, as four pieces
+that check each other. `scripts/guards/discover.py` finds every refusal site
+mechanically, 476 across 62 files under `scripts/`, `ci/`, `.githooks/`, `bin/`
+and `tools/`, deliberately not `crates/`.
+`scripts/guards/catalogue.py` declares each with the normative citation saying
+what it is FOR, so a probe's input comes from the specification and only its
+expected fragment from the implementation. `scripts/guard_probe.py` drives each
+red in a disposable repository. `scripts/guards/census.py` proves the
+declaration complete in both directions.
+
+**The count, and it is the story.** 227 refusals watched by 76 probes, 217 by a
+named standing test, 32 declared out of scope with a reason and a backstop, and
+**zero watched by nothing**. Before this story most of them had been observed
+red exactly once, by hand, by the story that wrote them.
+
+**The inversion is what makes it trustworthy.** A probe whose guard exits zero
+is a failure OF THE HARNESS, not a pass, and every guard file carries a
+mandatory control run on the unmutated sandbox. That is precisely what F-010's
+round 12 lacked, when a broken mutation harness gave every earlier "all
+refusals red" result a red baseline and proved nothing.
+
+**Four holes in existing guards are declared rather than fixed, and all four
+fire today.** `ci_floor_check.py` is satisfied by a YAML comment naming a gate
+with the real step deleted. `no_std_check.py` loses a crate that deletes the
+attribute rather than reporting it. `pin_and_size_check.py` reads the first
+quoted string in an entry, so a table form reports the wrong token. `validate-
+handoff` refuses a branch written in backticks, which is how this repository
+writes every path. **A declared defect whose probe starts passing fails the
+gate**, so the ratchet runs in both directions.
+
+**HLD sections implemented.** Section 27.1's denied lints, now asserted by
+`scripts/lint_policy_check.py` because nothing did. Section 27.2's R2 and R3 as
+the discipline the catalogue is built on. Section 11.
+**Deviations.** None. The HLD has no section on repository guards, so there is
+nothing to depart from, and the plan says so explicitly rather than omitting
+the section.
+**Crates / packages modified.** `scripts/guards/`, `scripts/guard_probe.py`,
+`scripts/guard_census.py`, `scripts/lint_policy_check.py`,
+`ci/guard-probe-budget.json`, `bin/ocelli.sh`, `scripts/ci_floor_check.py`,
+`.github/workflows/ci.yml`, `docs/runbooks/guard-verification.md`,
+`.claude/commands/implement-feature.md` and its regenerated adapter.
+**Tests added.** 30 in the catalogue's own unit suite, plus 66 guards observed
+red for their declared reason in the floor profile and 68 in the deep one, with
+38 and 41 controls green. Four mutations of the harness itself were observed
+red and reverted.
+**Fixture provenance.** Each probe's input is derived from the citation the
+entry names, and only the expected message fragment comes from the
+implementation. That split is what stops a probe asserting what a guard does
+rather than what it is for, which is HLD 27.2 R2 applied to a guard.
+**Verification.** `bin/ocelli.sh gate --floor` ALL GREEN over 25 gates, plus
+`corpus` and `oracle`, which is a full sprint profile over 28.
+**Corpus.** pass, 91 rows.
+**Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. Repository
+tooling resolves no tier. The rows are recorded rather than omitted.
+**LLD updated.** `docs/lld/guards.md` created, `docs/lld/README.md` gained a
+row, `docs/lld/oracle.md` gained the adoption paragraph.
+**Deviations from the design plan.** Seven, all reported. Six files under the
+scan roots carry refusals invoked by no gate at all, so a third state
+`not-a-guard` was needed rather than inflating the coverage number. Three
+invokes have no healthy state inside a sandbox, so their controls declare the
+DIFFERENT refusal a healthy repository gives, which is stronger than the plan's
+exit-zero rule. The oracle adoption is verified structurally rather than by
+fragment matching, because the faults build their messages at run time and only
+3 of 23 matched. Three refusal shapes were missing from the plan's discovery
+list, and the census found them by refusing the author's own entries.
+
+**Notes for future sessions.**
+- **The census earned itself at integration.** The sprint review remediation had
+  renamed the cached-wasm-view selector and split it in two, and the constant
+  ratchet refused the merge saying the recorded constant could not be read from
+  the file, so either it was renamed or the strictness had moved somewhere the
+  ratchet cannot see. It was the former. That is the mechanism working on its
+  first day, on a change made by the integrator rather than by a story.
+- **`split_hld.py`'s redaction branch cannot be made standing.** It sits behind
+  a pandoc conversion of a private `.docx` that is not in this repository, so
+  runbook probe 18's exact branch is unreachable from a sandbox. What is
+  standing is the fail-closed shape one level up, and the limit is recorded with
+  an owner rather than left as a gap.
+- **Thirteen entries carry an explicit `limit`** naming what their probe does
+  not reach, each rendered into the runbook. A probe that covers part of a guard
+  and says so is worth more than one that implies it covers all of it.

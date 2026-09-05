@@ -43,3 +43,4 @@ of the volume port work in M2 onward.
 | F-006 | Benchmark harness: decode, first frame, interaction latency | S03 | 2w | not measured, it ran concurrently with F-X007 in a worker worktree and the wall clock covers the other story's oracle runs | 2026-09-05 |
 | F-X007 | Oracle volume and MPR reference renders | S03 | 3w | not measured, it ran concurrently with F-006 and its wall clock includes several full oracle runs plus one remediation round after the integrator's review | 2026-09-05 |
 | F-011 | Pixel-diff comparator with per-modality tolerance policy | S03 | 3w | not measured, it ran serial in the canonical worktree and its wall clock includes several full oracle runs | 2026-09-05 |
+| F-X009 | A standing test for every repository guard | S03 | 3w | not measured, it ran concurrently with the sprint review's remediation and its wall clock includes waiting on that | 2026-09-05 |
