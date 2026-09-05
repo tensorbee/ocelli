@@ -859,3 +859,84 @@ a raw pointer dereference in a tracked file. The intent is unchanged, since
   both answers and before its handoff. The integrator verified the work in
   place, re-ran the comparator's tests, and confirmed the root cause in the
   crate source rather than accepting it from the report.
+
+## F-006, Benchmark harness: decode, first frame, interaction latency, completed 2026-09-05
+
+**What was built.** `tools/bench`, an instrument rather than a report. A tracked
+subject registry lists the eleven things this project will ever measure, each
+carrying its normative definition, its unit, its tier dimensions and the F-ID of
+the story that will give it a subject. A driver resolves each subject at run
+time to `measured`, `unavailable` naming the blocking story, or `incomparable`
+on a host-class mismatch, and a fourth state, a recorded number for a subject
+that does not exist, is refused by a gate rather than left to discipline.
+
+**Ten of the eleven subjects have nothing to measure, and the harness says so.**
+That is decision D7 holding rather than a shortfall. No proxy workload was
+substituted, no stub was timed and no number was invented. The design fixes
+every subject's DEFINITION now, from the specification, including the ones with
+no subject, so a later story adds a runner into a slot with no latitude to
+redefine the measurement into something easier.
+
+**The HLD states no performance target of any kind.** That was searched rather
+than assumed, across every file under `docs/hld/`, and the four numeric figures
+that bear on cost at all are an explicitly unmeasured size estimate, a GPU
+buffer limit, a series size, a caller's memory budget and a uniform block size.
+None is a target this harness can pass or fail against. The only budget-setting
+method written down anywhere here is spike A7.3's, which is relative to the
+incumbent viewer and says in terms not to invent a number.
+
+**HLD sections implemented.** Section 26 in full, which is the section this
+story makes enforceable. Sections 5.1, 5.3, 7, 11, 15.2, 21 and 24 supply the
+definitions the unavailable subjects are fixed against.
+**Deviations.** None.
+**Crates / packages modified.** `tools/bench/`, `scripts/bench_check.py`,
+`ci/bench-baseline.json`, `bin/ocelli.sh`, `.github/workflows/ci.yml`,
+`eslint.config.js`, `AGENTS.md`, `.gitignore`, `package.json`.
+**Tests added.** 43 across four pure `node:test` suites, 5 in a browser suite,
+and 25 cases in the guard's own test. Eighteen mutations were observed red by
+the author, and one was re-run independently at integration with its control
+green.
+**Fixture provenance.** No DICOM arithmetic. The one recorded figure states its
+provenance and its tolerance is derived rather than chosen, from an observed
+spread of 2.2 to 2.5 ms across fifteen runs and from `performance.now()` being
+quantised to 0.1 ms, which is itself over 4 per cent of a figure that small.
+**Verification.** `bin/ocelli.sh gate --floor` ALL GREEN over 24 gates, plus
+`gate corpus` pass.
+**Corpus.** pass, 91 rows.
+**Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a today. The
+registry carries tier dimensions on every subject, so the measurements that do
+arrive will carry the tier they were taken on, which deviation D-07 needs
+because the divergence bound has to cover tier A against tier C.
+**LLD updated.** `docs/lld/benchmarks.md` created. `docs/lld/README.md` and
+`docs/lld/build-targets.md` updated.
+**CHANGELOG.** No entry. The harness is repository tooling and ships to no
+consumer, and `/complete-feature` step 4 reserves a line for a user-visible
+change. The `AGENTS.md` correction is developer-facing for the same reason.
+**Deviations from the design plan.** Five, all reported. The plan's claim that
+six files still name F-096 was stale, because this sprint had already corrected
+them. `CLAUDE.md` does not carry the section 26 paraphrase, only `AGENTS.md`
+does. The plan said the wasm module's entire export is `ocelli_version()`, and
+F-005 had made it four. `eslint.config.js` was not in the write set and had to
+be. And `scripts/ci_floor_check.py` has a hole the change nearly exercised.
+
+**Notes for future sessions.**
+- **`scripts/ci_floor_check.py` is fail-open on a comment.** Line 77 tests
+  `f"gate {gate}" in workflow` as a plain substring over the whole workflow
+  file, so a YAML comment naming a gate satisfies it with the step deleted.
+  Confirmed at integration. **F-X009** carries it as a census entry and a probe
+  that fails today. This matters more than its size, because that guard exists
+  precisely because S02 added three floor gates by hand and nothing would have
+  noticed a missing step.
+- **The one number is not an answer to gate A4** and says so. The module holds
+  four functions, no wgpu and no Naga, against A4's 3 to 8 MB estimate. A4 stays
+  open.
+- **A subject story naming a real but wrong F-ID passes the guard**, because it
+  checks existence and not intent. Recorded by the author as a non-firing
+  mutation rather than left for a reader to find, which is the right way to
+  state a guard's limit.
+- **A gate that reads planning data is sensitive to ledger commits landing
+  between a worktree's base and its merge.** F-004's backlog row moved to `done`
+  after this worktree was cut, so `subject_story: F-004` resolved differently
+  either side of the merge. Checked at integration and safe, because the guard
+  refuses a runner for a story that is not done and does not demand one for a
+  story that is.
