@@ -635,3 +635,227 @@ around, and two of them corrections to the plan itself:
 - **Nothing under `tools/oracle/out/` is committed**, 269 files produced and
   zero tracked. A reference frame of a real corpus row is a rendered picture of
   patient data and every real row is `burned-in-unchecked`.
+
+## F-004, Runtime capability detection and tiering, completed 2026-09-05
+
+**What was built.** The detection half of tier resolution. `Caps` and the
+three-variant `Tier` already existed from F-008, whose own doc comment said the
+module defines the type and does not detect it. This story adds a pure decision
+procedure in `caps.rs` that takes signals and returns a resolution, and a wgpu
+probe in `probe.rs` that gathers them. The split is the point: everything that
+can be wrong about a tier needs no adapter to test, which is what makes it
+exhaustively testable in the CI floor deviation D-04 leaves us with.
+
+**The combination rule is written out, not left to an `if` chain.** No device
+means tier C. A benchmark verdict of Hardware or Software decides outright and
+the two hints are recorded but not consulted. Only an `Unknown` benchmark falls
+through to adapter type, then renderer string, then keeps the candidate. That
+ordering is deviation D-07's requirement, because on a host with no GPU a
+software rasteriser presents a conforming WebGL2 context, and a resolver that
+trusted the context would run GPU paths on something slower than our own CPU
+path, invisibly. It is also what contains the known `gallium` false positive,
+since a string is consulted only when the two stronger signals abstained.
+
+**The arithmetic avoids the whole cast question.** The fill-rate comparison is
+`pixels * NANOS_PER_SECOND >= threshold * elapsed_nanos`, both sides widened by
+`u128::from`, which is cross-multiplication instead of division. No float, no
+`as`, no rounding decision.
+
+**`probe` counts pixels and does not time itself.** `std::time::Instant` panics
+on `wasm32-unknown-unknown`, and the alternative is a dependency reaching
+`performance.now()` inside `ocelli-render`, which is the browser binding
+deviation D-12 says this crate must not grow. The clock is the caller's.
+
+**Tier B could not resolve in a browser at all before this story.** wgpu
+30.0.1 ships `webgpu` among its default features and not `webgl`, read from the
+pinned crate's own manifest, so `ocelli-render` could reach WebGPU on wasm32 and
+could not reach WebGL2. That is deviation **D-14**, and the measured cost today
+is zero bytes because `ocelli-wasm` has an empty dependency table and never
+reaches wgpu.
+
+**HLD sections implemented.** Section 7's tiers, section 22's `Caps` shape,
+section 9 and decision D5, section 31's degrade-never-fail rule as D-07
+generalises it.
+**Deviations.** D-14 added. D-07, D-10 and D-12 cited.
+**Crates / packages modified.** `crates/ocelli-render/`,
+`crates/ocelli-native/`, `packages/core/src/capabilities.ts`,
+`ci/tier-thresholds.json`, `ci/target-feature-baseline.json`.
+**Tests added.** 42 in `ocelli-render`, covering the classifier, the override
+outcomes, the band edges in both directions, and a totality property, plus one
+deliberately ignored test that is the measurement instrument and needs a real
+adapter.
+**Fixture provenance.** No DICOM arithmetic in this story. The fill-rate bands
+are a recorded measurement whose provenance is stated per figure in
+`ci/tier-thresholds.json`, and `the_recorded_bands_match_the_checked_in_file`
+stops the constant and the file drifting apart.
+**Verification.** `bin/ocelli.sh gate --floor` ALL GREEN over 23 gates, plus
+`gate corpus` pass.
+**Corpus.** pass, 91 rows.
+**Tier coverage.** A (WebGPU) resolved, B (WebGL2) resolved and reachable for
+the first time under D-14, C (CPU) resolved. This is the story that decides the
+answer for every other story.
+**LLD updated.** `docs/lld/tier-resolution.md` created.
+`docs/lld/gpu-ownership.md`, `docs/lld/build-targets.md` and
+`docs/lld/README.md` gained rows or contributed F-IDs.
+**Deviations from the design plan.** The design round answered seven open
+questions and they are recorded in the plan's own `## Decisions taken in the
+design round` section.
+
+**Notes for future sessions.**
+- **The implementing agent terminated on a session rate limit during its own
+  review loop.** Its work was complete and staged, and the integrator verified
+  it in place rather than assuming it. The one review this story has had is the
+  integrator's, recorded in `.claude/reviews/F-004-integration-pass-1.md`.
+- **The software ceiling is `null` and that is deliberate.** No
+  software-rasteriser figure can be taken on this machine, so the benchmark
+  never returns `Software` and a low rate is `Unknown`. Detection still works,
+  because a rasteriser falls through to `wgpu::DeviceType::Cpu`. Spike A7.3 says
+  do not invent a number, and an absent figure that says it is absent is not the
+  same as a guess.
+- **`gallium` is a known false positive** on genuine AMD and Intel hardware and
+  is kept because A7 lists it. Amending A7 is a separate reviewed change and was
+  deliberately not done here.
+
+## F-005, Error model, panic-to-JS mapping, structured logging, completed 2026-09-05
+
+**What was built.** A stable `u16` error code, a severity-or-level byte, an
+arity, a reserved `u32` and three `u64` operands packed into exactly the 32
+bytes of section 17.3's `Event` payload, so one layout and one decoder serve
+both an error and a log line. The human text lives in TypeScript keyed on the
+code, because section 23 says the message may change and format strings are the
+weight the size budget exists to notice.
+
+**The panic path catches nothing, and that is the finding.** Measured on the
+pinned toolchain, `wasm32-unknown-unknown` is `panic = "abort"` in every
+profile and not only in release, so `catch_unwind` compiles and never catches.
+A hook therefore writes a fixed `repr(C)` record into linear memory with the
+magic stored LAST, and the shell reads it after the trap with a `DataView` and
+no export call at all, which honours section 23's "must not be reused"
+literally rather than approximately. The record is written through atomics, so
+`unsafe` stays at zero files.
+
+**HLD sections implemented.** Section 23 in full, section 17.2, 17.3 and 17.4,
+section 24, section 4's crate table, section 9 and decision D5.
+**Deviations.** D-15 added, `thiserror` with default features off at the
+workspace entry.
+**Crates / packages modified.** `crates/ocelli-core/`, `crates/ocelli-wasm/`,
+`packages/core/`, `scripts/error_code_check.py`, `scripts/panic_probe.mjs`,
+`bin/ocelli.sh`, `.github/workflows/ci.yml`, `eslint.config.js`,
+`ci/error-codes.json`, `ci/wasm-size-budget.json`.
+**Tests added.** 25 in `ocelli-core`, 3 in `ocelli-wasm`, 36 across the
+TypeScript suites, 15 cases in the error-code guard's own test, and one wasm
+probe.
+**Fixture provenance.** `ERROR_BYTES` and `LOG_BYTES` are hand-derived byte by
+byte, each offset carrying its own comment with the little-endian reasoning, and
+each is used by both an encode test and a decode test. They were computed from
+the layout and not copied from the encoder's output, per HLD 27.2 R2.
+**Verification.** `bin/ocelli.sh gate --floor` ALL GREEN over 23 gates, plus
+`gate corpus` pass.
+**Corpus.** pass, 91 rows.
+**Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. An error code
+is not a rendering path. The rows are recorded rather than omitted.
+**LLD updated.** `docs/lld/errors.md` created. `docs/lld/build-targets.md`,
+`core-types.md`, `gpu-ownership.md`, `typescript-packaging.md` and `README.md`
+updated.
+**Deviations from the design plan.** Four, all reported rather than absorbed.
+The plan contradicted itself on `Severity`, since its body numbered
+`Recoverable` 0 while its own test table and its log-level rule both reserved 0,
+and one byte with one decoder cannot honour all three. Resolved as
+`Recoverable = 1, Fatal = 2`. The plan's five separate statics became one
+`repr(C)` struct, because Rust guarantees no layout relationship between
+separate statics and a single cached pointer would have addressed only the
+first. `clippy::panic` also covers `panic_any`, so the deliberate panics arrive
+through a failing assertion instead. `describe` is exported as `describeError`,
+because a bare `describe` at a package root collides with every test runner's.
+
+**Notes for future sessions.**
+- **The size budget moved once, 14104 to 16388 bytes, and the attribution is in
+  the file.** Base commit `d74ad3a` was rebuilt on this toolchain and reproduced
+  14104 exactly, so the delta is this story's and not drift. The cause is the
+  hook's code and NOT the 528-byte record: raising `MESSAGE_CAPACITY` from 512
+  to 1536 left the module byte-identical, because a zeroed static needs no data
+  segment. No bearing on gate A4, whose estimate is three orders of magnitude
+  larger.
+- **The panic hook does run under abort**, and the panic's file, line and column
+  survive `strip = true`, because `core::panic::Location` is emitted data rather
+  than a symbol name. The plan's flagged risk that bindgen placeholder imports
+  would defeat a raw node instantiate did not materialise: the release module
+  declares zero imports.
+- **The ESLint linear-memory allowance is now two files**, `bulk.ts` and
+  `panic.ts`. HLD 17.2's own wording is "the two functions", so the
+  specification expected two. `ring.ts` is still refused and a third is F-101's
+  argument to make.
+
+## F-X006, Answer Appendix A gates A1 and A2 against our own decoders, completed 2026-09-05
+
+**What was built.** Two written answers under `docs/spikes/`, not two passing
+tests, each carrying its pass and fail criteria transcribed from the design plan
+that predates the measurement. Four decodes reduced to one canonical form, 12288
+bytes of little-endian `u16` at 64 by 96, which is the shape
+`scripts/corpus_synth.py` actually produced rather than one chosen for
+convenience.
+
+**A1 is answered `Fail`, and two of the four pre-written clauses fired.**
+`openjp2` 0.6.1 does not link for `wasm32-unknown-unknown` in any feature
+configuration: `src/malloc.rs` declares `malloc`, `calloc`, `realloc` and `free`
+inside `extern "C"` with no `cfg` guard anywhere in the file, and the lib target
+declares a `cdylib`, so cargo links one even as a dependency and that link
+reports 432 undefined symbols. Forced to link with an allocator shim, the module
+then refuses every codestream by trapping. **Two JPEG 2000 Part 1 rows were
+decoded through the same build as a control**, so "openjp2 does not work on
+wasm32" and "openjp2's HTJ2K path does not work" are distinguishable rather than
+conflated. Nothing required that control and it is what makes the answer usable.
+
+**That measurement falsifies a sentence in the specification.** HLD section 15.2
+says "On wasm you want default-features = false, then jpeg, rle, deflate and
+openjp2 selected explicitly", and dicom-rs hedges in its own comment with "works
+on Linux and a few other platforms" and never claims wasm. A deviation is owed
+by whichever story activates a codec feature.
+
+**A2 is answered `Pure Rust`, which is the outcome that does not change the
+architecture.** `pure_jpegls` 2.0.0 decodes both corpus rows, builds for wasm32
+and native, and is MIT or Apache-2.0, so one implementation serves every target
+and the split answer the gate warned about is avoided.
+
+**HLD sections implemented.** None. This is a spike and its code is throwaway,
+which `/spike` step 2 permits and which the answer files state. Sections read:
+21, 15.2, Appendix A and Appendix B.
+**Deviations.** None. One is owed against section 15.2 by a later codec story.
+**Crates / packages modified.** `docs/spikes/`, `tools/spikes/`, `.gitignore`,
+`scripts/staged_content_check.py`, `eslint.config.js`.
+**Tests added.** Five comparator checks with two mutations observed red, plus
+the two spike harnesses, which are not held to the gate set.
+**Fixture provenance.** The anchors are named and their weakness is stated. For
+`.80` the anchor is the uncompressed reference row, and for `.81` it is ISO
+14495-1's NEAR bound. `pyjpegls` encoded and `dcmdjpls` decodes and both wrap
+CharLS, so their agreement is not independent evidence and the answer says so.
+**Verification.** `bin/ocelli.sh gate --floor` ALL GREEN over 23 gates, plus
+`gate corpus` pass.
+**Corpus.** pass, 91 rows.
+**Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. Decode is CPU
+work on every tier and this story registers no decoder.
+**LLD updated.** `docs/lld/corpus.md` and `docs/lld/oracle.md` gained pointers.
+**Deviations from the design plan.** One. The plan says the harness depends on
+`openjp2` directly and it depends on `jpeg2k` with `openjp2` selected, because
+`openjp2` 0.6.1 exposes no safe in-memory stream and the only other route needs
+a raw pointer dereference in a tracked file. The intent is unchanged, since
+`dicom-transfer-syntax-registry` resolves its own `openjp2` feature through
+`jpeg2k`.
+
+**Notes for future sessions.**
+- **A1's consequence is in force and F-X013 carries it.** Three routes are
+  priced and none is chosen, because the design round said the fallback is a
+  story of its own. The pure-Rust `openjph-core` is the one to measure first,
+  because it is the only route that is one implementation on every target, which
+  is the same property that decided A2.
+- **A second defect was found in `openjp2`**, a null pointer reaching its
+  deallocator, which is undefined behaviour on every target and not only on
+  wasm. It is why the answer declines to recommend the crate natively either.
+- **All five codec corpus rows are in the oracle's `lowInformation` list** at
+  about 99.7 per cent clipped, so a rendered-frame diff over them would show
+  almost nothing about a decoder. Comparing decoded buffers is not a
+  preference here, it is the only thing that measures anything.
+- **The implementing agent terminated on a session rate limit** after writing
+  both answers and before its handoff. The integrator verified the work in
+  place, re-ran the comparator's tests, and confirmed the root cause in the
+  crate source rather than accepting it from the report.
