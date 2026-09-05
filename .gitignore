@@ -50,6 +50,14 @@ corpus/data
 tools/oracle/out/
 tools/oracle/node_modules/
 
+# Benchmark output: one run's record, and the page directory it serves, which
+# holds a copy of the built wasm artefact. The RECORDED baseline is
+# ci/bench-baseline.json and IS committed, the way ci/wasm-size-budget.json is.
+# tools/bench/package-lock.json is committed too, per the note at the top of
+# this file.
+tools/bench/out/
+tools/bench/node_modules/
+
 # Spike working output, F-X006 and Appendix A gates A1 and A2. Raw codestreams
 # and decoded pixel buffers extracted from corpus rows, and the throwaway
 # harnesses' build trees. Their lockfiles ARE committed, per the note at the

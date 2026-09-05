@@ -43,6 +43,13 @@ export default tseslint.config(
       // `target/**` does not match, and eslint would then lint generated
       // wasm-bindgen glue.
       "**/target/**",
+      // The benchmark harness's run output (F-006). Gitignored, and it holds a
+      // COPY of the wasm-pack glue plus the page that loads it, so without this
+      // eslint lints generated wasm-bindgen output and a second copy of a page
+      // it already lints in place. `**/dist/**` covers the oracle's equivalent
+      // and does not reach here, because this directory is named for a run
+      // record rather than for a bundle.
+      "tools/bench/out/**",
       "corpus/**",
     ],
   },
@@ -140,6 +147,44 @@ export default tseslint.config(
         btoa: "readonly",
         File: "readonly",
         CustomEvent: "readonly",
+      },
+    },
+  },
+  {
+    // The benchmark harness (F-006). Plain ESM JavaScript, node only, and the
+    // split against the page block below runs both ways for the reason the
+    // oracle's pair gives: `no-undef` then catches a driver file reaching for
+    // `document` and a page file reaching for `process`.
+    //
+    // The globals are listed rather than pulled from a `globals` package, the
+    // same choice the two blocks above make.
+    files: ["tools/bench/**/*.mjs"],
+    ignores: ["tools/bench/page/**"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+        URL: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+      },
+    },
+  },
+  {
+    // The cold-start page, and only it. It is granted no node global, so a
+    // page file reaching for `process` is caught, which matters here more than
+    // usual: the whole point of the design is that timing is taken from the
+    // page with `performance.now()` and never by instrumenting the module, so
+    // the page and the driver must not be able to blur into each other.
+    files: ["tools/bench/page/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        window: "readonly",
+        document: "readonly",
+        performance: "readonly",
+        fetch: "readonly",
+        WebAssembly: "readonly",
+        globalThis: "readonly",
       },
     },
   },

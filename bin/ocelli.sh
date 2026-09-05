@@ -32,6 +32,8 @@ Targets
   native                 the cross-target proof: both targets, and features
 
 Validation
+  bench [args]           the benchmark harness (E1.6, HLD 26). --help for flags.
+                         Records durations. It compares nothing unless asked
   oracle [args]          the differential harness against cornerstone3D (GPU)
   corpus                 verify corpus/data against corpus/manifest.tsv
   corpus-tests           the corpus tooling suites (see OCELLI_PYTHON below)
@@ -61,6 +63,7 @@ GATES=(
   "nostd|no|no_std crates reach no dependency std feature (D-09)"
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
+  "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "prose|no|voice rules over operator-facing prose"
   "content|no|no DICOM and no build artefacts tracked"
@@ -115,6 +118,28 @@ run_gate() {
                  wasm-pack build crates/ocelli-wasm --target web \
                    --out-dir target/panic-probe -- --features panic-probe &&
                  node scripts/panic_probe.mjs ;;
+    # F-006, HLD section 26. The gate asserts the INSTRUMENT and never a
+    # duration: the registry parses, every subject_story resolves in
+    # allocation.json, no subject whose story is pending has a runner or a
+    # recorded number, and the two harnesses' playwright pins are equal. That
+    # is deterministic, needs no GPU and no browser, and so it is in the floor.
+    #
+    # The DURATION COMPARISON is deliberately not here and not in --sprint.
+    # `bin/ocelli.sh bench --compare` runs it on the machine that owns the
+    # baseline. A duration taken on a machine that did not record the baseline
+    # is either noise or a skip, a skipped gate is not a pass here, and a
+    # permanently amber gate is a gate that gets disabled.
+    #
+    # Three commands, chained on `&&` for the reason the backlog arm gives: a
+    # case arm returns the status of its LAST command. The node suites are the
+    # four pure ones. tests/cold_start_test.mjs needs a browser and is not here.
+    bench)       python3 scripts/bench_check.py &&
+                 python3 -m unittest discover -s scripts/tests \
+                   -p test_bench_check.py &&
+                 node --test tools/bench/tests/hostclass_test.mjs \
+                   tools/bench/tests/record_test.mjs \
+                   tools/bench/tests/registry_test.mjs \
+                   tools/bench/tests/state_test.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py ;;
     prose)       python3 scripts/prose_check.py ;;
     content)     python3 scripts/staged_content_check.py --tracked ;;
@@ -307,6 +332,38 @@ case "$command" in
     #    red on its own.
     echo "  4/4 resolved features agree across targets"
     python3 scripts/target_feature_check.py
+    ;;
+
+  bench)
+    # The benchmark harness HLD section 26 names. F-006.
+    #
+    # It refuses an absent install the way `oracle` does, and for a sharper
+    # reason: the ONE subject that has a subject today is timed in a browser,
+    # so a missing playwright is not a degraded run, it is no run at all. The
+    # harness would then report its single measurable subject as a runner
+    # failure, which is correct output and is not what anyone typing this
+    # wanted.
+    #
+    # tools/bench keeps its own install rather than sharing the oracle's, and
+    # scripts/bench_check.py asserts the two playwright pins are equal so the
+    # separation cannot become a drift.
+    #
+    # `--help` and `--list` are exempt, because neither loads a runner and
+    # neither touches playwright. Refusing them would mean a developer could
+    # not read what the harness measures without first installing a browser,
+    # and the registry is the part most worth reading.
+    case " $* " in
+      *" --help "*|*" -h "*|*" --list "*) ;;
+      *)
+        if [ ! -d tools/bench/node_modules ]; then
+          echo "The benchmark harness's browser is not installed." >&2
+          echo "Run: (cd tools/bench && npm ci && npx playwright install chromium)" >&2
+          echo "See docs/lld/benchmarks.md for what it measures and what it does not." >&2
+          echo "\`bench --list\` and \`bench --help\` work without it." >&2
+          exit 1
+        fi ;;
+    esac
+    node tools/bench/run.mjs "$@"
     ;;
 
   oracle)

@@ -1,0 +1,24 @@
+{
+  "name": "@ocelli/bench",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The benchmark harness HLD section 26 names (F-006). A subject registry, a runner per subject that has a subject, and a recorded baseline per host class.",
+  "license": "MIT OR Apache-2.0",
+  "$pins": [
+    "playwright is pinned at exactly 1.62.1, with no caret and no tilde, and it is the SAME pin tools/oracle/package.json carries. scripts/bench_check.py asserts the two are equal, so drift fails rather than being remembered.",
+    "The two harnesses get their own installs on purpose. Sharing one would couple the benchmark's story to the comparator's, and this sprint already has enough coupling in that area. A drifting browser build between them would silently make them report different environments, which is exactly the kind of difference a host class exists to catch."
+  ],
+  "$why_no_other_dependency": [
+    "There is no cornerstone3D here and there is no bundler. The page loads the wasm-pack glue that bin/ocelli.sh wasm already generates, as a browser would, and nothing is bundled, so a bundler could not change the module graph between two runs.",
+    "criterion is deliberately absent. There is no Rust subject to measure, AGENTS.md refuses a construct with no user today, and a dev-dependency that is not wasm32-portable breaks cargo check --all-targets on that target, which is how proptest reaching wait-timeout already constrains this workspace. F-023 and F-024 add the Rust runner and its dependency, with a named user."
+  ],
+  "scripts": {
+    "start": "node run.mjs",
+    "test": "node --test tests/hostclass_test.mjs tests/record_test.mjs tests/registry_test.mjs tests/state_test.mjs",
+    "test:browser": "node --test tests/cold_start_test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

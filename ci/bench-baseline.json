@@ -1,0 +1,102 @@
+{
+  "$about": [
+    "The benchmark harness's recorded baseline. F-006, HLD section 26. Written by `bin/ocelli.sh bench --accept`, which is the only thing that writes a number here. This prose block is the one part a person edits, and it states no figure.",
+    "A MAP KEYED ON HOST CLASS from the start, and not a scalar. Migrating a scalar to a map later rewrites every recorded entry, and a recorded measurement that gets rewritten stops being a measurement. A run on a machine that is not a key here reports `incomparable`, never a pass and never a guess.",
+    "THE KEY IS LOSSY AND THE `host_class` BLOCK IS NOT. The key sanitises every field with `[^A-Za-z0-9._-]+` to `_`, so two different CPU models can produce one key. The block beside each entry is the lossless check, and an entry that records it as null or omits it is refused by the gate and reported `incomparable` by the comparison.",
+    "THE COMPARISON IS NOT A GATE. `bin/ocelli.sh gate bench` asserts the instrument's integrity, which is deterministic and needs no GPU, and it never compares a duration. `bin/ocelli.sh bench --compare` compares, on the machine that owns the baseline. A duration comparison in CI would be noise or a skip, and a skipped gate is not a pass here, so the floor would be permanently amber and an amber gate is a gate that gets disabled.",
+    "THE TOLERANCE IS APPLIED ON BOTH SIDES. An unexplained improvement fails as loudly as an unexplained regression, exactly as `ci/wasm-size-budget.json` does for bytes, because during build-out the check does not mean 'you exceeded a budget', it means 'the figure moved and the move was not declared'. A runner that started timing less work reads as an improvement.",
+    "NO ENTRY MAY EXIST FOR A SUBJECT WHOSE STORY IS NOT DONE. `scripts/bench_check.py` refuses one. Ten of the eleven rows in tools/bench/subjects.json have no subject in this tree, and a plausible number recorded for one of them would describe nothing. That refusal is the point of this file's gate.",
+    "The HLD states no performance target of any kind, which was searched rather than assumed. Nothing here is a budget. Every figure is a measurement this harness took, on a machine it names, compared only against itself.",
+    "A `replaced` field appears on an entry that overwrote an earlier one, and its absence means the entry is the first for that subject on that host class."
+  ],
+  "host_classes": {
+    "darwin|25.6.0|arm64|Apple_M5_Max|18|137438953472": {
+      "host_class": {
+        "platform": "darwin",
+        "release": "25.6.0",
+        "arch": "arm64",
+        "cpu_model": "Apple M5 Max",
+        "cpu_count": 18,
+        "memory_bytes": 137438953472
+      },
+      "subjects": {
+        "wasm.cold_start": {
+          "value": 2.3,
+          "unit": "ms",
+          "tolerance": 0.25,
+          "tolerance_provenance": "DERIVED from the observed spread and from the clock. It is not a measurement and it is not invented. Fifteen consecutive runs on this machine, each taking the median of fifteen kept iterations, produced medians between 2.2 and 2.5 ms, while the machine carried a load average between two and six because another sprint worker was running. That is a spread of about 6 per cent about the middle. performance.now() in this Chromium is quantised to 0.1 ms, which is itself over 4 per cent of a figure this small, so nothing below roughly 10 per cent could ever be meaningful here. Individual iterations within a run were seen as high as 3.1 ms, which the recorded detail block below does not show because it holds only this run's fifteen. 25 per cent covers all of it with headroom. Erring wide is the safe direction, because during build-out this check does not mean the figure exceeded a budget, it means the figure moved and the move was not declared, and a check that fires on clock granularity is a check somebody disables. It tightens when the module is large enough for the measurement to dominate the noise.",
+          "provenance": "measured",
+          "recorded": "2026-09-05",
+          "story": "F-006",
+          "why": "The first recorded cold start of the release wasm artefact. Appendix A gate A4 has two halves and this is the second: F-002 measured binary size, which F-005 re-baselined to 16,388 bytes, and cold start had never been measured at all. The figure is the median of fifteen kept iterations, each in a freshly launched Chromium, with a sixteenth discarded as warm-up. It is a regression baseline for the build-out phase and NOT an answer to A4, which stays open, because this module holds four exported functions, no wgpu and no Naga against A4's estimate of 3 to 8 MB uncompressed with Naga dominating.",
+          "host_class": {
+            "platform": "darwin",
+            "release": "25.6.0",
+            "arch": "arm64",
+            "cpu_model": "Apple M5 Max",
+            "cpu_count": 18,
+            "memory_bytes": 137438953472
+          },
+          "instrument": {
+            "node": "v24.16.0",
+            "playwright": "1.62.1",
+            "chromium": "151.0.7922.34"
+          },
+          "conditions": {
+            "load_average": [
+              2.5966796875,
+              3.578125,
+              3.78369140625
+            ],
+            "free_memory_bytes": 18808340480,
+            "uptime_seconds": 67797
+          },
+          "detail": {
+            "statistic": "median",
+            "iterations_run": 16,
+            "iterations_kept": 15,
+            "discarded": "the first iteration, page-cache miss and first browser launch",
+            "observed_range_ms": [
+              2.1,
+              2.5
+            ],
+            "totals_ms": [
+              2.3,
+              2.2,
+              2.3,
+              2.3,
+              2.2,
+              2.2,
+              2.5,
+              2.1,
+              2.3,
+              2.2,
+              2.2,
+              2.2,
+              2.3,
+              2.3,
+              2.3
+            ],
+            "phases_median_ms": {
+              "glue_module_script": 1.1,
+              "fetch": 0.7,
+              "compile": 0.2,
+              "instantiate": 0.1,
+              "first_call": 0.2
+            },
+            "clock_quantum_ms": 0.1,
+            "clock": "performance.now() in the page. Chromium quantises it to 0.1 ms, which is a large fraction of a figure this small, and every duration here is rounded to four decimal places to drop the binary floating point artefact of subtracting two such readings.",
+            "artefact": {
+              "bytes": 16388,
+              "sha256": "d2d7990146912e37015726ffee867146563b5100cdf6120943a17a541267a782"
+            },
+            "profile": "release",
+            "version": "0.1.0",
+            "caveat": "This module holds four exported functions, no wgpu and no Naga. Appendix A gate A4 estimates 3 to 8 MB uncompressed with Naga dominating, so this figure has no bearing on A4 and A4 stays open. It is a regression baseline for the build-out phase.",
+            "not_measured": "A user's true cold start, which includes the network fetch of an uncached artefact over a real link and a browser process that was not just launched. The artefact is served from loopback here, so the fetch phase is a lower bound and nothing else."
+          }
+        }
+      }
+    }
+  }
+}

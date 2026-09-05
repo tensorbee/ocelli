@@ -68,8 +68,10 @@ That is the same defect class as widening a tolerance to make a test pass.
 
 ### The exported surface
 
-One function, `ocelli_version()`, returning the workspace version. It is the
-module's entire export until F-101 (E16.2) builds the boundary.
+Four functions, listed in the table under "The exported surface, and the panic
+probe" below. `ocelli_version()` returns the workspace version and the other
+three are the panic record of HLD section 23. The boundary itself arrives with
+F-101 (E16.2).
 
 It exists for measurement rather than for features. Fat LTO with `strip =
 true` lets the linker discard anything unreachable, so a module with no
@@ -192,7 +194,25 @@ larger and dominated by Naga.
 **That number is not an answer to Appendix A gate A4 and must not be read as
 one.** A4 asks whether binary size and cold start land within budget and
 estimates 3 to 8 MB uncompressed with Naga dominating. This module contains
-one function, no wgpu and no Naga. A4 stays open.
+four exported functions, no wgpu and no Naga. A4 stays open.
+
+### The other half of A4, cold start
+
+A4 names two figures and the paragraphs above are only the first. **Cold start
+was never measured at all until F-006**, which recorded **2.3 ms** on
+2026-09-05 for the release artefact: fetch, `WebAssembly.compile`, instantiate
+and the first `ocelli_version()` call, timed in headless Chromium from the page
+rather than from inside the module, so `crates/` gained not one line. The figure
+and everything about how it was taken are in `ci/bench-baseline.json`, and the
+design is `docs/lld/benchmarks.md`.
+
+**The same caveat applies to it, unchanged, and it is the reason both halves
+live in one place rather than in two documents.** A module holding four exported
+functions, no wgpu and no Naga tells you nothing about the cold start of a
+feature-complete module, exactly as its 16 KB tells you nothing about A4's 3 to
+8 MB. Separating the two numbers is how one of them eventually gets read as
+answering the gate. **A4 stays open**, and 2.3 ms is a regression baseline for
+the build-out phase.
 
 **Re-baselining is expected, repeatedly, for the whole build-out phase.** A 5%
 tolerance on a 14 KB module is blown by the first story that adds anything

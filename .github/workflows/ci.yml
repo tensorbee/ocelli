@@ -83,6 +83,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # The `bench` gate runs four node:test suites beside its Python guard. The
+      # runner image ships a node, and pinning it means this job does not depend
+      # on that staying true. Same reason python is pinned above.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
 
       # Decision D2. The one that is worthless unless enforced.
       - run: ci/check-bindgen-isolation.sh
@@ -101,6 +107,15 @@ jobs:
       # in the specification and the mechanism is not, so this is it. Runs
       # through the gate, which also runs the guard's own negative cases.
       - run: bin/ocelli.sh gate errors
+      # HLD section 26's last rule names a benchmark harness and gives it no
+      # shape, so F-006 is the shape and this is the gate over it. It asserts
+      # the INSTRUMENT and never a duration: no subject whose story has not
+      # landed may have a runner or a recorded number. That costs no GPU and no
+      # browser. The duration comparison runs through
+      # `bin/ocelli.sh bench --compare` on the machine that owns the baseline,
+      # deliberately not here, because a duration on a shared runner is noise
+      # and a skipped gate is not a pass.
+      - run: bin/ocelli.sh gate bench
       # docs/SOURCE-POLICY.md and HLD gate A6. No allowlist.
       - run: python3 scripts/source_provenance_check.py
       - run: python3 scripts/staged_content_check.py --tracked

@@ -20,3 +20,4 @@ Each file carries a `**F-IDs that contributed:**` line and a
 | [errors.md](errors.md) | The error model, the code registry, the panic record and structured logging | F-005 |
 | [typescript-packaging.md](typescript-packaging.md) | What the npm packages publish, and what proves it | F-003, F-005 |
 | [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010 |
+| [benchmarks.md](benchmarks.md) | The benchmark harness of HLD section 26, its subject registry, the host class and the `bench` gate | F-006 |

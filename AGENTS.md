@@ -50,6 +50,7 @@ bin/ocelli.sh cargo <anything>       # raw passthrough
 
 bin/ocelli.sh wasm                   # wasm-pack build + size budget
 bin/ocelli.sh native                 # the cross-target proof (E1.7)
+bin/ocelli.sh bench                  # the benchmark harness (E1.6, HLD 26)
 bin/ocelli.sh oracle                 # differential harness, needs a GPU
 bin/ocelli.sh corpus                 # verify the corpus against its manifest
 
@@ -135,8 +136,14 @@ this project's hot path.
   bytes, not a re-upload.
 - Batch pointer events into one command buffer per animation frame. Never cross
   the boundary per event.
-- **Measure before optimising. The intuitions that work in JavaScript do not
-  transfer.**
+- **Measure with the benchmark harness before optimising anything. The
+  intuitions that work in JavaScript do not transfer.** The harness is
+  `bin/ocelli.sh bench` and the subjects it will ever measure are listed in
+  `tools/bench/subjects.json`. Most of them report `unavailable` today and name
+  the story that gives them a subject, which is decision D7 holding. See
+  `docs/lld/benchmarks.md`. The instrument is half of section 26's rule, and an
+  earlier paraphrase here dropped it, leaving a habit where the specification
+  put a dependency.
 
 ## Skills
 

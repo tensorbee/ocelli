@@ -15,6 +15,7 @@
     "typecheck": "tsc --build",
     "test": "vitest run",
     "dev": "npm run dev -w @ocelli/example-viewer",
+    "bench": "node tools/bench/run.mjs",
     "oracle": "node tools/oracle/run.mjs"
   },
   "devDependencies": {
