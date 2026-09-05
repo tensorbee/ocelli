@@ -14,3 +14,18 @@ workspace = true
 # the mechanism that makes generated Rust safe to merge at volume, so it is
 # infrastructure and not a phase.
 [dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+# The comparator, F-011. It reads two directories of reference-half output and
+# writes a verdict per view. It is a binary rather than a test because the
+# corpus-scale exercises need `tools/oracle/out/`, and an `#[ignore]` test that
+# needs a directory reads as a pass on the day it did not run.
+[[bin]]
+name = "ocelli-compare"
+path = "src/bin/ocelli-compare.rs"

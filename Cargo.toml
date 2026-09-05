@@ -88,6 +88,18 @@ thiserror = { version = "2", default-features = false }
 pollster = "0.4"
 proptest = "1"
 trybuild = "1"
+# F-011. The comparator in `tools/oracle` reads `run.json` and ninety-eight
+# sidecars, and re-hashes every `.raw` it reads so a file edited after the run
+# cannot be compared as though somebody had rendered it. None of the three is
+# in HLD section 15.2's list, and none needs a deviation row: `ocelli-oracle`
+# is `publish = false` test infrastructure, so none of them enters the shipped
+# surface or the wasm size budget. Same precedent as `proptest` and `trybuild`
+# above. `sha2` is not in F-011's plan, which named only `serde` and
+# `serde_json`, and it is here because the plan's own input contract requires
+# the third hash.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
 
 # DICOM-RS FEATURES, HLD section 15.2. Disable default features. The defaults
 # are rayon and simd, and the gdcm feature is native-only. On wasm you want

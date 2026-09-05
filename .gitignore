@@ -50,6 +50,16 @@ corpus/data
 tools/oracle/out/
 tools/oracle/node_modules/
 
+# Comparator output, F-011. `<id>.diff.raw` is the per-lane absolute difference
+# between two frames of a corpus row, so it is derived from that row exactly as
+# a reference frame is, and every real row carries `burned-in-unchecked`. The
+# report beside it names every view.
+#
+# `.gitignore` alone is NOT the guard, because `git add -f` exists, so
+# `scripts/staged_content_check.py` refuses this prefix by path as well. Same
+# pairing as tools/oracle/out/ and tools/spikes/out/.
+tools/oracle/compare-out/
+
 # Benchmark output: one run's record, and the page directory it serves, which
 # holds a copy of the built wasm artefact. The RECORDED baseline is
 # ci/bench-baseline.json and IS committed, the way ci/wasm-size-budget.json is.

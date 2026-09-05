@@ -35,6 +35,7 @@ Validation
   bench [args]           the benchmark harness (E1.6, HLD 26). --help for flags.
                          Records durations. It compares nothing unless asked
   oracle [args]          the differential harness against cornerstone3D (GPU)
+  compare [args]         the pixel-diff comparator over the oracle's output
   corpus                 verify corpus/data against corpus/manifest.tsv
   corpus-tests           the corpus tooling suites (see OCELLI_PYTHON below)
 
@@ -183,7 +184,11 @@ run_gate() {
     corpus)      python3 scripts/corpus_check.py --coverage &&
                  python3 scripts/corpus_check.py &&
                  python3 scripts/corpus_tests.py --metadata-check ;;
-    oracle)      "$0" oracle ;;
+    # F-011. The reference half renders and the comparator judges, and the gate
+    # means both. Chained on `&&` for the reason the corpus arm gives above: a
+    # case arm returns the status of its LAST command, so an unchained
+    # `"$0" oracle` could fail and be reported green by a passing comparison.
+    oracle)      "$0" oracle && "$0" compare ;;
     *)           echo "unknown gate: $name" >&2; return 2 ;;
   esac
 }
@@ -387,6 +392,42 @@ case "$command" in
       exit 1
     fi
     node tools/oracle/run.mjs "$@"
+    ;;
+
+  compare)
+    # The comparator, F-011. It reads two directories of reference-half output
+    # and returns a verdict per view against HLD 25.1. See
+    # docs/lld/comparator.md.
+    #
+    # Two exercises with no arguments, and both are needed. `identity` proves
+    # the loader, the identifier mapping, the class resolution, the sidecar
+    # contract and the report shape over every view, and it proves NOTHING
+    # about detection. `mutations` replays the declared catalogue and requires
+    # each entry to produce the verdict written beside it, which is the half
+    # that proves detection. Chained on `&&` for the reason the corpus gate arm
+    # gives.
+    #
+    # RELEASE, and not for speed alone. A debug build of a comparison over
+    # ninety-eight frames plus twenty mutation replays is minutes rather than
+    # seconds, and a check nobody wants to wait for is a check that stops being
+    # run.
+    #
+    # An argument is passed straight through, so
+    # `bin/ocelli.sh compare identity --candidate DIR` is the form the port
+    # will use when there is a second side to compare.
+    if [ ! -d tools/oracle/out ]; then
+      echo "There is no oracle output to compare." >&2
+      echo "Run: bin/ocelli.sh oracle" >&2
+      echo "See docs/lld/comparator.md for what this compares and what it does not." >&2
+      exit 1
+    fi
+    cargo build --release -p ocelli-oracle --bin ocelli-compare
+    if [ "$#" -gt 0 ]; then
+      ./target/release/ocelli-compare "$@"
+    else
+      ./target/release/ocelli-compare identity &&
+      ./target/release/ocelli-compare mutations
+    fi
     ;;
 
   corpus)  python3 scripts/corpus_check.py "$@" ;;

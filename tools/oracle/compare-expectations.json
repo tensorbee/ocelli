@@ -1,0 +1,95 @@
+{
+  "why": "The census of every view the comparator reports as `unmeasured`, and the qualifiers that say why. It is strict in BOTH directions, which is unsupported.json's discipline applied to the comparator: a view that JOINS this list is a coverage loss that has to be explained, and a view that LEAVES it is a coverage gain that has to be recorded in the same change. That is what stops `unmeasured` becoming a place things go to be forgotten. Regenerate nothing automatically. A change here is reviewed like a tolerance change.",
+  "qualifiers": {
+    "weak": "run.json lists the view under lowInformation and its informative fraction over the image rectangle is below the floor declared in tools/oracle/src/tolerance.rs. A codec error in the clipped values could not show in a pixel diff.",
+    "decimated": "run.json lists the view under downsampled. The frame was fitted DOWN into the canvas under NEAREST, so a sub-source-pixel difference in the fit selects a different source pixel and the pixel difference is unbounded for a reason that is not the LUT chain. Its geometry component still gates.",
+    "unstated-threshold": "Class two. HLD 25.1 requires a perceptual difference below a stated threshold and states none and names no metric, so a pass would be a claim against a bound nobody wrote. Deviation D-16."
+  },
+  "unmeasured": {
+    "real__dx_varepop__00000001": [
+      "decimated"
+    ],
+    "real__us_cmb_crc__00000001": [
+      "decimated",
+      "unstated-threshold"
+    ],
+    "syntax__explicit_vr_be": [
+      "weak"
+    ],
+    "syntax__explicit_vr_le": [
+      "weak"
+    ],
+    "syntax__htj2k_lossless": [
+      "weak"
+    ],
+    "syntax__htj2k_lossless_rpcl": [
+      "weak"
+    ],
+    "syntax__htj2k_lossy": [
+      "weak"
+    ],
+    "syntax__implicit_vr_le": [
+      "weak"
+    ],
+    "syntax__j2k_lossless": [
+      "weak"
+    ],
+    "syntax__j2k_lossy": [
+      "weak"
+    ],
+    "syntax__jpeg_baseline_rgb8": [
+      "unstated-threshold"
+    ],
+    "syntax__jpeg_extended_12": [
+      "weak"
+    ],
+    "syntax__jpeg_lossless_p14": [
+      "weak"
+    ],
+    "syntax__jpeg_lossless_p14_sv1": [
+      "weak"
+    ],
+    "syntax__jpegls_lossless": [
+      "weak"
+    ],
+    "syntax__jpegls_near_lossless": [
+      "weak"
+    ],
+    "syntax__reference_mono12": [
+      "weak"
+    ],
+    "syntax__reference_rgb8": [
+      "unstated-threshold"
+    ],
+    "syntax__rle_lossless": [
+      "weak"
+    ],
+    "synthetic__ct_unsigned_16": [
+      "weak"
+    ],
+    "synthetic__sc_rgb_interleaved": [
+      "unstated-threshold"
+    ],
+    "synthetic__sc_rgb_planar": [
+      "unstated-threshold"
+    ],
+    "volume__synthetic__ct_series_nonuniform__AXIAL": [
+      "weak"
+    ],
+    "volume__synthetic__ct_series_nonuniform__CORONAL": [
+      "weak"
+    ],
+    "volume__synthetic__ct_series_nonuniform__SAGITTAL": [
+      "weak"
+    ],
+    "volume__synthetic__ct_series_uniform__AXIAL": [
+      "weak"
+    ],
+    "volume__synthetic__ct_series_uniform__CORONAL": [
+      "weak"
+    ],
+    "volume__synthetic__ct_series_uniform__SAGITTAL": [
+      "weak"
+    ]
+  }
+}

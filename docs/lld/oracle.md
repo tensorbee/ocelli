@@ -12,7 +12,9 @@ one instrument.
 **This half compares nothing against Ocelli.** It produces, for every
 applicable corpus row, a reference frame plus the metadata that explains it,
 and for every declared series directory a reference volume and three orthogonal
-reformats of it. Comparing Ocelli's own output against those frames is F-011.
+reformats of it. The half that judges is F-011 and it is
+`docs/lld/comparator.md`. Comparing Ocelli's own output against these frames
+still waits on there being an Ocelli output, which is decision D7 holding.
 
 Two passes, in two pages, in that order. The **stack pass** renders one frame of
 one instance, ninety-one times. The **volume pass** assembles four series
@@ -553,8 +555,9 @@ directory with no `run.json` in it is refused rather than deleted. So is an
 
 Per row into ignored `tools/oracle/out/`:
 
-- `<id>.raw`, the RGBA8 bytes the PNG encoder never touched. **F-011 compares
-  against these.**
+- `<id>.raw`, the RGBA8 bytes the PNG encoder never touched. **The comparator
+  reads these and never the PNG**, because the PNG encoder is a second
+  transformation and comparing its output would measure it.
 - `<id>.png`, for a human looking at a divergence.
 - `<id>.json`, the sidecar.
 

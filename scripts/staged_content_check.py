@@ -52,6 +52,18 @@ ORACLE_OUTPUT_PREFIXES = ("tools/oracle/out/",)
 # time of the person who trips it.
 SPIKE_OUTPUT_PREFIXES = ("tools/spikes/out/",)
 
+# Comparator output (F-011). The same reasoning again, applied to the third
+# derived artefact. `<id>.diff.raw` is the per-lane absolute difference between
+# two frames of a corpus row, so it is derived from that row exactly as a
+# reference frame is, and `compare.json` names every view. A `.raw` is not
+# DICOM by magic bytes and a difference image of a 512 by 512 frame is a
+# megabyte, which is under the size limit.
+#
+# Separate from ORACLE_OUTPUT_PREFIXES for the reason the spike block gives:
+# the remedy is a different command, and a guard that names the wrong one
+# wastes the time of the person who trips it.
+COMPARE_OUTPUT_PREFIXES = ("tools/oracle/compare-out/",)
+
 # DICOM Part 10 preamble: 128 zero bytes then "DICM". A file with no suffix
 # is checked by magic, because `anon001` is a very normal way to receive one.
 DICM_OFFSET = 128
@@ -98,6 +110,15 @@ def main() -> int:
                 f"row is marked burned-in-unchecked. Nothing under "
                 f"tools/oracle/out/ is ever committed. Regenerate it with "
                 f"`bin/ocelli.sh oracle`.")
+            continue
+
+        if name.startswith(COMPARE_OUTPUT_PREFIXES):
+            problems.append(
+                f"{name}: comparator output. A difference image under "
+                f"tools/oracle/compare-out/ is derived from a corpus row the "
+                f"same way a reference frame is, and every real row is marked "
+                f"burned-in-unchecked. Nothing here is ever committed. "
+                f"Regenerate it with `bin/ocelli.sh compare`.")
             continue
 
         if name.startswith(SPIKE_OUTPUT_PREFIXES):
