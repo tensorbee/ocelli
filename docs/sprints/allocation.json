@@ -3903,7 +3903,7 @@
    ],
    "notes": "Deviation D-11 pins cornerstone3D at 5.8.2 because Appendix B's v5.8.9 does not exist on npm. F-010 corrected CLAUDE.md. The string v5.8.9 survives in .claude/commands/parity.md, docs/RELEASE.md, scripts/gen_sprint_plan.py and the SPRINT_PLAN.md it generates, plus the generated adapter under .agents/skills/. A parity target stated three ways is worse than one stated wrongly, because a reader cannot tell which is current. Fix the generator rather than its output. Carried with it, from F-002: wasm-pack warns that crates/ocelli-wasm carries no LICENSE file, so the generated package would publish with a licence field and no licence text, which is the same defect F-003 fixed for the npm packages.",
    "milestone": "M1",
-   "sprint": "S03",
+   "sprint": "S04",
    "added": true,
    "depends_fids": [
     "F-010"
@@ -3945,7 +3945,7 @@
    ],
    "notes": "Two limits this sprint recorded rather than fixed. First, scripts/ci_floor_check.py asserts that CI INVOKES every floor gate and not that the invocation is EQUIVALENT: a workflow step running cargo clippy without -D warnings satisfies it today. Its own docstring says so. Closing it means either CI calling bin/ocelli.sh gate --floor per area, which collapses the job matrix that gives CI its useful per-area failure names, or comparing the command strings, and that is a design decision rather than a patch. Second, F-010 removed the S01 pre-oracle exception, which was the only thing distinguishing gates_cmd's --sprint arm from its --all arm, and the two are now character-identical. Either collapse them or give --sprint a distinction worth having.",
    "milestone": "M1",
-   "sprint": "S03",
+   "sprint": "S04",
    "added": true,
    "depends_fids": [
     "F-010"
@@ -3966,7 +3966,7 @@
    ],
    "notes": "F-010 claims determinism it can support: identical digests across two runs on one machine and one browser build, with SwiftShader forced so the reference does not depend on a GPU. It does not claim cross-machine reproducibility, and decision D14 is why the stronger claim is not made. That leaves an untested assumption at the point the oracle becomes shared: a second developer, or CI on manual dispatch, may produce different reference digests for reasons nobody has measured, and the failure would present as a port defect in F-011 rather than as an environment difference. Measure it on a second machine and a second Chromium build, publish the observed bound, and make run.json carry whatever identifies the difference.",
    "milestone": "M1",
-   "sprint": "S03",
+   "sprint": "S04",
    "added": true,
    "depends_fids": [
     "F-010"

@@ -84,7 +84,7 @@ _S01 to S05, 22 stories, 54 engineer-weeks._
 
 #### Sprint S03
 
-**Goal**: Runtime capability detection & tiering (WebGPU / WebGL2 / SIMD / threads), Error model, panic-to-JS mapping, structured logging, Benchmark harness: decode, first frame, interaction latency, Pixel-diff comparator with per-modality tolerance policy, Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders, Oracle volume and MPR reference renders, so the spacing rows are asked something, One parity-target version string, and a licence in the published wasm package, A standing test for every repository guard, not a mutation run once at authoring time, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it.
+**Goal**: Runtime capability detection & tiering (WebGPU / WebGL2 / SIMD / threads), Error model, panic-to-JS mapping, structured logging, Benchmark harness: decode, first frame, interaction latency, Pixel-diff comparator with per-modality tolerance policy, Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders, Oracle volume and MPR reference renders, so the spacing rows are asked something, A standing test for every repository guard, not a mutation run once at authoring time.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
@@ -94,14 +94,11 @@ _S01 to S05, 22 stories, 54 engineer-weeks._
 | F-011 | E2.3 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w |
 | F-X006 | Y1.1 | Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders | Test | 3w |
 | F-X007 | Y1.2 | Oracle volume and MPR reference renders, so the spacing rows are asked something | Test | 3w |
-| F-X008 | Y1.3 | One parity-target version string, and a licence in the published wasm package | Build | 1w |
 | F-X009 | Y1.4 | A standing test for every repository guard, not a mutation run once at authoring time | Build | 3w |
-| F-X010 | Y1.5 | CI floor equivalence, and the identical --sprint and --all gate profiles | Build | 2w |
-| F-X011 | Y1.6 | Cross-machine reference determinism, and what the oracle claims about it | Test | 2w |
 
 #### Sprint S04
 
-**Goal**: CI gate: every PR renders the full corpus, Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract.
+**Goal**: CI gate: every PR renders the full corpus, Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract, One parity-target version string, and a licence in the published wasm package, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
@@ -109,6 +106,9 @@ _S01 to S05, 22 stories, 54 engineer-weeks._
 | F-013 | E2.5 | Metadata diff harness (LUT values, geometry, spacing) | Test | 2w |
 | F-015 | E2.7 | Stable render-hash emission from the comparator | Test | 2w |
 | F-X001 | X1.1 | Tier C, software-adapter detection, and the feature-availability contract | Rust | 4w |
+| F-X008 | Y1.3 | One parity-target version string, and a licence in the published wasm package | Build | 1w |
+| F-X010 | Y1.5 | CI floor equivalence, and the identical --sprint and --all gate profiles | Build | 2w |
+| F-X011 | Y1.6 | Cross-machine reference determinism, and what the oracle claims about it | Test | 2w |
 
 #### Sprint S05
 
