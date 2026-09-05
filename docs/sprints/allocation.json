@@ -349,7 +349,7 @@
    "depends_eids": [
     "E2.2"
    ],
-   "notes": "Tolerance is a written policy, not a magic number",
+   "notes": "Tolerance is a written policy, not a magic number From F-010: 16 corpus frames are too saturated for a pixel diff to show a divergence in the clipped values. F-010 names them in run.json and does not solve them, because a second render at a wider window is a comparator decision. Decide it here.",
    "milestone": "M1",
    "sprint": "S03",
    "depends_fids": [
@@ -3844,6 +3844,153 @@
    "depends_fids": [
     "F-059",
     "F-X003"
+   ]
+  },
+  {
+   "fid": "F-X006",
+   "eid": "Y1.1",
+   "phase": "P1",
+   "epic": "EY Sprint follow-ups",
+   "epic_key": "EY",
+   "story": "Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders",
+   "layer": "Test",
+   "weeks": 3,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-009"
+   ],
+   "notes": "F-010 established that cornerstone3D 5.8.2 RENDERS all three HTJ2K rows and both JPEG-LS rows, and its own review pass 6 caught the harness claiming that this answers A1 and A2. It does not. A1 asks whether HTJ2K decodes bit-exact through openjp2 UNDER wasm32, diffed against OpenJPH. A2 asks what Ocelli's JPEG-LS answer is at all, between a CharLS bridge, a self-compiled CharLS and a young pure-Rust crate. Both are questions about OUR decoder choices, and the reference implementation's ability to display those rows bears on neither. HLD Appendix A says each gate can end or reshape the programme and belongs in the first six weeks, and A2 says decide before anything else. The inputs already exist: the corpus carries a row per transfer syntax, OpenJPH 0.31.0 and DCMTK are installed, and the dicom-tooling skill documents dcmdjpls as the independent JPEG-LS decode. Deliver a written answer per gate in docs/spikes/, not a passing test.",
+   "milestone": "M1",
+   "sprint": "S03",
+   "added": true,
+   "depends_fids": [
+    "F-009"
+   ]
+  },
+  {
+   "fid": "F-X007",
+   "eid": "Y1.2",
+   "phase": "P1",
+   "epic": "EY Sprint follow-ups",
+   "epic_key": "EY",
+   "story": "Oracle volume and MPR reference renders, so the spacing rows are asked something",
+   "layer": "Test",
+   "weeks": 3,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-010"
+   ],
+   "notes": "F-010 renders stack viewports only, which HLD section 28 justifies for the first two weeks. The consequence is recorded in docs/lld/oracle.md and is a real gap: the corpus carries ten uniform-spacing and ten non-uniform-spacing series rows, the non-uniform ten exist specifically to exercise the volume builder's REFUSAL path, and a stack-only oracle renders all twenty as independent stacks and asks them nothing. Until this lands, no reference output covers the geometry HLD section 16 warns about most, where using SpacingBetweenSlices instead of projected IPP compresses the volume along z and leaves every axial view looking perfect.",
+   "milestone": "M1",
+   "sprint": "S03",
+   "added": true,
+   "depends_fids": [
+    "F-010"
+   ]
+  },
+  {
+   "fid": "F-X008",
+   "eid": "Y1.3",
+   "phase": "P1",
+   "epic": "EY Sprint follow-ups",
+   "epic_key": "EY",
+   "story": "One parity-target version string, and a licence in the published wasm package",
+   "layer": "Build",
+   "weeks": 1,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-010"
+   ],
+   "notes": "Deviation D-11 pins cornerstone3D at 5.8.2 because Appendix B's v5.8.9 does not exist on npm. F-010 corrected CLAUDE.md. The string v5.8.9 survives in .claude/commands/parity.md, docs/RELEASE.md, scripts/gen_sprint_plan.py and the SPRINT_PLAN.md it generates, plus the generated adapter under .agents/skills/. A parity target stated three ways is worse than one stated wrongly, because a reader cannot tell which is current. Fix the generator rather than its output. Carried with it, from F-002: wasm-pack warns that crates/ocelli-wasm carries no LICENSE file, so the generated package would publish with a licence field and no licence text, which is the same defect F-003 fixed for the npm packages.",
+   "milestone": "M1",
+   "sprint": "S04",
+   "added": true,
+   "depends_fids": [
+    "F-010"
+   ]
+  },
+  {
+   "fid": "F-X009",
+   "eid": "Y1.4",
+   "phase": "P1",
+   "epic": "EY Sprint follow-ups",
+   "epic_key": "EY",
+   "story": "A standing test for every repository guard, not a mutation run once at authoring time",
+   "layer": "Build",
+   "weeks": 3,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-010"
+   ],
+   "notes": "The root cause F-010's review loop identified at pass 13, quoted: round 12 mutated its guards in the same command that added them, which proves the guard fired once and leaves nothing watching it afterwards. That shape recurred across passes 9 to 13 and is not confined to the oracle. The repository now runs twenty-one floor gates, and most are guards whose red path has been observed exactly once, by hand, by the story that wrote them. docs/runbooks/guard-verification.md records the procedure and nothing executes it. Give every guard a standing test that fails when the guard stops guarding, so that a guard silently weakened by a refactor is caught by CI rather than by the next person who happens to try it.",
+   "milestone": "M1",
+   "sprint": "S03",
+   "added": true,
+   "depends_fids": [
+    "F-010"
+   ]
+  },
+  {
+   "fid": "F-X010",
+   "eid": "Y1.5",
+   "phase": "P1",
+   "epic": "EY Sprint follow-ups",
+   "epic_key": "EY",
+   "story": "CI floor equivalence, and the identical --sprint and --all gate profiles",
+   "layer": "Build",
+   "weeks": 2,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-010"
+   ],
+   "notes": "Two limits this sprint recorded rather than fixed. First, scripts/ci_floor_check.py asserts that CI INVOKES every floor gate and not that the invocation is EQUIVALENT: a workflow step running cargo clippy without -D warnings satisfies it today. Its own docstring says so. Closing it means either CI calling bin/ocelli.sh gate --floor per area, which collapses the job matrix that gives CI its useful per-area failure names, or comparing the command strings, and that is a design decision rather than a patch. Second, F-010 removed the S01 pre-oracle exception, which was the only thing distinguishing gates_cmd's --sprint arm from its --all arm, and the two are now character-identical. Either collapse them or give --sprint a distinction worth having.",
+   "milestone": "M1",
+   "sprint": "S04",
+   "added": true,
+   "depends_fids": [
+    "F-010"
+   ]
+  },
+  {
+   "fid": "F-X011",
+   "eid": "Y1.6",
+   "phase": "P1",
+   "epic": "EY Sprint follow-ups",
+   "epic_key": "EY",
+   "story": "Cross-machine reference determinism, and what the oracle claims about it",
+   "layer": "Test",
+   "weeks": 2,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-010"
+   ],
+   "notes": "F-010 claims determinism it can support: identical digests across two runs on one machine and one browser build, with SwiftShader forced so the reference does not depend on a GPU. It does not claim cross-machine reproducibility, and decision D14 is why the stronger claim is not made. That leaves an untested assumption at the point the oracle becomes shared: a second developer, or CI on manual dispatch, may produce different reference digests for reasons nobody has measured, and the failure would present as a port defect in F-011 rather than as an environment difference. Measure it on a second machine and a second Chromium build, publish the observed bound, and make run.json carry whatever identifies the difference.",
+   "milestone": "M1",
+   "sprint": "S04",
+   "added": true,
+   "depends_fids": [
+    "F-010"
+   ]
+  },
+  {
+   "fid": "F-X012",
+   "eid": "Y1.7",
+   "phase": "P1",
+   "epic": "EY Sprint follow-ups",
+   "epic_key": "EY",
+   "story": "The reference's own SIGMOID width divergence, and what D14's bound says about it",
+   "layer": "Test",
+   "weeks": 2,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-010"
+   ],
+   "notes": "F-010 found a defect in the REFERENCE, not in this project. cornerstone3D 5.8.2's toLowHighRange applies LINEAR's (w - 1) / 2 to SIGMOID, and PS3.3 C.11.2.1.3.1 gives SIGMOID its own width constraint which is not LINEAR's. F-010's own minimumWidth is PS3.3-correct and therefore disagrees with the reference. It is unreachable today because all 85 windowed corpus rows resolve LINEAR, and the first SIGMOID row added to the corpus meets it. This matters more than its size suggests: decision D14 commits to publishing a MEASURED divergence against cornerstone3D, and here the oracle would be measuring our correct arithmetic against the reference's incorrect arithmetic and reporting it as our divergence. Decide and record which side the bound is stated against, add a SIGMOID corpus row so the case is exercised rather than reasoned about, and state the answer in docs/lld/oracle.md where the divergence is already recorded.",
+   "milestone": "M1",
+   "sprint": "S04",
+   "added": true,
+   "depends_fids": [
+    "F-010"
    ]
   }
  ]

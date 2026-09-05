@@ -20,7 +20,8 @@ Before changing code or tracked documentation, read `CLAUDE.md` and
 ## Non-negotiable rules
 
 - **No patient data** in prompts, source, fixtures, logs, errors, documentation
-  or commits. The corpus is outside git behind `corpus/manifest.tsv`.
+  or commits. The corpus is under ignored `corpus/data` behind
+  `corpus/manifest.tsv`.
 - **Do not open dwv or Horos**, and do not depend on Grok. Reading a copyleft
   source and translating it into Rust is a translation, an exclusive right of
   the copyright holder, and agent exposure cannot be disproved after the fact.

@@ -5,11 +5,10 @@ No gate or workflow calls this module. The tracked Markdown and JSON files are
 authoritative.
 
 They are outside the repository on purpose, so their location is a property of
-this CLONE rather than of the project. Three sources, first match wins:
+this CLONE rather than of the project. Two sources, first match wins:
 
   1. $OCELLI_SOURCE_DIR                  per-invocation override
   2. .ocelli-source-path                 per-clone, gitignored, survives a move
-  3. ../ocelli-source-documents          a machine-neutral fallback
 
 Recording it in a file rather than relying on an exported variable matters:
 an env var has to be remembered every session, and forgetting it makes the
@@ -31,9 +30,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / ".ocelli-source-path"
-# A sibling of the checkout, so the default is machine-neutral. The real
-# location is recorded per clone in .ocelli-source-path.
-DEFAULT = str(ROOT.parent / "ocelli-source-documents")
 EXPECTED = ["Ocelli-HLD.docx", "Rust-WASM-Imaging-Backlog.xlsx"]
 
 
@@ -46,7 +42,11 @@ def resolve() -> tuple[Path, str]:
         recorded = CONFIG.read_text().strip()
         if recorded:
             return Path(recorded).expanduser(), CONFIG.name
-    return Path(DEFAULT).expanduser(), "default"
+    sys.exit(
+        "Historical source documents are not configured. The tracked "
+        "Markdown and JSON are authoritative. To run a bootstrap converter "
+        "explicitly, set OCELLI_SOURCE_DIR or use --set."
+    )
 
 
 def main() -> int:

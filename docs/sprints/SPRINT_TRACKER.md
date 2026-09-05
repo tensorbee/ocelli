@@ -32,3 +32,8 @@ of the volume port work in M2 onward.
 |------|-------|--------|-----|-------------|-----------|
 | F-001 | Cargo workspace, crate skeleton, lint/CI baseline | S01 | 2w | 0.37d measured, 2h58m wall clock from the design commit to the F-ID commit, across four review passes | 2026-09-04 |
 | F-009 | Golden corpus ingest and de-identified fixture store | S01 | 3w | 0.76d measured, 6h03m wall clock from the design commit to the F-ID commit, across seven review passes | 2026-09-04 |
+| F-002 | wasm-pack build pipeline with a hard size budget gate | S02 | 2w | not measured, wall clock from the S02 design commit to this F-ID commit spans concurrent work on F-010 and is not attributable to this story | 2026-09-04 |
+| F-007 | Cross-target build proof: native desktop + server binary | S02 | 2w | not measured, same reason as F-002, this lane ran beside the F-010 worker | 2026-09-05 |
+| F-008 | ocelli-compute crate skeleton and GPU device-sharing contract | S02 | 2w | not measured, three review passes, and it also corrected F-007's feature guard | 2026-09-05 |
+| F-003 | TS package scaffold, bundling, npm publish pipeline | S02 | 2w | not measured, two review passes | 2026-09-05 |
+| F-010 | Headless cornerstone3D reference renderer | S02 | 4w | 0.31d measured, 7h29m wall clock from the design commit to the worker commit, across thirteen review passes and a strategy change, then integrated and reviewed once more | 2026-09-05 |

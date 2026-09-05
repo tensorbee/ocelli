@@ -1,0 +1,41 @@
+{
+  "name": "@ocelli/oracle",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Headless cornerstone3D reference renderer over the golden corpus (F-010, HLD section 11).",
+  "license": "MIT OR Apache-2.0",
+  "$pins": [
+    "Every version here is exact, with no caret and no tilde, for HLD 15.2's reason applied to the reference rather than to wgpu: an oracle that drifts is not an oracle.",
+    "The pin is 5.8.2 and not Appendix B's v5.8.9, which does not exist. That is deviation D-11.",
+    "@cornerstonejs/tools is pinned and is NEVER LOADED by this harness. It is here because the parity target names it and because D-11 pins all three cornerstone3D packages together, so `bin/ocelli.sh oracle` refuses a tree where the version of any of them has moved. @kitware/vtk.js, gl-matrix, d3-array and d3-interpolate are its peer dependencies and are pinned for the same reason.",
+    "@cornerstonejs/codec-* are declared even though nothing here imports them by name at run time. build-page.mjs resolves them to copy their .wasm binaries into the page, and those binaries decide the decoded pixels for every JPEG, JPEG-LS, JPEG 2000 and HTJ2K row. Relying on npm hoisting them out of dicom-image-loader's subtree would make the decoders a phantom dependency, which is the one thing hoisting can stop providing without warning.",
+    "dicom-parser reads the sidecar's DICOM attributes independently of the render path, so it is pinned and version-checked too. See PINNED in run.mjs.",
+    "esbuild is not part of the reference. It is what turns the reference into a page a browser can load, and a bundler that changed the module graph between two runs would move the output for a reason nobody could see."
+  ],
+  "scripts": {
+    "build:page": "node build-page.mjs",
+    "start": "node run.mjs",
+    "test": "node --test tests/args_test.mjs tests/manifest_test.mjs tests/output_test.mjs tests/params_test.mjs tests/paths_test.mjs tests/pins_test.mjs tests/registration_test.mjs tests/server_test.mjs tests/sidecar_test.mjs tests/unsupported_test.mjs"
+  },
+  "dependencies": {
+    "@cornerstonejs/codec-charls": "1.2.5",
+    "@cornerstonejs/codec-libjpeg-turbo-8bit": "1.2.4",
+    "@cornerstonejs/codec-openjpeg": "1.3.2",
+    "@cornerstonejs/codec-openjph": "2.4.9",
+    "@cornerstonejs/core": "5.8.2",
+    "@cornerstonejs/dicom-image-loader": "5.8.2",
+    "@cornerstonejs/metadata": "5.8.2",
+    "@cornerstonejs/tools": "5.8.2",
+    "@cornerstonejs/utils": "5.8.2",
+    "@kitware/vtk.js": "36.4.1",
+    "d3-array": "3.2.4",
+    "d3-interpolate": "3.0.1",
+    "dicom-parser": "1.8.21",
+    "gl-matrix": "3.4.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "playwright": "1.62.1"
+  }
+}

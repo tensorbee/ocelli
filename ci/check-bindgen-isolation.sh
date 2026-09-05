@@ -13,11 +13,55 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 fail=0
+
+# HLD section 15.3's loop, unaltered, over the HOST target.
 for c in crates/*/; do
   name=$(basename "$c")
   [ "$name" = "ocelli-wasm" ] && continue
   if cargo tree -p "$name" -e normal 2>/dev/null | grep -q 'wasm-bindgen'; then
     echo "FAIL: $name reaches wasm-bindgen"
+    fail=1
+  fi
+done
+
+# The same crates again for wasm32, and NOT as a `cargo tree` reachability
+# loop. Deviation D-12, and the reason is a contradiction inside the HLD
+# itself rather than a convenience.
+#
+# Section 15.2 specifies `wgpu`. Section 4 says `ocelli-render` builds for
+# wasm. Section 15.3, transcribed above, forbids any crate but ocelli-wasm
+# from REACHING wasm-bindgen. On wasm32 those three cannot all hold, because
+# wgpu talks to the browser's WebGPU through js-sys and web-sys, which are
+# built on wasm-bindgen. Measured:
+#
+#   wasm-bindgen v0.2.127
+#   |-- js-sys -> wasm-bindgen-futures -> wgpu -> ocelli-render
+#   `-- web-sys -> wgpu -> ocelli-render
+#
+# and on the host that route does not exist at all, so pass 1 above still
+# means exactly what section 15.3 wrote.
+#
+# Decision D2's PURPOSE survives intact, and that is what decides the shape of
+# this check. CLAUDE.md states the purpose: wasm-bindgen in one crate "is what
+# makes the desktop and server targets new entry points rather than rewrites".
+# wgpu abstracts the target itself, so `ocelli-render` carries no browser
+# binding in its source and compiles for native unchanged. What D2 forbids is
+# OUR code binding to the browser outside one crate.
+#
+# So the wasm32 rule is DIRECT DECLARATION, which is our code's own choice,
+# rather than transitive reachability, which a specified dependency decides
+# for us. A crate that adds wasm-bindgen to any of its own dependency tables,
+# under any target gate, still fails. That is the exact case F-002 added this
+# pass for, and it is still caught.
+for c in crates/*/; do
+  name=$(basename "$c")
+  [ "$name" = "ocelli-wasm" ] && continue
+  # Any `wasm-bindgen = ...` line in the manifest, whatever section or target
+  # gate it sits under. Comments are excluded so the explanatory prose in
+  # ocelli-wasm's own manifest cannot trip a sibling.
+  if grep -vE '^\s*#' "$c/Cargo.toml" 2>/dev/null |
+       grep -qE '^\s*wasm-bindgen\s*(=|\.)'; then
+    echo "FAIL: $name declares wasm-bindgen as a direct dependency"
     fail=1
   fi
 done

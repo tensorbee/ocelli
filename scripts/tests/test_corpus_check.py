@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import corpus_check  # noqa: E402
+import populate_corpus  # noqa: E402
 
 
 # The advisory the report prints when the real layer has no chroma anywhere.
@@ -253,6 +254,45 @@ class RegistryTable(unittest.TestCase):
             "1.2.840.10008.1.2.4.202",
             "1.2.840.10008.1.2.4.203",
         ])
+
+
+class PopulationSeed(unittest.TestCase):
+
+    def run_seed(self, content: bytes, expected: str) -> tuple[int, bool]:
+        with tempfile.TemporaryDirectory(prefix="ocelli-populate-") as tmp:
+            root = Path(tmp)
+            seed = root / "seed"
+            data = root / "data"
+            manifest = root / "manifest.tsv"
+            source = seed / "real" / "case.dcm"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(content)
+            manifest.write_text(
+                f"path\tsha256\nreal/case.dcm\t{expected}\n",
+                encoding="utf-8",
+            )
+
+            old_data = populate_corpus.DATA
+            old_manifest = populate_corpus.MANIFEST
+            populate_corpus.DATA = data
+            populate_corpus.MANIFEST = manifest
+            try:
+                captured = io.StringIO()
+                with redirect_stdout(captured):
+                    status = populate_corpus.copy_seed(seed)
+                copied = (data / "real" / "case.dcm").is_file()
+            finally:
+                populate_corpus.DATA = old_data
+                populate_corpus.MANIFEST = old_manifest
+        return status, copied
+
+    def test_a_matching_seed_case_is_copied(self) -> None:
+        content = b"synthetic test bytes"
+        expected = populate_corpus.hashlib.sha256(content).hexdigest()
+        self.assertEqual(self.run_seed(content, expected), (0, True))
+
+    def test_a_mismatched_seed_case_is_refused(self) -> None:
+        self.assertEqual(self.run_seed(b"different", "0" * 64), (1, False))
 
 
 if __name__ == "__main__":

@@ -2,9 +2,24 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
-//! Scaffold only. F-001 creates the crate, later stories fill it.
+//! F-001 creates the crate. F-008 gives it the device-ownership contract.
+//! F-004 resolves the tier, F-039 creates the device, and the render graph
+//! follows.
+//!
+//! **This crate is the only one permitted to create a `wgpu::Device`.** HLD
+//! section 31: "ocelli-compute never creates a wgpu::Device; it borrows the
+//! one ocelli-render owns. Two devices cannot share textures, which would
+//! defeat the entire point." `ci/check-device-ownership.sh` asserts it.
+//!
+//! **This crate is not `no_std`**, unlike the other core crates, because wgpu
+//! needs `std`. That is part of deviation D-10 and it is recorded there rather
+//! than left as an unexplained absence.
 
-#![cfg_attr(not(test), no_std)]
+pub mod caps;
+pub mod gpu;
+
+pub use caps::{Caps, Tier};
+pub use gpu::{GpuContext, SharedEncoder};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.

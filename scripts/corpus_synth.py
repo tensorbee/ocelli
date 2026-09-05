@@ -37,11 +37,11 @@ and OpenJPEG produce codestreams here. Whether Ocelli decodes them correctly is
 decided by the oracle against cornerstone3D, per HLD section 11.
 
 Usage:
-  python3 scripts/corpus_synth.py                    # write to $OCELLI_CORPUS_DIR
-  python3 scripts/corpus_synth.py --out DIR          # write somewhere else
-  python3 scripts/corpus_synth.py --manifest-rows    # print the rows, no files
-  python3 scripts/corpus_synth.py --write-manifest   # regenerate the owned rows
-  python3 scripts/corpus_synth.py --tool-versions    # what would produce them
+  .venv/bin/python scripts/corpus_synth.py           # write to corpus/data
+  uv run scripts/corpus_synth.py --out DIR          # write somewhere else
+  uv run scripts/corpus_synth.py --manifest-rows    # print the rows, no files
+  uv run scripts/corpus_synth.py --write-manifest   # regenerate the owned rows
+  uv run scripts/corpus_synth.py --tool-versions    # what would produce them
 """
 
 from __future__ import annotations
@@ -1051,7 +1051,7 @@ def write_manifest(rows: list[str]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", metavar="DIR",
-                        help="corpus root, default $OCELLI_CORPUS_DIR")
+                        help="corpus root, default corpus/data")
     parser.add_argument("--manifest-rows", action="store_true",
                         help="print the TSV rows for an already-generated set")
     parser.add_argument("--write-manifest", action="store_true",
@@ -1071,9 +1071,9 @@ def main() -> int:
                       if path.relative_to(out).as_posix()
                       .startswith(MANIFEST_OWNED_PREFIXES))
         print(f"wrote {written} cases under {out}")
-        print("next: python3 scripts/corpus_synth.py --write-manifest, "
-              "then python3 scripts/corpus_check.py")
-        print("if a digest moved, python3 scripts/corpus_synth.py "
+        print("next: uv run scripts/corpus_synth.py --write-manifest, "
+              "then uv run scripts/corpus_check.py")
+        print("if a digest moved, uv run scripts/corpus_synth.py "
               "--tool-versions says whether the toolchain did")
         return 0
 

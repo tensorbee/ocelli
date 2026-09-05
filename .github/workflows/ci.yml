@@ -49,6 +49,12 @@ jobs:
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      # `gate native` step 4 runs scripts/target_feature_check.py. The runner
+      # image ships a python3, and pinning it here means this job does not
+      # depend on that staying true.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -57,10 +63,15 @@ jobs:
       # Story E1.7, the cross-target build proof. This is what keeps decision
       # D2 honest over time: if the core stopped being WebAssembly-agnostic,
       # it shows up here first.
-      - name: Cross-target proof, native
-        run: cargo build -p ocelli-native
-      - name: Cross-target proof, wasm32
-        run: cargo check -p ocelli-wasm --target wasm32-unknown-unknown
+      #
+      # F-007 replaced two hand-written steps with the gate. The old pair built
+      # ocelli-native on the host and checked ocelli-wasm for wasm32, which
+      # left the other eleven crates unproved on both targets and said nothing
+      # about feature resolution. Going through the gate also means CI and a
+      # developer get ONE definition of the proof rather than a shell script
+      # and a workflow that drift apart.
+      - name: Cross-target proof
+        run: bin/ocelli.sh gate native
 
   guards:
     name: Guards
@@ -72,10 +83,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python3 -m pip install openpyxl
 
       # Decision D2. The one that is worthless unless enforced.
       - run: ci/check-bindgen-isolation.sh
+      # HLD section 31 and the section 38 hook. Only ocelli-render creates a
+      # device. The compile-fail cases under crates/ocelli-compute/tests/ui/
+      # are the strong half and run in the `test` gate. This catches the case
+      # no type can: a crate creating a device it never puts in a GpuContext.
+      - run: ci/check-device-ownership.sh
       # HLD 27.2 R5, two permitted files.
       - run: python3 scripts/unsafe_allowlist_check.py
       # HLD 15.2 and 27.2 R4, wgpu pinned exactly.
@@ -91,6 +106,10 @@ jobs:
       - run: python3 scripts/gen_sprint_plan.py --check
       # One workflow, two hosts. A stale adapter serves Codex old instructions.
       - run: python3 scripts/sync_agent_skills.py --check
+      # `gate --floor` calls itself "what CI runs". This is what makes that
+      # true. S02 added three gates to the floor and each needed a hand-written
+      # step here, and nothing would have noticed a missed one.
+      - run: python3 scripts/ci_floor_check.py
       # The manifest's shape AND its coverage, neither of which needs the
       # corpus itself. `--coverage` calls load() first, so it subsumes
       # `--manifest-only` rather than replacing it. This is the half of the
@@ -110,15 +129,13 @@ jobs:
           python-version: "3.12"
 
       # The generator writes real DICOM in every transfer syntax the codec
-      # registry claims, so it needs real encoders. Every Python package below
-      # is pinned and so is OpenJPH. DCMTK is NOT, see the step below.
+      # registry claims, so it needs real encoders. The Python environment is
+      # the same locked uv environment used by developers. OpenJPH is pinned.
+      # DCMTK is NOT, see the step below.
       - name: Python DICOM tooling
         run: |
-          python3 -m pip install \
-            "pydicom==3.0.2" "numpy==2.5.2" \
-            "pylibjpeg==2.1.0" "pylibjpeg-libjpeg==2.4.0" \
-            "pylibjpeg-openjpeg==2.5.0" "pylibjpeg-rle==2.2.0" \
-            "pyjpegls==1.5.1"
+          python3 -m pip install "uv==0.11.19"
+          uv sync --locked
 
       # DCMTK comes from the distribution and is therefore NOT pinned. On
       # ubuntu-latest (24.04) that is 3.6.7, against the 3.7.0 that
@@ -166,7 +183,7 @@ jobs:
       # an install half-succeeded and the fixture did not run. That must be
       # red, not a green tick. `--require-prerequisites` says so, and it is
       # the same runner a developer gets through the gate.
-      - run: python3 scripts/corpus_tests.py --require-prerequisites
+      - run: uv run scripts/corpus_tests.py --require-prerequisites
 
   frontend:
     name: TypeScript
@@ -177,11 +194,24 @@ jobs:
         with:
           node-version: "24"
           cache: npm
+      # `gate packages` runs scripts/package_check.py. The runner image ships a
+      # python3, and pinning it means this job does not depend on that staying
+      # true. Same reason the rust job pins it for `gate native`.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - run: npm ci
       # Includes the cached-wasm-view ban of HLD 17.2, which is a silent
       # failure mode and therefore a lint rather than a convention.
       - run: npm run lint
       - run: npm run typecheck
+      # Story E1.3. tsc proves the TypeScript compiles. This proves what a
+      # CONSUMER receives: the tarball carries every path the exports map
+      # advertises and both licence files, and a project outside the workspace
+      # installs and imports it under bundler and node16 resolution. It also
+      # runs `npm publish --dry-run`, which publishes nothing and which
+      # scripts/package_check.py refuses to run where a token exists.
+      - run: bin/ocelli.sh gate packages
 
   wasm:
     name: wasm size budget
@@ -199,8 +229,12 @@ jobs:
       # HLD 15.2's opt-level "z", fat LTO and strip apply to release, so a
       # dev-profile measurement is meaningless against Appendix A gate A4.
       #
-      # Until F-096 adds wasm-bindgen, wasm-pack cannot build ocelli-wasm at
-      # all, so this gate SKIPS with a stated reason. Going through the gate
-      # runner rather than calling wasm-pack directly is what keeps that a
-      # visible skip instead of a red job nobody can act on.
+      # F-002 (E1.2) removed the skip that used to sit here. ocelli-wasm now
+      # declares wasm-bindgen, wasm-pack builds it, and there is a release
+      # artefact to measure, so this job runs the build rather than reporting
+      # a skipped gate as a green tick.
+      #
+      # It still goes through the gate runner rather than calling wasm-pack
+      # directly, so that the size check and the build stay one definition
+      # that CI and a developer both get.
       - run: bin/ocelli.sh gate wasm

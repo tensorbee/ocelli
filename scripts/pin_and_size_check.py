@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The wgpu exact pin and the wasm size budget. HLD section 27.2 R4 and E1.2.
+"""The exact dependency pins and the wasm size budget. HLD 27.2 R4 and E1.2.
 
 Two checks that share a file because they share a failure mode: both are
 about a number nobody looks at until it is wrong.
@@ -13,6 +13,11 @@ about a number nobody looks at until it is wrong.
 R4 adds: "treat GPU code that compiles first try with suspicion". A caret or
 tilde range on wgpu re-opens exactly the gap the pin closes, so the range form
 is refused, not just a wrong version.
+
+**The wasm-bindgen pin.** Added by F-002 and not in section 15.2's list, which
+predates the build pipeline story. `wasm-pack` runs a wasm-bindgen CLI whose
+version must match the crate version, so a range lets the two drift and the
+mismatch reads as a build break rather than as a resolution change.
 
 **The size budget.** Story E1.2 is "wasm-pack build pipeline with a hard size
 budget gate", and Appendix A gate A4 asks whether binary size and cold start
@@ -43,8 +48,23 @@ CARGO = ROOT / "Cargo.toml"
 BUDGET = ROOT / "ci" / "wasm-size-budget.json"
 PKG = ROOT / "crates" / "ocelli-wasm" / "pkg"
 
-# HLD section 15.2. Crates whose version must be an EXACT `=` pin.
-EXACT_PINNED = {"wgpu"}
+# Crates whose version must be an EXACT `=` pin, with the reason a range is
+# refused. The reason is printed on failure, because "pin it exactly" without
+# the reason is the kind of rule that gets relaxed by the next person in a
+# hurry.
+EXACT_PINNED = {
+    "wgpu":
+        "HLD section 15.2 requires `=`. Agents reliably emit wgpu 0.19-era "
+        "pipeline code and a range lets that compile against something "
+        "subtly different from what the shader expects.",
+    # F-002 (E1.2). Not in HLD section 15.2's list, which predates the build
+    # pipeline story.
+    "wasm-bindgen":
+        "`wasm-pack` runs a wasm-bindgen CLI whose version must match the "
+        "crate version. A range lets the two drift, and the resulting "
+        "version-mismatch reads as a build break rather than as a resolution "
+        "change.",
+}
 
 # Growth tolerated before the gate fails, as a fraction of the baseline.
 # A binary that grows 5% in one story is a story that should say why.
@@ -59,12 +79,13 @@ def check_pins() -> list[str]:
         return ["Cargo.toml has no [workspace.dependencies] section"]
 
     problems = []
-    for crate in sorted(EXACT_PINNED):
-        entry = re.search(rf'^\s*{crate}\s*=\s*(.+)$', block.group(1), re.M)
+    for crate, reason in sorted(EXACT_PINNED.items()):
+        entry = re.search(rf'^\s*{re.escape(crate)}\s*=\s*(.+)$',
+                          block.group(1), re.M)
         if entry is None:
             problems.append(
-                f"{crate} is not declared in [workspace.dependencies]. "
-                f"HLD section 15.2 requires it, pinned exactly.")
+                f"{crate} is not declared in [workspace.dependencies], "
+                f"and it must be, pinned exactly. {reason}")
             continue
         value = entry.group(1)
         version = re.search(r'"([^"]+)"', value)
@@ -74,11 +95,7 @@ def check_pins() -> list[str]:
         spec = version.group(1)
         if not spec.startswith("="):
             problems.append(
-                f"{crate} = \"{spec}\" is a RANGE, not an exact pin. "
-                f"HLD section 15.2 requires `=`. Agents reliably emit "
-                f"wgpu 0.19-era pipeline code and a range lets that compile "
-                f"against something subtly different from what the shader "
-                f"expects.")
+                f"{crate} = \"{spec}\" is a RANGE, not an exact pin. {reason}")
     return problems
 
 
@@ -141,7 +158,7 @@ def main() -> int:
             print(f"  {problem}")
         return 1
 
-    print("OK: wgpu pinned exactly" +
+    print(f"OK: {', '.join(sorted(EXACT_PINNED))} pinned exactly" +
           (", wasm size within budget" if args.with_size else ""))
     return 0
 

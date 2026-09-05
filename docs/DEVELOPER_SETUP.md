@@ -13,12 +13,13 @@ gives it neither.
 | wasm-pack | 0.15+ | Builds `crates/ocelli-wasm` |
 | Node | 24+ | The TypeScript workspaces |
 | Python | 3.12+ | The guard scripts, and corpus and fixture work |
+| uv | 0.11+ | Creates the locked repository-local Python environment |
 | A WebGPU-capable browser | | Chrome or Edge. Required for the oracle |
 
 ```bash
 rustup toolchain install 1.97.1
 cargo install wasm-pack
-python3 -m pip install 'pydicom[all]' numpy
+uv sync --locked
 brew install dcmtk                  # macOS
 npm ci
 ```
@@ -50,11 +51,10 @@ allocation changes must keep `backlog` and `deviations` gates green.
 
 ## The corpus
 
-Not in git. See `corpus/README.md`.
+The bytes live under ignored `corpus/data`. See `corpus/README.md`.
 
 ```bash
-export OCELLI_CORPUS_DIR=/path/to/corpus
-bin/ocelli.sh corpus
+uv run scripts/populate_corpus.py
 ```
 
 Until it exists, `/verify` records `corpus=absent` honestly. That is permitted

@@ -37,7 +37,7 @@ HLD = ROOT / "docs" / "hld"
 
 # The authored .docx lives OUTSIDE the repository. It carries Appendix C, the
 # competitive and commercial analysis, which is not published with the library.
-# See the private folder's README. Default location, overridable:
+# Historical bootstrap input must be configured explicitly:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from source_dir import resolve as _resolve_source  # noqa: E402
 

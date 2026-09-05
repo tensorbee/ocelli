@@ -26,8 +26,7 @@ For the standard itself, the LUT formulas, the geometry and the traps, load
 ## Setup
 
 ```bash
-python3 -m pip install 'pydicom[all]' numpy
-python3 -m pip install pylibjpeg pylibjpeg-libjpeg pylibjpeg-openjpeg
+uv sync --locked
 brew install dcmtk          # macOS
 ```
 
@@ -326,7 +325,7 @@ each.
 ### Do not put a synthetic fixture in git either
 
 It is still a `.dcm` and the pre-commit hook still refuses it, deliberately.
-Generate it into `$OCELLI_CORPUS_DIR` from a **committed generator script**,
+Generate it into ignored `corpus/data` from a **committed generator script**,
 which is better than a committed binary anyway: the script says what the case
 is for, and a binary does not.
 
@@ -335,13 +334,12 @@ is for, and a binary does not.
 ## 6. Adding to the manifest
 
 ```bash
-export OCELLI_CORPUS_DIR=/path/to/corpus
-python3 scripts/corpus_check.py --add "$OCELLI_CORPUS_DIR/ct/case001.dcm" \
+uv run scripts/corpus_check.py --add "corpus/data/ct/case001.dcm" \
   --modality CT --transfer-syntax 1.2.840.10008.1.2.1 \
   --category stack-window --source "TCIA <collection>" \
   --licence "CC BY 3.0" --licence-url "https://..." \
   --url ""
-python3 scripts/corpus_check.py
+uv run scripts/corpus_check.py
 ```
 
 Commit the manifest row. Never the file.

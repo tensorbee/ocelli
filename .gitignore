@@ -18,6 +18,7 @@
 
 # Python bytecode from the guard scripts. Appears the moment one is imported
 # as a module rather than run as a script.
+.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -34,7 +35,13 @@ dist/
 .vite/
 
 # The corpus. See corpus/README.md. The manifest IS committed, the data is not.
-corpus/data/
+#
+# No trailing slash, deliberately. "corpus/data/" matches only a DIRECTORY, and
+# a parallel sprint worktree gets its corpus as a SYMLINK to the canonical one,
+# which that pattern does not match. The symlink then shows as untracked and a
+# `git add -A` commits a path pointing at one machine's filesystem. Measured in
+# S02, in the F-010 worktree.
+corpus/data
 *.dcm
 *.dicom
 *.DCM
@@ -79,7 +86,3 @@ test-results/
 # Historical bootstrap converters may record an external source location.
 # No gate or workflow requires it.
 .ocelli-source-path
-
-# Which interpreter has pydicom and the codec plugins on THIS machine, for
-# `bin/ocelli.sh gate corpus-tests`. Per-clone, for the same reason.
-.ocelli-python-path

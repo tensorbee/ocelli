@@ -1,0 +1,15 @@
+{
+  "note": "Declared per-target differences for dependencies this workspace names directly. Transitive packages are NOT listed: a cross-platform GPU library resolves a different closure per target by design, and per host, so listing them would make this gate machine-specific. See the module docstring of scripts/target_feature_check.py.",
+  "host_triple_when_written": "aarch64-apple-darwin",
+  "checked_dependencies": [
+    "bytemuck",
+    "dicom",
+    "glam",
+    "proptest",
+    "thiserror",
+    "trybuild",
+    "wasm-bindgen",
+    "wgpu"
+  ],
+  "allowed": {}
+}

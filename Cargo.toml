@@ -42,10 +42,20 @@ panic = "deny"
 #
 # Cargo does not resolve an unused workspace dependency, so an entry costs
 # nothing until a crate names it. Each activates with the story that needs it,
-# F-016 for dicom and F-039 for wgpu. F-001 activates glam, for the
-# `Transform<A, B>` matrix of HLD section 16.
+# F-016 for dicom and F-008 for wgpu. F-001 activates glam, for the
+# `Transform<A, B>` matrix of HLD section 16, and F-002 activates wasm-bindgen.
+#
+# wgpu moved from F-039 to F-008 under deviation D-10: HLD section 38's
+# device-sharing hook is stated in wgpu types, and a contract expressed only in
+# prose is not a mechanism.
 [workspace.dependencies]
 wgpu = "=30.0.1"
+# Pinned EXACTLY for the same reason as wgpu and one more that is specific to
+# it: `wasm-pack` runs a wasm-bindgen CLI whose version must match this crate
+# version, so a floating range produces a version-mismatch failure that reads
+# as a build break rather than as a resolution change. Activated by F-002,
+# which is the story that makes wasm32 a real build target.
+wasm-bindgen = "=0.2.127"
 dicom = { version = "0.10", default-features = false }
 # HLD section 15.2 writes `glam = "0.30"`. The version is untouched and only
 # the feature set differs, which is deviation D-09: every core crate carries

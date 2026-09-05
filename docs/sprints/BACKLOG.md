@@ -69,21 +69,28 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
 | F-001 | E1.1 | S01 | Cargo workspace, crate skeleton, lint/CI baseline | Build | 2w | - | done |
-| F-002 | E1.2 | S02 | wasm-pack build pipeline with a hard size budget gate | Build | 2w | F-001 | pending |
-| F-003 | E1.3 | S02 | TS package scaffold, bundling, npm publish pipeline | Build | 2w | F-001 | pending |
+| F-002 | E1.2 | S02 | wasm-pack build pipeline with a hard size budget gate | Build | 2w | F-001 | done |
+| F-003 | E1.3 | S02 | TS package scaffold, bundling, npm publish pipeline | Build | 2w | F-001 | done |
 | F-004 | E1.4 | S03 | Runtime capability detection & tiering (WebGPU / WebGL2 / SIMD / threads) | Build | 2w | F-002 | pending |
 | F-005 | E1.5 | S03 | Error model, panic-to-JS mapping, structured logging | Build | 2w | F-002 | pending |
 | F-006 | E1.6 | S03 | Benchmark harness: decode, first frame, interaction latency | Build | 2w | F-003 | pending |
-| F-007 | E1.7 | S02 | Cross-target build proof: native desktop + server binary | Build | 2w | F-001 | pending |
-| F-008 | E1.8 | S02 | ocelli-compute crate skeleton and GPU device-sharing contract | Build | 2w | F-001 | pending |
+| F-007 | E1.7 | S02 | Cross-target build proof: native desktop + server binary | Build | 2w | F-001 | done |
+| F-008 | E1.8 | S02 | ocelli-compute crate skeleton and GPU device-sharing contract | Build | 2w | F-001 | done |
 | F-009 | E2.1 | S01 | Golden corpus ingest and de-identified fixture store | Test | 3w | - | done |
-| F-010 | E2.2 | S02 | Headless cornerstone3D reference renderer | Test | 4w | F-009 | pending |
+| F-010 | E2.2 | S02 | Headless cornerstone3D reference renderer | Test | 4w | F-009 | done |
 | F-011 | E2.3 | S03 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w | F-010 | pending |
 | F-012 | E2.4 | S04 | CI gate: every PR renders the full corpus | Test | 3w | F-011 | pending |
 | F-013 | E2.5 | S04 | Metadata diff harness (LUT values, geometry, spacing) | Test | 2w | F-011 | pending |
 | F-014 | E2.6 | S05 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | F-012 | pending |
 | F-015 | E2.7 | S04 | Stable render-hash emission from the comparator | Test | 2w | F-011 | pending |
 | F-X001 | X1.1 | S04 | Tier C, software-adapter detection, and the feature-availability contract | Rust | 4w | F-004 | pending |
+| F-X006 | Y1.1 | S03 | Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders | Test | 3w | F-009 | pending |
+| F-X007 | Y1.2 | S03 | Oracle volume and MPR reference renders, so the spacing rows are asked something | Test | 3w | F-010 | pending |
+| F-X008 | Y1.3 | S04 | One parity-target version string, and a licence in the published wasm package | Build | 1w | F-010 | pending |
+| F-X009 | Y1.4 | S03 | A standing test for every repository guard, not a mutation run once at authoring time | Build | 3w | F-010 | pending |
+| F-X010 | Y1.5 | S04 | CI floor equivalence, and the identical --sprint and --all gate profiles | Build | 2w | F-010 | pending |
+| F-X011 | Y1.6 | S04 | Cross-machine reference determinism, and what the oracle claims about it | Test | 2w | F-010 | pending |
+| F-X012 | Y1.7 | S04 | The reference's own SIGMOID width divergence, and what D14's bound says about it | Test | 2w | F-010 | pending |
 
 ### M2, DICOM ingest and the pixel pipeline
 

@@ -1,0 +1,5 @@
+{
+  "bytes": 14104,
+  "tolerance": 0.05,
+  "note": "Recorded measurement, not a guess. HLD Appendix A gate A4 estimates 3-8 MB uncompressed before tuning, with Naga dominating, and says it is unmeasured. Re-baseline deliberately with --accept-size and say why in the design plan."
+}

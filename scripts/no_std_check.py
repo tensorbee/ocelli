@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 """The `no_std` posture of the core crates, enforced.
 
-Every crate under `crates/` except the two entry points declares
+Most crates under `crates/` declare
 
     #![cfg_attr(not(test), no_std)]
 
 and deviation D-09 disables glam's default `std` feature to keep that true.
 Nothing checked it. This does.
+
+**Four crates do not declare it, and each absence is deliberate.**
+`ocelli-wasm` and `ocelli-native` are the two entry points. `ocelli-render` and
+`ocelli-compute` link wgpu, which needs `std`, and that is part of deviation
+D-10 rather than an oversight. This script does not carry a list of exempt
+crates: it reads the attribute from each crate's source and checks the ones
+that declare it, so a crate that drops `no_std` leaves the check by construction
+and a crate that adds it joins by construction. A hand-maintained exemption
+list would be a second place to update and a place to hide.
 
 ## Why the obvious check does not work
 

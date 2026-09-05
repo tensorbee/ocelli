@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ocelli oracle, cornerstone3D reference renderer</title>
+    <style>
+      /* The page is never looked at by a person. The element is sized from
+         render-params.json by the driver, and everything else is kept out of
+         the way so no stylesheet can move a pixel. */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+      }
+      #viewport {
+        position: absolute;
+        top: 0;
+        left: 0;
+        line-height: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="viewport"></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

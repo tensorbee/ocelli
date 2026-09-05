@@ -1,0 +1,29 @@
+{
+  "$notes": [
+    "What the pinned cornerstone3D cannot render, and what it said when it could not.",
+    "Every corpus row is attempted. A row that fails is checked against this file: an entry has to match the row's transfer syntax, the boundary it failed at, the row's own path, and a fragment of the error the reference produced. A failure no entry describes fails the run, and a row an entry claims that then succeeds fails the run too.",
+    "This file is committed because it is a fact about cornerstone3D 5.8.2, not about this machine.",
+    "It does not answer Appendix A gates A1 or A2. Those ask about Ocelli's own wasm codec build, which does not exist yet. What it records is that the reference decodes, presents and reads back all three HTJ2K rows and both JPEG-LS rows, so those five have reference frames to be measured against when there is something to measure.",
+    "Regenerate the candidate list with `node tools/oracle/run.mjs --report-unsupported`, then write the `why` by hand. The reason a row cannot be rendered is not something the harness can know.",
+    "`errorContains` matches the message the harness reports, not the browser console. The console evidence behind each diagnosis is quoted in `why`, and a full run writes the console to `out/console.log`."
+  ],
+  "cornerstone3DVersion": "5.8.2",
+  "entries": [
+    {
+      "transferSyntax": "1.2.840.10008.1.2.1",
+      "feature": "Photometric Interpretation YBR_FULL_422 in an uncompressed instance",
+      "boundary": "read-back",
+      "errorContains": "every pixel of the frame is rgba(0,0,0,255)",
+      "rows": ["synthetic/us_ybr_full_422.dcm"],
+      "why": "PS3.3 C.7.6.3.1.2: YBR_FULL_422 subsamples the two chroma channels two to one horizontally and stores each pair of pixels as Y1 Y2 Cb Cr, so a frame of 12 rows by 20 columns is Rows*Columns*2 bytes and not Rows*Columns*SamplesPerPixel. Measured on the file: PixelData is 480 bytes where Rows*Columns*3 would be 720. This is the exact trap the case was written for, and `scripts/corpus_synth.py` says so at `case_ybr_full_422`: 'a reader that sizes the buffer from SamplesPerPixel alone over-reads by half a frame'. cornerstone3D 5.8.2 sizes the texture that way, the short buffer is refused by the browser with `WebGL: INVALID_OPERATION: texImage2D: ArrayBufferView not big enough for request`, nothing reaches the canvas and the frame reads back uniform black. The load itself RESOLVES, so this fails at read back and not at decode. That is precisely why the read-back guard exists: without it the run would have written a stable digest for a blank frame and called the row covered."
+    },
+    {
+      "transferSyntax": "1.2.840.10008.1.2.1.99",
+      "feature": "Deflated Explicit VR Little Endian",
+      "boundary": "decoded",
+      "errorContains": "Array buffer allocation failed",
+      "rows": ["syntax/deflated_explicit_vr_le.dcm"],
+      "why": "PS3.5 A.5: in Deflated Explicit VR Little Endian the whole data set after the File Meta group is deflated. cornerstone3D 5.8.2's default loader path, `loadImageFromNaturalizedMetadata`, hands the bytes to the reader in `@cornerstonejs/metadata` without inflating them first, so the reader parses compressed bytes as a data set. The console shows it reading nonsense element headers (`Invalid vr type ]Q - using UN`) and then asking for a buffer sized from a garbage length, which throws `RangeError: Array buffer allocation failed`. The package does carry an inflater, `imageLoader/wadouri/parseDicomWithInflater.js`, but it is only reached from the deprecated `useLegacyMetadataProvider` path. The harness runs the default path, because the default is what a cornerstone3D 5.8.2 user gets and therefore what the reference is."
+    }
+  ]
+}
