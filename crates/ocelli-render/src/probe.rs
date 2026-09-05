@@ -171,7 +171,8 @@ async fn measure_chosen(
         label: Some("ocelli tier probe"),
         required_features: wgpu::Features::empty(),
         // The adapter's OWN limits, never `Limits::default()`. Requesting
-        // limits an adapter does not provide panics, and a downlevel GL
+        // limits an adapter does not provide returns
+        // `Err(RequestDeviceError::LimitsExceeded)`, and a downlevel GL
         // adapter does not meet the WebGPU defaults, which is the whole reason
         // tier B exists.
         required_limits: adapter.limits(),
@@ -205,11 +206,12 @@ fn measure(
     // A warm-up whose figure is thrown away. The FIRST submission on a fresh
     // device pays for lazy pipeline compilation, driver initialisation and
     // command-buffer setup, and timing it measures startup latency rather than
-    // fill rate. Measured on the machine in `ci/tier-thresholds.json`: 6.2 ms
-    // for the first 65,536 fragments, and three orders of magnitude less for
-    // exactly the same work immediately afterwards. Without this the
-    // calibration classifies a current Apple GPU as slower than the software
-    // band, which is the misdetection of deviation D-07 with its sign flipped.
+    // fill rate. Measured on the machine in `ci/tier-thresholds.json`: about
+    // 9 ms for the first 65,536 fragments, and between 11 and 18 times less
+    // for exactly the same work immediately afterwards. Without this the
+    // calibration measures that first-run cost as the machine's fill rate, and
+    // 9 ms is over `CALIBRATION_BUDGET_NANOS`, so the full pass never runs and
+    // the startup latency is the figure that gets recorded.
     let _warm_up = run(
         device,
         queue,

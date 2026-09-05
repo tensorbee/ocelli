@@ -288,8 +288,10 @@ baseline includes both embedded codestreams, 2406 bytes.
 | `ritk-codecs`, `+simd128` | 142716 | **124185** |
 | R1, `@cornerstonejs/codec-charls` `charlswasm_decode.wasm` | 145306 | n/a, a separate module |
 
-`ci/wasm-size-budget.json` currently records 14104 bytes with a 0.05 tolerance,
-which is gate A4's currency. **`pure_jpegls` is roughly 40 KB, and
+`ci/wasm-size-budget.json` is the authority on the recorded module size and its
+0.05 tolerance, which is gate A4's currency. **Read the file rather than a
+number quoted here.** It read 16388 bytes at commit `739ba11`, where F-005
+rebaselined it from 14104. **`pure_jpegls` is roughly 40 KB, and
 `ritk-codecs` is roughly three times that**, partly because it also carries a
 JPEG 2000 decoder and pulls `jpeg-decoder` with `rayon`. R1 is a separate 145 KB
 module with a separate linear memory and is not comparable to a delta.
@@ -463,7 +465,7 @@ than a redesign.
 | JPEG-LS route | open, three candidates, possibly a split | **`pure_jpegls` 2.0.0, one implementation on every target** |
 | `docs/hld/12-workspace-and-build.md` 15.2's dependency list | names no JPEG-LS feature, which was the specification's own statement of A2 | A pure-Rust crate is added by E2.6. The absence in 15.2 is now explained rather than open |
 | Section 21's note, "JPEG-LS has no credible pure-Rust path" | true when written | **Still true inside dicom-rs**, whose `charls` feature is `dep:charls` over the C++ library. No longer true outside it |
-| `ci/wasm-size-budget.json` | 14104 bytes | Unchanged by this story. E2.6 should expect roughly 40 KB |
+| `ci/wasm-size-budget.json` | the file is the authority, 16388 bytes read at commit `739ba11` | Unchanged by this story. E2.6 should expect roughly 40 KB |
 | `docs/SOURCE-POLICY.md` "Extensions to the table" | no codec rows | **A `pure_jpegls` 2.0.0 row is owed, and that edit is the operator's** |
 | Multi-component JPEG-LS | not considered | **A corpus gap, and a story** |
 
@@ -517,8 +519,16 @@ cargo build --target wasm32-unknown-unknown  # the link-cplusplus failure
 
 **The harness is throwaway and is not held to the gate set**, per `/spike`
 step 2, and it is deleted when this gate and A1 are closed. The gates that do
-reach it, because they read `git ls-files`, are `unsafe`, `prose`, `provenance`
-and `content`, and it passes all four. `clippy`, `test`, `bindgen` and `nostd`
-are scoped to the workspace or to `crates/` and never see it. Nothing under
+reach it are `unsafe`, `provenance` and `content`, which read `git ls-files`,
+and `lint`, which reaches `run.mjs` through the `tools/spikes/**/*.mjs` block
+in `eslint.config.js`. It passes all four. `clippy`, `test`, `bindgen` and
+`nostd` are scoped to the workspace or to `crates/` and never see it.
+
+**`prose` does not reach this directory**, which earlier revisions of this file
+claimed it did. `scripts/prose_check.py` includes a path only if it is in
+`INCLUDE_EXACT` or it ends in `.md` and starts with one of `INCLUDE_PREFIXES`.
+`tools/spikes/` is on neither list and holds no `.md`. **This file is a
+different matter**: `docs/spikes/` is a prefix, so the answer files are covered
+and the harness sources are not. Nothing under
 `tools/spikes/out/` and nothing under `tools/spikes/a2-jpeg-ls/node_modules/`
 is committed.

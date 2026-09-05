@@ -10,7 +10,7 @@
     "delta_fraction": 0.1619,
     "cause": "The panic hook of HLD section 23. std::panic::set_hook, the boxed closure it takes, the core::fmt machinery that formats the panic location, and the Any downcast that reads the payload. Measured against a rebuild of base commit d74ad3a on the same toolchain, which reproduced 14104 bytes exactly, so the delta is this story's and not drift.",
     "not_the_cause": "The 528-byte panic record is a zero-initialised static and costs the module nothing. Raising MESSAGE_CAPACITY from 512 to 1536 left the module byte-identical at 16388, because a zeroed static needs no data segment. ocelli-core becoming a dependency of ocelli-wasm for the first time also costs nothing measurable on its own: the only thing reached is ErrorCode::Panicked's number and fat LTO drops the rest.",
-    "bearing_on_gate_A4": "None. Gate A4 estimates 3 to 8 MB uncompressed with Naga dominating, and this module is 16 KB with no renderer in it. 2284 bytes is 0.03 per cent of the low end of that estimate. The number that will bear on A4 arrives with the render path from S11, not here.",
+    "bearing_on_gate_A4": "None. Gate A4 estimates 3 to 8 MB uncompressed with Naga dominating, and this module is 16 KB with no renderer in it. 2284 bytes is 0.08 per cent of that estimate's low end and 0.03 per cent of its high one. The number that will bear on A4 arrives with the render path from S11, not here.",
     "only_rebaseline_in_S03": "F-004 was answered 'do not wire into ocelli-wasm' in the S03 design round, so there is no second delta and no attribution to split."
   }
 }

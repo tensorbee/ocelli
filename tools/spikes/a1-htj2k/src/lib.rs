@@ -7,9 +7,16 @@
 //! the only difference between the two measurements is the target.
 //!
 //! Not held to the gate set, per `/spike` step 2. It is not a workspace member,
-//! so `gate clippy` and `gate test` never see it. `gate unsafe`, `gate prose`,
+//! so `gate clippy` and `gate test` never see it. `gate unsafe`,
 //! `gate provenance` and `gate content` read `git ls-files` and do see it, and
-//! it is written to pass all four.
+//! `gate lint` sees `run.mjs`. It is written to pass all four.
+//!
+//! `gate prose` does NOT reach this directory, and an earlier revision of this
+//! comment said it did. `scripts/prose_check.py` includes a path only if it is
+//! in `INCLUDE_EXACT` or it ends in `.md` and starts with one of its
+//! `INCLUDE_PREFIXES`. `tools/spikes/` is on neither list and holds no `.md`,
+//! so an em-dash here is unchecked. `docs/spikes/A1-htj2k-openjp2.md` IS
+//! covered, which is a different fact.
 //!
 //! # THREE THINGS THAT ARE DELIBERATE AND LOOK LIKE OVERSIGHTS
 //!

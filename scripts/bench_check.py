@@ -185,7 +185,7 @@ def check_registry(registry: dict, fids: set[str],
                 f"docs/sprints/allocation.json. Every subject_story resolves "
                 f"against the allocation rather than being copied from a "
                 f"comment, because comments in this tree once named F-096 for "
-                f"work that is F-101's and were corrected in S02.")
+                f"work that is F-101's and were corrected in S03.")
             continue
         status = statuses.get(story)
         if status is None:

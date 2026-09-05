@@ -141,10 +141,20 @@ reverted:
 | `check_sidecars.py` truth 18.75 to 17.5 | red, three sidecars |
 | a volume sidecar's member `imagePositionPatient` perturbed | red |
 
-**Things that exist and that nothing executes.** Every new refusal in the
-volume page and in the volume half of the driver is aimed at by exactly one of
-eleven new faults, and every one has been observed red at its own boundary for
-its own reason. The three refusals that are pure functions rather than browser
+**Things that exist and that nothing executes.** Eleven new faults exist and
+every one has been observed red at its own boundary for its own reason.
+
+**This paragraph claimed more than that and the S03 sprint review corrected it.**
+It said every new refusal in the volume page and the volume half of the driver
+is aimed at by exactly one of those faults. Four are not, and all four are
+declared-parameter guards written in the same shape and with the same reasoning
+as the orientation guard, which does have `bad-orientation`: the z-profile
+voxel-range refusal, the blend-mode refusal, the interpolation refusal and the
+camera-mode refusal. `mutateVolumeRequest` touches only `loadTimeoutMs`,
+`orientations` and `params.canvas`, and `mutateParams` and `pageFault` are
+stack-only by design, so no fault can reach them. Being page code, no unit test
+reaches them either. They are carried to F-X009, which is the story that gives
+every guard a standing probe. The three refusals that are pure functions rather than browser
 state (`checkZProfile`'s first-value branch, `validateVolumeParams`'s ten key
 refusals, `validateVolumeTruth`'s self-consistency checks) are covered by unit
 tests that were watched go red.

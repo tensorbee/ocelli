@@ -676,7 +676,11 @@ of `slice_007` says what that instance's pixels look like. The volume says where
 it sits, which is the question the twenty synthetic spacing rows were written to
 ask and which nothing asked until this pass existed.
 
-**Four subjects, three orientations each, twelve reference reformats.**
+**Four subjects, three orientations each, so twelve reformats are DECLARED
+and nine are written.** `real/ct_cmb_mml` is refused as declared, and a refused
+subject writes no frame. `run.json` carries both numbers under
+`reformatsDeclared` and `reformatsWritten`, which is why they have separate
+names.
 
 | Subject id | Directory | Members | Truth |
 |---|---|---|---|
@@ -984,7 +988,7 @@ Each frame id writes the same three files beside the stack frames, in the same
 flat `out/` directory: `<id>.raw`, `<id>.png`, `<id>.json`.
 
 **Every sidecar carries a top-level `kind`, including the eighty-nine stack
-ones.** `"stack"` on those, `"volume-reformat"` on the twelve. F-011 switches on
+ones.** `"stack"` on those, `"volume-reformat"` on the nine that are written. F-011 switches on
 it and must not infer a shape from a filename. This is the single field that
 makes "a comparator written before F-X007 lands must not assume stack-only
 input" actionable, and `check_sidecars.py` partitions on the same field and

@@ -37,8 +37,8 @@ Repository bootstrap. Nothing is published.
   budget in `ci/wasm-size-budget.json`. First measurement 14,104 bytes, and
   16,388 after F-005 added the panic hook, with the delta and its cause
   attributed in that file. Both are baselines for regression detection and
-  neither is an answer to Appendix A gate A4, whose estimate is three orders
-  of magnitude larger.
+  neither is an answer to Appendix A gate A4, whose estimate is a little over
+  two orders of magnitude larger, 183x at its low end and 488x at its high one.
 - The cross-target build proof, `bin/ocelli.sh native` and the `native` gate.
   It links the `ocelli-desktop` and `ocelli-server` entry points, builds every
   shared crate for both wasm32 and the host, and compares resolved features

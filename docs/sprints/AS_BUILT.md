@@ -680,7 +680,8 @@ generalises it.
 **Crates / packages modified.** `crates/ocelli-render/`,
 `crates/ocelli-native/`, `packages/core/src/capabilities.ts`,
 `ci/tier-thresholds.json`, `ci/target-feature-baseline.json`.
-**Tests added.** 42 in `ocelli-render`, covering the classifier, the override
+**Tests added.** 39 added in `ocelli-render`, bringing that crate to 43,
+covering the classifier, the override
 outcomes, the band edges in both directions, and a totality property, plus one
 deliberately ignored test that is the measurement instrument and needs a real
 adapter.
@@ -742,9 +743,10 @@ workspace entry.
 `packages/core/`, `scripts/error_code_check.py`, `scripts/panic_probe.mjs`,
 `bin/ocelli.sh`, `.github/workflows/ci.yml`, `eslint.config.js`,
 `ci/error-codes.json`, `ci/wasm-size-budget.json`.
-**Tests added.** 25 in `ocelli-core`, 3 in `ocelli-wasm`, 36 across the
-TypeScript suites, 15 cases in the error-code guard's own test, and one wasm
-probe.
+**Tests added.** 14 in `ocelli-core`, 8 in `ocelli-wasm` and 34 across the
+TypeScript suites, counted as ADDITIONS in this story's diff rather than as
+crate totals, which are 28, 10 and 36. Plus 15 cases in the error-code guard's
+own test and one wasm probe.
 **Fixture provenance.** `ERROR_BYTES` and `LOG_BYTES` are hand-derived byte by
 byte, each offset carrying its own comment with the little-endian reasoning, and
 each is used by both an encode test and a decode test. They were computed from
@@ -774,8 +776,8 @@ because a bare `describe` at a package root collides with every test runner's.
   14104 exactly, so the delta is this story's and not drift. The cause is the
   hook's code and NOT the 528-byte record: raising `MESSAGE_CAPACITY` from 512
   to 1536 left the module byte-identical, because a zeroed static needs no data
-  segment. No bearing on gate A4, whose estimate is three orders of magnitude
-  larger.
+  segment. No bearing on gate A4, whose estimate is a little over two orders of
+  magnitude larger, 183x at its low end and 488x at its high one.
 - **The panic hook does run under abort**, and the panic's file, line and column
   survive `strip = true`, because `core::panic::Location` is emitted data rather
   than a symbol name. The plan's flagged risk that bindgen placeholder imports
@@ -983,8 +985,9 @@ tolerance, section 28's framing.
 `render-params.json`, `page/app.mjs`, `Cargo.toml`, `src/lib.rs`,
 `bin/ocelli.sh`, `corpus/manifest.tsv` and `scripts/corpus_synth.py` are all
 untouched, confirmed by `git diff --name-only`.
-**Tests added.** 210 cases across twelve `node:test` suites, and eleven new
-fault injectors, each observed red at its own boundary. Ten mutations observed
+**Tests added.** 73 cases across four `node:test` suites, which brings the
+oracle's twelve suites to 210 in total, and eleven new fault injectors, each
+observed red at its own boundary. Ten mutations observed
 red and reverted.
 **Fixture provenance.** Geometry is hand-computed from PS3.3 C.7.6.2.1.1 and
 from `scripts/corpus_synth.py`'s own constants, never from a cornerstone3D
@@ -1064,8 +1067,9 @@ and D-11 cited.
 **Crates / packages modified.** `tools/oracle/src/` and `tests/`,
 `tools/oracle/Cargo.toml`, the root `Cargo.toml`, `bin/ocelli.sh`,
 `scripts/staged_content_check.py`, `.gitignore`.
-**Tests added.** 65 in `ocelli-oracle`, being 42 unit, 10 tolerance fixture, 5
-VOI divergence fixture, 6 geometry fixture and 2 property. Plus a 20-entry
+**Tests added.** 64 added in `ocelli-oracle`, bringing that crate to 65, being
+42 unit, 10 tolerance fixture, 5 VOI divergence fixture, 6 geometry fixture and
+2 property. Plus a 20-entry
 mutation catalogue replayed on every oracle gate.
 **Fixture provenance.** Hand-computed from PS3.3 and from HLD 18.2's formulas.
 **Deviation D-13 is honoured**: no fixture asserts `LINEAR_EXACT(-160) = 1.594`,

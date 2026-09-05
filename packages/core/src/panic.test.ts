@@ -74,11 +74,33 @@ group("readPanicRecord", () => {
     expect(readPanicRecord(wasm, PTR, PANIC_RECORD_BYTES)).toBeNull();
   });
 
-  it("returns null for a zero pointer, which is how the core says it has none", () => {
+  /**
+   * `crates/ocelli-wasm/src/panic.rs` documents `record_ptr()` returning 0 as
+   * the ordinary answer on a 64-bit host, so 0 is the sentinel for "no record"
+   * and never an address to read. The record is written AT zero here, so the
+   * `ptr <= 0` guard is the only thing that can return null: without it the
+   * magic check would find a valid record and hand it back.
+   */
+  it("returns null for a zero pointer even when the bytes there are a record", () => {
+    const wasm = memoryWith(0, (view, bytes) => {
+      writeRecord(view, bytes, { message: "at address zero" });
+    });
+    expect(readPanicRecord(wasm, 0, PANIC_RECORD_BYTES)).toBeNull();
+  });
+
+  /**
+   * A negative pointer throws a `RangeError` out of the `DataView`
+   * constructor, so the guard is the only thing between a bad cached integer
+   * and an exception raised while the shell is already handling a dead
+   * instance. `toBeNull` would not catch a throw, so the throw is asserted
+   * against directly.
+   */
+  it("returns null for a negative pointer rather than throwing", () => {
     const wasm = memoryWith(PTR, (view, bytes) => {
       writeRecord(view, bytes, { message: "ignored" });
     });
-    expect(readPanicRecord(wasm, 0, PANIC_RECORD_BYTES)).toBeNull();
+    expect(() => readPanicRecord(wasm, -16, PANIC_RECORD_BYTES)).not.toThrow();
+    expect(readPanicRecord(wasm, -16, PANIC_RECORD_BYTES)).toBeNull();
   });
 
   it("returns null when the length is shorter than the layout", () => {

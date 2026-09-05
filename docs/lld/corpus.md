@@ -14,8 +14,11 @@ which rows cornerstone3D 5.8.2 cannot render and why, which is a fact about the
 reference rather than about the corpus.
 
 **Since F-X007 the sixty-two `series` rows are exercised as geometry as well as
-pixels.** The oracle assembles the four series directories into volumes and
-renders three orthogonal reformats of each, so a row's projected
+pixels.** The oracle attempts all four series directories and
+assembles three of them into volumes, rendering three orthogonal reformats of
+each. The fourth, `real/ct_cmb_mml`, is refused as declared, because its 27
+instances resolve to only 9 distinct positions on the slice normal and a series
+that cannot be one volume is named rather than averaged. so a row's projected
 `ImagePositionPatient` decides something rather than only travelling in a
 sidecar. Where a row sits, and whether its directory is one spatial volume at
 all, is now a checked claim. See "Stack and volume, and what each covers" in

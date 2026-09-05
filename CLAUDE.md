@@ -57,8 +57,14 @@ From `docs/hld/11-decision-log.md`. Raise a deviation in
 | D14 | Claim MEASURED divergence, never bit-exact reproducibility. |
 
 **Two numbering namespaces, and they nearly collide.** `D1` to `D14` above are
-the HLD's own decisions. `D-01` to `D-12` in `docs/hld/DEVIATIONS.md` are
-places this repository departs from the HLD. **`D7` and `D-07` are different
+the HLD's own decisions. The hyphenated `D-NN` rows in
+`docs/hld/DEVIATIONS.md` are places this repository departs from the HLD, and
+that register is the count rather than any number written here, because a range
+written here goes stale the first time a deviation lands. `python3
+scripts/deviation_check.py` prints how many there are. **The two namespaces now
+overlap in full**, since the register has passed `D-14`, so the hyphen is the
+only thing telling `D-14` from decision `D14` and it is load-bearing rather than
+a convention. **`D7` and `D-07` are different
 things**: D7 is the oracle-before-port-code decision, D-07 is the CPU tier.
 Always write the hyphen for a deviation.
 

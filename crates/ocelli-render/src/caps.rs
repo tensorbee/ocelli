@@ -757,10 +757,13 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
 mod tests {
     use super::{Caps, Tier};
 
-    /// Only tier A supports compute, and the other two are named explicitly so
-    /// that adding a fourth tier fails this test rather than passing by
-    /// default. `matches!` on one variant would let a new variant inherit
-    /// whichever answer the catch-all happened to give.
+    /// Only tier A supports compute.
+    ///
+    /// This test does not notice a fourth tier: all three assertions stay true
+    /// when one is added, and `supports_compute` is itself the `matches!` on
+    /// one variant. What stops a fourth tier is two exhaustive matches that
+    /// fail to compile, `classify`'s on `TierRequest` and
+    /// `tests/classify_is_total.rs`'s on `caps.tier`.
     #[test]
     fn only_tier_a_supports_compute() {
         assert!(Tier::A.supports_compute());

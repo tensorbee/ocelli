@@ -6,7 +6,9 @@
 # rather than walking up and failing. The root `Cargo.toml` is not edited by
 # this story. The consequence is intended and is recorded in the answer file:
 # `gate clippy` and `gate test` run `--workspace` and never see this code,
-# while `unsafe`, `prose`, `provenance` and `content` read `git ls-files` and do.
+# while `unsafe`, `provenance` and `content` read `git ls-files` and do, and
+# `lint` reaches `run.mjs`. `prose` does not reach this directory at all: it
+# covers `.md` under a fixed prefix list that `tools/spikes/` is not on.
 [workspace]
 
 [package]

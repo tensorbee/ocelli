@@ -176,7 +176,7 @@ export function resolveSubjects(subjects, { allocationFids, statuses }) {
           `docs/sprints/allocation.json. Every subject_story is resolved ` +
           `against the allocation rather than copied from a comment, ` +
           `because comments in this tree once named F-096 for work that is ` +
-          `F-101's and were corrected in S02.`,
+          `F-101's and were corrected in S03.`,
       );
     }
     const status = statuses.get(story);

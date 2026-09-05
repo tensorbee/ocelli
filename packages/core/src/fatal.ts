@@ -62,7 +62,7 @@ export function isUsable(status: CoreStatus): boolean {
 /**
  * The fatal status a panic record describes.
  *
- * The message comes from `describe`, which is the shell's table, because
+ * The message comes from `describeError`, which is the shell's table, because
  * section 23 puts the human text on this side. The core's own panic text is
  * developer detail and is not what a user is shown.
  */

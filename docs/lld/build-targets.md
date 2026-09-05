@@ -312,9 +312,11 @@ pulls in on wasm32 are already target-gated inside wgpu's own manifest.
 `cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))` tables, so
 the host tree does not reach them.
 
-**Measured cost today is zero bytes**, because `ocelli-wasm` has an empty
-`[dependencies]` table and never reaches wgpu. The size budget moves only when
-the render path is wired in from S11.
+**Measured cost today is zero bytes**, because `ocelli-wasm` does not depend on
+`ocelli-render` and so never reaches wgpu, whatever else it depends on. It had
+an empty `[dependencies]` table when this was written and F-005 has since added
+`ocelli-core`, which changes the premise and not the conclusion. The size budget
+moves only when the render path is wired in from S11.
 
 ### `ocelli-native` now depends on `ocelli-render`
 

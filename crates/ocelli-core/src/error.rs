@@ -39,9 +39,13 @@ use core::fmt;
 /// declares the per-crate ranges, so a second crate cannot quietly pick an
 /// overlapping block.
 ///
-/// **Only variants with a live producer today appear here**, which is three.
-/// A fourth arrives with the story whose code it is. Reserving a space of
-/// plausible future codes would be inventing producers.
+/// **These are the codes section 23's model declares.** `Panicked` is the only
+/// one with a live producer today, written by
+/// `crates/ocelli-wasm/src/panic.rs`. The other two name an intended
+/// correspondence that no code yet expresses: there is no
+/// `From<ComputeError>` anywhere, and `ocelli-compute` does not depend on this
+/// crate. A fourth code arrives with the story whose code it is. Reserving a
+/// space of plausible future codes would be inventing producers.
 ///
 /// `0` is never a valid code, so a zeroed buffer cannot decode as a real one.
 #[repr(u16)]
@@ -59,15 +63,16 @@ pub enum ErrorCode {
 
     /// A feature cannot run on the resolved tier and declares no fallback.
     ///
-    /// Maps `ocelli_compute::ComputeError::Unavailable`. Deviation D-07's
-    /// rule is that such a feature reports unavailable and never silently
-    /// produces a different answer, and this is that sentence as a number, so
-    /// a tier C session reports it in the encoding a tier A session would use.
+    /// Intended for `ocelli_compute::ComputeError::Unavailable`. Deviation
+    /// D-07's rule is that such a feature reports unavailable and never
+    /// silently produces a different answer, and this is that sentence as a
+    /// number, so a tier C session reports it in the encoding a tier A session
+    /// would use.
     Unavailable = 700,
 
     /// A kernel asked for a workgroup the device cannot dispatch.
     ///
-    /// Maps `ocelli_compute::ComputeError::Workgroup`. HLD section 31:
+    /// Intended for `ocelli_compute::ComputeError::Workgroup`. HLD section 31:
     /// "Workgroup sizes come from `Caps`, never hardcoded."
     Workgroup = 701,
 }

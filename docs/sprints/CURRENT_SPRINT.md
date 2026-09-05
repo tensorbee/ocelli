@@ -9,12 +9,12 @@ gates that decide the codec architecture.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-004 | E1.4 | Runtime capability detection and tiering (WebGPU / WebGL2 / SIMD / threads) | Build | 2w | pending |
-| F-005 | E1.5 | Error model, panic-to-JS mapping, structured logging | Build | 2w | pending |
-| F-006 | E1.6 | Benchmark harness: decode, first frame, interaction latency | Build | 2w | pending |
-| F-011 | E2.3 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w | pending |
-| F-X006 | Y1.1 | Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders | Test | 3w | pending |
-| F-X007 | Y1.2 | Oracle volume and MPR reference renders, so the spacing rows are asked something | Test | 3w | pending |
+| F-004 | E1.4 | Runtime capability detection and tiering (WebGPU / WebGL2 / SIMD / threads) | Build | 2w | done |
+| F-005 | E1.5 | Error model, panic-to-JS mapping, structured logging | Build | 2w | done |
+| F-006 | E1.6 | Benchmark harness: decode, first frame, interaction latency | Build | 2w | done |
+| F-011 | E2.3 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w | done |
+| F-X006 | Y1.1 | Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders | Test | 3w | done |
+| F-X007 | Y1.2 | Oracle volume and MPR reference renders, so the spacing rows are asked something | Test | 3w | done |
 | F-X009 | Y1.4 | A standing test for every repository guard, not a mutation run once at authoring time | Build | 3w | pending |
 
 Count the rows rather than trusting a sentence:

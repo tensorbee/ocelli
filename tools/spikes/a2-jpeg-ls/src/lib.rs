@@ -6,8 +6,16 @@
 //! `wasm32-unknown-unknown` build under node. Both reach the same functions.
 //!
 //! Not held to the gate set, per `/spike` step 2. It is not a workspace member,
-//! so `gate clippy` and `gate test` never see it. `gate unsafe`, `gate prose`,
-//! `gate provenance` and `gate content` read `git ls-files` and do see it.
+//! so `gate clippy` and `gate test` never see it. `gate unsafe`,
+//! `gate provenance` and `gate content` read `git ls-files` and do see it, and
+//! `gate lint` sees `run.mjs`.
+//!
+//! `gate prose` does NOT reach this directory, and an earlier revision of this
+//! comment said it did. `scripts/prose_check.py` includes a path only if it is
+//! in `INCLUDE_EXACT` or it ends in `.md` and starts with one of its
+//! `INCLUDE_PREFIXES`. `tools/spikes/` is on neither list and holds no `.md`,
+//! so an em-dash here is unchecked. `docs/spikes/A2-jpeg-ls.md` IS covered,
+//! which is a different fact.
 //!
 //! **No `unsafe`, no pointer dereference in Rust, and errors leave as raw
 //! integers.** `CodecError` is F-005's to shape and E2.6's to populate.

@@ -175,9 +175,17 @@ error: could not compile `openjp2` (lib) due to 1 previous error
 ```
 
 Counted over one complete link, with `-C link-arg=--error-limit=0` so nothing
-is truncated: 432 undefined-symbol errors, 279 `free`, 60 `malloc`, 51
-`calloc`, 41 `realloc` and 1 `strcpy`. `memcpy` does not appear at all, because
+is truncated, **under the `[profile.release]` this harness pins**, which is HLD
+15.2's: 197 undefined-symbol errors, 175 `free`, 17 `calloc`, 3 `malloc`, 1
+`realloc` and 1 `strcpy`. `memcpy` does not appear at all, because
 `compiler_builtins` supplies it on this target.
+
+**The count is a property of the profile and is meaningless without it.** The
+same link under the default release profile gives 432, 279 `free`, 60 `malloc`,
+51 `calloc`, 41 `realloc` and 1 `strcpy`, measured the same way. Five distinct
+symbols either way, and `memcpy` absent either way, which is the part of this
+that is an answer. The totals differ because `lto = "fat"` and
+`codegen-units = 1` change how many call sites survive into the object file.
 
 The cause is named and is not a mystery. **The upstream README calls it a
 "C2Rust port" under that heading and describes it as "An experimental Rust
@@ -365,11 +373,14 @@ does not build for wasm32, and when forced to link it refuses every codestream.
 Three things are true at once and none of them should be collapsed into the
 others.
 
-**One. `openjp2` 0.6.1 is exact natively.** For `.201` and `.202` it agrees
-byte for byte with `ojph_expand` 0.31.0 and with the uncompressed reference,
-and for `.201`, `.202` and `.90` all three independent parties produce the same
-digest. That is a real and useful result. It says the HTJ2K decode arithmetic
-in `openjp2` is right, which is not what failed.
+**One. `openjp2` 0.6.1 is exact natively.** For `.201` and `.202` all three
+independent parties produce the same digest: it agrees byte for byte with
+`ojph_expand` 0.31.0 and with the uncompressed reference. **`.90` has two
+parties, not three**, because `ojph_expand` is an HTJ2K decoder and `run.mjs`
+does not run it on the Part 1 controls, as the method section above says. There
+it is `openjp2` against the uncompressed reference, and they agree. That is a
+real and useful result. It says the HTJ2K decode arithmetic in `openjp2` is
+right, which is not what failed.
 
 **Two. `.203` differs from OpenJPH by exactly one level, on 1250 of 6144
 samples, maximum absolute difference 1, every difference of magnitude 1.**
@@ -526,16 +537,40 @@ cd ../../.. && node tools/spikes/a1-htj2k/run.mjs
 ```
 
 To see the failure as published, drop the `--allow-undefined` link argument and
-the `mod wasm_libc;` line with its `cfg`. To reproduce the complete
-undefined-symbol counts rather than a truncated list, add
-`-C link-arg=--error-limit=0` to `RUSTFLAGS`, since `rust-lld` stops at 20
-errors by default and a count taken from a truncated log is wrong.
+the `mod wasm_libc;` line with its `cfg`. The undefined-symbol counts above
+come from dropping the link argument only, run from `tools/spikes/a1-htj2k`:
+
+```bash
+RUSTFLAGS="-C link-arg=--error-limit=0" \
+  cargo build --release --lib --target wasm32-unknown-unknown
+```
+
+`--error-limit=0` is not optional, since `rust-lld` stops at 20 errors by
+default and a count taken from a truncated log is wrong. Dropping
+`mod wasm_libc;` is not needed for the count, because the link that fails is
+`openjp2`'s own cdylib, built as a dependency before this crate's code is
+reached.
+
+**Record the profile with the number.** The command above picks up the
+`[profile.release]` in this crate's `Cargo.toml`, which is HLD 15.2's, and that
+is where 197 comes from. Delete that table and cargo's default release profile
+gives 432 from the same command. A count quoted without its profile cannot be
+checked, and this figure has been restated twice for that reason.
 
 **The harness is throwaway and is not held to the gate set**, per `/spike`
 step 2, and it is deleted when this gate and A2 are closed. The gates that do
-reach it anyway, because they read `git ls-files`, are `unsafe`, `prose`,
-`provenance` and `content`, and it passes all four. `clippy`, `test`, `bindgen`
-and `nostd` are scoped to the workspace or to `crates/` and never see it.
+reach it anyway are `unsafe`, `provenance` and `content`, which read
+`git ls-files`, and `lint`, which reaches `run.mjs` through the
+`tools/spikes/**/*.mjs` block in `eslint.config.js`. It passes all four.
+`clippy`, `test`, `bindgen` and `nostd` are scoped to the workspace or to
+`crates/` and never see it.
+
+**`prose` does not reach this directory**, which earlier revisions of this file
+claimed it did. `scripts/prose_check.py` includes a path only if it is in
+`INCLUDE_EXACT` or it ends in `.md` and starts with one of `INCLUDE_PREFIXES`.
+`tools/spikes/` is on neither list and holds no `.md`, so an em-dash in
+`src/lib.rs` is unchecked. **This file is a different matter**: `docs/spikes/`
+is a prefix, so the answer files are covered and the harness sources are not.
 
 `ci/check-bindgen-isolation.sh` scopes all three of its passes to `crates/*/`,
 and `grep -c wasm-bindgen tools/spikes/a1-htj2k/Cargo.lock` returns 0, so there

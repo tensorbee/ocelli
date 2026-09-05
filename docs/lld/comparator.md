@@ -375,7 +375,9 @@ identity comparison of the reference against itself returns exactly zero bias
 and therefore proves nothing whatever about the bound. The specific untested
 risk is a rounding-convention mismatch on pixels whose display value lands
 exactly on a half, which is rare for continuous output and not rare for a
-synthetic ramp, and fifteen of the sixteen saturated `syntax/` rows are ramps.
+synthetic ramp, and all fifteen saturated `syntax/` rows are ramps. The sixteenth saturated
+STACK row is `synthetic/ct_unsigned_16`, which is a ramp too but is not under
+`syntax/`.
 Those rows do not gate, for other reasons. If a real divergence is later
 measured that this bound misclassifies, widening it is a reviewed change and not
 a fix.
@@ -565,7 +567,7 @@ compare: 20 mutations, 0 not detected
 Twenty-eight and not twenty-nine, because `real/us_cmb_crc/00000001.dcm` is
 class two and decimated and is counted once with both qualifiers.
 
-The twenty pass numbers mean nothing on their own. **The identity run compares
+The seventy pass numbers mean nothing on their own. **The identity run compares
 the reference against itself**, so a comparator that always answered zero would
 produce the same seventy passes. The mutation line is what makes the seventy
 worth reading.
