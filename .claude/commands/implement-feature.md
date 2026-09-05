@@ -64,6 +64,12 @@ So:
 - **Never build a view over wasm linear memory outside
   `packages/core/src/bulk.ts`.** ESLint refuses it. The failure mode is silent.
 - **Do not read dwv or Horos**, and do not fetch a URL belonging to either.
+- **A new refusal arrives with its probe.** Every refusal under `scripts/`,
+  `ci/`, `.githooks/`, `bin/` and `tools/` is claimed by an entry in
+  `scripts/guards/catalogue.py` naming the citation it enforces and how to
+  drive it red. `bin/ocelli.sh gate guards` refuses a refusal no entry claims,
+  and it is in the floor, so the push that adds one without an entry is the
+  push that goes red. This sentence is a courtesy. The census is the mechanism.
 
 ## 4. Checks
 

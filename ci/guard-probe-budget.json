@@ -1,0 +1,144 @@
+{
+  "constants": {
+    "Cargo.toml:workspace.lints": {
+      "digest": "adf2cb2237be28da",
+      "guard": "lint-policy",
+      "tunable": false
+    },
+    "ci/check-device-ownership.sh:CREATORS": {
+      "digest": "947444bdc1ce1b8c",
+      "guard": "device",
+      "tunable": false
+    },
+    "crates/*/src/lib.rs:NO_STD_CRATES": {
+      "digest": "a7d75f8deccc3710",
+      "guard": "nostd",
+      "tunable": false
+    },
+    "eslint.config.js:LINEAR_MEMORY_ALLOWANCE": {
+      "digest": "0f511cb2956fefc1",
+      "guard": "lint-policy",
+      "tunable": false
+    },
+    "eslint.config.js:NO_CACHED_WASM_VIEW_DESTRUCTURED": {
+      "digest": "a4095f31e3b24328",
+      "guard": "lint-policy",
+      "tunable": false
+    },
+    "eslint.config.js:NO_CACHED_WASM_VIEW_MEMBER": {
+      "digest": "40eb944c8af3775a",
+      "guard": "lint-policy",
+      "tunable": false
+    },
+    "scripts/backlog_check.py:DECLARED_DEFECTS": {
+      "digest": "0b1922c66a6e5d83",
+      "guard": "backlog",
+      "tunable": false
+    },
+    "scripts/backlog_check.py:HOOK_EIDS": {
+      "digest": "ed8996fe29a796ba",
+      "guard": "backlog",
+      "tunable": false
+    },
+    "scripts/backlog_check.py:VALID_STATUS": {
+      "digest": "11bfc202b533e793",
+      "guard": "backlog",
+      "tunable": false
+    },
+    "scripts/ci_floor_check.py:NOT_IN_FLOOR": {
+      "digest": "cef018d7322ad7e1",
+      "guard": "ci-floor",
+      "tunable": false
+    },
+    "scripts/pin_and_size_check.py:EXACT_PINNED": {
+      "digest": "b98559eaf372548e",
+      "guard": "pins",
+      "tunable": false
+    },
+    "scripts/pin_and_size_check.py:TOLERANCE": {
+      "digest": "5cdcba12a9fa4e4b",
+      "guard": "pins",
+      "tunable": true
+    },
+    "scripts/prose_check.py:INCLUDE_EXACT": {
+      "digest": "2fa5f9b42fd8e937",
+      "guard": "prose",
+      "tunable": false
+    },
+    "scripts/prose_check.py:INCLUDE_PREFIXES": {
+      "digest": "7c373c0c4f66d30c",
+      "guard": "prose",
+      "tunable": false
+    },
+    "scripts/source_provenance_check.py:BLOCKED": {
+      "digest": "17fe8a76d8b67c81",
+      "guard": "provenance",
+      "tunable": false
+    },
+    "scripts/source_provenance_check.py:BLOCKED_URLS": {
+      "digest": "a3416b5d533503f0",
+      "guard": "provenance",
+      "tunable": false
+    },
+    "scripts/source_provenance_check.py:POLICY_FILES": {
+      "digest": "849162d574ba792d",
+      "guard": "provenance",
+      "tunable": false
+    },
+    "scripts/staged_content_check.py:ARTEFACT_PARTS": {
+      "digest": "9e1edb881ab884b8",
+      "guard": "content",
+      "tunable": false
+    },
+    "scripts/staged_content_check.py:COMPARE_OUTPUT_PREFIXES": {
+      "digest": "967177d4662a668a",
+      "guard": "content",
+      "tunable": false
+    },
+    "scripts/staged_content_check.py:DICOM_SUFFIXES": {
+      "digest": "231971e1d32fc820",
+      "guard": "content",
+      "tunable": false
+    },
+    "scripts/staged_content_check.py:MAX_BYTES": {
+      "digest": "fa91539ed7239c31",
+      "guard": "content",
+      "tunable": true
+    },
+    "scripts/staged_content_check.py:ORACLE_OUTPUT_PREFIXES": {
+      "digest": "97536d18f79c9e3f",
+      "guard": "content",
+      "tunable": false
+    },
+    "scripts/staged_content_check.py:SIZE_EXEMPT_SUFFIXES": {
+      "digest": "8e0b282a44cb8139",
+      "guard": "content",
+      "tunable": true
+    },
+    "scripts/staged_content_check.py:SPIKE_OUTPUT_PREFIXES": {
+      "digest": "fed8fa985c7be3ee",
+      "guard": "content",
+      "tunable": false
+    },
+    "scripts/unsafe_allowlist_check.py:ALLOWED": {
+      "digest": "e3e3bacd9d7955cf",
+      "guard": "unsafe",
+      "tunable": false
+    },
+    "scripts/verify_ledger.py:CORPUS_STATES": {
+      "digest": "665b94f223ccc6ef",
+      "guard": "ledger.assert",
+      "tunable": false
+    }
+  },
+  "note": "Recorded measurements, not guesses. `wall_clock_seconds` is what the harness took on the machine that recorded it. `constants` is the declared-constant ratchet and `uncovered` is the uncovered-refusal ratchet, both written by scripts/guard_census.py --record.",
+  "oracle_faults": 23,
+  "uncovered": {
+    "sites": 0,
+    "sweep_complete": true
+  },
+  "wall_clock_seconds": {
+    "deep": 17.2,
+    "floor": 11.8
+  }
+}

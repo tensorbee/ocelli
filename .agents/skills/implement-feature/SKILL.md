@@ -7,7 +7,7 @@ description: "Implement one F-ID from its approved design plan, with the focused
 
 Canonical source: `.claude/commands/implement-feature.md`.
 
-Source SHA-256: `39593917d3519dfcb6d3fbdc6d5b54737a050b844dd05220c92ca07d8b8fa063`.
+Source SHA-256: `a868bef5654068ee709f473bd4b1138c7c4aa61b4415a574cdb79a1d1bceb294`.
 
 Before acting, read the canonical source completely and follow it using this
 host's available tools. Treat invocation arguments as arguments to that

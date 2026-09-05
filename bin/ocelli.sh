@@ -78,6 +78,8 @@ GATES=(
   "device|no|only ocelli-render creates a GPU device (E1.8, HLD 31)"
   "packages|no|npm tarball contents, exports and a consumer install (E1.3)"
   "ci|no|every floor gate is actually invoked by .github/workflows/ci.yml"
+  "guards|no|every declared guard still refuses what it is for (F-X009)"
+  "guards-deep|no|the guard probes needing cargo, npm or wasm-pack (F-X009)"
   "corpus-tests|no|the corpus generator and coverage suites, a skip fails it"
   "corpus|no|corpus coverage over the codec registry, then presence and digests"
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
@@ -166,6 +168,36 @@ run_gate() {
     native)      "$0" native ;;
     device)      ci/check-device-ownership.sh ;;
     ci)          python3 scripts/ci_floor_check.py ;;
+    # F-X009. A green run of the gates is not evidence that the gates work, it
+    # is evidence that nothing was wrong or that nothing was checked, and only
+    # this tells those apart (docs/runbooks/guard-verification.md).
+    #
+    # Three commands, chained on `&&` for the reason the backlog arm gives: a
+    # case arm returns the status of its LAST command. The census proves the
+    # catalogue is complete and no guard has been widened, the probe runner
+    # drives each declared refusal red inside a disposable repository, and the
+    # new lint-policy guard asserts HLD 27.1's deny list is still denied.
+    #
+    # Every probe here runs with no cargo, no npm, no wasm-pack, no browser,
+    # no corpus and no GPU, which is what puts it in the floor. The census
+    # REFUSES an entry that declares otherwise and sits in the floor anyway.
+    guards)      python3 scripts/lint_policy_check.py &&
+                 python3 scripts/guard_census.py &&
+                 python3 scripts/guard_probe.py --self-test &&
+                 python3 scripts/guard_probe.py --profile floor &&
+                 python3 -m unittest discover -s scripts/tests \
+                   -p test_guard_catalogue.py ;;
+    # The level-3 runs that need a toolchain. NOT in the floor, and excluded
+    # by name in the --floor arm below and in scripts/ci_floor_check.py's
+    # NOT_IN_FLOOR. Both are needed: miss either and the `ci` gate demands a
+    # CI step for a gate the floor never runs.
+    #
+    # It gets a CI job on pushes to `main` and on workflow_dispatch, and not
+    # on pull_request. So a weakened deep guard is caught on merge to main
+    # rather than on the pull request, and that is the strongest claim the
+    # cost allows.
+    guards-deep) python3 scripts/guard_census.py --profile deep &&
+                 python3 scripts/guard_probe.py --profile deep ;;
     packages)    [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
                  npm run test &&
                  python3 scripts/package_check.py ;;
@@ -224,10 +256,18 @@ gates_cmd() {
       for entry in "${GATES[@]}"; do
         IFS='|' read -r name gpu desc <<<"$entry"
         # The CI floor. `oracle` needs a GPU and a browser. `corpus` needs the
-        # corpus, which is not in git and so is not in CI. Everything else
-        # runs, INCLUDING `wasm`: story E1.2's note is "CI fails if the module
-        # exceeds the agreed budget", and a wasm-pack build costs no GPU.
-        case "$name" in oracle|corpus) continue ;; esac
+        # corpus, which is not in git and so is not in CI. `guards-deep` needs
+        # cargo, npm and wasm-pack per probe and is minutes rather than
+        # seconds, so it runs on a push to main and on dispatch instead.
+        # Everything else runs, INCLUDING `wasm`: story E1.2's note is "CI
+        # fails if the module exceeds the agreed budget", and a wasm-pack
+        # build costs no GPU.
+        #
+        # This list and scripts/ci_floor_check.py's NOT_IN_FLOOR must agree.
+        # They are two literals in two files and nothing joins them, so a name
+        # added to one and not the other makes the `ci` gate demand a CI step
+        # for a gate the floor never runs.
+        case "$name" in oracle|corpus|guards-deep) continue ;; esac
         selected+=("$name")
       done ;;
     --sprint)

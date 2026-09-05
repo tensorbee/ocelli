@@ -41,9 +41,11 @@ WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 # Gates the floor deliberately excludes. `bin/ocelli.sh` excludes these by
 # name in its --floor arm, and the reason is deviation D-04: CI has no GPU and
-# no corpus. Kept here so this script fails if the runner's exclusion list
-# changes without anyone thinking about CI.
-NOT_IN_FLOOR = {"oracle", "corpus"}
+# no corpus. `guards-deep` is excluded for a different reason, cost: its probes
+# each need cargo, npm or wasm-pack, so it runs on a push to `main` and on
+# workflow_dispatch rather than on every pull request. Kept here so this script
+# fails if the runner's exclusion list changes without anyone thinking about CI.
+NOT_IN_FLOOR = {"oracle", "corpus", "guards-deep"}
 
 
 def floor_gates(runner: str) -> list[str]:
