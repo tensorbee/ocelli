@@ -151,16 +151,14 @@ pub enum Effect {
     /// image rectangle reproduces that exactly and deterministically.
     ///
     /// **Both display extremes are excluded, and the two exclusions are not
-    /// equally tight.** PS3.3's two lower clamp conditions coincide, so a
-    /// pixel at 0 cannot move at any width and excluding it is exact. The
-    /// upper clamps differ by a whole unit of `x`, so a pixel at 255 cannot
-    /// move at `w >= 510` and CAN move below it, over a band of
-    /// `1 - w / 510` input units below LINEAR's upper clamp. An 8-bit frame
-    /// does not carry the stored value behind a 255, so excluding the whole
-    /// population is the conservative reading there rather than a statement
-    /// that nothing could have moved. `apply_to_frame` carries the derivation
-    /// at the site, and it is the only statement of this arithmetic in the
-    /// file.
+    /// equally tight.** A pixel at 0 cannot move at any width, so excluding it
+    /// is EXACT. A pixel at 255 can move at EVERY width, over the band where
+    /// LINEAR rounded up to 255 and LINEAR_EXACT falls under 254.5, so
+    /// excluding it is CONSERVATIVE at every width and exact at none. An
+    /// 8-bit frame does not carry the stored value behind a 255, so excluding
+    /// the whole population under-damages the frame rather than stating that
+    /// nothing could have moved. `apply_to_frame` carries the derivation at
+    /// the site, and it is the only statement of this arithmetic in the file.
     ///
     /// **This exists because `AddDelta` could not represent the real thing.**
     /// A flat delta over a declared fraction of the image is a caricature: it
@@ -273,8 +271,8 @@ pub const CATALOGUE: &[Mutation] = &[
               the ones that can. Run `ocelli-compare census` for the table. \
               Until the sprint review's fourth pass that claim was true of one \
               view only and false of 44, because the accumulator dropped white \
-              pixels the two clamp conditions in PS3.3 C.11.2.1.2 and \
-              C.11.2.1.3.2 say cannot move.",
+              pixels, which an 8-bit frame gives no way to tell apart from the \
+              255s PS3.3 C.11.2.1.2 and C.11.2.1.3.2 hold still.",
         side: MutatedSide::Candidate,
         target: Target::MeasuredStack,
         effect: Effect::VoiLinearExactSwap,
@@ -804,48 +802,78 @@ pub fn apply_to_frame(
             // C.11.2.1.3.2 gives LINEAR_EXACT on `c` and `w` themselves:
             // `x <= c - w/2` yields ymin, `x > c + w/2` yields ymax.
             //
-            // The LOWER clamps coincide exactly. LINEAR's is
-            // `c' - w'/2 = (c - 0.5) - (w - 1)/2 = c - w/2`, which is
-            // LINEAR_EXACT's, so no stored value clamps to black under one
-            // function and not the other. That is why a pixel the reference
-            // rendered as 0 can never drop, and it is what the `grey == 0`
-            // exclusion has always been.
+            // Write `y_L` and `y_E` for the two display values at the same
+            // stored value `x`. Where NEITHER function clamps, the entire
+            // divergence is one line:
             //
-            // **The UPPER clamps do not coincide, and an earlier version of
-            // this loop excluded only the bottom.** LINEAR's is
-            // `c' + w'/2 = c + w/2 - 1` and LINEAR_EXACT's is `c + w/2`, a
-            // full unit of `x` apart, with LINEAR clamping the EARLIER of the
-            // two. So for a pixel the reference rendered as 255, every stored
-            // value above `c + w/2` is ymax under both functions and cannot
-            // move at all, and inside the one-unit band below it LINEAR_EXACT
-            // evaluates to `((x - c) / w + 0.5) * 255`, which at the band's
-            // lower edge `x = c + w/2 - 1` is `(1 - 1/w) * 255 = 255 - 255/w`.
-            // Rounded to eight bits that is still 255 unless `255 / w > 0.5`,
-            // so **at `w >= 510` a pixel at 255 cannot move for any stored
-            // value whatever**. Below 510 it CAN move, and over exactly one
-            // band: LINEAR_EXACT rounds under 255 when
-            // `((x - c) / w + 0.5) * 255 < 254.5`, which is
-            // `x < c + w/2 - w/510`, so the movable band runs from
-            // `c + w/2 - 1` to `c + w/2 - w/510` and is `1 - w/510` input
-            // units wide. It is empty at `w = 510` and widens as the window
-            // narrows.
+            //     y_L - y_E = 255 * [ (x - c')/w' - (x - c)/w ]
+            //               = 255 * (x - c + w/2) / (w * w')
+            //               = y_L / w
             //
-            // The accumulator's drop rate is `u / w`, which is HIGHEST at
-            // `u = 255`, while 255 is the display value whose stored values
-            // can move over the NARROWEST band and, at or above 510, over no
-            // band at all. Excluding it is also what stops the mutation
-            // perturbing the informative region, since a pixel that stays at
-            // an extreme on both sides stays uninformative, so the measured
-            // bias keeps the numerator and the denominator the divergence
-            // actually has.
+            // the last step because `y_L = 255 * (x - c + w/2) / w'` by the
+            // same algebra. That identity is the whole of this block. It is
+            // asserted over a table of widths by
+            // `the_divergence_is_the_display_value_over_the_width` in
+            // `tools/oracle/tests/voi_divergence_fixture.rs`.
+            //
+            // **The exclusion at 0 is EXACT at every width, and coincident
+            // clamps are only half the reason.** The lower clamps do coincide,
+            // `c' - w'/2 = (c - 0.5) - (w - 1)/2 = c - w/2`, so a stored value
+            // clamping to black under one function clamps under the other.
+            // What carries the rest is that `y_E = y_L * (w - 1) / w` lies in
+            // `[0, y_L)` everywhere the two functions are unclamped, so
+            // `round(y_L) = 0` forces `round(y_E) = 0`. Coincident clamps
+            // alone say nothing about the unclamped values just above them,
+            // and this comment used to stop there.
+            //
+            // **The exclusion at 255 is CONSERVATIVE at every width and exact
+            // at none.** A pixel the reference rendered 255 has
+            // `round(y_L) = 255`, so `y_L >= 254.5`, and it moves when
+            // `round(y_E) != 255`, that is when `y_L - y_L/w < 254.5`, that is
+            // when `y_L < 254.5 * w / (w - 1)`. So the movable set in
+            // display-value space is
+            //
+            //     y_L in [254.5, min(255, 254.5 * w / (w - 1)))
+            //
+            // of width `254.5 / (w - 1)` capped at `0.5`. It is NON-EMPTY at
+            // every width, because 254.5 is strictly below
+            // `254.5 * w / (w - 1)` for every finite `w`.
+            //
+            // **What `w >= 510` buys is only that a CLAMPED pixel cannot
+            // move**, and four review passes in a row read that as the whole
+            // statement. `254.5 * w / (w - 1) >= 255` exactly when `w <= 510`,
+            // which is the only place 510 comes from. On
+            // `(c + w/2 - 1, c + w/2]`, where LINEAR clamps to 255 and
+            // LINEAR_EXACT does not, the lowest `y_E` is `255 - 255/w`, which
+            // rounds back to 255 exactly when `w >= 510`. That says nothing
+            // about the pixels LINEAR ROUNDED up to 255 from below, and that
+            // band never closes. 510 is therefore not a threshold separating
+            // two regimes and must not be written as one.
+            //
+            // Measured over integer stored values at centre 40, counting `x`
+            // where LINEAR rounds to 255 and LINEAR_EXACT does not: `w = 400`
+            // gives 1, `w = 510` gives 0, and 512, 600, 1000, 2048 and 4096
+            // each give 1. The 0 at 510 is where the integers happen to fall
+            // and not a property. In stored-value units the movable band is
+            // `509/510` of one input unit wide at EVERY width, which holds at
+            // most one integer and sometimes none.
+            // `the_white_exclusion_is_conservative_at_every_width_and_exact_at_none`
+            // in the fixture named above pins all of that.
             //
             // An 8-bit frame does not carry the stored value behind a 255, so
             // there is no way to tell a pixel inside the band from one outside
-            // it. Excluding the whole population is exact at `w >= 510` and
-            // the conservative reading below it, where it under-damages the
-            // frame by whatever share of the 255s fell in a band of
-            // `1 - w/510` input units. The exclusion at 0 is exact at every
-            // width, because the lower clamps coincide.
+            // it, and excluding the whole population is the conservative
+            // reading at every width. It UNDER-damages the frame by whatever
+            // share of the 255s fell in the band and never over-damages it, so
+            // no pixel is wrongly moved.
+            //
+            // The accumulator's drop rate is `u / w`, which is HIGHEST at
+            // `u = 255`, while 255 is the display value whose stored values
+            // can move over the NARROWEST band. Excluding it is also what
+            // stops the mutation perturbing the informative region, since a
+            // pixel that stays at an extreme on both sides stays
+            // uninformative, so the measured bias keeps the numerator and the
+            // denominator the divergence actually has.
             //
             // **The residue is discarded, and the bound on it is now
             // enforced rather than asserted.** Each pixel takes
@@ -925,11 +953,15 @@ pub fn apply_to_frame(
                     ),
                 ));
             }
-            // **The delivered quantity, checked against the declared one.**
-            // Until the fifth pass the only thing asked of the scan was that
-            // it moved SOMETHING, so one drop on a frame owing 262144 of them
-            // passed. The catalogue declares `floor(sum(u) / w)` drops, so
-            // that is what is counted and compared.
+            // **A tripwire against a future edit, not a measurement.** Until
+            // the fifth pass the only thing asked of the scan was that it
+            // moved SOMETHING, so one drop on a frame owing 262144 of them
+            // passed, and this replaced that. What it can prove is bounded,
+            // and saying so is the point: the residue telescopes, so the loop
+            // above applies `floor(participating_sum / w)` drops BY
+            // CONSTRUCTION and the two sides of this comparison cannot differ
+            // while the loop is the loop. It fires only if a later edit breaks
+            // that, which is exactly what the fifth pass's single `if` did.
             if drops_applied != declared {
                 return Err(MutationError::Apply(
                     mutation.name,
@@ -1015,16 +1047,17 @@ mod tests {
     ///
     /// Eight pixels, hand-computed, with a 0 and a 255 in them.
     ///
-    /// **The exclusions are PS3.3's, not the accumulator's.** C.11.2.1.2 gives
-    /// LINEAR the clamps `c' - w'/2` and `c' + w'/2` on `c' = c - 0.5` and
-    /// `w' = w - 1`, and C.11.2.1.3.2 gives LINEAR_EXACT `c - w/2` and
-    /// `c + w/2`. The lower pair is equal, `(c - 0.5) - (w - 1)/2 = c - w/2`,
-    /// so nothing clamps to black under one function and not the other. The
-    /// upper pair differs by one whole unit of `x`, with LINEAR clamping first,
-    /// so a pixel at 255 sits inside a region where LINEAR_EXACT is at worst
-    /// `255 - 255/w`, which rounds back to 255 for every `w >= 510` and for all
-    /// but a sliver of one input unit below it. Neither extreme can move, and
-    /// the accumulator must skip both.
+    /// **The exclusions are PS3.3's, not the accumulator's, and they are not
+    /// equally tight.** `apply_to_frame` carries the derivation. At 0 the
+    /// exclusion is exact at every width: the lower clamps coincide, and above
+    /// them `y_E` lies in `[0, y_L)`, so `round(y_L) = 0` forces
+    /// `round(y_E) = 0`. At 255 it is conservative at every width and exact at
+    /// none, because a pixel LINEAR ROUNDED up to 255 moves whenever
+    /// `y_L < 254.5 * w / (w - 1)`, and that band is non-empty at every width.
+    /// An 8-bit frame cannot tell a 255 inside the band from one outside it,
+    /// so the accumulator skips the whole population, which under-damages the
+    /// frame and never over-damages it.
+    /// `tools/oracle/tests/voi_divergence_fixture.rs` pins the band.
     ///
     /// Values `[0, 255, 100, 200, 150, 255, 0, 90]` at `w = 400`. The two
     /// zeroes and the two 255s take no part, so the accumulator sees

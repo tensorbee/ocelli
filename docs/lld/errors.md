@@ -281,10 +281,16 @@ the production allowance does not read as three files when it is two:
 itself, which nothing can grow, and the rule is syntactic and cannot tell that
 memory from the core's.
 
-The comment above `NO_CACHED_WASM_VIEW_MEMBER` carries the MEASURED list of
-shapes that still escape the ban, taken with a probe file and `npx eslint`
-rather than reasoned about, along with the fourth selector that would close all
-of them and the one site in `packages/` and `examples/` it would cost.
+The comment above `NO_CACHED_WASM_VIEW_MEMBER` carries a MEASURED list of
+shapes that escape the ban, taken with a probe file and `npx eslint` rather
+than reasoned about, along with a fourth selector and the one site in
+`packages/` and `examples/` it would cost. **That list is a sample and not the
+set**, and the fourth selector does not close all of it: the S03 review's fifth
+pass measured three further routes and the sixth confirmed that
+`new DataView(wasm.memory["buffer"])` escapes the fourth selector too, because
+it keys on a property name and a computed member's property is a `Literal` with
+none. F-X017 is the story, its answer is type-aware linting rather than a
+config line, and its acceptance test is the computed route.
 
 ## The shell side
 

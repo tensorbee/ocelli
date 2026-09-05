@@ -46,9 +46,13 @@ runner drives each entry red for its declared reason.
 ## Discovery, and what a refusal site is
 
 `discover.py` finds refusal sites by shape rather than by a list somebody
-maintains. The shapes are `problems.append(`, `print("FAIL...`,
+maintains. The shapes are `problems.append(`, `problems += [`,
+`problems.extend(`, `return ["..."]`, `print("FAIL...`,
 `sys.exit("...")`, `raise SystemExit(` or `raise SomethingError(`,
-`throw new Error(`, `echo "FAIL...` and a bare `exit 1`. The scan roots are
+`throw new Error(`, `echo "FAIL...` and a bare `exit 1`. The three list shapes
+arrived in the S03 review's sixth pass, and the eight refusals they were
+missing included `scripts/pin_and_size_check.py`'s wasm size ceiling, which is
+HLD Appendix A gate A4's number. The scan roots are
 `scripts/`, `ci/`, `.githooks/`, `bin/` and `tools/`, over `.py`, `.mjs`, `.js`
 and `.sh`. Generated, vendored and test-fixture directories are excluded by
 `SCAN_EXCLUDE`, because a test suite's own assertions are not guards.
@@ -292,8 +296,22 @@ Equality and not a ratchet, because a refusal DELETED from a claimed file is
 equally invisible: the entry goes on claiming the other sites in its file. The
 catalogue was the alternative home for these numbers, one per entry, and it was
 rejected. The budget already carries every other recorded value and `--record`
-already writes them all in one command, where sixty numbers spread through the
-catalogue would be sixty things to hand-edit.
+already writes them all in one command, where the same numbers spread through
+the catalogue would be that many things to hand-edit. How many there are is
+printed by `python3 scripts/guard_census.py --record`, and the two files that
+carried the number in prose disagreed with each other and with the harness,
+inside the paragraph that added the measurement.
+
+**What that number can see is `scripts/guards/discover.py`'s shape table**, and
+the sentence above stood ahead of the mechanism until the S03 review's sixth
+pass. A refusal built as a list, `problems += [...]`, `problems.extend(...)` or
+`return ["..."]`, was found by no shape, so eight refusals in scanned guard
+files moved no number at all. One of them was `scripts/pin_and_size_check.py`'s
+wasm size ceiling, which is HLD Appendix A gate A4's own number: deleting it
+left the census headline byte-identical and exit 0, and only a probe caught it.
+Those three shapes are scanned now. A refusal whose message is assembled into a
+local variable before it is appended is still invisible, and `discover.py`
+declares that where the scan is rather than here.
 
 **b. Gate and hook coverage, in both directions.** Every name in
 `bin/ocelli.sh`'s `GATES` array has an entry or an explicit `DELEGATED` reason,
@@ -459,7 +477,10 @@ guesses, plus a `note` restating that:
 - `gates_declared`, so a row deleted from `bin/ocelli.sh`'s `GATES` array is
   noticed
 - `entry_sites`, the refusal count of every entry claiming its file with `"*"`,
-  so a refusal added to an already-claimed file moves a number
+  so a refusal added to an already-claimed file moves a number, for every
+  refusal shape `scripts/guards/discover.py` scans and no others. It claimed
+  this without the qualifier until the S03 review's sixth pass, and a refusal
+  written as `problems += [...]` moved nothing
 - `uncovered`, the uncovered-refusal ceiling and whether the sweep is complete,
   the second derived from the first rather than remembered
 - `oracle_faults`, the fault count the adoption check ratchets against

@@ -115,6 +115,32 @@ impl Exact {
         (2 * self.numerator) % (2 * self.denominator) == self.denominator
     }
 
+    /// `self * numerator / denominator`, exact.
+    ///
+    /// Every denominator in this file is positive, which is what makes
+    /// `is_below` a cross-multiplication with no sign case, so this is only
+    /// ever called with a positive `denominator`.
+    fn scaled(self, numerator: i128, denominator: i128) -> Self {
+        Self {
+            numerator: self.numerator * numerator,
+            denominator: self.denominator * denominator,
+        }
+    }
+
+    /// Strict `<`, by cross-multiplication. Both denominators are positive, so
+    /// the inequality does not flip.
+    fn is_below(self, other: Self) -> bool {
+        self.numerator * other.denominator < other.numerator * self.denominator
+    }
+
+    /// `self + other`, exact.
+    fn plus(self, other: Self) -> Self {
+        Self {
+            numerator: self.numerator * other.denominator + other.numerator * self.denominator,
+            denominator: self.denominator * other.denominator,
+        }
+    }
+
     /// `self - other`, exact.
     fn minus(self, other: Self) -> Self {
         Self {
@@ -124,7 +150,8 @@ impl Exact {
     }
 }
 
-/// PS3.3 C.11.2.1.2, LINEAR, at this file's window, in exact rationals.
+/// PS3.3 C.11.2.1.2, LINEAR, at this file's centre and an arbitrary width, in
+/// exact rationals.
 ///
 /// Transcribed from the block quoted in the module header and from nothing
 /// else. `c' = c - 0.5` and `w' = w - 1`, so `2c' = 2c - 1`, and every test
@@ -136,9 +163,14 @@ impl Exact {
 /// y = ((x - c')/w' + 1/2) * (ymax - ymin) + ymin
 ///   = [ (2x - 2c') + w' ] * (ymax - ymin) / (2w') + ymin
 /// ```
-fn linear(x: i128) -> Exact {
+///
+/// The width is a parameter because the white-exclusion section at the foot of
+/// this file has to vary it. `w >= 2`, so `w'` is at least 1 and nothing here
+/// divides by zero, which is HLD 18.2's own `w >= 1` for LINEAR tightened by
+/// one because `w' = 0` is the division it warns about.
+fn linear_at(x: i128, w: i128) -> Exact {
     let two_c_prime = 2 * CENTRE - 1;
-    let w_prime = WIDTH - 1;
+    let w_prime = w - 1;
     if 2 * x <= two_c_prime - w_prime {
         return Exact::whole(Y_MIN);
     }
@@ -159,17 +191,28 @@ fn linear(x: i128) -> Exact {
 /// y = ((x - c)/w + 1/2) * (ymax - ymin) + ymin
 ///   = [ (2x - 2c) + w ] * (ymax - ymin) / (2w) + ymin
 /// ```
-fn linear_exact(x: i128) -> Exact {
-    if 2 * x <= 2 * CENTRE - WIDTH {
+fn linear_exact_at(x: i128, w: i128) -> Exact {
+    if 2 * x <= 2 * CENTRE - w {
         return Exact::whole(Y_MIN);
     }
-    if 2 * x > 2 * CENTRE + WIDTH {
+    if 2 * x > 2 * CENTRE + w {
         return Exact::whole(Y_MAX);
     }
     Exact {
-        numerator: (2 * x - 2 * CENTRE + WIDTH) * (Y_MAX - Y_MIN) + Y_MIN * 2 * WIDTH,
-        denominator: 2 * WIDTH,
+        numerator: (2 * x - 2 * CENTRE + w) * (Y_MAX - Y_MIN) + Y_MIN * 2 * w,
+        denominator: 2 * w,
     }
+}
+
+/// LINEAR at the one window HLD 18.3 works, which is what everything above the
+/// white-exclusion section uses. One transcription, two call sites.
+fn linear(x: i128) -> Exact {
+    linear_at(x, WIDTH)
+}
+
+/// LINEAR_EXACT at the same window.
+fn linear_exact(x: i128) -> Exact {
+    linear_exact_at(x, WIDTH)
 }
 
 /// HU 100 to 115, quantised LINEAR codes. Hand-computed, one row per HU:
@@ -617,4 +660,434 @@ fn every_code_in_the_two_tables_follows_from_18_2s_formulas() -> Outcome {
         .count();
     assert_eq!(u64::try_from(differing)?, DIFFERING);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The two display-extreme exclusions of `Effect::VoiLinearExactSwap`.
+//
+// **This section exists because the same block carried a wrong consequence of
+// PS3.3 through four consecutive sprint review passes**, each time in a
+// comment that HLD 27.3 tells a human to check against the cited section "not
+// against the comment above it". Four comments and one LLD paragraph said the
+// exclusion of the display value 255 was "exact at `w >= 510`". It is exact at
+// no width, and nothing in the suite went red at any point.
+//
+// The mutation in `tools/oracle/src/mutations.rs` skips every pixel the
+// reference rendered 0 or 255, because an 8-bit frame does not carry the
+// stored value behind either. Both exclusions are safe in direction, since
+// skipping a pixel that could have moved under-damages the frame and never
+// over-damages it, so this was a false derivation and never a wrong pixel.
+// What is asserted below is which of the two is exact and which is merely
+// safe, from HLD 18.2's transcribed formulas and from nothing else.
+//
+// The derivation, in one line. Where NEITHER function clamps,
+//
+//     y_L - y_E = 255 * [ (x - c')/w' - (x - c)/w ]
+//               = 255 * (x - c + w/2) / (w * w')
+//               = y_L / w
+//
+// because `y_L = 255 * (x - c + w/2) / w'` by the same algebra. Everything
+// else follows from that identity and from the rounding rule this file
+// declares in its header.
+// ---------------------------------------------------------------------------
+
+/// One width and the integer stored values that move at it.
+///
+/// `movers` is every integer `x` at `CENTRE` that LINEAR quantises to 255 and
+/// LINEAR_EXACT does not. Reproduce the whole table with
+/// `cargo test -p ocelli-oracle --test voi_divergence_fixture`.
+struct WhiteBand {
+    width: i128,
+    movers: &'static [i128],
+}
+
+/// The twelve widths this section varies over, with the movers hand-computed
+/// at each.
+///
+/// 100 and 256 bracket 255, and 509, 510, 511 and 512 bracket 510, because
+/// those are the two numbers the old derivation treated as boundaries. Two
+/// rows worked by hand, at `c = 40`, `ymin = 0`, `ymax = 255`:
+///
+/// ```text
+/// w = 400   c' = 39.5   w' = 399
+///   LINEAR(239)       = ((239 - 39.5) / 399 + 0.5) * 255
+///                     = (0.5 + 0.5) * 255 = 255.0000  -> 255
+///   LINEAR_EXACT(239) = ((239 - 40) / 400 + 0.5) * 255
+///                     = (0.4975 + 0.5) * 255 = 254.3625 -> 254   MOVES
+///
+/// w = 512   c' = 39.5   w' = 511
+///   LINEAR(294)       = ((294 - 39.5) / 511 + 0.5) * 255
+///                     = (0.4980431 + 0.5) * 255 = 254.5010 -> 255
+///   LINEAR_EXACT(294) = ((294 - 40) / 512 + 0.5) * 255
+///                     = (0.4960938 + 0.5) * 255 = 253.9539 -> 254   MOVES
+/// ```
+///
+/// **The second of those is the whole finding.** 512 is above 510, where four
+/// review passes said a 255 "cannot move for any stored value whatever", and a
+/// stored value moves there.
+///
+/// The two empty rows, 255 and 510, are where the integers happen to fall and
+/// not a property of either width. They sit on opposite sides of 510, which is
+/// the shortest statement that 510 is not a threshold separating two regimes.
+const WHITE_BANDS: [WhiteBand; 12] = [
+    WhiteBand {
+        width: 100,
+        movers: &[89],
+    },
+    WhiteBand {
+        width: 255,
+        movers: &[],
+    },
+    WhiteBand {
+        width: 256,
+        movers: &[167],
+    },
+    WhiteBand {
+        width: 400,
+        movers: &[239],
+    },
+    WhiteBand {
+        width: 509,
+        movers: &[293],
+    },
+    WhiteBand {
+        width: 510,
+        movers: &[],
+    },
+    WhiteBand {
+        width: 511,
+        movers: &[294],
+    },
+    WhiteBand {
+        width: 512,
+        movers: &[294],
+    },
+    WhiteBand {
+        width: 600,
+        movers: &[338],
+    },
+    WhiteBand {
+        width: 1000,
+        movers: &[538],
+    },
+    WhiteBand {
+        width: 2048,
+        movers: &[1059],
+    },
+    WhiteBand {
+        width: 4096,
+        movers: &[2079],
+    },
+];
+
+/// 254.5, the lowest display value that quantises to 255 under this file's
+/// declared rounding rule, as an exact rational.
+const HALF_ABOVE_254: Exact = Exact {
+    numerator: 509,
+    denominator: 2,
+};
+
+/// Every integer stored value from `CENTRE - w` to `CENTRE + w`, which covers
+/// the whole window and a half-window of margin at each end, so no boundary
+/// case can fall outside the scan.
+fn scanned(width: i128) -> impl Iterator<Item = i128> {
+    (CENTRE - width)..=(CENTRE + width)
+}
+
+/// The stored values LINEAR renders 255 and LINEAR_EXACT does not.
+fn movers_at_255(width: i128) -> Vec<i128> {
+    scanned(width)
+        .filter(|x| linear_at(*x, width).code() == 255 && linear_exact_at(*x, width).code() != 255)
+        .collect()
+}
+
+/// **The identity the whole section rests on**, over every width and every
+/// stored value where neither function clamps.
+///
+/// `LINEAR(x) - LINEAR_EXACT(x) = y_L / w` exactly. The closed form asserted
+/// further up this file, `255 * (x + 160) / 159600`, is this same identity at
+/// one window, and this generalises it so the exclusion arguments below can be
+/// stated at any width.
+///
+/// The unclamped region in integers: LINEAR_EXACT's lower clamp is
+/// `2x <= 2c - w`, LINEAR's is the same number, and LINEAR's upper clamp is
+/// `2x > 2c' + w' = 2c + w - 2`, which is the earlier of the two upper ones.
+#[test]
+fn the_divergence_is_the_display_value_over_the_width() {
+    let mut checked = 0_u32;
+    for band in &WHITE_BANDS {
+        let w = band.width;
+        for x in scanned(w) {
+            if 2 * x <= 2 * CENTRE - w || 2 * x > 2 * CENTRE + w - 2 {
+                continue;
+            }
+            let y_l = linear_at(x, w);
+            let measured = y_l.minus(linear_exact_at(x, w));
+            assert!(
+                measured.equals(y_l.scaled(1, w)),
+                "at w = {w}, x = {x} the divergence is {measured:?} and \
+                 y_L / w is {:?}",
+                y_l.scaled(1, w)
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 10_000, "only {checked} inputs were checked");
+}
+
+/// **The exclusion at 255 is conservative at every width and exact at none.**
+///
+/// A pixel the reference rendered 255 has `round(y_L) = 255`, so
+/// `y_L >= 254.5`, and it moves when `round(y_E) != 255`, that is when
+/// `y_L - y_L / w < 254.5`, that is when `y_L < 254.5 * w / (w - 1)`. That
+/// band is non-empty at every width, so some `y_L` always moves, and whether
+/// an INTEGER stored value lands in it is a separate question this table
+/// answers width by width.
+///
+/// The old comment said a 255 "cannot move for any stored value whatever" at
+/// `w >= 510`. Five of the rows below are above 510 and four of them carry a
+/// mover.
+#[test]
+fn the_white_exclusion_is_conservative_at_every_width_and_exact_at_none() {
+    for band in &WHITE_BANDS {
+        let w = band.width;
+        assert_eq!(
+            movers_at_255(w),
+            band.movers,
+            "at w = {w} the stored values LINEAR renders 255 and LINEAR_EXACT \
+             does not are not the hand-computed ones"
+        );
+        for x in band.movers {
+            assert_eq!(linear_at(*x, w).code(), 255);
+            assert!(
+                linear_exact_at(*x, w).code() < 255,
+                "the swap can only ever DARKEN a pixel, so excluding this one \
+                 under-damages the frame and cannot over-damage it"
+            );
+        }
+    }
+    // 510 is not a threshold, and this is the assertion that says so. Every
+    // width above it carries a mover, and one width below it carries none, so
+    // the presence of a mover does not sort the widths by 510 in either
+    // direction.
+    let above = WHITE_BANDS.iter().filter(|band| band.width > 510).count();
+    let above_with_movers = WHITE_BANDS
+        .iter()
+        .filter(|band| band.width > 510 && !band.movers.is_empty())
+        .count();
+    let below_without = WHITE_BANDS
+        .iter()
+        .filter(|band| band.width < 510 && band.movers.is_empty())
+        .count();
+    assert_eq!(above, 6, "511, 512, 600, 1000, 2048 and 4096");
+    assert_eq!(
+        above_with_movers, above,
+        "every one of the six widths above 510 carries a stored value that \
+         moves, where the old derivation said none of them could"
+    );
+    assert_eq!(below_without, 1, "255 is a width below 510 with no mover");
+}
+
+/// **The movable band, pinned at its two boundaries, in display-value space.**
+///
+/// `y_L` in `[254.5, min(255, 254.5 * w / (w - 1)))`, of width
+/// `254.5 / (w - 1)` capped at `0.5`.
+///
+/// The lower boundary is closed and always moves: `y_E = 254.5 * (w - 1) / w`
+/// is strictly under 254.5 for every finite `w`. The upper boundary is open
+/// and never moves: at `y_L = 254.5 * w / (w - 1)` exactly, `y_E` is exactly
+/// 254.5, which quantises to 255. Those two facts together are why the band is
+/// non-empty at every width, which is the sentence four review passes did not
+/// have.
+#[test]
+fn the_movable_band_is_non_empty_at_every_width() {
+    for band in &WHITE_BANDS {
+        let w = band.width;
+        assert_eq!(
+            HALF_ABOVE_254.code(),
+            255,
+            "254.5 rounds half away from zero"
+        );
+
+        // The lower boundary moves, at every width.
+        let low_moved = HALF_ABOVE_254.scaled(w - 1, w);
+        assert!(low_moved.is_below(HALF_ABOVE_254));
+        assert!(
+            low_moved.code() < 255,
+            "at w = {w} the bottom of the band does not move, so there is no \
+             band at all"
+        );
+
+        // The upper boundary does not, at every width. `254.5 * w / (w - 1)`
+        // times `(w - 1) / w` is 254.5 by construction, which is the exact
+        // statement that the band is half open.
+        let upper = HALF_ABOVE_254.scaled(w, w - 1);
+        assert!(
+            HALF_ABOVE_254.is_below(upper),
+            "at w = {w} the band is empty, and it is empty at no width"
+        );
+        assert!(upper.scaled(w - 1, w).equals(HALF_ABOVE_254));
+        assert_eq!(upper.scaled(w - 1, w).code(), 255);
+
+        // The width of the band, `254.5 / (w - 1)` capped at 0.5. The cap
+        // binds exactly when `254.5 * w / (w - 1) >= 255`, which is `w <= 510`,
+        // and that inequality is the ONLY place 510 comes from.
+        let uncapped = Exact {
+            numerator: 509,
+            denominator: 2 * (w - 1),
+        };
+        let half = Exact {
+            numerator: 1,
+            denominator: 2,
+        };
+        let capped = if half.is_below(uncapped) {
+            half
+        } else {
+            uncapped
+        };
+        let top = if upper.is_below(Exact::whole(255)) {
+            upper
+        } else {
+            Exact::whole(255)
+        };
+        assert!(
+            top.minus(HALF_ABOVE_254).equals(capped),
+            "at w = {w} the band width is {:?} and 254.5 / (w - 1) capped at \
+             0.5 is {capped:?}",
+            top.minus(HALF_ABOVE_254)
+        );
+        assert_eq!(
+            w <= 510,
+            !upper.is_below(Exact::whole(255)),
+            "254.5 * w / (w - 1) >= 255 exactly when w <= 510"
+        );
+
+        // **The same band in STORED-VALUE units, where it is 509/510 of one
+        // input unit at every width.** Display values convert to stored values
+        // at `(w - 1) / 255` per code, which covers the pixels LINEAR ROUNDED
+        // up to 255. At or below 510 the band also spills into
+        // `(c + w/2 - 1, c + w/2]`, where LINEAR has CLAMPED to 255 and
+        // LINEAR_EXACT has not, and that interval is `1 - w/510` wide. The two
+        // parts sum to a constant, which is the shortest statement that the
+        // band never closes and that 510 moves width between the two parts
+        // rather than switching anything off.
+        let rounding_part = capped.scaled(w - 1, 255);
+        let clamp_part = if w <= 510 {
+            Exact {
+                numerator: 510 - w,
+                denominator: 510,
+            }
+        } else {
+            Exact::whole(0)
+        };
+        assert!(
+            rounding_part.plus(clamp_part).equals(Exact {
+                numerator: 509,
+                denominator: 510,
+            }),
+            "at w = {w} the movable band is {:?} input units wide and it is \
+             509/510 at every width",
+            rounding_part.plus(clamp_part)
+        );
+    }
+}
+
+/// **What `w >= 510` actually buys is only that a CLAMPED pixel cannot move**,
+/// and reading that as the whole statement is the defect this section exists
+/// for.
+///
+/// On `(c + w/2 - 1, c + w/2]` LINEAR has clamped to `ymax` and LINEAR_EXACT
+/// has not, and the lowest `y_E` anywhere `y_L` is 255 is `255 - 255/w`, taken
+/// at `x = c + w/2 - 1`. It quantises to 255 exactly when `255/w <= 0.5`,
+/// which is `w >= 510`.
+///
+/// So above 510 no pixel that is 255 BY CLAMPING can move. The pixels LINEAR
+/// ROUNDED up to 255 from below are a different population, the band above
+/// covers them, and it never closes. Both halves are asserted here, because
+/// the true half on its own is what four passes mistook for the whole.
+#[test]
+fn a_width_of_510_buys_only_that_a_clamped_pixel_cannot_move() {
+    for band in &WHITE_BANDS {
+        let w = band.width;
+        // `255 - 255/w`, the worst LINEAR_EXACT value under a LINEAR 255.
+        let worst = Exact {
+            numerator: 255 * (w - 1),
+            denominator: w,
+        };
+        assert_eq!(
+            worst.code() == 255,
+            w >= 510,
+            "at w = {w} the lowest y_E under a display value of 255 is \
+             {worst:?}, which quantises to {}",
+            worst.code()
+        );
+        if w % 2 == 0 {
+            // `c + w/2 - 1` is an integer at an even width, it is the last
+            // stored value LINEAR does not clamp, and LINEAR is exactly 255
+            // there. This is where `255 - 255/w` is taken.
+            let top = CENTRE + w / 2 - 1;
+            assert!(linear_at(top, w).equals(Exact::whole(255)));
+            assert!(linear_exact_at(top, w).equals(worst));
+        }
+    }
+    // The punchline. At 512 and at 4096 a 255 reached by clamping cannot move,
+    // and a stored value moves anyway.
+    for width in [512_i128, 4096] {
+        let worst = Exact {
+            numerator: 255 * (width - 1),
+            denominator: width,
+        };
+        assert_eq!(worst.code(), 255, "no clamped pixel moves at w = {width}");
+        assert!(
+            !movers_at_255(width).is_empty(),
+            "and yet a stored value moves at w = {width}, which is why the \
+             exclusion is conservative here and not exact"
+        );
+    }
+}
+
+/// **The exclusion at 0 IS exact at every width, and coincident clamps are
+/// only half the reason.**
+///
+/// The lower clamps coincide, `c' - w'/2 = (c - 0.5) - (w - 1)/2 = c - w/2`,
+/// so a stored value clamping to black under one function clamps under the
+/// other. That alone says nothing about the unclamped values just above them,
+/// and the comment in `mutations.rs` used to stop there. What carries the rest
+/// is that `y_E = y_L * (w - 1) / w` lies in `[0, y_L)` wherever neither
+/// function clamps, so `round(y_L) = 0` forces `round(y_E) = 0`.
+///
+/// Both are asserted: the ordering `y_E <= y_L` at every scanned input, and
+/// the consequence, that no stored value at any width renders 0 under LINEAR
+/// and something else under LINEAR_EXACT. The exhaustive half is what the
+/// white table above cannot say.
+#[test]
+fn the_black_exclusion_is_exact_at_every_width() {
+    for band in &WHITE_BANDS {
+        let w = band.width;
+        let mut blacks = 0_u32;
+        for x in scanned(w) {
+            let y_l = linear_at(x, w);
+            let y_e = linear_exact_at(x, w);
+            assert!(
+                !y_l.is_below(y_e),
+                "at w = {w}, x = {x} LINEAR_EXACT is ABOVE LINEAR, which the \
+                 swap's direction depends on being impossible"
+            );
+            if y_l.code() == 0 {
+                blacks += 1;
+                assert_eq!(
+                    y_e.code(),
+                    0,
+                    "at w = {w} the stored value {x} renders 0 under LINEAR \
+                     and {} under LINEAR_EXACT, so excluding 0 is not exact",
+                    y_e.code()
+                );
+            }
+        }
+        assert!(
+            blacks > 0,
+            "no input rendered 0 at w = {w}, so the width \
+             proves nothing"
+        );
+    }
 }

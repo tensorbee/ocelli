@@ -109,18 +109,34 @@ off the end of `errors`, `bench` and `guards`, and `runs_command` uses
 `-p test_nothing_at_all.py`, which discovers zero tests, left this check at
 exit 0.
 
-**The extractor's limit, declared rather than discovered.** It recognises four
-command prefixes, `python3 `, `npm run `, `cargo ` and `ci/`. `node`,
-`wasm-pack` and `"$0"` are invisible to it, so the three `node --test` suites
-in `bench`, the wasm-pack build in `panic` and the `"$0" wasm` and `"$0" native`
-self-calls are not demanded of CI by a check whose message says every command
-in the arm is. Nothing is lost today, because `bench`, `wasm`, `panic` and
-`native` are each invoked by NAME in `ci.yml` and a step naming a gate runs its
-arm entire by definition. Widening the prefix list would change that: `panic`
-would stop being a gate with no extractable command, and the sentence above
-about `all([])` would stop being true of it. The limit is therefore declared
-here and in the `ci-floor` catalogue entry, where the census prints it, rather
-than closed by a widening that trades one silent gap for another.
+**The extractor's limit was a live hole and the OK line asserted the opposite.**
+It recognises four command prefixes, `python3 `, `npm run `, `cargo ` and
+`ci/`. `node`, `wasm-pack` and `"$0"` are invisible to it, so the three
+`node --test` suites in `bench`, the wasm-pack build in `panic` and the
+`"$0" wasm` and `"$0" native` self-calls were not demanded of CI by a check
+printing "every command in each gate's arm". The declaration that stood here
+said nothing was lost, because "bench, wasm, panic and native are each invoked
+by NAME in ci.yml", and **nothing enforced that sentence**. Measured in the S03
+review's sixth pass: replacing the `- run: bin/ocelli.sh gate bench` step with
+its two extractable commands left this check at exit 0 with that same OK line,
+and five node test files left CI in a two-line edit that reads as expanding the
+step. It is the same shape as the `arms['panic']` bug the fifth pass fixed, one
+level out.
+
+So the sentence is a rule now. `unseen_commands` reads each arm's statements
+and reports the ones the extractor cannot see, and **a gate whose arm holds one
+of those is refused unless a step invokes the gate by name**, per event, exactly
+as the per-command rule is. That is strictly stronger than the declaration it
+replaces, and it leaves the `all([])` argument standing: `panic`, `native` and
+`oracle` still yield no extractable command, `covers` still refuses an empty arm
+through `bool(arm)`, and widening `COMMAND_PREFIXES` is still not what happened
+here. Only the sentence that was taken on trust is now mechanical.
+
+A statement whose first word is a shell builtin or a control keyword is not a
+command for this purpose. `[ -d node_modules ]`, `command -v wasm-pack`, `skip`,
+`echo` and `return` decide whether the real work runs and are not the work, so
+counting them would demand a gate-name step for `lint`, `types` and `packages`,
+which run their whole arm as steps today and are not weaker for it.
 
 ## A gate outside the floor can still be a gate CI is supposed to run
 
@@ -579,16 +595,40 @@ CONTINUATION = re.compile(r"\\\n\s*")
 # One `run_gate` arm: a case label at the start of a line, then everything up
 # to its `;;`. Ending at the next LABEL instead is what let each arm swallow
 # the comment block introducing the following one.
+#
+# The remaining limit, and it is why `arm_bodies` refuses a nested `case`: a
+# `case` inside an arm body ends its own branches with `;;` too, so this would
+# stop at the FIRST of those and keep only whatever came before it. Today the
+# degradation would be safe by accident, because the one shape tried in the S03
+# review's sixth pass left the arm empty and `covers` refuses an empty arm. An
+# arm with a real command before a nested `case` would keep only that command
+# and drop the rest silently, so the shape is refused rather than parsed.
 ARM = re.compile(r"^[ \t]*([a-z-]+)\)(.*?);;", re.M | re.S)
 
+# A `case` keyword at a statement position inside an arm body.
+NESTED_CASE = re.compile(r"(?:^|[\n;{}()&|])\s*case\b")
 
-def gate_commands(runner: str) -> dict[str, list[str]]:
-    """The commands each gate's `run_gate` arm actually runs.
+# Where one shell statement ends and the next begins, for the unseen-command
+# scan. `{` and `}` are separators here and never statement heads.
+STATEMENT_BREAK = re.compile(r"[\n;{}()]|&&|\|\||\|")
 
-    An arm ends at its `;;`. Comments are stripped and continuations joined
-    before the commands are read out, so nothing here can read a command out
-    of prose. See the docstring's "Where an arm ENDS" section for what that
-    cost.
+# Statement heads that are not the work a gate does. A builtin or a control
+# keyword decides whether the real command runs, and demanding a gate-name step
+# for one of them would refuse `lint`, `types` and `packages`, which run their
+# whole arm as CI steps today and lose nothing by it.
+SHELL_NOISE = frozenset({
+    "[", "[[", "test", "command", "echo", "printf", "return", "exit", "skip",
+    "local", "if", "then", "elif", "else", "fi", "for", "while", "until",
+    "do", "done", "case", "esac", "true", "false", ":", "set", "shift",
+    "read", "cd", "export", "unset", "eval",
+})
+
+
+def arm_bodies(runner: str) -> dict[str, str]:
+    """Each gate's `run_gate` arm body, comments stripped, continuations joined.
+
+    An arm ends at its `;;`. Nothing here can read a command out of prose. See
+    the docstring's "Where an arm ENDS" section for what that cost.
     """
     try:
         body = runner[runner.index("run_gate() {"):runner.index("skip() {")]
@@ -599,9 +639,33 @@ def gate_commands(runner: str) -> dict[str, list[str]]:
             "restructured, in which case this parser has to be restructured "
             "with it, or the arms are gone. Both need a person, and neither "
             "may be read as agreement.") from error
-    arms: dict[str, list[str]] = {}
+    bodies: dict[str, str] = {}
     for match in ARM.finditer(body):
         text = SHELL_COMMENT.sub("", CONTINUATION.sub(" ", match.group(2)))
+        if NESTED_CASE.search(text):
+            raise RuntimeError(
+                f"the `{match.group(1)}` arm in bin/ocelli.sh's `run_gate` "
+                f"holds a nested `case`. An arm ends at its `;;` here and a "
+                f"nested case ends its own branches the same way, so this "
+                f"parser would keep only what came before the first inner "
+                f"`;;` and drop the rest of the arm without saying so. Either "
+                f"move the nested case into a function the arm calls, or "
+                f"teach this parser to balance `case`/`esac`. Both need a "
+                f"person, and neither may be read as agreement.")
+        bodies[match.group(1)] = text
+    if not bodies:
+        raise RuntimeError(
+            "bin/ocelli.sh's `run_gate` declares no case arm this parser can "
+            "read. Every gate would then have an empty arm, `covers` would "
+            "fall back to the gate-name route for all of them, and the "
+            "per-command rule would hold over nothing.")
+    return bodies
+
+
+def gate_commands(runner: str) -> dict[str, list[str]]:
+    """The commands each gate's `run_gate` arm runs and this file can see."""
+    arms: dict[str, list[str]] = {}
+    for gate, text in arm_bodies(runner).items():
         found = re.findall(
             "(?:" + "|".join(re.escape(p) for p in COMMAND_PREFIXES) +
             r")[\w./ -]+", text)
@@ -609,14 +673,37 @@ def gate_commands(runner: str) -> dict[str, list[str]]:
         # that sat before the backslash beside the one that replaced it, and
         # `runs_command` compares the text, so a doubled space would make an
         # arm command that CI runs verbatim look absent.
-        arms[match.group(1)] = [re.sub(r"\s+", " ", c).strip() for c in found]
-    if not arms:
-        raise RuntimeError(
-            "bin/ocelli.sh's `run_gate` declares no case arm this parser can "
-            "read. Every gate would then have an empty arm, `covers` would "
-            "fall back to the gate-name route for all of them, and the "
-            "per-command rule would hold over nothing.")
+        arms[gate] = [re.sub(r"\s+", " ", c).strip() for c in found]
     return arms
+
+
+def unseen_commands(runner: str) -> dict[str, list[str]]:
+    """The statements in each arm that `gate_commands` cannot see.
+
+    The extractor's vocabulary is `COMMAND_PREFIXES` and the arms run more than
+    that: `node --test`, `wasm-pack build` and the `"$0"` self-calls. A gate
+    holding one of these can only be run whole by a step that names the gate,
+    and until the sixth pass that was a sentence in this file's docstring
+    rather than a rule. It is a rule now, and `main` applies it per event.
+
+    Shell builtins and control keywords are not commands here, for the reason
+    `SHELL_NOISE` gives.
+    """
+    unseen: dict[str, list[str]] = {}
+    for gate, text in arm_bodies(runner).items():
+        found: list[str] = []
+        for raw in STATEMENT_BREAK.split(text):
+            statement = re.sub(r"\s+", " ", raw).strip()
+            if not statement:
+                continue
+            if statement.startswith(COMMAND_PREFIXES):
+                continue
+            if statement.split(" ", 1)[0] in SHELL_NOISE:
+                continue
+            found.append(statement)
+        if found:
+            unseen[gate] = found
+    return unseen
 
 
 def main() -> int:
@@ -630,6 +717,7 @@ def main() -> int:
     # are unchanged. Only how they are printed is.
     try:
         arms = gate_commands(runner)
+        unseen = unseen_commands(runner)
         declared = declared_gates(runner)
         excluded = runner_excluded(runner)
     except RuntimeError as error:
@@ -674,19 +762,44 @@ def main() -> int:
         # Per event AND over the whole arm. `blocked` is the events no step
         # touching the gate reaches at all, `partial` is the events a step
         # reaches while leaving a command in the arm unrun.
+        #
+        # `unnamed` is the third: the events on which a gate whose arm holds a
+        # command this file CANNOT see is not invoked by name. `covers` is
+        # blind to those commands by construction, so it can answer yes over a
+        # smaller arm, and a step naming the gate is the only thing that runs
+        # them. Asked per event for the same reason as the other two.
         blocked: list[str] = []
         partial: dict[str, list[str]] = {}
+        unnamed: list[str] = []
         for event in sorted(events):
             reachable = [c for c in commands if c.runs_on({event})]
+            if unseen.get(gate) and gate not in invoked_gates(reachable):
+                unnamed.append(event)
             if covers(gate, arms, reachable):
                 continue
             if not any(c in running for c in reachable):
                 blocked.append(event)
             else:
                 partial[event] = missing_arm_commands(gate, arms, reachable)
-        if events and running and not blocked and not partial:
+        if events and running and not blocked and not partial and not unnamed:
             continue
-        if running and events and (blocked or partial):
+        if running and events and (blocked or partial or unnamed):
+            if unnamed:
+                problems.append(
+                    f"the `{gate}` gate is in the CI floor, its arm in "
+                    f"bin/ocelli.sh runs "
+                    f"{', '.join(repr(c) for c in unseen[gate])}, and no step "
+                    f"in {WORKFLOW.relative_to(ROOT)} invokes "
+                    f"`bin/ocelli.sh gate {gate}` on "
+                    f"{', '.join(unnamed)}. This file's command extractor "
+                    f"recognises {', '.join(repr(p) for p in COMMAND_PREFIXES)}"
+                    f" and nothing else, so it cannot demand those commands "
+                    f"step by step and must not report the arm covered "
+                    f"without them. A step naming the gate runs the arm "
+                    f"entire by definition, and that is the only form this "
+                    f"check can accept here. Either restore the gate-name "
+                    f"step, or exclude the gate from the floor in "
+                    f"bin/ocelli.sh and say why.")
             if partial:
                 absent = sorted({command for gaps in partial.values()
                                  for command in gaps})
@@ -766,6 +879,18 @@ def main() -> int:
           f"{', '.join(sorted(events))}, every command in each gate's arm")
     print(f"  the runner's --floor exclusion list and NOT_IN_FLOOR agree on "
           f"{', '.join(sorted(NOT_IN_FLOOR))}")
+    # Named rather than left to the docstring, because the previous version of
+    # this claim was a sentence in the docstring saying these gates were
+    # invoked by name and nothing read it. The gates are derived from the arms
+    # and the list is printed, so a gate joining or leaving it is visible in a
+    # diff of this output rather than in a paragraph nobody re-reads.
+    named_only = sorted(g for g in unseen
+                        if g in declared and g not in NOT_IN_FLOOR)
+    if named_only:
+        print(f"  {', '.join(named_only)} hold arm command(s) this file "
+              f"cannot extract, so each is required to be invoked by name and "
+              f"each is. That was a declared limit until the sixth pass and "
+              f"is a rule now.")
     for gate, reachable in sorted(reached_outside.items()):
         print(f"  outside the floor, CI runs `{gate}` on "
               f"{', '.join(reachable)}. That is what is PROVABLE from the "

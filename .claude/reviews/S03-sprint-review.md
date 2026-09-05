@@ -6,8 +6,12 @@ integrator rather than by any story's author.
 written by the pre-commit hook from the verify ledger and naming the profile,
 the gate list, the corpus result and the tree it certifies. `git log
 --format='%h %(trailers:key=Ocelli-Verify)' 36adc98..HEAD` prints them, and
-`git rev-parse <commit>^{tree}` checks the binding. Every S03 pass ended
-`profile=sprint corpus=pass` over 28 gates. **The number of gates is the only
+`git rev-parse <commit>^{tree}` checks the binding, and it holds on every one.
+**Every pass from 2 onward ended `profile=sprint corpus=pass` over 28 gates.**
+Pass 1's two commits record `profile=feature` over 25, because the sprint
+profile was not yet being run for review remediation. The sixth pass found that
+sentence written here without the qualifier, in the paragraph whose whole
+argument is that the trailer records what actually ran. **The number of gates is the only
 figure written here**, because `bin/ocelli.sh gate --list` prints it and the
 trailer records what actually ran. The comparator's mutation catalogue detects
 every entry in `tools/oracle/src/mutations.rs`, which `grep -c '^    Mutation
@@ -114,9 +118,10 @@ and a mutation is an input to a test: it derives from the specification too.
 |------|-------|---------|
 | 1 | 23 defects and 32 smells, three of them blocking. The rest were records asserting things the tree did not do, swept in one commit | remediated |
 | 2 | 20 defects, 19 smells. The bias bound detected nothing. The census counted a refusal as watched when its entry named a test that never opened the file. In-plane spacing was compared by nothing. Two DICOM skills reproduced HLD 18.3's wrong `LINEAR_EXACT(-160)` | remediated |
-| 3 | 10 defects, 6 smells. Pass 2's mutation was a caricature. The bound's blind spot starts at width 678 and not 2550. Three LLD updates were claimed and none existed | remediated |
-| 4 | Four independent reviewers on disjoint areas, whose tallies are recorded in the same untracked notebook as passes 1 to 3 and are not reproducible from this tree. Pass 3's replacement mutation was still not the divergence. A group `#![allow]` switched off four of HLD 27.1's five denied lints with both gates green. The `covered_by` directory route was satisfied by the catalogue itself. This record stated a caught defect that never existed | remediated |
+| 3 | 10 defects and 6 smells, a tally that appears in no commit message and nowhere in this tree, so it is the row that fails this file's own rule. Pass 2's mutation was a caricature. The bound's blind spot starts at width 678 and not 2550. Three LLD updates were claimed and none existed | remediated |
+| 4 | Four independent reviewers on disjoint areas. The tally is in an untracked notebook and is not reproducible from this tree, which is also true of pass 3's and is not true of passes 1 and 2, whose commit messages carry theirs. Pass 3's replacement mutation was still not the divergence. A group `#![allow]` switched off four of HLD 27.1's five denied lints with both gates green. The `covered_by` directory route was satisfied by the catalogue itself. This record stated a caught defect that never existed | remediated |
 | 5 | Four reviewers again, on the same areas, with the pass-4 remediation as the primary target. A floor gate could be deleted from CI while the check said all 25 ran. `#![allow(clippy :: pedantic)]` with spaces defeated the fix for `#![allow(clippy::pedantic)]`. Four of the five refusals pass 4 added to the census were watched by nothing. The mutation's residue invariant was false below `w = 255` | remediated |
+| 6 | Three reviewers. Six defects, against twenty-one and thirty-four before. The comparator's white-pixel exclusion carried a wrong consequence of PS3.3 for the fourth consecutive pass. A TOML trailing comment was the fifth route past the lint policy. Eight refusals in scanned guard files, including gate A4's wasm size ceiling, were invisible to the scanner | remediated |
 
 ### Pass 1's three blocking defects, which this record used to omit
 
@@ -324,6 +329,58 @@ all. The escape count in F-X017's title moved from four to five to at least
 eight across two passes, so the title carries no count either. And a CHANGELOG
 bullet claimed twelve reformats where nine are written, reintroducing a count
 pass 1 had already fixed in two other files.
+
+## What pass 6 found, and where the passes are going
+
+Six defects, against twenty-one in pass 5 and thirty-four in pass 4, and the
+areas are separating. The record and the crates came back with two defects
+between them and a verification that mattered more than any finding: every one
+of the twenty-one test mutations pass 5 claimed to have proved was applied
+again and every one went red, and an independent sweep of fifteen further
+mutations in `caps.rs` killed fourteen, the survivor being a provably
+equivalent mutant. **No test in that area passes whether the code is right or
+wrong.** That is the first time in this sprint a reviewer has been able to say
+so.
+
+The two places still producing defects are the two with the most arithmetic and
+the most adversarial surface.
+
+**The comparator's white-pixel exclusion was wrong for the fourth consecutive
+pass.** Every version of that block reasoned only about stored values in
+LINEAR's clamped region and treated "the reference rendered 255" as equivalent
+to "LINEAR clamped". LINEAR also rounds to 255 over a band below the clamp, and
+LINEAR_EXACT can fall under 254.5 there. The movable set is `y_L` in
+`[254.5, min(255, 254.5 w/(w-1)))`, and what `w >= 510` buys is only that a
+CLAMPED pixel cannot move. The remediation then derived what four passes of
+prose had missed: **in stored-value units the band is exactly `509/510` of one
+input unit wide at every width.** 510 moves width between the rounding part and
+the clamp part rather than switching anything off, which is why an integer
+sometimes falls in the band and sometimes does not, and why the count is zero at
+both 255 and 510 and one at every other width tried. The exclusion is
+conservative everywhere and exact nowhere, and there is now a fixture over
+twelve widths that pins the boundary rather than a sentence asserting it.
+
+**The lint policy took a fifth route.** A trailing TOML comment made a row
+invisible to a regex anchored on end of line. On a required row that fails safe.
+On the group row added one pass earlier it failed open, and the declared
+constant that was supposed to be the backstop stopped at the first blank line,
+so the two holes lined up and `pedantic = { level = "allow", priority = 1 }
+# keeps noise down` after a blank line turned off four of HLD 27.1's five
+denied lints with every gate green. Both halves are fixed, and one residual is
+declared rather than hidden: a two-line inline table is still invisible to the
+row regex, and the constant digest is what catches it.
+
+**And the scanner could not see eight refusals that were already there**,
+including gate A4's wasm size ceiling, because they are written as
+`problems += [...]` or as a returned list literal. Deleting that ceiling left
+the census reporting exactly the same number of refusals and exiting 0. So
+`entry_sites`, added one pass earlier precisely to notice a refusal added to an
+already-claimed file, could not see a refusal written in that shape. Three
+shapes were added and the count moved from 544 to 566.
+
+**The shape of the remaining work is now clear.** Six passes have not exhausted
+the guard harness or the comparator, and each pass costs less than the one
+before it. What has converged is everything else.
 
 ## What is still open, and it is declared rather than hidden
 

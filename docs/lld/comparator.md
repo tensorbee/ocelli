@@ -295,16 +295,37 @@ one on the other side, and at 512 rows either is 512 background pixels counted
 as picture.
 
 **What that costs is not the bias bound, and this section said it was until the
-sprint review's fifth pass.** Both sides paint the declared clear colour in the
-letterbox, so an admitted column is black on both sides, which is clipped to the
-same extreme, which is uninformative. It never enters the bias denominator at
-all. Two other things break instead:
+sprint review's fifth pass.** Both sides paint the same clear colour in the
+letterbox, so an admitted column agrees on both sides, and that colour is an
+8-bit extreme, so the column is clipped to the same extreme and is
+uninformative. It never enters the bias denominator at all.
+
+**Both halves of that are load-bearing, and the sixth pass added the second.**
+`clipped_to_the_same_extreme` in `tools/oracle/src/frame.rs` is
+`reference == candidate && (reference == 0 || reference == u8::MAX)`, so
+agreement alone does not make a pixel uninformative. The clear colour is
+`base.background` in `tools/oracle/render-params.json`, today `[0, 0, 0]`. At
+`[16, 16, 16]` every letterbox pixel becomes informative and this paragraph
+inverts. That file's digest is compared between the two sides and never against
+an expected value, so a change both halves agreed on would be silent. The
+dependency is therefore asserted, by
+`the_declared_background_is_an_eight_bit_extreme` in
+`tools/oracle/tests/geometry_fixture.rs`, which checks the rule rather than
+today's value: any 8-bit extreme passes and `[16, 16, 16]` does not.
+
+Two other things break instead:
 
 1. `informativeFraction` is informative pixels over image-rectangle pixels, so
-   an admitted column inflates the denominator alone. 512 of 262144 pixels is
-   0.00195 of the rectangle, and the lowest fraction among the views the
-   identity run does not call weak is 0.10074 against a floor of 0.10, a margin
-   of 0.0007. A wrong column can therefore turn a measured view into a `weak`
+   an admitted column inflates the denominator alone. **The move is
+   `f * n / (P + n)` and not `n / P`, and this compared the second against the
+   margin until the sixth pass.** The informative count does not change, so the
+   fraction goes from `I / P` to `I / (P + n)`. On the worst view the identity
+   run does not call weak, `synthetic/ct_series_nonuniform`, `I` is 21973 over a
+   rectangle of `P = 218112` pixels, which is 0.10074 against a floor of 0.10,
+   so the margin is 0.00074. One column of `n = 512` moves it to 0.100506, a
+   move of 0.000236, and four columns cross the floor at 0.099805. 262144 is the
+   canvas rather than that view's rectangle, which is where the old 0.00195
+   came from. A wrong column can therefore turn a measured view into a `weak`
    one.
 2. The `letterbox-only` qualifier fires only when the image region carries no
    difference at all and the letterbox carries one. A fit error in a column that
@@ -530,26 +551,57 @@ window of 80, or any MR window under 255, reaches it. The delivered drop count
 is now compared against `floor(sum(u) / w)` and the mutation refuses when they
 disagree, where before the only thing asked of it was that it moved something.
 
+**That comparison is a tripwire and not a measurement**, and saying so is the
+point. The residue telescopes, so the loop applies `floor(sum(u) / w)` drops by
+construction and the two sides cannot part company while the loop is the loop.
+It fires only if a later edit breaks that, which is exactly what the single
+`if` the fifth pass found had done.
+
 **Both display extremes are excluded, and PS3.3 is why.** C.11.2.1.2 gives
 LINEAR the clamps `c' - w'/2` and `c' + w'/2` on `c' = c - 0.5` and
-`w' = w - 1`, and C.11.2.1.3.2 gives LINEAR_EXACT `c - w/2` and `c + w/2`. The
-lower pair is equal, since `(c - 0.5) - (w - 1)/2 = c - w/2`, so nothing clamps
-to black under one function and not the other and a pixel at 0 can never move.
-The upper pair differs by a whole unit of `x`, with LINEAR clamping the earlier
-of the two, so a pixel at 255 sits where LINEAR_EXACT is at worst `255 - 255/w`,
-which rounds back to 255 for every `w >= 510`.
+`w' = w - 1`, and C.11.2.1.3.2 gives LINEAR_EXACT `c - w/2` and `c + w/2`.
+Write `y_L` and `y_E` for the two display values at one stored value. Where
+neither function clamps, the whole divergence is
+`y_L - y_E = 255 * (x - c + w/2) / (w * w')`, which is `y_L / w`, because
+`y_L = 255 * (x - c + w/2) / w'`.
 
-**So the two exclusions are not equally tight, and this said they were.** At 0
-the exclusion is exact at every width. At 255 it is exact only at `w >= 510`. A
-pixel at 255 CAN move below that, over the stored values where LINEAR_EXACT
-rounds under 255, which is `x < c + w/2 - w/510`, so the movable band runs from
-LINEAR's upper clamp at `c + w/2 - 1` up to that point and is `1 - w/510` input
-units wide. The band is empty at 510 and widens as the window narrows. An 8-bit
-frame does not carry the stored value behind a 255, so there is no way to tell a
-pixel inside the band from one outside it, and excluding the whole population is
-the conservative reading below 510 rather than a statement that nothing could
-have moved. It also keeps the mutation from perturbing the informative region,
-which is what kept the numerator and the denominator honest.
+**The two exclusions are not equally tight, and four review passes in a row got
+the upper one wrong.** At 0 it is exact at every width. The lower clamps are
+equal, since `(c - 0.5) - (w - 1)/2 = c - w/2`, and above them
+`y_E = y_L * (w - 1) / w` lies in `[0, y_L)`, so `round(y_L) = 0` forces
+`round(y_E) = 0`. Coincident clamps alone would not carry that, which is what
+this section used to claim.
+
+**At 255 the exclusion is conservative at every width and exact at none.** A
+pixel the reference rendered 255 has `y_L >= 254.5`, and it moves when
+`y_L - y_L / w < 254.5`, which is `y_L < 254.5 * w / (w - 1)`. So the movable
+set in display-value space is `y_L` in
+`[254.5, min(255, 254.5 * w / (w - 1)))`, of width `254.5 / (w - 1)` capped at
+`0.5`, and 254.5 is strictly below `254.5 * w / (w - 1)` at every finite width,
+so the band never closes.
+
+**What `w >= 510` buys is only that a clamped pixel cannot move.**
+`254.5 * w / (w - 1) >= 255` exactly when `w <= 510`, which is the only place
+510 comes from. On `(c + w/2 - 1, c + w/2]`, where LINEAR clamps to 255 and
+LINEAR_EXACT does not, the lowest `y_E` is `255 - 255/w`, which rounds back to
+255 exactly when `w >= 510`. That says nothing about the pixels LINEAR rounded
+up to 255 from below, so 510 is not a threshold separating two regimes and must
+not be written as one. Measured over integer stored values at centre 40,
+counting `x` where LINEAR rounds to 255 and LINEAR_EXACT does not, `w = 400`
+gives 1, `w = 510` gives 0, and 512, 600, 1000, 2048 and 4096 each give 1. The
+0 at 510 is where the integers happen to fall: in stored-value units the
+movable band is `509/510` of one input unit wide at every width, which holds at
+most one integer and sometimes none. Reproduce with
+`cargo test -p ocelli-oracle --test voi_divergence_fixture`, which pins the
+band, the counts and the clamped-pixel case.
+
+An 8-bit frame does not carry the stored value behind a 255, so there is no way
+to tell a pixel inside the band from one outside it, and excluding the whole
+population is the conservative reading at every width. It under-damages the
+frame by whatever share of the 255s fell in the band and never over-damages it,
+so no pixel is wrongly moved. It also keeps the mutation from perturbing the
+informative region, which is what kept the numerator and the denominator
+honest.
 
 It said `round(u - u/w)` here and in the variant's own doc comment until the
 sprint review's fourth pass, and `apply_to_frame`'s comment 600 lines below it

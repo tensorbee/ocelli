@@ -76,10 +76,17 @@ def render_table() -> str:
                         else "must ACCEPT")
             defect = (f" **{probe.defect}, fails today**" if probe.defect
                       else "")
+            # An empty `expect` is a SILENT refusal and the runner asserts the
+            # output is empty, which is the strongest assertion in the table.
+            # Rendered as "output carries ``" it read as a probe that checks
+            # nothing, so the operator-facing artefact said the opposite of
+            # what the harness does. `ledger.trailer-silent` is the one today.
+            drives = (f"{polarity}, output is SILENT"
+                      if probe.expect == ""
+                      else f"{polarity}, output carries `{probe.expect}`")
             lines.append(
                 f"| {number} | `{guard.file}` | `{probe.id}`, level "
-                f"{probe.level}{defect} | {polarity}, output carries "
-                f"`{probe.expect}` | {probe.profile} | "
+                f"{probe.level}{defect} | {drives} | {probe.profile} | "
                 f"`bin/ocelli.sh gate "
                 f"{'guards' if probe.profile == 'floor' else 'guards-deep'}` |")
     lines.append("")

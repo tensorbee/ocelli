@@ -8,12 +8,17 @@
 //! not clipped to the same extreme on both sides.
 //!
 //! **A wrong column is caught here and not elsewhere.** It does NOT move the
-//! bias: a letterbox column is the declared clear colour on both sides, so it
-//! is clipped to the same extreme, is not informative, and never enters the
-//! bias denominator. What it moves is `informativeFraction`, whose denominator
-//! is this rectangle, and the `letterbox-only` qualifier, which can only fire
-//! when the image region carries no difference at all. Neither shows up as a
-//! corpus failure, so
+//! bias: a letterbox column is the same clear colour on both sides, and that
+//! colour is an 8-bit extreme, so it is clipped to the same extreme, is not
+//! informative, and never enters the bias denominator. **Both halves of that
+//! are needed**, because `clipped_to_the_same_extreme` requires
+//! `reference == candidate && (reference == 0 || reference == u8::MAX)`. The
+//! colour is `base.background` in `tools/oracle/render-params.json`, today
+//! `[0, 0, 0]`, and `the_declared_background_is_an_eight_bit_extreme` below is
+//! what makes that dependency a checked one. What a wrong column moves is
+//! `informativeFraction`, whose denominator is this rectangle, and the
+//! `letterbox-only` qualifier, which can only fire when the image region
+//! carries no difference at all. Neither shows up as a corpus failure, so
 //! `an_edge_exactly_on_a_pixel_centre_belongs_to_the_image` below is the only
 //! thing standing between an off-by-one edge rule and silence. Today's corpus
 //! carries no extent landing on a pixel centre, which is exactly why that case
@@ -39,6 +44,7 @@ use std::error::Error;
 use ocelli_oracle::frame::Rect;
 use ocelli_oracle::geometry::{Camera, CanvasExtent, canvas_divergences, world_divergences};
 use ocelli_oracle::tolerance;
+use serde_json::Value;
 
 type Outcome = Result<(), Box<dyn Error>>;
 
@@ -98,10 +104,25 @@ fn the_worked_case_rectangle_reproduces_the_reference_black_fraction() -> Outcom
 /// A rule that floored the offset would have started at column 42 and a rule
 /// that ceiled the far edge would have ended at 469, and both would have
 /// counted a letterbox column as image. At 512 rows that is 512 pixels of
-/// background counted as picture: 0.00195 of the rectangle added to the
-/// denominator of `informativeFraction`, against a measured margin of 0.0007
-/// above the floor, and a column in which a fit error can no longer be
-/// reported as `letterbox-only`.
+/// background counted as picture, added to the denominator of
+/// `informativeFraction` alone, and a column in which a fit error can no
+/// longer be reported as `letterbox-only`.
+///
+/// **What that costs the fraction is `f * n / (P + n)`, not `n / P`**, and
+/// this comment compared the second against the margin until the sprint
+/// review's sixth pass. The informative COUNT does not change, so the fraction
+/// goes from `I / P` to `I / (P + n)`. On the worst view the identity run does
+/// not call weak, `synthetic/ct_series_nonuniform`, `I` is 21973 over
+/// `P = 218112`, which is 0.10074 against a floor of 0.10, so the margin is
+/// 0.00074. One column of `n = 512` moves it to 21973 / 218624 = 0.100506, a
+/// move of 0.000236, which does not cross. Four do, at
+/// 21973 / 220160 = 0.099805. Reproduce from `informativeFraction`,
+/// `imagePixels` and `informativePixels` in the `compare.json` that
+/// `./target/release/ocelli-compare identity` writes to
+/// `tools/oracle/compare-out/`.
+///
+/// The mechanism is unchanged and only the supporting arithmetic was wrong:
+/// one admitted column is still a guard nothing else watches.
 #[test]
 fn a_fractional_extent_takes_the_pixels_whose_centres_are_inside() -> Outcome {
     let extent = CanvasExtent {
@@ -318,4 +339,54 @@ fn a_quarter_canvas_pixel_is_more_than_half_a_source_pixel_when_decimated() {
          two decimated rows are not decimated to the same degree and only one \
          of them defeats the written bound arithmetically"
     );
+}
+
+/// **The letterbox argument's one unchecked dependency, made checked.**
+///
+/// The argument at the head of this file, in `CanvasExtent::rect`'s comment
+/// and in `docs/lld/comparator.md` is that a wrongly admitted letterbox column
+/// is uninformative. `clipped_to_the_same_extreme` in
+/// `tools/oracle/src/frame.rs` is
+/// `reference == candidate && (reference == 0 || reference == u8::MAX)`, so
+/// the step that carries it is not "the same colour on both sides", it is
+/// "and that colour is 0 or 255". At `base.background` of `[16, 16, 16]` every
+/// letterbox pixel becomes informative, the admitted column enters the bias
+/// denominator, and the argument inverts.
+///
+/// Nothing in the comparator cited that value until the sprint review's sixth
+/// pass. The file's digest is compared BETWEEN the two sides by the
+/// `the-render-params-digest-disagrees` mutation and never against an expected
+/// value, so a change both halves agreed on would be silent. `attribution.rs`
+/// already refuses rather than rely on an unchecked coupling with the same
+/// file, in `CompareError::NoBiasDenominator`, and this is that shape.
+///
+/// It asserts the RULE and not today's value: any 8-bit extreme keeps the
+/// argument, so `[255, 255, 255]` would pass and `[16, 16, 16]` would not.
+#[test]
+fn the_declared_background_is_an_eight_bit_extreme() -> Outcome {
+    let params: Value = serde_json::from_str(include_str!("../render-params.json"))?;
+    let background = params
+        .pointer("/base/background")
+        .and_then(Value::as_array)
+        .ok_or("tools/oracle/render-params.json declares no base.background")?;
+    assert_eq!(
+        background.len(),
+        3,
+        "the clear colour is an RGB triple: {background:?}"
+    );
+    for channel in background {
+        let value = channel
+            .as_u64()
+            .ok_or("a base.background channel is not a whole number")?;
+        assert!(
+            value == 0 || value == u64::from(u8::MAX),
+            "tools/oracle/render-params.json declares base.background \
+             {background:?}. A letterbox painted anything but an 8-bit extreme \
+             is INFORMATIVE under clipped_to_the_same_extreme, so a wrongly \
+             admitted column would enter the bias denominator and the \
+             argument in this file's header would be false rather than merely \
+             imprecise."
+        );
+    }
+    Ok(())
 }

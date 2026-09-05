@@ -510,6 +510,15 @@ fn detectability(
             .map_err(|error| error.to_string())?;
         let rect = image_rect_for(sidecar.kind, sidecar, original.width(), original.height())
             .map_err(|error| error.to_string())?;
+        // **`as_u64` is `None` for a JSON number written with a decimal
+        // point**, so a reference half that emitted `741.0`, or a DICOM `DS`
+        // window width of `741.5`, lands its view in `declined` rather than
+        // `measured` and the census reports one fewer view than the corpus
+        // has. Today every sidecar's `windowWidth` is integral, so nothing is
+        // lost, and the totals printed below make a change visible rather than
+        // silent. Widening this to `as_f64` is a rounding decision on a
+        // window width, which HLD 27.3 makes a human review item, so it is
+        // stated here rather than taken.
         let window_width = sidecar
             .json
             .pointer("/voi/windowWidth")

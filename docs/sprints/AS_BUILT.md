@@ -1287,10 +1287,12 @@ repair.** `.claude/WORKFLOW.md` gives `AS_BUILT.md` a lifetime of Append-only,
 and S01 honoured that: its review corrections went into their own headed
 entries, so the file still shows what was claimed at completion beside what was
 later found false. S03's review passes instead rewrote story entries in
-place, which is why five wrong numbers survived three passes. The fifth pass
-counted them and there are six, not the four this paragraph first named:
-`e962144` alone rewrote the `**Tests added.**` field of F-005 and of F-X007
-beside the four. `git log -p 36adc98..HEAD -- docs/sprints/AS_BUILT.md` is the
+place, which is why five wrong numbers survived three passes. **Six entries
+were rewritten**, F-004, F-005, F-006, F-011, F-X007 and F-X009, and not the
+four this paragraph first named: `e962144` alone rewrote the `**Tests added.**`
+field of F-005 and of F-X007 beside the other four. The sixth pass had to say
+so, because deleting the list left "them" pointing at the five numbers rather
+than at the entries. `git log -p 36adc98..HEAD -- docs/sprints/AS_BUILT.md` is the
 record and this sentence is not. A sentence edited in place carries no evidence that it used to say
 something else, so nothing invites the next reader to re-measure it. The
 corrections below are recorded here as well as applied above.
@@ -1347,8 +1349,11 @@ re-measured against the command that prints it. What was wrong:
 | F-011 and F-X007 needed no CHANGELOG entry | Neither had one and neither carried the `**CHANGELOG.**` field that records a deliberate omission, so step 4 was silently skipped on two of seven stories. Both now have a bullet and both entries now carry the field |
 
 `BACKLOG.md`'s generated summary block was removed rather than corrected. It
-named a generator that has never existed, was asserted by nothing, and every
-headline number in it was wrong. Each figure it claimed now has a command
+named a generator that has never existed, was asserted by nothing, and carried
+four wrong numbers in its five-figure Total row. Of its nineteen milestone rows
+only M1's was wrong, at 16 stories and 40 weeks. The sixth pass measured that,
+because the fifth pass narrowed this claim in `BACKLOG.md` and left the copy
+here saying every headline number. Each figure it claimed now has a command
 beside it in that file.
 
 **Notes for future sessions.**

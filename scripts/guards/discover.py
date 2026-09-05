@@ -12,12 +12,26 @@ The shapes a refusal takes in this repository, and nothing else:
 | Shape | Language | Looks like |
 |-------|----------|------------|
 | `problems.append(` | Python | a collected problem, printed under a `FAIL:` header |
+| `problems += [` | Python | several collected at once, or one written as a list |
+| `problems.extend(` | Python | the same, spelled as a method call |
+| `return ["..."]` | Python | a check that RETURNS its problems rather than collecting into a caller's list |
 | `print("FAIL...` | Python | a refusal that prints and returns 1 without collecting |
 | `sys.exit("...")` | Python | an immediate refusal carrying a message |
 | `raise SystemExit(` or `raise SomethingError(` | Python | the same, in a module that is imported rather than run |
 | `throw new Error(` | JavaScript | the oracle's and the harness's refusals |
 | `echo "FAIL...` | shell | the two `ci/` guards and the hooks |
 | `exit 1` | shell | a shell refusal with no message of its own |
+
+The middle three arrived in the S03 review's sixth pass and they were not
+hypothetical. `docs/lld/guards.md` claimed `entry_sites` meant "a refusal added
+to an already-claimed file moves a number", and that was false for any refusal
+built as a list: adding `problems += [f"..."]` to `scripts/lint_policy_check.py`
+left the census headline byte-identical and exit 0. Eight refusals in scanned
+guard files were invisible, `scripts/pin_and_size_check.py`'s wasm SIZE CEILING
+among them, which is gate A4's own number. Deleting that ceiling left the
+headline unmoved and only a probe caught it. The declared limit below said the
+scan misses a returned refusal "without a message of its own", and every one of
+these carries a message, so the declaration did not cover them.
 
 A site's IDENTITY is its file plus a normalised fragment of the message it
 produces, and deliberately not `file:line`. Moving a refusal within a file must
@@ -34,10 +48,14 @@ reported rather than assumed to be zero.
 
 ## What it does not find
 
-A refusal expressed as a return value that a caller turns into an exit status
-without a message of its own, and a refusal inside `crates/`. The second is the
-scope boundary decision 7 of `.claude/plans/F-X009-design.md` records: a
-runtime refusal inside a crate is that crate's story's test, not this one's.
+A refusal expressed as a bare return value that a caller turns into an exit
+status, `return False` and `return 1` above all, because those carry no words
+and there is nothing for a catalogue entry to claim. A returned list of MESSAGES
+is found, which is the correction the sixth pass made. Also not found: a message
+built into a local variable and appended in a later statement, and a refusal
+inside `crates/`. The last is the scope boundary decision 7 of
+`.claude/plans/F-X009-design.md` records: a runtime refusal inside a crate is
+that crate's story's test, not this one's.
 
 Nor does it find one in prose. A Python docstring or comment that quotes a
 refusal shape, such as the table above, is masked before the scan runs, because
@@ -80,6 +98,16 @@ STRING = re.compile(r'"(?:[^"\\]|\\.)*"' r"|'(?:[^'\\]|\\.)*'"
 
 SHAPES: dict[str, re.Pattern[str]] = {
     "py-problem": re.compile(r"problems\.append\(", re.M),
+    # The three list shapes. A refusal does not stop being one because it was
+    # written with `+=` instead of `.append`, and eight in scanned guard files
+    # were invisible until the S03 review's sixth pass, including the wasm size
+    # ceiling of HLD Appendix A gate A4. `return [f"..."]` is the shape a check
+    # that hands its problems back to a caller uses, which is how
+    # `scripts/pin_and_size_check.py` and `scripts/bench_check.py` are written
+    # throughout.
+    "py-problem-list": re.compile(r"problems\s*\+=\s*\[", re.M),
+    "py-problem-extend": re.compile(r"problems\.extend\(", re.M),
+    "py-return-list": re.compile(r"return\s*\[\s*f?[\"']", re.M),
     # `scripts/verify_ledger.py` refuses by printing and returning 1 rather
     # than by collecting, so every one of its eight refusal sites is invisible
     # to the `problems.append` shape: it has none. Adding this shape found
@@ -140,8 +168,15 @@ def _normalise(text: str) -> str:
     return joined.strip()
 
 
-def _balanced(text: str, open_at: int) -> str:
+# Which bracket opens each shape's message. A call's argument list is in
+# parentheses and a list refusal's is in square brackets, and reading the wrong
+# one takes the message from whatever punctuation came next.
+SHAPE_BRACKET = {"py-problem-list": "[", "py-return-list": "["}
+
+
+def _balanced(text: str, open_at: int, opening: str = "(") -> str:
     """The argument list of a call whose opening bracket is at `open_at`."""
+    closing = ")" if opening == "(" else "]"
     depth = 0
     index = open_at
     while index < len(text):
@@ -150,9 +185,9 @@ def _balanced(text: str, open_at: int) -> str:
             match = STRING.match(text, index)
             index = match.end() if match else index + 1
             continue
-        if char == "(":
+        if char == opening:
             depth += 1
-        elif char == ")":
+        elif char == closing:
             depth -= 1
             if depth == 0:
                 return text[open_at + 1:index]
@@ -223,8 +258,9 @@ def _sites_in(rel: str, text: str) -> list[Site]:
                     # message was printed above it.
                     message = f"{rel}: bare shell refusal"
             else:
-                bracket = text.index("(", match.start())
-                message = _normalise(_balanced(text, bracket))
+                opening = SHAPE_BRACKET.get(shape, "(")
+                bracket = text.index(opening, match.start())
+                message = _normalise(_balanced(text, bracket, opening))
             if not message:
                 message = f"{rel}:{line}"
             found.append(Site(file=rel, shape=shape, message=message,

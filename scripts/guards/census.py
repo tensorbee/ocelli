@@ -35,8 +35,19 @@ is the loss check a exists to notice and it is equally invisible, because the
 entry goes on claiming the other sites in its file. The catalogue was the
 alternative home for these numbers, one per entry, and it was rejected: the
 budget already carries every other recorded value, `--record` already writes
-them in one place, and fifty numbers spread through the catalogue would be
-fifty things to hand-edit rather than one command to re-run.
+them in one place, and one number per catch-all entry spread through the
+catalogue would be that many things to hand-edit rather than one command to
+re-run. `python3 scripts/guard_census.py --record` prints how many there are,
+and a count written here would go stale the first time an entry was added.
+
+**What that number can and cannot see** is `scripts/guards/discover.py`'s shape
+table, and the S03 review's sixth pass found the claim ahead of the mechanism.
+A refusal built as a list, `problems += [...]`, `problems.extend(...)` or
+`return ["..."]`, was invisible: eight in scanned guard files, including the
+wasm size ceiling of HLD Appendix A gate A4. Deleting that ceiling left the
+headline at 544 and exit 0, and only a probe caught it. Those shapes are
+scanned now. A refusal whose message is built into a local variable first is
+still invisible, and that limit is declared in `discover.py` rather than here.
 
 **b. Gate and hook coverage, in both directions.** Every name in
 `bin/ocelli.sh`'s `GATES` array has an entry or an explicit `delegated`
@@ -132,7 +143,9 @@ BUDGET_NOTE = (
     "counts that catch one of those being removed rather than changed, "
     "`entry_sites` is the per-entry refusal count for the catalogue entries "
     "claiming their file with `\"*\"`, so a refusal added to an already "
-    "claimed file moves a number, `oracle_faults` is the fault-count ratchet "
+    "claimed file moves a number when it takes one of the shapes "
+    "scripts/guards/discover.py scans, `oracle_faults` is the fault-count "
+    "ratchet "
     "and `uncovered` is the uncovered-refusal ratchet, all written by "
     "scripts/guard_census.py --record.")
 

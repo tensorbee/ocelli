@@ -107,8 +107,11 @@ proved nothing, and six of 26 refusals turned out to be watched by nothing.
   against OpenJPH. A2 is the JPEG-LS architecture decision.
 - **F-X007** reference renders volumes and MPR, so the ten non-uniform spacing
   rows exercise the volume builder's refusal path.
-- **F-X009** gives every guard a standing test that fails when the guard stops
-  guarding.
+- **F-X009** gives the repository's refusals a standing harness that fails
+  when a guard stops guarding. **Not every guard**, which is what this line
+  said until the S03 review's sixth pass: `python3 scripts/guard_census.py`
+  prints the bucket watched by nothing and it is not empty, and two guards
+  are declared defective rather than fixed.
 
 ## Dependency order
 

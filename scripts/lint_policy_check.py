@@ -229,8 +229,57 @@ REASON = re.compile(
 # level and the inline table. The inline form was invisible, and
 # `pedantic = { level = "allow", priority = 1 }` is measured to take cargo
 # clippy from 101 to 0 on a crate denying cast_possible_truncation.
+#
+# It matches the row BODY and not the whole line, because the anchor was `\s*$`
+# and a TOML trailing comment is not whitespace. `_row_body` below removes the
+# comment first. THE CLASS OF INPUT THAT IS NOW CLOSED: any row of either TOML
+# form carrying a trailing `#` comment, at any level, in either
+# `[workspace.lints.clippy]` or `[workspace.lints.rust]`. On a REQUIRED row the
+# old anchor failed safe, reporting the row missing. On a GROUP row it failed
+# OPEN, which is the whole table switched off in one line that this check read
+# as absent. Measured under the pinned 1.97.1 toolchain on a minimal crate
+# carrying `cast_possible_truncation = "deny"` and one `x as i32`: cargo clippy
+# exits 101, and with
+# `pedantic = { level = "allow", priority = 1 } # keeps noise down` appended it
+# exits 0. What is NOT closed is a row spread over two lines: TOML 1.0 puts an
+# inline table on one line, and a `pedantic = { level = "allow",` / `priority =
+# 1 }` pair is invisible to this regex, MEASURED at exit 0. The declared
+# constant `Cargo.toml:workspace.lints` is the backstop for that and it was
+# measured too: the same pair moves the digest from adf2cb2237be28da to
+# e3d02e83d8b52dab and `guard_census.py` refuses. That is the division of
+# labour between the two mechanisms and it is why both had to be fixed. What
+# `table()` adds on its own is that an inline form it CAN see and whose level
+# it cannot read yields the empty string, which is weaker than every level in
+# `STRENGTH` and is refused rather than skipped.
 LINT_ROW = re.compile(
     r'^\s*([A-Za-z_][\w:-]*)\s*=\s*(?:"([a-z]+)"|\{([^}]*)\})\s*$')
+
+# A TOML trailing comment. `#` opens one only outside a string, so the scan
+# tracks the quote it is inside rather than splitting on the first `#`: a level
+# is never a string carrying one today, and `reason = "see #123"` in an inline
+# table is legal TOML and would otherwise truncate the row into something this
+# parser reads as unparseable.
+def _row_body(line: str) -> str:
+    """`line` with any trailing `#` comment removed, quotes respected."""
+    quote = ""
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if quote:
+            # A backslash escapes the next character inside a TOML basic
+            # string, so the pair is stepped over together. Skipping only the
+            # backslash would leave an escaped quote closing the string.
+            if char == "\\" and quote == '"':
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char == "#":
+            return line[:index]
+        index += 1
+    return line
 
 # A stricter level satisfies a weaker requirement and not the other way round.
 STRENGTH = {"allow": 0, "warn": 1, "deny": 2, "forbid": 3}
@@ -263,6 +312,17 @@ def workspace_members(text: str) -> tuple[list[Path], list[str]]:
     rather than skipped. cargo would refuse that workspace too, and a member
     this function cannot find is a member whose sources are not scanned, which
     the walk would otherwise report as a smaller number and a pass.
+
+    `exclude` applies to the GLOB patterns only, because that is what cargo
+    does. Measured under the pinned 1.97.1 toolchain on this workspace, with
+    `members = ["crates/*", "tools/oracle"]` and `exclude = ["tools/oracle"]`
+    added: `cargo metadata --no-deps` reports 14 packages with `ocelli-oracle`
+    among them, and clippy compiles it. Applying `exclude` to the explicit
+    entry too dropped it here and printed "13 workspace member(s) ... 33 .rs
+    file(s)", which is the same pair of numbers the header records as the fifth
+    pass's defect, reached through a different key. An explicitly named member
+    is named, and a list that removes what another list names is a decision
+    cargo does not make on this shape.
     """
     patterns, excluded = member_patterns(text)
     problems: list[str] = []
@@ -279,9 +339,14 @@ def workspace_members(text: str) -> tuple[list[Path], list[str]]:
         if "*" in pattern:
             hits = sorted(p for p in ROOT.glob(pattern)
                           if (p / "Cargo.toml").is_file())
+            # Subtracted AFTER the empty test below, so a glob whose every hit
+            # is excluded is reported as an exclusion rather than as a pattern
+            # that resolves to nothing, which is a different repair.
+            kept = [p for p in hits if p.resolve() not in skip]
         else:
             path = ROOT / pattern
             hits = [path] if (path / "Cargo.toml").is_file() else []
+            kept = hits
         if not hits:
             problems.append(
                 f"the workspace member `{pattern}` resolves to no directory "
@@ -290,7 +355,7 @@ def workspace_members(text: str) -> tuple[list[Path], list[str]]:
                 f"its sources not at all, and report the smaller number as a "
                 f"pass.")
             continue
-        members.extend(p for p in hits if p.resolve() not in skip)
+        members.extend(kept)
     if not members and not problems:
         problems.append(
             f"Cargo.toml's [workspace] declares {len(patterns)} member "
@@ -379,6 +444,15 @@ def table(text: str, name: str) -> dict[str, str]:
     at exit 0. A row whose inline table carries no readable `level` yields the
     empty string, which is weaker than every level in `STRENGTH` and is
     therefore refused rather than skipped.
+
+    A trailing `#` comment is removed before the row is matched. `LINT_ROW`
+    anchors on `\\s*$` and a comment is not whitespace, so the sixth pass
+    measured `pedantic = { level = "allow", priority = 1 } # keeps noise down`
+    read as no row at all: this check printed "no group row weaker than deny"
+    and exited 0 while cargo clippy went from 101 to 0.
+
+    The block runs to the next `[` header and not to the first blank line. A
+    blank line does not end a TOML table, so a row after one is still in it.
     """
     block = re.search(rf"^\[{re.escape(name)}\]$(.*?)(?=^\[|\Z)", text,
                       re.M | re.S)
@@ -386,7 +460,7 @@ def table(text: str, name: str) -> dict[str, str]:
         return {}
     found = {}
     for line in block.group(1).splitlines():
-        match = LINT_ROW.match(line)
+        match = LINT_ROW.match(_row_body(line))
         if match is None:
             continue
         if match.group(2) is not None:

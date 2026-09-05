@@ -343,6 +343,17 @@ def _delete_ci_step(box: Sandbox, leave_comment: bool) -> None:
     box.substitute(".github/workflows/ci.yml", line, replacement)
 
 
+def _put_gate_step_behind(box: Sandbox, gate: str, condition: str) -> None:
+    """Put one named gate's step behind an `if:`, leaving the step in place."""
+    workflow = box.read(".github/workflows/ci.yml")
+    line = next(l for l in workflow.splitlines()
+                if f"bin/ocelli.sh gate {gate}" in l)
+    indent = " " * (len(line) - len(line.lstrip()))
+    body = line.lstrip().removeprefix("- ")
+    box.substitute(".github/workflows/ci.yml", line,
+                   f"{indent}- if: {condition}\n{indent}  {body}")
+
+
 def _gate_step_behind(box: Sandbox, condition: str) -> None:
     """Put a floor gate's step behind an `if:`, leaving the step in place.
 
@@ -351,14 +362,7 @@ def _gate_step_behind(box: Sandbox, condition: str) -> None:
     for a condition that excludes the pull request that is the same outcome as
     deleting it.
     """
-    gate = _floor_gate_with_own_step(box)
-    workflow = box.read(".github/workflows/ci.yml")
-    line = next(l for l in workflow.splitlines()
-                if f"bin/ocelli.sh gate {gate}" in l)
-    indent = " " * (len(line) - len(line.lstrip()))
-    body = line.lstrip().removeprefix("- ")
-    box.substitute(".github/workflows/ci.yml", line,
-                   f"{indent}- if: {condition}\n{indent}  {body}")
+    _put_gate_step_behind(box, _floor_gate_with_own_step(box), condition)
 
 
 def _gate_step_split_across_events(box: Sandbox) -> None:
@@ -1336,6 +1340,93 @@ def _group_row_in_the_workspace_table(box: Sandbox) -> None:
                    '\npedantic = { level = "allow", priority = 1 }')
 
 
+def _last_lint_table_row(box: Sandbox) -> str:
+    """The last `name = value` line of `[workspace.lints.clippy]`.
+
+    Read from the manifest rather than named, so the two probes below plant
+    their row at the END of the table wherever the table ends today. A blank
+    line does not close a TOML table, which is the half of the sixth pass's
+    bypass the declared-constant capture missed.
+    """
+    region = re.search(r"^\[workspace\.lints\.clippy\]\n((?:(?!^\[)[\s\S])*)",
+                       box.read("Cargo.toml"), re.M)
+    if region is None:
+        raise AssertionError(
+            "Cargo.toml carries no [workspace.lints.clippy] table, so there "
+            "is no row for this probe to plant one after.")
+    rows = re.findall(r"^[\w-]+\s*=[^\n]*$", region.group(1), re.M)
+    if not rows:
+        raise AssertionError(
+            "[workspace.lints.clippy] carries no `name = value` row, so this "
+            "probe cannot find the end of the table.")
+    return rows[-1]
+
+
+def _group_row_after_a_blank_line_with_a_trailing_comment(
+        box: Sandbox) -> None:
+    """The fifth route past the lint policy, and it took the whole gate.
+
+    `LINT_ROW` anchored on `\\s*$` and a TOML trailing comment is not
+    whitespace, so the row was invisible to the guard. Put it after a blank
+    line and it was invisible to the declared-constant capture too, which
+    stopped at the first `\\n\\n`. MEASURED under the pinned 1.97.1 toolchain
+    on a minimal crate carrying `cast_possible_truncation = "deny"` and one
+    `x as i32`: cargo clippy exits 101, and with
+    `pedantic = { level = "allow", priority = 1 } # keeps noise down` appended
+    it exits 0. In this repository the same row after a blank line left
+    `lint_policy_check.py` at exit 0 printing "no group row weaker than deny",
+    `guard_census.py` at exit 0 and `bin/ocelli.sh gate guards` ALL GREEN,
+    with four of HLD 27.1's five lints off.
+    """
+    last = _last_lint_table_row(box)
+    box.substitute(
+        "Cargo.toml", last,
+        last + '\n\npedantic = { level = "allow", priority = 1 }'
+               ' # keeps noise down')
+
+
+def _required_row_with_a_trailing_comment(box: Sandbox) -> None:
+    """A trailing comment on a REQUIRED row, which weakens nothing.
+
+    The accept direction of the same regex, and the direction that says which
+    fix was made. Stripping the comment before matching is not the same as
+    loosening the anchor to `.*$`, and only this probe can tell the two apart:
+    under the old anchor the row read as ABSENT and the guard refused, naming
+    a lint that is present at exactly the level 27.1 asks for. A repair that
+    made the guard tolerate the comment by ignoring the row body would pass
+    the group probe above and fail here.
+    """
+    row = re.search(r'^cast_possible_truncation = "[a-z]+"$',
+                    box.read("Cargo.toml"), re.M)
+    if row is None:
+        raise AssertionError(
+            "Cargo.toml carries no `cast_possible_truncation` row in the "
+            "quoted form, so this probe cannot comment one.")
+    box.substitute("Cargo.toml", row.group(0),
+                   row.group(0) + "  # HLD 27.1, and this comment is not a "
+                                  "weakening")
+
+
+def _exclude_a_named_workspace_member(box: Sandbox) -> None:
+    """`exclude` naming an explicitly listed member, with a group allow in it.
+
+    cargo does not apply `exclude` to a member `members` names outright.
+    MEASURED on this workspace under the pinned 1.97.1 toolchain: with
+    `members = ["crates/*", "tools/oracle"]` and `exclude = ["tools/oracle"]`,
+    `cargo metadata --no-deps` reports 14 packages with the oracle among them
+    and clippy compiles it. The guard dropped it and printed "13 workspace
+    member(s) ... 33 .rs file(s)", which is the pair of numbers its own header
+    records as the fifth pass's defect, reached through a different key. So
+    the group allow planted here was in a member the walk no longer visited.
+    """
+    member = _a_member_outside_crates(box)
+    patterns = _workspace_members(box)
+    box.substitute("Cargo.toml", f"members = {json.dumps(patterns)}",
+                   f"members = {json.dumps(patterns)}\n"
+                   f"exclude = {json.dumps([member])}")
+    _member_outside_crates_group_allow(box)
+
+
 def _ci_arm_commands(box: Sandbox, gate: str) -> list[str]:
     """A gate's arm commands, read through the guard's own runner parser.
 
@@ -1500,6 +1591,101 @@ def _a_floor_gate_with_no_arm_command(box: Sandbox) -> str:
         "cannot build the state it is about.")
 
 
+def _an_automatic_event(box: Sandbox) -> str:
+    """One event the workflow declares that a change triggers.
+
+    Read through the guard's own reader, because the floor's claim is about the
+    events `ci.yml` declares and this catalogue may not hold a second copy of
+    that list. Two or more are needed: a condition naming the only automatic
+    event blocks nothing, so the state this feeds could not be built.
+    """
+    import ci_floor_check
+    events = sorted(ci_floor_check.workflow_events(
+        box.read(".github/workflows/ci.yml")) - ci_floor_check.MANUAL_EVENTS)
+    if len(events) < 2:
+        raise AssertionError(
+            f"the workflow declares {len(events)} automatic event(s), so a "
+            f"condition naming one of them excludes no other and this probe "
+            f"cannot build the state it is about.")
+    return events[0]
+
+
+def _a_no_arm_command_gate_behind_a_condition(box: Sandbox) -> None:
+    """Keep a no-arm-command gate's naming step and gate it to one event.
+
+    This is what watches `covers`'s `bool(arm)` clause, and until the S03
+    review's sixth pass nothing did. `ci-floor.gate-with-no-arm-command` DELETES
+    the naming step, so `steps_running` comes back empty and the refusal arrives
+    from the final "nothing in ci.yml runs it" branch without `covers` ever
+    being consulted: dropping `bool(arm) and` left that probe green.
+
+    Here the step stays, so `steps_running` is not empty and the per-event
+    question is the one that decides. On the event the condition excludes the
+    gate is not named, its arm yields no extractable command, and `bool(arm)`
+    is the only thing between that and `all([])` being true. MEASURED: with the
+    clause the check refuses at "is behind a condition that does not run it on",
+    and with `bool(arm) and` dropped that sentence is gone.
+
+    `ci-floor.event-gated` happens to reach the same clause today, because
+    `_floor_gate_with_own_step` returns the first gate `ci.yml` names and that
+    gate's arm is empty. That is an accident of ordering rather than a
+    selection, and a probe whose discrimination depends on one is a probe that
+    stops discriminating the day a step moves. This one selects for the
+    property by name.
+    """
+    _put_gate_step_behind(box, _a_floor_gate_with_no_arm_command(box),
+                          f"github.event_name == '{_an_automatic_event(box)}'")
+
+
+def _a_gate_with_an_unextractable_arm_command(box: Sandbox) -> str:
+    """A floor gate CI names whose arm runs something the extractor cannot see.
+
+    And that also has commands the extractor CAN see, because the bypass this
+    feeds is expanding a gate-name step into those, which is an edit that reads
+    as making CI more explicit. `bench` is the one today: two `python3`
+    commands the extractor reads and one `node --test` line carrying five
+    suites that it does not.
+    """
+    import ci_floor_check
+    runner = box.read("bin/ocelli.sh")
+    unseen = ci_floor_check.unseen_commands(runner)
+    visible = ci_floor_check.gate_commands(runner)
+    excluded = _not_in_floor(box)
+    workflow = box.read(".github/workflows/ci.yml")
+    for gate in re.findall(r'^\s*"([a-z-]+)\|no\|', runner, re.M):
+        if gate in excluded or gate not in unseen or not visible.get(gate):
+            continue
+        if f"bin/ocelli.sh gate {gate}" in workflow:
+            return gate
+    raise AssertionError(
+        "no floor gate CI names by gate has both an extractable arm command "
+        "and one the extractor cannot see, so the state this probe is about "
+        "cannot be built.")
+
+
+def _expand_a_gate_step_into_its_visible_commands(box: Sandbox) -> None:
+    """Replace a gate-name step with the arm commands the extractor can read.
+
+    The measured bypass, in full. `COMMAND_PREFIXES` recognises `python3 `,
+    `npm run `, `cargo ` and `ci/`, so the `node --test` line in the `bench`
+    arm is invisible. Replacing `- run: bin/ocelli.sh gate bench` with its two
+    `python3` commands left `ci_floor_check.py` at exit 0 printing "every
+    command in each gate's arm", and five node test files left CI in a two-line
+    edit that reads as expanding the step. The docstring's declaration that
+    nothing was lost, because these gates "are each invoked by NAME in ci.yml",
+    was enforced by nothing.
+    """
+    gate = _a_gate_with_an_unextractable_arm_command(box)
+    commands = _ci_arm_commands(box, gate)
+    workflow = box.read(".github/workflows/ci.yml")
+    line = next(l for l in workflow.splitlines()
+                if f"bin/ocelli.sh gate {gate}" in l)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(".github/workflows/ci.yml", line,
+                   "\n".join(f"{indent}- run: {command}"
+                             for command in commands))
+
+
 def _a_command_a_runner_comment_names(box: Sandbox) -> str:
     """A command string that appears inside a `run_gate` COMMENT.
 
@@ -1623,6 +1809,41 @@ def _empty_the_run_gate_region(box: Sandbox) -> None:
     """
     box.substitute("bin/ocelli.sh", "run_gate() {",
                    "run_gate() {\nskip() {\n")
+
+
+def _nested_case_in_a_gate_arm(box: Sandbox) -> None:
+    """Add a nested `case` after a gate arm's command, inside the same arm.
+
+    `ARM` ends an arm at its `;;` and a nested `case` ends its own branches the
+    same way, so the arm parser stops at the FIRST inner `;;` and keeps only
+    what came before it. Here that is a real command CI runs, so every command
+    the parser can see is accounted for and the rest of the arm is dropped
+    without a word. The shape is legal shell and does nothing, which is the
+    point: the loss is in the parser and not in the runner.
+
+    The gate is chosen for the property rather than named: a single-line arm
+    whose extractable command `ci.yml` runs, so that WITHOUT the refusal this
+    exits 0 rather than refusing for an unrelated reason.
+    """
+    runner = box.read("bin/ocelli.sh")
+    workflow = box.read(".github/workflows/ci.yml")
+    body = runner[runner.index("run_gate() {"):runner.index("skip() {")]
+    for line in body.splitlines():
+        match = re.match(r"^([ \t]*)([a-z-]+)\)(.*);;\s*$", line)
+        if match is None or "case" in match.group(3):
+            continue
+        commands = _ci_arm_commands(box, match.group(2))
+        if not commands or not all(c in workflow for c in commands):
+            continue
+        box.substitute(
+            "bin/ocelli.sh", line,
+            f"{match.group(1)}{match.group(2)}){match.group(3).rstrip()}\n"
+            f"{match.group(1)}             case \"$OSTYPE\" in *) : ;; esac ;;")
+        return
+    raise AssertionError(
+        "no gate has a single-line arm whose every extractable command "
+        "appears in ci.yml, so this probe cannot build an arm whose tail is "
+        "dropped silently and would refuse for an unrelated reason.")
 
 
 def _reorder_the_runner_exclusion_list(box: Sandbox) -> None:
@@ -2022,6 +2243,42 @@ GUARDS: tuple[Guard, ...] = (
                        "reordering that changes nothing, and this repository "
                        "has already paid once for a positional read of a "
                        "Cargo entry in probe `pins.table-form`."),
+            Probe("ci-floor.no-arm-command-gate-behind-a-condition",
+                  _a_no_arm_command_gate_behind_a_condition,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "is behind a condition that does not run it on",
+                  note="What watches `covers`'s `bool(arm)` clause, and "
+                       "nothing did until the sixth pass. This entry claimed "
+                       "`ci-floor.gate-with-no-arm-command` was the watch and "
+                       "it is not: that probe DELETES the naming step, so "
+                       "`steps_running` is empty and the refusal comes from "
+                       "the final \"nothing in ci.yml runs it\" branch without "
+                       "`covers` being consulted at all. Dropping "
+                       "`bool(arm) and` left it green. Here the step stays and "
+                       "is gated to one event, so the per-event question is "
+                       "the one that decides. MEASURED: with the clause the "
+                       "check refuses at this fragment, and with it dropped "
+                       "the fragment is gone. `ci-floor.event-gated` reaches "
+                       "the same clause today only because the first gate "
+                       "ci.yml names happens to have an empty arm, which is "
+                       "an accident of ordering rather than a selection."),
+            Probe("ci-floor.gate-with-an-unextractable-arm-command",
+                  _expand_a_gate_step_into_its_visible_commands,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "so it cannot demand those commands step by step",
+                  note="The declared prefix limit was a live hole and the OK "
+                       "line asserted the opposite. `COMMAND_PREFIXES` cannot "
+                       "see `node`, so the `bench` arm's three `node --test` "
+                       "suites were not demanded of CI, and the docstring's "
+                       "claim that nothing was lost because these gates are "
+                       "\"each invoked by NAME in ci.yml\" was enforced by "
+                       "nothing. MEASURED: replacing "
+                       "`- run: bin/ocelli.sh gate bench` with its two "
+                       "extractable commands left the check at exit 0 printing "
+                       "\"every command in each gate's arm\", and five node "
+                       "test files left CI in a two-line edit that reads as "
+                       "expanding the step. Same shape as the `arms['panic']` "
+                       "bug the fifth pass fixed, one level out."),
             Probe("ci-floor.gate-with-no-arm-command",
                   _swap_a_named_gate_step_for_an_unrelated_command,
                   script("python3", "scripts/ci_floor_check.py"),
@@ -2038,7 +2295,14 @@ GUARDS: tuple[Guard, ...] = (
                        "deletion returned the check to exit 0 with `all 25 "
                        "floor gate(s) are invoked by CI`. `panic` is HLD "
                        "section 23's wasm panic-hook proof, the one property "
-                       "no native test can observe."),
+                       "no native test can observe. What this probe watches is "
+                       "that arm-ending rule and the final \"nothing runs it\" "
+                       "branch, and NOT `covers`'s `bool(arm)` clause: the "
+                       "builder deletes the naming step, so `steps_running` "
+                       "comes back empty and `covers` is never consulted. "
+                       "`ci-floor.no-arm-command-gate-behind-a-condition` "
+                       "above is what watches that clause. This entry claimed "
+                       "otherwise until the sixth pass measured it."),
             Probe("ci-floor.narrowed-arm-command",
                   _replace_a_gate_step_with_a_narrowed_arm,
                   script("python3", "scripts/ci_floor_check.py"),
@@ -2070,6 +2334,23 @@ GUARDS: tuple[Guard, ...] = (
                        "find the region gives every gate an empty arm, and an "
                        "empty arm is exactly what `covers` treats as "
                        "gate-name-only."),
+            Probe("ci-floor.nested-case-in-an-arm",
+                  _nested_case_in_a_gate_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "holds a nested `case`",
+                  note="`ARM` ends an arm at its `;;` and a nested case ends "
+                       "its own branches the same way, so the parser kept only "
+                       "what came before the first inner `;;`. The S03 review's "
+                       "sixth pass found this degrading safe by accident: the "
+                       "one shape tried left the arm EMPTY and `covers` "
+                       "refuses an empty arm. With a real command before the "
+                       "nested case the parser keeps that command, every "
+                       "extractable command is then accounted for, and the "
+                       "rest of the arm is dropped at exit 0. This probe "
+                       "builds that shape. The parser refuses it now rather "
+                       "than truncating, because balancing `case`/`esac` here "
+                       "would be a second shell parser in a file that has one "
+                       "already."),
             Probe("ci-floor.no-arms-at-all",
                   _empty_the_run_gate_region,
                   script("python3", "scripts/ci_floor_check.py"),
@@ -2109,15 +2390,26 @@ GUARDS: tuple[Guard, ...] = (
               "claim. The third limit is the arm-command extractor's own "
               "vocabulary. It recognises `python3 `, `npm run `, `cargo ` and "
               "`ci/`, so `node`, `wasm-pack` and `\"$0\"` are invisible and "
-              "the three `node --test` suites in `bench`, the wasm-pack build "
-              "in `panic` and the `\"$0\"` self-calls in `wasm` and `native` "
-              "are not demanded of CI by a check whose message says every "
-              "command in the arm is. Nothing is lost today, because each of "
-              "those four gates is invoked by NAME in ci.yml and a step "
-              "naming a gate runs its arm entire by definition. Widening the "
-              "vocabulary would cost the other claim: `panic` would stop "
-              "being a gate with no extractable command, and probe "
-              "`ci-floor.gate-with-no-arm-command` is what watches that one.",
+              "the check cannot demand those commands of CI step by step. "
+              "That was declared as a limit and taken on trust until the S03 "
+              "review's sixth pass measured it open: replacing "
+              "`- run: bin/ocelli.sh gate bench` with its two extractable "
+              "commands left the check at exit 0 and five node test files out "
+              "of CI. The vocabulary is unchanged and the CONSEQUENCE is now "
+              "a rule: `unseen_commands` reports what the extractor cannot "
+              "see and a gate holding one of those is refused unless a step "
+              "invokes it by name, per event. So the remaining limit is only "
+              "that the refusal names the gate rather than the command, and "
+              "the `all([])` claim still holds, because `panic`, `native` and "
+              "`oracle` still yield no extractable command and "
+              "`ci-floor.no-arm-command-gate-behind-a-condition` is what "
+              "watches `bool(arm)`. The fourth limit is what "
+              "`unseen_commands` itself cannot judge: a statement whose first "
+              "word is in `SHELL_NOISE` is treated as not being the work, so "
+              "an arm that did its work inside an `if` or a `for` would be "
+              "read as having none. Nothing does today, and `ARM` refuses a "
+              "nested `case` outright rather than truncating the arm at its "
+              "inner `;;`.",
     ),
 
     # -- D-04's chain, the part CI reads ------------------------------------
@@ -2971,6 +3263,55 @@ GUARDS: tuple[Guard, ...] = (
                        "`cast_possible_truncation = \"deny\"` takes cargo "
                        "clippy from 101 to 0, because the higher priority is "
                        "applied last."),
+            Probe("lint-policy.group-row-with-a-trailing-comment",
+                  _group_row_after_a_blank_line_with_a_trailing_comment,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "carries the lint GROUP",
+                  note="The fifth consecutive route past this guard, and the "
+                       "first that took the whole `guards` gate with it. "
+                       "`LINT_ROW` anchored on `\\s*$` and a TOML trailing "
+                       "comment is not whitespace. On a REQUIRED row that "
+                       "failed safe, reporting the row missing. On the group "
+                       "row the fifth pass added parsing for it failed OPEN. "
+                       "Put after a blank line the declared-constant capture "
+                       "missed it too, because a non-greedy `\\n\\n` stopped "
+                       "inside the table. MEASURED with cargo on a minimal "
+                       "crate under 1.97.1: baseline exit 101, and with "
+                       "`pedantic = { level = \"allow\", priority = 1 } "
+                       "# keeps noise down` appended, exit 0. In this "
+                       "repository the same row left this check at 0, the "
+                       "census at 0 and `gate guards` ALL GREEN."),
+            Probe("lint-policy.commented-required-row-is-permitted",
+                  _required_row_with_a_trailing_comment,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "clippy lint(s) at or above HLD 27.1's level",
+                  polarity="accept",
+                  note="The accept half of the same regex, and it is what "
+                       "distinguishes the fix that was made from the one "
+                       "that looks like it. Stripping the comment before "
+                       "matching keeps the row body under the same anchor. "
+                       "Loosening the anchor to `.*$` would pass the group "
+                       "probe above and would also read "
+                       "`cast_possible_truncation = \"deny\" is what we want` "
+                       "as a row. A comment on a required row weakens "
+                       "nothing and the guard has to say so."),
+            Probe("lint-policy.excluded-named-member",
+                  _exclude_a_named_workspace_member,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "allows the lint group",
+                  note="`exclude` was applied to explicitly listed members "
+                       "and cargo does not do that. MEASURED: with "
+                       "`members = [\"crates/*\", \"tools/oracle\"]` and "
+                       "`exclude = [\"tools/oracle\"]`, `cargo metadata "
+                       "--no-deps` reports 14 packages with the oracle among "
+                       "them and clippy compiles it, while this guard printed "
+                       "\"13 workspace member(s) ... 33 .rs file(s)\" and "
+                       "exited 0. That is the same pair of numbers the "
+                       "header records as the fifth pass's defect, reached "
+                       "through a different key, and `gate guards` went red "
+                       "only because probe "
+                       "`lint-policy.member-outside-crates-group-allow` "
+                       "happens to pick `tools/oracle`."),
         ),
         limit="`REFUSED_GROUPS` is a list of nine names that exists only in "
               "the guard, and a probe can only ever write one of them, so "
@@ -2981,7 +3322,16 @@ GUARDS: tuple[Guard, ...] = (
               "narrowing it fails the census in the same change. Two of the "
               "nine are measured to reach 27.1's table under clippy 1.97.1 "
               "and the other seven are refused as blanket allows, which the "
-              "message says rather than overclaiming.",
+              "message says rather than overclaiming. The second limit is a "
+              "table row spread over two lines. `LINT_ROW` reads one line, so "
+              "`pedantic = { level = \"allow\",` followed by `priority = 1 }` "
+              "is invisible to it, MEASURED at exit 0. The declared constant "
+              "`Cargo.toml:workspace.lints` is the backstop and was measured "
+              "too: the same pair moves its digest from adf2cb2237be28da to "
+              "e3d02e83d8b52dab and the census refuses. That division of "
+              "labour is why the sixth pass had to fix both the row regex and "
+              "the constant's capture, and it is the reason a probe here is "
+              "not the whole answer.",
     ),
 
     # -- this story's own machinery, watched by the same runner ------------
@@ -3665,9 +4015,27 @@ CONSTANTS: tuple[Constant, ...] = (
              why="G-04's undocumented contract. A field added or removed here "
                  "changes what every worker must write and is documented "
                  "nowhere else."),
+    # THE WHOLE TABLE, and not to the first blank line. A blank line does not
+    # end a TOML table, so the non-greedy `\n\n` stopped the capture inside the
+    # table it was recording: the S03 review's sixth pass put
+    # `pedantic = { level = "allow", priority = 1 } # keeps noise down` after a
+    # blank line and inside `[workspace.lints.clippy]`, and this digest did not
+    # move. `lint_policy_check.py`'s row regex missed it too, for the trailing
+    # comment, so `bin/ocelli.sh gate guards` was ALL GREEN with four of HLD
+    # 27.1's five lints switched off. Both halves are closed, and this is the
+    # half that still catches a row the row parser cannot read at all.
+    #
+    # The capture is bounded by the next `[` header and then backtracks to the
+    # LAST `name = value` line inside it, so a comment block that introduces
+    # the following section and happens to sit before its header is not part of
+    # the recorded value. Every row of the table is, wherever the blank lines
+    # fall.
     Constant("lint-policy", "Cargo.toml", "workspace.lints",
-             r"^\[workspace\.lints\.clippy\]\n(.*?)\n\n",
-             why="HLD 27.1's denied lint table, verbatim."),
+             r"^\[workspace\.lints\.clippy\]\n((?:(?!^\[)[\s\S])*[\w-]\s*=[^\n]*)",
+             why="HLD 27.1's denied lint table, verbatim, and every other row "
+                 "of the table it sits in. A row added anywhere in that table "
+                 "moves this digest, blank lines and trailing comments "
+                 "included."),
     # The group names that exist only in this guard. HLD 27.1 names five
     # lints and no groups, so `lint-policy.group-allow` has to write one of
     # the nine and narrowing the nine to that one would leave the probe green

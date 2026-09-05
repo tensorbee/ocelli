@@ -331,6 +331,45 @@ mod tests {
         assert_eq!(section_25_1("nothing here"), "");
     }
 
+    /// **The truncation branch, over a body that can reach it.**
+    ///
+    /// Section 25.1 is the LAST heading in
+    /// `docs/hld/22-testing-and-tolerance.md`, so `after_heading.find("\n#")`
+    /// returns `None` over the real file and the `Some(end)` arm has never
+    /// run. Reproduce with
+    /// `grep -n '^#' docs/hld/22-testing-and-tolerance.md | tail -1`, which
+    /// prints the 25.1 heading itself.
+    ///
+    /// That is smell S1 of the sprint review's sixth pass. The test above
+    /// stays green with `body.get(..heading.len() + end)` replaced by `body`,
+    /// because everything it asserts is about the section's START and about
+    /// text that lies ABOVE it. A guard nobody has watched fail is the shape
+    /// this repository refuses, so the case is constructed rather than waited
+    /// for: a `## 26` heading follows, and the slice must stop before it.
+    #[test]
+    fn the_section_slice_stops_at_the_following_heading() {
+        let synthetic = "## 25. Testing\n\nprologue\n\n\
+                         ### 25.1 Tolerance policy\n\n\
+                         - a bullet that belongs to 25.1\n\n\
+                         ## 26. Something else\n\n\
+                         - a bullet that does not\n";
+        let section = section_25_1(synthetic);
+        assert_eq!(
+            section, "### 25.1 Tolerance policy\n\n- a bullet that belongs to 25.1\n",
+            "the slice must be the section and stop at the next heading"
+        );
+        assert!(
+            !section.contains("## 26"),
+            "the following heading is outside the section"
+        );
+        assert!(
+            !section.contains("a bullet that does not"),
+            "and so is its content, which is what a bullet check searching \
+             this slice must not be able to match"
+        );
+        assert!(!section.contains("prologue"), "nor is the prose above it");
+    }
+
     /// **The transcribed bullets are compared against the specification.**
     ///
     /// They are presented as verbatim quotations of HLD 25.1 and until the
@@ -362,10 +401,28 @@ mod tests {
     /// whole of `22-testing-and-tolerance.md`, so a bullet that moved out of
     /// the tolerance section into the prose above or below it would still have
     /// matched, and the constant would have gone on claiming to quote 25.1.
+    ///
+    /// **The sixth pass added the bullet's LABEL to the comparison.** The
+    /// label was stripped from the constant using this test's own hardcoded
+    /// copy of it before the search ran, so the specification's half of the
+    /// label was never read at all: editing the HLD's
+    /// `**Monochrome 16-bit (CT, MR, CR, DR):**` to
+    /// `**Monochrome 8-bit (XX):**` left the test green. `16-bit` against
+    /// `8-bit` is exactly the ambiguity `MONOCHROME_ONE_LSB` spends a
+    /// paragraph on, so it is the last thing that should have been unchecked.
+    /// The constants now match the specification label included, and the
+    /// stripping is gone.
+    ///
+    /// The only normalisation left is the removal of `**`, because the HLD
+    /// bolds the label and the constants are plain text. That is a rendering
+    /// difference and not a wording one, and it is applied to the
+    /// specification side alone, which cannot make a constant match text the
+    /// HLD does not carry.
     #[test]
     fn the_transcribed_bullets_match_the_specification() {
         let hld = include_str!("../../../docs/hld/22-testing-and-tolerance.md");
         let spec: String = section_25_1(hld)
+            .replace("**", "")
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
@@ -383,14 +440,17 @@ mod tests {
             ("Colour and ultrasound", super::SECTION_25_1_COLOUR),
             ("Geometry", super::SECTION_25_1_GEOMETRY),
         ] {
-            let first_sentence = quoted
-                .split_once(". ")
-                .map_or(quoted, |(head, _)| head)
-                .replace(&format!("{label}: "), "");
+            let first_sentence = quoted.split_once(". ").map_or(quoted, |(head, _)| head);
             let normalised: String = first_sentence
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
+            assert!(
+                normalised.starts_with(&format!("{label}:")),
+                "this loop asserts the label as part of the quotation, so a \
+                 constant that does not open with {label:?} would be compared \
+                 against the wrong bullet: {normalised:?}"
+            );
             assert!(
                 spec.contains(&normalised),
                 "{label} is transcribed here as {normalised:?} and \

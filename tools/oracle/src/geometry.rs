@@ -161,20 +161,39 @@ impl CanvasExtent {
     /// the far edge admits one on the other side. At 512 rows either is 512
     /// background pixels counted as picture.
     ///
-    /// **The harm is not to the bias bullet.** Both sides paint the declared
-    /// clear colour in the letterbox, so a wrongly admitted column is black on
-    /// both sides, which is clipped to the same extreme and therefore
-    /// uninformative, and it never reaches the bias denominator at all. The
-    /// two things it does break:
+    /// **The harm is not to the bias bullet, and that rests on a declared
+    /// value rather than on symmetry.** Both sides paint the same clear colour
+    /// in the letterbox, so a wrongly admitted column agrees on both sides.
+    /// Agreement alone is not the step that carries the argument:
+    /// `clipped_to_the_same_extreme` in `frame.rs` is
+    /// `reference == candidate && (reference == 0 || reference == u8::MAX)`,
+    /// so what makes the column uninformative is that the clear colour IS an
+    /// 8-bit extreme. It is `base.background` in
+    /// `tools/oracle/render-params.json`, today `[0, 0, 0]`. At `[16, 16, 16]`
+    /// every letterbox pixel would be informative and this paragraph would
+    /// invert. That file's digest is compared BETWEEN the two sides and never
+    /// against an expected value, so a change both halves agreed on would be
+    /// silent, and the dependency is asserted instead by
+    /// `the_declared_background_is_an_eight_bit_extreme` in
+    /// `tools/oracle/tests/geometry_fixture.rs`.
+    ///
+    /// So an admitted column never reaches the bias denominator. The two
+    /// things it does break:
     ///
     /// 1. `informativeFraction` is informative pixels over image-rectangle
-    ///    pixels, so an admitted column inflates the denominator alone and
+    ///    pixels, so an admitted column inflates the DENOMINATOR alone and
     ///    pushes the fraction down towards `INFORMATIVE_FRACTION_FLOOR`. The
-    ///    lowest fraction among the views the identity run does not call weak
-    ///    is 0.10074 against a floor of 0.10, so the margin is 0.0007 and 512
-    ///    of 262144 pixels is 0.00195 of the rectangle. Reproduce the fraction
-    ///    from `informativeFraction` in the `compare.json` that
-    ///    `./target/release/ocelli-compare identity` writes.
+    ///    move is `f * n / (P + n)` and not `n / P`, and this comment compared
+    ///    the second against the margin until the sprint review's sixth pass.
+    ///    On the worst view the identity run does not call weak,
+    ///    `synthetic/ct_series_nonuniform`, `f` is 0.10074 over a rectangle of
+    ///    `P = 218112` pixels, one column is `n = 512` of them, and the
+    ///    fraction falls to 0.100506. That is a move of 0.000236 against a
+    ///    margin of 0.00074 above the floor of 0.10, so one column does not
+    ///    cross it and four do, at 0.099805. Reproduce from
+    ///    `informativeFraction`, `imagePixels` and `informativePixels` in the
+    ///    `compare.json` that `./target/release/ocelli-compare identity`
+    ///    writes to `tools/oracle/compare-out/`.
     /// 2. The `letterbox-only` qualifier fires only when the image region
     ///    carries NO difference and the background carries one. A fit error in
     ///    a column that should have been letterbox then lands inside the image

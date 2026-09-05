@@ -340,8 +340,7 @@ inside `--compare` and only on a machine that already owns a baseline for that
 subject. It is the same shape as `the_recorded_bands_match_the_checked_in_file`,
 a constant in source asserted equal to the checked-in file it claims to follow.
 
-The
-gate then runs the guard's own negative cases and all five node suites.
+That gate then runs the guard's own negative cases and all five node suites.
 
 **Five and not four, since the S03 review's fourth pass.**
 `tools/bench/tests/cold_start_test.mjs` holds five tests and only the last

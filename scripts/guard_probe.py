@@ -596,8 +596,12 @@ def _budget_problems(profile: str, elapsed: float, record: bool) -> list[str]:
         # The note is `scripts/guards/census.py`'s BUDGET_NOTE, declared
         # once. It was written out in full here and consulted nowhere else,
         # so a key added to the budget left this sentence describing the
-        # previous set and `setdefault` could never refresh it.
-        budget.setdefault("note", BUDGET_NOTE)
+        # previous set. Written UNCONDITIONALLY, because `setdefault` is the
+        # exact mechanism the sentence above names as the reason the note
+        # could never be refreshed, and leaving it here read as the bug it
+        # documents even while `guard_census.py --record` happened to keep the
+        # value current.
+        budget["note"] = BUDGET_NOTE
         BUDGET.write_text(json.dumps(budget, indent=2, sort_keys=True) + "\n")
         print(f"  {profile} wall clock recorded at {elapsed:.1f}s")
         return []
