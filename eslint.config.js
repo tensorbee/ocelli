@@ -143,4 +143,28 @@ export default tseslint.config(
       },
     },
   },
+  {
+    // The Appendix A spike harnesses (F-X006, gates A1 and A2). Node-only
+    // throwaway ESM, deleted when both gates are closed, and listed here for
+    // the same reason the oracle block exists: `no-undef` should still catch a
+    // typo, so the globals are named rather than switched off.
+    //
+    // `WebAssembly` is granted because these drivers instantiate a module
+    // directly. **They do build a view over that module's linear memory**, and
+    // that is deliberate rather than an oversight. NO_CACHED_WASM_VIEW above is
+    // scoped to `**/*.{ts,tsx}` and does not reach a `.mjs` file, and the
+    // allowance is NOT widened here. The harnesses obey section 17.2's actual
+    // requirement anyway: each view is built immediately after the exported
+    // `out_ptr()` that returns the offset, copied out with `.slice()`, and let
+    // go. Nothing is cached across a call that could grow the memory.
+    files: ["tools/spikes/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        Buffer: "readonly",
+        console: "readonly",
+        process: "readonly",
+        WebAssembly: "readonly",
+      },
+    },
+  },
 );
