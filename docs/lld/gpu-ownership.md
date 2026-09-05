@@ -1,6 +1,6 @@
 # GPU ownership
 
-**F-IDs that contributed:** F-005, F-008
+**F-IDs that contributed:** F-004, F-005, F-008
 **Last updated:** 2026-09-05
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
@@ -110,6 +110,11 @@ exactly one crate holding it, so deleting the contract has to fail too.
 | B, WebGL2 | The contract holds and no kernel runs, because tier B has no compute shaders. A kernel whose `tier()` is A with no declared fallback marks its feature unavailable |
 | C, CPU | Not constructible. A tier C session has no device, so it has no `GpuContext` and no `ComputeCtx`. Every kernel resolves through its section 31 fallback or reports unavailable |
 
+Which of the three a session gets is F-004's, and the rule is in
+[tier-resolution.md](tier-resolution.md). The short version: three signals,
+the fill-rate benchmark decides where it decided, and a candidate the evidence
+calls a software rasteriser resolves tier C rather than tier B.
+
 `ComputeError::Unavailable` names both the required and the resolved tier,
 because "unavailable" without them is a message nobody can act on. Deviation
 D-07's rule is unchanged by this story: a feature that cannot run on the
@@ -128,12 +133,15 @@ for that situation and not two. See `docs/lld/errors.md`.
 ## What this story deliberately does not do
 
 - **It does not create a device.** `GpuContext::new` takes one that already
-  exists. Adapter enumeration and tier resolution are F-004, device creation
-  and loss recovery are F-039. Doing them here would be a second copy of a
-  decision the project wants exactly once.
-- **It does not detect `Caps`.** `caps.rs` defines the type because section
+  exists. Device creation and loss recovery are F-039. Doing them here would be
+  a second copy of a decision the project wants exactly once.
+- **It does not detect `Caps`.** `caps.rs` defined the type because section
   31's `Kernel::workgroup` takes a `&Caps` and a hook expressed in types needs
-  the types. Filling it from an adapter is F-004.
+  the types. **F-004 has since filled it**, in the same file plus
+  `probe.rs`, and [tier-resolution.md](tier-resolution.md) is where that lives.
+  F-004's probe device is transient: created, measured on and dropped inside
+  `resolve`, so it never becomes a `GpuContext` and there is never a moment
+  when two devices exist.
 - **It supplies no `Kernel` implementer.** The trait is declared with none, and
   `AGENTS.md` forbids that shape. The rule exists to stop invented
   abstractions, and this one is prescribed: HLD Part II says a given signature

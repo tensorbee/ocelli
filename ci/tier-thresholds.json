@@ -1,0 +1,36 @@
+{
+  "note": "The fill-rate bands F-004's tier resolver judges its startup measurement against, in pixels shaded per second. Spike gate A7.3's rule is do not invent a number, so this file states the provenance of EACH figure separately: one is measured, one is derived from that measurement, and one does not exist yet. A recorded-but-not-consulted number must not read as a trusted one. crates/ocelli-render/src/caps.rs carries FillRateBands::RECORDED, and the test the_recorded_bands_match_the_checked_in_file asserts the constant and this file are one number.",
+  "workload": {
+    "shader": "crates/ocelli-render/src/fill_rate.wgsl",
+    "alu_steps_per_fragment": 64,
+    "target_format": "Rgba8Unorm",
+    "warm_up_pixels": 65536,
+    "calibration_pixels": 65536,
+    "full_pixels": 16777216,
+    "description": "A full-viewport triangle into an offscreen texture, a fixed ALU count per fragment, repeated a fixed number of passes, one submission, no readback. The warm-up run's figure is discarded. A figure taken with a different workload is a different measurement and does not belong in this file.",
+    "instrument": "cargo test -p ocelli-render --release -- --ignored --nocapture measures_a_fill_rate_on_this_machine"
+  },
+  "bands": {
+    "hardware_floor_pixels_per_second": 400000000,
+    "hardware_floor_provenance": "DERIVED from the single measured figure below, and not itself a measurement. It sits at roughly a quarter of that figure, chosen so that a rate clearly faster than any plausible software rasteriser is called Hardware and nothing else is. A genuine but much slower GPU therefore lands in Unknown rather than Hardware, and is then decided by its reported adapter type, which is the designed fall-through and not a failure. Erring high is the safe direction here: the defect deviation D-07 exists to prevent is a rasteriser being called hardware, never the reverse. The figure tightens when measurements from more machines exist.",
+    "software_ceiling_pixels_per_second": null,
+    "software_ceiling_provenance": "NOT MEASURED, and therefore absent rather than guessed. No software-rasteriser figure can be taken on the machine this was recorded on. While it is null the benchmark NEVER returns Software: a low rate is Unknown, and the combination rule falls through to the adapter type and then the renderer string, which is exactly what the resolver already does for a benchmark that did not decide. Whether lavapipe even resolves as a fallback adapter under the pinned wgpu is itself unproven and is F-X002's acceptance criterion, per docs/spikes/A7-tier-c.md section A7.2."
+  },
+  "measurements": [
+    {
+      "provenance": "measured",
+      "date": "2026-09-05",
+      "machine": "aarch64-apple-darwin",
+      "backend": "metal",
+      "adapter": "Apple M5 Max",
+      "device_type": "IntegratedGpu",
+      "pixels_shaded": 16777216,
+      "elapsed_nanos": 10036459,
+      "pixels_per_second": 1671627015,
+      "observed_range_pixels_per_second": [1539641471, 1805789646],
+      "note": "Five runs across the release and dev profiles, all within 17 percent of each other. One machine and one adapter, so this is a data point rather than a distribution. Taken on a workstation that was not otherwise idle, so the low end of the range is the more trustworthy half."
+    }
+  ],
+  "tolerance": null,
+  "tolerance_note": "No tolerance, deliberately. ci/wasm-size-budget.json carries one because it re-takes a measurement and asks whether it moved. This file is not that: the bands are a decision boundary that a measurement is judged against, and a tolerance on a boundary would be a third band nobody specified."
+}

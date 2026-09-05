@@ -3,8 +3,13 @@
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
 //! F-001 creates the crate. F-008 gives it the device-ownership contract.
-//! F-004 resolves the tier, F-039 creates the device, and the render graph
-//! follows.
+//! F-004 resolves the tier, F-039 creates the long-lived device, and the
+//! render graph follows.
+//!
+//! Tier resolution is split across two modules on purpose. `caps` decides and
+//! touches no GPU, `probe` touches the GPU and decides nothing. Everything
+//! that can be WRONG about a tier is in `caps`, which needs no adapter to
+//! test.
 //!
 //! **This crate is the only one permitted to create a `wgpu::Device`.** HLD
 //! section 31: "ocelli-compute never creates a wgpu::Device; it borrows the
@@ -17,9 +22,14 @@
 
 pub mod caps;
 pub mod gpu;
+pub mod probe;
 
-pub use caps::{Caps, Tier};
+pub use caps::{
+    AdapterFacts, Caps, DecidedBy, FillRate, FillRateBands, OverrideOutcome, Resolution,
+    SimdSupport, SoftwareVerdict, Tier, TierEvidence, TierRequest, TierSignals, classify,
+};
 pub use gpu::{GpuContext, SharedEncoder};
+pub use probe::resolve;
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.

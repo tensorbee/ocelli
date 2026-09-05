@@ -48,6 +48,13 @@ export type { PanicMemory, PanicRecord } from "./panic.js";
 export { CORE_OK, fatalFromPanic, isUsable, nextStatus } from "./fatal.js";
 export type { CoreStatus } from "./fatal.js";
 
+export {
+  SIMD128_PROBE_MODULE,
+  moduleValidates,
+  sharedMemoryAvailable,
+  wasmSimd128Supported,
+} from "./capabilities.js";
+
 /** Package version, kept in step with the crate versions by `/release`. */
 export const VERSION = "0.1.0";
 

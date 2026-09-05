@@ -1,6 +1,6 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-005, F-007, F-008
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008
 **Last updated:** 2026-09-05
 
 The wasm build pipeline, the size budget, and the invariants that keep the
@@ -109,8 +109,9 @@ run its tests, so step 3 has to compile them.
 ### The two entry points
 
 `crates/ocelli-native/src/bin/ocelli-desktop.rs` and `ocelli-server.rs`. Both
-are stubs that print `entry_point_banner()`, which names the binary and the
-four extension points of HLD section 13 that Phase 2 and Phase 3 will fill.
+print `entry_point_banner()`, which names the binary and the four extension
+points of HLD section 13 that Phase 2 and Phase 3 will fill, and then, since
+F-004, the tier they resolved to and the evidence for it.
 
 They are two binaries rather than one with a subcommand because section 13
 names two entry points, and because the server one is what the render-target
@@ -269,6 +270,42 @@ not run" and "the check ran and was happy" must not look the same.
 |-------|------------------------|
 | `wgpu` | HLD section 15.2. Agents reliably emit wgpu 0.19-era pipeline code, and a range lets that compile against something subtly different from what the shader expects |
 | `wasm-bindgen` | `wasm-pack` runs a CLI whose version must match the crate version. A range lets the two drift, and the mismatch reads as a build break rather than as a resolution change |
+
+### `ocelli-render` adds one wgpu feature, and it is deviation D-14
+
+`wgpu = { workspace = true, features = ["webgl"] }`. The pin and the workspace
+entry are untouched and only the consuming crate's feature set changes, which
+is the shape D-09 set for glam.
+
+wgpu 30.0.1's default set is `std, parking_lot, dx12, metal, gles, vulkan,
+wgsl, webgpu`, read from the pinned crate's own manifest. `webgl` is a real
+feature and is not among them, and `gles` is the **native** GL backend rather
+than the browser one. Without the feature the crate reaches WebGPU on wasm32
+and cannot reach WebGL2 at all, so HLD section 7's tier B could never resolve
+in a browser, and a tier the resolver can never return is not a tier.
+
+**Step 4 is unaffected and that was checked rather than assumed.** The feature
+is enabled unconditionally, so both targets resolve it, and the packages it
+pulls in on wasm32 are already target-gated inside wgpu's own manifest.
+`ci/check-bindgen-isolation.sh` part 1 is unaffected for the same reason:
+`wasm-bindgen`, `js-sys` and `web-sys` sit under wgpu's
+`cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))` tables, so
+the host tree does not reach them.
+
+**Measured cost today is zero bytes**, because `ocelli-wasm` has an empty
+`[dependencies]` table and never reaches wgpu. The size budget moves only when
+the render path is wired in from S11.
+
+### `ocelli-native` now depends on `ocelli-render`
+
+F-004 gives the two entry points a real job: read `OCELLI_TIER`, resolve a
+tier, and print the evidence. That is the operator override's named user, and
+`AGENTS.md` forbids a flag without one.
+
+The cost is that **step 1 of the cross-target proof starts linking wgpu**,
+which is a real build-time increase to a gate in the floor. It is accepted
+because the alternative is shipping an override nobody can observe. See
+[tier-resolution.md](tier-resolution.md).
 
 ## Known gaps
 

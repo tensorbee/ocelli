@@ -5,6 +5,7 @@
     "bytemuck",
     "dicom",
     "glam",
+    "pollster",
     "proptest",
     "thiserror",
     "trybuild",

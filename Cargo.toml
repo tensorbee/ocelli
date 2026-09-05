@@ -80,7 +80,12 @@ thiserror = { version = "2", default-features = false }
 # ships. `proptest` is the harness section 25's round-trip listing is written
 # against. `trybuild` is what asserts that a section 16 space mismatch fails
 # to COMPILE, which is the payoff section 16 claims and which no runtime test
-# can observe.
+# can observe. `pollster` drives the one `async fn` this workspace has,
+# `ocelli_render::probe::resolve`, inside a native `#[test]`: wgpu's adapter
+# and device requests are futures in the pinned version, and F-004 needs a
+# test to be able to await one. All three are dev-only and none reaches the
+# shipped surface, so none of them is a section 15.2 deviation.
+pollster = "0.4"
 proptest = "1"
 trybuild = "1"
 
