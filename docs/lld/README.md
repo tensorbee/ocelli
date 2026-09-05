@@ -19,6 +19,7 @@ Each file carries a `**F-IDs that contributed:**` line and a
 | [tier-resolution.md](tier-resolution.md) | How a session resolves tier A, B or C, the fill-rate probe and the operator override | F-004 |
 | [errors.md](errors.md) | The error model, the code registry, the panic record and structured logging | F-005 |
 | [typescript-packaging.md](typescript-packaging.md) | What the npm packages publish, and what proves it | F-003, F-005 |
-| [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010, F-X007 |
+| [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010, F-X007, F-X009 |
 | [comparator.md](comparator.md) | The harness's judging half: the tolerance predicate, the verdict vocabulary, the attribution ladder and the census | F-011 |
 | [benchmarks.md](benchmarks.md) | The benchmark harness of HLD section 26, its subject registry, the host class and the `bench` gate | F-006 |
+| [guards.md](guards.md) | The guard harness: discovery, the catalogue, the sandbox, the probe runner and the census | F-X009 |

@@ -207,6 +207,43 @@ class CoveredByNamesATestThatOpensTheFile(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("no test it names opens that file", problems[0])
 
+    def test_a_directory_whose_files_do_not_open_it_is_refused(self) -> None:
+        """The hatch the S03 review's third pass measured.
+
+        A `covered_by` naming a bare directory was accepted for the
+        directory's own existence, with no reachability check at all. One
+        line, `covered_by=("tools/bench/tests/",)`, put `bench.runner`'s nine
+        uncovered refusals back into the covered bucket and the census
+        printed `0 watched by nothing` and exited 0.
+        """
+        from guards.catalogue import Guard
+        hatch = Guard(
+            id="probe", file="tools/bench/run.mjs", gate="-", spec="none",
+            refuses="A sentence long enough to satisfy the well-formed test.",
+            claims=("*",),
+            covered_by=("tools/bench/tests/",))
+        problems = self._problems_for(hatch)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("no test it names opens that file", problems[0])
+        self.assertIn("the directory tools/bench/tests/ holds", problems[0])
+
+    def test_a_directory_holding_a_file_that_opens_it_passes(self) -> None:
+        """The other direction, and it is why this is not just a ban.
+
+        `scripts/guards/catalogue.py` names `ci/check-device-ownership.sh`, so
+        the directory holding it reaches that guard's file and the claim
+        stands. A rule that refused every directory would be as useless as
+        one that read none of them.
+        """
+        from guards.catalogue import Guard
+        real = Guard(
+            id="probe", file="ci/check-device-ownership.sh", gate="-",
+            spec="none",
+            refuses="A sentence long enough to satisfy the well-formed test.",
+            claims=("*",),
+            covered_by=("scripts/guards/",))
+        self.assertEqual(self._problems_for(real), [])
+
     def test_a_named_test_that_is_gone_is_refused(self) -> None:
         from guards.catalogue import Guard
         missing = Guard(

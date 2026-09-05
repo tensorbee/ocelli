@@ -40,6 +40,16 @@ importing it, in either direction, or by declaring identifiers the guarded file
 implements by name. That last shape is the oracle's: `faults.mjs` declares the
 fault ids and the page implements each one.
 
+**A directory is resolved to its files.** The first version of check f
+accepted a claim naming a directory for the directory's own existence, with no
+reachability check at all, and the review's third pass measured what that
+costs: one line, `covered_by=("tools/bench/tests/",)`, put the same nine
+refusals back into the covered bucket and the census printed
+`0 watched by nothing` and exited 0. So a directory now has to hold a file
+that reaches the guarded file, by the same three routes a named file uses. An
+entry that cannot name one drops the claim and is counted as uncovered, which
+is what `bench.runner` does and what the printed number is for.
+
 **What the coverage number is and is not.** It is an ENTRY-level claim summed
 over refusal sites. `covered_by` says a standing test reaches the file, and
 check f verifies that. Neither says the named test drives THIS refusal red, and
@@ -229,6 +239,19 @@ COVERED_PATH = re.compile(
 DECLARED_ID = re.compile(r'^ {2}"([a-z0-9]+(?:-[a-z0-9]+)+)":\s*\{', re.M)
 
 
+# Suffixes a standing test can be written in here. The directory route reads
+# the files rather than the directory's existence, so it has to know which of
+# them are text this check can read: Python, node, shell and the trybuild
+# compile-fail cases, which are Rust.
+COVERING_SUFFIXES = frozenset(
+    {".py", ".mjs", ".js", ".ts", ".sh", ".rs", ".json"})
+
+# Directories a walk must not descend into. Build output and installed
+# dependencies are not standing tests, and node_modules alone is minutes.
+SKIP_DIRS = frozenset({".git", "__pycache__", "node_modules", "target",
+                       "dist", "pkg"})
+
+
 def _reaches(covering: str, target: Path) -> str | None:
     """Does `covering`'s text reach the file at `target`."""
     if target.name in covering:
@@ -238,6 +261,34 @@ def _reaches(covering: str, target: Path) -> str | None:
     if re.search(rf"\bimport\b[^\n]*\b{re.escape(target.stem)}\b", covering):
         return "imports it"
     return None
+
+
+def _files_under(directory: Path) -> list[Path]:
+    """Every file in a claimed directory this check can read, sorted."""
+    found = []
+    for path in sorted(directory.rglob("*")):
+        if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        if path.is_file() and path.suffix in COVERING_SUFFIXES:
+            found.append(path)
+    return found
+
+
+def _how(named: Path, base: Path, guard_file: str,
+         target_text: str) -> str | None:
+    """How one candidate file reaches the guarded file, or `None`.
+
+    The three routes, in the order they were added: the covering file names or
+    imports the guarded one, the guarded one names the covering file, or the
+    covering file declares identifiers the guarded file implements by name.
+    """
+    text = named.read_text(encoding="utf-8", errors="replace")
+    how = (_reaches(text, Path(guard_file))
+           or _reaches(target_text, named.relative_to(base)))
+    if how is None and any(name in target_text
+                           for name in DECLARED_ID.findall(text)):
+        how = "declares ids it implements"
+    return how
 
 
 def covered_by_problems(root: Path | None = None) -> list[str]:
@@ -257,13 +308,27 @@ def covered_by_problems(root: Path | None = None) -> list[str]:
         target_text = (target.read_text(encoding="utf-8", errors="replace")
                        if target.is_file() else "")
         reached: list[str] = []
+        detail: list[str] = []
         for claim in guard.covered_by:
             match = COVERED_PATH.search(claim)
             if match is None:
                 continue
             named = base / match.group(1)
             if named.is_dir():
-                reached.append(f"{match.group(1)} exists")
+                members = _files_under(named)
+                hit = None
+                for member in members:
+                    how = _how(member, base, guard.file, target_text)
+                    if how is not None:
+                        hit = f"{member.relative_to(base).as_posix()} {how}"
+                        break
+                if hit is None:
+                    detail.append(
+                        f"the directory {match.group(1)} holds "
+                        f"{len(members)} readable file(s) and none of them "
+                        f"opens it")
+                    continue
+                reached.append(f"{match.group(1)} contains {hit}")
                 continue
             if not named.is_file():
                 problems.append(
@@ -272,23 +337,21 @@ def covered_by_problems(root: Path | None = None) -> list[str]:
                     f"claim of coverage naming a file that is gone reads as "
                     f"coverage forever.")
                 continue
-            text = named.read_text(encoding="utf-8", errors="replace")
-            how = (_reaches(text, Path(guard.file))
-                   or _reaches(target_text, Path(match.group(1))))
-            if how is None and any(
-                    name in target_text
-                    for name in DECLARED_ID.findall(text)):
-                how = "declares ids it implements"
+            how = _how(named, base, guard.file, target_text)
             if how is not None:
                 reached.append(f"{match.group(1)} {how}")
         if not reached:
             problems.append(
                 f"catalogue entry `{guard.id}` claims {guard.file} is covered "
-                f"by a standing test, and no test it names opens that file. "
-                f"Either name one that does, or record the gap: a false claim "
-                f"of coverage is worse than the gap it hides, because the gap "
-                f"can be fixed and the claim will be counted as coverage "
-                f"forever.")
+                f"by a standing test, and no test it names opens that file"
+                + (f" ({', and '.join(detail)})" if detail else "") + ". A "
+                f"directory is resolved to the files in it and is not "
+                f"accepted for existing, which was the hatch the S03 review's "
+                f"third pass measured. Either name a test that does open the "
+                f"file, or drop the claim and take the uncovered count: a "
+                f"false claim of coverage is worse than the gap it hides, "
+                f"because the gap can be fixed and the claim will be counted "
+                f"as coverage forever.")
     return problems
 
 

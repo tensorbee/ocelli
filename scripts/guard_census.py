@@ -6,7 +6,7 @@ proves the DECLARATION is complete, which is the half a probe cannot reach:
 a probe run over a catalogue that has fallen behind is a green answer to a
 question nobody asked.
 
-Five checks, described in `scripts/guards/census.py`. The two that matter most
+Six checks, described in `scripts/guards/census.py`. The two that matter most
 are the bidirectional site matching, which makes a guard added next month
 arrive with its test or turn CI red, and the declared-constant ratchet, which
 is the only thing that notices a guard being widened rather than broken.

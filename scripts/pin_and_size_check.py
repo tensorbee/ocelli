@@ -14,6 +14,22 @@ R4 adds: "treat GPU code that compiles first try with suspicion". A caret or
 tilde range on wgpu re-opens exactly the gap the pin closes, so the range form
 is refused, not just a wrong version.
 
+**`=` is not the pin. `=` and a full version is.** The S03 sprint review's
+third pass measured the residue: this check tested only that the spec starts
+with `=`, and `wgpu = "=30"` passed. Cargo reads a partial version after `=`
+as a whole band, which is demonstrable rather than a reading of the
+documentation:
+
+    wgpu = "=30.0.0"   cargo metadata  -> Downgrading wgpu v30.0.1 -> v30.0.0
+    wgpu = "=30"       cargo metadata  -> resolves against 30.0.1, no change
+    wgpu = "=30"       cargo update -p wgpu --precise 30.0.0  -> exit 0
+    wgpu = "=30.0.1"   cargo update -p wgpu --precise 30.0.0  -> exit 101,
+                       "failed to select a version for the requirement"
+
+A spec that both resolves 30.0.1 and permits 30.0.0 is `=30.*`, and two
+versions is a range. So an exact pin is `=` followed by a major, a minor and a
+patch, and `=30` and `=30.0` are refused with the rest.
+
 **The wasm-bindgen pin.** Added by F-002 and not in section 15.2's list, which
 predates the build pipeline story. `wasm-pack` runs a wasm-bindgen CLI whose
 version must match the crate version, so a range lets the two drift and the
@@ -54,6 +70,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -84,6 +101,13 @@ EXACT_PINNED = {
 # Growth tolerated before the gate fails, as a fraction of the baseline.
 # A binary that grows 5% in one story is a story that should say why.
 TOLERANCE = 0.05
+
+# An exact pin: `=`, optional whitespace Cargo allows after the operator, then
+# all three of major, minor and patch, then the optional pre-release and build
+# metadata semver permits. One version and no band. `=30` and `=30.0` are
+# comparators over a whole minor or patch band and are refused here.
+EXACT_PIN = re.compile(
+    r"^=\s*\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 
 
 def declared_version(entry: object) -> str | None:
@@ -126,9 +150,24 @@ def check_pins() -> list[str]:
                 f"{declared[crate]!r}. An entry with no `version` key is "
                 f"not an exact pin, whatever else the table holds. {reason}")
             continue
-        if not spec.startswith("="):
+        if not spec.strip().startswith("="):
             problems.append(
                 f"{crate} = \"{spec}\" is a RANGE, not an exact pin. {reason}")
+            continue
+        if "," in spec:
+            problems.append(
+                f"{crate} = \"{spec}\" declares MORE THAN ONE comparator, "
+                f"which is a range whatever the first one says. An exact pin "
+                f"is one `=` and one full major.minor.patch. {reason}")
+            continue
+        if not EXACT_PIN.match(spec.strip()):
+            problems.append(
+                f"{crate} = \"{spec}\" pins with `=` and a PARTIAL version, "
+                f"which Cargo reads as a whole band. Measured on wgpu: `=30` "
+                f"resolves against 30.0.1, and under it "
+                f"`cargo update -p wgpu --precise 30.0.0` exits 0 where "
+                f"`=30.0.1` refuses that version. Two versions is a range. "
+                f"Write `=` and a full major.minor.patch. {reason}")
     return problems
 
 

@@ -266,6 +266,13 @@ def _relax_wgpu_pin(box: Sandbox) -> None:
     box.substitute("Cargo.toml", 'wgpu = "=30.0.1"', 'wgpu = "30.0.1"')
 
 
+def _partial_wgpu_pin(box: Sandbox) -> None:
+    # `=` and a major only. Cargo reads it as a band: it resolves against
+    # 30.0.1 and `cargo update -p wgpu --precise 30.0.0` under it exits 0,
+    # both measured, where `=30.0.1` refuses that version.
+    box.substitute("Cargo.toml", 'wgpu = "=30.0.1"', 'wgpu = "=30"')
+
+
 def _reorder_wgpu_table(box: Sandbox) -> None:
     # The pin is unchanged and still exact. Only the shape of the entry
     # changes, to the table form Cargo accepts everywhere else in this file.
@@ -324,6 +331,44 @@ def _delete_ci_step(box: Sandbox, leave_comment: bool) -> None:
     replacement = (f"      # the `bin/ocelli.sh gate {gate}` step was here"
                    if leave_comment else "")
     box.substitute(".github/workflows/ci.yml", line, replacement)
+
+
+def _gate_step_behind(box: Sandbox, condition: str) -> None:
+    """Put a floor gate's step behind an `if:`, leaving the step in place.
+
+    The step is still a real `run:` line naming the gate, so every earlier
+    version of this check passed. Only the events it executes on change, and
+    for a condition that excludes the pull request that is the same outcome as
+    deleting it.
+    """
+    gate = _floor_gate_with_own_step(box)
+    workflow = box.read(".github/workflows/ci.yml")
+    line = next(l for l in workflow.splitlines()
+                if f"bin/ocelli.sh gate {gate}" in l)
+    indent = " " * (len(line) - len(line.lstrip()))
+    body = line.lstrip().removeprefix("- ")
+    box.substitute(".github/workflows/ci.yml", line,
+                   f"{indent}- if: {condition}\n{indent}  {body}")
+
+
+def _gate_step_split_across_events(box: Sandbox) -> None:
+    """Replace a floor gate's one step with two, one per automatic event.
+
+    Between them they cover every event the floor claims, which is the
+    question `--floor` actually asks. The first version of the condition
+    reader asked whether ONE step covered them all, refused this, and named
+    no missing event while doing it, so the message could not be acted on.
+    """
+    gate = _floor_gate_with_own_step(box)
+    workflow = box.read(".github/workflows/ci.yml")
+    line = next(l for l in workflow.splitlines()
+                if f"bin/ocelli.sh gate {gate}" in l)
+    indent = " " * (len(line) - len(line.lstrip()))
+    body = line.lstrip().removeprefix("- ")
+    box.substitute(
+        ".github/workflows/ci.yml", line,
+        f"{indent}- if: github.event_name == 'push'\n{indent}  {body}\n"
+        f"{indent}- if: github.event_name == 'pull_request'\n{indent}  {body}")
 
 
 def _drop_no_std_from_one_crate(box: Sandbox) -> None:
@@ -440,8 +485,50 @@ def _prose_commit_message(box: Sandbox) -> None:
               "F-000, a probe\n\nOne clause; and a second.\n")
 
 
-def _sprint_plan_disagreement(box: Sandbox) -> None:
+def _sprint_plan_absent(box: Sandbox) -> None:
     box.delete("docs/sprints/SPRINT_PLAN.md")
+
+
+def _sprint_plan_wrong_estimate(box: Sandbox) -> None:
+    """Change one sprint-table row's estimate and leave the backlog alone.
+
+    This is the drift the S03 review found in the tree: F-X014 read `1w` in
+    the plan and `2w` in the backlog and the allocation, and `--check`
+    compared only the sprint, so nothing could see it.
+    """
+    text = box.read("docs/sprints/SPRINT_PLAN.md")
+    row = re.search(r"^\|\s*F-X?\d{3}[a-z]?\s*\|[^|]*\|[^|]*\|[^|]*\|"
+                    r"\s*(\d+)w\s*\|\s*$", text, re.M)
+    if row is None:
+        raise AssertionError("SPRINT_PLAN.md carries no estimated story row")
+    weeks = int(row.group(1))
+    box.substitute("docs/sprints/SPRINT_PLAN.md", row.group(0),
+                   row.group(0).replace(f"| {weeks}w |", f"| {weeks + 1}w |"))
+
+
+def _sprint_plan_wrong_sprint(box: Sandbox) -> None:
+    """Move the first sprint's first story row into the next sprint's table.
+
+    The guard has claimed this refusal since it was written and no probe
+    watched it, so the branch that actually matters was proved only by the
+    absent-file one above.
+    """
+    head = re.compile(r"^####\s+Sprint\s+S\d+\s*$")
+    story = re.compile(r"^\|\s*F-X?\d{3}[a-z]?\s*\|")
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+
+    heads = [i for i, line in enumerate(lines) if head.match(line.rstrip("\n"))]
+    if len(heads) < 2:
+        raise AssertionError("SPRINT_PLAN.md carries fewer than two sprints")
+    rows = [i for i in range(heads[0], heads[1]) if story.match(lines[i])]
+    if not rows:
+        raise AssertionError("the first sprint table carries no story row")
+
+    moved = lines.pop(rows[0])
+    after = next(i for i in range(rows[0], len(lines))
+                 if head.match(lines[i].rstrip("\n")))
+    lines.insert(after + 1, moved)
+    box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
 
 
 def _stale_codex_adapter(box: Sandbox) -> None:
@@ -885,14 +972,26 @@ GUARDS: tuple[Guard, ...] = (
         file="scripts/pin_and_size_check.py",
         gate="pins",
         spec="HLD 15.2 and 27.2 R4, and story E1.2 for the ceiling",
-        refuses="A range where the specification requires an exact `=` pin, a "
-                "pinned crate that has left the workspace table, and a wasm "
-                "module over its recorded ceiling.",
+        refuses="A range where the specification requires an exact `=` pin, "
+                "an `=` in front of a partial version or a second comparator "
+                "after it, a pinned crate that has left the workspace table, "
+                "and a wasm module over its recorded ceiling.",
         claims=("*",),
         probes=(
             Probe("pins.range", _relax_wgpu_pin,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "is a RANGE, not an exact pin"),
+            Probe("pins.partial-version", _partial_wgpu_pin,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "PARTIAL version",
+                  note="`wgpu = \"=30\"` starts with `=` and is a range. "
+                       "Measured with cargo rather than read: under it "
+                       "`cargo update -p wgpu --precise 30.0.0` exits 0 and "
+                       "the resolver leaves 30.0.1 in the lock, while "
+                       "`=30.0.1` refuses 30.0.0 outright. This was the "
+                       "residue of G-03 that the S03 review's third pass "
+                       "measured, the guard having tested only that the spec "
+                       "starts with `=`."),
             Probe("pins.absent", _drop_wgpu_entry,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "is not declared in [workspace.dependencies]"),
@@ -963,9 +1062,44 @@ GUARDS: tuple[Guard, ...] = (
         gate="ci",
         spec="`.claude/WORKFLOW.md`, `--floor` is \"what CI runs\"",
         refuses="A gate in the floor that `.github/workflows/ci.yml` does not "
-                "actually run.",
+                "actually run, or runs only on events the floor does not "
+                "cover.",
         claims=("*",),
         probes=(
+            Probe("ci-floor.event-gated",
+                  lambda box: _gate_step_behind(
+                      box, "github.event_name == 'workflow_dispatch'"),
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "is behind a condition that does not run it on",
+                  note="The step is untouched and still names the gate. Only "
+                       "the event changes, and a gate that runs on a manual "
+                       "dispatch and not on a pull request has the same "
+                       "effect as no step at all. The S03 review's third pass "
+                       "measured this route to G-01's outcome after the "
+                       "prefix and comment routes were shut."),
+            Probe("ci-floor.event-gated-accept",
+                  lambda box: _gate_step_behind(
+                      box, "github.event_name != 'workflow_dispatch'"),
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The other direction, and it is the point. This "
+                       "condition excludes only the manual dispatch, so the "
+                       "gate still runs on every push and every pull request "
+                       "the floor covers and the check must still pass. A "
+                       "check that refused every `if:` would be as useless as "
+                       "one that read none of them."),
+            Probe("ci-floor.complementary-steps",
+                  _gate_step_split_across_events,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="Two steps, one per automatic event, covering the "
+                       "floor between them. Coverage is asked per event and "
+                       "not per step, because asking one step to satisfy "
+                       "every event refuses this arrangement and then reports "
+                       "no missing event, which is a refusal a maintainer "
+                       "cannot act on."),
             Probe("ci-floor.missing-step",
                   lambda box: _delete_ci_step(box, leave_comment=False),
                   script("python3", "scripts/ci_floor_check.py"),
@@ -1203,7 +1337,14 @@ GUARDS: tuple[Guard, ...] = (
                   script("ci/check-device-ownership.sh"),
                   "derives Clone"),
         ),
-        covered_by=("crates/ocelli-compute/tests/ui/ (trybuild, `test` gate)",),
+        limit="The trybuild compile-fail cases under "
+              "crates/ocelli-compute/tests/ui/ are the strong half of section "
+              "31 and run in the `test` gate, and they are recorded here "
+              "rather than as `covered_by`. They assert the same property "
+              "through the type system and they do not open "
+              "ci/check-device-ownership.sh, so counting them as coverage of "
+              "THIS guard's refusals would be the claim check f exists to "
+              "refuse. The four probes above are what watch those refusals.",
     ),
 
     # -- the ledgers --------------------------------------------------------
@@ -1237,12 +1378,18 @@ GUARDS: tuple[Guard, ...] = (
         spec="`.claude/WORKFLOW.md`, the sprint plan is derived and not "
              "hand-maintained",
         refuses="A sprint plan that disagrees with the backlog about which "
-                "sprint a story is in, and an absent plan.",
+                "sprint a story is in or how large it is, and an absent plan.",
         claims=("*",),
         probes=(
-            Probe("sprint-plan.absent", _sprint_plan_disagreement,
+            Probe("sprint-plan.absent", _sprint_plan_absent,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
                   "does not exist"),
+            Probe("sprint-plan.wrong-sprint", _sprint_plan_wrong_sprint,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "is in sprint"),
+            Probe("sprint-plan.wrong-estimate", _sprint_plan_wrong_estimate,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "is estimated"),
         ),
     ),
     Guard(
@@ -1474,7 +1621,7 @@ GUARDS: tuple[Guard, ...] = (
         ),
         limit="The per-target divergence branch itself needs a dependency "
               "whose features differ by target, which cannot be built from "
-              "the locked graph without a network fetch. Owner F-X010.",
+              "the locked graph without a network fetch. Owner F-X014.",
     ),
     Guard(
         id="packages",
@@ -1546,7 +1693,7 @@ GUARDS: tuple[Guard, ...] = (
               "resolutions and the publish dry run are level 3 and need an "
               "npm install the sandbox does not carry. They run for real in "
               "the `packages` gate on every push, green, and this harness has "
-              "not watched them red. Owner F-X010.",
+              "not watched them red. Owner F-X014.",
     ),
 
     # -- the runner and the source resolver --------------------------------
@@ -1625,7 +1772,7 @@ GUARDS: tuple[Guard, ...] = (
               "18 itself, sits behind a pandoc conversion of the private "
               "`.docx`. Neither is in this repository, so a sandbox cannot "
               "reach it, and the same is true of the drift and "
-              "section-mapping branches. Owner F-X010.",
+              "section-mapping branches. Owner F-X014.",
     ),
 
     # -- the new guard this story ships ------------------------------------
@@ -2017,7 +2164,7 @@ GUARDS: tuple[Guard, ...] = (
                 "not exist, a comparison on a machine that does not own the "
                 "baseline, and a browser that is not installed.",
         claims=("*",),
-        owner="F-X010",
+        owner="F-X014",
         reason="Nothing watches these nine refusals. This entry claimed "
                "`scripts/tests/test_bench_check.py (the 7 argument refusals "
                "and the 4 run-time refusals)` until the S03 review's second "
@@ -2039,7 +2186,7 @@ GUARDS: tuple[Guard, ...] = (
         covered_by=("tools/bench/tests/cold_start_test.mjs",),
         limit="That suite needs a browser and is deliberately outside the "
               "`bench` gate, so these refusals are watched only when a "
-              "developer runs the harness. Owner F-X010.",
+              "developer runs the harness. Owner F-X014.",
     ),
     Guard(
         id="bench.page",
@@ -2049,7 +2196,7 @@ GUARDS: tuple[Guard, ...] = (
         refuses="A page serving an incomplete copy of the wasm artefact.",
         claims=("*",),
         covered_by=("tools/bench/tests/cold_start_test.mjs",),
-        limit="Same browser dependency as bench.cold-start. Owner F-X010.",
+        limit="Same browser dependency as bench.cold-start. Owner F-X014.",
     ),
     Guard(
         id="panic-probe",
@@ -2064,7 +2211,7 @@ GUARDS: tuple[Guard, ...] = (
         limit="The stub refusal itself has not been watched red. It fires "
               "only when the module fails to export what the probe imports, "
               "which needs a broken wasm-pack build to construct. Owner "
-              "F-X010.",
+              "F-X014.",
     ),
 
     # -- declared out of scope, with the reason -----------------------------
@@ -2113,7 +2260,7 @@ GUARDS: tuple[Guard, ...] = (
                "suite, `tools/spikes/common/tests/compare_test.mjs`, is run "
                "by nothing, which is pass 1's smell S19 and is unfixed. Out "
                "of scope here means no gate runs the file, not that its "
-               "refusals did not matter. Owner F-X010.",
+               "refusals did not matter. Owner F-X014.",
     ),
     Guard(
         id="spikes.extract",

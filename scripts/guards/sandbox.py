@@ -93,9 +93,17 @@ def scrubbed_env(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# The only two functions that name REPO_ROOT. A reviewer reads these two and
-# then knows the harness cannot write to the developer's repository, because
-# nothing else below refers to it at all.
+# `repo_read` is the ONLY function that runs git against the real repository,
+# and `cwd=REPO_ROOT` appears once in this file, in it. Three functions name
+# REPO_ROOT at all and the other two do not write: `Sandbox.git` names it to
+# REFUSE a cwd inside or above it, and `build` names it to read a tracked file
+# out of it. A reviewer reads those three and then knows the harness cannot
+# write to the developer's repository.
+#
+# An earlier version of this banner said two functions and said nothing else
+# below referred to REPO_ROOT, which was false, and a safety argument that
+# miscounts its own choke points is not one. `grep -n REPO_ROOT` on this file
+# is the check.
 # ---------------------------------------------------------------------------
 
 def repo_read(*args: str) -> str:

@@ -244,11 +244,10 @@ pub const CATALOGUE: &[Mutation] = &[
     },
     Mutation {
         name: "the-actual-linear-exact-swap",
-        why: "The real thing rather than a caricature of it. Every pixel moves \
-              by `u / w`, which is the exact divergence between LINEAR and \
-              LINEAR_EXACT derived in rational arithmetic, so most pixels do \
-              not cross a rounding boundary at all and the ones that do move \
-              by a single code. `plus-one-on-two-fifths-of-the-image` moves 40 \
+        why: "The real thing rather than a caricature of it. LINEAR_EXACT sits \
+              `u / w` below LINEAR before the renderer quantises, so a pixel \
+              drops one code with probability `u / w` and the rest do not, \
+              which an accumulator reproduces exactly and deterministically. `plus-one-on-two-fifths-of-the-image` moves 40 \
               per cent of the image by a whole code and clears the bias bound \
               several times over, which proves the bound catches THAT and says \
               nothing about the divergence HLD 18.3 is about. This one is the \
@@ -751,11 +750,27 @@ pub fn apply_to_frame(
             Ok(())
         }
         Effect::VoiLinearExactSwap => {
-            // The view's OWN window, read from its sidecar by the caller. Not a
-            // constant in the catalogue, because a divergence of `u / w` is a
-            // statement about the window the frame was actually rendered with,
-            // and a catalogue that hardcoded one would silently stop describing
-            // the view the day the target resolved elsewhere.
+            // **The renderer quantises a CONTINUOUS value, and that is the
+            // whole of this.** LINEAR_EXACT sits `u / w` below LINEAR before
+            // quantisation, so a pixel whose continuous value is within `u / w`
+            // of a rounding boundary drops one code and every other pixel does
+            // not. Over a region the effect is a drop rate of `u / w`,
+            // proportional to the display value.
+            //
+            // An earlier version of this applied `round(u - u / w)` to the
+            // already-quantised byte, and the sprint review's third pass caught
+            // it. That is not the divergence, it is a threshold: it changes a
+            // pixel only when `u >= w / 2`, so at width 400 it moved 55 of the
+            // 256 codes and at any width from 510 upward **it moved nothing at
+            // all** and then refused, claiming the view could not show the
+            // divergence, which was false. Four tracked files called it the
+            // real thing.
+            //
+            // The accumulator below is the real thing. `acc += u` each pixel,
+            // and a drop is taken whenever it crosses `w`, which yields exactly
+            // `floor(sum(u) / w)` drops placed in proportion to `u`. It is
+            // deterministic, so the mutation is reproducible, and it needs no
+            // float, no cast and no rounding decision.
             let Some(window_width) = window_width.filter(|w| *w > 0) else {
                 return Err(MutationError::Apply(
                     mutation.name,
@@ -764,33 +779,30 @@ pub fn apply_to_frame(
                         .to_owned(),
                 ));
             };
-            // `round(u * (w - 1) / w)` in integers, which is exactly
-            // `round(u - u / w)`. `(2a + b) / (2b)` is round-half-up for
-            // non-negative integers, so there is no float, no `as` cast and no
-            // rounding decision left implicit. u is at most 255 and w fits a
-            // u32, so u64 cannot overflow here.
             let w = u64::from(window_width);
+            let mut accumulator = 0_u64;
             let mut moved = 0_u64;
             for y in image.y0..image.y0.saturating_add(image.height) {
                 for x in image.x0..image.x0.saturating_add(image.width) {
                     let pixel = frame.pixel(x, y)?;
                     let Some(grey) = pixel.first() else { continue };
                     let u = u64::from(*grey);
-                    let swapped = (2 * u * (w - 1) + w) / (2 * w);
-                    let byte = u8::try_from(swapped).unwrap_or(*grey);
-                    if byte != *grey {
+                    accumulator = accumulator.saturating_add(u);
+                    if accumulator >= w && *grey > 0 {
+                        accumulator -= w;
+                        let byte = grey.saturating_sub(1);
+                        frame.set_pixel(x, y, [byte, byte, byte, u8::MAX])?;
                         moved = moved.saturating_add(1);
                     }
-                    frame.set_pixel(x, y, [byte, byte, byte, u8::MAX])?;
                 }
             }
             if moved == 0 {
                 return Err(MutationError::Apply(
                     mutation.name,
                     format!(
-                        "the swap moved no pixel at window width {window_width}, \
-                         so this view cannot show the divergence and declaring it \
-                         detectable would be false"
+                        "the swap moved no pixel at window width {window_width}. \
+                         Every pixel in the image rectangle is black, so there \
+                         is no divergence to show rather than a defect here"
                     ),
                 ));
             }

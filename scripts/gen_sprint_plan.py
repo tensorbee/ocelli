@@ -2,9 +2,12 @@
 """Generate docs/sprints/SPRINT_PLAN.md from docs/sprints/allocation.json.
 
 Written once at bootstrap. After that SPRINT_PLAN.md is hand-curated prose and
-this script runs only in `--check` mode, where it asserts one thing and one
-thing only: every planned F-ID appears in exactly one sprint table, and the
-sprint it appears in matches BACKLOG.md. Prose drift is a human's business.
+this script runs only in `--check` mode, where it asserts the planning data
+and nothing else: every planned F-ID appears in exactly one sprint table, and
+the sprint and the estimate it appears with match the allocation the backlog is
+rendered from. Prose drift is a human's business. The estimate was added by the
+S03 review's third pass, which found F-X014 carrying `1w` in the plan and `2w`
+in the backlog with no check able to see it.
 
 Usage:
   python3 scripts/gen_sprint_plan.py            # write SPRINT_PLAN.md
@@ -153,13 +156,29 @@ def render(data: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-ROW = re.compile(r"^\|\s*(F-X?\d{3}[a-z]?)\s*\|")
+ROW = re.compile(r"^\|\s*(F-X?\d{3}[a-z]?)\s*\|(.*)$")
 HEAD = re.compile(r"^####\s+Sprint\s+(S\d+)\s*$")
 
+#: Which cell of a sprint table row carries the estimate, counting from the
+#: F-ID as cell 0. `render` writes `| fid | eid | story | layer | Nw |`.
+EST_CELL = 4
 
-def parse_plan(text: str) -> dict[str, str]:
-    """F-ID -> sprint, read from the '#### Sprint SNN' sections."""
-    found: dict[str, str] = {}
+
+def parse_plan(text: str) -> dict[str, tuple[str, str]]:
+    """F-ID -> (sprint, estimate), read from the '#### Sprint SNN' sections.
+
+    The sprint comes from the heading and the estimate from the row's fifth
+    cell. A row too short to have one yields the empty string, which `check`
+    reports rather than skipping.
+
+    **The story text is deliberately not returned.** After the bootstrap
+    render this file is hand-curated prose and the wording is a human's
+    business. An estimate is not wording, it is the planning number the
+    backlog and the allocation both carry, and until the S03 review nothing
+    compared the three. F-X014 sat at `1w` here and `2w` in both of the
+    others for the length of that sprint.
+    """
+    found: dict[str, tuple[str, str]] = {}
     current = ""
     for line in text.splitlines():
         head = HEAD.match(line)
@@ -168,7 +187,9 @@ def parse_plan(text: str) -> dict[str, str]:
             continue
         row = ROW.match(line)
         if row and current:
-            found[row.group(1)] = current
+            cells = [c.strip() for c in row.group(2).split("|")]
+            est = cells[EST_CELL - 1] if len(cells) >= EST_CELL else ""
+            found[row.group(1)] = (current, est)
     return found
 
 
@@ -176,27 +197,36 @@ def check(data: dict) -> int:
     if not PLAN.exists():
         print(f"FAIL: {PLAN.relative_to(ROOT)} does not exist")
         return 1
-    expected = {s["fid"]: s["sprint"] for s in data["stories"] if s["sprint"]}
+    expected = {s["fid"]: (s["sprint"], f"{s['weeks']}w")
+                for s in data["stories"] if s["sprint"]}
     actual = parse_plan(PLAN.read_text())
 
     problems = []
-    for fid, sprint in sorted(expected.items()):
+    for fid, (sprint, est) in sorted(expected.items()):
         if fid not in actual:
             problems.append(f"{fid} is in BACKLOG.md sprint {sprint} "
                             f"but appears in no SPRINT_PLAN.md sprint table")
-        elif actual[fid] != sprint:
-            problems.append(f"{fid} is {sprint} in BACKLOG.md and "
-                            f"{actual[fid]} in SPRINT_PLAN.md")
+            continue
+        if actual[fid][0] != sprint:
+            problems.append(f"{fid} is in sprint {sprint} in BACKLOG.md "
+                            f"and in sprint {actual[fid][0]} in "
+                            f"SPRINT_PLAN.md")
+        if actual[fid][1] != est:
+            problems.append(f"{fid} is estimated {est} in BACKLOG.md and "
+                            f"{actual[fid][1] or 'nothing'} in "
+                            f"SPRINT_PLAN.md")
     for fid in sorted(set(actual) - set(expected)):
-        problems.append(f"{fid} appears in SPRINT_PLAN.md sprint {actual[fid]} "
-                        f"but carries no sprint in BACKLOG.md")
+        problems.append(f"{fid} appears in SPRINT_PLAN.md sprint "
+                        f"{actual[fid][0]} but carries no sprint in "
+                        f"BACKLOG.md")
 
     if problems:
         print("FAIL: SPRINT_PLAN.md and BACKLOG.md disagree")
         for problem in problems:
             print(f"  - {problem}")
         return 1
-    print(f"OK: {len(expected)} planned F-IDs, sprint assignment agrees")
+    print(f"OK: {len(expected)} planned F-IDs, sprint assignment and "
+          f"estimate agree")
     return 0
 
 

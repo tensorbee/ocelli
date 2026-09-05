@@ -28,8 +28,9 @@ differing by more than 2.";
 /// 25.1's bias bullet, added in S03 by operator decision through F-011's
 /// design plan, transcribed under the same two normalisations.
 pub const SECTION_25_1_BIAS: &str = "Systematic bias, monochrome: signed mean \
-difference over the image rectangle within 0.1 of one display code, evaluated \
-only where input identity, declared parameters and geometry already agree.";
+difference over the informative region within 0.1 of one display code, \
+evaluated only where input identity, declared parameters and geometry already \
+agree.";
 
 /// 25.1's colour bullet.
 pub const SECTION_25_1_COLOUR: &str = "Colour and ultrasound: perceptual \
@@ -207,14 +208,27 @@ pub fn monochrome_predicate(stats: &ChannelStats) -> Result<MonochromeVerdict, T
 /// views and detecting the soft-tissue CT rows where HLD 18.3's worked
 /// example lives.
 ///
-/// **A structural limit worth knowing before trusting this.** The
-/// per-pixel divergence between LINEAR and LINEAR_EXACT is exactly
-/// `u / w`, where `u` is the LINEAR display value in 0 to 255 and `w`
-/// is the window width. So the largest divergence any view can show is
-/// `255 / w`, and for `w > 2550` this bound is UNREACHABLE no matter
-/// which region it is taken over. The corpus already carries rows at
-/// `w = 4096`. Those views are not protected by this bound and nothing
-/// pretends otherwise.
+/// **What this bound cannot catch, measured rather than reasoned.** The
+/// per-pixel divergence between LINEAR and LINEAR_EXACT is exactly `u / w`,
+/// where `u` is the LINEAR display value in 0 to 255 and `w` is the window
+/// width, so the mean over a region is `mean(u) / w` and the bound fires only
+/// where the informative mean display code exceeds `0.1 * w`.
+///
+/// That is a statement about CONTENT and not only about width. The absolute
+/// limit is `255 / w`, so `w > 2550` is unreachable for any content, but the
+/// practical limit bites far sooner. Measured across the 71 gating class-one
+/// views on this corpus: **51 can fail this bound under the real divergence
+/// and 20 cannot.** The 20 are every `real/mr_eay131` row and its two
+/// reformats, at windows from 678 to 881 and informative means giving 0.058 to
+/// 0.087, plus `synthetic/mr_nonsquare_spacing` at 2048 and the two rows at
+/// 4096. **The smallest blind window is 678, not 2550.**
+///
+/// So this bound protects the soft-tissue CT rows, which is where HLD 18.3's
+/// worked example lives, and does not protect a wide-window MR. Widening it is
+/// not the answer, because the bound's job is to sit below a real divergence
+/// and above rounding noise. The answer for those views is a second statistic
+/// or a corpus row whose content reaches the bound, and neither is this
+/// story's to invent.
 #[derive(Clone, Copy, Debug)]
 pub struct BiasVerdict {
     pub signed_mean_diff: f64,
@@ -233,6 +247,44 @@ pub fn bias_bound(image_stats: &ChannelStats) -> Result<BiasVerdict, ToleranceEr
 
 #[cfg(test)]
 mod tests {
+    /// **The transcribed bullets are compared against the specification.**
+    ///
+    /// They are presented as verbatim quotations of HLD 25.1 and until the
+    /// sprint review's third pass nothing compared them to it, so
+    /// `SECTION_25_1_BIAS` still said "image rectangle" for a bullet the same
+    /// sprint had changed to "informative region". A quotation nobody checks is
+    /// a paraphrase that has stopped being true.
+    ///
+    /// The comparison is on the bullet's FIRST SENTENCE, because that is the
+    /// normative statement and the rest of the bullet is the reasoning behind
+    /// it, which moves as measurements are added.
+    #[test]
+    fn the_transcribed_bullets_match_the_specification() {
+        let hld = include_str!("../../../docs/hld/22-testing-and-tolerance.md");
+        for (label, quoted) in [
+            ("Systematic bias, monochrome", super::SECTION_25_1_BIAS),
+            ("Colour and ultrasound", super::SECTION_25_1_COLOUR),
+        ] {
+            let first_sentence = quoted
+                .split_once(". ")
+                .map_or(quoted, |(head, _)| head)
+                .replace(&format!("{label}: "), "");
+            let normalised: String = first_sentence
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            let spec: String = hld.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                spec.contains(&normalised),
+                "{label} is transcribed here as {normalised:?} and \
+                 docs/hld/22-testing-and-tolerance.md does not contain that. \
+                 The constant claims to be a quotation, so either the \
+                 specification moved and this did not, or this was never the \
+                 quotation it says it is."
+            );
+        }
+    }
+
     use super::{ToleranceClass, ToleranceError, class_from_categories};
 
     fn tokens(list: &[&str]) -> Vec<String> {

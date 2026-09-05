@@ -83,11 +83,19 @@ Repository bootstrap. Nothing is published.
   route. HLD section 15.2 names `openjp2` as the wasm choice, and that is
   measured not to work.
 - A standing probe for every repository guard. `bin/ocelli.sh gate guards`
-  drives each declared refusal into its rejected state in a disposable
-  repository and requires it to fire, and a probe whose guard exits zero is a
-  failure of the harness rather than a pass. The census refuses in both
-  directions, so a refusal no entry claims and an entry claiming no refusal both
-  fail, and it currently reports zero refusals watched by nothing. Four holes in
-  existing guards are declared rather than hidden, and a declared hole whose
+  drives each probed refusal into its rejected state in a disposable repository
+  and requires it to fire, and a probe whose guard exits zero is a failure of
+  the harness rather than a pass. The census refuses in both directions, so a
+  refusal no entry claims and an entry claiming no refusal both fail. It sorts
+  every discovered refusal into four buckets, and the fourth is the refusals
+  watched by nothing. **That bucket is not empty**, and the number in it is a
+  ratchet that may only go down, so a refusal added without a watcher fails the
+  floor. `python3 scripts/guard_census.py` prints the buckets and names each
+  uncovered entry, each declared limit and each open hole with its owner. Those
+  are entry-level buckets summed over refusal sites rather than a count of
+  refusals driven red, which the census says on the line that prints them. Holes
+  in existing guards are declared rather than hidden, and a declared hole whose
   probe starts passing also fails, so the record cannot go stale in either
-  direction.
+  direction. Two of the four declared in S03 were closed inside the same sprint
+  and their declarations went with them, which is that ratchet working.
+  `docs/lld/guards.md` is the design.

@@ -1129,18 +1129,31 @@ the input contract's third hash and the plan's write set named only `serde`.
 
 **What was built.** Discovery, declaration, probe and census, as four pieces
 that check each other. `scripts/guards/discover.py` finds every refusal site
-mechanically, 476 across 62 files under `scripts/`, `ci/`, `.githooks/`, `bin/`
-and `tools/`, deliberately not `crates/`.
+mechanically, under `scripts/`, `ci/`, `.githooks/`, `bin/` and `tools/`,
+deliberately not `crates/`. `python3 -m guards.discover` from `scripts/` lists
+them and `python3 scripts/guard_census.py` prints the total.
 `scripts/guards/catalogue.py` declares each with the normative citation saying
 what it is FOR, so a probe's input comes from the specification and only its
 expected fragment from the implementation. `scripts/guard_probe.py` drives each
 red in a disposable repository. `scripts/guards/census.py` proves the
 declaration complete in both directions.
 
-**The count, and it is the story.** 227 refusals watched by 76 probes, 217 by a
-named standing test, 32 declared out of scope with a reason and a backstop, and
-**zero watched by nothing**. Before this story most of them had been observed
-red exactly once, by hand, by the story that wrote them.
+**The count, and it is the story.** Every refusal the scan finds is claimed by
+exactly one catalogue entry, and `python3 scripts/guard_census.py` prints the
+buckets: how many belong to an entry carrying one of this harness's probes, how
+many to an entry naming a standing test that opens the file, how many are
+declared out of scope with a reason and a backstop, and how many are watched by
+nothing. Those are ENTRY-level buckets summed over refusal sites and not a
+count of refusals driven red, which is the sentence the census prints beside
+them. Before this story most of these refusals had been observed red exactly
+once, by hand, by the story that wrote them.
+
+**The last bucket is not zero, and this entry claimed it was.** The S03 review's
+second pass measured an entry naming a suite that never opens the file it was
+claimed to cover, so that claim is now recorded as a gap with an owner and the
+census ratchets it downward. **No count for this harness is transcribed into
+this entry.** Every count that was here is wrong today, because the harness was
+corrected inside the same sprint and the prose beside it was not.
 
 **The inversion is what makes it trustworthy.** A probe whose guard exits zero
 is a failure OF THE HARNESS, not a pass, and every guard file carries a
@@ -1148,14 +1161,15 @@ mandatory control run on the unmutated sandbox. That is precisely what F-010's
 round 12 lacked, when a broken mutation harness gave every earlier "all
 refusals red" result a red baseline and proved nothing.
 
-**Four holes in existing guards are declared rather than fixed, and all four
-fire today.** `ci_floor_check.py` is satisfied by a YAML comment naming a gate
-with the real step deleted. `no_std_check.py` loses a crate that deletes the
-attribute rather than reporting it. `pin_and_size_check.py` reads the first
-quoted string in an entry, so a table form reports the wrong token. `validate-
-handoff` refuses a branch written in backticks, which is how this repository
-writes every path. **A declared defect whose probe starts passing fails the
-gate**, so the ratchet runs in both directions.
+**Four holes in existing guards were declared rather than fixed, and the
+declaration is a ratchet in both directions.** **A declared defect whose probe
+starts passing fails the gate**, so a hole that gets closed cannot leave its
+declaration standing as coverage. Two of the four were closed during the S03
+sprint review's second pass and their declarations went with them in the same
+change, which is that ratchet working. The open ones live in `DEFECTS` at the
+foot of `scripts/guards/catalogue.py`, and `python3 scripts/guard_census.py`
+names each with its full text and its owner. F-X014 is the story that closes
+them.
 
 **HLD sections implemented.** Section 27.1's denied lints, now asserted by
 `scripts/lint_policy_check.py` because nothing did. Section 27.2's R2 and R3 as
@@ -1168,21 +1182,40 @@ the section.
 `ci/guard-probe-budget.json`, `bin/ocelli.sh`, `scripts/ci_floor_check.py`,
 `.github/workflows/ci.yml`, `docs/runbooks/guard-verification.md`,
 `.claude/commands/implement-feature.md` and its regenerated adapter.
-**Tests added.** 30 in the catalogue's own unit suite, plus 66 guards observed
-red for their declared reason in the floor profile and 68 in the deep one, with
-38 and 41 controls green. Four mutations of the harness itself were observed
-red and reverted.
+**Tests added.** The catalogue's own unit suite,
+`python3 -m unittest discover -s scripts/tests -p test_guard_catalogue.py`,
+which asserts the DECLARATION and not the guards. Plus the probe harness itself
+in both profiles, `python3 scripts/guard_probe.py --profile floor` and
+`--profile deep`, each of which prints the refusal probes it ran, the distinct
+guards those drove red, the accept probes, the open known defects and the
+mandatory controls it held green. **Those are five different quantities and
+this entry reported one under another's name**, so they are left to the command
+that measures them. Four mutations of the harness itself were observed red and
+reverted.
 **Fixture provenance.** Each probe's input is derived from the citation the
 entry names, and only the expected message fragment comes from the
 implementation. That split is what stops a probe asserting what a guard does
 rather than what it is for, which is HLD 27.2 R2 applied to a guard.
-**Verification.** `bin/ocelli.sh gate --floor` ALL GREEN over 25 gates, plus
-`corpus` and `oracle`, which is a full sprint profile over 28.
+**Verification.** `bin/ocelli.sh gate --floor` ALL GREEN, plus `corpus` and
+`oracle`. That is not a full sprint profile and this entry's arithmetic said it
+was. `bin/ocelli.sh gate --list` is the inventory, `--floor` is that list
+without `oracle`, `corpus` and `guards-deep`, and `--sprint` runs all of it, so
+floor plus those two leaves exactly one gate out and it is `guards-deep`, the
+one this story added.
 **Corpus.** pass, 91 rows.
 **Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. Repository
 tooling resolves no tier. The rows are recorded rather than omitted.
-**LLD updated.** `docs/lld/guards.md` created, `docs/lld/README.md` gained a
-row, `docs/lld/oracle.md` gained the adoption paragraph.
+**LLD updated.** `docs/lld/guards.md` created, covering discovery, the
+catalogue, the sandbox and its safety argument, the probe runner, the census
+checks, the two gates and what none of it reaches. `docs/lld/README.md` gained
+a row. `docs/lld/oracle.md` gained the adoption paragraph. **All three were
+claimed here when the story closed and none of them existed.**
+`/complete-feature` step 9 was not run and nothing noticed, so the sprint's
+largest story had no living-architecture document while the record said it had
+three. They were written during the S03 review's third pass, against the code
+rather than against the design plan. That distinction is not cosmetic: the plan
+proposed three census checks and the census grew past them, so a document
+written from the plan would have described a mechanism that does not exist.
 **Deviations from the design plan.** Seven, all reported. Six files under the
 scan roots carry refusals invoked by no gate at all, so a third state
 `not-a-guard` was needed rather than inflating the coverage number. Three

@@ -229,90 +229,96 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 16 | `scripts/source_provenance_check.py` | `provenance.dependency`, level 3 | must refuse, output carries `depends on` | floor | `bin/ocelli.sh gate guards` |
 | 17 | `scripts/source_provenance_check.py` | `provenance.unqualified-mention`, level 3 | must refuse, output carries `with no statement that it is out of bounds` | floor | `bin/ocelli.sh gate guards` |
 | 18 | `scripts/pin_and_size_check.py` | `pins.range`, level 3 | must refuse, output carries `is a RANGE, not an exact pin` | floor | `bin/ocelli.sh gate guards` |
-| 19 | `scripts/pin_and_size_check.py` | `pins.absent`, level 3 | must refuse, output carries `is not declared in [workspace.dependencies]` | floor | `bin/ocelli.sh gate guards` |
-| 20 | `scripts/pin_and_size_check.py` | `pins.size-ceiling`, level 3 | must refuse, output carries `byte ceiling` | floor | `bin/ocelli.sh gate guards` |
-| 21 | `scripts/pin_and_size_check.py` | `pins.table-form`, level 3 | must ACCEPT, output carries `pinned exactly` | floor | `bin/ocelli.sh gate guards` |
-| 22 | `scripts/no_std_check.py` | `nostd.reaches-std`, level 3 | must refuse, output carries `reaches a std feature` | deep | `bin/ocelli.sh gate guards-deep` |
-| 23 | `scripts/no_std_check.py` | `nostd.none-declared`, level 3 | must refuse, output carries `no crate under crates/ declares no_std` | deep | `bin/ocelli.sh gate guards-deep` |
-| 24 | `scripts/no_std_check.py` | `nostd.loses-a-crate`, level 3 **G-02, fails today** | must refuse, output carries `stopped declaring no_std` | deep | `bin/ocelli.sh gate guards-deep` |
-| 25 | `scripts/ci_floor_check.py` | `ci-floor.missing-step`, level 3 | must refuse, output carries `and nothing in` | floor | `bin/ocelli.sh gate guards` |
-| 26 | `scripts/ci_floor_check.py` | `ci-floor.comment-only`, level 3 | must refuse, output carries `and nothing in` | floor | `bin/ocelli.sh gate guards` |
-| 27 | `scripts/verify_ledger.py` | `ledger.no-record`, level 3 | must refuse, output carries `no verification recorded for the staged tree` | floor | `bin/ocelli.sh gate guards` |
-| 28 | `scripts/verify_ledger.py` | `ledger.red-corpus`, level 3 | must refuse, output carries `the corpus is RED for tree` | floor | `bin/ocelli.sh gate guards` |
-| 29 | `scripts/verify_ledger.py` | `ledger.require-corpus`, level 3 | must refuse, output carries `and this gate requires 'pass'` | floor | `bin/ocelli.sh gate guards` |
-| 30 | `scripts/verify_ledger.py` | `ledger.bad-state`, level 3 | must refuse, output carries `--corpus must be one of` | floor | `bin/ocelli.sh gate guards` |
-| 31 | `scripts/verify_ledger.py` | `ledger.trailer-silent`, level 3 | must refuse, output carries `` | floor | `bin/ocelli.sh gate guards` |
-| 32 | `scripts/verify_ledger.py` | `ledger.no-trailer`, level 3 | must refuse, output carries `carries no Ocelli-Verify trailer` | floor | `bin/ocelli.sh gate guards` |
-| 33 | `scripts/verify_ledger.py` | `ledger.tree-mismatch`, level 3 | must refuse, output carries `but the commit's tree is` | floor | `bin/ocelli.sh gate guards` |
-| 34 | `.githooks/pre-commit` | `hooks.pre-commit.dicom`, level 3 | must refuse, output carries `Commit refused` | floor | `bin/ocelli.sh gate guards` |
-| 35 | `.githooks/commit-msg` | `hooks.commit-msg.forged-trailer`, level 3 | must refuse, output carries `written by this hook from the verify ledger` | floor | `bin/ocelli.sh gate guards` |
-| 36 | `.githooks/commit-msg` | `hooks.commit-msg.agent-coauthor`, level 3 | must refuse, output carries `no agent co-author trailer` | floor | `bin/ocelli.sh gate guards` |
-| 37 | `.githooks/commit-msg` | `hooks.commit-msg.prose`, level 3 | must refuse, output carries `semicolon in prose` | floor | `bin/ocelli.sh gate guards` |
-| 38 | `.githooks/pre-push` | `hooks.pre-push.unverified`, level 3 | must refuse, output carries `Push refused` | floor | `bin/ocelli.sh gate guards` |
-| 39 | `ci/check-bindgen-isolation.sh` | `bindgen.reaches`, level 3 | must refuse, output carries `reaches wasm-bindgen` | deep | `bin/ocelli.sh gate guards-deep` |
-| 40 | `ci/check-bindgen-isolation.sh` | `bindgen.declares`, level 3 | must refuse, output carries `declares wasm-bindgen as a direct dependency` | deep | `bin/ocelli.sh gate guards-deep` |
-| 41 | `ci/check-bindgen-isolation.sh` | `bindgen.in-source`, level 3 | must refuse, output carries `names wasm_bindgen in source` | deep | `bin/ocelli.sh gate guards-deep` |
-| 42 | `ci/check-device-ownership.sh` | `device.creator`, level 3 | must refuse, output carries `creates a GPU device or surface` | floor | `bin/ocelli.sh gate guards` |
-| 43 | `ci/check-device-ownership.sh` | `device.contract-gone`, level 3 | must refuse, output carries `no longer defines GpuContext` | floor | `bin/ocelli.sh gate guards` |
-| 44 | `ci/check-device-ownership.sh` | `device.owned-accessor`, level 3 | must refuse, output carries `hands out an owned device` | floor | `bin/ocelli.sh gate guards` |
-| 45 | `ci/check-device-ownership.sh` | `device.derives-clone`, level 3 | must refuse, output carries `derives Clone` | floor | `bin/ocelli.sh gate guards` |
-| 46 | `scripts/backlog_check.py` | `backlog.done-without-record`, level 3 | must refuse, output carries `is done with no SPRINT_TRACKER.md row` | floor | `bin/ocelli.sh gate guards` |
-| 47 | `scripts/backlog_check.py` | `backlog.bad-status`, level 3 | must refuse, output carries `expected one of` | floor | `bin/ocelli.sh gate guards` |
-| 48 | `scripts/backlog_check.py` | `backlog.hook-out-of-phase`, level 3 | must refuse, output carries `not P1` | floor | `bin/ocelli.sh gate guards` |
-| 49 | `scripts/gen_sprint_plan.py` | `sprint-plan.absent`, level 3 | must refuse, output carries `does not exist` | floor | `bin/ocelli.sh gate guards` |
-| 50 | `scripts/sync_agent_skills.py` | `skills.stale-adapter`, level 3 | must refuse, output carries `is stale, its source changed` | floor | `bin/ocelli.sh gate guards` |
-| 51 | `scripts/sprint_workflow.py` | `handoff.wrong-branch`, level 3 | must refuse, output carries `does not start with` | floor | `bin/ocelli.sh gate guards` |
-| 52 | `scripts/sprint_workflow.py` | `handoff.backticked-branch`, level 3 **G-04, fails today** | must ACCEPT, output carries `validates` | floor | `bin/ocelli.sh gate guards` |
-| 53 | `scripts/sprint_workflow.py` | `sprint-lifecycle.not-in-sprint`, level 3 | must refuse, output carries `is not in sprint` | floor | `bin/ocelli.sh gate guards` |
-| 54 | `scripts/error_code_check.py` | `errors.renumbered`, level 3 | must refuse, output carries `so this is a renumbering` | floor | `bin/ocelli.sh gate guards` |
-| 55 | `scripts/bench_check.py` | none in this harness | A benchmark registry whose subject stories do not resolve, a subject whose story has not landed carrying a runner or a recorded number, and a playwright pin that has drifted between the two harnesses. | - | scripts/tests/test_bench_check.py (25 cases, run by the `bench` gate, which is in the floor) |
-| 56 | `scripts/corpus_check.py` | `corpus.digest-mismatch`, level 3 | must refuse, output carries `does not match its manifest digest` | floor | `bin/ocelli.sh gate guards` |
-| 57 | `scripts/corpus_check.py` | `corpus.absent`, level 3 | must refuse, output carries `corpus cases are absent` | floor | `bin/ocelli.sh gate guards` |
-| 58 | `scripts/corpus_check.py` | `corpus.unrecorded-licence`, level 3 | must refuse, output carries `cannot be redistributed or cited` | floor | `bin/ocelli.sh gate guards` |
-| 59 | `scripts/corpus_tests.py` | `corpus-tests.skip-is-not-a-pass`, level 3 | must refuse, output carries `FAIL: a prerequisite` | floor | `bin/ocelli.sh gate guards` |
-| 60 | `scripts/corpus_synth.py` | none in this harness | A manifest whose header is not the recorded column set. | - | scripts/tests/test_corpus_synth.py (run by the `corpus-tests` gate) |
-| 61 | `scripts/target_feature_check.py` | `target-features.cannot-run`, level 3 | must refuse, output carries `could not run` | deep | `bin/ocelli.sh gate guards-deep` |
-| 62 | `scripts/package_check.py` | `packages.exports-not-in-tarball`, level 1 | must refuse, output carries `advertises` | floor | `bin/ocelli.sh gate guards` |
-| 63 | `scripts/package_check.py` | `packages.version-skew`, level 1 | must refuse, output carries `the Rust workspace is` | floor | `bin/ocelli.sh gate guards` |
-| 64 | `bin/ocelli.sh` | `runner.absent-prerequisite`, level 3 | must refuse, output carries `reference stack is not installed` | floor | `bin/ocelli.sh gate guards` |
-| 65 | `scripts/source_dir.py` | `source-dir.unconfigured`, level 3 | must refuse, output carries `are not configured` | floor | `bin/ocelli.sh gate guards` |
-| 66 | `scripts/split_hld.py` | `split-hld.cannot-run`, level 3 | must refuse, output carries `A check that cannot run is NOT a check that` | floor | `bin/ocelli.sh gate guards` |
-| 67 | `scripts/lint_policy_check.py` | `lint-policy.weakened`, level 3 | must refuse, output carries `is 'allow' and HLD 27.1 requires` | floor | `bin/ocelli.sh gate guards` |
-| 68 | `scripts/lint_policy_check.py` | `lint-policy.uninherited`, level 3 | must refuse, output carries `does not inherit the workspace lint table` | floor | `bin/ocelli.sh gate guards` |
-| 69 | `scripts/guards/census.py` | `census.unclaimed-site`, level 3 | must refuse, output carries `no catalogue entry claims` | floor | `bin/ocelli.sh gate guards` |
-| 70 | `scripts/guards/census.py` | `census.changed-constant`, level 3 | must refuse, output carries `changed without its recorded value` | floor | `bin/ocelli.sh gate guards` |
-| 71 | `scripts/guards/census.py` | `census.no-std-set-shrunk`, level 3 | must refuse, output carries `changed without its recorded value` | floor | `bin/ocelli.sh gate guards` |
-| 72 | `scripts/guards/census.py` | `census.uncovered-grew`, level 3 | must refuse, output carries `The ratchet may only decrease` | floor | `bin/ocelli.sh gate guards` |
-| 73 | `scripts/guards/census.py` | `census.no-ceiling`, level 3 | must refuse, output carries `records no uncovered ceiling` | floor | `bin/ocelli.sh gate guards` |
-| 74 | `scripts/guards/census.py` | `census.orphan-recorded-constant`, level 3 | must refuse, output carries `is not declared in the catalogue's CONSTANTS` | floor | `bin/ocelli.sh gate guards` |
-| 75 | `scripts/guards/census.py` | `census.gate-without-an-entry`, level 3 | must refuse, output carries `has no catalogue entry and no `delegated` reason` | floor | `bin/ocelli.sh gate guards` |
-| 76 | `scripts/guards/census.py` | `census.floor-needing-a-gpu`, level 1 | must refuse, output carries `no GPU, no browser and no corpus` | floor | `bin/ocelli.sh gate guards` |
-| 77 | `scripts/guard_census.py` | `census-runbook.markers-gone`, level 3 | must refuse, output carries `carries no generated-table markers` | floor | `bin/ocelli.sh gate guards` |
-| 78 | `scripts/guard_probe.py` | `probe-runner.self-test`, level 3 | must ACCEPT, output carries `OK` | floor | `bin/ocelli.sh gate guards` |
-| 79 | `scripts/guards/sandbox.py` | none in this harness | A git call outside the sandbox, a git call in a directory this harness did not create, and the `rm --cached` and `checkout --` pair the runbook records as a false-green trap. | - | scripts/guard_probe.py --self-test; scripts/tests/test_guard_catalogue.py |
-| 80 | `scripts/guards/discover.py` | none in this harness | Nothing on its own. It is the scanner the census refuses from. | - | scripts/tests/test_guard_catalogue.py |
-| 81 | `scripts/guards/catalogue.py` | none in this harness | A probe builder that mutated nothing, and a fixture drawn from a citation that has gone away. | - | scripts/tests/test_guard_catalogue.py |
-| 82 | `tools/oracle/run.mjs` | none in this harness | A run that reached no row, a decode that produced nothing, a frame that never presented, a read-back still showing the sentinel, a volume that did not load, and the environment refusals that keep the rasteriser honest. | - | tools/oracle/src/faults.mjs (23 injected faults, replayed by tools/oracle/tests/faults.mjs on every `oracle` gate); tools/oracle/tests/args_test.mjs; tools/oracle/tests/paths_test.mjs; tools/oracle/tests/pins_test.mjs |
-| 83 | `tools/oracle/page/app.mjs` | none in this harness | A render that did not present, a read-back that is not comparable, and a frame the page cannot attribute. | - | tools/oracle/src/faults.mjs |
-| 84 | `tools/oracle/page/volume.mjs` | none in this harness | A volume that did not load, a geometry that is not a permutation of the declared one, and a reformat that never presented. | - | tools/oracle/src/faults.mjs |
-| 85 | `tools/oracle/src/volume.mjs` | none in this harness | A volume subject whose members disagree, a spacing or orientation that does not resolve, and a declared truth the reference does not reproduce. | - | tools/oracle/tests/volume_test.mjs (run inside `bin/ocelli.sh oracle`'s unit pass) |
-| 86 | `tools/oracle/src/manifest.mjs` | none in this harness | A manifest the reference half cannot read, and a row it cannot resolve to a case. | - | tools/oracle/tests/manifest_test.mjs |
-| 87 | `tools/oracle/src/geometry.mjs` | none in this harness | A geometry the reference cannot express, and one that does not round-trip. | - | tools/oracle/tests/geometry_test.mjs |
-| 88 | `tools/oracle/src/voi.mjs` | none in this harness | A VOI declaration the reference cannot apply, and a window the row does not carry. | - | tools/oracle/tests/params_test.mjs |
-| 89 | `tools/oracle/src/params.mjs` | none in this harness | A render parameter the page does not implement, and a parameter set that does not resolve for a row. | - | tools/oracle/tests/params_test.mjs |
-| 90 | `tools/oracle/src/unsupported.mjs` | none in this harness | A row declared unsupported that renders, and a row that fails without a declaration. | - | tools/oracle/tests/unsupported_test.mjs |
-| 91 | `tools/oracle/src/output.mjs` | none in this harness | An output directory that is not the harness's own. | - | tools/oracle/tests/output_test.mjs |
-| 92 | `tools/oracle/src/pins.mjs` | none in this harness | A reference stack installed at a version nobody pinned. | - | tools/oracle/tests/pins_test.mjs |
-| 93 | `tools/oracle/src/sidecar.mjs` | none in this harness | A sidecar the comparator cannot read. | - | tools/oracle/tests/sidecar_test.mjs |
-| 94 | `tools/oracle/check_sidecars.py` | none in this harness | A cross-read mismatch reported without redacting a real row's values, and a sidecar pydicom and the reference disagree about. | - | tools/oracle/check_sidecars.py --self-test, run by tools/oracle/run.mjs under both interpreters |
-| 95 | `tools/oracle/src/faults.mjs` | none in this harness | A fault name nothing declares, and a filter that selected nothing reading as success. | - | tools/oracle/tests/faults.mjs |
-| 96 | `tools/bench/src/registry.mjs` | none in this harness | A registry entry with no subject story, a duplicate subject, and a runner for a subject whose story has not landed. | - | tools/bench/tests/registry_test.mjs (run by the `bench` gate) |
-| 97 | `tools/bench/src/record.mjs` | none in this harness | A record written against a host class it was not measured on, and a malformed baseline. | - | tools/bench/tests/record_test.mjs; tools/bench/tests/hostclass_test.mjs |
-| 98 | `tools/bench/src/state.mjs` | none in this harness | A run state the harness cannot resume from. | - | tools/bench/tests/state_test.mjs |
-| 99 | `tools/bench/run.mjs` | none in this harness | An argument the harness does not accept, a subject that does not exist, a comparison on a machine that does not own the baseline, and a browser that is not installed. | - | nothing |
-| 100 | `tools/bench/src/runners/wasm_cold_start.mjs` | none in this harness | A cold-start measurement taken against a stub, an incomplete artefact copy, and a page that never reported. | - | tools/bench/tests/cold_start_test.mjs |
-| 101 | `tools/bench/page/app.mjs` | none in this harness | A page serving an incomplete copy of the wasm artefact. | - | tools/bench/tests/cold_start_test.mjs |
-| 102 | `scripts/panic_probe.mjs` | none in this harness | A run that measured the probe's stub rather than the module. | - | bin/ocelli.sh gate panic, which builds a second module carrying the panic-probe feature and runs this file on every floor gate |
+| 19 | `scripts/pin_and_size_check.py` | `pins.partial-version`, level 3 | must refuse, output carries `PARTIAL version` | floor | `bin/ocelli.sh gate guards` |
+| 20 | `scripts/pin_and_size_check.py` | `pins.absent`, level 3 | must refuse, output carries `is not declared in [workspace.dependencies]` | floor | `bin/ocelli.sh gate guards` |
+| 21 | `scripts/pin_and_size_check.py` | `pins.size-ceiling`, level 3 | must refuse, output carries `byte ceiling` | floor | `bin/ocelli.sh gate guards` |
+| 22 | `scripts/pin_and_size_check.py` | `pins.table-form`, level 3 | must ACCEPT, output carries `pinned exactly` | floor | `bin/ocelli.sh gate guards` |
+| 23 | `scripts/no_std_check.py` | `nostd.reaches-std`, level 3 | must refuse, output carries `reaches a std feature` | deep | `bin/ocelli.sh gate guards-deep` |
+| 24 | `scripts/no_std_check.py` | `nostd.none-declared`, level 3 | must refuse, output carries `no crate under crates/ declares no_std` | deep | `bin/ocelli.sh gate guards-deep` |
+| 25 | `scripts/no_std_check.py` | `nostd.loses-a-crate`, level 3 **G-02, fails today** | must refuse, output carries `stopped declaring no_std` | deep | `bin/ocelli.sh gate guards-deep` |
+| 26 | `scripts/ci_floor_check.py` | `ci-floor.event-gated`, level 3 | must refuse, output carries `is behind a condition that does not run it on` | floor | `bin/ocelli.sh gate guards` |
+| 27 | `scripts/ci_floor_check.py` | `ci-floor.event-gated-accept`, level 3 | must ACCEPT, output carries `floor gate(s) are invoked by CI on` | floor | `bin/ocelli.sh gate guards` |
+| 28 | `scripts/ci_floor_check.py` | `ci-floor.complementary-steps`, level 3 | must ACCEPT, output carries `floor gate(s) are invoked by CI on` | floor | `bin/ocelli.sh gate guards` |
+| 29 | `scripts/ci_floor_check.py` | `ci-floor.missing-step`, level 3 | must refuse, output carries `and nothing in` | floor | `bin/ocelli.sh gate guards` |
+| 30 | `scripts/ci_floor_check.py` | `ci-floor.comment-only`, level 3 | must refuse, output carries `and nothing in` | floor | `bin/ocelli.sh gate guards` |
+| 31 | `scripts/verify_ledger.py` | `ledger.no-record`, level 3 | must refuse, output carries `no verification recorded for the staged tree` | floor | `bin/ocelli.sh gate guards` |
+| 32 | `scripts/verify_ledger.py` | `ledger.red-corpus`, level 3 | must refuse, output carries `the corpus is RED for tree` | floor | `bin/ocelli.sh gate guards` |
+| 33 | `scripts/verify_ledger.py` | `ledger.require-corpus`, level 3 | must refuse, output carries `and this gate requires 'pass'` | floor | `bin/ocelli.sh gate guards` |
+| 34 | `scripts/verify_ledger.py` | `ledger.bad-state`, level 3 | must refuse, output carries `--corpus must be one of` | floor | `bin/ocelli.sh gate guards` |
+| 35 | `scripts/verify_ledger.py` | `ledger.trailer-silent`, level 3 | must refuse, output carries `` | floor | `bin/ocelli.sh gate guards` |
+| 36 | `scripts/verify_ledger.py` | `ledger.no-trailer`, level 3 | must refuse, output carries `carries no Ocelli-Verify trailer` | floor | `bin/ocelli.sh gate guards` |
+| 37 | `scripts/verify_ledger.py` | `ledger.tree-mismatch`, level 3 | must refuse, output carries `but the commit's tree is` | floor | `bin/ocelli.sh gate guards` |
+| 38 | `.githooks/pre-commit` | `hooks.pre-commit.dicom`, level 3 | must refuse, output carries `Commit refused` | floor | `bin/ocelli.sh gate guards` |
+| 39 | `.githooks/commit-msg` | `hooks.commit-msg.forged-trailer`, level 3 | must refuse, output carries `written by this hook from the verify ledger` | floor | `bin/ocelli.sh gate guards` |
+| 40 | `.githooks/commit-msg` | `hooks.commit-msg.agent-coauthor`, level 3 | must refuse, output carries `no agent co-author trailer` | floor | `bin/ocelli.sh gate guards` |
+| 41 | `.githooks/commit-msg` | `hooks.commit-msg.prose`, level 3 | must refuse, output carries `semicolon in prose` | floor | `bin/ocelli.sh gate guards` |
+| 42 | `.githooks/pre-push` | `hooks.pre-push.unverified`, level 3 | must refuse, output carries `Push refused` | floor | `bin/ocelli.sh gate guards` |
+| 43 | `ci/check-bindgen-isolation.sh` | `bindgen.reaches`, level 3 | must refuse, output carries `reaches wasm-bindgen` | deep | `bin/ocelli.sh gate guards-deep` |
+| 44 | `ci/check-bindgen-isolation.sh` | `bindgen.declares`, level 3 | must refuse, output carries `declares wasm-bindgen as a direct dependency` | deep | `bin/ocelli.sh gate guards-deep` |
+| 45 | `ci/check-bindgen-isolation.sh` | `bindgen.in-source`, level 3 | must refuse, output carries `names wasm_bindgen in source` | deep | `bin/ocelli.sh gate guards-deep` |
+| 46 | `ci/check-device-ownership.sh` | `device.creator`, level 3 | must refuse, output carries `creates a GPU device or surface` | floor | `bin/ocelli.sh gate guards` |
+| 47 | `ci/check-device-ownership.sh` | `device.contract-gone`, level 3 | must refuse, output carries `no longer defines GpuContext` | floor | `bin/ocelli.sh gate guards` |
+| 48 | `ci/check-device-ownership.sh` | `device.owned-accessor`, level 3 | must refuse, output carries `hands out an owned device` | floor | `bin/ocelli.sh gate guards` |
+| 49 | `ci/check-device-ownership.sh` | `device.derives-clone`, level 3 | must refuse, output carries `derives Clone` | floor | `bin/ocelli.sh gate guards` |
+| 50 | `scripts/backlog_check.py` | `backlog.done-without-record`, level 3 | must refuse, output carries `is done with no SPRINT_TRACKER.md row` | floor | `bin/ocelli.sh gate guards` |
+| 51 | `scripts/backlog_check.py` | `backlog.bad-status`, level 3 | must refuse, output carries `expected one of` | floor | `bin/ocelli.sh gate guards` |
+| 52 | `scripts/backlog_check.py` | `backlog.hook-out-of-phase`, level 3 | must refuse, output carries `not P1` | floor | `bin/ocelli.sh gate guards` |
+| 53 | `scripts/gen_sprint_plan.py` | `sprint-plan.absent`, level 3 | must refuse, output carries `does not exist` | floor | `bin/ocelli.sh gate guards` |
+| 54 | `scripts/gen_sprint_plan.py` | `sprint-plan.wrong-sprint`, level 3 | must refuse, output carries `is in sprint` | floor | `bin/ocelli.sh gate guards` |
+| 55 | `scripts/gen_sprint_plan.py` | `sprint-plan.wrong-estimate`, level 3 | must refuse, output carries `is estimated` | floor | `bin/ocelli.sh gate guards` |
+| 56 | `scripts/sync_agent_skills.py` | `skills.stale-adapter`, level 3 | must refuse, output carries `is stale, its source changed` | floor | `bin/ocelli.sh gate guards` |
+| 57 | `scripts/sprint_workflow.py` | `handoff.wrong-branch`, level 3 | must refuse, output carries `does not start with` | floor | `bin/ocelli.sh gate guards` |
+| 58 | `scripts/sprint_workflow.py` | `handoff.backticked-branch`, level 3 **G-04, fails today** | must ACCEPT, output carries `validates` | floor | `bin/ocelli.sh gate guards` |
+| 59 | `scripts/sprint_workflow.py` | `sprint-lifecycle.not-in-sprint`, level 3 | must refuse, output carries `is not in sprint` | floor | `bin/ocelli.sh gate guards` |
+| 60 | `scripts/error_code_check.py` | `errors.renumbered`, level 3 | must refuse, output carries `so this is a renumbering` | floor | `bin/ocelli.sh gate guards` |
+| 61 | `scripts/bench_check.py` | none in this harness | A benchmark registry whose subject stories do not resolve, a subject whose story has not landed carrying a runner or a recorded number, and a playwright pin that has drifted between the two harnesses. | - | scripts/tests/test_bench_check.py (25 cases, run by the `bench` gate, which is in the floor) |
+| 62 | `scripts/corpus_check.py` | `corpus.digest-mismatch`, level 3 | must refuse, output carries `does not match its manifest digest` | floor | `bin/ocelli.sh gate guards` |
+| 63 | `scripts/corpus_check.py` | `corpus.absent`, level 3 | must refuse, output carries `corpus cases are absent` | floor | `bin/ocelli.sh gate guards` |
+| 64 | `scripts/corpus_check.py` | `corpus.unrecorded-licence`, level 3 | must refuse, output carries `cannot be redistributed or cited` | floor | `bin/ocelli.sh gate guards` |
+| 65 | `scripts/corpus_tests.py` | `corpus-tests.skip-is-not-a-pass`, level 3 | must refuse, output carries `FAIL: a prerequisite` | floor | `bin/ocelli.sh gate guards` |
+| 66 | `scripts/corpus_synth.py` | none in this harness | A manifest whose header is not the recorded column set. | - | scripts/tests/test_corpus_synth.py (run by the `corpus-tests` gate) |
+| 67 | `scripts/target_feature_check.py` | `target-features.cannot-run`, level 3 | must refuse, output carries `could not run` | deep | `bin/ocelli.sh gate guards-deep` |
+| 68 | `scripts/package_check.py` | `packages.exports-not-in-tarball`, level 1 | must refuse, output carries `advertises` | floor | `bin/ocelli.sh gate guards` |
+| 69 | `scripts/package_check.py` | `packages.version-skew`, level 1 | must refuse, output carries `the Rust workspace is` | floor | `bin/ocelli.sh gate guards` |
+| 70 | `bin/ocelli.sh` | `runner.absent-prerequisite`, level 3 | must refuse, output carries `reference stack is not installed` | floor | `bin/ocelli.sh gate guards` |
+| 71 | `scripts/source_dir.py` | `source-dir.unconfigured`, level 3 | must refuse, output carries `are not configured` | floor | `bin/ocelli.sh gate guards` |
+| 72 | `scripts/split_hld.py` | `split-hld.cannot-run`, level 3 | must refuse, output carries `A check that cannot run is NOT a check that` | floor | `bin/ocelli.sh gate guards` |
+| 73 | `scripts/lint_policy_check.py` | `lint-policy.weakened`, level 3 | must refuse, output carries `is 'allow' and HLD 27.1 requires` | floor | `bin/ocelli.sh gate guards` |
+| 74 | `scripts/lint_policy_check.py` | `lint-policy.uninherited`, level 3 | must refuse, output carries `does not inherit the workspace lint table` | floor | `bin/ocelli.sh gate guards` |
+| 75 | `scripts/guards/census.py` | `census.unclaimed-site`, level 3 | must refuse, output carries `no catalogue entry claims` | floor | `bin/ocelli.sh gate guards` |
+| 76 | `scripts/guards/census.py` | `census.changed-constant`, level 3 | must refuse, output carries `changed without its recorded value` | floor | `bin/ocelli.sh gate guards` |
+| 77 | `scripts/guards/census.py` | `census.no-std-set-shrunk`, level 3 | must refuse, output carries `changed without its recorded value` | floor | `bin/ocelli.sh gate guards` |
+| 78 | `scripts/guards/census.py` | `census.uncovered-grew`, level 3 | must refuse, output carries `The ratchet may only decrease` | floor | `bin/ocelli.sh gate guards` |
+| 79 | `scripts/guards/census.py` | `census.no-ceiling`, level 3 | must refuse, output carries `records no uncovered ceiling` | floor | `bin/ocelli.sh gate guards` |
+| 80 | `scripts/guards/census.py` | `census.orphan-recorded-constant`, level 3 | must refuse, output carries `is not declared in the catalogue's CONSTANTS` | floor | `bin/ocelli.sh gate guards` |
+| 81 | `scripts/guards/census.py` | `census.gate-without-an-entry`, level 3 | must refuse, output carries `has no catalogue entry and no `delegated` reason` | floor | `bin/ocelli.sh gate guards` |
+| 82 | `scripts/guards/census.py` | `census.floor-needing-a-gpu`, level 1 | must refuse, output carries `no GPU, no browser and no corpus` | floor | `bin/ocelli.sh gate guards` |
+| 83 | `scripts/guard_census.py` | `census-runbook.markers-gone`, level 3 | must refuse, output carries `carries no generated-table markers` | floor | `bin/ocelli.sh gate guards` |
+| 84 | `scripts/guard_probe.py` | `probe-runner.self-test`, level 3 | must ACCEPT, output carries `OK` | floor | `bin/ocelli.sh gate guards` |
+| 85 | `scripts/guards/sandbox.py` | none in this harness | A git call outside the sandbox, a git call in a directory this harness did not create, and the `rm --cached` and `checkout --` pair the runbook records as a false-green trap. | - | scripts/guard_probe.py --self-test; scripts/tests/test_guard_catalogue.py |
+| 86 | `scripts/guards/discover.py` | none in this harness | Nothing on its own. It is the scanner the census refuses from. | - | scripts/tests/test_guard_catalogue.py |
+| 87 | `scripts/guards/catalogue.py` | none in this harness | A probe builder that mutated nothing, and a fixture drawn from a citation that has gone away. | - | scripts/tests/test_guard_catalogue.py |
+| 88 | `tools/oracle/run.mjs` | none in this harness | A run that reached no row, a decode that produced nothing, a frame that never presented, a read-back still showing the sentinel, a volume that did not load, and the environment refusals that keep the rasteriser honest. | - | tools/oracle/src/faults.mjs (23 injected faults, replayed by tools/oracle/tests/faults.mjs on every `oracle` gate); tools/oracle/tests/args_test.mjs; tools/oracle/tests/paths_test.mjs; tools/oracle/tests/pins_test.mjs |
+| 89 | `tools/oracle/page/app.mjs` | none in this harness | A render that did not present, a read-back that is not comparable, and a frame the page cannot attribute. | - | tools/oracle/src/faults.mjs |
+| 90 | `tools/oracle/page/volume.mjs` | none in this harness | A volume that did not load, a geometry that is not a permutation of the declared one, and a reformat that never presented. | - | tools/oracle/src/faults.mjs |
+| 91 | `tools/oracle/src/volume.mjs` | none in this harness | A volume subject whose members disagree, a spacing or orientation that does not resolve, and a declared truth the reference does not reproduce. | - | tools/oracle/tests/volume_test.mjs (run inside `bin/ocelli.sh oracle`'s unit pass) |
+| 92 | `tools/oracle/src/manifest.mjs` | none in this harness | A manifest the reference half cannot read, and a row it cannot resolve to a case. | - | tools/oracle/tests/manifest_test.mjs |
+| 93 | `tools/oracle/src/geometry.mjs` | none in this harness | A geometry the reference cannot express, and one that does not round-trip. | - | tools/oracle/tests/geometry_test.mjs |
+| 94 | `tools/oracle/src/voi.mjs` | none in this harness | A VOI declaration the reference cannot apply, and a window the row does not carry. | - | tools/oracle/tests/params_test.mjs |
+| 95 | `tools/oracle/src/params.mjs` | none in this harness | A render parameter the page does not implement, and a parameter set that does not resolve for a row. | - | tools/oracle/tests/params_test.mjs |
+| 96 | `tools/oracle/src/unsupported.mjs` | none in this harness | A row declared unsupported that renders, and a row that fails without a declaration. | - | tools/oracle/tests/unsupported_test.mjs |
+| 97 | `tools/oracle/src/output.mjs` | none in this harness | An output directory that is not the harness's own. | - | tools/oracle/tests/output_test.mjs |
+| 98 | `tools/oracle/src/pins.mjs` | none in this harness | A reference stack installed at a version nobody pinned. | - | tools/oracle/tests/pins_test.mjs |
+| 99 | `tools/oracle/src/sidecar.mjs` | none in this harness | A sidecar the comparator cannot read. | - | tools/oracle/tests/sidecar_test.mjs |
+| 100 | `tools/oracle/check_sidecars.py` | none in this harness | A cross-read mismatch reported without redacting a real row's values, and a sidecar pydicom and the reference disagree about. | - | tools/oracle/check_sidecars.py --self-test, run by tools/oracle/run.mjs under both interpreters |
+| 101 | `tools/oracle/src/faults.mjs` | none in this harness | A fault name nothing declares, and a filter that selected nothing reading as success. | - | tools/oracle/tests/faults.mjs |
+| 102 | `tools/bench/src/registry.mjs` | none in this harness | A registry entry with no subject story, a duplicate subject, and a runner for a subject whose story has not landed. | - | tools/bench/tests/registry_test.mjs (run by the `bench` gate) |
+| 103 | `tools/bench/src/record.mjs` | none in this harness | A record written against a host class it was not measured on, and a malformed baseline. | - | tools/bench/tests/record_test.mjs; tools/bench/tests/hostclass_test.mjs |
+| 104 | `tools/bench/src/state.mjs` | none in this harness | A run state the harness cannot resume from. | - | tools/bench/tests/state_test.mjs |
+| 105 | `tools/bench/run.mjs` | none in this harness | An argument the harness does not accept, a subject that does not exist, a comparison on a machine that does not own the baseline, and a browser that is not installed. | - | nothing |
+| 106 | `tools/bench/src/runners/wasm_cold_start.mjs` | none in this harness | A cold-start measurement taken against a stub, an incomplete artefact copy, and a page that never reported. | - | tools/bench/tests/cold_start_test.mjs |
+| 107 | `tools/bench/page/app.mjs` | none in this harness | A page serving an incomplete copy of the wasm artefact. | - | tools/bench/tests/cold_start_test.mjs |
+| 108 | `scripts/panic_probe.mjs` | none in this harness | A run that measured the probe's stub rather than the module. | - | bin/ocelli.sh gate panic, which builds a second module carrying the panic-probe feature and runs this file on every floor gate |
 
 Known defects this table names, in full:
 
@@ -324,23 +330,24 @@ What a probe above does NOT reach, declared rather than left to be discovered:
 - **`scripts/source_provenance_check.py`.** The URL clause has no probe, deliberately. `docs/SOURCE-POLICY.md` names the projects and does not name their addresses, so a probe would have to take its input from the guard's own URL list, which is the R2 failure this catalogue exists to avoid: it would assert the current regex and pass forever once the regex was weakened. The list itself is a declared constant in the ratchet, so a change to it is caught there and lands in front of a reviewer.
 - **`scripts/verify_ledger.py`.** `assert` with a real record cannot be controlled green in the sandbox without recording one first, so the control for this invoke records a passing entry and then asserts.
 - **`scripts/verify_ledger.py`.** The `records a RED corpus` and `records corpus=` branches of check-commit need a commit carrying a trailer this harness would have to forge, and the commit-msg hook refuses exactly that. They are reached instead by ledger.assert's equivalents.
+- **`ci/check-device-ownership.sh`.** The trybuild compile-fail cases under crates/ocelli-compute/tests/ui/ are the strong half of section 31 and run in the `test` gate, and they are recorded here rather than as `covered_by`. They assert the same property through the type system and they do not open ci/check-device-ownership.sh, so counting them as coverage of THIS guard's refusals would be the claim check f exists to refuse. The four probes above are what watch those refusals.
 - **`scripts/sprint_workflow.py`.** The other twenty-two refusals in this file belong to the sprint lifecycle commands, and the entry below owns them. The field list is a second limit and a sharper one. Both probes here are about the BRANCH rule, and reaching it means writing a handoff that passes the field check first, so their input carries the five `**Field**` markers from the tool's own tuple. `.claude/commands/complete-feature.md` names six items including the files touched, which the tool does not require, so the citation and the code do not agree and no probe can see that. `HANDOFF_FIELDS` is in the declared-constant ratchet instead, which is what puts a change to the contract in front of a reviewer. G-04 is the same undocumented contract seen from the branch side.
 - **`scripts/sprint_workflow.py`.** One probe over the shape shared by every lifecycle refusal. The remaining branches need a sprint mid-flight, which the sandbox cannot build without writing sprint state, and docs/sprints/ is outside this story's write set.
 - **`scripts/bench_check.py`.** No level-3 probe. The suite above is the negative-case set for this guard and it runs on every floor gate, so a level-3 probe would need a second registry fixture that the suite already carries.
-- **`scripts/target_feature_check.py`.** The per-target divergence branch itself needs a dependency whose features differ by target, which cannot be built from the locked graph without a network fetch. Owner F-X010.
-- **`scripts/package_check.py`.** The consumer install, the node import, the two tsc resolutions and the publish dry run are level 3 and need an npm install the sandbox does not carry. They run for real in the `packages` gate on every push, green, and this harness has not watched them red. Owner F-X010.
-- **`scripts/split_hld.py`.** The redaction map's fail-closed branch, which is runbook probe 18 itself, sits behind a pandoc conversion of the private `.docx`. Neither is in this repository, so a sandbox cannot reach it, and the same is true of the drift and section-mapping branches. Owner F-X010.
+- **`scripts/target_feature_check.py`.** The per-target divergence branch itself needs a dependency whose features differ by target, which cannot be built from the locked graph without a network fetch. Owner F-X014.
+- **`scripts/package_check.py`.** The consumer install, the node import, the two tsc resolutions and the publish dry run are level 3 and need an npm install the sandbox does not carry. They run for real in the `packages` gate on every push, green, and this harness has not watched them red. Owner F-X014.
+- **`scripts/split_hld.py`.** The redaction map's fail-closed branch, which is runbook probe 18 itself, sits behind a pandoc conversion of the private `.docx`. Neither is in this repository, so a sandbox cannot reach it, and the same is true of the drift and section-mapping branches. Owner F-X014.
 - **`tools/oracle/run.mjs`.** Adopted and not re-declared, and not re-run either, because the run needs a browser and the `oracle` gate already does it. A second declaration of the same faults is the same defect as a second copy of the LUT chain, except that it only runs where nobody looks. What the census verifies instead is that the catalogue still carries faults, that each still names the message fragment proving its own boundary, that tools/oracle/run.mjs still reaches the runner, and that the count has not shrunk below the recorded 23.
-- **`tools/bench/src/runners/wasm_cold_start.mjs`.** That suite needs a browser and is deliberately outside the `bench` gate, so these refusals are watched only when a developer runs the harness. Owner F-X010.
-- **`tools/bench/page/app.mjs`.** Same browser dependency as bench.cold-start. Owner F-X010.
-- **`scripts/panic_probe.mjs`.** The stub refusal itself has not been watched red. It fires only when the module fails to export what the probe imports, which needs a broken wasm-pack build to construct. Owner F-X010.
+- **`tools/bench/src/runners/wasm_cold_start.mjs`.** That suite needs a browser and is deliberately outside the `bench` gate, so these refusals are watched only when a developer runs the harness. Owner F-X014.
+- **`tools/bench/page/app.mjs`.** Same browser dependency as bench.cold-start. Owner F-X014.
+- **`scripts/panic_probe.mjs`.** The stub refusal itself has not been watched red. It fires only when the module fails to export what the probe imports, which needs a broken wasm-pack build to construct. Owner F-X014.
 
 Declared out of scope. Each of these carries refusals that the census counts and that no gate runs, so calling them guards would inflate the coverage number:
 
 - **`scripts/populate_corpus.py`.** A corpus acquisition tool a developer runs by hand. No gate and no CI step invokes it, and its first act is to refuse when the locked Python environment is absent, which the sandbox always is because `.venv` is not tracked. The property its refusals protect, that a case matches the digest its manifest row records, is verified afterwards and independently by scripts/corpus_check.py, which IS in a gate and whose digest and presence refusals are both probed above.
 - **`scripts/import_backlog_xlsx.py`.** A bootstrap importer over a private spreadsheet that is not in this repository and is not fetched by anything. No gate and no CI step invokes it. Its OUTPUT is tracked, and that output is watched by scripts/backlog_check.py and scripts/gen_sprint_plan.py, both of which are in the floor and both of which carry probes above.
 - **`tools/spikes/a1-htj2k/run.mjs`.** A throwaway spike harness for Appendix A gate A1, invoked by no gate and by no CI step. `content.spike-output` guards its output DIRECTORY and is not a backstop for its refusals, unlike the probed backstops populate-corpus and bootstrap-importer name. Nothing watches these go red.
-- **`tools/spikes/common/compare.mjs`.** Shared helper for the same throwaway spike harnesses, invoked by no gate and by no CI step. The measurement is throwaway and the ANSWER is not: this file produced every digest in both Appendix A answer files, and `docs/spikes/GATES.md`'s A1 verdict and the decision to file F-X013 rest on them. Its own suite, `tools/spikes/common/tests/compare_test.mjs`, is run by nothing, which is pass 1's smell S19 and is unfixed. Out of scope here means no gate runs the file, not that its refusals did not matter. Owner F-X010.
+- **`tools/spikes/common/compare.mjs`.** Shared helper for the same throwaway spike harnesses, invoked by no gate and by no CI step. The measurement is throwaway and the ANSWER is not: this file produced every digest in both Appendix A answer files, and `docs/spikes/GATES.md`'s A1 verdict and the decision to file F-X013 rest on them. Its own suite, `tools/spikes/common/tests/compare_test.mjs`, is run by nothing, which is pass 1's smell S19 and is unfixed. Out of scope here means no gate runs the file, not that its refusals did not matter. Owner F-X014.
 - **`tools/spikes/common/extract.py`.** The spike harnesses' corpus extractor, invoked by no gate. Its refusals protect a throwaway measurement rather than the repository. `content.spike-output` guards the output DIRECTORY, which is not a backstop for these refusals, so nothing watches them go red.
 - **`tools/spikes/a2-jpeg-ls/anchors.py`.** A throwaway spike harness for Appendix A gate A2, invoked by no gate. Same argument as spikes.a1, including that its output directory being guarded is not a backstop for its refusals.
 

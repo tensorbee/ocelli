@@ -1,6 +1,6 @@
 # The oracle, reference half
 
-**F-IDs that contributed:** F-010, F-X007
+**F-IDs that contributed:** F-010, F-X007, F-X009
 **Last updated:** 2026-09-05
 
 HLD section 11 names cornerstone3D as the reference the differential harness
@@ -488,6 +488,22 @@ and one changes the driver's loop, so the declarations are production data.
 `tests/faults.mjs` is only the runner. The cost is one extra browser launch per
 fault on every oracle gate, and it buys a re-runnable proof rather than a note
 saying somebody once watched them fail.
+
+**The fault catalogue has a second reader, and it adopts rather than copies.**
+`scripts/guards/census.py`, the repository guard census described in
+`docs/lld/guards.md`, needs to know that this harness's refusals are watched.
+Re-declaring the same faults there would be the same defect as a second copy of
+the LUT chain, except that it would only run where nobody looks, so the census
+verifies the real file instead and re-declares none of it. It checks that
+`src/faults.mjs` declares faults at all, that each one carries the message
+fragment proving its run went red at its own boundary, and that `run.mjs` still
+reaches `tests/faults.mjs`, which is what makes the `oracle` gate replay them.
+The declared count is a ratchet recorded in `ci/guard-probe-budget.json`, so
+the catalogue may grow and a silent shrink fails the `guards` gate. The census
+also owns `run.mjs`'s own refusals, which no injected fault reaches, against
+the argument, path and pin suites. It never launches a browser, so it proves
+the adoption is still wired and not that the faults fired. Only
+`bin/ocelli.sh gate oracle` does that.
 
 ## Applicability is discovered and recorded, never skipped
 

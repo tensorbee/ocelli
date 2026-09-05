@@ -111,7 +111,7 @@ _S01 to S05, 26 stories, 61 engineer-weeks._
 | F-X011 | Y1.6 | Cross-machine reference determinism, and what the oracle claims about it | Test | 2w |
 | F-X012 | Y1.7 | The reference's own SIGMOID width divergence, and what D14's bound says about it | Test | 2w |
 | F-X013 | Y1.8 | Price the HTJ2K decoder route after gate A1 failed | Test | 3w |
-| F-X014 | Y1.9 | Close the two guard holes F-X009 declared and S03 did not fix | Build | 1w |
+| F-X014 | Y1.9 | Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing | Build | 2w |
 | F-X015 | Y1.10 | Execute the skills' worked examples, because the skills gate asserts nothing about their numbers | Build | 1w |
 
 #### Sprint S05
