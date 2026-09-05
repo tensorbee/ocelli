@@ -21,9 +21,12 @@ Repository bootstrap. Nothing is published.
   transfer-syntax conformance checks, metadata auditing and digest verification.
 - The authoritative Markdown specification under `docs/hld/`, sanitized during
   bootstrap so no external source-document bundle is needed by the workflow.
-- `docs/sprints/`, with 190 F-IDs imported from the backlog spreadsheet, 13
-  added since as `F-X` stories, and 170 of the 203 allocated across 72 sprints
-  and 18 milestones.
+- `docs/sprints/`, with 190 F-IDs imported from the backlog spreadsheet and
+  `F-X` stories added since. This line deliberately does not repeat the totals.
+  `python3 scripts/backlog_check.py` prints how many F-IDs there are and how
+  many are done, and `python3 scripts/gen_sprint_plan.py --check` prints how
+  many carry a sprint. The allocation spans 72 sprints and 18 milestones, which
+  `docs/sprints/BACKLOG.md`'s summary section names the command for.
 - The gate set behind `bin/ocelli.sh gate`, and a CI floor that runs every one
   of them that needs no GPU and no corpus. `bin/ocelli.sh gate --list` is the
   list, and this line deliberately does not repeat the count, because a number
@@ -61,7 +64,32 @@ Repository bootstrap. Nothing is published.
   on SwiftShader and writes reference pixels plus a metadata sidecar, or a
   precise failure at one of four named boundaries. 89 of 91 rows render
   deterministically, and the two that do not are recorded with their reason in
-  `tools/oracle/unsupported.json`. It compares nothing yet, which is F-011.
+  `tools/oracle/unsupported.json`.
+- The oracle's volume and reformat pass. Four series directories declared in
+  `tools/oracle/volume-params.json` are assembled into cornerstone3D volumes and
+  rendered as three orthogonal reformats each, on their own page opened only
+  after the stack page has closed, so the existing stack frames are provably
+  untouched. Series geometry is measured from the files themselves through
+  PS3.3 C.7.6.2.1.1 rather than from any cornerstone3D module, which is what
+  makes the reference's own through-plane spacing something the harness can
+  contradict. It does: the reference derives spacing from the endpoints alone
+  and so renders two deliberately non-uniform synthetic series identically, and
+  a real MR series with gaps running 5 to 50 mm gets a uniform 10 mm grid with
+  no warning. `tools/oracle/volume-truth.json` asserts both, so the day the
+  reference stops averaging, the assertion goes red and names the reason.
+- The differential oracle's comparator half, which is what makes it an oracle.
+  `bin/ocelli.sh gate oracle` is now `oracle && compare`: it renders the corpus
+  through cornerstone3D and then diffs it, returning one record per view
+  against HLD 25.1 with the tolerance class resolved from the manifest's
+  category tokens rather than from the modality. Class-two views publish their
+  measurement and claim no verdict, because 25.1 states no threshold for them
+  and a `pass` against a bound nobody wrote is exactly what decision D14
+  forbids. 25.1's maximum-difference rule passes a whole-frame swap between VOI
+  `LINEAR` and `LINEAR_EXACT` everywhere, which is this project's own headline
+  defect, so a signed-mean bias bound was added to 25.1 by operator decision and
+  is evaluated over the informative region rather than the image rectangle. A
+  mutation catalogue is replayed on every oracle gate, and a mutation that goes
+  undetected fails the gate.
 - Runtime tier resolution. `Caps` now has a detection procedure that resolves
   tier A, B or C from an adapter enumeration, a startup fill-rate measurement,
   the reported adapter type and the renderer string, in that order of trust,

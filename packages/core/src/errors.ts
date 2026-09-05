@@ -25,8 +25,15 @@
  * The stable numeric codes, mirroring `ErrorCode` in
  * `crates/ocelli-core/src/error.rs` and `ci/error-codes.json`.
  *
- * Only codes with a live producer today. A fourth arrives with the story whose
- * code it is, as one appended line in three files.
+ * A fourth arrives with the story whose code it is, as one appended line in
+ * three files.
+ *
+ * **Only `Panicked` has a live producer today**, written by
+ * `crates/ocelli-wasm/src/panic.rs`. `Unavailable` and `Workgroup` name an
+ * intended correspondence with `ocelli_compute::ComputeError` that no code yet
+ * expresses: there is no `From<ComputeError>` anywhere, and `ocelli-compute`
+ * does not depend on `ocelli-core`. `crates/ocelli-core/src/error.rs` says the
+ * same, and `docs/lld/errors.md` carries the table.
  */
 export const ERROR_CODE = {
   /** A Rust panic reached the hook. The instance is poisoned. */

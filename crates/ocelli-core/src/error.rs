@@ -515,17 +515,30 @@ mod tests {
 
     /// The same table for a log line, hand-written the same way.
     ///
-    /// `code = 700`, `level = Info = 3`, `arity = 3`, `reserved = 0`, operands
-    /// `1`, `2` and `u64::MAX`.
+    /// `code = 700`, `level = Trace = 5`, `arity = 3`, `reserved = 0`,
+    /// operands `1`, `2` and `u64::MAX`.
     ///
     /// - offset 0, `u16` 700 is `0x02BC`, little-endian `BC 02`
-    /// - offset 2, `LogLevel::Info`, is `03`
+    /// - offset 2, `LogLevel::Trace`, is `05`
     /// - offset 3, three meaningful operands, is `03`
     /// - offset 8, `u64` 1, is `01` then seven `00`
     /// - offset 16, `u64` 2, is `02` then seven `00`
     /// - offset 24, `u64::MAX`, is eight `FF`
+    ///
+    /// **`Trace` and not `Info`, and the choice is the test.** Bytes 2 and 3
+    /// are adjacent single bytes carrying different meanings, so a fixture
+    /// whose level and arity are the SAME number is symmetric under a swap of
+    /// them and cannot detect one. This fixture carried level 3 and arity 3
+    /// until the S03 review's fourth pass. Swapping the two bytes in BOTH
+    /// [`Record::encode`] and [`Record::decode`], which a round trip cannot
+    /// see, left both log tests green while `ERROR_BYTES` above went red,
+    /// because that fixture's severity is 2 and its arity is 1. So the layout
+    /// was still guarded, and this fixture was contributing nothing to the
+    /// guarding. `Trace` is 5, the two bytes now differ, and the same mutation
+    /// makes `a_log_line_encodes_to_the_hand_written_layout` and
+    /// `a_log_line_decodes_from_the_hand_written_layout` fail as well.
     const LOG_BYTES: [u8; 32] = [
-        0xBC, 0x02, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xBC, 0x02, 0x05, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
         0xFF, 0xFF,
     ];
@@ -583,7 +596,7 @@ mod tests {
     #[test]
     fn a_log_line_encodes_to_the_hand_written_layout() {
         assert_eq!(
-            Record::log(ErrorCode::Unavailable, LogLevel::Info, &[1, 2, u64::MAX])
+            Record::log(ErrorCode::Unavailable, LogLevel::Trace, &[1, 2, u64::MAX])
                 .map(Record::encode),
             Ok(LOG_BYTES)
         );
@@ -599,7 +612,7 @@ mod tests {
         );
         assert_eq!(
             decoded.map(Record::severity_or_level),
-            Ok(LogLevel::Info.number())
+            Ok(LogLevel::Trace.number())
         );
         assert_eq!(decoded.map(Record::arity), Ok(3));
         assert_eq!(decoded.map(Record::operands), Ok([1, 2, u64::MAX]));

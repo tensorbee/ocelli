@@ -21,12 +21,31 @@ measured, write `not measured`. A plausible-looking `<1d` written to fill a
 cell is invented evidence, and it is worse than a gap, because a gap is
 visibly a gap and an invented figure is not.
 
-## Capacity calibration
+## Capacity calibration, and why there is nothing to calibrate from
 
-Recalculate after S03 and again after S06, and write the result into
-`SPRINT_PLAN.md` under "Capacity calibration". Do not recalculate off one
-sprint. S01 to S03 are foundations and the oracle, which is not representative
-of the volume port work in M2 onward.
+The plan was to recalculate after S03 and again after S06, off the `Days
+actual` column, and not off one sprint, because S01 to S03 are foundations and
+the oracle rather than the volume port work of M2 onward.
+
+**S03 produced no measurement to recalculate from.** All seven of its rows read
+`not measured`, each with the reason recorded in the cell: three stories ran
+concurrently in worker worktrees whose agents terminated on a session rate
+limit, two ran beside each other with one story's oracle runs inside the other's
+wall clock, and the remaining two overlapped the sprint review's remediation.
+Most rows in this file read `not measured` and the measured ones are all S01 and
+S02. No count is transcribed into this sentence, because the table below is the
+count:
+
+```bash
+grep -E '^\| F-' docs/sprints/SPRINT_TRACKER.md | grep -c 'not measured'
+```
+
+**This section used to direct the reader to write the result into a "Capacity
+calibration" section of `SPRINT_PLAN.md`. That section does not exist**, and
+naming a destination that was never created is how an instruction survives
+without ever being followed. Nothing is written there until a sprint produces at
+least three measured rows, at which point the section is created by the change
+that has something to put in it.
 
 | F-ID | Title | Sprint | Est | Days actual | Completed |
 |------|-------|--------|-----|-------------|-----------|

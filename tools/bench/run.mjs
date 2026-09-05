@@ -51,7 +51,9 @@ const require = createRequire(import.meta.url);
 
 export const USAGE = `bin/ocelli.sh bench [options]
 
-  --list                 print the registry with each subject's state and stop
+  --list                 print each subject with its definition, the story that
+                         gives it a subject and that story's backlog status,
+                         then stop. It resolves no state and runs nothing
   --compare              compare the run against ci/bench-baseline.json for
                          this host class. Reports incomparable, never a guess,
                          on a machine that did not record the baseline
@@ -349,7 +351,8 @@ export async function main(argv) {
       process.stderr.write(
         `\nMOVED: ${moved.map((one) => `${one.id} ` +
           `${(one.comparison.delta_fraction * 100).toFixed(1)}% ` +
-          `${one.comparison.direction}`).join(", ")}\n`,
+          `${one.comparison.direction} (${one.comparison.sense})`)
+          .join(", ")}\n`,
       );
       process.stderr.write(
         "A figure that moved outside its tolerance is not automatically a " +

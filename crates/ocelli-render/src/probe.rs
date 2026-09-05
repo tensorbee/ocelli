@@ -156,6 +156,17 @@ fn facts_of(adapter: &wgpu::Adapter) -> AdapterFacts {
 /// Returns whether a device was created, and the measurement if one could be
 /// taken. The device and queue are dropped at the end of this function, before
 /// the caller sees the answer.
+///
+/// **Exactly one adapter is tried, and no other is attempted after it fails.**
+/// `choose_candidate` returns the single best candidate and this function asks
+/// that one for a device. Natively `enumerate_adapters(Backends::all())`
+/// commonly returns several, so on a host with a broken Vulkan ICD beside a
+/// working GL driver the best candidate is the Vulkan A-candidate,
+/// `request_device` fails, and the session resolves tier C while a tier-B path
+/// exists and was never attempted. Tier C renders nothing until F-X001 to
+/// F-X004, so the outcome is "renders nothing" rather than "renders on tier
+/// B". Trying the next adapter is a behaviour change with its own ranking and
+/// evidence questions, so it belongs to a story rather than to this comment.
 async fn measure_chosen(
     adapters: &[wgpu::Adapter],
     chosen: Option<usize>,
@@ -170,16 +181,28 @@ async fn measure_chosen(
     let descriptor = wgpu::DeviceDescriptor {
         label: Some("ocelli tier probe"),
         required_features: wgpu::Features::empty(),
-        // The adapter's OWN limits, never `Limits::default()`. Requesting
-        // limits an adapter does not provide fails the request:
-        // `Adapter::request_device` returns `Err(wgpu::RequestDeviceError)`,
-        // which in the pinned 30.0.1 is an opaque struct over a private
-        // `RequestDeviceErrorKind` (`src/api/device.rs:790` and `:805`). The
-        // underlying `LimitsExceeded` belongs to `wgpu_core`, which `wgpu`
-        // does not re-export, so the reason is reachable from here only
-        // through `Display`. A downlevel GL
+        // The adapter's OWN limits, never `Limits::default()`. A downlevel GL
         // adapter does not meet the WebGPU defaults, which is the whole reason
         // tier B exists.
+        //
+        // **The pinned wgpu documents two different answers to asking for more
+        // than the adapter has, and this code depends on the second.** The doc
+        // comment on `Adapter::request_device` (`src/api/adapter.rs:49` to
+        // `:56` in 30.0.1) lists "Limits requested exceed the values provided
+        // by the adapter" under `# Panics`, while the same function's
+        // signature returns `Result<(Device, Queue), RequestDeviceError>` and
+        // the wgpu-core backend converts the core error into `Err` rather than
+        // panicking (`src/backend/wgpu_core.rs:943` to `:948`, over
+        // `wgpu_core::instance::RequestDeviceError::LimitsExceeded` raised at
+        // `wgpu-core-30.0.1/src/instance.rs:941`). The browser backend maps a
+        // rejected promise the same way. So the `Err` arm below is reachable
+        // and the `NoDevice` path is not dead. Asking for the adapter's own
+        // limits means neither answer is exercised here.
+        //
+        // `RequestDeviceError` is an opaque struct over a private
+        // `RequestDeviceErrorKind` (`src/api/device.rs:790` and `:805`), and
+        // `wgpu` does not re-export `wgpu_core`, so the reason is reachable
+        // from here only through `Display`.
         required_limits: adapter.limits(),
         ..Default::default()
     };

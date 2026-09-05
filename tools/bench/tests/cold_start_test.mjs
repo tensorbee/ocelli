@@ -1,11 +1,20 @@
-// The real release module loads under headless Chromium and ocelli_version()
-// returns the workspace version, with a duration attached.
+// Four pure suites over the cold-start runner, and one that needs a browser.
 //
-// This is the only suite here that needs a browser, so it is NOT in the `bench`
-// floor gate. `bin/ocelli.sh gate bench` asserts the instrument's integrity and
-// never a duration, and this asserts that the instrument can actually take one.
-// Run it with `npm run test:browser` from tools/bench, or get it for free from
-// `bin/ocelli.sh bench`, which fails if the subject does not measure.
+// **Only the last test needs one**, and until the S03 review's fourth pass the
+// whole file was outside the `bench` gate on the strength of it. The cause was
+// mechanical rather than a judgement: `wasm_cold_start.mjs` imported
+// `playwright` at module scope, so this file could not be LOADED without a
+// playwright install, and `workspaceVersion`, `median`, `atClockPrecision`,
+// which is this story's one stated rounding decision, and `resolveServedPath`,
+// which refuses `/..`, `/%2e%2e/`, a malformed escape and a sibling directory
+// sharing a prefix, were watched by nothing. The runner now imports playwright
+// inside `run()`, and the four pure tests are in the floor.
+//
+// The browser test is opted into with `OCELLI_BENCH_BROWSER=1`, which
+// `npm run test:browser` in tools/bench sets. It builds the release artefact
+// and launches sixteen Chromiums, so it is not something a floor gate can run,
+// and `bin/ocelli.sh bench` exercises the same path anyway by failing if the
+// subject does not measure.
 //
 // It builds the artefact rather than reusing whatever is in
 // crates/ocelli-wasm/pkg, for the reason the runner's refusal gives: a figure
@@ -67,8 +76,22 @@ test("the served path refusal fires on a walk out of the directory", () => {
     "a sibling directory sharing a prefix was served");
 });
 
+/**
+ * Why the one browser test is opted into rather than detected.
+ *
+ * Detecting a playwright install would run it on every developer machine that
+ * happens to have one, including inside `bin/ocelli.sh gate bench`, and the
+ * test builds a release wasm artefact and launches sixteen browsers. An
+ * explicit variable makes the cost a choice, and the skip message names the
+ * variable so nobody has to find this comment.
+ */
+const BROWSER_TEST_SKIP = process.env.OCELLI_BENCH_BROWSER === "1"
+  ? false
+  : "needs a browser and a release wasm build. Set OCELLI_BENCH_BROWSER=1, " +
+    "or run `npm run test:browser` in tools/bench";
+
 test("the real release artefact cold starts, and the module is this tree's",
-  { timeout: 600_000 }, async () => {
+  { timeout: 600_000, skip: BROWSER_TEST_SKIP }, async () => {
     const outDir = await mkdtemp(join(tmpdir(), "ocelli-bench-"));
     try {
       const result = await run({ outDir, build: true });

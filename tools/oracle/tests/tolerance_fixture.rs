@@ -15,9 +15,17 @@
 //!
 //! and the bullet the operator added through this story's design plan:
 //!
-//! > **Systematic bias, monochrome:** signed mean difference over the image
-//! > rectangle within 0.1 of one display code, evaluated only where input
-//! > identity, declared parameters and geometry already agree.
+//! > **Systematic bias, monochrome:** signed mean difference over the
+//! > informative region within 0.1 of one display code, evaluated only where
+//! > input identity, declared parameters and geometry already agree.
+//!
+//! **"informative region" and not "image rectangle".** The bullet said the
+//! latter when it was written and the sprint review's second pass changed it,
+//! because a pixel clipped to the same extreme on both sides cannot express a
+//! divergence and counting it in the denominator hides one. This header quoted
+//! the superseded wording until the fourth pass. The two regions coincide in
+//! the fixtures below, which is stated at `verdict` and is why nothing here
+//! measured the difference.
 //!
 //! "1 LSB" is one 8-bit display code. The reference emits RGBA8 canvas frames
 //! and nothing else, so the 16-bit reading is not evaluable against this
@@ -63,9 +71,15 @@ fn pair(deltas: &[(usize, i16)]) -> Result<(Frame, Frame), Box<dyn Error>> {
     ))
 }
 
-/// The whole frame is image, no letterbox, so the full-frame and
-/// image-rectangle statistics coincide and the bias bullet's "over the image
-/// rectangle" is unambiguous here.
+/// **All three regions coincide in these fixtures, and that is deliberate.**
+/// The whole frame is image, so there is no letterbox, and `BASE` is 128 with
+/// deltas no larger than three, so no pixel reaches 0 or 255 on either side
+/// and every image pixel is informative. The full-frame, image-rectangle and
+/// informative statistics are therefore the same numbers, which is what makes
+/// each boundary below a statement about the BOUND rather than about the
+/// region. Which region the comparator picks is measured over the corpus by
+/// `ocelli-compare census` instead, and it is not a question a hand-built
+/// frame can answer.
 fn verdict(
     deltas: &[(usize, i16)],
 ) -> Result<(tolerance::MonochromeVerdict, tolerance::BiasVerdict), Box<dyn Error>> {

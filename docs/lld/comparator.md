@@ -60,6 +60,7 @@ additional cost and with no code change when F-X001 to F-X004 land.
 bin/ocelli.sh compare                       # identity, then the catalogue
 bin/ocelli.sh compare identity --candidate DIR
 bin/ocelli.sh gate oracle                   # renders, then compares
+./target/release/ocelli-compare census      # a measurement, not a gate
 ```
 
 `bin/ocelli.sh gate oracle` is `"$0" oracle && "$0" compare`, chained with `&&`
@@ -69,12 +70,23 @@ passing comparison. **No new gate name was added.** The comparator is part of
 what `oracle` means.
 
 The binary is built in release. A debug comparison over ninety-eight frames
-plus twenty mutation replays is minutes rather than seconds, and a check nobody
-wants to wait for is a check that stops being run.
+plus twenty-one mutation replays is minutes rather than seconds, and a check
+nobody wants to wait for is a check that stops being run.
 
 The corpus-scale exercises are subcommands of a binary and **not** `#[ignore]`
 tests. An ignored test that needs `tools/oracle/out/` reads as a pass on the day
 it did not run, and this repository refuses a skip that reports as a success.
+
+**`census` is deliberately not in any gate.** It gates nothing, it exits 0
+whatever it finds, and `bin/ocelli.sh compare` does not call it. It exists
+because this document, `tolerance.rs`, `attribution.rs` and HLD 25.1 all carry
+counts of which corpus views the bias bound can and cannot reach, and every one
+of those counts was wrong at least once. It applies the catalogue's own swap to
+every gating class-one view and prints the signed mean over both the informative
+region and the image rectangle, so a number in prose has a command beside it
+rather than a provenance. Rerun it after any change to the corpus, to
+`render-params.json` or to the swap, and update the numbers those four files
+carry in the same change.
 
 ## The input contract, asserted on load
 
@@ -327,6 +339,16 @@ instrument has answered, and reporting that as "cannot tell" would absorb a
 measured divergence, which is the exact defect this sprint names. Such a view
 carries `divergent-while-unmeasured` and fails the run on its own.
 
+**"On its own" is now true, and it was not.** Four tracked places said so and
+nothing pushed a run problem for it, so a view carrying the qualifier failed the
+run only through the census, and `Qualifier::parse` accepts the label. Adding
+`"divergent-while-unmeasured"` to a `compare-expectations.json` entry, which a
+reviewer reads as documenting a known-unmeasured view, therefore made the run
+green with a measured divergence absorbed. `RunReport::green` reads the
+qualifier off the records itself, so no census entry and no forgetful caller can
+switch it off. `report::tests::a_census_entry_naming_the_qualifier_does_not_buy_a_green_run`
+builds exactly that bypass and asserts the run is red.
+
 ## The attribution ladder, in order
 
 1. **Inputs disagree**, by digest. Attributed to the inputs, not to either
@@ -395,10 +417,24 @@ region it detected nothing.** The per-pixel divergence is exactly `u / w`, where
 pixel clipped to black or white on both sides differs by nothing whatever the
 arithmetic underneath says, so averaging over the whole rectangle divides the
 divergence the unclipped pixels do show by a denominator full of pixels that
-structurally cannot show one. Measured over all 71 gating class-one views on
-this corpus, the largest observable bias over the image rectangle was **0.0825**
-and a 0.1 bound caught **none of them**. Over the informative region the same
-soft-tissue CT rows run to about 0.28.
+structurally cannot show one. Measured over all **70** gating class-one views on
+this corpus, the largest bias over the image rectangle is **0.0853**, on
+`real/mr_eay131/00000008.dcm`, and a 0.1 bound catches **none of them**. Over
+the informative region the same swap gives 0.269 to 0.284 on the real
+soft-tissue CT rows and 0.32 on the synthetic ones, and **51 of the 70** exceed
+the bound.
+
+Reproduce with `./target/release/ocelli-compare census`, which applies the
+catalogue's own swap to every gating view and prints the signed mean over both
+regions. It gates nothing and it exists because every count in this section was
+wrong at least once.
+
+It said 71 views and 0.0825 until the sprint review's fourth pass, and both
+errors are worth naming. **71** was `93 - 22 weak` and forgot that
+`real/dx_varepop/00000001.dcm` is `mono16` and `unmeasured` for `decimated`, so
+it gates nothing either. **0.0825** is a real number on this corpus and it is
+not this one: it is what two of the `real/ct_cmb_mml` rows produce over the same
+region.
 
 It exists because of a finding this story made. At the soft-tissue window,
 
@@ -432,9 +468,31 @@ pixel tables are checked the same way. HLD 18.3 prints the centre row as
 printed decimals are a rendering of them.
 
 **What the bound is proven to do.** It detects the actual swap, and the
-mutation that proves it is `the-actual-linear-exact-swap`, which applies
-`round(u - u/w)` to every pixel using the view's own declared window. That is
-the divergence rather than a stand-in for it.
+mutation that proves it is `the-actual-linear-exact-swap`. LINEAR_EXACT sits
+`u / w` below LINEAR before the renderer quantises, so a pixel drops one display
+code with probability `u / w` and the rest do not. The mutation accumulates `u`
+across the image rectangle using the view's own declared window and takes a drop
+each time the accumulator crosses `w`, which places exactly `floor(sum(u) / w)`
+drops in proportion to `u`, in integers, with no rounding decision in it. That
+is the divergence rather than a stand-in for it.
+
+**Both display extremes are excluded, and PS3.3 is why.** C.11.2.1.2 gives
+LINEAR the clamps `c' - w'/2` and `c' + w'/2` on `c' = c - 0.5` and
+`w' = w - 1`, and C.11.2.1.3.2 gives LINEAR_EXACT `c - w/2` and `c + w/2`. The
+lower pair is equal, since `(c - 0.5) - (w - 1)/2 = c - w/2`, so nothing clamps
+to black under one function and not the other and a pixel at 0 can never move.
+The upper pair differs by a whole unit of `x`, with LINEAR clamping the earlier
+of the two, so a pixel at 255 sits where LINEAR_EXACT is at worst `255 - 255/w`,
+which rounds back to 255 for every `w >= 510` and for all but a sliver of one
+input unit below it. A pixel at 255 therefore cannot move either, and excluding
+it also keeps the mutation from perturbing the informative region, which is what
+kept the numerator and the denominator honest.
+
+It said `round(u - u/w)` here and in the variant's own doc comment until the
+sprint review's fourth pass, and `apply_to_frame`'s comment 600 lines below it
+existed to repudiate exactly that. Three passes in a row accepted a mutation
+because something went red rather than because the mutation was the thing it
+claimed to be, and the third of those was the missing `grey == 255` exclusion.
 
 **`plus-one-on-two-fifths-of-the-image` is kept and is not that proof.** It
 moves 40 per cent of the image by a whole code where the real divergence moves
@@ -449,12 +507,36 @@ image rectangle makes `the-actual-linear-exact-swap` come back `NOT DETECTED`
 with the view passing, and the run exits 1 on the undetected mutation. Restoring
 the informative region detects all 21.
 
+**And the argument for it is now measured over the corpus rather than over one
+view.** `ocelli-compare census` applies the swap to all 70 gating class-one
+views and averages over the image rectangle instead: **0 of 70** exceed the
+bound, the largest being 0.0853, while over the informative region 51 of 70 do.
+The mutation's own target sits at -0.0773 over the rectangle, a 23 per cent
+margin below the bound.
+
+Until the fourth pass that argument rested on a modelling error and a margin of
+half a per cent. The accumulator dropped white pixels, so the same measurement
+gave **44 of 70** over the rectangle with a maximum of 0.4836, and the claim
+held for the single view the mutation lands on and for no other, at -0.0995
+against a bound of 0.1.
+
 **A structural limit, stated because no region choice removes it.** The largest
 divergence any view can show is `255 / w`, so **a view whose window is wider
-than 2550 cannot reach this bound at all**. The corpus already carries rows at
-`w = 4096`, including `real/dx_varepop/00000001.dcm` and
-`synthetic/cr_monochrome1.dcm`. Those views are not protected by this bullet and
-nothing here pretends they are.
+than 2550 cannot reach this bound at all**. The corpus carries two rows at
+`w = 4096`, `real/dx_varepop/00000001.dcm` and `synthetic/cr_monochrome1.dcm`,
+and only the second of them gates at all: the first is `unmeasured` for
+`decimated`. That view is not protected by this bullet and nothing here pretends
+it is.
+
+**The practical limit bites long before 2550**, and it is about content and not
+only about width, because the mean over a region is `mean(u) / w`. Of the 70
+gating views, 51 can fail this bound under the real divergence and **19 cannot**:
+the fifteen `real/mr_eay131` stack rows and two of that subject's three
+reformats, at windows from 678 to 881 and informative means from 0.058 to 0.087,
+plus `synthetic/mr_nonsquare_spacing` at 2048 and `synthetic/cr_monochrome1` at
+4096. **The smallest blind window is 678.** That subject's CORONAL reformat is
+at -0.114 and CAN fail, so the blind pair is two of three reformats rather than
+all of them.
 
 **What the bound is not.** It is NOT calibrated against measured divergence.
 **Its false-positive rate is unmeasured and unmeasurable in this sprint**,
@@ -630,6 +712,12 @@ register entry marked unreachable fired, and the census of `unmeasured` views
 and their qualifiers matches `tools/oracle/compare-expectations.json` exactly,
 **in both directions**.
 
+Three of those five reach `green()` as run problems the caller collects. The
+other two, the outcome counts and `divergent-while-unmeasured`, are read off the
+records inside `green()` itself, so the rule holds whatever a caller does or
+forgets. That split is not tidiness. The qualifier spent this sprint being
+described as failing a run on its own while nothing pushed a problem for it.
+
 A view that JOINS the census is a coverage loss that has to be explained. A view
 that LEAVES it is a coverage gain that has to be recorded in the same change.
 That is `unsupported.json`'s discipline, and it is the first half of what stops
@@ -649,7 +737,7 @@ not emit is refused at load, so a stale census cannot read as an empty set.
   decimated: 2
   unstated-threshold: 5
   weak: 22
-compare: 20 mutations, 0 not detected
+compare: 21 mutations, 0 not detected
 ```
 
 Twenty-eight and not twenty-nine, because `real/us_cmb_crc/00000001.dcm` is
@@ -714,6 +802,16 @@ Per `docs/sprints/CURRENT_SPRINT.md`, the mutation that proves a guard must not
 be run in the same command that adds the guard, which is why the catalogue is
 standing production data and the gate re-runs all of it every time rather than
 trusting a note.
+
+**The effects themselves now have unit tests, and until the fourth pass they had
+none at all.** `apply_to_frame` was reachable only from `bin/ocelli.sh compare`,
+which needs the rendered corpus, so `cargo test -p ocelli-oracle` never executed
+a line of it and nothing in `--floor` did either. That is how `round(u - u/w)`
+shipped as "the real thing" through two review passes and how the missing white
+exclusion survived a third. `mutations::tests` now carries an eight-pixel table
+for the swap, with a 0 and a 255 in it, the drop set hand-computed from the
+accumulator and the exclusions derived from PS3.3 rather than from the code.
+Restoring the previous guard turns all four of those tests red.
 
 ## What F-011 did not build
 

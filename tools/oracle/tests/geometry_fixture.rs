@@ -1,10 +1,20 @@
 //! The image rectangle, and HLD 25.1's geometry bound at each boundary.
 //!
-//! The rectangle matters twice. It is the region the bias bullet is evaluated
-//! over, "signed mean difference over the image rectangle", and it is what
-//! separates a difference in the picture from a difference in the letterbox.
-//! Getting it wrong by a column would move the bias by a fraction of a code
-//! and nothing would say so.
+//! The rectangle matters twice. It is what separates a difference in the
+//! picture from a difference in the letterbox, and it BOUNDS the region the
+//! bias bullet is evaluated over. The bullet says "signed mean difference over
+//! the informative region", not over the rectangle, and the difference is
+//! load-bearing: the informative region is the subset of this rectangle that
+//! is not clipped to the same extreme on both sides. So a rectangle wrong by a
+//! column is wrong in the denominator of every bias number the comparator
+//! reports.
+//!
+//! **A wrong column is caught here and not elsewhere.** It moves the bias by a
+//! fraction of a display code, which no corpus view would report as a failure,
+//! so `an_edge_exactly_on_a_pixel_centre_belongs_to_the_image` below is the
+//! only thing standing between an off-by-one edge rule and silence. Today's
+//! corpus carries no extent landing on a pixel centre, which is exactly why
+//! that case is constructed rather than waited for.
 //!
 //! **The canvas scale is READ, not re-derived.** `canvasScale` in
 //! `tools/oracle/src/params.mjs` computes canvas pixels per source pixel from
@@ -96,6 +106,66 @@ fn a_fractional_extent_takes_the_pixels_whose_centres_are_inside() -> Outcome {
     };
     let rect = extent.rect(CANVAS, CANVAS);
     assert_eq!(rect, Rect::new(43, 0, 426, 512)?);
+    Ok(())
+}
+
+/// **The case where the boundary convention is decidable, constructed because
+/// the corpus does not contain one.**
+///
+/// Every extent in `tools/oracle/out/` today lands strictly between two pixel
+/// centres, so `>=` and `>` in `first_centre_at_or_after` agree on all of them
+/// and the whole suite stayed green when the comparison was changed. That is a
+/// guard nobody has watched fail, and it is the shape this repository refuses.
+///
+/// The rule, from the extent's own definition: the extent is the half-open
+/// interval `[x0, x0 + width)`, and a pixel belongs to the image when its
+/// centre lies in it, so pixel `i` is inside exactly when
+/// `x0 <= i + 0.5 < x0 + width`. **The two ends need opposite conventions and
+/// one comparison serves both**, because the search returns the first index at
+/// or after the edge and that index is the first pixel INCLUDED at the near
+/// edge and the first pixel EXCLUDED at the far one. So `>=` is right twice
+/// and `>` is wrong twice.
+///
+/// Three cases, each with at least one edge exactly on a centre:
+///
+/// - `x0 = 0.5`, width 42, far edge 42.5. Column 0's centre is 0.5, which is
+///   in `[0.5, 42.5)`, so it is the first column. Column 42's centre is 42.5,
+///   which is not, so 41 is the last. 42 columns from 0.
+/// - `x0 = 42.5`, width 384, far edge 426.5. Columns 42 through 425, so 384
+///   columns from 42.
+/// - `x0 = 42.5`, width 384.3, far edge 426.8. The near edge is on a centre
+///   and the far edge is not, so column 426 joins: 385 columns from 42. This
+///   is the case where the wrong comparison changes the pixel COUNT and not
+///   only the offset, which is what moves the denominator of every bias number
+///   the comparator reports.
+#[test]
+fn an_edge_exactly_on_a_pixel_centre_belongs_to_the_image() -> Outcome {
+    let flush = CanvasExtent {
+        x0: 0.5,
+        y0: 0.5,
+        width: 42.0,
+        height: 42.0,
+    };
+    assert_eq!(flush.rect(CANVAS, CANVAS), Rect::new(0, 0, 42, 42)?);
+
+    let offset = CanvasExtent {
+        x0: 42.5,
+        y0: 42.5,
+        width: 384.0,
+        height: 384.0,
+    };
+    assert_eq!(offset.rect(CANVAS, CANVAS), Rect::new(42, 42, 384, 384)?);
+
+    let one_edge_only = CanvasExtent {
+        x0: 42.5,
+        y0: 42.5,
+        width: 384.3,
+        height: 384.3,
+    };
+    assert_eq!(
+        one_edge_only.rect(CANVAS, CANVAS),
+        Rect::new(42, 42, 385, 385)?
+    );
     Ok(())
 }
 

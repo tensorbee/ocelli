@@ -8,12 +8,21 @@
 //! ```text
 //! ocelli-compare identity  [--reference DIR] [--candidate DIR] [--out DIR]
 //! ocelli-compare mutations [--reference DIR] [--candidate DIR]
+//! ocelli-compare census    [--reference DIR]
 //! ```
 //!
 //! `identity` compares a directory against itself, which proves the plumbing
 //! over every view. `mutations` replays the declared catalogue and requires
 //! each entry to produce the verdict written beside it, which is what proves
 //! detection. `bin/ocelli.sh compare` runs both.
+//!
+//! `census` reports nothing about correctness and gates nothing. It exists
+//! because four tracked files carry counts of which corpus views the bias
+//! bound can and cannot detect the LINEAR to LINEAR_EXACT divergence on, and
+//! every one of those counts was wrong at least once. It applies the
+//! catalogue's own swap to every gating class-one view and prints what it
+//! measures, so a number in prose has a command beside it rather than a
+//! provenance.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -22,13 +31,14 @@ use std::process::ExitCode;
 use ocelli_oracle::attribution::{
     Context, Register, compare_view, image_rect_for, unreachable_entries_that_fired,
 };
-use ocelli_oracle::frame::Frame;
+use ocelli_oracle::frame::{ChannelSet, Frame, difference};
 use ocelli_oracle::mutations::{
     CATALOGUE, Expectation, MutatedSide, Mutation, apply_to_frame, apply_to_run, resolve_target,
     touches_the_frame,
 };
 use ocelli_oracle::report::{Census, Outcome, RunReport, Side, ViewRecord};
 use ocelli_oracle::sidecar::Run;
+use ocelli_oracle::tolerance::{MONOCHROME_SIGNED_MEAN_BIAS, ToleranceClass};
 use serde_json::Value;
 
 /// Where the comparator writes. **Ignored and refused by
@@ -95,8 +105,8 @@ fn parse_arguments() -> Result<Arguments, String> {
         }
     }
     if command.is_empty() {
-        return Err("a command is required: `identity` or `mutations`. See \
-             docs/lld/comparator.md"
+        return Err("a command is required: `identity`, `mutations` or \
+             `census`. See docs/lld/comparator.md"
             .to_owned());
     }
     Ok(Arguments {
@@ -118,8 +128,9 @@ fn run() -> Result<bool, String> {
     match arguments.command.as_str() {
         "identity" => identity(&reference, &candidate, &register, &census, &arguments.out),
         "mutations" => mutations(&reference, &candidate, &register, &census),
+        "census" => detectability(&reference, &candidate, &register, &census),
         other => Err(format!(
-            "{other} is not a command. `identity` or `mutations`"
+            "{other} is not a command. `identity`, `mutations` or `census`"
         )),
     }
 }
@@ -298,6 +309,12 @@ fn summarise(report: &RunReport) {
     for problem in &report.problems {
         println!("  PROBLEM {problem}");
     }
+    // Printed from the records rather than from `problems`, because that is
+    // where `green()` reads it and a summary that read a different source
+    // could report a red run with nothing said about why.
+    for absorbed in report.absorbed_divergences() {
+        println!("  PROBLEM {absorbed}");
+    }
 }
 
 fn identity(
@@ -434,6 +451,142 @@ fn mutations(
         failures
     );
     Ok(failures == 0)
+}
+
+/// The catalogue entry that carries the real divergence. Looked up by name
+/// rather than rebuilt here, so the census measures the mutation the oracle
+/// runs and not a second copy of it.
+const SWAP: &str = "the-actual-linear-exact-swap";
+
+/// One gating view's answer to "can the bias bound see the divergence here?".
+struct Detectability {
+    id: String,
+    window_width: u32,
+    informative_bias: f64,
+    image_bias: f64,
+}
+
+/// Apply the real swap to every gating class-one view and print what it moves.
+///
+/// **This is a measurement and not a gate**, and it exits 0 whatever it finds.
+/// It exists because the counts in `tolerance.rs`, `attribution.rs` and
+/// `docs/lld/comparator.md` describing which views the bound can reach were
+/// written from a model rather than from the mutation, and the model was wrong
+/// three times running.
+///
+/// Two regions are reported per view because both appear in tracked prose. The
+/// informative-region figure is what the comparator actually gates on. The
+/// image-rectangle figure is what the same swap would produce over the region
+/// the bullet named before the sprint review's second pass, and it is the
+/// evidence that the region choice is load-bearing.
+fn detectability(
+    reference: &Run,
+    candidate: &Run,
+    register: &Register,
+    census: &Census,
+) -> Result<bool, String> {
+    let baseline = compare_runs(reference, candidate, register, census, None)?;
+    let swap = CATALOGUE
+        .iter()
+        .find(|mutation| mutation.name == SWAP)
+        .ok_or_else(|| format!("{SWAP} is not in the catalogue"))?;
+
+    let mut measured: Vec<Detectability> = Vec::new();
+    let mut declined: Vec<String> = Vec::new();
+    for record in &baseline.records {
+        if record.class != ToleranceClass::MonochromeSixteenBit || record.outcome != Outcome::Pass {
+            continue;
+        }
+        let sidecar = reference
+            .sidecars
+            .get(&record.id)
+            .ok_or_else(|| format!("{}: no sidecar", record.id))?;
+        let original = reference
+            .read_frame(&record.id)
+            .map_err(|error| error.to_string())?;
+        let rect = image_rect_for(sidecar.kind, sidecar, original.width(), original.height())
+            .map_err(|error| error.to_string())?;
+        let window_width = sidecar
+            .json
+            .pointer("/voi/windowWidth")
+            .and_then(Value::as_u64)
+            .and_then(|width| u32::try_from(width).ok());
+        let mut swapped = original.clone();
+        if let Err(error) = apply_to_frame(swap, &mut swapped, &rect, window_width) {
+            declined.push(format!("{}: {error}", record.id));
+            continue;
+        }
+        let diff = difference(&original, &swapped, rect, ChannelSet::Monochrome)
+            .map_err(|error| error.to_string())?;
+        let informative = diff
+            .informative
+            .channel(0)
+            .ok_or_else(|| format!("{}: no informative channel", record.id))?;
+        let image = diff
+            .image
+            .channel(0)
+            .ok_or_else(|| format!("{}: no image-rectangle channel", record.id))?;
+        measured.push(Detectability {
+            id: record.id.clone(),
+            window_width: window_width.unwrap_or(0),
+            informative_bias: informative
+                .signed_mean_diff()
+                .map_err(|error| error.to_string())?,
+            image_bias: image
+                .signed_mean_diff()
+                .map_err(|error| error.to_string())?,
+        });
+    }
+
+    let gating = measured.len().saturating_add(declined.len());
+    let bound = MONOCHROME_SIGNED_MEAN_BIAS;
+    println!("id\twindowWidth\tbiasInformative\tbiasImageRect");
+    for row in &measured {
+        println!(
+            "{}\t{}\t{:.4}\t{:.4}",
+            row.id, row.window_width, row.informative_bias, row.image_bias
+        );
+    }
+    for message in &declined {
+        println!("DECLINED {message}");
+    }
+
+    let can_fail = measured
+        .iter()
+        .filter(|row| row.informative_bias.abs() > bound)
+        .count();
+    let blind: Vec<&Detectability> = measured
+        .iter()
+        .filter(|row| row.informative_bias.abs() <= bound)
+        .collect();
+    let over_the_rectangle = measured
+        .iter()
+        .filter(|row| row.image_bias.abs() > bound)
+        .count();
+    let worst_rectangle = measured
+        .iter()
+        .max_by(|a, b| a.image_bias.abs().total_cmp(&b.image_bias.abs()));
+
+    println!("gating class-one views: {gating}");
+    println!("can fail the bias bound over the informative region: {can_fail}");
+    println!("cannot: {}", blind.len());
+    if let Some(smallest) = blind.iter().map(|row| row.window_width).min() {
+        println!("smallest blind window: {smallest}");
+    }
+    for row in &blind {
+        println!(
+            "  BLIND {} w={} bias={:.4}",
+            row.id, row.window_width, row.informative_bias
+        );
+    }
+    println!("exceed the bound over the IMAGE RECTANGLE instead: {over_the_rectangle}");
+    if let Some(worst) = worst_rectangle {
+        println!(
+            "largest image-rectangle bias: {:.4} on {}",
+            worst.image_bias, worst.id
+        );
+    }
+    Ok(true)
 }
 
 fn check(

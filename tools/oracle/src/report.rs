@@ -87,7 +87,10 @@ pub enum Qualifier {
     /// A committed register entry, or F-X007's own per-subject measurement,
     /// explains the divergence and attributes it to the reference.
     ReferenceDivergence,
-    /// The signed mean over the image rectangle is outside 25.1's bias bound.
+    /// The signed mean over the INFORMATIVE region is outside 25.1's bias
+    /// bound. Not over the image rectangle, which is what the bullet said
+    /// before the S03 sprint review's second pass and what this line said
+    /// until its fourth.
     Bias,
     /// The difference is confined to the letterbox, so it is a difference in
     /// the fit rather than in the picture.
@@ -458,8 +461,15 @@ impl RunReport {
             .count()
     }
 
-    /// The qualifier histogram over the unmeasured views, which is the number
-    /// the run-level summary line carries.
+    /// The qualifier histogram over EVERY record, which is the number the
+    /// run-level summary line carries.
+    ///
+    /// Not over the unmeasured views alone. A qualifier is not the property of
+    /// an outcome: `parameter-divergence`, `geometry-divergence` and `bias` all
+    /// arrive on views that FAILED, and a histogram that dropped those would
+    /// under-report the reasons a run went red. The counts therefore total more
+    /// than the unmeasured count, and `real/us_cmb_crc/00000001.dcm` alone
+    /// contributes to two of them.
     #[must_use]
     pub fn qualifier_counts(&self) -> BTreeMap<&'static str, usize> {
         let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
@@ -471,16 +481,50 @@ impl RunReport {
         counts
     }
 
+    /// Every view whose gate failed while its outcome stayed `unmeasured`,
+    /// phrased as run problems.
+    ///
+    /// **Read off the records here rather than collected by the caller**, and
+    /// the difference is the whole point. Until the sprint review's fourth pass
+    /// four tracked places said this qualifier failed a run on its own and
+    /// nothing pushed a problem for it, so it failed only through the census in
+    /// `compare-expectations.json`, and `Qualifier::parse` accepts the label.
+    /// Adding `"divergent-while-unmeasured"` to a census entry, which reads
+    /// like documenting a known-unmeasured view, therefore turned a measured
+    /// divergence back into a green run. A rule that any other file can switch
+    /// off is not the rule the record claims it is.
+    #[must_use]
+    pub fn absorbed_divergences(&self) -> Vec<String> {
+        self.records
+            .iter()
+            .filter(|record| {
+                record
+                    .qualifiers
+                    .contains(&Qualifier::DivergentWhileUnmeasured)
+            })
+            .map(|record| {
+                format!(
+                    "{}: the pixel predicate failed and the outcome is {}. A \
+                     measured divergence absorbed into \"cannot tell\" fails \
+                     the run on its own, and no census entry excuses it",
+                    record.id, record.outcome
+                )
+            })
+            .collect()
+    }
+
     /// A comparison run is green when every view has outcome `pass` or
     /// `unmeasured`, there are zero `absent` views, no view carries
     /// `divergent-while-unmeasured`, the census matches exactly in both
     /// directions, and no register entry marked unreachable fired.
     ///
-    /// The last four are collected into `problems` by the caller, so this is
-    /// the whole of the rule and not half of it.
+    /// Three of those five are `problems`, which the caller collects. The
+    /// other two are counted and read here, so the whole rule holds whatever a
+    /// caller does or forgets.
     #[must_use]
     pub fn green(&self) -> bool {
         self.problems.is_empty()
+            && self.absorbed_divergences().is_empty()
             && self.count(Outcome::Fail) == 0
             && self.count(Outcome::Absent) == 0
     }
@@ -503,6 +547,7 @@ impl RunReport {
                     .collect()
             ),
             "problems": self.problems,
+            "absorbedDivergences": self.absorbed_divergences(),
             "green": self.green(),
             "records": Value::Array(self.records.iter().map(ViewRecord::to_json).collect()),
         })
@@ -515,7 +560,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{Census, Outcome, Qualifier, Side, ViewRecord};
+    use super::{Census, Outcome, Qualifier, RunReport, Side, ViewRecord};
     use crate::sidecar::ViewKind;
     use crate::tolerance::ToleranceClass;
 
@@ -603,5 +648,67 @@ mod tests {
     fn an_unknown_qualifier_in_the_census_is_refused() {
         let outcome = Census::from_json(&json!({ "unmeasured": { "a": ["invented"] } }));
         assert!(outcome.is_err());
+    }
+
+    fn report(records: Vec<ViewRecord>, problems: Vec<String>) -> RunReport {
+        RunReport {
+            records,
+            problems,
+            reference_directory: "reference".to_owned(),
+            candidate_directory: "candidate".to_owned(),
+        }
+    }
+
+    /// A run with nothing wrong is green, which is what makes the two tests
+    /// below about the qualifier rather than about the constructor.
+    #[test]
+    fn a_clean_run_is_green() {
+        let clean = report(
+            vec![record("a", Outcome::Unmeasured, &[Qualifier::Weak])],
+            Vec::new(),
+        );
+        assert!(clean.green());
+        assert!(clean.absorbed_divergences().is_empty());
+    }
+
+    /// `divergent-while-unmeasured` fails the run BY ITSELF. Zero fails, zero
+    /// absents and an empty problem list, and the run is still red.
+    ///
+    /// Until the sprint review's fourth pass this was false. `green()` read
+    /// `problems`, the qualifier put nothing there, and four tracked places
+    /// said it failed a run on its own.
+    #[test]
+    fn an_absorbed_divergence_fails_the_run_on_its_own() {
+        let absorbed = report(
+            vec![record(
+                "a",
+                Outcome::Unmeasured,
+                &[Qualifier::Weak, Qualifier::DivergentWhileUnmeasured],
+            )],
+            Vec::new(),
+        );
+        assert_eq!(absorbed.count(Outcome::Fail), 0);
+        assert_eq!(absorbed.count(Outcome::Absent), 0);
+        assert!(absorbed.problems.is_empty());
+        assert_eq!(absorbed.absorbed_divergences().len(), 1);
+        assert!(!absorbed.green(), "a measured divergence was absorbed");
+    }
+
+    /// **The bypass, refused.** The census is the only thing that used to fail
+    /// a run for this qualifier, and `Qualifier::parse` accepts the label, so
+    /// a census entry naming it silenced the census check as well. Here the
+    /// census agrees with the record exactly and reports nothing, which is the
+    /// state that used to be green.
+    #[test]
+    fn a_census_entry_naming_the_qualifier_does_not_buy_a_green_run() {
+        let qualifiers = &[Qualifier::Weak, Qualifier::DivergentWhileUnmeasured];
+        let records = vec![record("a", Outcome::Unmeasured, qualifiers)];
+        let expected = census(&[("a", &["weak", "divergent-while-unmeasured"])]);
+        let problems = expected.differences(&records);
+        assert!(
+            problems.is_empty(),
+            "the census is satisfied, which is the bypass: {problems:?}"
+        );
+        assert!(!report(records, problems).green());
     }
 }

@@ -29,6 +29,43 @@ catch, and this is the specific case of it that costs the most.
 Found by taking the census for F-X009, and it is the same shape as the two
 guards the S01 runbook exercise produced.
 
+## The hole the S03 sprint review found, and what was measured
+
+The crate-allow pass matched by LINT NAME only, and it read `src/lib.rs` and
+nothing else. Both halves were bypasses and both are closed here.
+
+**A group allow switches the whole table off in one line.** Every lint in
+27.1's table belongs to a clippy group, so `#![allow(clippy::pedantic)]`
+names none of the five and disables four of them. Measured on a minimal crate
+carrying `cast_possible_truncation = "deny"` and one `x as i32`, under the
+pinned 1.97.1 toolchain:
+
+    no attribute                        cargo clippy exits 101
+    #![allow(clippy::pedantic)]         cargo clippy exits 0
+    #![allow(clippy::restriction)]      exits 0 for indexing_slicing
+    #![allow(warnings)]                 exits 101
+    #![allow(clippy::all)]              exits 101
+
+So `pedantic` and `restriction` are the two that reach this table TODAY, and
+that is a fact about clippy 1.97.1 rather than a law: `float_cmp` sat in
+`correctness` until clippy 1.76 and was moved. The other seven names are
+refused on 27.1's own note instead, that every conversion should be a
+deliberate visible choice, which a crate-wide blanket allow is not. Refusing
+them costs nothing, because a crate that needs one of those groups off can say
+so at the item that needs it.
+
+**An inner attribute is not confined to a crate root.** `#![allow(...)]` at the
+top of a module file applies to that module and everything under it, so
+`crates/x/src/inner.rs` carrying one silences the lint for that module while
+`src/lib.rs` stays clean. Measured the same way: with `src/lib.rs` carrying
+nothing but `pub mod inner;` and the attribute in `src/inner.rs`, clippy goes
+from 101 to 0. `src/main.rs` is a second crate ROOT and was never read at all.
+So every `.rs` file under each crate is walked.
+
+The `#[allow(...)]` outer form on one item is deliberately NOT refused. That is
+the visible, local choice 27.1's note asks for. The gap between the two is one
+character, which is why the refusal names the whole attribute it found.
+
 ## The one departure, declared rather than discovered
 
 `unsafe_code = "deny"` is NOT in `Cargo.toml`. HLD 27.2 R5 is enforced instead
@@ -53,8 +90,10 @@ CARGO = ROOT / "Cargo.toml"
 CRATES = ROOT / "crates"
 RUNNER = ROOT / "bin" / "ocelli.sh"
 
-# HLD 27.1, transcribed. The table is the specification and this is the only
-# copy of it in the repository outside `docs/hld/`.
+# HLD 27.1, transcribed. The table is the specification. There is a second copy
+# in Cargo.toml's [workspace.lints.clippy], carrying the same five rows at the
+# same levels, and comparing the two is this check's whole job. A rule with one
+# copy has nothing to be compared against.
 REQUIRED_CLIPPY = {
     "cast_possible_truncation": "deny",
     "cast_precision_loss": "deny",
@@ -64,8 +103,88 @@ REQUIRED_CLIPPY = {
 }
 REQUIRED_RUST = {"unsafe_code": "deny"}
 
+# Group and blanket names no crate may allow. NAMES ONLY, so the declared
+# constant ratchet in scripts/guards/catalogue.py records the set that decides
+# how strict this is and not a sentence somebody may reword. Narrowing this
+# list is the widening a probe cannot see, because a probe can only ever write
+# one of these names and the guard stays correct about its new, smaller rule.
+REFUSED_GROUPS = {
+    "clippy::pedantic",
+    "clippy::restriction",
+    "clippy::all",
+    "clippy::correctness",
+    "clippy::style",
+    "clippy::complexity",
+    "clippy::perf",
+    "clippy::suspicious",
+    "warnings",
+}
+
+# What each group reaches, for the refusal message. Measured under the pinned
+# 1.97.1 toolchain, and the header records the runs. Only two of the nine
+# reach 27.1's table TODAY, and that is a fact about clippy 1.97.1 rather than
+# a law, which is why the other seven are refused as blanket allows and are
+# not claimed to disable anything.
+GROUP_REACHES = {
+    "clippy::pedantic": "cast_possible_truncation, cast_precision_loss, "
+                        "cast_sign_loss and float_cmp, measured",
+    "clippy::restriction": "indexing_slicing, measured",
+}
+BLANKET = ("no lint in HLD 27.1's table under clippy 1.97.1, and it is a "
+           "blanket allow over a whole crate or module, which 27.1's note "
+           "rules out on its own")
+
+# An INNER attribute, `#![...]`, and every `allow(...)` inside it including one
+# reached through `cfg_attr`. The outer `#[allow(...)]` form on a single item is
+# not matched, deliberately, because that is the visible local choice 27.1
+# permits. Names are then compared whole rather than by substring: the previous
+# `\b(clippy::)?{lint}\b` search could only ever find a name it was already
+# looking for, which is how a group allow naming none of the five passed.
+#
+# `expect` is matched alongside `allow`, and leaving it out was a live bypass
+# in the first version of this fix. It is the RFC 2383 form, stable since Rust
+# 1.81, and it silences a lint exactly as `allow` does while additionally
+# warning if the lint never fires. Measured under the pinned 1.97.1 toolchain
+# on a crate carrying `cast_possible_truncation = "deny"` and one `x as i32`:
+# no attribute exits 101, `#![expect(clippy::cast_possible_truncation)]` exits
+# 0, and `#![expect(clippy::pedantic)]` exits 0. Both the named and the group
+# route were open. Note that `expect` reaches `pedantic` where `allow` does
+# not reach `warnings`, so the two attributes are not even the same shape of
+# hole.
+INNER_ALLOW = re.compile(
+    r"#!\[[^\]]*?\b(?:allow|expect)\(([^)]*)\)[^\]]*\]")
+
 # A stricter level satisfies a weaker requirement and not the other way round.
 STRENGTH = {"allow": 0, "warn": 1, "deny": 2, "forbid": 3}
+
+
+def crate_sources(crate: Path) -> list[Path]:
+    """Every `.rs` file in a crate, sorted, with build output skipped.
+
+    Not `src/lib.rs`. An inner attribute in `src/main.rs` is a second crate
+    root and one in any module file governs that module, both measured, so a
+    pass that reads one file answers a question about one file and says so by
+    succeeding.
+    """
+    return sorted(path for path in crate.rglob("*.rs")
+                  if "target" not in path.relative_to(crate).parts)
+
+
+def allowed_lints(source: str) -> list[tuple[str, str]]:
+    """Every lint name allowed by an inner attribute, with the attribute.
+
+    Returns (name, attribute text) so a refusal can quote what it found. The
+    name keeps its tool prefix, because `clippy::pedantic` and a bare
+    `pedantic` are different things to clippy and only one of them is a group.
+    """
+    found: list[tuple[str, str]] = []
+    for match in INNER_ALLOW.finditer(source):
+        attribute = " ".join(match.group(0).split())
+        for name in match.group(1).split(","):
+            name = name.strip()
+            if name:
+                found.append((name, attribute))
+    return found
 
 
 def table(text: str, name: str) -> dict[str, str]:
@@ -140,20 +259,57 @@ def main() -> int:
                 f"apply to it, and a crate without it compiles under a "
                 f"smaller set of rules while the `clippy` gate stays green.")
 
-    # A crate-level allow puts a denied lint back to sleep for a whole crate.
+    # An inner `allow` or `expect` puts a denied lint back to sleep for a
+    # whole crate or a whole module. By name, and by any group that
+    # contains one.
+    named = set(REQUIRED_CLIPPY) | set(REQUIRED_RUST)
+    scanned = 0
     for crate in crates:
-        lib = crate / "src" / "lib.rs"
-        if not lib.is_file():
-            continue
-        source = lib.read_text(encoding="utf-8")
-        for lint in sorted(REQUIRED_CLIPPY) + sorted(REQUIRED_RUST):
-            if re.search(rf"#!\[allow\([^)]*\b(clippy::)?{lint}\b", source):
-                problems.append(
-                    f"{crate.name}/src/lib.rs re-allows `{lint}` for the "
-                    f"whole crate. HLD 27.1 denies it, and a crate-wide allow "
-                    f"is not the deliberate, visible choice 27.1's note asks "
-                    f"for. Allow it at the expression that needs it, with a "
-                    f"reason.")
+        for path in crate_sources(crate):
+            scanned += 1
+            where = path.relative_to(ROOT).as_posix()
+            for name, attribute in allowed_lints(
+                    path.read_text(encoding="utf-8")):
+                bare = name.removeprefix("clippy::")
+                if bare in named:
+                    problems.append(
+                        f"{where} re-allows `{bare}` with `{attribute}`. HLD "
+                        f"27.1 denies it, and an inner attribute is not the "
+                        f"deliberate, visible choice 27.1's note asks for: at "
+                        f"a crate root it covers the crate and in a module "
+                        f"file it covers that module. Allow it at the "
+                        f"expression that needs it, with a reason.")
+                    continue
+                if name in REFUSED_GROUPS:
+                    reaches = GROUP_REACHES.get(name)
+                    why = (
+                        f"which reaches {reaches}. A group allow names none "
+                        f"of HLD 27.1's five lints and switches them off "
+                        f"anyway, so this check and the `clippy` gate would "
+                        f"both stay green over a smaller set of rules. That "
+                        f"is the arithmetic defect class CLAUDE.md names as "
+                        f"the one that reaches patients."
+                        if reaches else
+                        f"which reaches {BLANKET}. It is refused here rather "
+                        f"than measured, because which lint sits in which "
+                        f"group is a clippy release detail and not a law: "
+                        f"float_cmp sat in `correctness` until clippy 1.76.")
+                    problems.append(
+                        f"{where} allows the lint group `{name}` with "
+                        f"`{attribute}`, {why} Allow the single lint at the "
+                        f"expression that needs it, with a reason.")
+
+    # A scan that read nothing is not a scan that found nothing. Measured
+    # while proving the `expect` route above: a tree whose crates carry no
+    # `.rs` file at all printed `0 .rs file(s) carry no inner allow` and
+    # exited 0, which is AGENTS.md's named failure of answering a question
+    # about an empty set in the language of success.
+    if crates and not scanned:
+        problems.append(
+            f"{len(crates)} crate(s) inherit the lint table and not one "
+            f"`.rs` file was read, so the inner-attribute pass proved "
+            f"nothing and would have said OK. Either the crate layout moved "
+            f"or `crate_sources` stopped finding sources.")
 
     if problems:
         print("FAIL: the HLD 27.1 lint policy")
@@ -162,8 +318,10 @@ def main() -> int:
         return 1
 
     print(f"OK: {len(REQUIRED_CLIPPY)} clippy lint(s) at or above HLD 27.1's "
-          f"level, {len(crates)} crate(s) inherit the table, unsafe_code "
-          f"denied by {unsafe_by}")
+          f"level, {len(crates)} crate(s) inherit the table, {scanned} "
+          f".rs file(s) carry no inner allow or expect of a denied lint or "
+          f"of a group "
+          f"holding one, unsafe_code denied by {unsafe_by}")
     return 0
 
 

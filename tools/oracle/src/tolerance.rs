@@ -65,9 +65,21 @@ pub const MONOCHROME_MAX_ABS_DIFF: u8 = 2;
 /// soft-tissue window is `255 * (x + 160) / 159600`, which peaks at 0.6375 of
 /// a display code and therefore never exceeds one code after quantisation, so
 /// the maximum-difference rule above passes a whole-frame swap between the two
-/// functions everywhere. 0.1 sits roughly three times below the 0.32 mean that
-/// swap produces at the window centre and far above the zero expected when two
-/// implementations agree.
+/// functions everywhere.
+///
+/// **0.32 is a per-pixel divergence and not a mean, and this said "mean" until
+/// the sprint review's fourth pass.** It is the value of that formula AT the
+/// window centre, `255 * (40 + 160) / 159600 = 51000 / 159600 = 0.3195`, which
+/// is one pixel's divergence and not an average over any region. What the
+/// oracle measures over a region is `mean(u) / w`, and on this corpus's
+/// synthetic soft-tissue rows, whose content is spread across the window, that
+/// lands within a thousandth of 0.32 for exactly that reason. On the real
+/// soft-tissue CT rows it runs from 0.269 to 0.284.
+///
+/// So 0.1 sits about three times below what the swap actually produces on a
+/// soft-tissue row and far above the zero expected when two implementations
+/// agree. Reproduce with `./target/release/ocelli-compare census`, the
+/// `biasInformative` column, rows at `windowWidth` 400.
 pub const MONOCHROME_SIGNED_MEAN_BIAS: f64 = 0.1;
 
 /// "world coordinates within 1e-6 mm".
@@ -204,9 +216,9 @@ pub fn monochrome_predicate(stats: &ChannelStats) -> Result<MonochromeVerdict, T
 /// sides differs by nothing whatever the arithmetic underneath says, so
 /// including it in the denominator divides a real divergence by pixels
 /// that structurally cannot show one. Measured on this corpus, that
-/// choice was the difference between detecting 0 of 71 gating class-one
-/// views and detecting the soft-tissue CT rows where HLD 18.3's worked
-/// example lives.
+/// choice is the difference between detecting **0 of the 70** gating
+/// class-one views and detecting 51 of them, the soft-tissue CT rows
+/// where HLD 18.3's worked example lives among them.
 ///
 /// **What this bound cannot catch, measured rather than reasoned.** The
 /// per-pixel divergence between LINEAR and LINEAR_EXACT is exactly `u / w`,
@@ -216,12 +228,26 @@ pub fn monochrome_predicate(stats: &ChannelStats) -> Result<MonochromeVerdict, T
 ///
 /// That is a statement about CONTENT and not only about width. The absolute
 /// limit is `255 / w`, so `w > 2550` is unreachable for any content, but the
-/// practical limit bites far sooner. Measured across the 71 gating class-one
-/// views on this corpus: **51 can fail this bound under the real divergence
-/// and 20 cannot.** The 20 are every `real/mr_eay131` row and its two
-/// reformats, at windows from 678 to 881 and informative means giving 0.058 to
-/// 0.087, plus `synthetic/mr_nonsquare_spacing` at 2048 and the two rows at
-/// 4096. **The smallest blind window is 678, not 2550.**
+/// practical limit bites far sooner.
+///
+/// Measured across the **70** gating class-one views on this corpus, by
+/// applying the catalogue's own swap to each and reading the signed mean back:
+/// **51 can fail this bound under the real divergence and 19 cannot.** The 19
+/// are the fifteen `real/mr_eay131` stack rows and two of that subject's three
+/// reformats, at windows from 678 to 881 and informative means from 0.058 to
+/// 0.087, plus `synthetic/mr_nonsquare_spacing` at 2048 and
+/// `synthetic/cr_monochrome1` at 4096. **The smallest blind window is 678, not
+/// 2550.**
+///
+/// Three details in that list were wrong before the sprint review's fourth
+/// pass and each is worth naming. It is 70 gating views and not 71, because
+/// `real/dx_varepop/00000001.dcm` is `mono16` and is `unmeasured` for
+/// `decimated`, so it gates nothing. Its CORONAL reformat is at -0.114 and
+/// CAN fail, so "its two reformats" was true only of the count. And
+/// `real/dx_varepop/00000001.dcm` is not one of "the two rows at 4096",
+/// because only `synthetic/cr_monochrome1.dcm` gates at that width at all.
+///
+/// Reproduce every number here with `./target/release/ocelli-compare census`.
 ///
 /// So this bound protects the soft-tissue CT rows, which is where HLD 18.3's
 /// worked example lives, and does not protect a wide-window MR. Widening it is
@@ -237,8 +263,8 @@ pub struct BiasVerdict {
 
 /// # Errors
 /// When the region is empty.
-pub fn bias_bound(image_stats: &ChannelStats) -> Result<BiasVerdict, ToleranceError> {
-    let signed_mean_diff = image_stats.signed_mean_diff()?;
+pub fn bias_bound(region: &ChannelStats) -> Result<BiasVerdict, ToleranceError> {
+    let signed_mean_diff = region.signed_mean_diff()?;
     Ok(BiasVerdict {
         signed_mean_diff,
         passes: signed_mean_diff.abs() <= MONOCHROME_SIGNED_MEAN_BIAS,
@@ -258,12 +284,37 @@ mod tests {
     /// The comparison is on the bullet's FIRST SENTENCE, because that is the
     /// normative statement and the rest of the bullet is the reasoning behind
     /// it, which moves as measurements are added.
+    ///
+    /// **All four bullets, and until the fourth pass it was two.** The loop
+    /// covered the bias and colour bullets only, and the reason was not
+    /// declared anywhere: the monochrome and geometry bullets each carry a
+    /// prose semicolon and the monochrome one a `≤`, both of which this
+    /// repository's voice rules make the constants write as `,` and `<=`
+    /// outside `docs/hld/`. The normalisation was applied to the constant and
+    /// not to the specification string being searched, so those two could
+    /// never match and were quietly dropped instead of failing. The two
+    /// substitutions are now applied to the SPEC side as well, which is the
+    /// only place they belong, and the loop covers what the constants claim.
     #[test]
     fn the_transcribed_bullets_match_the_specification() {
         let hld = include_str!("../../../docs/hld/22-testing-and-tolerance.md");
+        // The two normalisations the constants declare, undone on the
+        // specification rather than on the quotation, so a real difference in
+        // wording still fails.
+        let spec: String = hld
+            .replace('\u{2264}', "<=")
+            .replace(';', ",")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
         for (label, quoted) in [
+            (
+                "Monochrome 16-bit (CT, MR, CR, DR)",
+                super::SECTION_25_1_MONOCHROME,
+            ),
             ("Systematic bias, monochrome", super::SECTION_25_1_BIAS),
             ("Colour and ultrasound", super::SECTION_25_1_COLOUR),
+            ("Geometry", super::SECTION_25_1_GEOMETRY),
         ] {
             let first_sentence = quoted
                 .split_once(". ")
@@ -273,7 +324,6 @@ mod tests {
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
-            let spec: String = hld.split_whitespace().collect::<Vec<_>>().join(" ");
             assert!(
                 spec.contains(&normalised),
                 "{label} is transcribed here as {normalised:?} and \

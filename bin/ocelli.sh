@@ -134,15 +134,25 @@ run_gate() {
     # permanently amber gate is a gate that gets disabled.
     #
     # Three commands, chained on `&&` for the reason the backlog arm gives: a
-    # case arm returns the status of its LAST command. The node suites are the
-    # four pure ones. tests/cold_start_test.mjs needs a browser and is not here.
+    # case arm returns the status of its LAST command.
+    #
+    # tests/cold_start_test.mjs IS here, and it was not until the S03 review's
+    # fourth pass. Four of its five tests need no browser, and the whole file
+    # was excluded because the runner it imports pulled in `playwright` at
+    # module scope, so the file could not load without an install. The runner
+    # now imports playwright inside `run()`, and the one test that does launch
+    # a browser is opted into with OCELLI_BENCH_BROWSER=1, which
+    # `npm run test:browser` in tools/bench sets. So this stays a no-browser
+    # gate and gains workspaceVersion, median, atClockPrecision and
+    # resolveServedPath.
     bench)       python3 scripts/bench_check.py &&
                  python3 -m unittest discover -s scripts/tests \
                    -p test_bench_check.py &&
                  node --test tools/bench/tests/hostclass_test.mjs \
                    tools/bench/tests/record_test.mjs \
                    tools/bench/tests/registry_test.mjs \
-                   tools/bench/tests/state_test.mjs ;;
+                   tools/bench/tests/state_test.mjs \
+                   tools/bench/tests/cold_start_test.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py ;;
     prose)       python3 scripts/prose_check.py ;;
     content)     python3 scripts/staged_content_check.py --tracked ;;
@@ -185,12 +195,19 @@ run_gate() {
                  python3 scripts/guard_census.py &&
                  python3 scripts/guard_probe.py --self-test &&
                  python3 scripts/guard_probe.py --profile floor &&
-                 python3 -m unittest discover -s scripts/tests \
+                 python3 -B -m unittest discover -s scripts/tests \
                    -p test_guard_catalogue.py ;;
     # The level-3 runs that need a toolchain. NOT in the floor, and excluded
     # by name in the --floor arm below and in scripts/ci_floor_check.py's
-    # NOT_IN_FLOOR. Both are needed: miss either and the `ci` gate demands a
-    # CI step for a gate the floor never runs.
+    # NOT_IN_FLOOR. The two lists are compared for set equality there, so
+    # missing either is refused rather than being a matter of care.
+    #
+    # scripts/ci_floor_check.py also refuses the case where this job goes
+    # away entirely: a gate outside the floor that needs no GPU must still
+    # be run by some CI step. What it can PROVE about this one is that the
+    # step is reachable on workflow_dispatch, because `github.ref` is
+    # outside the expression subset it evaluates, so the push-to-main half
+    # of the claim below is this comment's and not the check's.
     #
     # It gets a CI job on pushes to `main` and on workflow_dispatch, and not
     # on pull_request. So a weakened deep guard is caught on merge to main
@@ -263,10 +280,16 @@ gates_cmd() {
         # fails if the module exceeds the agreed budget", and a wasm-pack
         # build costs no GPU.
         #
-        # This list and scripts/ci_floor_check.py's NOT_IN_FLOOR must agree.
-        # They are two literals in two files and nothing joins them, so a name
-        # added to one and not the other makes the `ci` gate demand a CI step
-        # for a gate the floor never runs.
+        # This list and scripts/ci_floor_check.py's NOT_IN_FLOOR must agree,
+        # and since the S03 review's fourth pass something joins them: that
+        # file PARSES the `case` line below and refuses a set that differs
+        # from NOT_IN_FLOOR in either direction. This comment used to say a
+        # name in one list and not the other "makes the `ci` gate demand a
+        # CI step for a gate the floor never runs", and the reviewer
+        # measured that adding `prose` here alone left the `ci` gate at 0
+        # while `gate --floor` silently stopped running `prose`. A gate
+        # leaving the floor removes work rather than adding a demand, so
+        # that direction had no detection at all. Now it does.
         case "$name" in oracle|corpus|guards-deep) continue ;; esac
         selected+=("$name")
       done ;;

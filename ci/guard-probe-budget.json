@@ -60,6 +60,11 @@
       "guard": "ci-floor",
       "tunable": false
     },
+    "scripts/lint_policy_check.py:REFUSED_GROUPS": {
+      "digest": "e4ef8e3eb53413b7",
+      "guard": "lint-policy",
+      "tunable": false
+    },
     "scripts/pin_and_size_check.py:EXACT_PINNED": {
       "digest": "b98559eaf372548e",
       "guard": "pins",
@@ -146,7 +151,9 @@
       "tunable": false
     }
   },
-  "note": "Recorded measurements, not guesses. `wall_clock_seconds` is what the harness took on the machine that recorded it. `constants` is the declared-constant ratchet and `uncovered` is the uncovered-refusal ratchet, both written by scripts/guard_census.py --record.",
+  "constants_count": 30,
+  "gates_declared": 28,
+  "note": "Recorded measurements, not guesses. `wall_clock_seconds` is what the harness took on the machine that recorded it. `constants` is the declared-constant ratchet, `constants_count` and `gates_declared` are the counts that catch one of those being removed rather than changed, `oracle_faults` is the fault-count ratchet and `uncovered` is the uncovered-refusal ratchet, all written by scripts/guard_census.py --record.",
   "oracle_faults": 23,
   "uncovered": {
     "sites": 9,
@@ -154,6 +161,6 @@
   },
   "wall_clock_seconds": {
     "deep": 17.2,
-    "floor": 14.3
+    "floor": 13.9
   }
 }

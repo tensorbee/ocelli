@@ -143,15 +143,20 @@ no GPU and no browser and Ocelli needs both.
 ## Current state
 
 Early. S01 delivered the `ocelli-core` types and the corpus. S02 delivered the
-build and packaging paths and the reference half of the oracle. See
+build and packaging paths and the reference half of the oracle. S03 gave the
+oracle a verdict, resolved the runtime tier, answered Appendix A gates A1 and
+A2, and gave every repository guard a standing probe. See
 `docs/sprints/CURRENT_SPRINT.md` and `docs/lld/`.
 
 What exists, in the order it matters:
 
-- **The oracle's reference half.** `tools/oracle` renders every applicable
-  corpus row through cornerstone3D 5.8.2 under headless Chromium on
-  SwiftShader and writes reference pixels plus a metadata sidecar. It compares
-  nothing yet, which is F-011.
+- **The oracle, both halves.** `tools/oracle` renders every applicable corpus
+  row through cornerstone3D 5.8.2 under headless Chromium on SwiftShader and
+  writes reference pixels plus a metadata sidecar. F-011 added the comparator,
+  so it now returns a per-view verdict against section 25.1's tolerances and
+  can attribute a divergence to a side. There is still no Ocelli renderer to
+  compare against, so detection is proved by a declared mutation catalogue
+  applied to real reference frames. `bin/ocelli.sh oracle` runs both halves.
 - **The corpus**, 91 rows behind `corpus/manifest.tsv`, covering all sixteen
   transfer syntaxes the codec registry claims.
 - **`ocelli-core`**, the coordinate and value spaces, entries 1 and 2 of the

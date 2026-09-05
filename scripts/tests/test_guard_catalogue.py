@@ -138,6 +138,40 @@ class ProfileAgreesWithNeeds(unittest.TestCase):
                          [])
 
 
+class KindAndGateAreValidated(unittest.TestCase):
+    """Two fields that decide a bucket, and nothing checked either of them.
+
+    `kind` decides whether an entry's refusals sit in the uncovered ratchet or
+    in "declared out of scope", so a typo such as `not_a_guard` moves them out
+    of the count and nothing anywhere said so. `gate` decides nothing at all in
+    this harness, which is the point: a probe invokes the guard's own script,
+    so deleting a row from `bin/ocelli.sh`'s GATES array shrank `--floor`,
+    `--sprint` and `--all` and left every count here unchanged.
+    """
+
+    # Named from the outside, in the shape `TheTripwire.EXPECTED_READS` uses.
+    # Asserting `guard.kind in census.KINDS` alone would pass with KINDS
+    # widened to hold the typo.
+    EXPECTED_KINDS = {"guard", "not-a-guard"}
+
+    def test_the_declared_set_is_exactly_two(self) -> None:
+        self.assertEqual(census.KINDS, self.EXPECTED_KINDS)
+
+    def test_every_entry_declares_one_of_them(self) -> None:
+        for guard in GUARDS:
+            with self.subTest(guard.id):
+                self.assertIn(guard.kind, self.EXPECTED_KINDS, guard.id)
+
+    def test_every_entry_names_a_declared_gate_or_the_sentinel(self) -> None:
+        declared = set(census.gates_declared())
+        self.assertTrue(declared, "bin/ocelli.sh's GATES array parsed empty, "
+                                  "so this test proved nothing")
+        for guard in GUARDS:
+            for name in guard.gate.split():
+                with self.subTest(f"{guard.id}:{name}"):
+                    self.assertTrue(name == "-" or name in declared, name)
+
+
 class SpecCitationsResolve(unittest.TestCase):
     DEVIATIONS = ROOT / "docs" / "hld" / "DEVIATIONS.md"
 
@@ -207,15 +241,20 @@ class CoveredByNamesATestThatOpensTheFile(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("no test it names opens that file", problems[0])
 
-    def test_a_directory_whose_files_do_not_open_it_is_refused(self) -> None:
-        """The hatch the S03 review's third pass measured.
+    # These two used to assert the opposite: that a directory holding a file
+    # which reaches the guarded file was an acceptable claim, with
+    # `scripts/guards/` as the worked example. The S03 review's fourth pass
+    # measured what that example actually proves. `scripts/guards/` holds
+    # `catalogue.py`, which writes every guarded path as
+    # `file="tools/bench/run.mjs"`, so that directory reaches EVERY entry and
+    # so does any directory whose walk contains the catalogue. The reviewer got
+    # zero check-f problems from `("scripts/",)`, `("scripts/guards/",)` and
+    # `("docs/",)`, and one line moved `bench.runner`'s nine unwatched refusals
+    # into the covered bucket. So the route is gone and the test is now that a
+    # directory claim is refused, in both the shape that never reached the file
+    # and the shape that did.
 
-        A `covered_by` naming a bare directory was accepted for the
-        directory's own existence, with no reachability check at all. One
-        line, `covered_by=("tools/bench/tests/",)`, put `bench.runner`'s nine
-        uncovered refusals back into the covered bucket and the census
-        printed `0 watched by nothing` and exited 0.
-        """
+    def test_a_directory_whose_files_do_not_open_it_is_refused(self) -> None:
         from guards.catalogue import Guard
         hatch = Guard(
             id="probe", file="tools/bench/run.mjs", gate="-", spec="none",
@@ -223,17 +262,20 @@ class CoveredByNamesATestThatOpensTheFile(unittest.TestCase):
             claims=("*",),
             covered_by=("tools/bench/tests/",))
         problems = self._problems_for(hatch)
-        self.assertEqual(len(problems), 1, problems)
-        self.assertIn("no test it names opens that file", problems[0])
-        self.assertIn("the directory tools/bench/tests/ holds", problems[0])
+        # Two: the directory claim itself, and the entry left with no claim
+        # that reaches its file, which is what makes it uncovered.
+        self.assertEqual(len(problems), 2, problems)
+        self.assertIn("covered by the directory tools/bench/tests/",
+                      problems[0])
+        self.assertIn("no test it names opens that file", problems[1])
 
-    def test_a_directory_holding_a_file_that_opens_it_passes(self) -> None:
-        """The other direction, and it is why this is not just a ban.
+    def test_a_directory_holding_the_catalogue_is_refused_too(self) -> None:
+        """The measured bypass, asserted where it was asserted the other way.
 
-        `scripts/guards/catalogue.py` names `ci/check-device-ownership.sh`, so
-        the directory holding it reaches that guard's file and the claim
-        stands. A rule that refused every directory would be as useless as
-        one that read none of them.
+        `ci/check-device-ownership.sh` is named inside
+        `scripts/guards/catalogue.py`, so under the pass 3 rule
+        `covered_by=("scripts/guards/",)` was a valid claim of coverage for
+        it, and for every other entry, since the catalogue names them all.
         """
         from guards.catalogue import Guard
         real = Guard(
@@ -242,7 +284,27 @@ class CoveredByNamesATestThatOpensTheFile(unittest.TestCase):
             refuses="A sentence long enough to satisfy the well-formed test.",
             claims=("*",),
             covered_by=("scripts/guards/",))
-        self.assertEqual(self._problems_for(real), [])
+        problems = self._problems_for(real)
+        self.assertEqual(len(problems), 2, problems)
+        self.assertIn("covered by the directory scripts/guards/", problems[0])
+        self.assertIn("no test it names opens that file", problems[1])
+
+    def test_the_catalogue_names_no_directory(self) -> None:
+        """Removing the route was honest only because nothing used it.
+
+        If an entry ever needs one, the answer is to name the file rather than
+        to put the route back, and this fails at the moment somebody tries.
+        """
+        from guards.catalogue import GUARDS as REAL
+        for guard in REAL:
+            for claim in guard.covered_by:
+                match = census.COVERED_PATH.search(claim)
+                if match is None:
+                    continue
+                with self.subTest(f"{guard.id}:{match.group(1)}"):
+                    self.assertFalse(
+                        (ROOT / match.group(1)).is_dir(),
+                        f"{guard.id} claims the directory {match.group(1)}")
 
     def test_a_named_test_that_is_gone_is_refused(self) -> None:
         from guards.catalogue import Guard

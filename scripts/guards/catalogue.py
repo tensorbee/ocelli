@@ -531,6 +531,39 @@ def _sprint_plan_wrong_sprint(box: Sandbox) -> None:
     box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
 
 
+def _sprint_plan_wrong_milestone_summary(box: Sandbox) -> None:
+    """Change one milestone summary line's engineer-week total.
+
+    `render` writes this line and `--check` did not read it until the S03
+    review's fourth pass, which found M1 claiming 61 engineer-weeks against
+    an allocation saying 62. A generated line nothing compares is a
+    hand-maintained line that looks generated.
+    """
+    text = box.read("docs/sprints/SPRINT_PLAN.md")
+    line = re.search(r"^_S\d+ to S\d+, \d+ stories, (\d+) engineer-weeks\._$",
+                     text, re.M)
+    if line is None:
+        raise AssertionError("SPRINT_PLAN.md carries no milestone summary line")
+    weeks = int(line.group(1))
+    box.substitute("docs/sprints/SPRINT_PLAN.md", line.group(0),
+                   line.group(0).replace(f"{weeks} engineer-weeks",
+                                         f"{weeks + 1} engineer-weeks"))
+
+
+def _sprint_plan_stale_goal_line(box: Sandbox) -> None:
+    """Drop a story title out of a sprint's generated goal paragraph.
+
+    The same defect the fourth pass found in S04's goal line, which still
+    named a story title the table row beside it had already replaced.
+    """
+    text = box.read("docs/sprints/SPRINT_PLAN.md")
+    goal = re.search(r"^\*\*Goal\*\*: (.+)$", text, re.M)
+    if goal is None:
+        raise AssertionError("SPRINT_PLAN.md carries no goal line")
+    box.substitute("docs/sprints/SPRINT_PLAN.md", goal.group(0),
+                   "**Goal**: A title no story in the allocation carries.")
+
+
 def _stale_codex_adapter(box: Sandbox) -> None:
     box.append(".claude/commands/verify.md",
                "\nA line the adapter has not seen.\n")
@@ -782,6 +815,277 @@ def _lint_policy_weakened(box: Sandbox) -> None:
 def _lint_policy_uninherited(box: Sandbox) -> None:
     box.substitute("crates/ocelli-pixel/Cargo.toml",
                    "[lints]\nworkspace = true", "")
+
+
+def _a_crate_root(box: Sandbox) -> str:
+    """The first crate root under `crates/`, read rather than named.
+
+    A crate ROOT specifically, because `#![allow(...)]` there governs the whole
+    crate and that is the widest form of the bypass.
+    """
+    for crate in sorted((box.path / "crates").iterdir()):
+        lib = crate / "src" / "lib.rs"
+        if lib.is_file():
+            return f"crates/{crate.name}/src/lib.rs"
+    raise AssertionError("no crate carries a src/lib.rs, so there is no crate "
+                         "root to plant an inner attribute in")
+
+
+def _a_crate_module_file(box: Sandbox) -> str:
+    """A `.rs` file in a crate that is NOT the crate root.
+
+    The second half of the bypass. `#![allow(...)]` at the top of a module file
+    applies to that module, measured with cargo under 1.97.1, and the guard
+    read `src/lib.rs` and nothing else.
+    """
+    for crate in sorted((box.path / "crates").iterdir()):
+        for path in sorted((crate / "src").glob("*.rs")):
+            if path.name != "lib.rs":
+                return f"crates/{crate.name}/src/{path.name}"
+    raise AssertionError("every crate is a single lib.rs, so there is no "
+                         "module file for this probe to plant one in")
+
+
+def _prepend(box: Sandbox, rel: str, line: str) -> None:
+    box.write(rel, line + "\n" + box.read(rel))
+
+
+def _group_allow_at_a_crate_root(box: Sandbox) -> None:
+    """`#![allow(clippy::pedantic)]`, which names none of HLD 27.1's lints.
+
+    The input is HLD 27.1's table read together with clippy's own group
+    membership, and the membership was MEASURED rather than read off the
+    guard's list. On a minimal crate carrying `cast_possible_truncation =
+    "deny"` and one `x as i32`, under the pinned 1.97.1 toolchain, cargo clippy
+    exits 101 without this attribute and 0 with it. So the `clippy` gate goes
+    green with the arithmetic denies switched off, which is the defect class
+    CLAUDE.md names as the one that reaches patients.
+    """
+    _prepend(box, _a_crate_root(box), "#![allow(clippy::pedantic)]")
+
+
+def _expect_attribute_at_a_crate_root(box: Sandbox) -> None:
+    """`#![expect(...)]`, the RFC 2383 form, which silences a lint like allow.
+
+    This was a live bypass in the first version of the group-allow fix, which
+    matched `allow` and nothing else. Measured on a minimal crate carrying
+    `cast_possible_truncation = "deny"` and one `x as i32`, under the pinned
+    1.97.1 toolchain: no attribute exits 101,
+    `#![expect(clippy::cast_possible_truncation)]` exits 0 and
+    `#![expect(clippy::pedantic)]` exits 0. Both the named route and the group
+    route were open, and `expect` reaches `pedantic` where `allow` does not
+    reach `warnings`, so it is not even the same shape of hole.
+    """
+    _prepend(box, _a_crate_root(box),
+             "#![expect(clippy::cast_possible_truncation)]")
+
+
+def _no_crate_sources_at_all(box: Sandbox) -> None:
+    """Delete every `.rs` file under `crates/`.
+
+    A scan that read nothing is not a scan that found nothing. The check
+    printed `0 .rs file(s) carry no inner allow` and exited 0 over exactly
+    this state, which is AGENTS.md's named failure of answering a question
+    about an empty set in the language of success.
+    """
+    removed = 0
+    for path in sorted((box.path / "crates").rglob("*.rs")):
+        if "target" in path.parts:
+            continue
+        path.unlink()
+        removed += 1
+    if removed == 0:
+        raise AssertionError("no crate carries a .rs file already, so this "
+                             "probe cannot create the state it is about")
+
+
+def _named_allow_outside_the_crate_root(box: Sandbox) -> None:
+    """A denied lint re-allowed in a module file rather than in `lib.rs`.
+
+    The lint name comes from HLD 27.1's table. The FILE is the point: an inner
+    attribute in a module file governs that module, so reading only
+    `src/lib.rs` answered a question about one file and said so by succeeding.
+    """
+    _prepend(box, _a_crate_module_file(box),
+             "#![allow(clippy::cast_possible_truncation)]")
+
+
+def _item_allow_with_a_reason(box: Sandbox) -> None:
+    """The form HLD 27.1's note PERMITS, at the expression that needs it.
+
+    An outer `#[allow(...)]` on one item, which is the deliberate visible
+    choice the note asks for. One character separates it from the refused
+    form, so a guard that refused this would be refusing the remedy it
+    recommends in its own message.
+    """
+    box.append(
+        _a_crate_module_file(box),
+        "\n// HLD 27.1's note, the deliberate visible choice at the "
+        "expression\n// that needs it.\n"
+        "#[allow(clippy::cast_possible_truncation, reason = \"probe\")]\n"
+        "pub fn probe_local_allow(x: i64) -> i32 {\n    x as i32\n}\n")
+
+
+def _ci_arm_commands(box: Sandbox, gate: str) -> list[str]:
+    """A gate's arm commands, read through the guard's own runner parser.
+
+    Reading `bin/ocelli.sh` is reading the ARTEFACT this guard is about, which
+    is the same move `_floor_gate_with_own_step` makes on `ci.yml`. The
+    alternative, writing the `backlog` arm's two commands here, would be a
+    second copy of the runner's own line inside this catalogue.
+
+    Imported lazily rather than at module scope, because every caller of this
+    catalogue already puts `scripts/` on `sys.path` and a top-level import here
+    would make the catalogue depend on one particular guard.
+    """
+    import ci_floor_check
+    return ci_floor_check.gate_commands(box.read("bin/ocelli.sh")).get(gate, [])
+
+
+def _a_floor_gate_run_command_by_command(box: Sandbox) -> tuple[str, list[str]]:
+    """A floor gate CI runs as its separate commands rather than by name.
+
+    Returns the gate and the `ci.yml` lines running each of its arm commands.
+    Only a gate with two or more such lines can show the defect, because the
+    hole was that running ONE of several counted as running the gate.
+    """
+    workflow = box.read(".github/workflows/ci.yml")
+    named = set(re.findall(r"bin/ocelli\.sh gate ([a-z-]+)", workflow))
+    for gate in sorted(set(re.findall(r'^\s*"([a-z-]+)\|no\|',
+                                      box.read("bin/ocelli.sh"), re.M))):
+        if gate in named:
+            continue
+        arm = [c.strip() for c in _ci_arm_commands(box, gate)]
+        lines = [line for line in workflow.splitlines()
+                 if any(c and c in line for c in arm)]
+        if len(arm) >= 2 and len(lines) >= 2:
+            return gate, lines
+    raise AssertionError(
+        "no floor gate has two or more arm commands that ci.yml runs as "
+        "separate steps, so there is no partial invocation to build and this "
+        "probe would report its guard silent.")
+
+
+def _delete_one_command_of_a_gate(box: Sandbox) -> None:
+    """Delete ONE step of a multi-command gate and leave the rest.
+
+    The reviewer's measurement: with `gen_sprint_plan.py --check` deleted the
+    check exited 0, with `backlog_check.py` deleted instead it exited 0, and
+    only deleting both made it exit 1. So the estimate comparison could be
+    removed from every pull request by deleting one line.
+    """
+    _, lines = _a_floor_gate_run_command_by_command(box)
+    box.substitute(".github/workflows/ci.yml", lines[-1], "")
+
+
+def _one_step_for_the_whole_arm(box: Sandbox) -> None:
+    """Replace a gate's several steps with one `bin/ocelli.sh gate <name>`.
+
+    The accept direction, and it is why the rule is not simply "every command
+    must appear". A step naming the gate runs its whole arm by definition, and
+    a check that demanded the commands as well would refuse the arrangement
+    `ci.yml` already uses for `errors`, `bench`, `packages` and `guards`.
+    """
+    gate, lines = _a_floor_gate_run_command_by_command(box)
+    indent = " " * (len(lines[0]) - len(lines[0].lstrip()))
+    box.substitute(".github/workflows/ci.yml", lines[0],
+                   f"{indent}- run: bin/ocelli.sh gate {gate}")
+    for line in lines[1:]:
+        box.substitute(".github/workflows/ci.yml", line, "")
+
+
+def _a_non_floor_gate_ci_runs(box: Sandbox) -> str:
+    """A gate outside the floor that needs no GPU and that ci.yml runs by name.
+
+    Both facts are read from the repository. The exclusion comes from
+    `NOT_IN_FLOOR`, which is in the declared-constant ratchet, and the GPU
+    column comes from `bin/ocelli.sh`'s own GATES table, which is what says
+    `oracle` is the one excluded gate CI may not run.
+    """
+    declared = re.search(r"^NOT_IN_FLOOR = \{(.*?)\}",
+                         box.read("scripts/ci_floor_check.py"), re.M | re.S)
+    if declared is None:
+        raise AssertionError(
+            "scripts/ci_floor_check.py declares no NOT_IN_FLOOR, so this "
+            "probe cannot tell an excluded gate from a floor one.")
+    excluded = set(re.findall(r'"([a-z-]+)"', declared.group(1)))
+    runner = box.read("bin/ocelli.sh")
+    gpu = set(re.findall(r'^\s*"([a-z-]+)\|YES\|', runner, re.M))
+    workflow = box.read(".github/workflows/ci.yml")
+    for match in re.finditer(r"bin/ocelli\.sh gate ([a-z-]+)", workflow):
+        name = match.group(1)
+        if name in excluded and name not in gpu:
+            return name
+    raise AssertionError(
+        "no CI step invokes a gate that is outside the floor and needs no "
+        "GPU, so there is no such step for this probe to delete.")
+
+
+def _delete_the_non_floor_ci_step(box: Sandbox) -> None:
+    """Delete the CI step running a non-floor gate, job and comments intact.
+
+    The reviewer deleted the whole `guards-deep` job and this check, the census
+    and the floor probes all exited 0. This is the smaller version of that: the
+    job, its name and the comment explaining its trigger all stay, and only the
+    `run:` line goes, so a reader of `ci.yml` still sees the gate named and
+    nothing runs it.
+    """
+    gate = _a_non_floor_gate_ci_runs(box)
+    workflow = box.read(".github/workflows/ci.yml")
+    line = next(l for l in workflow.splitlines()
+                if f"bin/ocelli.sh gate {gate}" in l)
+    box.substitute(".github/workflows/ci.yml", line, "")
+
+
+def _runner_exclusion_list(box: Sandbox) -> tuple[str, list[str]]:
+    """The runner's `--floor` exclusion line and the names on it, in order.
+
+    In ORDER. The set is what matters to the guard and the order is what
+    matters to a text substitution, and sorting the names before searching for
+    them is how the first version of the two probes below failed to find a
+    line that was right in front of it.
+    """
+    line = next(l for l in box.read("bin/ocelli.sh").splitlines()
+                if 'case "$name" in' in l and "continue" in l)
+    names = re.findall(r"[a-z-]+", line.split(" in ", 1)[1].split(")", 1)[0])
+    if not names:
+        raise AssertionError(
+            "bin/ocelli.sh's --floor arm excludes no gate by name, so there "
+            "is no list for these probes to disagree with.")
+    return line, names
+
+
+def _exclude_a_floor_gate_in_the_runner_only(box: Sandbox) -> None:
+    """Add a floor gate to `bin/ocelli.sh`'s exclusion list and nowhere else.
+
+    The reviewer added `prose` to the shell list alone: `ci_floor_check.py`
+    exited 0, `gate --floor` silently stopped running `prose`, and the net the
+    runner's comment claimed caught nothing. The gate here is read from the
+    runner's own GATES table rather than named, so the probe stays true when
+    the table changes.
+    """
+    _, names = _runner_exclusion_list(box)
+    gate = next(g for g in re.findall(r'^\s*"([a-z-]+)\|no\|',
+                                      box.read("bin/ocelli.sh"), re.M)
+                if g not in names)
+    box.substitute("bin/ocelli.sh", f"in {'|'.join(names)})",
+                   f"in {'|'.join([*names, gate])})")
+
+
+def _reorder_the_runner_exclusion_list(box: Sandbox) -> None:
+    """Rewrite the runner's exclusion list in a different order, same names.
+
+    The accept direction. The two lists are a SET written twice, so a check
+    that compared them as text would refuse a reordering that changes nothing,
+    and this repository has already paid once for a positional read of a Cargo
+    entry (probe `pins.table-form`).
+    """
+    _, names = _runner_exclusion_list(box)
+    if len(names) < 2:
+        raise AssertionError("the runner excludes fewer than two gates, so "
+                             "there is no order to change")
+    box.substitute("bin/ocelli.sh", f"in {'|'.join(names)})",
+                   f"in {'|'.join(reversed(names))})")
 
 
 # ---------------------------------------------------------------------------
@@ -1104,6 +1408,67 @@ GUARDS: tuple[Guard, ...] = (
                   lambda box: _delete_ci_step(box, leave_comment=False),
                   script("python3", "scripts/ci_floor_check.py"),
                   "and nothing in"),
+            Probe("ci-floor.partial-arm",
+                  _delete_one_command_of_a_gate,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "runs only part of it on",
+                  note="A gate is every command in its arm. The `backlog` "
+                       "gate is `backlog_check.py && gen_sprint_plan.py "
+                       "--check`, and the S03 review's fourth pass measured "
+                       "that deleting either step alone left this check at 0 "
+                       "and only deleting both made it 1. So the estimate "
+                       "comparison added in the same pass could be removed "
+                       "from every pull request by deleting one line. The "
+                       "probe deletes ONE step and leaves the other."),
+            Probe("ci-floor.whole-arm-through-the-runner",
+                  _one_step_for_the_whole_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The other direction, and it is why the rule is not "
+                       "\"every command must appear as its own step\". A step "
+                       "running `bin/ocelli.sh gate <name>` runs the whole arm "
+                       "by definition, which is how ci.yml already invokes "
+                       "`errors`, `bench`, `packages` and `guards`. A check "
+                       "that demanded the commands as well would refuse the "
+                       "arrangement the workflow uses today."),
+            Probe("ci-floor.non-floor-gate-not-run",
+                  _delete_the_non_floor_ci_step,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "is excluded from the floor and needs no GPU",
+                  note="`NOT_IN_FLOOR` took `guards-deep` out of the floor and "
+                       "nothing else asserted CI ran it, so the S03 review's "
+                       "fourth pass deleted the whole job and this check, the "
+                       "census and the floor probes all exited 0. "
+                       "`guards-deep` is what runs the cargo probes and "
+                       "`census --profile deep`, which is the sweep-complete "
+                       "rule. The job, its name and its trigger comment are "
+                       "left in place here and only the `run:` line goes, so "
+                       "the probe is the comment-only lesson again from the "
+                       "other side of the floor."),
+            Probe("ci-floor.exclusion-lists-disagree",
+                  _exclude_a_floor_gate_in_the_runner_only,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "disagree about which gates the floor excludes",
+                  note="bin/ocelli.sh's comment said a name in one list and "
+                       "not the other would make the `ci` gate demand a step "
+                       "for a gate the floor never runs. The reviewer added "
+                       "`prose` to the shell list alone and measured the "
+                       "opposite: this check exited 0 and `gate --floor` "
+                       "silently stopped running `prose`. That direction "
+                       "removes work rather than adding a demand, so it had "
+                       "no detection at all. The gate is read from the "
+                       "runner's own GATES table rather than named here."),
+            Probe("ci-floor.exclusion-list-reordered",
+                  _reorder_the_runner_exclusion_list,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "exclusion list and NOT_IN_FLOOR agree on",
+                  polarity="accept",
+                  note="The two lists are a SET written twice. A comparison "
+                       "made on the text rather than on the set would refuse a "
+                       "reordering that changes nothing, and this repository "
+                       "has already paid once for a positional read of a "
+                       "Cargo entry in probe `pins.table-form`."),
             Probe("ci-floor.comment-only",
                   lambda box: _delete_ci_step(box, leave_comment=True),
                   script("python3", "scripts/ci_floor_check.py"),
@@ -1116,6 +1481,22 @@ GUARDS: tuple[Guard, ...] = (
                        "satisfied, and which `gate guards` also satisfied "
                        "from inside `gate guards-deep`."),
         ),
+        limit="The non-floor rule exempts a gate `bin/ocelli.sh` marks YES in "
+              "its GPU column, which is `oracle` and deviation D-04's reason "
+              "for it, and that column is not in the declared-constant "
+              "ratchet. Marking `guards-deep|YES|` would therefore exempt it "
+              "without this check noticing. It is left as a limit rather than "
+              "recorded, because the column is a semantic claim in the "
+              "runner's own gate table where a false entry reads as false to "
+              "a person, and because `NOT_IN_FLOOR` and the runner's "
+              "exclusion list are both watched, so the OTHER routes out of "
+              "the floor are closed. The second limit is that this file "
+              "cannot evaluate `github.ref`, so what it proves about "
+              "`guards-deep` is that CI runs it on `workflow_dispatch`. The "
+              "workflow's own comment claims a push to `main` as well and "
+              "that half is unproven, which the OK line says in as many "
+              "words rather than leaving a reader to infer the stronger "
+              "claim.",
     ),
 
     # -- D-04's chain, the part CI reads ------------------------------------
@@ -1378,7 +1759,9 @@ GUARDS: tuple[Guard, ...] = (
         spec="`.claude/WORKFLOW.md`, the sprint plan is derived and not "
              "hand-maintained",
         refuses="A sprint plan that disagrees with the backlog about which "
-                "sprint a story is in or how large it is, and an absent plan.",
+                "sprint a story is in or how large it is, a generated "
+                "milestone summary or goal line that has drifted from the "
+                "allocation it is written from, and an absent plan.",
         claims=("*",),
         probes=(
             Probe("sprint-plan.absent", _sprint_plan_absent,
@@ -1390,6 +1773,13 @@ GUARDS: tuple[Guard, ...] = (
             Probe("sprint-plan.wrong-estimate", _sprint_plan_wrong_estimate,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
                   "is estimated"),
+            Probe("sprint-plan.wrong-milestone-summary",
+                  _sprint_plan_wrong_milestone_summary,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "milestone summary line"),
+            Probe("sprint-plan.stale-goal-line", _sprint_plan_stale_goal_line,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "**Goal** line"),
         ),
     ),
     Guard(
@@ -1782,8 +2172,10 @@ GUARDS: tuple[Guard, ...] = (
         gate="guards",
         spec="HLD 27.1, the denied lint table",
         refuses="A lint in HLD 27.1's table weakened below the level the "
-                "specification sets, and a crate that stops inheriting the "
-                "workspace lint table.",
+                "specification sets, a crate that stops inheriting the "
+                "workspace lint table, and any `.rs` file in a crate putting "
+                "one of those lints back to sleep with an inner allow, by "
+                "name or through a group that contains it.",
         claims=("*",),
         probes=(
             Probe("lint-policy.weakened", _lint_policy_weakened,
@@ -1792,7 +2184,62 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.uninherited", _lint_policy_uninherited,
                   script("python3", "scripts/lint_policy_check.py"),
                   "does not inherit the workspace lint table"),
+            Probe("lint-policy.group-allow", _group_allow_at_a_crate_root,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "allows the lint group",
+                  note="The most serious thing the S03 review found. "
+                       "`#![allow(clippy::pedantic)]` names none of HLD "
+                       "27.1's five lints and disables four of them, and "
+                       "`clippy::restriction` disables indexing_slicing. "
+                       "MEASURED with cargo rather than read: on a minimal "
+                       "crate carrying `cast_possible_truncation = \"deny\"` "
+                       "and one `x as i32`, under the pinned 1.97.1 "
+                       "toolchain, cargo clippy exits 101 without the "
+                       "attribute and 0 with it. The guard matched by lint "
+                       "NAME, so both the `clippy` gate and the `guards` gate "
+                       "went green with the arithmetic denies switched off, "
+                       "which is the defect class CLAUDE.md names as the one "
+                       "that reaches patients."),
+            Probe("lint-policy.expect-attribute",
+                  _expect_attribute_at_a_crate_root,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "re-allows"),
+            Probe("lint-policy.nothing-scanned", _no_crate_sources_at_all,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "not one `.rs` file was read"),
+            Probe("lint-policy.allow-outside-the-crate-root",
+                  _named_allow_outside_the_crate_root,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "re-allows `cast_possible_truncation`",
+                  note="The second half of the same defect. The guard read "
+                       "`<crate>/src/lib.rs` and nothing else, so an allow in "
+                       "`main.rs` or in any module file was invisible. "
+                       "Measured that it applies: with `src/lib.rs` carrying "
+                       "nothing but `pub mod inner;` and the attribute in "
+                       "`src/inner.rs`, cargo clippy goes from 101 to 0. An "
+                       "inner attribute in a module file governs that module."),
+            Probe("lint-policy.item-allow-is-permitted",
+                  _item_allow_with_a_reason,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "carry no inner allow or expect of a denied lint",
+                  polarity="accept",
+                  note="The direction that is not obvious. HLD 27.1's note "
+                       "asks for a deliberate, visible choice, and the outer "
+                       "`#[allow(...)]` on one item with a reason IS that "
+                       "choice. One character separates it from the refused "
+                       "form, so a guard that refused this would be refusing "
+                       "the remedy its own message recommends."),
         ),
+        limit="`REFUSED_GROUPS` is a list of nine names that exists only in "
+              "the guard, and a probe can only ever write one of them, so "
+              "narrowing the list to `clippy::pedantic` would leave "
+              "`lint-policy.group-allow` green with eight groups unguarded. "
+              "That is the shape `device.owned-accessor` has, and the answer "
+              "is the same: the set is in the declared-constant ratchet, so "
+              "narrowing it fails the census in the same change. Two of the "
+              "nine are measured to reach 27.1's table under clippy 1.97.1 "
+              "and the other seven are refused as blanket allows, which the "
+              "message says rather than overclaiming.",
     ),
 
     # -- this story's own machinery, watched by the same runner ------------
@@ -2184,9 +2631,14 @@ GUARDS: tuple[Guard, ...] = (
                 "artefact copy, and a page that never reported.",
         claims=("*",),
         covered_by=("tools/bench/tests/cold_start_test.mjs",),
-        limit="That suite needs a browser and is deliberately outside the "
-              "`bench` gate, so these refusals are watched only when a "
-              "developer runs the harness. Owner F-X014.",
+        limit="Four of that suite's five tests are in the `bench` gate since "
+              "the S03 review's fourth pass, which moved playwright to an "
+              "`await import` inside `run()`. The fifth launches a browser "
+              "and is opted into with OCELLI_BENCH_BROWSER=1, so the "
+              "refusals THIS entry names, a measurement against a stub, an "
+              "incomplete artefact copy and a page that never reported, are "
+              "still watched only when a developer runs the harness. Owner "
+              "F-X014.",
     ),
     Guard(
         id="bench.page",
@@ -2196,7 +2648,10 @@ GUARDS: tuple[Guard, ...] = (
         refuses="A page serving an incomplete copy of the wasm artefact.",
         claims=("*",),
         covered_by=("tools/bench/tests/cold_start_test.mjs",),
-        limit="Same browser dependency as bench.cold-start. Owner F-X014.",
+        limit="Same browser dependency as the fifth test bench.cold-start "
+              "describes. The four tests that joined the `bench` gate do not "
+              "serve the page, so this entry's refusal is watched only when "
+              "a developer runs the harness. Owner F-X014.",
     ),
     Guard(
         id="panic-probe",
@@ -2404,6 +2859,19 @@ CONSTANTS: tuple[Constant, ...] = (
     Constant("lint-policy", "Cargo.toml", "workspace.lints",
              r"^\[workspace\.lints\.clippy\]\n(.*?)\n\n",
              why="HLD 27.1's denied lint table, verbatim."),
+    # The group names that exist only in this guard. HLD 27.1 names five
+    # lints and no groups, so `lint-policy.group-allow` has to write one of
+    # the nine and narrowing the nine to that one would leave the probe green
+    # with eight groups unguarded. Same shape as OWNED_ACCESSORS above, same
+    # answer. The recorded value is the NAMES and not the explanations beside
+    # them, so rewording a message does not move the digest.
+    Constant("lint-policy", "scripts/lint_policy_check.py", "REFUSED_GROUPS",
+             r"^REFUSED_GROUPS = \{(.*?)^\}",
+             why="A group allow disables every lint in the group without "
+                 "naming one of them. Measured: `#![allow(clippy::pedantic)]` "
+                 "takes cargo clippy from 101 to 0 on a crate that denies "
+                 "cast_possible_truncation. Dropping a name here is the "
+                 "widening no probe can see."),
     # TWO selectors since the S03 sprint review, and the rename is the point.
     # The single `NO_CACHED_WASM_VIEW` matched only
     # `new DataView(wasm.memory.buffer)` and missed the destructured shape

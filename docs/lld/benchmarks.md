@@ -49,11 +49,11 @@ mechanically by `scripts/bench_check.py`, which is the `bench` gate:
 Searched rather than assumed. Every file under `docs/hld/` was read for `ms`,
 `fps`, `latency`, `budget`, `cold start`, `throughput`, `frame rate`,
 `benchmark` and the rest. The complete set of numeric figures the HLD states
-that bear on cost at all is four, and not one is a target this harness can pass
+that bear on cost at all is five, and not one is a target this harness can pass
 or fail against: an explicitly unmeasured binary-size estimate in gate A4, a GPU
-buffer limit and a series size in section 7, a memory budget in section 8 that
-belongs to the caller, and a uniform block size in section 26 that is an
-argument for a technique.
+buffer limit and a series size in section 7 which are two figures rather than
+one, a memory budget in section 8 that belongs to the caller, and a uniform
+block size in section 26 that is an argument for a technique.
 
 The only budget-setting method written down in this repository is spike gate
 A7.3's, and it is relative to the incumbent viewer:
@@ -74,9 +74,9 @@ machine that recorded it, and against nothing else.
 | `tools/bench/src/state.mjs` | the four states, and the one that throws |
 | `tools/bench/src/hostclass.mjs` | the fingerprint and the comparability rule |
 | `tools/bench/src/record.mjs` | the run record, the comparison, the re-baseline |
-| `tools/bench/src/runners/` | one file per subject that has a subject |
+| `tools/bench/src/runners/` | one file per subject that has a runner. A row whose `subject_story` is `null` must have one. A row whose story has landed may not have one yet, which is `no_runner` |
 | `tools/bench/page/` | the page that times a cold start, `window.__bench` |
-| `tools/bench/tests/` | four pure suites and one that needs a browser |
+| `tools/bench/tests/` | five suites. All five are in the `bench` gate, and the one browser test inside `cold_start_test.mjs` is opted into with `OCELLI_BENCH_BROWSER=1` |
 | `ci/bench-baseline.json` | tracked, the recorded measurement per subject per host class |
 | `scripts/bench_check.py` | the `bench` gate |
 | `tools/bench/out/` | ignored. One run's record and the page it served |
@@ -144,7 +144,13 @@ arriving. `runner_failed` carries the failure rather than swallowing it.
 **A `no_runner` row does not fail the gate**, deliberately. Requiring a runner
 the moment a story is marked done would fail the CI floor on the day an
 unrelated story completes, for a reason nobody in that story can act on. What
-the gate requires is a runner for a row that names no blocking story at all.
+the gate requires is a runner for a row whose `subject_story` is `null`, which
+is the registry saying the subject exists today. **A row whose story is DONE
+and whose runner has not been written is not that case**, and the wording here
+used to read as though it were, which would have made
+`tier.startup_microbenchmark` a gate failure the day F-004 landed. It is
+`unavailable` with reason `no_runner` instead, which is what the opening
+section calls the awkward eleventh row.
 
 ## The state of every subject at merge
 
@@ -160,7 +166,7 @@ the gate requires is a runner for a row that names no blocking story at all.
 | `session.cpu_interactive` | unavailable | F-X003 (X1.3), S16 |
 | `session.cpu_idle` | unavailable | F-X003 (X1.3), S16 |
 | `cine.frame_change_rate` | unavailable | F-X003 (X1.3), S16 |
-| `tier.startup_microbenchmark` | unavailable | F-004 (E1.4), S03 |
+| `tier.startup_microbenchmark` | unavailable, reason `no_runner` | nothing. F-004 (E1.4), S03 is **done**, and no runner has been written |
 
 `docs/sprints/allocation.json`'s note on F-006 is "Numbers feed the P0 kill
 criteria". Exactly two stories carry that marker, F-027 and F-028, both are
@@ -210,6 +216,16 @@ that measured a cache lookup. Sixteen is measured rather than chosen: at six,
 the median swung between 2.2 and 2.9 ms across ten consecutive runs, and at
 sixteen it sat between 2.3 and 2.5 ms across eleven, on a machine carrying a load
 average near six. The whole subject costs about two seconds either way.
+
+**That calibration is recorded in two places and they disagree**, which the S03
+review's fourth pass found. The paragraph above and the comment beside
+`ITERATIONS` in `tools/bench/src/runners/wasm_cold_start.mjs` both say eleven
+runs between 2.3 and 2.5 ms. `ci/bench-baseline.json`'s
+`tolerance_provenance` said fifteen runs between 2.2 and 2.5 ms. Neither can be
+recovered after the fact, so the disagreement is recorded in that field rather
+than resolved by preference, and the recorded 25 per cent tolerance covers
+either. The next story to re-baseline this subject takes its own calibration
+and replaces both accounts with one.
 
 ### What it does not measure, stated plainly
 
@@ -314,7 +330,19 @@ a runner and every row whose story is not done has none, that no runner file
 exists without a registry row, that no baseline entry exists for a subject whose
 story is not done, that every baseline entry names a host class and a tolerance
 with its provenance, and that the two harnesses' playwright pins are equal. The
-gate then runs the guard's own negative cases and the four pure node suites.
+gate then runs the guard's own negative cases and all five node suites.
+
+**Five and not four, since the S03 review's fourth pass.**
+`tools/bench/tests/cold_start_test.mjs` holds five tests and only the last
+needs a browser, but `wasm_cold_start.mjs` imported `playwright` at module
+scope, so the file could not be loaded at all without a playwright install and
+the whole suite sat outside the gate. `workspaceVersion`, `median`,
+`atClockPrecision`, which is this story's one stated rounding decision, and
+`resolveServedPath`, which refuses `/..`, `/%2e%2e/`, a malformed percent
+escape and a sibling directory sharing a prefix, were watched by nothing. The
+runner now takes playwright with `await import` inside `run()`, and the browser
+test is opted into with `OCELLI_BENCH_BROWSER=1`, which
+`npm run test:browser` in `tools/bench` sets. The gate still needs no browser.
 
 **A comparison that is not a gate.** `bin/ocelli.sh bench` runs what it can and
 writes the record. `bin/ocelli.sh bench --compare` compares against the baseline
@@ -342,9 +370,29 @@ therefore a mechanism rather than something to remember.
 
 ## Tiers
 
-The harness resolves no tier and requires none. The resolved tier is a dimension
-of every measurement, and a tier-A baseline is never compared against a tier-B or
-tier-C run.
+The harness resolves no tier and requires none, **and nothing in it records
+one, so no comparison is scoped by tier today.** An earlier sentence here
+claimed that a tier-A baseline is never compared against a tier-B or tier-C
+run, and the harness has no mechanism that could make that true.
+`hostClass()` returns `platform`, `release`, `arch`, `cpu_model`, `cpu_count`
+and `memory_bytes`, `sameHostClass` and `sameInstrument` compare only those,
+and `acceptRecord` stores `host_class`, `instrument`, `conditions` and
+`detail`. The only `tiers` field anywhere is the registry's declared
+applicability list, copied into the run entry by `state.mjs` and never
+compared. Check rather than trusting this paragraph:
+
+```bash
+grep -n tier ci/bench-baseline.json
+```
+
+**So this is a requirement on the story that lands the first tier-bearing
+runner, and not a property of the instrument.** Adding the resolved tier to the
+host class, or to a comparison key beside it, is that story's design decision,
+because the runner that reports a tier is the first thing that can put one in
+the record. Until then a subject measured on two tiers on one machine would be
+compared as if it were one population, which is why the three tier-C rows and
+`tier.startup_microbenchmark` below have no runner rather than an approximate
+one.
 
 `session.cpu_interactive`, `session.cpu_idle` and `cine.frame_change_rate` are
 tier-C rows and they exist from this story, because `docs/spikes/A7-tier-c.md`
@@ -363,12 +411,15 @@ number. The runner, when it is written, invokes F-004's own instrument and reads
 
 ## What is deliberately absent
 
-**No `criterion` and no new dev-dependency.** There is no Rust subject to
-measure, `AGENTS.md` refuses a construct with no user today, and a
-dev-dependency that is not wasm32-portable breaks `cargo check --all-targets` on
-that target, which is how `proptest` reaching `wait-timeout` already constrains
-this workspace. F-023 and F-024 add the Rust runner and the dependency it needs,
-with a named user.
+**No `criterion` and no new CARGO dev-dependency**, and the qualifier is not
+pedantry: F-006 did add a node one. `tools/bench/package.json` and its lockfile
+are this story's, and they pin playwright at exactly the version `tools/oracle`
+pins, which `scripts/bench_check.py` asserts. What is untouched is the cargo
+side. There is no Rust subject to measure, `AGENTS.md` refuses a construct with
+no user today, and a dev-dependency that is not wasm32-portable breaks
+`cargo check --all-targets` on that target, which is how `proptest` reaching
+`wait-timeout` already constrains this workspace. F-023 and F-024 add the Rust
+runner and the cargo dependency it needs, with a named user.
 
 **No new trait and no new generic.** The runner lookup is a file path derived
 from a subject id, and the two implementers a trait would need do not exist.

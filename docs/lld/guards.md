@@ -223,14 +223,17 @@ a guard that refuses everything cannot read as a pass.
 
 `_prepare_control` holds the minimum healthy state an invoke needs, written in
 one place rather than hidden inside each probe, because a control that quietly
-does the probe's job is the false green this file exists to refuse. Three
-invokes have no healthy state a sandbox can build, because what they need is
-per-clone and `git ls-files` never copies it. For those the control is still
-mandatory and declares the different refusal a healthy repository gives.
+does the probe's job is the false green this file exists to refuse. A few
+invokes have no healthy state a sandbox can build at all, because what they
+need is per-clone and `git ls-files` never copies it. Those declare a non-zero
+`control_status` and the different refusal a healthy repository gives, and
+`python3 scripts/guard_probe.py --list` is where to read which they are. An
+earlier version of this paragraph said three and the count was two, which is
+the failure this file's no-counts rule exists to prevent.
 
-The summary line reports five quantities: refusal probes, the distinct guards
-those drove red, accept probes, open known defects and controls green. **They
-are five different numbers and reporting one under another's name is the
+The summary line reports refusal probes, the distinct guards those drove red,
+accept probes, open known defects, controls green and the elapsed wall clock.
+**Each is a different quantity and reporting one under another's name is the
 failure this harness exists to refuse.** In particular a pass count is a PROBE
 count and includes the accept probes, which were never red, so it is never the
 number of guards observed red.
@@ -239,6 +242,9 @@ number of guards observed red.
 which no gate run otherwise produces. `SELF_TEST_PROPERTIES` names each
 property and the printed count is derived from the blocks that actually ran,
 because a hardcoded count survives the deletion of the blocks it stands for.
+The faithful-copy property compares the sandbox against `git ls-files` by name.
+It was a threshold, `copied > 100` over a walk that counts the sandbox's own
+`.git`, and a sandbox with every tracked file deleted passed it.
 
 ## The census
 
@@ -250,12 +256,19 @@ must be claimed by exactly one entry, so the catalogue cannot fall behind.
 Every entry must claim at least one site, so a deleted refusal cannot leave a
 stale entry that reads as coverage.
 
-**b. Gate and hook coverage.** Every name in `bin/ocelli.sh`'s `GATES` array
-has an entry or an explicit `DELEGATED` reason, and every executable under
-`.githooks/` has entries. A gate nobody declared is a gate nobody probed. The
-`GATES` array is parsed with a copy of `scripts/ci_floor_check.py`'s regex, and
-`bin/ocelli.sh` carries a third. Nothing joins the three, which is a
-duplication this file does not get to describe away.
+**b. Gate and hook coverage, in both directions.** Every name in
+`bin/ocelli.sh`'s `GATES` array has an entry or an explicit `DELEGATED` reason,
+every entry's `gate` names a gate that array declares, the number of rows in it
+is a ratchet that may only grow, and every executable under `.githooks/` has
+entries. A gate nobody declared is a gate nobody probed, and the three gate
+rules are one rule seen three ways: the S03 review's fourth pass deleted the
+`prose` row and got a green census, a green `ci_floor_check.py` over one gate
+fewer, and probes still passing, because a probe invokes
+`scripts/prose_check.py` directly rather than through the gate. `--floor`,
+`--sprint` and `--all` all shrank and nothing said so. The `GATES` array is
+parsed with a copy of `scripts/ci_floor_check.py`'s regex, and `bin/ocelli.sh`
+carries a third. Nothing joins the three, which is a duplication this file does
+not get to describe away.
 
 **c. The declared-constant ratchet.** The class of weakening no probe can
 reach. A probe proves a guard still refuses what it refuses and cannot notice
@@ -268,6 +281,16 @@ rather than in a refactor nobody reads. A recorded value that no longer parses
 also fails, because a constant the ratchet cannot read is a ratchet that has
 quietly stopped holding.
 
+**The ratchet can also be narrowed, and the number of declared constants is
+recorded for exactly that.** Deleting a `Constant` and its recorded row is a
+two-line edit that reads as a cleanup, and every other check here stays green
+afterwards: the loop over `CONSTANTS` no longer visits it and the loop over the
+recorded rows no longer sees it. The S03 review's fourth pass did it to
+`pins:TOLERANCE` and the census exited 0. The one mechanism that notices a
+guard being widened could therefore be disarmed in one green commit and the
+widening land in the next, also green. The count may only grow, so retiring a
+constant means saying which and why in the diff that re-records.
+
 **d. The profile rule.** An entry whose probe needs a GPU, a browser or the
 corpus may not be in the floor, and neither may one needing cargo, npm or
 wasm-pack. `.claude/WORKFLOW.md`'s floor definition as a mechanism rather than
@@ -279,15 +302,26 @@ entry with neither a probe nor a `covered_by` may only decrease. A new
 uncovered refusal fails the floor, and once the sweep is recorded complete any
 non-zero count fails `--profile deep`.
 
-**f. `covered_by` names a test that reaches the file.** Each named path must
-resolve, and at least one must reach the guarded file: by naming it, by
-importing it, in either direction, or by declaring identifiers the guarded file
-implements by name. That last shape is the oracle's, where `faults.mjs`
+**f. `covered_by` names a FILE that reaches the file.** Each named path must
+resolve to a file, and at least one must reach the guarded file: by naming it,
+by importing it, in either direction, or by declaring identifiers the guarded
+file implements by name. That last shape is the oracle's, where `faults.mjs`
 declares the fault ids and the render page implements each one. The check is
 cheap and blunt on purpose. It cannot show that the named test drives a
 particular refusal red, and nothing claims it does. It exists because one entry
 named a suite that never mentions the file it claimed to cover, and its
 refusals were counted as watched.
+
+**A directory claim is refused outright, and it took three attempts to get
+there.** The first version accepted a directory for its own existence, with no
+reachability check, so one line put the same nine refusals back into the
+covered bucket. The second resolved a directory to the files in it and asked
+whether one of them reached the guarded file, and the fourth review pass
+measured that hatch reopened one indirection out: `scripts/guards/catalogue.py`
+writes every guarded path as `file="tools/bench/run.mjs"` and so on, so any
+directory whose walk reaches the catalogue reaches every entry. `scripts/`,
+`scripts/guards/` and `docs/` each gave zero problems for every entry. No entry
+claims a directory, so the route is gone rather than narrowed a third time.
 
 ### What the coverage number is, and what it is not
 
@@ -336,11 +370,15 @@ harness exists to fix.
   Every probe in it runs with no cargo, no npm, no wasm-pack, no browser, no
   corpus and no GPU, and check d refuses an entry that declares otherwise and
   sits in the floor anyway.
-- **`guards-deep`**, not in the floor. The level-3 runs that need a toolchain,
-  plus the census at `--profile deep`. It gets a CI job on pushes to `main` and
-  on dispatch, and not on `pull_request`, so a weakened deep guard is caught on
-  merge to main rather than on the pull request. That is the strongest claim
-  the cost allows.
+- **`guards-deep`**, not in the floor. `--profile deep` is every probe, so this
+  re-runs the floor set and adds the ones that need a toolchain, plus the
+  census at `--profile deep`. Every probe it adds today declares `needs`
+  `cargo`, and none of them needs npm or wasm-pack, which
+  `python3 scripts/guard_probe.py --list` is the place to check. Its CI job
+  installs node anyway, and that is a cost nobody has trimmed rather than a
+  requirement. It runs on pushes to `main` and on dispatch, and not on
+  `pull_request`, so a weakened deep guard is caught on merge to main rather
+  than on the pull request. That is the strongest claim the cost allows.
 
 `guards-deep` is excluded by name in two places, `bin/ocelli.sh`'s `--floor`
 arm and `scripts/ci_floor_check.py`'s `NOT_IN_FLOOR`. Both are needed: miss
@@ -352,8 +390,11 @@ gate runs `-D warnings`, which turns whatever is enabled into an error and
 asserts nothing about what is enabled. A lint moved from `deny` to `allow` in
 `[workspace.lints]`, or a crate that stops carrying `lints.workspace = true`,
 is invisible to it and passes over a smaller set of rules. HLD 27.1's table is
-transcribed in `lint_policy_check.py` and that is its only copy outside
-`docs/hld/`. `unsafe_code = "deny"` is the declared exception: R5 is enforced
+transcribed in `lint_policy_check.py`, and there is a second copy in
+`Cargo.toml`'s `[workspace.lints.clippy]` carrying the same five rows at the
+same levels. That is not an oversight, it is the point: comparing the two
+copies is the whole job of the check, and a rule with one copy has nothing to
+be compared against. `unsafe_code = "deny"` is the declared exception: R5 is enforced
 by `scripts/unsafe_allowlist_check.py` over the whole tree instead, which is
 stronger for what R5 asks, because a per-file `#![allow(unsafe_code)]` would
 silence the lint and would not silence the script. The check requires one of
@@ -361,17 +402,20 @@ the two and names which it found.
 
 ## What is recorded, and where
 
-`ci/guard-probe-budget.json` holds four things, all measurements rather than
-guesses:
+`ci/guard-probe-budget.json` holds these keys, all measurements rather than
+guesses, plus a `note` restating that:
 
 - `constants`, the declared-constant ratchet's digests
+- `constants_count`, so a constant removed together with its digest is noticed
+- `gates_declared`, so a row deleted from `bin/ocelli.sh`'s `GATES` array is
+  noticed
 - `uncovered`, the uncovered-refusal ceiling and whether the sweep is complete,
   the second derived from the first rather than remembered
 - `oracle_faults`, the fault count the adoption check ratchets against
 - `wall_clock_seconds`, per profile
 
-`python3 scripts/guard_census.py --record` writes the first three.
-`python3 scripts/guard_probe.py --record-budget` writes the last. Neither is
+`python3 scripts/guard_census.py --record` writes every one of those except the
+last, which `python3 scripts/guard_probe.py --record-budget` writes. Neither is
 written on an ordinary gate run, because a gate that quietly rewrote a tracked
 file would leave the tree dirty and make the number a record of the last
 machine to run rather than a baseline anybody agreed to.

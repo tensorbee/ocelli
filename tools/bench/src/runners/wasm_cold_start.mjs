@@ -23,9 +23,21 @@ import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { extname, join, resolve, sep } from "node:path";
 
-import { chromium } from "playwright";
-
 import { benchPath, repoPath } from "../paths.mjs";
+
+// **`playwright` is imported inside `run()` and not here.** A static import at
+// module scope is evaluated when the module is LOADED, so the file could not be
+// opened at all without a playwright install, and that made four pure
+// functions in it unreachable from any gate. `workspaceVersion`, `median`,
+// `atClockPrecision`, which is this story's one rounding decision, and
+// `resolveServedPath`, which refuses a walk out of the served directory, need
+// no browser and are now in the `bench` floor gate through
+// `tools/bench/tests/cold_start_test.mjs`. One line of indirection buys four
+// standing tests, and the browser requirement stays exactly where it belongs,
+// on the one function that launches one.
+//
+// It is `await import(...)` rather than a top-level await for the same reason:
+// a top-level await is still evaluated at load.
 
 export const id = "wasm.cold_start";
 
@@ -221,6 +233,9 @@ async function assemblePage(outDir) {
  *                    instrument: {chromium: string}}>}
  */
 export async function run({ outDir, build = true }) {
+  // The one line that needs a browser, and the only reason this file ever
+  // needed one. See the note beside the imports.
+  const { chromium } = await import("playwright");
   if (build) {
     await buildArtefact();
   }

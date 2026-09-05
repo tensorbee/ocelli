@@ -10,9 +10,15 @@ site, so a deleted refusal cannot leave a stale entry that reads as coverage.
 That is the discipline `docs/lld/oracle.md` already applies to
 `unsupported.json`.
 
-**b. Gate and hook coverage.** Every name in `bin/ocelli.sh`'s `GATES` array
-has an entry or an explicit `delegated` declaration with a reason, and every
-executable under `.githooks/` has entries. The array is parsed with the same
+**b. Gate and hook coverage, in both directions.** Every name in
+`bin/ocelli.sh`'s `GATES` array has an entry or an explicit `delegated`
+declaration with a reason, every entry's `gate` names a gate that array
+declares, the gate COUNT is a ratchet that may only grow, and every executable
+under `.githooks/` has entries. The three gate rules are one rule seen three
+ways, because the S03 review's fourth pass deleted the `prose` row and measured
+a green census, a green `ci_floor_check.py` over one gate fewer, and probes
+still passing because they invoke `scripts/prose_check.py` rather than the
+gate. The array is parsed with the same
 regex `scripts/ci_floor_check.py` uses, and it is a second copy of that regex
 rather than a shared one. `bin/ocelli.sh` carries a third. Nothing joins the
 three, which is a duplication this module does not get to describe away.
@@ -20,7 +26,10 @@ three, which is a duplication this module does not get to describe away.
 **c. The declared-constant ratchet.** The class of weakening no probe can
 reach. A probe proves a guard still refuses what it refuses, and cannot notice
 that the guard's configuration has been widened, because after the widening the
-guard is correct about its new, weaker rule.
+guard is correct about its new, weaker rule. The COUNT of declared constants is
+itself a ratchet, because deleting a `Constant` together with its recorded row
+left every other check here green and disarmed the mechanism in a commit that
+read as a cleanup.
 
 **d. The profile rule.** An entry whose probe needs a GPU, a browser or the
 corpus may not be in the floor. `.claude/WORKFLOW.md`'s floor definition turned
@@ -28,7 +37,9 @@ into a mechanism rather than a convention.
 
 **e. The uncovered ratchet.** The count may only decrease. A new uncovered
 refusal fails the floor, and once the sweep is recorded complete any non-zero
-count fails `--sprint`.
+count fails `--profile deep`, which is what `run()` tests and what
+`bin/ocelli.sh`'s `guards-deep` gate passes. `--profile` takes `floor` and
+`deep` and has never taken `sprint`.
 
 **f. `covered_by` names a test that reaches the file.** An entry with no probe
 here claims a standing test elsewhere, and until the S03 review's second pass
@@ -40,15 +51,23 @@ importing it, in either direction, or by declaring identifiers the guarded file
 implements by name. That last shape is the oracle's: `faults.mjs` declares the
 fault ids and the page implements each one.
 
-**A directory is resolved to its files.** The first version of check f
-accepted a claim naming a directory for the directory's own existence, with no
-reachability check at all, and the review's third pass measured what that
-costs: one line, `covered_by=("tools/bench/tests/",)`, put the same nine
-refusals back into the covered bucket and the census printed
-`0 watched by nothing` and exited 0. So a directory now has to hold a file
-that reaches the guarded file, by the same three routes a named file uses. An
-entry that cannot name one drops the claim and is counted as uncovered, which
-is what `bench.runner` does and what the printed number is for.
+**A directory claim is refused. `covered_by` names a file.** The first version
+of check f accepted a claim naming a directory for the directory's own
+existence, with no reachability check at all, and the review's third pass
+measured what that costs: one line, `covered_by=("tools/bench/tests/",)`, put
+the same nine refusals back into the covered bucket and the census printed
+`0 watched by nothing` and exited 0. Pass 3 answered that by resolving a
+directory to its files and asking whether one of them reached the guarded file,
+and the fourth pass measured the hatch reopened one indirection out.
+`scripts/guards/catalogue.py` names every guarded file by construction, as
+`file="tools/bench/run.mjs"` and so on, so ANY directory whose walk reaches the
+catalogue reached every entry: `covered_by=("scripts/",)`,
+`("scripts/guards/",)` and `("docs/",)` each gave zero check-f problems, and
+one line moved `bench.runner`'s nine unwatched refusals into the covered
+bucket. No entry claims a directory today, so the route is removed rather than
+narrowed again. An entry that cannot name a file drops the claim and is counted
+as uncovered, which is what `bench.runner` does and what the printed number is
+for.
 
 **What the coverage number is and is not.** It is an ENTRY-level claim summed
 over refusal sites. `covered_by` says a standing test reaches the file, and
@@ -61,6 +80,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,6 +90,11 @@ from .discover import SCAN_SUFFIXES, Site, discover, sites_collapsed
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 BUDGET = ROOT / "ci" / "guard-probe-budget.json"
+
+# The two values `Guard.kind` may take. `guard` is a refusal some gate runs and
+# `not-a-guard` is a file whose refusals no gate runs. Anything else is a typo,
+# and a typo silently moves an entry's refusals out of the uncovered ratchet.
+KINDS = frozenset({"guard", "not-a-guard"})
 
 # Gates whose refusal is not ours to probe. Each needs a reason, because an
 # omitted row and a deliberate "not ours" read identically later.
@@ -228,7 +253,9 @@ def match_sites(sites: list[Site]) -> tuple[list[Match], list[str]]:
 
 
 # A path inside a `covered_by` sentence. The rest of the sentence is prose for
-# a reader and this is the part a machine can check.
+# a reader and this is the part a machine can check. The trailing-slash
+# alternative is here so a DIRECTORY claim is seen and refused by name rather
+# than falling through as no path at all.
 COVERED_PATH = re.compile(
     r"([\w][\w./-]*\.(?:py|mjs|js|sh|ts|json)|[\w][\w./-]*/)")
 
@@ -237,19 +264,6 @@ COVERED_PATH = re.compile(
 # by name. Two files linked this way are linked more tightly than by a
 # filename mention, and nothing else in the catalogue is shaped like it.
 DECLARED_ID = re.compile(r'^ {2}"([a-z0-9]+(?:-[a-z0-9]+)+)":\s*\{', re.M)
-
-
-# Suffixes a standing test can be written in here. The directory route reads
-# the files rather than the directory's existence, so it has to know which of
-# them are text this check can read: Python, node, shell and the trybuild
-# compile-fail cases, which are Rust.
-COVERING_SUFFIXES = frozenset(
-    {".py", ".mjs", ".js", ".ts", ".sh", ".rs", ".json"})
-
-# Directories a walk must not descend into. Build output and installed
-# dependencies are not standing tests, and node_modules alone is minutes.
-SKIP_DIRS = frozenset({".git", "__pycache__", "node_modules", "target",
-                       "dist", "pkg"})
 
 
 def _reaches(covering: str, target: Path) -> str | None:
@@ -261,17 +275,6 @@ def _reaches(covering: str, target: Path) -> str | None:
     if re.search(rf"\bimport\b[^\n]*\b{re.escape(target.stem)}\b", covering):
         return "imports it"
     return None
-
-
-def _files_under(directory: Path) -> list[Path]:
-    """Every file in a claimed directory this check can read, sorted."""
-    found = []
-    for path in sorted(directory.rglob("*")):
-        if any(part in SKIP_DIRS for part in path.parts):
-            continue
-        if path.is_file() and path.suffix in COVERING_SUFFIXES:
-            found.append(path)
-    return found
 
 
 def _how(named: Path, base: Path, guard_file: str,
@@ -308,27 +311,32 @@ def covered_by_problems(root: Path | None = None) -> list[str]:
         target_text = (target.read_text(encoding="utf-8", errors="replace")
                        if target.is_file() else "")
         reached: list[str] = []
-        detail: list[str] = []
         for claim in guard.covered_by:
             match = COVERED_PATH.search(claim)
             if match is None:
                 continue
             named = base / match.group(1)
             if named.is_dir():
-                members = _files_under(named)
-                hit = None
-                for member in members:
-                    how = _how(member, base, guard.file, target_text)
-                    if how is not None:
-                        hit = f"{member.relative_to(base).as_posix()} {how}"
-                        break
-                if hit is None:
-                    detail.append(
-                        f"the directory {match.group(1)} holds "
-                        f"{len(members)} readable file(s) and none of them "
-                        f"opens it")
-                    continue
-                reached.append(f"{match.group(1)} contains {hit}")
+                # Refused outright, and the reason is that a directory claim
+                # cannot be checked here without the catalogue satisfying it.
+                # `scripts/guards/catalogue.py` writes every guarded path as
+                # `file="tools/bench/run.mjs"`, so a walk of any directory that
+                # reaches the catalogue reaches every guarded file, and the
+                # pass 3 rule that a directory must HOLD a file reaching the
+                # target was true of `scripts/`, `scripts/guards/` and `docs/`
+                # for every entry in the catalogue. Excluding the catalogue
+                # from the walk would only move the hatch to the next file that
+                # happens to name a path. Nothing claims a directory today, so
+                # the route is gone.
+                problems.append(
+                    f"catalogue entry `{guard.id}` is covered by the directory "
+                    f"{match.group(1)}. `covered_by` names a FILE, because a "
+                    f"directory claim is satisfied by the catalogue itself: "
+                    f"scripts/guards/catalogue.py names every guarded file by "
+                    f"construction, so any directory whose walk reaches it "
+                    f"reaches every entry, and one line put nine unwatched "
+                    f"refusals into the covered bucket. Name the test file, or "
+                    f"drop the claim and take the uncovered count.")
                 continue
             if not named.is_file():
                 problems.append(
@@ -343,15 +351,11 @@ def covered_by_problems(root: Path | None = None) -> list[str]:
         if not reached:
             problems.append(
                 f"catalogue entry `{guard.id}` claims {guard.file} is covered "
-                f"by a standing test, and no test it names opens that file"
-                + (f" ({', and '.join(detail)})" if detail else "") + ". A "
-                f"directory is resolved to the files in it and is not "
-                f"accepted for existing, which was the hatch the S03 review's "
-                f"third pass measured. Either name a test that does open the "
-                f"file, or drop the claim and take the uncovered count: a "
-                f"false claim of coverage is worse than the gap it hides, "
-                f"because the gap can be fixed and the claim will be counted "
-                f"as coverage forever.")
+                f"by a standing test, and no test it names opens that file. "
+                f"Either name a test that does open the file, or drop the "
+                f"claim and take the uncovered count: a false claim of "
+                f"coverage is worse than the gap it hides, because the gap can "
+                f"be fixed and the claim will be counted as coverage forever.")
     return problems
 
 
@@ -388,8 +392,17 @@ def oracle_adoption(recorded: int | None) -> tuple[int, list[str]]:
             f"{len(expectations)} message fragment(s). A fault without one "
             f"proves only that the run failed, and a run that failed for "
             f"another reason proves nothing about the guard it aimed at.")
-    if runner.is_file() and "tests/faults.mjs" not in runner.read_text(
-            encoding="utf-8"):
+    # The absent-runner case is a problem and not a skip. This was
+    # `if runner.is_file() and "tests/faults.mjs" not in ...`, which failed
+    # OPEN: deleting tools/oracle/run.mjs skipped the branch entirely, so
+    # removing the runner was quieter than breaking it, while the same loss of
+    # faults.mjs three lines above was refused.
+    if not runner.is_file():
+        problems.append(
+            "tools/oracle/run.mjs is gone, so the `oracle` gate has no runner "
+            "and nothing replays the fault catalogue. Every oracle entry in "
+            "the catalogue claims coverage from a replay that cannot happen.")
+    elif "tests/faults.mjs" not in runner.read_text(encoding="utf-8"):
         problems.append(
             "tools/oracle/run.mjs no longer reaches tests/faults.mjs, so the "
             "`oracle` gate has stopped replaying the fault catalogue and the "
@@ -406,27 +419,77 @@ def oracle_adoption(recorded: int | None) -> tuple[int, list[str]]:
 def run(profile: str = "floor") -> tuple[int, list[str]]:
     """The census. Returns (uncovered site count, problems)."""
     problems: list[str] = []
+    budget = load_budget()
     sites = discover()
     matches, claim_problems = match_sites(sites)
     problems += claim_problems
 
-    # b. Every gate has an entry or a declared reason.
+    # `kind` decides which bucket an entry's refusals land in, and nothing
+    # validated it. A typo such as `kind="not_a_guard"` is not `"guard"`, so
+    # the entry left the uncovered ratchet and was reported as declared out of
+    # scope, which is the quietest way to move refusals out of the count.
+    for guard in GUARDS:
+        if guard.kind not in KINDS:
+            problems.append(
+                f"catalogue entry `{guard.id}` declares kind "
+                f"{guard.kind!r}, which is not one of "
+                f"{', '.join(sorted(KINDS))}. An unrecognised kind is not "
+                f"`guard`, so the entry's refusals leave the uncovered ratchet "
+                f"and are reported as declared out of scope. A typo is enough.")
+
+    # b. Every gate has an entry or a declared reason, and every entry names a
+    # gate that exists. The second direction was missing, and deleting a row
+    # from `bin/ocelli.sh`'s GATES array shrank `--floor`, `--sprint` and
+    # `--all` with nothing to say so: the entry kept its probes, the probes
+    # kept passing because they invoke the underlying script directly, and the
+    # census counted 487 refusals all claimed.
+    declared_gates = gates_declared()
     entry_gates = {name for g in GUARDS for name in g.gate.split()
                    if name != "-"}
-    for gate in gates_declared():
+    for gate in declared_gates:
         if gate in entry_gates or gate in DELEGATED:
             continue
         problems.append(
             f"the `{gate}` gate has no catalogue entry and no `delegated` "
             f"reason. A gate nobody declared is a gate nobody probed.")
     for name in sorted(DELEGATED):
-        if name in gates_declared():
+        if name in declared_gates:
             continue
         problems.append(
             f"`{name}` is declared delegated and is not a gate. Remove the "
             f"declaration rather than leaving a reason for nothing.")
+    for guard in GUARDS:
+        for name in guard.gate.split():
+            if name == "-" or name in declared_gates:
+                continue
+            problems.append(
+                f"catalogue entry `{guard.id}` names the `{name}` gate and "
+                f"bin/ocelli.sh's GATES array does not declare it. The entry "
+                f"still carries its probes and they still pass, because a "
+                f"probe invokes the guard's own script rather than the gate, "
+                f"so a deleted row shrinks `--floor`, `--sprint` and `--all` "
+                f"and leaves every count here unchanged. Restore the gate, or "
+                f"move the entry to `-` and say in `reason` what runs it now.")
+
+    # The same deletion seen from the other side, because an entry can be moved
+    # to `-` in the same commit that deletes the row and the loop above then
+    # has nothing to say. The count may only grow.
+    recorded_gates = budget.get("gates_declared")
+    if recorded_gates is None:
+        problems.append(
+            f"{BUDGET.relative_to(ROOT)} records no gate count, so a row "
+            f"deleted from bin/ocelli.sh's GATES array cannot be noticed. "
+            f"Record it with `python3 scripts/guard_census.py --record`.")
+    elif len(declared_gates) < recorded_gates:
+        problems.append(
+            f"bin/ocelli.sh's GATES array declares {len(declared_gates)} "
+            f"gate(s) and {recorded_gates} were recorded. Deleting a row "
+            f"silently shrinks `--floor`, `--sprint` and `--all`. If the gate "
+            f"was retired deliberately, re-record in this diff so a reviewer "
+            f"sees which one went.")
+
     hooks = sorted(p.name for p in (ROOT / ".githooks").iterdir()
-                   if p.is_file())
+                   if p.is_file() and os.access(p, os.X_OK))
     hook_files = {g.file for g in GUARDS}
     for name in hooks:
         if f".githooks/{name}" not in hook_files:
@@ -435,7 +498,6 @@ def run(profile: str = "floor") -> tuple[int, list[str]]:
                 f"has no catalogue entry.")
 
     # c. The declared-constant ratchet.
-    budget = load_budget()
     recorded = budget.get("constants", {})
     for constant in CONSTANTS:
         key = f"{constant.file}:{constant.name}"
@@ -468,6 +530,28 @@ def run(profile: str = "floor") -> tuple[int, list[str]]:
                 f"{key} has a recorded value and is not declared in the "
                 f"catalogue's CONSTANTS. A recorded value nothing reads is "
                 f"not a ratchet.")
+
+    # The ratchet on the ratchet. Deleting a `Constant` AND its recorded row is
+    # a two-line edit that reads as a cleanup, and every check above stays
+    # green afterwards: the loop over CONSTANTS no longer visits it and the
+    # loop over `recorded` no longer sees it. The one mechanism that catches a
+    # guard being WIDENED could therefore be disarmed in one green commit and
+    # the widening land in the next, also green. The count may only grow.
+    recorded_constants = budget.get("constants_count")
+    if recorded_constants is None:
+        problems.append(
+            f"{BUDGET.relative_to(ROOT)} records no constant count, so a "
+            f"declared constant removed together with its recorded row cannot "
+            f"be noticed. Record it with "
+            f"`python3 scripts/guard_census.py --record`.")
+    elif len(CONSTANTS) < recorded_constants:
+        problems.append(
+            f"the catalogue declares {len(CONSTANTS)} constant(s) and "
+            f"{recorded_constants} were recorded. Narrowing the "
+            f"declared-constant ratchet disarms the only check that notices a "
+            f"guard being widened rather than broken. If a constant was "
+            f"retired deliberately, re-record in this diff and say which one "
+            f"and why.")
 
     # d. The profile rule.
     rows = [(p.id, p.needs, p.profile) for g in GUARDS for p in g.probes]

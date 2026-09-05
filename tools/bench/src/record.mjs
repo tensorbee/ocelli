@@ -30,6 +30,44 @@ export const MOVED = "moved";
 /** Nothing recorded for this subject on this host class. */
 export const NO_BASELINE = "no_baseline";
 
+/** The figure went up, went down, or did not move. Arithmetic, no judgement. */
+export const UP = "up";
+export const DOWN = "down";
+export const UNCHANGED = "unchanged";
+
+/** What the movement MEANS, once the unit is known. */
+export const BETTER = "better";
+export const WORSE = "worse";
+
+/**
+ * What an INCREASE means, per unit in `tools/bench/subjects.json`.
+ *
+ * **Seven of the eleven registry rows are durations and four are not**, which
+ * is why this table exists rather than a hardcoded rule. `direction` used to be
+ * `delta > 0 ? "slower" : "faster"` for every subject, so a
+ * `tier.startup_microbenchmark` figure in `pixels_per_second` that HALVED
+ * would have been printed as `faster`, and `cine.frame_change_rate` in
+ * `changed_frames_per_second` the same. That is the harness reporting a
+ * regression as an improvement, in the one field a reader looks at first.
+ *
+ * `fraction_of_one_vcpu` is `worse` on an increase for the reason
+ * `docs/spikes/A7-tier-c.md` section A7.3 gives, "Ocelli's idle cost must be
+ * indistinguishable from zero", and it is listed rather than folded in with
+ * the durations because it is not one and the words `slower` and `faster` were
+ * never right for it either.
+ *
+ * **An unrecognised unit throws.** The registry is the authority on units and
+ * it declares four. A fifth arriving with a new subject is a decision about
+ * which way is better, and defaulting it to "an increase is worse" would make
+ * that decision silently and in the wrong direction half the time.
+ */
+export const INCREASE_MEANS = {
+  ms: WORSE,
+  fraction_of_one_vcpu: WORSE,
+  changed_frames_per_second: BETTER,
+  pixels_per_second: BETTER,
+};
+
 /** An empty baseline, in the shape the tracked file uses. */
 export function emptyBaseline() {
   return { host_classes: {} };
@@ -56,20 +94,60 @@ export function baselineEntry(baseline, key, subjectId) {
  * declared". A one-sided check would let a measurement quietly stop measuring
  * the thing it was recorded against, because a runner that started timing less
  * work reads as an improvement.
+ *
+ * `unit` is the recorded unit and it is required, because `direction` alone
+ * says which way the number moved and only the unit says what that means. See
+ * `INCREASE_MEANS`.
+ *
+ * **A missing tolerance is refused rather than treated as zero.** `null <= 0`
+ * is what `Math.abs(fraction) <= null` reduces to in JavaScript, so an entry
+ * with no tolerance used to admit only a bit-identical duration and report
+ * every other figure as `moved`, which is a comparison that has quietly become
+ * a different check. `scripts/bench_check.py` refuses a tracked entry without
+ * a tolerance, and this is the arithmetic's own refusal for a baseline that
+ * reached here some other way.
  */
-export function withinTolerance(baselineValue, observed, tolerance) {
+export function withinTolerance(baselineValue, observed, tolerance, unit) {
   if (!(baselineValue > 0)) {
     throw new Error(
       `a baseline of ${baselineValue} cannot carry a fractional tolerance`,
     );
   }
+  if (typeof tolerance !== "number" || !Number.isFinite(tolerance) ||
+      tolerance <= 0 || tolerance > 1) {
+    throw new Error(
+      `a tolerance of ${JSON.stringify(tolerance)} is not a fraction above 0 ` +
+        "and at most 1. Spike gate A7.3 names ci/wasm-size-budget.json's " +
+        "mechanism, and null degenerates to an equality check rather than to " +
+        "no check, which is the same comparison wearing a different meaning.",
+    );
+  }
+  const meaning = INCREASE_MEANS[unit];
+  if (meaning === undefined) {
+    throw new Error(
+      `the unit ${JSON.stringify(unit)} declares no direction, so this ` +
+        "comparison cannot say whether the figure got better or worse. Add " +
+        "it to INCREASE_MEANS in tools/bench/src/record.mjs with the reason, " +
+        "which is a decision and not a default.",
+    );
+  }
   const delta = observed - baselineValue;
   const fraction = delta / baselineValue;
+  const direction = delta === 0 ? UNCHANGED : delta > 0 ? UP : DOWN;
+  // Written as two named steps rather than one nested conditional, because
+  // the polarity is the whole point of the field and a reader has to be able
+  // to check it by reading rather than by tracing.
+  const wentTheWrongWay = meaning === WORSE
+    ? direction === UP
+    : direction === DOWN;
   return {
     within: Math.abs(fraction) <= tolerance,
     delta,
     delta_fraction: fraction,
-    direction: delta === 0 ? "unchanged" : delta > 0 ? "slower" : "faster",
+    direction,
+    sense: direction === UNCHANGED
+      ? UNCHANGED
+      : wentTheWrongWay ? WORSE : BETTER,
   };
 }
 
@@ -154,8 +232,12 @@ export function compareRecord(record, baseline) {
         },
       };
     }
+    // The RECORDED unit, not the run's. A subject whose unit changed under a
+    // baseline that still names the old one is comparing two different
+    // quantities, and taking the unit from the entry being compared against is
+    // what makes that visible rather than silently converted.
     const outcome = withinTolerance(recorded.value, entry.value,
-      recorded.tolerance);
+      recorded.tolerance, recorded.unit);
     return {
       ...entry,
       comparison: {

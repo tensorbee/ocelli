@@ -908,13 +908,28 @@ fn build_statistics(
             // the divergence the unclipped pixels DO show by a denominator that
             // includes every pixel that structurally cannot show one.
             //
-            // Measured on this corpus at the time of the change: the per-pixel
-            // divergence between LINEAR and LINEAR_EXACT is exactly `u / w`,
-            // where `u` is the LINEAR display value. Over the image rectangle
-            // the largest observable bias across all 71 gating class-one views
-            // was 0.0825, so a 0.1 bound detected NONE of them. Over the
-            // informative region the same views run to 0.28 on the soft-tissue
-            // CT rows, which is where section 18.3's worked example lives.
+            // Measured on this corpus, by applying the catalogue's own swap to
+            // every gating class-one view and reading the signed mean back
+            // over each region. The per-pixel divergence between LINEAR and
+            // LINEAR_EXACT is `u / w`, where `u` is the LINEAR display value,
+            // so the mean over a region is `mean(u) / w`.
+            //
+            // Over the image rectangle the largest bias across all **70**
+            // gating class-one views is **0.0853**, on
+            // `real/mr_eay131/00000008.dcm`, so a 0.1 bound detects NONE of
+            // them. Over the informative region the same swap gives 0.269 to
+            // 0.284 on the real soft-tissue CT rows and 0.32 on the synthetic
+            // ones, which is where section 18.3's worked example lives, and
+            // 51 of the 70 exceed the bound.
+            //
+            // It said 71 views and 0.0825 until the sprint review's fourth
+            // pass. 71 was `93 - 22 weak` and forgot that
+            // `real/dx_varepop/00000001.dcm` is `mono16` and `unmeasured` for
+            // `decimated`, so it gates nothing either. 0.0825 is a real number
+            // on this corpus and it is not this one: it is what two of the
+            // `real/ct_cmb_mml` rows produce over the same region.
+            //
+            // Reproduce with `./target/release/ocelli-compare census`.
             //
             // A view whose informative region is empty is already `weak` and
             // already `unmeasured`, so it does not gate and the bias is not

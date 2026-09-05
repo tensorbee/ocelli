@@ -3,8 +3,8 @@
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
 //! F-001 creates the crate. F-008 gives it the device-ownership contract.
-//! F-004 resolves the tier, F-039 creates the long-lived device, and the
-//! render graph follows.
+//! F-004 resolves the tier, F-037 (E6.1, S11) creates the long-lived device,
+//! and the render graph follows in F-038.
 //!
 //! Tier resolution is split across two modules on purpose. `caps` decides and
 //! touches no GPU, `probe` touches the GPU and decides nothing. Everything

@@ -133,7 +133,9 @@ for that situation and not two. See `docs/lld/errors.md`.
 ## What this story deliberately does not do
 
 - **It does not create a device.** `GpuContext::new` takes one that already
-  exists. Device creation and loss recovery are F-039. Doing them here would be
+  exists. Device creation and loss recovery are F-037, which is E6.1 in S11,
+  "ocelli-render: device init, capability tiering, device-lost recovery".
+  F-039 is E6.3 in S13 and is OffscreenCanvas. Doing them here would be
   a second copy of a decision the project wants exactly once.
 - **It does not detect `Caps`.** `caps.rs` defined the type because section
   31's `Kernel::workgroup` takes a `&Caps` and a hook expressed in types needs

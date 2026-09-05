@@ -89,13 +89,60 @@ const NO_CACHED_WASM_MEMORY_ALIAS = {
     "the pointer, use it, and let it go. See HLD section 17.2.",
 };
 
-// **What still escapes, stated rather than left to be discovered.** All three
-// selectors are anchored on a variable declaration or on the literal member
-// chain. A view over memory reached any other way is not matched: a function
-// parameter, an assignment to a binding that already exists, the return value
-// of a call, a class field read through `this`, and the computed form
-// `wasm["memory"]`. HLD 17.2's rule is about intent and no AST selector
-// expresses intent.
+// **What still escapes, MEASURED rather than reasoned about.** The S03
+// review's fourth pass wrote a probe file with seven routes to a view over
+// linear memory and ran `npx eslint` over it. Five escape and two are caught.
+// All three selectors are anchored on a variable declaration or on the literal
+// member chain, so a view over memory reached any other way is not matched.
+//
+//   caught    new DataView(wasm.memory.buffer)
+//   caught    const { memory } = wasm;      new DataView(memory.buffer)
+//   ESCAPES   function heap(mem) { return new Uint8Array(mem.buffer); }
+//   ESCAPES   new DataView(wasm["memory"].buffer)
+//   ESCAPES   let m; m = wasm.memory;       new DataView(m.buffer)
+//   ESCAPES   new DataView(fetchMemory(wasm).buffer)
+//   ESCAPES   class C { mem = wasm.memory;  view() { return new DataView(this.mem.buffer); } }
+//
+// **The function-parameter route is the one that matters**, because it is not
+// exotic. It is how anyone would write a drain helper, and
+// `let HEAP = null; export function heap(mem) { HEAP ??= new Uint8Array(mem.buffer); return HEAP; }`
+// is HLD 17.2's named failure with one indirection in front of it and a green
+// lint behind it.
+//
+// **The old wording of this note said "a class field read through `this`"
+// escapes, and that is both too wide and too narrow.** `this.memory.buffer` is
+// CAUGHT, because argument 0's object property is still named `memory` and the
+// first selector matches it. It escapes only when the field is RENAMED, which
+// is the same shape as every other escape here: the alias is what the rule
+// cannot see, not the `this`.
+//
+// **A fourth selector was written and measured and is deliberately NOT here.**
+//
+//   NewExpression[callee.name=/(Array|DataView)$/][arguments.0.property.name="buffer"]
+//
+// unconditioned on the object. Measured: it catches all five escapes above and
+// therefore all seven routes. Its cost across `packages/` and `examples/` is
+// exactly ONE site, `decodeRecord` at packages/core/src/errors.ts, which takes
+// `new DataView(payload.buffer, payload.byteOffset, RECORD_BYTES)` over a
+// caller's `Uint8Array`. That is a true instance of the syntactic pattern and
+// a safe instance of the hazard, built inside the function, used immediately
+// and neither stored nor returned, which is exactly what `panic.ts` is allowed
+// for.
+//
+// **One site against five closed routes is a good trade, and landing it is
+// still a design decision rather than a remediation**, because this repository
+// has no exception narrower than a file-wide allowance. Accommodating that one
+// site means adding `errors.ts` to ALLOWED_TO_DISABLE, which switches off all
+// the selectors there and would make `new DataView(wasm.memory.buffer)` legal
+// in that file, and `docs/lld/errors.md` says granting a third file is a
+// design-plan decision. The alternatives measured are worse: an inline
+// `eslint-disable` would be the first in this tree and `assertTheBanIsIntact`
+// cannot see one, and a per-file narrowing block would require weakening that
+// self-check. Restricting the selector to `[arguments.length=1]` would spare
+// `errors.ts` and reopen the hole one comma away, which is the shape of every
+// escape this rule has already been through.
+//
+// HLD 17.2's rule is about intent and no AST selector expresses intent.
 //
 // **What watches these three.** All three selectors and the allowance list are
 // declared constants in `scripts/guards/catalogue.py`'s ratchet, so weakening

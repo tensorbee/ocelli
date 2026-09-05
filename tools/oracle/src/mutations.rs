@@ -144,10 +144,14 @@ pub enum Effect {
     AddDelta { count: PixelCount, delta: i16 },
     /// Apply the actual LINEAR to LINEAR_EXACT swap to every pixel.
     ///
-    /// The per-pixel divergence is exactly `u / w`, where `u` is the LINEAR
-    /// display value and `w` the window width, so the swapped value is
-    /// `round(u - u / w)`. Derived in exact rational arithmetic over five
-    /// windows in the S03 sprint review, not fitted.
+    /// LINEAR_EXACT sits `u / w` below LINEAR before the renderer quantises,
+    /// where `u` is the LINEAR display value and `w` the window width, so a
+    /// pixel drops one display code with probability `u / w` and the rest do
+    /// not. An accumulator over the image rectangle reproduces that exactly
+    /// and deterministically. A pixel at either display extreme is excluded,
+    /// because PS3.3's two clamp conditions decide what can move there and
+    /// neither extreme can. `apply_to_frame` carries the derivation at the
+    /// site, and it is the only statement of this arithmetic in the file.
     ///
     /// **This exists because `AddDelta` could not represent the real thing.**
     /// A flat delta over a declared fraction of the image is a caricature: it
@@ -252,9 +256,15 @@ pub const CATALOGUE: &[Mutation] = &[
               several times over, which proves the bound catches THAT and says \
               nothing about the divergence HLD 18.3 is about. This one is the \
               divergence. It is also why the bound is evaluated over the \
-              informative region: over the whole image rectangle this mutation \
-              is NOT detected on any view in the corpus, because the clipped \
-              pixels that cannot show it outnumber the ones that can.",
+              informative region, and that is measured rather than asserted: \
+              applied to all 70 gating class-one views and averaged over the \
+              whole image rectangle instead, it exceeds the bound on 0 of \
+              them, because the clipped pixels that cannot show it outnumber \
+              the ones that can. Run `ocelli-compare census` for the table. \
+              Until the sprint review's fourth pass that claim was true of one \
+              view only and false of 44, because the accumulator dropped white \
+              pixels the two clamp conditions in PS3.3 C.11.2.1.2 and \
+              C.11.2.1.3.2 say cannot move.",
         side: MutatedSide::Candidate,
         target: Target::MeasuredStack,
         effect: Effect::VoiLinearExactSwap,
@@ -771,6 +781,57 @@ pub fn apply_to_frame(
             // `floor(sum(u) / w)` drops placed in proportion to `u`. It is
             // deterministic, so the mutation is reproducible, and it needs no
             // float, no cast and no rounding decision.
+            //
+            // **BOTH display extremes are excluded, and the reason is not the
+            // same at each end.** Derived from PS3.3 rather than from the
+            // shape of the code below.
+            //
+            // C.11.2.1.2 gives LINEAR on `c' = c - 0.5` and `w' = w - 1`:
+            // `x <= c' - w'/2` yields ymin, `x > c' + w'/2` yields ymax.
+            // C.11.2.1.3.2 gives LINEAR_EXACT on `c` and `w` themselves:
+            // `x <= c - w/2` yields ymin, `x > c + w/2` yields ymax.
+            //
+            // The LOWER clamps coincide exactly. LINEAR's is
+            // `c' - w'/2 = (c - 0.5) - (w - 1)/2 = c - w/2`, which is
+            // LINEAR_EXACT's, so no stored value clamps to black under one
+            // function and not the other. That is why a pixel the reference
+            // rendered as 0 can never drop, and it is what the `grey == 0`
+            // exclusion has always been.
+            //
+            // **The UPPER clamps do not coincide, and an earlier version of
+            // this loop excluded only the bottom.** LINEAR's is
+            // `c' + w'/2 = c + w/2 - 1` and LINEAR_EXACT's is `c + w/2`, a
+            // full unit of `x` apart, with LINEAR clamping the EARLIER of the
+            // two. So for a pixel the reference rendered as 255, every stored
+            // value above `c + w/2` is ymax under both functions and cannot
+            // move at all, and inside the one-unit band below it LINEAR_EXACT
+            // evaluates to `((x - c) / w + 0.5) * 255`, which at the band's
+            // lower edge `x = c + w/2 - 1` is `(1 - 1/w) * 255 = 255 - 255/w`.
+            // Rounded to eight bits that is still 255 unless `255 / w > 0.5`,
+            // so **at `w >= 510` a pixel at 255 cannot move for any stored
+            // value whatever**, and below 510 it can move only for the part of
+            // a single unit of `x` out of `w`.
+            //
+            // The accumulator's drop rate is `u / w`, which is HIGHEST at
+            // `u = 255`. That is exactly backwards: 255 is the display value
+            // that can move least. Excluding it is also what stops the
+            // mutation perturbing the informative region, since a pixel that
+            // stays at an extreme on both sides stays uninformative, so the
+            // measured bias keeps the numerator and the denominator the
+            // divergence actually has.
+            //
+            // An 8-bit frame does not carry the stored value behind a 255, so
+            // there is no way to tell a pixel just inside the band from one
+            // far outside it. Excluding the whole population is the
+            // conservative reading and it is the same reading already taken at
+            // 0.
+            //
+            // **The residue is discarded, and that is stated rather than
+            // left to be noticed.** When the scan ends the accumulator holds
+            // `sum(u) mod w`, which is less than `w` by construction, and no
+            // drop is taken for it. So the mutation applies exactly
+            // `floor(sum(u) / w)` drops and never `round`, and the most a
+            // frame can lose to the residue is one drop.
             let Some(window_width) = window_width.filter(|w| *w > 0) else {
                 return Err(MutationError::Apply(
                     mutation.name,
@@ -786,9 +847,11 @@ pub fn apply_to_frame(
                 for x in image.x0..image.x0.saturating_add(image.width) {
                     let pixel = frame.pixel(x, y)?;
                     let Some(grey) = pixel.first() else { continue };
-                    let u = u64::from(*grey);
-                    accumulator = accumulator.saturating_add(u);
-                    if accumulator >= w && *grey > 0 {
+                    if *grey == 0 || *grey == u8::MAX {
+                        continue;
+                    }
+                    accumulator = accumulator.saturating_add(u64::from(*grey));
+                    if accumulator >= w {
                         accumulator -= w;
                         let byte = grey.saturating_sub(1);
                         frame.set_pixel(x, y, [byte, byte, byte, u8::MAX])?;
@@ -801,8 +864,10 @@ pub fn apply_to_frame(
                     mutation.name,
                     format!(
                         "the swap moved no pixel at window width {window_width}. \
-                         Every pixel in the image rectangle is black, so there \
-                         is no divergence to show rather than a defect here"
+                         The display values in the image rectangle that are \
+                         neither 0 nor 255 sum to less than {window_width}, so \
+                         there is under one drop's worth of divergence to show \
+                         rather than a defect here"
                     ),
                 ));
             }
@@ -852,8 +917,129 @@ pub fn apply_to_frame(
 
 #[cfg(test)]
 mod tests {
-    use super::{CATALOGUE, PixelCount, fraction_budget};
+    use std::error::Error;
+
+    use super::{CATALOGUE, Mutation, PixelCount, apply_to_frame, fraction_budget};
+    use crate::frame::{Frame, Rect};
     use crate::tolerance::MONOCHROME_WITHIN_ONE_LSB_FRACTION;
+
+    type Outcome = Result<(), Box<dyn Error>>;
+
+    /// The catalogue's own swap entry, so these tests exercise the shipped
+    /// mutation and not a second copy of it.
+    fn the_swap() -> Result<&'static Mutation, Box<dyn Error>> {
+        CATALOGUE
+            .iter()
+            .find(|entry| entry.name == "the-actual-linear-exact-swap")
+            .ok_or_else(|| "the-actual-linear-exact-swap is not in the catalogue".into())
+    }
+
+    /// **`apply_to_frame` had no unit test at all until the sprint review's
+    /// fourth pass**, and that is how `round(u - u / w)` shipped as "the real
+    /// thing" through two passes and how the missing `grey == 255` exclusion
+    /// survived a third. `cargo test -p ocelli-oracle` never executed a line of
+    /// the accumulator: the catalogue was exercised only by
+    /// `bin/ocelli.sh compare`, which needs the rendered corpus and no GPU-less
+    /// machine can run.
+    ///
+    /// Eight pixels, hand-computed, with a 0 and a 255 in them.
+    ///
+    /// **The exclusions are PS3.3's, not the accumulator's.** C.11.2.1.2 gives
+    /// LINEAR the clamps `c' - w'/2` and `c' + w'/2` on `c' = c - 0.5` and
+    /// `w' = w - 1`, and C.11.2.1.3.2 gives LINEAR_EXACT `c - w/2` and
+    /// `c + w/2`. The lower pair is equal, `(c - 0.5) - (w - 1)/2 = c - w/2`,
+    /// so nothing clamps to black under one function and not the other. The
+    /// upper pair differs by one whole unit of `x`, with LINEAR clamping first,
+    /// so a pixel at 255 sits inside a region where LINEAR_EXACT is at worst
+    /// `255 - 255/w`, which rounds back to 255 for every `w >= 510` and for all
+    /// but a sliver of one input unit below it. Neither extreme can move, and
+    /// the accumulator must skip both.
+    ///
+    /// Values `[0, 255, 100, 200, 150, 255, 0, 90]` at `w = 400`. The two
+    /// zeroes and the two 255s take no part, so the accumulator sees
+    /// 100, 200, 150, 90 in that order:
+    ///
+    /// | pixel | u | accumulator after | drop |
+    /// |-------|---|-------------------|------|
+    /// | 2 | 100 | 100 | no |
+    /// | 3 | 200 | 300 | no |
+    /// | 4 | 150 | 450, then 50 | **yes**, 150 becomes 149 |
+    /// | 7 | 90 | 140 | no |
+    ///
+    /// One drop, on pixel 4, and `floor(540 / 400) = 1` confirms the count.
+    /// The residue of 140 is discarded, which is what makes the count a floor.
+    ///
+    /// Under the accumulator as it stood before this pass, the 255s were added
+    /// and only their drop was blocked, so the run was
+    /// `255, 355, 555 -> drop at 3, 305, 560 -> drop at 5`: two drops instead
+    /// of one, on the wrong pixels, and one of them on a 255.
+    #[test]
+    fn the_swap_drops_by_the_accumulator_and_never_touches_a_display_extreme() -> Outcome {
+        let swap = the_swap()?;
+        let mut frame = Frame::from_monochrome(8, 1, &[0, 255, 100, 200, 150, 255, 0, 90])?;
+        apply_to_frame(swap, &mut frame, &Rect::full(8, 1), Some(400))?;
+        assert_eq!(
+            frame,
+            Frame::from_monochrome(8, 1, &[0, 255, 100, 200, 149, 255, 0, 90])?,
+            "one drop, on the pixel where the accumulator crossed 400"
+        );
+        Ok(())
+    }
+
+    /// The same eight pixels at `w = 540`, which is exactly the sum of the four
+    /// values that take part. The accumulator reaches 540 only on the LAST of
+    /// them, so the single drop lands on pixel 7 and the residue is zero.
+    ///
+    /// This is the case that says the drop is placed by the accumulator rather
+    /// than by position, because the same frame moves a different pixel.
+    #[test]
+    fn a_wider_window_moves_the_drop_to_the_pixel_that_crosses_it() -> Outcome {
+        let swap = the_swap()?;
+        let mut frame = Frame::from_monochrome(8, 1, &[0, 255, 100, 200, 150, 255, 0, 90])?;
+        apply_to_frame(swap, &mut frame, &Rect::full(8, 1), Some(540))?;
+        assert_eq!(
+            frame,
+            Frame::from_monochrome(8, 1, &[0, 255, 100, 200, 150, 255, 0, 89])?
+        );
+        Ok(())
+    }
+
+    /// One wider still. 540 is under 541, so the accumulator never crosses and
+    /// the frame carries under one drop's worth of divergence. The mutation
+    /// REFUSES rather than applying nothing, because a catalogue entry that
+    /// quietly did less than it declared would report a guard as watched when
+    /// it was not.
+    ///
+    /// The message names what was measured. It used to say "every pixel in the
+    /// image rectangle is black", which is an inference the condition does not
+    /// support: this frame has a 255 and four mid-greys in it.
+    #[test]
+    fn the_swap_refuses_a_frame_with_under_one_drop_in_it() -> Outcome {
+        let swap = the_swap()?;
+        let mut frame = Frame::from_monochrome(8, 1, &[0, 255, 100, 200, 150, 255, 0, 90])?;
+        let Err(error) = apply_to_frame(swap, &mut frame, &Rect::full(8, 1), Some(541)) else {
+            return Err("a frame carrying under one drop was mutated anyway".into());
+        };
+        let message = error.to_string();
+        assert!(
+            message.contains("under one drop's worth"),
+            "the refusal must say what was measured: {message}"
+        );
+        assert!(!message.contains("black"), "and must not infer: {message}");
+        Ok(())
+    }
+
+    /// A frame of nothing but display extremes carries no divergence at all,
+    /// whatever the window, and is refused for the same reason. Both extremes,
+    /// so this fails if either exclusion is dropped.
+    #[test]
+    fn a_frame_of_only_extremes_carries_no_divergence() -> Outcome {
+        let swap = the_swap()?;
+        let mut frame = Frame::from_monochrome(4, 1, &[0, 255, 255, 0])?;
+        assert!(apply_to_frame(swap, &mut frame, &Rect::full(4, 1), Some(2)).is_err());
+        assert_eq!(frame, Frame::from_monochrome(4, 1, &[0, 255, 255, 0])?);
+        Ok(())
+    }
 
     /// The budget on the declared 512 by 512 canvas, hand-computed:
     /// 512 * 512 = 262144 pixels, and 25.1 needs at least 99.9% of them within

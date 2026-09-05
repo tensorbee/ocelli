@@ -43,8 +43,8 @@ the wasm32 trap, which is why `bin/ocelli.sh gate panic` exists.
 ## The code registry
 
 `ci/error-codes.json` holds every code, its number, the crate range it falls
-in, and its producer. Three files have to agree and they are edited by
-different hands:
+in, and either its producer or, where none exists yet, the producer it is
+intended for. Three files have to agree and they are edited by different hands:
 
 | File | Holds |
 |------|-------|
@@ -63,14 +63,32 @@ refused is reuse of the number, which is the part that is silent.
 
 ### The three codes that exist today
 
-Only codes with a live producer. A fourth arrives with the story whose code it
-is, as one appended entry in each of the three files.
+A fourth arrives with the story whose code it is, as one appended entry in each
+of the three files.
 
-| Code | Number | Producer |
-|------|--------|----------|
-| `Panicked` | 1 | `crates/ocelli-wasm/src/panic.rs` |
-| `Unavailable` | 700 | `ComputeError::Unavailable`, F-008 |
-| `Workgroup` | 701 | `ComputeError::Workgroup`, F-008 |
+| Code | Number | Producer | Intended producer |
+|------|--------|----------|-------------------|
+| `Panicked` | 1 | `crates/ocelli-wasm/src/panic.rs` | - |
+| `Unavailable` | 700 | none today | `ocelli_compute::ComputeError::Unavailable` |
+| `Workgroup` | 701 | none today | `ocelli_compute::ComputeError::Workgroup` |
+
+**Only `Panicked` has a live producer, and the other two name a correspondence
+that no code yet expresses.** `crates/ocelli-core/src/error.rs` says so in
+terms and this table used to say the opposite: there is no `From<ComputeError>`
+anywhere, and `ocelli-compute` does not depend on `ocelli-core` at all, its
+dependencies being `ocelli-render`, `wgpu` and `thiserror`. Check both rather
+than trusting this paragraph:
+
+```bash
+grep -rn "From<ComputeError>" crates/
+sed -n '/^\[dependencies\]/,/^$/p' crates/ocelli-compute/Cargo.toml
+```
+
+The distinction is worth the column because `scripts/error_code_check.py`
+never reads the producer field. It checks the number, the name, the range and
+that both sides can name the code, so the producer is unchecked prose in the
+file this document calls "the register that outlives both", and unchecked prose
+that claims a mechanism is how a register stops being one.
 
 `Unavailable` is deviation D-07's sentence as a number. A feature that cannot
 run on the resolved tier reports unavailable and never silently produces a
@@ -250,8 +268,23 @@ view is built inside the function, used immediately, and neither stored nor
 returned, and the `PanicRecord` handed back carries copied bytes and a decoded
 string.
 
-**A third file is not granted.** `packages/core/src/ring.ts` will need one when
-F-101 gives it a real ring to drain, and that is F-101's design plan to argue.
+**A third PRODUCTION file is not granted.** `packages/core/src/ring.ts` will
+need one when F-101 gives it a real ring to drain, and that is F-101's design
+plan to argue.
+
+`ALLOWED_TO_DISABLE` in `eslint.config.js` holds three path patterns and not
+two, which is worth stating because the sentence above reads as though it held
+two. The first list is the production allowance, `bulk.ts` and `panic.ts`. The
+second is `packages/core/src/*.test.ts`, kept as a separate list precisely so
+the production allowance does not read as three files when it is two:
+`panic.test.ts` builds a view over a `WebAssembly.Memory` it constructed
+itself, which nothing can grow, and the rule is syntactic and cannot tell that
+memory from the core's.
+
+The comment above `NO_CACHED_WASM_VIEW_MEMBER` carries the MEASURED list of
+shapes that still escape the ban, taken with a probe file and `npx eslint`
+rather than reasoned about, along with the fourth selector that would close all
+of them and the one site in `packages/` and `examples/` it would cost.
 
 ## The shell side
 

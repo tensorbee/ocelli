@@ -36,7 +36,7 @@ use crate::caps::Caps;
 ///
 /// Nor does this type create anything. `new` takes a device and a queue that
 /// already exist. Adapter enumeration, tier resolution and device-loss
-/// recovery are F-004 and F-039, and doing them here would be a second copy of
+/// recovery are F-004 and F-037, and doing them here would be a second copy of
 /// a decision this project wants exactly once.
 #[derive(Debug)]
 pub struct GpuContext {
@@ -50,7 +50,7 @@ impl GpuContext {
     ///
     /// This crate is the only one permitted to call `request_device`, so in
     /// practice the arguments come from within `ocelli-render`. The
-    /// constructor is public because F-039 will build the device in a sibling
+    /// constructor is public because F-037 will build the device in a sibling
     /// module and the oracle's software-adapter path in F-X002 needs to build
     /// one too.
     #[must_use]

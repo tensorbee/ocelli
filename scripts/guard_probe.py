@@ -138,10 +138,22 @@ def run_controls(box: sb.Sandbox, probes: list[tuple[str, Probe]],
 def _prepare_control(box: sb.Sandbox, probe: Probe) -> None:
     """The minimum state an invoke needs to be green when nothing is broken.
 
-    Three invokes refuse the sandbox's natural state by design, and their
-    control has to establish the state a healthy repository would be in.
-    Recorded here rather than hidden inside each probe, because a control that
-    quietly does the probe's job is the false green this file exists to refuse.
+    Most invokes with a branch here refuse a freshly built sandbox, because
+    what a healthy repository has at that point is produced by an earlier step
+    rather than tracked: hooks enabled, a benign change staged, a verify-ledger
+    record keyed on the tree the index holds, a built wasm artefact, a present
+    corpus. Each branch builds exactly that and no more. Recorded here rather
+    than hidden inside each probe, because a control that quietly does the
+    probe's job is the false green this file exists to refuse. An earlier
+    version of this sentence said "three invokes" and the branch list has never
+    been three.
+
+    One branch deliberately builds nothing. `split_hld` has no healthy state in
+    a repository with no private source, so its control is the DIFFERENT
+    refusal it gives with no source configured at all, declared through
+    `control_status` and `control_expect` rather than constructed here.
+    `corpus-tests` is the other probe whose control is a refusal, and its
+    invoke needs nothing prepared, so it has no branch.
     """
     key = (probe.control or probe.invoke).key
     if key.startswith("git commit:"):
@@ -376,11 +388,20 @@ def self_test() -> int:
             check("no-op edit message", "mutated nothing" in str(error),
                   str(error))
 
-        # 6. The sandbox is a faithful copy, by count.
+        # 6. The sandbox is a faithful copy, by name and not by a threshold.
+        # This was `copied > 100` over `box.path.rglob("*")`, and that walk
+        # counts the sandbox's own `.git`, which is several hundred entries on
+        # its own. Measured in the S03 review's fourth pass: a sandbox with
+        # EVERY tracked file deleted still walked 948 entries and passed. The
+        # property is named for faithfulness, so it compares against the
+        # tracked set that `build` copies from.
         reached.add(6)
-        copied = len(list(box.path.rglob("*")))
-        check("sandbox is populated", copied > 100,
-              f"only {copied} entries were copied")
+        tracked = sb.repo_tracked_paths()
+        missing = [name for name in tracked if not (box.path / name).is_file()]
+        check("sandbox is a faithful copy", bool(tracked) and not missing,
+              f"{len(tracked)} path(s) are tracked and {len(missing)} of them "
+              f"are not regular files in the sandbox, the first few being "
+              f"{missing[:5]}")
 
     # 7. The tripwire detects a planted change to each thing it captures.
     reached.add(7)
@@ -563,9 +584,11 @@ def _budget_problems(profile: str, elapsed: float, record: bool) -> list[str]:
             "note",
             "Recorded measurements, not guesses. `wall_clock_seconds` is what "
             "the harness took on the machine that recorded it. `constants` is "
-            "the declared-constant ratchet and `uncovered` is the "
-            "uncovered-refusal ratchet, both written by "
-            "scripts/guard_census.py --record.")
+            "the declared-constant ratchet, `constants_count` and "
+            "`gates_declared` are the counts that catch one of those being "
+            "removed rather than changed, `oracle_faults` is the fault-count "
+            "ratchet and `uncovered` is the uncovered-refusal ratchet, all "
+            "written by scripts/guard_census.py --record.")
         BUDGET.write_text(json.dumps(budget, indent=2, sort_keys=True) + "\n")
         print(f"  {profile} wall clock recorded at {elapsed:.1f}s")
         return []

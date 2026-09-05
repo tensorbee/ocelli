@@ -7,13 +7,18 @@ import test from "node:test";
 import {
   acceptRecord,
   baselineEntry,
+  BETTER,
   compareRecord,
+  DOWN,
   emptyBaseline,
   movedSubjects,
   MOVED,
   NO_BASELINE,
+  UNCHANGED,
+  UP,
   WITHIN,
   withinTolerance,
+  WORSE,
 } from "../src/record.mjs";
 import { hostClassKey } from "../src/hostclass.mjs";
 import { INCOMPARABLE, MEASURED, UNAVAILABLE } from "../src/state.mjs";
@@ -57,25 +62,78 @@ const baselineWith = (value, tolerance, host = HOST) => ({
 });
 
 test("the tolerance is applied on BOTH sides of the baseline", () => {
-  assert.equal(withinTolerance(10, 10.9, 0.1).within, true);
-  assert.equal(withinTolerance(10, 11.1, 0.1).within, false);
-  assert.equal(withinTolerance(10, 9.1, 0.1).within, true);
+  assert.equal(withinTolerance(10, 10.9, 0.1, "ms").within, true);
+  assert.equal(withinTolerance(10, 11.1, 0.1, "ms").within, false);
+  assert.equal(withinTolerance(10, 9.1, 0.1, "ms").within, true);
   // An unexplained improvement fails as loudly as an unexplained regression.
   // A runner that started timing less work reads as an improvement.
-  assert.equal(withinTolerance(10, 8.9, 0.1).within, false);
+  assert.equal(withinTolerance(10, 8.9, 0.1, "ms").within, false);
 });
 
 test("the direction and the fraction are reported", () => {
-  const slower = withinTolerance(10, 12, 0.1);
-  assert.equal(slower.direction, "slower");
-  assert.equal(slower.delta, 2);
-  assert.ok(Math.abs(slower.delta_fraction - 0.2) < 1e-12);
-  assert.equal(withinTolerance(10, 8, 0.1).direction, "faster");
-  assert.equal(withinTolerance(10, 10, 0.1).direction, "unchanged");
+  const up = withinTolerance(10, 12, 0.1, "ms");
+  assert.equal(up.direction, UP);
+  assert.equal(up.delta, 2);
+  assert.ok(Math.abs(up.delta_fraction - 0.2) < 1e-12);
+  assert.equal(withinTolerance(10, 8, 0.1, "ms").direction, DOWN);
+  assert.equal(withinTolerance(10, 10, 0.1, "ms").direction, UNCHANGED);
+});
+
+test("a rate that FELL is worse, and a duration that fell is better", () => {
+  // The defect this replaces: `direction` was `delta > 0 ? "slower" :
+  // "faster"` for every unit, so tier.startup_microbenchmark, whose unit is
+  // pixels_per_second and whose subject story is already done, would have
+  // reported a halved fill rate as `faster`. Four of the eleven registry rows
+  // are not durations.
+  const halvedRate = withinTolerance(1000, 500, 0.1, "pixels_per_second");
+  assert.equal(halvedRate.direction, DOWN);
+  assert.equal(halvedRate.sense, WORSE,
+    "a fill rate that halved was reported as an improvement");
+
+  const fasterCine = withinTolerance(30, 60, 0.1, "changed_frames_per_second");
+  assert.equal(fasterCine.direction, UP);
+  assert.equal(fasterCine.sense, BETTER);
+
+  const slower = withinTolerance(10, 12, 0.1, "ms");
+  assert.equal(slower.sense, WORSE);
+  assert.equal(withinTolerance(10, 8, 0.1, "ms").sense, BETTER);
+
+  // A7.3: "Ocelli's idle cost must be indistinguishable from zero", so more
+  // CPU is worse. The polarity matches a duration and the WORDS did not, which
+  // is why the vocabulary is up and down rather than slower and faster.
+  const moreCpu = withinTolerance(0.02, 0.05, 0.1, "fraction_of_one_vcpu");
+  assert.equal(moreCpu.direction, UP);
+  assert.equal(moreCpu.sense, WORSE);
+
+  assert.equal(withinTolerance(10, 10, 0.1, "ms").sense, UNCHANGED);
+});
+
+test("a unit that declares no direction is refused, not defaulted", () => {
+  assert.throws(() => withinTolerance(10, 12, 0.1, "furlongs"),
+    /declares no direction/);
+  assert.throws(() => withinTolerance(10, 12, 0.1, undefined),
+    /declares no direction/);
 });
 
 test("a baseline of zero cannot carry a fractional tolerance", () => {
-  assert.throws(() => withinTolerance(0, 1, 0.1), /cannot carry a fractional/);
+  assert.throws(() => withinTolerance(0, 1, 0.1, "ms"),
+    /cannot carry a fractional/);
+});
+
+test("a missing tolerance is refused rather than read as zero", () => {
+  // `Math.abs(fraction) <= null` is `<= 0` in JavaScript, so a null tolerance
+  // used to admit only a bit-identical duration and report everything else as
+  // moved. That is a different check wearing the same name.
+  for (const bad of [null, undefined, 0, -0.1, 1.5, NaN, "0.25"]) {
+    assert.throws(() => withinTolerance(10, 10.1, bad, "ms"),
+      /is not a fraction above 0 and at most 1/,
+      `a tolerance of ${JSON.stringify(bad)} was accepted`);
+  }
+});
+
+test("a baseline entry with no tolerance is refused by the comparison", () => {
+  assert.throws(() => compareRecord(record(), baselineWith(10, null)),
+    /is not a fraction above 0 and at most 1/);
 });
 
 test("a matching host class and instrument yields a comparison", () => {

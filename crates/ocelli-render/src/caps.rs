@@ -5,7 +5,9 @@
 //!
 //! F-008 defined the type. **F-004 added the decision procedure that fills
 //! it**, which is everything from `SoftwareVerdict` downwards. Device creation
-//! and loss recovery are still F-039.
+//! and loss recovery are still F-037, which is E6.1 in S11,
+//! "ocelli-render: device init, capability tiering, device-lost recovery".
+//! F-039 is E6.3 in S13 and is OffscreenCanvas.
 //!
 //! **This module makes the decision and touches no GPU.** The wgpu calls and
 //! the fill-rate workload live in `probe.rs`, and the split is the point:
@@ -134,10 +136,24 @@ pub enum SoftwareVerdict {
 /// on real hardware**: Mesa's Gallium framework backs the radeonsi and iris
 /// drivers on genuine AMD and Intel GPUs, whose renderer strings have
 /// historically read "Gallium 0.4 on AMD ...". What contains it is the
-/// combination rule rather than the list. A string is consulted only when the
-/// benchmark did not decide, so a real GPU that measures as hardware is never
-/// dropped to tier C by this entry. `docs/lld/tier-resolution.md` records the
-/// narrowing, and amending A7 itself is a separate reviewed change.
+/// combination rule rather than the list.
+///
+/// **The containment is partial and the residue is stated rather than left to
+/// be found.** A string is consulted only where the benchmark AND the adapter
+/// type both abstained, so a real GPU that measures `Hardware`, or that
+/// reports `DiscreteGpu` or `IntegratedGpu`, is never dropped by this entry.
+/// The case that is not covered is the one where both abstain, and it is not
+/// exotic. [`FillRateBands::RECORDED`] has no software ceiling and a hardware
+/// floor of 400 Mpps derived from one Apple figure, so a genuine but slower
+/// GPU measures [`SoftwareVerdict::Unknown`], and wgpu's GLES backend commonly
+/// reports `DeviceType::Other` or `VirtualGpu`, which is
+/// [`SoftwareVerdict::Unknown`] as well. A real Mesa GPU that lands in both
+/// abstentions is demoted to tier C by this entry, and tier C renders nothing
+/// until F-X001 to F-X004. `a_real_mesa_gpu_that_both_hints_abstain_on_is_demoted`
+/// is the test in that direction.
+///
+/// `docs/lld/tier-resolution.md` records the narrowing, and amending A7 itself
+/// is a separate reviewed change.
 pub const SOFTWARE_RENDERER_STRINGS: [&str; 7] = [
     "swiftshader",
     "llvmpipe",
@@ -566,8 +582,15 @@ fn cpu_caps() -> Caps {
 ///    device, no benchmark.
 /// 2. **Rank the candidates** and take the best, preferring A over B.
 /// 3. **No candidate resolves tier C**, recorded as `NoAdapter`.
-/// 4. **No device resolves tier C**, recorded as `NoDevice`. There is no GPU
-///    path to be had.
+/// 4. **No device resolves tier C**, recorded as `NoDevice`. What that
+///    records is narrower than "there is no GPU path to be had", and the
+///    narrower statement is the true one: the BEST candidate could not open a
+///    device, and no other adapter was tried. `probe.rs` calls
+///    `request_device` on the single adapter `choose_candidate` returned, so
+///    on a host whose best candidate is a broken Vulkan ICD beside a working
+///    GL driver the answer is tier C while a tier-B path exists and was never
+///    attempted. Trying the next adapter is a design decision for a story
+///    rather than something to add here.
 /// 5. **The benchmark decides if it decided.** A7: a renderer string is a
 ///    claim, a measured fill rate is a fact. The two hints are recorded and
 ///    not consulted.
@@ -578,9 +601,12 @@ fn cpu_caps() -> Caps {
 /// 7. **Hardware resolves the candidate's tier. Software resolves tier C.**
 ///    That single line is the whole defect this exists to prevent.
 /// 8. **The override applies last, clamped to what is constructible.** Tier C
-///    always is, tier B needs some adapter, tier A needs an A-candidate. An
-///    override that is not constructible is refused, recorded, and the
-///    measured tier stands.
+///    always is, tier B needs some adapter AND a device to have been created,
+///    tier A needs an A-candidate AND a device to have been created. An
+///    adapter appearing in the enumeration and a device opening on it are
+///    different facts, and the second one is what makes a GPU tier
+///    constructible. An override that is not constructible is refused,
+///    recorded, and the measured tier stands.
 #[must_use]
 pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
     // Step 1.
@@ -612,8 +638,9 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
         .cloned();
     let candidate_tier = candidate.as_ref().and_then(AdapterFacts::candidate_tier);
 
-    // Step 4's three verdicts, all computed, all recorded, whichever ends up
-    // being consulted.
+    // Steps 5 and 6's three verdicts, all computed, all recorded, whichever
+    // ends up being consulted. The benchmark is step 5 in the procedure above,
+    // and step 4 is the device check below.
     let benchmark = signals.fill_rate.map_or(SoftwareVerdict::Unknown, |rate| {
         rate.verdict(&signals.bands)
     });
@@ -696,7 +723,8 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
         // called software stays allowed, because that is how a misdetection
         // gets diagnosed on the estate it happens on. Forcing it where no
         // device could be created is a different thing and is refused, because
-        // there is no GPU path to be had.
+        // there is nothing to run it on: the one adapter that was tried could
+        // not open a device.
         TierRequest::Requested(Tier::B) if candidate_tier.is_some() && signals.device_created => (
             Tier::B,
             DecidedBy::Override,
@@ -1058,10 +1086,10 @@ mod detection_tests {
         assert_eq!(resolved.evidence.decided_by, DecidedBy::NoAdapter);
     }
 
-    /// An adapter was found and no device could be created on it. There is no
-    /// GPU path to be had, so the answer is tier C and it is recorded as
-    /// `NoDevice` rather than as `NoAdapter`, because the two are different
-    /// diagnoses.
+    /// An adapter was found and no device could be created on it. `probe.rs`
+    /// tries exactly one adapter, the best candidate, so the answer is tier C
+    /// and it is recorded as `NoDevice` rather than as `NoAdapter`, because
+    /// the two are different diagnoses.
     #[test]
     fn a_device_that_could_not_be_created_resolves_cpu() {
         let mut signals = signals(vec![discrete_webgpu()], None);
@@ -1140,6 +1168,46 @@ mod detection_tests {
             );
             assert_eq!(resolved.evidence.decided_by, DecidedBy::RendererString);
         }
+    }
+
+    /// **The direction the list's own doc comment used to exculpate itself
+    /// in.** `SOFTWARE_RENDERER_STRINGS` says the combination rule contains
+    /// the `gallium` false positive, and it does so only where the benchmark
+    /// or the adapter type has something to say. This is the case where
+    /// neither does, and it is the case a Mesa GPU on wgpu's GLES backend
+    /// actually presents: `DeviceType::Other`, which abstains, and no usable
+    /// measurement, which abstains. Real AMD hardware is then demoted to
+    /// tier C, which renders nothing until F-X001 to F-X004.
+    ///
+    /// The two halves are asserted together on purpose. The second is what the
+    /// doc comment claims and the first is what it omitted, and separating
+    /// them would leave the claim looking complete again.
+    #[test]
+    fn a_real_mesa_gpu_that_both_hints_abstain_on_is_demoted() {
+        let mesa = facts(
+            wgpu::Backend::Gl,
+            wgpu::DeviceType::Other,
+            "Gallium 0.4 on AMD RADV POLARIS10",
+            false,
+        );
+
+        // Both hints abstain, so the string decides and real hardware goes to
+        // tier C.
+        let abstained = classify(&signals(vec![mesa.clone()], None), TierRequest::Auto);
+        assert_eq!(abstained.caps.tier, Tier::Cpu);
+        assert_eq!(abstained.evidence.decided_by, DecidedBy::RendererString);
+        assert_eq!(abstained.evidence.benchmark, SoftwareVerdict::Unknown);
+        assert_eq!(abstained.evidence.adapter_type, SoftwareVerdict::Unknown);
+
+        // And the containment the doc comment does claim: a measurement in the
+        // hardware band keeps the same adapter on its own tier.
+        let measured = classify(
+            &signals(vec![mesa], Some(at_hardware_floor())),
+            TierRequest::Auto,
+        );
+        assert_eq!(measured.caps.tier, Tier::B);
+        assert_eq!(measured.evidence.decided_by, DecidedBy::Benchmark);
+        assert_eq!(measured.evidence.renderer_string, SoftwareVerdict::Software);
     }
 
     /// The list is matched case-insensitively and across all three of `name`,

@@ -285,10 +285,14 @@ jobs:
   guards-deep:
     name: Guard probes needing a toolchain
     # F-X009, and the trigger is a deliberate cost decision rather than an
-    # oversight. These probes each need cargo, npm or wasm-pack, so they are
-    # minutes rather than seconds and they are excluded from the floor by name
-    # in bin/ocelli.sh's --floor arm and in scripts/ci_floor_check.py's
-    # NOT_IN_FLOOR.
+    # oversight. Every probe outside the floor declares `needs="cargo"`, and
+    # none of them needs npm or wasm-pack, which an earlier version of this
+    # comment claimed. Read the current answer rather than this sentence:
+    # `python3 scripts/guard_probe.py --list` prints each probe's profile and
+    # what it needs. They are excluded from the floor by name in
+    # bin/ocelli.sh's --floor arm and in scripts/ci_floor_check.py's
+    # NOT_IN_FLOOR, and since the S03 review's fourth pass those two lists are
+    # compared for set equality rather than kept in step by care.
     #
     # State the claim precisely: a deep guard that has been weakened is caught
     # on MERGE TO MAIN, or on a manual dispatch, and not on the pull request

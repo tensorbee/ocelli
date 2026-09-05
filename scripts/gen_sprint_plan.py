@@ -5,9 +5,15 @@ Written once at bootstrap. After that SPRINT_PLAN.md is hand-curated prose and
 this script runs only in `--check` mode, where it asserts the planning data
 and nothing else: every planned F-ID appears in exactly one sprint table, and
 the sprint and the estimate it appears with match the allocation the backlog is
-rendered from. Prose drift is a human's business. The estimate was added by the
-S03 review's third pass, which found F-X014 carrying `1w` in the plan and `2w`
-in the backlog with no check able to see it.
+rendered from. Prose drift is a human's business.
+
+The estimate comparison was added by the S03 review's third pass. That pass
+widened F-X014 from one week to two, updated `BACKLOG.md` and
+`allocation.json`, and left this file's row at `1w`. **No committed state ever
+held the disagreement**, and the fourth pass checked: at `fe18a91` all three
+files read `1w` and at `4139a54` all three read `2w`. So this check has never
+caught anything. It exists because nothing could have, and the drift it would
+have caught was real for the length of one edit.
 
 Usage:
   python3 scripts/gen_sprint_plan.py            # write SPRINT_PLAN.md
@@ -175,8 +181,8 @@ def parse_plan(text: str) -> dict[str, tuple[str, str]]:
     render this file is hand-curated prose and the wording is a human's
     business. An estimate is not wording, it is the planning number the
     backlog and the allocation both carry, and until the S03 review nothing
-    compared the three. F-X014 sat at `1w` here and `2w` in both of the
-    others for the length of that sprint.
+    compared the three. See `check` for what that review did and did not
+    find, because the first account of it here claimed more than was true.
     """
     found: dict[str, tuple[str, str]] = {}
     current = ""
@@ -190,6 +196,54 @@ def parse_plan(text: str) -> dict[str, tuple[str, str]]:
             cells = [c.strip() for c in row.group(2).split("|")]
             est = cells[EST_CELL - 1] if len(cells) >= EST_CELL else ""
             found[row.group(1)] = (current, est)
+    return found
+
+
+MILESTONE_LINE = re.compile(
+    r"^_(S\d+) to (S\d+), (\d+) stories, (\d+) engineer-weeks\._$", re.M)
+GOAL_LINE = re.compile(r"^\*\*Goal\*\*: (.+)$")
+
+
+def rendered_milestones(data: dict) -> list[tuple[str, str, int, int]]:
+    """The milestone summary lines `render` would write, as tuples.
+
+    Built by the same walk `render` uses, so a disagreement is the plan
+    lagging the allocation rather than two different derivations.
+    """
+    groups = sprint_groups(data)
+    out: list[tuple[str, str, int, int]] = []
+    seen = None
+    for sprint, stories in groups.items():
+        key = stories[0]["milestone"]
+        if key == seen:
+            continue
+        span = [s for s in groups if groups[s][0]["milestone"] == key]
+        out.append((span[0], span[-1],
+                    sum(len(groups[sp]) for sp in span),
+                    sum(st["weeks"] for sp in span for st in groups[sp])))
+        seen = key
+    return out
+
+
+def rendered_goals(data: dict) -> dict[str, str]:
+    """The `**Goal**:` line `render` would write, per sprint."""
+    return {
+        sprint: ", ".join(s["story"].replace(";", ",") for s in stories) + "."
+        for sprint, stories in sprint_groups(data).items()
+    }
+
+
+def parse_goals(text: str) -> dict[str, str]:
+    found: dict[str, str] = {}
+    current = ""
+    for line in text.splitlines():
+        head = HEAD.match(line)
+        if head:
+            current = head.group(1)
+            continue
+        goal = GOAL_LINE.match(line)
+        if goal and current and current not in found:
+            found[current] = goal.group(1).strip()
     return found
 
 
@@ -220,13 +274,63 @@ def check(data: dict) -> int:
                         f"{actual[fid][0]} but carries no sprint in "
                         f"BACKLOG.md")
 
+    # The milestone summary lines and the goal paragraphs. Both are written
+    # by `render` from this same allocation, and until the S03 review's
+    # fourth pass `check` read neither, which is how M1 carried 61
+    # engineer-weeks against an allocation saying 62 and how S04's goal line
+    # kept a story title the table row had already replaced. A generated line
+    # nothing compares is a hand-maintained line that looks generated.
+    plan_text = PLAN.read_text()
+    expected_lines = rendered_milestones(data)
+    actual_lines = [(a, b, int(n), int(w))
+                    for a, b, n, w in MILESTONE_LINE.findall(plan_text)]
+    if expected_lines != actual_lines:
+        for expected, actual in zip(expected_lines, actual_lines):
+            if expected != actual:
+                problems.append(
+                    f"the milestone summary line for {expected[0]} to "
+                    f"{expected[1]} should read {expected[2]} stories and "
+                    f"{expected[3]} engineer-weeks, and SPRINT_PLAN.md says "
+                    f"{actual[2]} stories and {actual[3]} engineer-weeks")
+        if len(expected_lines) != len(actual_lines):
+            problems.append(
+                f"the allocation has {len(expected_lines)} milestone(s) and "
+                f"SPRINT_PLAN.md carries {len(actual_lines)} summary line(s)")
+
+    expected_goals = rendered_goals(data)
+    actual_goals = parse_goals(plan_text)
+    groups = sprint_groups(data)
+    for sprint, goal in sorted(expected_goals.items()):
+        if sprint not in actual_goals:
+            problems.append(f"{sprint} carries no **Goal** line")
+            continue
+        if actual_goals[sprint] == goal:
+            continue
+        # Name the title that drifted rather than reprinting the line. A
+        # sprint holds up to six stories and quoting all of them buries the
+        # one word that changed, which is how S04's stale title survived
+        # being read.
+        absent = [s["story"] for s in groups[sprint]
+                  if s["story"].replace(";", ",") not in actual_goals[sprint]]
+        if absent:
+            for story in absent:
+                problems.append(
+                    f"{sprint}'s **Goal** line does not carry the story "
+                    f"title it is built from: {story!r}")
+        else:
+            problems.append(
+                f"{sprint}'s **Goal** line carries every story title and "
+                f"still does not match, so its order or its punctuation has "
+                f"drifted from what the generator writes")
+
     if problems:
         print("FAIL: SPRINT_PLAN.md and BACKLOG.md disagree")
         for problem in problems:
             print(f"  - {problem}")
         return 1
     print(f"OK: {len(expected)} planned F-IDs, sprint assignment and "
-          f"estimate agree")
+          f"estimate agree, {len(expected_lines)} milestone summary line(s) "
+          f"and {len(expected_goals)} goal line(s) match the allocation")
     return 0
 
 

@@ -99,7 +99,11 @@ packages/
 examples/
   viewer-react/     the example viewer, and the manual smoke test
 
-tools/oracle/       the differential harness against cornerstone3D
+tools/
+  oracle/           the differential harness against cornerstone3D
+  bench/            the benchmark registry and its runners
+  spikes/           throwaway harnesses for the Appendix A gates
+
 corpus/             manifest only. The data is not in git
 
 docs/hld/           the authoritative Markdown specification

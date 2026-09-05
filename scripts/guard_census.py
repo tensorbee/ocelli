@@ -133,6 +133,25 @@ def record_constants() -> int:
             "guard": constant.guard,
         }
     budget["constants"] = constants
+    # Two counts beside the digests, because both of the things they count can
+    # be REMOVED with every other check staying green. Deleting a `Constant`
+    # and its recorded row disarms the widening ratchet in a commit that reads
+    # as a cleanup, and deleting a row from bin/ocelli.sh's GATES array shrinks
+    # `--floor`, `--sprint` and `--all` while the entry's probes go on passing,
+    # because a probe invokes the guard's script rather than the gate.
+    previous_constants = budget.get("constants_count")
+    if previous_constants is not None and len(CONSTANTS) < previous_constants:
+        print(f"  the declared-constant count FALLS from {previous_constants} "
+              f"to {len(CONSTANTS)}. Say in this diff which constant was "
+              f"retired and why the guard it watched no longer needs one.")
+    budget["constants_count"] = len(CONSTANTS)
+    gates = census.gates_declared()
+    previous_gates = budget.get("gates_declared")
+    if previous_gates is not None and len(gates) < previous_gates:
+        print(f"  the gate count FALLS from {previous_gates} to {len(gates)}. "
+              f"A gate deleted from bin/ocelli.sh shrinks `--floor`, "
+              f"`--sprint` and `--all`, and nothing else notices.")
+    budget["gates_declared"] = len(gates)
     budget["oracle_faults"] = census.oracle_adoption(None)[0]
     sites = discover()
     matches, _ = match_sites(sites)
@@ -154,7 +173,9 @@ def record_constants() -> int:
     ratchet["sweep_complete"] = uncovered == 0
     BUDGET.parent.mkdir(parents=True, exist_ok=True)
     BUDGET.write_text(json.dumps(budget, indent=2, sort_keys=True) + "\n")
-    print(f"recorded {len(constants)} constant(s), uncovered={uncovered}, "
+    print(f"recorded {len(constants)} constant(s), "
+          f"constants_count={len(CONSTANTS)}, gates_declared={len(gates)}, "
+          f"uncovered={uncovered}, "
           f"sweep_complete={ratchet['sweep_complete']}")
     return 0
 

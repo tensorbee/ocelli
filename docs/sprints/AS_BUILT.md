@@ -745,7 +745,11 @@ workspace entry.
 `ci/error-codes.json`, `ci/wasm-size-budget.json`.
 **Tests added.** 14 in `ocelli-core`, 8 in `ocelli-wasm` and 34 across the
 TypeScript suites, counted as ADDITIONS in this story's diff rather than as
-crate totals, which are 28, 10 and 36. Plus 15 cases in the error-code guard's
+crate totals. The crate totals were written here as 28, 10 and 36, and 28 is
+the LIB unit-test binary rather than the crate: `cargo test -p ocelli-core
+--all-targets -- --list` counts 38, against 28 for `--lib`, because
+`ocelli-core` also carries the `roundtrip` and `compile_fail` targets. The
+additions figure of 14 is unaffected. Plus 15 cases in the error-code guard's
 own test and one wasm probe.
 **Fixture provenance.** `ERROR_BYTES` and `LOG_BYTES` are hand-derived byte by
 byte, each offset carrying its own comment with the little-endian reasoning, and
@@ -887,7 +891,7 @@ no subject, so a later story adds a runner into a slot with no latitude to
 redefine the measurement into something easier.
 
 **The HLD states no performance target of any kind.** That was searched rather
-than assumed, across every file under `docs/hld/`, and the four numeric figures
+than assumed, across every file under `docs/hld/`, and the five numeric figures
 that bear on cost at all are an explicitly unmeasured size estimate, a GPU
 buffer limit, a series size, a caller's memory budget and a uniform block size.
 None is a target this harness can pass or fail against. The only budget-setting
@@ -996,6 +1000,9 @@ module. `volume-truth.json` carries the expectation per subject.
 **Verification.** `bin/ocelli.sh gate --floor` ALL GREEN over 24 gates, plus
 `gate corpus` and `gate oracle`, which is a full sprint profile over 26.
 **Corpus.** pass, 91 rows.
+**CHANGELOG.** `## Unreleased`, the entry for the oracle's volume and reformat
+pass. It was missing when this story closed and the sprint review's fourth pass
+added it, so `/complete-feature` step 4 was silently skipped here.
 **Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. This story runs
 somebody else's renderer, under SwiftShader, which is a property of the
 reference and not a tier declaration by Ocelli.
@@ -1058,19 +1065,39 @@ where inputs, parameters and geometry already agree.
 pass found that.** The bound was evaluated over the image rectangle, and the
 per-pixel divergence is exactly `u / w`, so a rectangle full of pixels clipped
 to black or white divides the divergence the unclipped ones show by a
-denominator that cannot show one. Measured across all 71 gating class-one views,
+denominator that cannot show one. Measured across every gating class-one view,
 the largest observable bias over the rectangle was 0.0825 and a 0.1 bound caught
 none of them. The proof that had been accepted, a mutation moving 40 per cent of
 the image by a whole code, cleared the bound several times over and was a
 caricature of a divergence that moves each pixel by a sub-code amount.
+**No view count is transcribed here**, because the one that stood in this
+sentence was wrong. `bin/ocelli.sh gate oracle` prints the run census,
+`bin/ocelli.sh compare census` prints the class-one detectability census, and
+`tools/oracle/compare-out/compare.json` carries the per-view records behind
+both.
 
 **It is now evaluated over the informative region and it does catch the real
-thing**, proved by a mutation that IS the real thing: `round(u - u / w)` applied
-to every pixel using the view's own declared window. Reverting the region to the
-rectangle makes that mutation come back `NOT DETECTED` with the view passing.
-A structural limit remains and is recorded rather than hidden: the largest
-divergence any view can show is `255 / w`, so a window wider than 2550 cannot
-reach the bound at all, and the corpus carries two such rows.
+thing**, and the mutation that proves it is an ACCUMULATOR, not the
+`round(u - u / w)` this entry claimed. That claim was pass 2's and pass 3
+falsified it: applied to the already-quantised byte, `round(u - u / w)` is a
+threshold at `u >= w/2` rather than a proportional effect, so at window 400 it
+moved 55 of 256 codes and at 510, 678 and 4096 it moved nothing at all. The real
+divergence is proportional and PRE-quantisation, so LINEAR_EXACT sits `u / w`
+below LINEAR before the renderer rounds and a pixel drops one code with
+probability `u / w`. The accumulator produces exactly that distribution,
+deterministically, at every width, in integer arithmetic with no float and no
+cast. Reverting the region to the rectangle makes it come back `NOT DETECTED`
+with the view passing.
+
+**The bound's blind spot is content and not only width**, and the structural
+`255 / w` figure this entry used to record here is true and nearly useless. The
+bound depends on `mean(u) / w`, so it fires only where the informative mean
+display code exceeds `0.1 * w`. **The smallest blind window on this corpus is
+678 and not 2550**, and the blind views are the `real/mr_eay131` family and the
+wide-window rows. The split between the views that can fail the bound and the
+views that cannot is recorded in `tools/oracle/src/tolerance.rs` and in HLD 25.1
+rather than transcribed here, for the reason the paragraph above gives, and
+`bin/ocelli.sh compare census` re-derives it from the rendered corpus.
 
 **HLD sections implemented.** Section 25 and 25.1, including the bias bullet
 this sprint added. Section 11's requirement that metadata is diffed alongside
@@ -1082,15 +1109,20 @@ and D-11 cited.
 `scripts/staged_content_check.py`, `.gitignore`.
 **Tests added.** 64 added in `ocelli-oracle`, bringing that crate to 65, being
 42 unit, 10 tolerance fixture, 5 VOI divergence fixture, 6 geometry fixture and
-2 property. Plus a 20-entry
-mutation catalogue replayed on every oracle gate.
+2 property. Plus a mutation catalogue replayed on every oracle gate. **No entry
+count is transcribed here.** It was 20 when this entry was written and the
+sprint review has moved it twice since, so
+`grep -c '^    Mutation {' tools/oracle/src/mutations.rs` is the count.
 **Fixture provenance.** Hand-computed from PS3.3 and from HLD 18.2's formulas.
 **Deviation D-13 is honoured**: no fixture asserts `LINEAR_EXACT(-160) = 1.594`,
 the value is computed as `0.000` from the formula, and the other three rows of
 the 18.3 table are used unchanged.
 **Verification.** `gate --floor` ALL GREEN over 24, `gate corpus` pass, `gate
-oracle` pass including render, compare and the twenty mutations.
+oracle` pass including render, compare and every mutation in the catalogue.
 **Corpus.** pass, 91 rows.
+**CHANGELOG.** `## Unreleased`, the entry for the differential oracle's
+comparator half. It was missing when this story closed and the sprint review's
+fourth pass added it, so `/complete-feature` step 4 was silently skipped here.
 **Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. The comparator
 is a host-side tool over two directories and resolves no tier. The candidate
 side being a directory contract rather than a call into a renderer is what makes
@@ -1238,6 +1270,88 @@ list, and the census found them by refusing the author's own entries.
   runbook probe 18's exact branch is unreachable from a sandbox. What is
   standing is the fail-closed shape one level up, and the limit is recorded with
   an owner rather than left as a gap.
-- **Thirteen entries carry an explicit `limit`** naming what their probe does
-  not reach, each rendered into the runbook. A probe that covers part of a guard
-  and says so is worth more than one that implies it covers all of it.
+- **Some entries carry an explicit `limit`** naming what their probe does not
+  reach, each rendered into the runbook. A probe that covers part of a guard and
+  says so is worth more than one that implies it covers all of it. This bullet
+  said "thirteen" and the same commit that wrote the sentence three paragraphs
+  up saying no count for this harness belongs in this entry also added the
+  fourteenth. `grep -c 'limit=' scripts/guards/catalogue.py` is the count, and
+  `python3 scripts/guard_census.py` names each one with its owner.
+
+## Corrections from S03 sprint review, recorded 2026-09-05
+
+**This file lost its append-only property during S03 and this entry is the
+repair.** `.claude/WORKFLOW.md` gives `AS_BUILT.md` a lifetime of Append-only,
+and S01 honoured that: its review corrections went into their own headed
+entries, so the file still shows what was claimed at completion beside what was
+later found false. S03's review passes instead rewrote the F-004, F-006, F-011
+and F-X009 entries in place, which is why five wrong numbers survived three
+passes. A sentence edited in place carries no evidence that it used to say
+something else, so nothing invites the next reader to re-measure it. The
+corrections below are recorded here as well as applied above.
+
+**The rule the fourth pass applied throughout.** Where a number is not
+reproducible by a command, the number is deleted and the command is named. The
+dominant defect of this sprint was not a wrong number written carelessly. It
+was a number that was TRUE when written and was falsified by a later commit
+that edited the sentence next to it.
+
+### Pass 1, `a651821` and `e962144`
+
+Two commits, not one. Twenty-three defects and thirty-two smells, of which
+three were blocking: an eslint selector that banned only the literal
+`new DataView(wasm.memory.buffer)` and therefore banned nothing this repository
+writes, the only real volume reference shipping with its divergence switched
+off, and an `OCELLI_TIER` override that could construct a tier no device on the
+host could open. The remaining twenty were false factual sentences across the
+ledgers, swept in one commit.
+
+### Pass 2, `f04e07d` and `fe18a91`
+
+The bias bound added to HLD 25.1 this sprint detected none of the divergence it
+exists to detect, because it was evaluated over the image rectangle. It is now
+evaluated over the informative region. The guard census counted a refusal as
+watched whenever the entry naming it named any test, without checking the test
+opens the file, so its uncovered count went from zero to nine, which is the
+honest direction.
+
+### Pass 3, `4139a54`
+
+Pass 2's replacement mutation was not the divergence either. Applied to the
+quantised byte, `round(u - u / w)` is a threshold rather than a proportional
+effect and moved nothing at all at widths from 510 up. An accumulator replaced
+it. `docs/lld/guards.md` did not exist while F-X009's entry claimed it and two
+other LLD updates, so `/complete-feature` step 9 had been skipped on the
+sprint's largest story.
+
+### Pass 4, this entry
+
+Every number in the sprint ledgers, `CHANGELOG.md`, `README.md`,
+`docs/hld/DEVIATIONS.md` and `.claude/reviews/S03-sprint-review.md` was
+re-measured against the command that prints it. What was wrong:
+
+| Claim as written | What the command says |
+|------------------|-----------------------|
+| F-011's bound is proved by `round(u - u / w)` on every pixel | Falsified by pass 3 in the same commit that left this sentence standing. It is an accumulator |
+| F-011's structural limit is `255 / w`, so wider than 2550 cannot reach the bound | True and nearly useless. The smallest blind window measured on this corpus is 678 |
+| A 20-entry mutation catalogue, and `gate oracle` runs the twenty mutations | `grep -c '^    Mutation {' tools/oracle/src/mutations.rs` |
+| Thirteen entries carry an explicit `limit` | `grep -c 'limit=' scripts/guards/catalogue.py` |
+| F-006 found four numeric figures in the HLD that bear on cost | The same sentence then lists five |
+| F-005's `ocelli-core` crate total is 28 | 28 is `--lib`. `cargo test -p ocelli-core --all-targets -- --list` counts 38. The additions figure of 14 is unaffected |
+| 71 gating class-one views | Wrong, and deleted from the ledgers rather than corrected in them. `bin/ocelli.sh compare census` measures it and `tools/oracle/src/tolerance.rs` is where the measurement is recorded |
+| F-011 and F-X007 needed no CHANGELOG entry | Neither had one and neither carried the `**CHANGELOG.**` field that records a deliberate omission, so step 4 was silently skipped on two of seven stories. Both now have a bullet and both entries now carry the field |
+
+`BACKLOG.md`'s generated summary block was removed rather than corrected. It
+named a generator that has never existed, was asserted by nothing, and every
+headline number in it was wrong. Each figure it claimed now has a command
+beside it in that file.
+
+**Notes for future sessions.**
+- **A count and the mechanism it describes must be edited by the same hand or
+  neither.** Every defect above is a number left behind by a commit that
+  changed the thing the number counted. The cheapest defence is not a better
+  reviewer, it is to write the command instead of the number.
+- **`/complete-feature` step 4 can be skipped in silence.** Nothing gates a
+  missing CHANGELOG bullet, and the `**CHANGELOG.**` field that F-006 used to
+  record a deliberate omission is a convention rather than a check. Two of this
+  sprint's seven stories shipped without either.

@@ -30,13 +30,17 @@ quietly.
 **Everything that can be wrong is in the half that needs no adapter.** That is
 what makes the dangerous decision exhaustively testable in the CI floor, which
 deviation D-04 leaves without a GPU. `caps.rs` carries a table of signal
-combinations and a proptest over generated ones, and neither touches hardware.
+combinations, and `crates/ocelli-render/tests/classify_is_total.rs` carries a
+proptest over generated ones. Neither touches hardware.
 
 `probe.rs` has no test row of its own beyond the shape of its constants, and
 that is deliberate rather than an omission. `docs/spikes/A7-tier-c.md` section
-A7.2 is explicit that no software adapter is an oracle and that the browser
-layer is F-X002's acceptance question. What this story can prove without a GPU
-is the decision, and the decision is where the defect is.
+A7.2 is explicit that no software adapter is an oracle, and the one open
+acceptance question it hands F-X002 is whether lavapipe resolves as a fallback
+adapter under the pinned wgpu on `ubuntu-latest`, which is its layer 2. F-X002
+builds the browser layer too, headless Chrome on SwiftShader, which A7.2 runs
+nightly or by hand. What this story can prove without a GPU is the decision,
+and the decision is where the defect is.
 
 ## The three signals
 
@@ -72,10 +76,25 @@ historically read "Gallium 0.4 on AMD ...", so matching it would classify real
 hardware as software and drop a working GPU session to tier C.
 
 **The list is kept verbatim and the narrowing is in how it is used.** A string
-is consulted only where the benchmark did not decide, so a real GPU that
-measures as hardware is never dropped by this entry. Amending
-`docs/spikes/A7-tier-c.md` itself is a reviewed change to a resolved spike and
-is deliberately not part of F-004.
+is consulted only where the benchmark AND the adapter type both abstained, so
+a real GPU that measures `Hardware`, or that reports `DiscreteGpu` or
+`IntegratedGpu`, is never dropped by this entry.
+
+**The narrowing is partial, and the residue is a real population rather than a
+corner.** Where both abstain the string still decides, and both abstaining is
+what a Mesa GPU on wgpu's GLES backend presents. `FillRateBands::RECORDED` has
+no software ceiling and a hardware floor of 400 Mpps derived from one Apple
+figure, so a genuine but slower GPU measures `Unknown`, and that backend
+commonly reports `DeviceType::Other` or `VirtualGpu`, which is `Unknown` too.
+`"Gallium 0.4 on AMD RADV POLARIS10"` then resolves tier C, which renders
+nothing until F-X001 to F-X004.
+`a_real_mesa_gpu_that_both_hints_abstain_on_is_demoted` in `caps.rs` asserts
+that outcome in the direction that matters, beside the containment the
+combination rule does provide. The decision to keep A7's list verbatim was
+reviewed and stands, and what changed here is the claim made for it.
+
+Amending `docs/spikes/A7-tier-c.md` itself is a reviewed change to a resolved
+spike and is deliberately not part of F-004.
 
 ## The combination rule
 
@@ -92,9 +111,19 @@ is deliberately not part of F-004.
    wins, then the best B-candidate, with the adapter's own device type
    breaking ties within a class and an earlier adapter winning an exact tie.
 3. **No candidate resolves tier C**, `decided_by = NoAdapter`.
-4. **No device resolves tier C**, `decided_by = NoDevice`. There is no GPU
-   path to be had, and the two are recorded apart because they are different
-   diagnoses.
+4. **No device resolves tier C**, `decided_by = NoDevice`, recorded apart from
+   `NoAdapter` because they are different diagnoses. What it records is
+   narrower than "there is no GPU path to be had", and the narrow statement is
+   the true one: **the best candidate could not open a device, and no other
+   adapter was tried.** `probe.rs` calls `request_device` on the single adapter
+   `choose_candidate` returned and never tries the next, while native
+   `enumerate_adapters(Backends::all())` commonly returns several. So a host
+   with a broken Vulkan ICD beside a working GL driver picks the Vulkan
+   A-candidate, fails, and resolves tier C with a tier-B path present and
+   unattempted. Tier C renders nothing until F-X001 to F-X004, so the outcome
+   is "renders nothing" rather than "renders on tier B". Trying the next
+   adapter is a behaviour change with its own ranking and evidence questions
+   and belongs to a story rather than to this paragraph.
 5. **If the benchmark decided, it decides.** A7: "The micro-benchmark is the
    one to trust, and the strings are the hint. A renderer string is a claim. A
    measured fill rate is a fact." The other two verdicts are still computed
@@ -130,7 +159,7 @@ shading.
 |-------|------|-------|
 | Warm-up | 65,536 fragments | no, the figure is discarded |
 | Calibration | 65,536 fragments | yes |
-| Full | 16,777,216 fragments | yes, and only if the calibration came in under 2 ms |
+| Full | 16,777,216 fragments | yes, and only if the calibration did not EXCEED 2 ms |
 
 **The warm-up is not tidiness.** The first submission on a fresh device pays
 for lazy pipeline compilation, driver initialisation and command-buffer setup.
@@ -138,14 +167,25 @@ Measured on an Apple M5 Max, twenty release runs in fresh processes: 5.4 to
 9.3 ms for the first 65,536 fragments, median 6.1, and 0.32 to 0.70 ms, median
 0.36, for exactly the same work immediately afterwards. That is a factor of
 between 8.8 and 20.7, and the spread is this machine's noise rather than a
-bound. Without the warm-up, the calibration classifies a current Apple GPU at
-about 10.5 megapixels per second, which is below the software band, and the
-whole resolver would then have the deviation D-07 misdetection with its sign
-flipped.
+bound.
+
+**What the warm-up prevents is a lost measurement, not a flipped verdict.**
+There is no software band to fall into: `software_ceiling_pps` is `None`,
+`ci/tier-thresholds.json` records it as `null`, and `FillRate::verdict` returns
+`Unknown` rather than `Software` whenever the ceiling is absent, which the
+section below states as well. Without the discard, the first submission's 5.4
+to 9.3 ms for 65,536 fragments exceeds `CALIBRATION_BUDGET_NANOS` on every one
+of those twenty runs, so `probe.rs` returns the calibration figure and the full
+pass never runs. The recorded fill rate is then this machine's startup latency,
+the benchmark abstains, and the resolver falls through to the adapter type and
+the renderer string with a figure in the record that describes something else.
 
 The two-stage split after that exists so a genuine rasteriser does not hang
 startup. If the calibration exceeds its budget the full pass is never
-attempted and the calibration figure is itself the answer.
+attempted and the calibration figure is itself the answer. The comparison in
+`probe.rs`'s `measure` is
+`calibration.elapsed_nanos > CALIBRATION_BUDGET_NANOS`, so a calibration of
+exactly 2 ms still runs the full pass.
 
 ### Completion, which is the awkward part
 
@@ -243,8 +283,21 @@ ignore the override exists to prevent.
 | Requested | Constructible when | Otherwise |
 |-----------|--------------------|-----------|
 | `cpu` | always | n/a |
-| `b` | some adapter is a candidate | refused, recorded, the measured tier stands |
-| `a` | some adapter is an A-candidate | refused, recorded, the measured tier stands |
+| `b` | some adapter is a candidate **and a device was created** | refused, recorded, the measured tier stands |
+| `a` | some adapter is an A-candidate **and a device was created** | refused, recorded, the measured tier stands |
+
+**Both halves, and the second one is not decoration.** An adapter appearing in
+the enumeration says a tier-A adapter EXISTS. `signals.device_created` says one
+could actually be opened, and they are different facts. The measured path
+already refuses a GPU tier without a device, at `DecidedBy::NoDevice`, and
+until the S03 sprint review's first pass the override bypassed it:
+`OCELLI_TIER=a` on a host where `request_device` failed returned tier A with
+`Applied(A)`, against this step's own promise that an override is clamped to
+what is constructible. The two `TierRequest::Requested` guard arms in
+`classify` carry the corrected condition, `has_a_candidate &&
+signals.device_created` and `candidate_tier.is_some() &&
+signals.device_created`, and `tests/classify_is_total.rs` asserts it over every
+generated combination rather than only over the override path.
 
 **Forcing tier B onto a rasteriser the evidence called software is
 deliberately allowed.** That is how the misdetection gets diagnosed on the
@@ -288,7 +341,8 @@ and reads no environment of its own.
 ## Filling `Caps`
 
 Section 22's four fields, from the chosen adapter and **not** from section 7's
-tier figures.
+tier figures. The fourth field is `tier` itself, which the combination rule
+above produces, so the table below has three rows rather than four.
 
 | Field | Tier A or B | Tier C |
 |-------|-------------|--------|
@@ -314,9 +368,25 @@ inside `ocelli-render`, which is the only crate permitted to make one, and
 [gpu-ownership.md](gpu-ownership.md).
 
 `request_device` is asked for `Features::empty()` and the **adapter's own**
-limits, never `Limits::default()`. Requesting limits an adapter does not
-provide panics, and a downlevel GL adapter does not meet the WebGPU defaults,
-which is the whole reason tier B exists.
+limits, never `Limits::default()`. A downlevel GL adapter does not meet the
+WebGPU defaults, which is the whole reason tier B exists.
+
+**The pinned wgpu documents two different answers to asking for more than the
+adapter has, and this code depends on the one the implementation gives.** The
+doc comment on `Adapter::request_device`, in wgpu 30.0.1's own source at
+`src/api/adapter.rs:49` to `:56`, lists "Limits requested exceed the values
+provided by the adapter" under `# Panics`. The same function's signature
+returns `Result<(Device, Queue), RequestDeviceError>`, and the wgpu-core
+backend converts the core error into `Err` rather than panicking, at
+`src/backend/wgpu_core.rs:943` to `:948`, over the
+`RequestDeviceError::LimitsExceeded` raised in
+`wgpu-core-30.0.1/src/instance.rs:941`. The browser backend maps a rejected
+promise the same way. So the `let Ok((device, queue)) =
+adapter.request_device(...) else` arm in `probe.rs`'s `measure_chosen` is
+reachable and the
+`NoDevice` path is not dead code, which it would have to be if the flat "it
+panics" this paragraph used to carry were the whole story. Asking for the
+adapter's own limits means neither answer is exercised here.
 
 ## SIMD, and the threads field that deliberately does not exist
 
@@ -375,13 +445,15 @@ the render path is wired in from S11. That crate had an empty
 
 - **It does not wire tier resolution into `ocelli-wasm`.** That module has no
   dependency on `ocelli-render` and so never reaches wgpu. The boundary is
-  E16.2 in S16, and no browser path of the resolver can run before F-039 in S11.
+  E16.2 in S16, and no browser path of the resolver can run before F-037 in S11.
   Wiring it now would add an entry point nothing calls and re-baseline the
   wasm size budget for a feature with no user. F-004 touches
   `ci/wasm-size-budget.json` not at all.
 - **It does not create a long-lived device.** The probe device is transient
   and `GpuContext` is still built by whoever owns one. Device creation and
-  loss recovery are F-039.
+  loss recovery are F-037, which is E6.1 in S11, "ocelli-render: device init,
+  capability tiering, device-lost recovery". F-039 is E6.3 in S13 and is
+  OffscreenCanvas.
 - **It does not render on tier C.** This story resolves the tier. Rendering on
   it is F-X001 to F-X004.
 - **It does not amend `docs/spikes/A7-tier-c.md`.** The `Gallium` narrowing is
@@ -398,5 +470,6 @@ For F-X009, which gives every guard a standing test.
 | `classify_is_total_and_never_invents_a_tier` | `crates/ocelli-render/tests/classify_is_total.rs` | Tier A without an A-candidate, tier B without any candidate, tier C with a non-zero `Caps`, a panic on any signal combination |
 | `each_a7_software_renderer_string_resolves_cpu` | `caps.rs` | An A7 renderer string being dropped from the list. The strings are typed out whole rather than looped over the constant, so emptying the list goes red instead of passing vacuously |
 | `the_a7_list_is_seven_lowercase_entries` | `caps.rs` | An entry added in mixed case, which the lowercase match would never find |
+| `a_real_mesa_gpu_that_both_hints_abstain_on_is_demoted` | `caps.rs` | The `gallium` narrowing being restated as complete. It asserts the demotion that survives it as well as the containment it provides |
 | `rejects the same module with one byte of its SIMD opcode broken` | `packages/core/src/capabilities.test.ts` | The committed probe module being replaced by a valid non-SIMD one that validates for the wrong reason |
 | `the_override_variable_is_named_once` | `crates/ocelli-native/src/lib.rs` | `OCELLI_TIER` being spelled two ways |
