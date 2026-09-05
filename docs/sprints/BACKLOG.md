@@ -84,6 +84,12 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-014 | E2.6 | S05 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | F-012 | pending |
 | F-015 | E2.7 | S04 | Stable render-hash emission from the comparator | Test | 2w | F-011 | pending |
 | F-X001 | X1.1 | S04 | Tier C, software-adapter detection, and the feature-availability contract | Rust | 4w | F-004 | pending |
+| F-X006 | Y1.1 | S03 | Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders | Test | 3w | F-009 | pending |
+| F-X007 | Y1.2 | S03 | Oracle volume and MPR reference renders, so the spacing rows are asked something | Test | 3w | F-010 | pending |
+| F-X008 | Y1.3 | S03 | One parity-target version string, and a licence in the published wasm package | Build | 1w | F-010 | pending |
+| F-X009 | Y1.4 | S03 | A standing test for every repository guard, not a mutation run once at authoring time | Build | 3w | F-010 | pending |
+| F-X010 | Y1.5 | S03 | CI floor equivalence, and the identical --sprint and --all gate profiles | Build | 2w | F-010 | pending |
+| F-X011 | Y1.6 | S03 | Cross-machine reference determinism, and what the oracle claims about it | Test | 2w | F-010 | pending |
 
 ### M2, DICOM ingest and the pixel pipeline
 

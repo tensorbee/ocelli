@@ -59,7 +59,7 @@ Part III work appears in a parity plan. This table is generated from
 
 The workspace builds to wasm and to native, and the oracle renders the corpus through cornerstone3D before any port code exists.
 
-_S01 to S05, 16 stories, 40 engineer-weeks._
+_S01 to S05, 22 stories, 54 engineer-weeks._
 
 #### Sprint S01
 
@@ -84,7 +84,7 @@ _S01 to S05, 16 stories, 40 engineer-weeks._
 
 #### Sprint S03
 
-**Goal**: Runtime capability detection & tiering (WebGPU / WebGL2 / SIMD / threads), Error model, panic-to-JS mapping, structured logging, Benchmark harness: decode, first frame, interaction latency, Pixel-diff comparator with per-modality tolerance policy.
+**Goal**: Runtime capability detection & tiering (WebGPU / WebGL2 / SIMD / threads), Error model, panic-to-JS mapping, structured logging, Benchmark harness: decode, first frame, interaction latency, Pixel-diff comparator with per-modality tolerance policy, Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders, Oracle volume and MPR reference renders, so the spacing rows are asked something, One parity-target version string, and a licence in the published wasm package, A standing test for every repository guard, not a mutation run once at authoring time, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
@@ -92,6 +92,12 @@ _S01 to S05, 16 stories, 40 engineer-weeks._
 | F-005 | E1.5 | Error model, panic-to-JS mapping, structured logging | Build | 2w |
 | F-006 | E1.6 | Benchmark harness: decode, first frame, interaction latency | Build | 2w |
 | F-011 | E2.3 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w |
+| F-X006 | Y1.1 | Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders | Test | 3w |
+| F-X007 | Y1.2 | Oracle volume and MPR reference renders, so the spacing rows are asked something | Test | 3w |
+| F-X008 | Y1.3 | One parity-target version string, and a licence in the published wasm package | Build | 1w |
+| F-X009 | Y1.4 | A standing test for every repository guard, not a mutation run once at authoring time | Build | 3w |
+| F-X010 | Y1.5 | CI floor equivalence, and the identical --sprint and --all gate profiles | Build | 2w |
+| F-X011 | Y1.6 | Cross-machine reference determinism, and what the oracle claims about it | Test | 2w |
 
 #### Sprint S04
 
@@ -828,3 +834,4 @@ _S66 to S72, 7 stories, 74 engineer-weeks._
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
 | F-149 | E35.7 | Multi-server data sources within one study | Rust | 8w |
+
