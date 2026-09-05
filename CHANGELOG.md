@@ -21,8 +21,9 @@ Repository bootstrap. Nothing is published.
   transfer-syntax conformance checks, metadata auditing and digest verification.
 - The authoritative Markdown specification under `docs/hld/`, sanitized during
   bootstrap so no external source-document bundle is needed by the workflow.
-- `docs/sprints/`, with 190 F-IDs imported from the backlog spreadsheet and
-  157 of them allocated across 72 sprints and 18 milestones.
+- `docs/sprints/`, with 190 F-IDs imported from the backlog spreadsheet, 12
+  added since as `F-X` stories, and 169 of the 202 allocated across 72 sprints
+  and 18 milestones.
 - The gate set behind `bin/ocelli.sh gate`, and a CI floor that runs every one
   of them that needs no GPU and no corpus. `bin/ocelli.sh gate --list` is the
   list, and this line deliberately does not repeat the count, because a number
