@@ -1022,3 +1022,82 @@ branches the reference's own volume property derivation.
   views, and `lowInformation` rows carry `kind` so it can.
 - **F-011 gets no real CT volume reference**, because the only real CT series in
   the corpus is the one that is not a volume.
+
+## F-011, Pixel-diff comparator with per-modality tolerance policy, completed 2026-09-05
+
+**What was built.** The oracle's judging half, in Rust in the existing
+`ocelli-oracle` crate. It reads two directories of reference-half output and
+returns one record per view against HLD 25.1, resolving each view's tolerance
+class from the manifest's category tokens rather than from the modality, because
+modality does not resolve: four corpus rows are `OT` and one is `DX`, neither
+named in 25.1, while every row carries a usable token. `bin/ocelli.sh gate
+oracle` is now `"$0" oracle && "$0" compare`.
+
+**The finding that shaped the story, and the bullet it produced.**
+`LINEAR(x) - LINEAR_EXACT(x) = 255 * (x + 160) / 159600` at the soft-tissue
+window, which peaks at 0.6375 of a display code and therefore can never exceed
+one code after quantisation to the RGBA8 frame the oracle compares. So 25.1's
+maximum-difference rule **passes a whole-frame swap between the two functions
+everywhere**, which is the project's own headline defect and the entire reason
+the oracle exists. Derived independently twice, by the implementing agent and by
+the integrator, in exact rational arithmetic. The operator's answer was to add a
+signed-mean bias bound to 25.1, within 0.1 of a display code, evaluated only
+where inputs, parameters and geometry already agree.
+
+**That bound is proved to be what catches it.** At integration the constant was
+widened from 0.1 to 0.7 and the catalogue entry carrying the swap signature went
+`NOT DETECTED`, with the view becoming `pass` and the run exiting 1. Restored,
+twenty of twenty are detected and the run exits 0. The analytic argument and the
+mechanism agree.
+
+**HLD sections implemented.** Section 25 and 25.1, including the bias bullet
+this sprint added. Section 11's requirement that metadata is diffed alongside
+pixels. Section 18.2's formulas as fixture sources.
+**Deviations.** D-13 and D-16 applied, both added earlier in this sprint. D-04
+and D-11 cited.
+**Crates / packages modified.** `tools/oracle/src/` and `tests/`,
+`tools/oracle/Cargo.toml`, the root `Cargo.toml`, `bin/ocelli.sh`,
+`scripts/staged_content_check.py`, `.gitignore`.
+**Tests added.** 65 in `ocelli-oracle`, being 42 unit, 10 tolerance fixture, 5
+VOI divergence fixture, 6 geometry fixture and 2 property. Plus a 20-entry
+mutation catalogue replayed on every oracle gate.
+**Fixture provenance.** Hand-computed from PS3.3 and from HLD 18.2's formulas.
+**Deviation D-13 is honoured**: no fixture asserts `LINEAR_EXACT(-160) = 1.594`,
+the value is computed as `0.000` from the formula, and the other three rows of
+the 18.3 table are used unchanged.
+**Verification.** `gate --floor` ALL GREEN over 24, `gate corpus` pass, `gate
+oracle` pass including render, compare and the twenty mutations.
+**Corpus.** pass, 91 rows.
+**Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. The comparator
+is a host-side tool over two directories and resolves no tier. The candidate
+side being a directory contract rather than a call into a renderer is what makes
+deviation D-07's tier A against tier C bound the same binary with two candidate
+directories and no reference, at no additional cost.
+**LLD updated.** `docs/lld/comparator.md` created. `docs/lld/oracle.md` and
+`docs/lld/README.md` updated.
+**Deviations from the design plan.** Eleven, all reported rather than absorbed,
+and most of them consequences of F-X007's shape landing after the plan was
+written. A volume-reformat sidecar carries no `row` block at all, so class is
+resolved through the members' own stack sidecars. A reformat has no derivable
+image rectangle, so it uses the full frame and its bias bound is therefore
+slightly looser, which is documented rather than hidden. `sha2` was needed for
+the input contract's third hash and the plan's write set named only `serde`.
+
+**Notes for future sessions.**
+- **The run-level verdict today is 70 pass, 0 fail, 28 unmeasured over 98
+  views**, and the 28 is not a shortfall to be tidied away. Twenty-two are
+  `weak`, because the frames are over 95 per cent clipped and could not show a
+  divergence. Five are class two, where 25.1 states no threshold, which is
+  D-16. Two are decimated. One row carries two qualifiers and is counted once.
+- **`--no-fail-fast` was required to see the mutation reds.** Without it cargo
+  stops at the first failing test binary and the fixture reds hide behind a
+  library red, which made two of six tolerance mutations look under-covered on
+  the first pass. Worth knowing before the next mutation sweep.
+- **A mutation aimed at a colour view was measuring a frame it could not
+  damage.** The first class-two view in identifier order is the 8-bit greyscale
+  ultrasound, so a red-and-blue channel swap was a no-op there. Caught by
+  running it rather than by reading it, split into two entries, and every record
+  now publishes a `monochromeFrame` flag so the gap is visible rather than
+  inferred.
+- **Two refusals are named as honest gaps that cannot be exercised yet.** One
+  waits on a SIGMOID corpus row, which is F-X012.

@@ -78,7 +78,7 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-008 | E1.8 | S02 | ocelli-compute crate skeleton and GPU device-sharing contract | Build | 2w | F-001 | done |
 | F-009 | E2.1 | S01 | Golden corpus ingest and de-identified fixture store | Test | 3w | - | done |
 | F-010 | E2.2 | S02 | Headless cornerstone3D reference renderer | Test | 4w | F-009 | done |
-| F-011 | E2.3 | S03 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w | F-010 | pending |
+| F-011 | E2.3 | S03 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w | F-010 | done |
 | F-012 | E2.4 | S04 | CI gate: every PR renders the full corpus | Test | 3w | F-011 | pending |
 | F-013 | E2.5 | S04 | Metadata diff harness (LUT values, geometry, spacing) | Test | 2w | F-011 | pending |
 | F-014 | E2.6 | S05 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | F-012 | pending |
