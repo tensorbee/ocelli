@@ -165,7 +165,7 @@
    "layer": "Build",
    "weeks": 2,
    "depends_eids": [],
-   "notes": "Core crates must not depend on wasm-bindgen \u2014 see HLD \u00a74",
+   "notes": "Core crates must not depend on wasm-bindgen — see HLD §4",
    "milestone": "M1",
    "sprint": "S01",
    "depends_fids": []
@@ -634,7 +634,7 @@
    "depends_eids": [
     "E4.1"
    ],
-   "notes": "openjp2 is a machine-translated port \u2014 validate hard",
+   "notes": "openjp2 is a machine-translated port — validate hard",
    "milestone": "M2",
    "sprint": "S08",
    "depends_fids": [
@@ -653,7 +653,7 @@
    "depends_eids": [
     "E4.4"
    ],
-   "notes": "P0 KILL CRITERION \u2014 unverified in Rust today",
+   "notes": "P0 KILL CRITERION — unverified in Rust today",
    "milestone": "M2",
    "sprint": "S09",
    "depends_fids": [
@@ -672,7 +672,7 @@
    "depends_eids": [
     "E4.1"
    ],
-   "notes": "P0 KILL CRITERION \u2014 no credible pure-Rust path",
+   "notes": "P0 KILL CRITERION — no credible pure-Rust path",
    "milestone": "M2",
    "sprint": "S09",
    "depends_fids": [
@@ -805,7 +805,7 @@
    "depends_eids": [
     "E5.3"
    ],
-   "notes": "Uint8Array views detach on memory growth \u2014 see HLD \u00a75",
+   "notes": "Uint8Array views detach on memory growth — see HLD §5",
    "milestone": "M3",
    "sprint": "S13",
    "depends_fids": [
@@ -881,7 +881,7 @@
    "depends_eids": [
     "E6.1"
    ],
-   "notes": "One GPUDevice serves N viewports \u2014 no context pool",
+   "notes": "One GPUDevice serves N viewports — no context pool",
    "milestone": "M3",
    "sprint": "S13",
    "depends_fids": [
@@ -900,7 +900,7 @@
    "depends_eids": [
     "E6.1"
    ],
-   "notes": "The architectural win \u2014 pixels never become JS objects",
+   "notes": "The architectural win — pixels never become JS objects",
    "milestone": "M3",
    "sprint": "S13",
    "depends_fids": [
@@ -1432,7 +1432,7 @@
    "depends_eids": [
     "E16.1"
    ],
-   "notes": "TS \u2014 this is interaction state, not pixels",
+   "notes": "TS — this is interaction state, not pixels",
    "milestone": "M7",
    "sprint": "S25",
    "depends_fids": [
@@ -1451,7 +1451,7 @@
    "depends_eids": [
     "E11.1"
    ],
-   "notes": "TS \u2014 531 listener sites in cornerstone live here",
+   "notes": "TS — 531 listener sites in cornerstone live here",
    "milestone": "M7",
    "sprint": "S26",
    "depends_fids": [
@@ -1470,7 +1470,7 @@
    "depends_eids": [
     "E7.4"
    ],
-   "notes": "Rust \u2014 the part worth moving",
+   "notes": "Rust — the part worth moving",
    "milestone": "M7",
    "sprint": "S25",
    "depends_fids": [
@@ -1489,7 +1489,7 @@
    "depends_eids": [
     "E11.2"
    ],
-   "notes": "TS \u2014 DOM-native, stays out of wasm",
+   "notes": "TS — DOM-native, stays out of wasm",
    "milestone": "M7",
    "sprint": "S27",
    "depends_fids": [
@@ -1983,7 +1983,7 @@
    "depends_eids": [
     "E15.2"
    ],
-   "notes": "Keep the dcmjs bridge \u2014 rewriting buys nothing",
+   "notes": "Keep the dcmjs bridge — rewriting buys nothing",
    "milestone": "M11",
    "sprint": "S36",
    "depends_fids": [
@@ -2038,7 +2038,7 @@
    "layer": "TS",
    "weeks": 4,
    "depends_eids": [],
-   "notes": "New API by decision \u2014 see HLD \u00a72",
+   "notes": "New API by decision — see HLD §2",
    "milestone": "M4",
    "sprint": "S15",
    "depends_fids": []
@@ -2226,7 +2226,7 @@
    "depends_eids": [
     "E6.6"
    ],
-   "notes": "Naga dominates the profile \u2014 biggest single lever",
+   "notes": "Naga dominates the profile — biggest single lever",
    "milestone": "M13",
    "sprint": "S40",
    "depends_fids": [
@@ -3991,6 +3991,27 @@
    "added": true,
    "depends_fids": [
     "F-010"
+   ]
+  },
+  {
+   "fid": "F-X013",
+   "eid": "Y1.8",
+   "phase": "P1",
+   "epic": "EY Sprint follow-ups",
+   "epic_key": "EY",
+   "story": "Price the HTJ2K decoder route after gate A1 failed",
+   "layer": "Test",
+   "weeks": 3,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-X006"
+   ],
+   "notes": "Appendix A gate A1 is answered Fail by F-X006 and its consequence is in force, so C codec builds are maintained regardless and one of the four arguments for the rewrite weakens. Measured: openjp2 0.6.1 does not link for wasm32-unknown-unknown, because src/malloc.rs declares malloc, calloc, realloc and free inside extern C with no cfg guard and the lib target declares a cdylib, so cargo links one even as a dependency and the link reports 432 undefined symbols. Forced to link with an allocator shim it then refuses every codestream by trapping, and two JPEG 2000 Part 1 rows decoded through the same build as a control show the failure is not confined to the HTJ2K path. A separate latent defect was found in the same crate, a null pointer reaching its deallocator, which is undefined behaviour on every target and not only on wasm. F-X006 priced three routes and chose none, because the design round said the fallback is priced in its own story. F3, the pure-Rust openjph-core 0.1.0 under BSD-2-Clause, is the one to measure FIRST, because it is the only route that is one implementation on every target, which is the same property that decided A2. Its risk is stated: first and only publish 2026-03-20 and crates.io reports no repository URL, so docs/SOURCE-POLICY.md question 1 cannot be answered from a repository. F1 is an upstream fix to openjp2, small but on a third-party release cycle. F2 is the JS-side codec-openjph the reference itself uses, which leaves the native desktop and server targets with no HTJ2K decoder at all and so has the hole D2's payoff exists to avoid. Until this answers, HTJ2K reports unavailable, which is section 31's rule and deviation D-07's rule generalised. A deviation against HLD section 15.2's sentence that openjp2 is what you select on wasm is owed by whichever story activates a codec feature.",
+   "milestone": "M1",
+   "sprint": "S04",
+   "added": true,
+   "depends_fids": [
+    "F-X006"
    ]
   }
  ]

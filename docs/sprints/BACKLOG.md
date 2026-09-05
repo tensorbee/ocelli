@@ -91,6 +91,7 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-X010 | Y1.5 | S04 | CI floor equivalence, and the identical --sprint and --all gate profiles | Build | 2w | F-010 | pending |
 | F-X011 | Y1.6 | S04 | Cross-machine reference determinism, and what the oracle claims about it | Test | 2w | F-010 | pending |
 | F-X012 | Y1.7 | S04 | The reference's own SIGMOID width divergence, and what D14's bound says about it | Test | 2w | F-010 | pending |
+| F-X013 | Y1.8 | S04 | Price the HTJ2K decoder route after gate A1 failed | Test | 3w | F-X006 | pending |
 
 ### M2, DICOM ingest and the pixel pipeline
 
