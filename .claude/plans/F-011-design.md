@@ -1341,6 +1341,18 @@ rounding convention is part of what the parameter rung compares. If a real
 divergence is later measured that this bound misclassifies, widening it is a
 reviewed change and not a fix.
 
+**What cannot be validated this sprint, and `docs/lld/comparator.md` must say
+so.** The bound is proven to DETECT by the declared mutation catalogue. Its
+FALSE POSITIVE rate is unmeasured and unmeasurable here, because measuring it
+needs two independent renderers and only one exists. An identity comparison of
+the reference against itself returns exactly zero bias and therefore proves
+nothing about the bound. The specific untested risk is a rounding-convention
+mismatch on pixels whose display value lands exactly on a half, which is rare
+for continuous output and not rare for a synthetic ramp, and fifteen of the
+sixteen saturated `syntax/` rows are ramps. Those rows do not gate, for other
+reasons. Do not write prose implying the number is calibrated against measured
+divergence, because it is not.
+
 **3. OPERATOR DECISION. Class two returns `unmeasured` and publishes
 statistics.** Deviation **D-16** is applied. The comparator measures per-channel
 difference statistics and never returns `pass` for a class-two view, because a
