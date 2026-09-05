@@ -2,10 +2,16 @@
 
 **Scope**: the whole S03 diff on `sprint/s03`, seven stories, reviewed by the
 integrator rather than by any story's author.
-**Result after pass 3 remediation**: `bin/ocelli.sh gate --sprint` ALL GREEN
-over 28 gates, and the comparator's mutation catalogue detects every entry in
-`tools/oracle/src/mutations.rs`, which `grep -c '^    Mutation {'` on that file
-counts.
+**Result**: each remediation commit carries its own `Ocelli-Verify` trailer,
+written by the pre-commit hook from the verify ledger and naming the profile,
+the gate list, the corpus result and the tree it certifies. `git log
+--format='%h %(trailers:key=Ocelli-Verify)' 36adc98..HEAD` prints them, and
+`git rev-parse <commit>^{tree}` checks the binding. Every S03 pass ended
+`profile=sprint corpus=pass` over 28 gates. **The number of gates is the only
+figure written here**, because `bin/ocelli.sh gate --list` prints it and the
+trailer records what actually ran. The comparator's mutation catalogue detects
+every entry in `tools/oracle/src/mutations.rs`, which `grep -c '^    Mutation
+{'` on that file counts.
 
 **A fourth pass then measured every number in this record and in the sprint
 ledgers, and this file is corrected by it.** It found the wrong commit count
@@ -32,14 +38,15 @@ in `git log`, and this is the command that lists exactly those commits:
 git log --oneline --grep='^S03, sprint review pass' 36adc98..HEAD
 ```
 
-**Three passes did not leave three commits, and this record said they did until
-the fourth pass ran that command.** It returns five. Four carry `remediation` in
-the subject, `a651821`, `e962144`, `fe18a91` and `4139a54`, and the fifth,
-`f04e07d`, is pass 2 landing its own fix. Pass 1 remediated in two commits, the
-three blocking defects first and then the prose and claim sweep. A record whose
-stated purpose is to point at the evidence pointed at the wrong number of
-commits, which is the defect class this whole file catalogues: a count written
-once and never re-run.
+**The passes do not map one to one onto commits, and this record said they did
+until the fourth pass ran that command.** Pass 1 remediated in two commits, the
+three blocking defects first and then the prose and claim sweep, and pass 2
+landed its own fix in a commit of its own before its remediation. **The number
+is deliberately not written here.** The fourth pass replaced "three" with
+"five", and the fifth pass ran the same command and got six, because the
+commit that wrote "five" carries the same subject and counted itself out. A
+count written once and never re-run is the defect class this whole file
+catalogues, and it is not made safe by being recounted once.
 
 ## The finding that matters more than the count
 
@@ -52,7 +59,10 @@ pixel clipped to black or white on both sides differs by nothing whatever the
 arithmetic underneath says, so the rectangle divides the divergence the
 unclipped pixels do show by a denominator full of pixels that structurally
 cannot show one. Measured over every gating class-one view, the largest
-observable bias was 0.0825 against a bound of 0.1. It caught nothing.
+observable bias fell short of the 0.1 bound, so it caught nothing.
+`./target/release/ocelli-compare census` prints the figure, which was itself
+superseded once when the mutation it was measured under turned out to be
+wrong.
 
 **No view count is transcribed into this record.** `bin/ocelli.sh gate oracle`
 summarises the run as `<n> views: <n> pass, <n> fail, <n> unmeasured, <n>
@@ -75,8 +85,16 @@ divergence". **Pass 3 measured that mutation and it was not.** It applied
 | 678 | none |
 | 4096 | none |
 
-At any width from 510 up it moved no pixel and the harness then refused, saying
-the view could not show the divergence. Four tracked files repeated that claim.
+That table is arithmetic and not a measurement, so it is written out rather
+than deferred to a command: it is the count of `u` in `0..=255` for which
+`round(u - u/w) != u`. **Rerun it with Rust's rounding and not Python's.**
+Rust's `f64::round` goes half away from zero and Python's `round` goes half to
+even, and they disagree at exactly one code here: at `w = 510` and `u = 255`
+the value is `254.5`, which Rust returns to 255 and leaves unchanged while
+Python returns 254 and reports a change. Python alone would put a 1 in the
+second row and make the whole finding look weaker than it is. At any width from
+510 up the mutation moved no pixel and the harness then refused, saying the
+view could not show the divergence. Four tracked files repeated that claim.
 
 The real divergence is proportional and PRE-quantisation. LINEAR_EXACT sits
 `u / w` below LINEAR before the renderer rounds, so a pixel drops one code with
@@ -97,7 +115,8 @@ and a mutation is an input to a test: it derives from the specification too.
 | 1 | 23 defects and 32 smells, three of them blocking. The rest were records asserting things the tree did not do, swept in one commit | remediated |
 | 2 | 20 defects, 19 smells. The bias bound detected nothing. The census counted a refusal as watched when its entry named a test that never opened the file. In-plane spacing was compared by nothing. Two DICOM skills reproduced HLD 18.3's wrong `LINEAR_EXACT(-160)` | remediated |
 | 3 | 10 defects, 6 smells. Pass 2's mutation was a caricature. The bound's blind spot starts at width 678 and not 2550. Three LLD updates were claimed and none existed | remediated |
-| 4 | 34 defects, 27 smells, over four independent reviewers on disjoint areas. Pass 3's replacement mutation was still not the divergence. A group `#![allow]` switched off four of HLD 27.1's five denied lints with both gates green. The `covered_by` directory route was satisfied by the catalogue itself. This record stated a caught defect that never existed | remediated |
+| 4 | Four independent reviewers on disjoint areas, whose tallies are recorded in the same untracked notebook as passes 1 to 3 and are not reproducible from this tree. Pass 3's replacement mutation was still not the divergence. A group `#![allow]` switched off four of HLD 27.1's five denied lints with both gates green. The `covered_by` directory route was satisfied by the catalogue itself. This record stated a caught defect that never existed | remediated |
+| 5 | Four reviewers again, on the same areas, with the pass-4 remediation as the primary target. A floor gate could be deleted from CI while the check said all 25 ran. `#![allow(clippy :: pedantic)]` with spaces defeated the fix for `#![allow(clippy::pedantic)]`. Four of the five refusals pass 4 added to the census were watched by nothing. The mutation's residue invariant was false below `w = 255` | remediated |
 
 ### Pass 1's three blocking defects, which this record used to omit
 
@@ -217,10 +236,14 @@ every time.** Pass 3's accumulator drops clipped-WHITE pixels. The lower clamps
 of LINEAR and LINEAR_EXACT coincide exactly, which is why excluding black is
 right, and **the upper clamps do not**: LINEAR clamps at `x > c + w/2 - 1` and
 LINEAR_EXACT at `x > c + w/2`, so a pixel the reference rendered 255 cannot
-move at all once `w >= 510`. Measured on the target, 5801 of 26084 drops were
-on reference value 255, and on white-heavy rows the mutation overstated the
-divergence by 2.7 times. Each time, the mutation was checked for being
-DETECTED and never for being what it claimed to be.
+move at all once `w >= 510`. A fifth of the mutation's drops were landing on
+pixels the divergence leaves alone, and the overstatement was worst on
+white-heavy rows. **The figures are not transcribed here**, which is this
+file's own rule and one it broke for two paragraphs:
+`./target/release/ocelli-compare census` prints the per-view bias and
+`tools/oracle/src/mutations.rs` carries the derivation at the site. Each time,
+the mutation was checked for being DETECTED and never for being what it
+claimed to be.
 
 **A one-line attribute switched off the defect class this project exists to
 prevent.** `scripts/lint_policy_check.py` matched an `#![allow]` by lint name,
@@ -255,6 +278,53 @@ read, refused the tree with all three drift classes named before a human looked
 at it. That is the first time in this sprint a check caught a real edit rather
 than a mutation written to prove it.
 
+## What pass 5 found, and the shape it kept finding
+
+Pass 5 aimed four reviewers at the pass-4 remediation, on the argument that the
+newest code is the least reviewed code. It found twenty-one defects, and nearly
+all of them are one shape: **the fix was written against the route somebody
+demonstrated rather than against the rule.**
+
+- Pass 4 refused `#![allow(clippy::pedantic)]`. `#![expect(...)]` silenced the
+  same lints and was found before the commit landed. Then pass 5 found
+  `#![allow(clippy :: pedantic)]`, which Rust tokenises identically and the
+  guard compared as a string, and `#[allow(...)] pub mod x;`, which governs a
+  whole module tree while the guard permitted it as "the visible local choice".
+  And the walk read `crates/` while `Cargo.toml` declares fourteen members,
+  the fourteenth being `tools/oracle` with thirteen unscanned source files.
+- Pass 4 required every command in a gate's arm to be run by CI. The arm
+  splitter ended an arm at the next case label rather than at its `;;`, so it
+  read commands out of the comment block introducing the next arm.
+  `arms['panic']` came out as `npm run test`, a command that appears nowhere in
+  that arm, and the `panic` gate, which is the wasm panic-hook proof of HLD
+  section 23 and the one property no native test can observe, could be deleted
+  from CI while the check printed "all 25 floor gate(s) are invoked by CI".
+- Pass 4 added twelve probes and changed `scripts/guards/census.py` by 224
+  lines **and gave that file no probes at all**. Four of its five new
+  refusals, including the ratchet whose stated purpose is that the widening
+  ratchet cannot be disarmed in one green commit, could each be deleted with
+  the census, the probe profile and the unit suite all green. They were
+  invisible because the entry claims its file with `"*"`, so a new refusal in
+  an already-catalogued file lands in the covered bucket. The census's own
+  rule, that a guard arrives with its test, did not apply to the census.
+- The mutation's residue invariant was false. `if accumulator >= w` rather than
+  `while` means `acc < w` holds only where every participating value is below
+  `w`, so below a window of 255 the mutation applied materially less than the
+  divergence it claims to be. The corpus's narrowest window is 256.
+
+**And the region decision that pass 2 called the sprint's central fix had no
+test outside the corpus run.** Substituting the image rectangle for the
+informative region left `cargo test` fully green and was caught only by a
+mutation replay needing the rendered corpus and a GPU.
+
+Three findings were the record's own. The commit count this file had already
+corrected once was wrong again, because the commit that corrected it carries
+the same subject and counted itself out, so the number is now not written at
+all. The escape count in F-X017's title moved from four to five to at least
+eight across two passes, so the title carries no count either. And a CHANGELOG
+bullet claimed twelve reformats where nine are written, reintroducing a count
+pass 1 had already fixed in two other files.
+
 ## What is still open, and it is declared rather than hidden
 
 - **G-02 and G-04**, the two remaining declared guard holes. F-X014.
@@ -262,7 +332,8 @@ than a mutation written to prove it.
   host with a broken driver beside a working one resolves a tier that
   renders nothing. F-X016, and the cost is the evidence design rather
   than the loop.
-- **Four measured escapes from the wasm linear memory view ban.** The
+- **Measured escapes from the wasm linear memory view ban**, and the count is
+  deliberately not written because it moved three times in two passes. The
   function-parameter route is HLD 17.2's named failure with one
   indirection and a green lint. The cheap fourth selector costs one
   real site and the only mechanism for sparing it switches every

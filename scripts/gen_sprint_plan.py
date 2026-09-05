@@ -170,12 +170,20 @@ HEAD = re.compile(r"^####\s+Sprint\s+(S\d+)\s*$")
 EST_CELL = 4
 
 
-def parse_plan(text: str) -> dict[str, tuple[str, str]]:
-    """F-ID -> (sprint, estimate), read from the '#### Sprint SNN' sections.
+def parse_plan(text: str) -> dict[str, list[tuple[str, str]]]:
+    """F-ID -> EVERY (sprint, estimate) it appears with, in document order.
 
     The sprint comes from the heading and the estimate from the row's fifth
     cell. A row too short to have one yields the empty string, which `check`
     reports rather than skipping.
+
+    **Every occurrence and not the last one.** The docstring at the top of this
+    file says every planned F-ID appears in "exactly one sprint table" and this
+    function used to let the last occurrence win, so the rule was stated and
+    not checked. Measured in the S03 review's fifth pass: copying S72's F-149
+    row into S01's table left `--check` at exit 0, because the later row
+    overwrote the earlier one and agreed with the allocation. A story planned
+    into two sprints is a planning error that reads as a plan.
 
     **The story text is deliberately not returned.** After the bootstrap
     render this file is hand-curated prose and the wording is a human's
@@ -184,7 +192,7 @@ def parse_plan(text: str) -> dict[str, tuple[str, str]]:
     compared the three. See `check` for what that review did and did not
     find, because the first account of it here claimed more than was true.
     """
-    found: dict[str, tuple[str, str]] = {}
+    found: dict[str, list[tuple[str, str]]] = {}
     current = ""
     for line in text.splitlines():
         head = HEAD.match(line)
@@ -195,7 +203,7 @@ def parse_plan(text: str) -> dict[str, tuple[str, str]]:
         if row and current:
             cells = [c.strip() for c in row.group(2).split("|")]
             est = cells[EST_CELL - 1] if len(cells) >= EST_CELL else ""
-            found[row.group(1)] = (current, est)
+            found.setdefault(row.group(1), []).append((current, est))
     return found
 
 
@@ -233,8 +241,15 @@ def rendered_goals(data: dict) -> dict[str, str]:
     }
 
 
-def parse_goals(text: str) -> dict[str, str]:
-    found: dict[str, str] = {}
+def parse_goals(text: str) -> dict[str, list[str]]:
+    """Sprint -> EVERY `**Goal**:` line under its heading, in document order.
+
+    The first one only was kept until the S03 review's fifth pass, so a second
+    goal paragraph under one sprint heading was invisible: the stale one wins
+    and the corrected one below it is never read. `render` writes exactly one
+    per sprint, so more than one is a hand edit that `check` reports.
+    """
+    found: dict[str, list[str]] = {}
     current = ""
     for line in text.splitlines():
         head = HEAD.match(line)
@@ -242,8 +257,8 @@ def parse_goals(text: str) -> dict[str, str]:
             current = head.group(1)
             continue
         goal = GOAL_LINE.match(line)
-        if goal and current and current not in found:
-            found[current] = goal.group(1).strip()
+        if goal and current:
+            found.setdefault(current, []).append(goal.group(1).strip())
     return found
 
 
@@ -256,22 +271,36 @@ def check(data: dict) -> int:
     actual = parse_plan(PLAN.read_text())
 
     problems = []
+
+    # "Exactly one sprint table", which this file's own docstring has always
+    # claimed and nothing checked. Refused BEFORE the comparisons below,
+    # because with two rows for one F-ID there is no single row to compare.
+    for fid, rows in sorted(actual.items()):
+        if len(rows) > 1:
+            problems.append(
+                f"{fid} appears in {len(rows)} SPRINT_PLAN.md sprint tables, "
+                f"under {', '.join(sprint for sprint, _ in rows)}. Every "
+                f"planned F-ID appears in exactly one, and the parser used to "
+                f"let the last occurrence win, so a row copied into an earlier "
+                f"sprint agreed with the allocation and was invisible.")
+
     for fid, (sprint, est) in sorted(expected.items()):
         if fid not in actual:
             problems.append(f"{fid} is in BACKLOG.md sprint {sprint} "
                             f"but appears in no SPRINT_PLAN.md sprint table")
             continue
-        if actual[fid][0] != sprint:
+        found_sprint, found_est = actual[fid][0]
+        if found_sprint != sprint:
             problems.append(f"{fid} is in sprint {sprint} in BACKLOG.md "
-                            f"and in sprint {actual[fid][0]} in "
+                            f"and in sprint {found_sprint} in "
                             f"SPRINT_PLAN.md")
-        if actual[fid][1] != est:
+        if found_est != est:
             problems.append(f"{fid} is estimated {est} in BACKLOG.md and "
-                            f"{actual[fid][1] or 'nothing'} in "
+                            f"{found_est or 'nothing'} in "
                             f"SPRINT_PLAN.md")
     for fid in sorted(set(actual) - set(expected)):
         problems.append(f"{fid} appears in SPRINT_PLAN.md sprint "
-                        f"{actual[fid][0]} but carries no sprint in "
+                        f"{actual[fid][0][0]} but carries no sprint in "
                         f"BACKLOG.md")
 
     # The milestone summary lines and the goal paragraphs. Both are written
@@ -284,18 +313,35 @@ def check(data: dict) -> int:
     expected_lines = rendered_milestones(data)
     actual_lines = [(a, b, int(n), int(w))
                     for a, b, n, w in MILESTONE_LINE.findall(plan_text)]
-    if expected_lines != actual_lines:
-        for expected, actual in zip(expected_lines, actual_lines):
-            if expected != actual:
-                problems.append(
-                    f"the milestone summary line for {expected[0]} to "
-                    f"{expected[1]} should read {expected[2]} stories and "
-                    f"{expected[3]} engineer-weeks, and SPRINT_PLAN.md says "
-                    f"{actual[2]} stories and {actual[3]} engineer-weeks")
-        if len(expected_lines) != len(actual_lines):
+    # Matched on the SPAN a line names, not on its position in the file. A
+    # positional `zip` reads the Nth expected line against the Nth found line,
+    # so one absent summary shifts every line after it and the refusal names
+    # the wrong milestone, which is a message a maintainer cannot act on. The
+    # spans are the identity a reader has anyway: `_S01 to S05, ..._`.
+    found_by_span = {(a, b): (a, b, n, w) for a, b, n, w in actual_lines}
+    for wanted in expected_lines:
+        span = (wanted[0], wanted[1])
+        actual_line = found_by_span.get(span)
+        if actual_line is None:
             problems.append(
-                f"the allocation has {len(expected_lines)} milestone(s) and "
-                f"SPRINT_PLAN.md carries {len(actual_lines)} summary line(s)")
+                f"the allocation puts a milestone at {span[0]} to {span[1]} "
+                f"and SPRINT_PLAN.md carries no summary line for it. The line "
+                f"is generated, so an absent one is a deleted line rather than "
+                f"a milestone nobody wrote up.")
+            continue
+        if actual_line != wanted:
+            problems.append(
+                f"the milestone summary line for {wanted[0]} to "
+                f"{wanted[1]} should read {wanted[2]} stories and "
+                f"{wanted[3]} engineer-weeks, and SPRINT_PLAN.md says "
+                f"{actual_line[2]} stories and {actual_line[3]} "
+                f"engineer-weeks")
+    for span in sorted(set(found_by_span) - {(e[0], e[1])
+                                             for e in expected_lines}):
+        problems.append(
+            f"SPRINT_PLAN.md carries a milestone summary line for {span[0]} "
+            f"to {span[1]} and the allocation has no milestone spanning those "
+            f"sprints")
 
     expected_goals = rendered_goals(data)
     actual_goals = parse_goals(plan_text)
@@ -304,14 +350,22 @@ def check(data: dict) -> int:
         if sprint not in actual_goals:
             problems.append(f"{sprint} carries no **Goal** line")
             continue
-        if actual_goals[sprint] == goal:
+        if len(actual_goals[sprint]) > 1:
+            problems.append(
+                f"{sprint} carries {len(actual_goals[sprint])} **Goal** "
+                f"lines. `render` writes one, and the parser used to keep the "
+                f"first, so a stale line above a corrected one won and the "
+                f"corrected one was never read.")
+            continue
+        found_goal = actual_goals[sprint][0]
+        if found_goal == goal:
             continue
         # Name the title that drifted rather than reprinting the line. A
         # sprint holds up to six stories and quoting all of them buries the
         # one word that changed, which is how S04's stale title survived
         # being read.
         absent = [s["story"] for s in groups[sprint]
-                  if s["story"].replace(";", ",") not in actual_goals[sprint]]
+                  if s["story"].replace(";", ",") not in found_goal]
         if absent:
             for story in absent:
                 problems.append(

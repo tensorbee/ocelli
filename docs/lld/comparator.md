@@ -280,13 +280,37 @@ alongside, so the inflation is visible rather than absorbed.
 
 ### The image rectangle
 
+**The rectangle is not the region the bias bullet averages over.** It BOUNDS
+that region. 25.1 names the informative region, which is the subset of this
+rectangle that is not clipped to the same display extreme on both sides, and
+the rectangle's own job is to draw the line between the picture and the
+letterbox and to be the denominator of `informativeFraction`.
+
 For a stack view: `columns` and `rows` times the published canvas scale, centred
 in the canvas. A canvas pixel is inside when its CENTRE is, so pixel `i` is
 inside when `i + 0.5 >= x0` and `i + 0.5 < x0 + width`, and the result is
 clamped to the canvas. The alternatives are wrong in a way that is invisible.
 Flooring the offset admits a letterbox column and ceiling the far edge admits
-one on the other side, and at 512 rows either is 512 background pixels inside
-the region the bias bullet averages over.
+one on the other side, and at 512 rows either is 512 background pixels counted
+as picture.
+
+**What that costs is not the bias bound, and this section said it was until the
+sprint review's fifth pass.** Both sides paint the declared clear colour in the
+letterbox, so an admitted column is black on both sides, which is clipped to the
+same extreme, which is uninformative. It never enters the bias denominator at
+all. Two other things break instead:
+
+1. `informativeFraction` is informative pixels over image-rectangle pixels, so
+   an admitted column inflates the denominator alone. 512 of 262144 pixels is
+   0.00195 of the rectangle, and the lowest fraction among the views the
+   identity run does not call weak is 0.10074 against a floor of 0.10, a margin
+   of 0.0007. A wrong column can therefore turn a measured view into a `weak`
+   one.
+2. The `letterbox-only` qualifier fires only when the image region carries no
+   difference at all and the letterbox carries one. A fit error in a column that
+   should have been letterbox then lands inside the image region, the qualifier
+   cannot fire, and a difference in the fit is reported as a difference in the
+   picture and attributed to us.
 
 `docs/lld/oracle.md`'s worked case is the fixture:
 `syntax/reference_mono12.dcm` at 64 by 96 with a published scale of 8 vertical
@@ -302,10 +326,22 @@ through a volume and has no source pixel grid to be a magnification of, which is
 why `docs/lld/oracle.md` deliberately does not publish
 `canvasPixelsPerSourcePixel` for one. Deriving a rectangle from the volume
 bounding box would be a second copy of a derivation the reference did not
-publish, which is the thing decision 13 exists to avoid. The consequence is that
-a reformat's letterbox counts as image, so its bias bullet is averaged over a
-region containing background that agrees by construction, which makes the bound
-slightly LOOSER there than on a stack view. Worth a story if a reformat ever
+publish, which is the thing decision 13 exists to avoid.
+
+The consequence is that a reformat's black surround counts as image. **That does
+not loosen the bias bound, which is what this said until the fifth pass.** The
+surround is black on both sides, so it is uninformative and stays out of the
+bias denominator exactly as a stack's letterbox does. What it does is put every
+one of those pixels into `informativeFraction`'s denominator, so a reformat is
+readier than a stack to fall under the informative floor and be reported `weak`.
+On the identity run all six synthetic reformats are `weak`, at informative
+fractions from 0.0 on the two AXIAL planes to 0.011 on the two CORONAL ones,
+while the three real MR reformats run from 0.418 to 0.75 and pass. Reproduce
+from `informativeFraction` in the `compare.json` that
+`./target/release/ocelli-compare identity` writes. The second consequence is
+that a reformat has no letterbox
+region at all, so `letterbox-only` can never fire for one and a fit difference
+there is always attributed to the picture. Worth a story if a reformat ever
 gates on bias in anger.
 
 ## The verdict vocabulary
@@ -418,10 +454,13 @@ pixel clipped to black or white on both sides differs by nothing whatever the
 arithmetic underneath says, so averaging over the whole rectangle divides the
 divergence the unclipped pixels do show by a denominator full of pixels that
 structurally cannot show one. Measured over all **70** gating class-one views on
-this corpus, the largest bias over the image rectangle is **0.0853**, on
-`real/mr_eay131/00000008.dcm`, and a 0.1 bound catches **none of them**. Over
-the informative region the same swap gives 0.269 to 0.284 on the real
-soft-tissue CT rows and 0.32 on the synthetic ones, and **51 of the 70** exceed
+this corpus, the largest bias over the image rectangle is **-0.0853**, on
+`real/mr_eay131/00000008.dcm`, and a 0.1 bound catches **none of them**. The
+sign is the census's own and is kept rather than dropped: the swap makes the
+candidate darker, so every bias it produces is negative, and 25.1's bound is
+two-sided. Over the informative region the same swap gives -0.269 to -0.284 on
+the real soft-tissue CT rows and about -0.32 on the synthetic ones, and
+**51 of the 70** exceed
 the bound.
 
 Reproduce with `./target/release/ocelli-compare census`, which applies the
@@ -470,11 +509,26 @@ printed decimals are a rendering of them.
 **What the bound is proven to do.** It detects the actual swap, and the
 mutation that proves it is `the-actual-linear-exact-swap`. LINEAR_EXACT sits
 `u / w` below LINEAR before the renderer quantises, so a pixel drops one display
-code with probability `u / w` and the rest do not. The mutation accumulates `u`
-across the image rectangle using the view's own declared window and takes a drop
-each time the accumulator crosses `w`, which places exactly `floor(sum(u) / w)`
-drops in proportion to `u`, in integers, with no rounding decision in it. That
-is the divergence rather than a stand-in for it.
+code with probability `u / w` and the rest do not, and at `u > w` it drops more
+than one. The mutation accumulates `u` across the image rectangle using the
+view's own declared window, takes `accumulator / w` drops at each pixel and
+keeps `accumulator % w`, which places exactly `floor(sum(u) / w)` drops in
+proportion to `u`, in integers, with no rounding decision in it. That is the
+divergence rather than a stand-in for it.
+
+**It took at most one drop per pixel until the sprint review's fifth pass, and
+the doc comment called the residue bound "by construction".** One subtraction
+per pixel leaves the accumulator at or above `w` whenever `u >= 2w`, and `u`
+runs to 254, so the bound held only for `w > 254`. Frame `[200, 200, 200]` at
+`w = 100` came back `[199, 199, 199]`: three drops where `floor(600 / 100)` is
+six, and a residue of 300. A drop of two codes at `w = 100` and `u = 200` is the
+divergence itself, since `u / w` is 2 there, so the loop was corrected rather
+than the domain narrowed to windows the corpus happens to have. The corpus's
+narrowest window today is 256, on the class-two row
+`real/us_cmb_crc/00000001.dcm`, which is why nothing measured it. A CT brain
+window of 80, or any MR window under 255, reaches it. The delivered drop count
+is now compared against `floor(sum(u) / w)` and the mutation refuses when they
+disagree, where before the only thing asked of it was that it moved something.
 
 **Both display extremes are excluded, and PS3.3 is why.** C.11.2.1.2 gives
 LINEAR the clamps `c' - w'/2` and `c' + w'/2` on `c' = c - 0.5` and
@@ -483,10 +537,19 @@ lower pair is equal, since `(c - 0.5) - (w - 1)/2 = c - w/2`, so nothing clamps
 to black under one function and not the other and a pixel at 0 can never move.
 The upper pair differs by a whole unit of `x`, with LINEAR clamping the earlier
 of the two, so a pixel at 255 sits where LINEAR_EXACT is at worst `255 - 255/w`,
-which rounds back to 255 for every `w >= 510` and for all but a sliver of one
-input unit below it. A pixel at 255 therefore cannot move either, and excluding
-it also keeps the mutation from perturbing the informative region, which is what
-kept the numerator and the denominator honest.
+which rounds back to 255 for every `w >= 510`.
+
+**So the two exclusions are not equally tight, and this said they were.** At 0
+the exclusion is exact at every width. At 255 it is exact only at `w >= 510`. A
+pixel at 255 CAN move below that, over the stored values where LINEAR_EXACT
+rounds under 255, which is `x < c + w/2 - w/510`, so the movable band runs from
+LINEAR's upper clamp at `c + w/2 - 1` up to that point and is `1 - w/510` input
+units wide. The band is empty at 510 and widens as the window narrows. An 8-bit
+frame does not carry the stored value behind a 255, so there is no way to tell a
+pixel inside the band from one outside it, and excluding the whole population is
+the conservative reading below 510 rather than a statement that nothing could
+have moved. It also keeps the mutation from perturbing the informative region,
+which is what kept the numerator and the denominator honest.
 
 It said `round(u - u/w)` here and in the variant's own doc comment until the
 sprint review's fourth pass, and `apply_to_frame`'s comment 600 lines below it
@@ -507,10 +570,23 @@ image rectangle makes `the-actual-linear-exact-swap` come back `NOT DETECTED`
 with the view passing, and the run exits 1 on the undetected mutation. Restoring
 the informative region detects all 21.
 
+**And it is proved without the corpus too, which it was not until the fifth
+pass.** That proof above needs `tools/oracle/out/`, so on a machine with no
+rendered run the substitution left `cargo test -p ocelli-oracle` fully green:
+every bias fixture builds frames in which the two regions are the same pixels,
+and `tolerance_fixture.rs` says so honestly at `verdict` without anything
+elsewhere covering the gap.
+`the_bias_bound_is_fed_the_informative_region_and_not_the_rectangle` in
+`tools/oracle/src/attribution.rs` is the frame those fixtures cannot be: 216 of
+its 256 pixels are white on both sides, 25 of the remaining 40 differ by one
+code, so the bias is 25 / 40 = 0.625 over the informative region and
+25 / 256 = 0.09765625 over the rectangle. The two regions disagree about the
+verdict, and the substitution turns the test's `fail` into a `pass`.
+
 **And the argument for it is now measured over the corpus rather than over one
 view.** `ocelli-compare census` applies the swap to all 70 gating class-one
 views and averages over the image rectangle instead: **0 of 70** exceed the
-bound, the largest being 0.0853, while over the informative region 51 of 70 do.
+bound, the largest being -0.0853, while over the informative region 51 of 70 do.
 The mutation's own target sits at -0.0773 over the rectangle, a 23 per cent
 margin below the bound.
 
@@ -587,9 +663,25 @@ pixels can still fail.
 Measured on today's corpus the two mechanisms agree without being made to:
 every one of the twenty-two views the reference lists has an informative
 fraction at or below 0.0583, and the lowest fraction among the other
-seventy-six is 0.1007. Both AXIAL synthetic reformats are at exactly zero, every
-pixel being black or white. That separation is an observation recorded after the
-fact and not the reason for the number.
+seventy-six is 0.10074. Both AXIAL synthetic reformats are at exactly zero,
+every pixel being black or white. That separation is an observation recorded
+after the fact and not the reason for the number.
+
+**And it is now checked rather than relied on.** Until the sprint review's fifth
+pass, `build_statistics` handled a view with no informative pixel at all by
+inventing `signedMeanDiff: 0` and `biasPasses: true`, on the stated grounds that
+such a view "is already `weak` and already `unmeasured`". Structurally it is
+not.
+`weak` needs the reference half to have listed the view under `lowInformation`
+at `extremeFractionWarnAbove: 0.95`, and the floor here is 0.10, and nothing
+asserts the two agree. The margin is 0.00074, the distance between 0.10074 and
+0.10. A view the reference did not list would have taken an invented pass, which
+is the reference half's configuration deciding a comparator verdict by the back
+door. That case is now a refusal, `NoBiasDenominator`, whose message names both
+numbers and both files. The listed case is unchanged: the bias is not evaluated,
+and the view is `weak` and `unmeasured` as before. Two unit tests in
+`tools/oracle/src/attribution.rs` hold the pair apart, and neither can be
+satisfied by the corpus changing shape because both build their own frames.
 
 A zero-information view stays `unmeasured` rather than `fail`, because it is a
 corpus problem and failing it would pressure somebody to widen a window.
@@ -812,6 +904,13 @@ exclusion survived a third. `mutations::tests` now carries an eight-pixel table
 for the swap, with a 0 and a 255 in it, the drop set hand-computed from the
 accumulator and the exclusions derived from PS3.3 rather than from the code.
 Restoring the previous guard turns all four of those tests red.
+
+The fifth pass added two more, at windows narrower than the display range, which
+is the case the eight-pixel table at `w = 400` could not reach:
+`[200, 200, 200]` at `w = 100` owes six drops and `[254, 3, 3]` at `w = 5` owes
+fifty-two, fifty of them on the first pixel. Restoring the single subtraction
+per pixel turns exactly those two red and leaves the four above green, which is
+what says the mutation is the narrow-window defect and not something else.
 
 ## What F-011 did not build
 

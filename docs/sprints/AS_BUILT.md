@@ -1065,9 +1065,11 @@ where inputs, parameters and geometry already agree.
 pass found that.** The bound was evaluated over the image rectangle, and the
 per-pixel divergence is exactly `u / w`, so a rectangle full of pixels clipped
 to black or white divides the divergence the unclipped ones show by a
-denominator that cannot show one. Measured across every gating class-one view,
-the largest observable bias over the rectangle was 0.0825 and a 0.1 bound caught
-none of them. The proof that had been accepted, a mutation moving 40 per cent of
+denominator that cannot show one. Measured across every gating class-one view, the
+largest observable bias over the rectangle fell short of the 0.1 bound and it
+caught none of them. `./target/release/ocelli-compare census` prints the figure
+and `docs/lld/comparator.md` records which model it belongs to, because the
+number in this sentence was superseded twice while the sentence stood. The proof that had been accepted, a mutation moving 40 per cent of
 the image by a whole code, cleared the bound several times over and was a
 caricature of a divergence that moves each pixel by a sub-code amount.
 **No view count is transcribed here**, because the one that stood in this
@@ -1284,9 +1286,12 @@ list, and the census found them by refusing the author's own entries.
 repair.** `.claude/WORKFLOW.md` gives `AS_BUILT.md` a lifetime of Append-only,
 and S01 honoured that: its review corrections went into their own headed
 entries, so the file still shows what was claimed at completion beside what was
-later found false. S03's review passes instead rewrote the F-004, F-006, F-011
-and F-X009 entries in place, which is why five wrong numbers survived three
-passes. A sentence edited in place carries no evidence that it used to say
+later found false. S03's review passes instead rewrote story entries in
+place, which is why five wrong numbers survived three passes. The fifth pass
+counted them and there are six, not the four this paragraph first named:
+`e962144` alone rewrote the `**Tests added.**` field of F-005 and of F-X007
+beside the four. `git log -p 36adc98..HEAD -- docs/sprints/AS_BUILT.md` is the
+record and this sentence is not. A sentence edited in place carries no evidence that it used to say
 something else, so nothing invites the next reader to re-measure it. The
 corrections below are recorded here as well as applied above.
 
@@ -1330,7 +1335,7 @@ Every number in the sprint ledgers, `CHANGELOG.md`, `README.md`,
 `docs/hld/DEVIATIONS.md` and `.claude/reviews/S03-sprint-review.md` was
 re-measured against the command that prints it. What was wrong:
 
-| Claim as written | What the command says |
+| The record as it stood | What the command says |
 |------------------|-----------------------|
 | F-011's bound is proved by `round(u - u / w)` on every pixel | Falsified by pass 3 in the same commit that left this sentence standing. It is an accumulator |
 | F-011's structural limit is `255 / w`, so wider than 2550 cannot reach the bound | True and nearly useless. The smallest blind window measured on this corpus is 678 |

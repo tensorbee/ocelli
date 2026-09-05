@@ -83,6 +83,45 @@ A gate whose arm yields no extractable command, `native` and `panic` and
 empty list is true, and a vacuous pass here would be the widest hole in the
 file.
 
+## Where an arm ENDS, and the worst thing the fifth pass found
+
+That sentence was false for `panic` and the way it was false is the reason
+this section exists. `gate_commands` ended an arm at the next case LABEL rather
+than at its `;;`, so every arm swallowed the comment block introducing the
+following arm and the command regex read commands out of prose. `arms['panic']`
+came out as `['npm run test']`, a command that appears nowhere in the `panic`
+arm, taken from the `bench` comment block's sentence about
+`npm run test:browser`.
+
+Measured: delete the `bin/ocelli.sh gate panic` step from `ci.yml` and this
+check refused at exit 1. Then also add a legitimate `- run: npm run test` step
+to the frontend job and it returned to exit 0 with "all 25 floor gate(s) are
+invoked by CI". `panic` is the wasm panic-hook proof of HLD section 23, the one
+property no native test can observe, and it could be deleted from CI by a
+change that reads as adding a test.
+
+So an arm now ends at its `;;`, `#` comments are stripped from the body before
+extraction, and a backslash line continuation is joined first. That last one
+own loss: the extraction pattern stops at the backslash, so `-p <suite>` fell
+off the end of `errors`, `bench` and `guards`, and `runs_command` uses
+`search`, which means any unittest step satisfied any of them. Replacing the
+`guards` step with its five arm commands but with
+`-p test_nothing_at_all.py`, which discovers zero tests, left this check at
+exit 0.
+
+**The extractor's limit, declared rather than discovered.** It recognises four
+command prefixes, `python3 `, `npm run `, `cargo ` and `ci/`. `node`,
+`wasm-pack` and `"$0"` are invisible to it, so the three `node --test` suites
+in `bench`, the wasm-pack build in `panic` and the `"$0" wasm` and `"$0" native`
+self-calls are not demanded of CI by a check whose message says every command
+in the arm is. Nothing is lost today, because `bench`, `wasm`, `panic` and
+`native` are each invoked by NAME in `ci.yml` and a step naming a gate runs its
+arm entire by definition. Widening the prefix list would change that: `panic`
+would stop being a gate with no extractable command, and the sentence above
+about `all([])` would stop being true of it. The limit is therefore declared
+here and in the `ci-floor` catalogue entry, where the census prints it, rather
+than closed by a widening that trades one silent gap for another.
+
 ## A gate outside the floor can still be a gate CI is supposed to run
 
 `NOT_IN_FLOOR` takes a gate out of `floor_gates`, and until the fourth pass
@@ -520,22 +559,83 @@ def covers(gate: str, arms: dict[str, list[str]],
     return bool(arm) and not missing_arm_commands(gate, arms, commands)
 
 
+# The four command prefixes this file can see. Declared as a constant so the
+# limit is one thing to read rather than a regex to re-derive. `node`,
+# `wasm-pack` and `"$0"` are deliberately absent, for the reason the docstring
+# gives at length: adding them would make `panic` a gate with an extractable
+# command and would break the claim that a gate whose arm yields none can only
+# be satisfied by a step naming it.
+COMMAND_PREFIXES = ("python3 ", "npm run ", "cargo ", "ci/")
+
+# A shell comment, in the body of a case arm. `(?<!\S)` so a `#` inside a word
+# is not one, which is the same idiom `run_commands` uses on the workflow.
+SHELL_COMMENT = re.compile(r"(?<!\S)#.*$", re.M)
+
+# A line continuation. Joined BEFORE extraction, because the extraction class
+# stops at the backslash and `-p <suite>` then falls off the end of every
+# multi-line arm.
+CONTINUATION = re.compile(r"\\\n\s*")
+
+# One `run_gate` arm: a case label at the start of a line, then everything up
+# to its `;;`. Ending at the next LABEL instead is what let each arm swallow
+# the comment block introducing the following one.
+ARM = re.compile(r"^[ \t]*([a-z-]+)\)(.*?);;", re.M | re.S)
+
+
 def gate_commands(runner: str) -> dict[str, list[str]]:
-    """The commands each gate's `run_gate` arm actually runs."""
-    body = runner[runner.index("run_gate() {"):runner.index("skip() {")]
+    """The commands each gate's `run_gate` arm actually runs.
+
+    An arm ends at its `;;`. Comments are stripped and continuations joined
+    before the commands are read out, so nothing here can read a command out
+    of prose. See the docstring's "Where an arm ENDS" section for what that
+    cost.
+    """
+    try:
+        body = runner[runner.index("run_gate() {"):runner.index("skip() {")]
+    except ValueError as error:
+        raise RuntimeError(
+            "bin/ocelli.sh carries no `run_gate() {` ... `skip() {` region "
+            "where this parser looks for the gate arms. Either the runner was "
+            "restructured, in which case this parser has to be restructured "
+            "with it, or the arms are gone. Both need a person, and neither "
+            "may be read as agreement.") from error
     arms: dict[str, list[str]] = {}
-    for match in re.finditer(
-            r"^\s*([a-z-]+)\)\s*(.*?)(?=^\s*(?:[a-z-]+\)|\*\)))",
-            body, re.M | re.S):
-        arms[match.group(1)] = re.findall(
-            r"(?:python3 |npm run |cargo |ci/)[\w./ -]+", match.group(2))
+    for match in ARM.finditer(body):
+        text = SHELL_COMMENT.sub("", CONTINUATION.sub(" ", match.group(2)))
+        found = re.findall(
+            "(?:" + "|".join(re.escape(p) for p in COMMAND_PREFIXES) +
+            r")[\w./ -]+", text)
+        # Collapsed to single spaces. A joined continuation leaves the space
+        # that sat before the backslash beside the one that replaced it, and
+        # `runs_command` compares the text, so a doubled space would make an
+        # arm command that CI runs verbatim look absent.
+        arms[match.group(1)] = [re.sub(r"\s+", " ", c).strip() for c in found]
+    if not arms:
+        raise RuntimeError(
+            "bin/ocelli.sh's `run_gate` declares no case arm this parser can "
+            "read. Every gate would then have an empty arm, `covers` would "
+            "fall back to the gate-name route for all of them, and the "
+            "per-command rule would hold over nothing.")
     return arms
 
 
 def main() -> int:
     runner = RUNNER.read_text()
     workflow = WORKFLOW.read_text()
-    arms = gate_commands(runner)
+    # Every parser here refuses rather than returning an empty result, and
+    # until the fifth pass those refusals reached the terminal as a bare
+    # traceback. A cosmetic reformat of the `--floor` case line into three arms
+    # exited 1 with `RuntimeError:` and no `FAIL:` header, which is fail-closed
+    # and is still the wrong way to tell a maintainer what to do. The refusals
+    # are unchanged. Only how they are printed is.
+    try:
+        arms = gate_commands(runner)
+        declared = declared_gates(runner)
+        excluded = runner_excluded(runner)
+    except RuntimeError as error:
+        print("FAIL: CI does not run the whole floor")
+        print(f"  {error}")
+        return 1
     commands = run_commands(workflow)
     events = workflow_events(workflow) - MANUAL_EVENTS
 
@@ -549,7 +649,6 @@ def main() -> int:
 
     # The two exclusion lists, joined. A comment used to say they had to
     # agree and nothing read either of them.
-    excluded = runner_excluded(runner)
     if excluded != NOT_IN_FLOOR:
         only_runner = sorted(excluded - NOT_IN_FLOOR)
         only_here = sorted(NOT_IN_FLOOR - excluded)
@@ -565,7 +664,7 @@ def main() -> int:
             f"two lists are one decision written twice and they have to be "
             f"kept equal.")
 
-    for gate in floor_gates(runner):
+    for gate in [g for g in declared if g not in NOT_IN_FLOOR]:
         running = steps_running(gate, arms, commands)
         # Per event, not per step. Two steps with complementary conditions
         # cover the floor between them, and asking one step to cover every
@@ -636,7 +735,7 @@ def main() -> int:
     every_event = workflow_events(workflow)
     gpu = gpu_gates(runner)
     reached_outside: dict[str, list[str]] = {}
-    for gate in sorted(NOT_IN_FLOOR & set(declared_gates(runner))):
+    for gate in sorted(NOT_IN_FLOOR & set(declared)):
         if gate in gpu:
             continue
         running = steps_running(gate, arms, commands)
@@ -662,7 +761,7 @@ def main() -> int:
             print(f"  {problem}")
         return 1
 
-    count = len(floor_gates(runner))
+    count = len([g for g in declared if g not in NOT_IN_FLOOR])
     print(f"OK: all {count} floor gate(s) are invoked by CI on "
           f"{', '.join(sorted(events))}, every command in each gate's arm")
     print(f"  the runner's --floor exclusion list and NOT_IN_FLOOR agree on "

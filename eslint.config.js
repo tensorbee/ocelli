@@ -94,6 +94,13 @@ const NO_CACHED_WASM_MEMORY_ALIAS = {
 // linear memory and ran `npx eslint` over it. Five escape and two are caught.
 // All three selectors are anchored on a variable declaration or on the literal
 // member chain, so a view over memory reached any other way is not matched.
+// **The seven below are a sample and not the set.** The S03 review's fifth pass
+// measured three further routes past the same three selectors,
+// `for (const m of [wasm.memory]) new DataView(m.buffer)`,
+// `new DataView(wasm.memory["buffer"])` and a getter returning `wasm.memory`,
+// and the general sentence above already covers them. A new route is expected
+// rather than surprising, and adding one to this list changes nothing about the
+// rule.
 //
 //   caught    new DataView(wasm.memory.buffer)
 //   caught    const { memory } = wasm;      new DataView(memory.buffer)
@@ -121,7 +128,12 @@ const NO_CACHED_WASM_MEMORY_ALIAS = {
 //   NewExpression[callee.name=/(Array|DataView)$/][arguments.0.property.name="buffer"]
 //
 // unconditioned on the object. Measured: it catches all five escapes above and
-// therefore all seven routes. Its cost across `packages/` and `examples/` is
+// therefore all seven routes, **and it does not catch every route there is**.
+// `new DataView(wasm.memory["buffer"])` escapes it too, because it keys on
+// `arguments.0.property.name="buffer"` and a computed member's property is a
+// `Literal` with no `name`. So F-X017 cannot be closed by landing this
+// selector, which is why the story names type-aware linting and makes the
+// computed route its acceptance test. Its cost across `packages/` and `examples/` is
 // exactly ONE site, `decodeRecord` at packages/core/src/errors.ts, which takes
 // `new DataView(payload.buffer, payload.byteOffset, RECORD_BYTES)` over a
 // caller's `Uint8Array`. That is a true instance of the syntactic pattern and

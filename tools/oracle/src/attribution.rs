@@ -187,6 +187,20 @@ pub enum CompareError {
     },
     #[error("{id}: the two sides resolve different tolerance classes, {a} and {b}")]
     ClassDisagreement { id: String, a: String, b: String },
+    #[error(
+        "{id}: every pixel of the image rectangle is clipped to the same \
+         display extreme on both sides, so 25.1's bias bullet has no \
+         denominator, and `run.json` does not list the view under \
+         `lowInformation`. Two independently configured numbers have to agree \
+         for that combination to be impossible: the reference half's \
+         `extremeFractionWarnAbove` in render-params.json, which decides \
+         `lowInformation`, and INFORMATIVE_FRACTION_FLOOR in tolerance.rs, \
+         which decides `weak`. Nothing makes them agree, so this case is \
+         refused rather than passed with an invented bias of zero. \
+         tolerance.rs says the reference half's configuration must not decide \
+         a comparator verdict, and inventing a pass here would let it"
+    )]
+    NoBiasDenominator { id: String },
     #[error("{0}")]
     Register(String),
 }
@@ -515,8 +529,14 @@ fn attribute_parameter(pointer: &str, reference: &Sidecar, candidate: &Sidecar) 
     }
 }
 
-/// The image rectangle the bias bullet is averaged over, and the extents the
-/// canvas bound is applied to.
+/// The image rectangle that BOUNDS the region the bias bullet is averaged
+/// over, and the extents the canvas bound is applied to.
+///
+/// 25.1's bias bullet names the informative region, which is the subset of
+/// this rectangle that is not clipped to the same display extreme on both
+/// sides. So this rectangle is the denominator of `informativeFraction` and
+/// the line between the picture and the letterbox, and it is not itself the
+/// region the bullet averages over.
 ///
 /// **A volume reformat's rectangle is the whole frame**, and that is a
 /// narrowing worth stating rather than leaving to be noticed. A reformat plane
@@ -680,7 +700,7 @@ pub fn compare_view(
     ));
 
     let diff = difference(reference_frame, candidate_frame, rect, channels)?;
-    let statistics = build_statistics(&diff, class)?;
+    let statistics = build_statistics(&diff, class, id, context.low_information.contains(id))?;
 
     let register_entries = context.register.matching(&reference.json);
     let volume_divergence = context.reference.reference_divergence_for(id);
@@ -859,9 +879,19 @@ pub fn compare_view(
     })
 }
 
+/// The four regions' statistics, and the two class-one verdicts.
+///
+/// `listed_low_information` is whether `run.json` names this view under
+/// `lowInformation`. It is passed in rather than inferred, because the ONLY
+/// case where a class-one view can have no bias denominator at all is a view
+/// the reference half already flagged, and until the sprint review's fifth
+/// pass that was a coincidence between two independently configured numbers
+/// rather than something checked. See `CompareError::NoBiasDenominator`.
 fn build_statistics(
     diff: &crate::frame::FrameDifference,
     class: ToleranceClass,
+    id: &str,
+    listed_low_information: bool,
 ) -> Result<ViewStatistics, CompareError> {
     let region = |stats: &crate::frame::RegionStats| -> Result<Vec<ChannelReport>, CompareError> {
         stats
@@ -894,10 +924,6 @@ fn build_statistics(
                 .full
                 .channel(0)
                 .ok_or_else(|| CompareError::Register("no channel 0 to gate on".to_owned()))?;
-            let image_channel = diff
-                .image
-                .channel(0)
-                .ok_or_else(|| CompareError::Register("no image channel 0".to_owned()))?;
             let predicate = tolerance::monochrome_predicate(full_channel)?;
             // **The bias is evaluated over the INFORMATIVE region, not the
             // image rectangle, and the S03 sprint review's second pass is why.**
@@ -915,12 +941,14 @@ fn build_statistics(
             // so the mean over a region is `mean(u) / w`.
             //
             // Over the image rectangle the largest bias across all **70**
-            // gating class-one views is **0.0853**, on
+            // gating class-one views is **-0.0853**, on
             // `real/mr_eay131/00000008.dcm`, so a 0.1 bound detects NONE of
-            // them. Over the informative region the same swap gives 0.269 to
-            // 0.284 on the real soft-tissue CT rows and 0.32 on the synthetic
-            // ones, which is where section 18.3's worked example lives, and
-            // 51 of the 70 exceed the bound.
+            // them. The sign is the census's own and is kept: the swap makes
+            // the candidate DARKER, so every bias it produces is negative, and
+            // the bound is two-sided. Over the informative region the same
+            // swap gives -0.269 to -0.284 on the real soft-tissue CT rows and
+            // about -0.32 on the synthetic ones, which is where section 18.3's
+            // worked example lives, and 51 of the 70 exceed the bound.
             //
             // It said 71 views and 0.0825 until the sprint review's fourth
             // pass. 71 was `93 - 22 weak` and forgot that
@@ -931,19 +959,23 @@ fn build_statistics(
             //
             // Reproduce with `./target/release/ocelli-compare census`.
             //
-            // A view whose informative region is empty is already `weak` and
-            // already `unmeasured`, so it does not gate and the bias is not
-            // evaluated for it rather than being invented.
+            // **A view with no informative pixel at all has no bias
+            // denominator, and that case is refused rather than invented.**
+            // This said the case "is already `weak` and already `unmeasured`",
+            // which was a coincidence between two files and not a structural
+            // guarantee. See `CompareError::NoBiasDenominator`.
             let bias = match diff.informative.channel(0) {
                 Some(informative_channel) if informative_channel.pixels() > 0 => {
                     tolerance::bias_bound(informative_channel)?
                 }
-                _ => tolerance::BiasVerdict {
+                _ if listed_low_information => tolerance::BiasVerdict {
                     signed_mean_diff: 0.0,
                     passes: true,
                 },
+                _ => {
+                    return Err(CompareError::NoBiasDenominator { id: id.to_owned() });
+                }
             };
-            let _ = image_channel;
             (predicate.passes, bias.passes, bias.signed_mean_diff)
         } else {
             let mean = image
@@ -1223,6 +1255,184 @@ mod tests {
         }
         let candidate_frame = Frame::from_monochrome(SIDE_PIXELS, SIDE_PIXELS, &greys)?;
         compare_view(&context, VIEW, &reference_frame, &candidate_frame)
+    }
+
+    /// The same reformat pair with the frames supplied, and with control over
+    /// whether `run.json` lists the view under `lowInformation`.
+    ///
+    /// Both sides carry the same camera and the same scale, so geometry and
+    /// parameters agree and the ladder reaches rung 5. Everything the record
+    /// says is then a consequence of the two frames.
+    fn compare_reformat_frames(
+        reference_greys: &[u8],
+        candidate_greys: &[u8],
+        listed_low_information: bool,
+    ) -> Result<crate::report::ViewRecord, CompareError> {
+        let reference_run = reformat_run(100.0, false);
+        let candidate_run = reformat_run(100.0, false);
+        let register = Register::default();
+        let empty: BTreeSet<String> = BTreeSet::new();
+        let mut listed: BTreeSet<String> = BTreeSet::new();
+        if listed_low_information {
+            listed.insert(VIEW.to_owned());
+        }
+        let context = Context {
+            reference: &reference_run,
+            candidate: &candidate_run,
+            register: &register,
+            low_information: &listed,
+            downsampled: &empty,
+        };
+        let reference_frame = Frame::from_monochrome(SIDE_PIXELS, SIDE_PIXELS, reference_greys)?;
+        let candidate_frame = Frame::from_monochrome(SIDE_PIXELS, SIDE_PIXELS, candidate_greys)?;
+        compare_view(&context, VIEW, &reference_frame, &candidate_frame)
+    }
+
+    // ---- The bias bullet's region, watched --------------------------------
+    //
+    // **This is DEFECT 2 of the S03 sprint review's fifth pass.** Changing
+    // `diff.informative.channel(0)` to `diff.image.channel(0)` in
+    // `build_statistics` left `cargo test -p ocelli-oracle` fully green,
+    // because every bias fixture in `tools/oracle/tests/` builds frames in
+    // which the image rectangle and the informative region are the same
+    // pixels. The only thing that caught it was `ocelli-compare mutations`,
+    // which needs the rendered corpus and no GPU-less machine can run.
+    //
+    // The pair below is the frame those fixtures cannot be: most of it clipped
+    // to white on both sides, so the two regions differ, and the deltas chosen
+    // so the two regions DISAGREE about the verdict.
+
+    /// A 16 by 16 reformat, so the image rectangle is all 256 pixels.
+    ///
+    /// | pixels | reference | candidate | informative? | signed diff |
+    /// |--------|-----------|-----------|--------------|-------------|
+    /// | 216 | 255 | 255 | no, clipped to the same extreme | 0 |
+    /// | 25 | 100 | 101 | yes | +1 |
+    /// | 15 | 100 | 100 | yes | 0 |
+    ///
+    /// Hand-computed, from 25.1's bullet and from the informative region's own
+    /// definition:
+    ///
+    /// - informative pixels: 25 + 15 = **40**, so the informative fraction is
+    ///   40 / 256 = 0.15625, above `INFORMATIVE_FRACTION_FLOOR` of 0.10, so
+    ///   the view is not weak and its verdict counts.
+    /// - bias over the INFORMATIVE region: 25 / 40 = **0.625**, which is over
+    ///   the 0.1 bound, so the view FAILS.
+    /// - bias over the IMAGE RECTANGLE: 25 / 256 = **0.09765625**, which is
+    ///   inside the 0.1 bound, so over that region the view would PASS.
+    /// - 25.1's maximum-difference rule: every differing pixel differs by
+    ///   exactly one code, so the within-one-LSB fraction is 1.0 and the count
+    ///   over two is 0. It passes, which is what leaves the bias as the only
+    ///   thing that can decide the outcome.
+    ///
+    /// Both means are exact in binary: 25 / 40 is 0.625 and 25 / 256 is
+    /// 0.09765625, so the assertions carry no tolerance.
+    ///
+    /// Feed the image channel to `bias_bound` instead and this test reports
+    /// `pass` with no qualifiers.
+    #[test]
+    fn the_bias_bound_is_fed_the_informative_region_and_not_the_rectangle()
+    -> Result<(), CompareError> {
+        let mut reference = [255_u8; 256];
+        let mut candidate = [255_u8; 256];
+        for index in 0..40_usize {
+            if let (Some(left), Some(right)) = (reference.get_mut(index), candidate.get_mut(index))
+            {
+                *left = 100;
+                *right = if index < 25 { 101 } else { 100 };
+            }
+        }
+        let record = compare_reformat_frames(&reference, &candidate, false)?;
+        let statistics = record
+            .statistics
+            .as_ref()
+            .ok_or_else(|| CompareError::Register("no statistics".to_owned()))?;
+
+        assert_eq!(statistics.informative_pixels, 40);
+        assert_eq!(statistics.image_pixels, 256);
+        assert_eq!(
+            statistics.informative_fraction.to_bits(),
+            0.15625_f64.to_bits(),
+            "the view must sit above the informative floor, or `weak` and not \
+             the region choice would decide the outcome"
+        );
+        assert_eq!(
+            statistics.signed_mean_diff.to_bits(),
+            0.625_f64.to_bits(),
+            "the reported bias is the informative region's 25 / 40"
+        );
+        let image_bias = statistics
+            .image
+            .first()
+            .ok_or_else(|| CompareError::Register("no image channel".to_owned()))?
+            .signed_mean_diff;
+        assert_eq!(
+            image_bias.to_bits(),
+            0.097_656_25_f64.to_bits(),
+            "and the image rectangle's 25 / 256 is inside the bound, which is \
+             what makes the two regions disagree here"
+        );
+        assert!(
+            statistics.predicate_passes,
+            "every difference is one code, so 25.1's first two clauses pass \
+             and only the bias can decide"
+        );
+        assert!(!statistics.bias_passes);
+        assert_eq!(record.outcome, Outcome::Fail);
+        assert_eq!(record.side, Side::Ours);
+        assert_eq!(record.rung, "pixels");
+        assert!(record.qualifiers.contains(&Qualifier::Bias));
+        Ok(())
+    }
+
+    // ---- The empty informative region, checked ----------------------------
+    //
+    // **This is smell S1 of the fifth pass.** `build_statistics` invented
+    // `bias_passes: true` for a view with no informative pixel, on the stated
+    // grounds that such a view "is already `weak` and already `unmeasured`".
+    // That is a coincidence between two independently configured numbers, not
+    // a structural guarantee: `lowInformation` comes from the reference half's
+    // `extremeFractionWarnAbove` in render-params.json and
+    // `INFORMATIVE_FRACTION_FLOOR` is 0.10 here. On the identity run the
+    // lowest non-weak informative fraction is 0.10074 against that floor, a
+    // margin of 0.0007. The two tests below make the dependency a checked one.
+
+    /// A frame clipped to white on both sides everywhere has no informative
+    /// pixel, so 25.1's bias bullet has no denominator. When `run.json` did
+    /// not list the view, the comparator refuses rather than inventing a pass.
+    #[test]
+    fn an_empty_informative_region_the_reference_did_not_flag_is_refused() {
+        let white = [255_u8; 256];
+        let record = compare_reformat_frames(&white, &white, false);
+        assert!(
+            matches!(record, Err(CompareError::NoBiasDenominator { .. })),
+            "an invented `bias_passes: true` would let the reference half's \
+             own configuration decide a comparator verdict"
+        );
+    }
+
+    /// The same frame, listed. Now the dependency holds, the bias is not
+    /// evaluated rather than invented, and the view is `weak` and
+    /// `unmeasured`, which is what the two AXIAL synthetic reformats do on the
+    /// real corpus.
+    ///
+    /// Without this half the test above would be satisfied by refusing every
+    /// saturated frame, which would fail the identity run.
+    #[test]
+    fn the_same_frame_listed_under_low_information_is_weak_and_not_refused()
+    -> Result<(), CompareError> {
+        let white = [255_u8; 256];
+        let record = compare_reformat_frames(&white, &white, true)?;
+        let statistics = record
+            .statistics
+            .as_ref()
+            .ok_or_else(|| CompareError::Register("no statistics".to_owned()))?;
+        assert_eq!(statistics.informative_pixels, 0);
+        assert_eq!(statistics.informative_fraction.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(record.outcome, Outcome::Unmeasured);
+        assert_eq!(record.rung, "weak");
+        assert!(record.qualifiers.contains(&Qualifier::Weak));
+        Ok(())
     }
 
     /// **The narrowing.** A declared through-plane spacing divergence does not

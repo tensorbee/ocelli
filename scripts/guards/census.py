@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Prove the catalogue is complete, and that no guard has been quietly widened.
 
-Six checks, because none of them is sufficient alone.
+The checks are lettered below and none of them is sufficient alone. The
+count is deliberately not written here: it read "six" while there were six
+and the fifth pass added a seventh, a2, which is the sort of sentence this
+repository has already paid for twice.
 
 **a. Refusal-site discovery, strict in both directions.** Every site
 `scripts/guards/discover.py` finds must be claimed by exactly one catalogue
@@ -9,6 +12,31 @@ entry, so the catalogue cannot fall behind. Every entry must claim at least one
 site, so a deleted refusal cannot leave a stale entry that reads as coverage.
 That is the discipline `docs/lld/oracle.md` already applies to
 `unsupported.json`.
+
+**a2. The per-entry site count, for the gap check a leaves open.** The census's
+stated purpose is that a guard added next month arrives with its test, and
+until the S03 review's fifth pass that rule did not apply to a guard added to a
+file the catalogue ALREADY claims. Most entries claim their file with `"*"`, so
+a new `problems.append` in an already-catalogued file lands in the probed
+bucket and no number moves. The pass measured it from the other side: it added
+224 lines to this module, four of them new refusal branches, and deleting each
+in turn left the census, the floor probe profile and the unit suite all green.
+
+So the site count of every `"*"` entry is recorded in
+`ci/guard-probe-budget.json` and compared for EQUALITY. A refusal added to a
+claimed file, or deleted from one, then fails until the number is re-recorded
+in the same change, which is the same "put it in the diff" mechanism check c
+uses for the declared constants. It does not claim the new refusal is probed.
+It claims a reviewer sees that the file grew one, which is exactly what nothing
+said before.
+
+Equality and not a ratchet, deliberately. A refusal DELETED from a claimed file
+is the loss check a exists to notice and it is equally invisible, because the
+entry goes on claiming the other sites in its file. The catalogue was the
+alternative home for these numbers, one per entry, and it was rejected: the
+budget already carries every other recorded value, `--record` already writes
+them in one place, and fifty numbers spread through the catalogue would be
+fifty things to hand-edit rather than one command to re-run.
 
 **b. Gate and hook coverage, in both directions.** Every name in
 `bin/ocelli.sh`'s `GATES` array has an entry or an explicit `delegated`
@@ -90,6 +118,23 @@ from .discover import SCAN_SUFFIXES, Site, discover, sites_collapsed
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 BUDGET = ROOT / "ci" / "guard-probe-budget.json"
+
+# What each recorded key is, written into the budget file itself so a reader
+# who opens it does not have to come here. Declared ONCE, because it was
+# written in `scripts/guard_probe.py` and consulted nowhere else, so adding a
+# key left the note describing the previous set: `--record-budget` reaches it
+# with `setdefault` and the note already existed, so it could never be
+# refreshed. `scripts/guard_census.py --record` writes it unconditionally now.
+BUDGET_NOTE = (
+    "Recorded measurements, not guesses. `wall_clock_seconds` is what the "
+    "harness took on the machine that recorded it. `constants` is the "
+    "declared-constant ratchet, `constants_count` and `gates_declared` are the "
+    "counts that catch one of those being removed rather than changed, "
+    "`entry_sites` is the per-entry refusal count for the catalogue entries "
+    "claiming their file with `\"*\"`, so a refusal added to an already "
+    "claimed file moves a number, `oracle_faults` is the fault-count ratchet "
+    "and `uncovered` is the uncovered-refusal ratchet, all written by "
+    "scripts/guard_census.py --record.")
 
 # The two values `Guard.kind` may take. `guard` is a refusal some gate runs and
 # `not-a-guard` is a file whose refusals no gate runs. Anything else is a typo,
@@ -359,6 +404,62 @@ def covered_by_problems(root: Path | None = None) -> list[str]:
     return problems
 
 
+def catch_all_sites(matches: list[Match]) -> dict[str, int]:
+    """How many refusal sites each `claims=("*",)` entry owns.
+
+    The catch-all is what makes a new refusal in an already-claimed file
+    invisible, so this is the number that has to be recorded. An entry with
+    explicit claims is not here: adding a refusal it does not match makes the
+    site unclaimed, which check a already refuses by name.
+    """
+    return {match.guard.id: len(match.sites) for match in matches
+            if "*" in match.guard.claims}
+
+
+def catch_all_problems(matches: list[Match],
+                       recorded: dict[str, int] | None) -> list[str]:
+    """Check a2. Every catch-all entry's site count, compared for equality."""
+    found = catch_all_sites(matches)
+    if recorded is None:
+        return [
+            f"{BUDGET.relative_to(ROOT)} records no per-entry site count, so "
+            f"a refusal added to a file the catalogue already claims with "
+            f"`\"*\"` cannot be noticed. That is the census's own purpose not "
+            f"applying to its own files: four refusals added to "
+            f"scripts/guards/census.py in the S03 review's fourth pass were "
+            f"watched by nothing and every count here stayed still. Record it "
+            f"with `python3 scripts/guard_census.py --record`."]
+    problems: list[str] = []
+    for guard_id in sorted(set(found) | set(recorded)):
+        was = recorded.get(guard_id)
+        now = found.get(guard_id)
+        if was == now:
+            continue
+        if was is None:
+            problems.append(
+                f"catalogue entry `{guard_id}` claims its file with `\"*\"` "
+                f"and has no recorded site count. Record it in the change that "
+                f"adds the entry, so the number it starts from is in the same "
+                f"diff as the entry.")
+        elif now is None:
+            problems.append(
+                f"`{guard_id}` has a recorded site count and is no longer a "
+                f"catch-all entry in the catalogue. A recorded number nothing "
+                f"reads is not a ratchet.")
+        else:
+            direction = "grew" if now > was else "shrank"
+            problems.append(
+                f"catalogue entry `{guard_id}` {direction} from {was} refusal "
+                f"site(s) to {now}. It claims its file with `\"*\"`, so a "
+                f"refusal added to that file lands in the probed bucket and "
+                f"nothing else here moves: the census's rule that a guard "
+                f"arrives with its test does not otherwise reach a file the "
+                f"catalogue already claims. Add a probe for the new refusal, "
+                f"or declare why it needs none, and re-record in this diff so "
+                f"a reviewer sees the count move.")
+    return problems
+
+
 def oracle_adoption(recorded: int | None) -> tuple[int, list[str]]:
     """Verify the adoption of the oracle's fault catalogue, do not copy it.
 
@@ -552,6 +653,10 @@ def run(profile: str = "floor") -> tuple[int, list[str]]:
             f"guard being widened rather than broken. If a constant was "
             f"retired deliberately, re-record in this diff and say which one "
             f"and why.")
+
+    # a2. The per-entry site count for the catch-all entries, which is what
+    # makes a refusal added to an already-claimed file visible in a diff.
+    problems += catch_all_problems(matches, budget.get("entry_sites"))
 
     # d. The profile rule.
     rows = [(p.id, p.needs, p.profile) for g in GUARDS for p in g.probes]

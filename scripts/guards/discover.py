@@ -163,11 +163,16 @@ def _balanced(text: str, open_at: int) -> str:
 def mask_python_prose(text: str) -> str:
     """Blank Python docstrings and comments, preserving every byte offset.
 
-    The shape table at the top of this module is five markdown rows quoting
-    five refusal shapes. Scanned as code they are five refusal sites, so the
-    census's headline counted prose and deleting the documentation turned the
-    gate red. Masking is by replacement with spaces rather than deletion, so
-    line numbers and the bracket-matching in `_balanced` are unaffected.
+    The shape table at the top of this module is SEVEN markdown rows quoting
+    seven refusal shapes, of which five are detectable when the table is
+    scanned unmasked: `raise SystemExit(` is followed by a backtick where the
+    shape wants a quote, and a bare `exit 1` inside a table cell is not at the
+    start of its line. So the census's headline counted five refusals of prose
+    and deleting the documentation turned the gate red. The earlier count here
+    said five rows and five sites, which happened to name the right number of
+    sites for the wrong reason. Masking is by replacement with spaces rather
+    than deletion, so line numbers and the bracket-matching in `_balanced` are
+    unaffected.
 
     A refusal message is never a triple-quoted literal in this repository and
     never lives in a comment, so nothing real is masked. A file that does not

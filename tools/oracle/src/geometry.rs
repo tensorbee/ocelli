@@ -10,8 +10,10 @@
 //! reasoning generalises.
 //!
 //! What this file derives is the RECTANGLE that scale implies, which is the
-//! region the bias bullet is averaged over and the line between the picture
-//! and the letterbox.
+//! line between the picture and the letterbox and the denominator of
+//! `informativeFraction`. It is not the region the bias bullet is averaged
+//! over: 25.1 names the informative region, which is the subset of this
+//! rectangle that is not clipped to the same display extreme on both sides.
 //!
 //! **There is no float to integer cast here.** `as` on a float truncates
 //! toward zero and saturates silently out of range, and all three cast lints
@@ -157,7 +159,27 @@ impl CanvasExtent {
     /// The alternatives were tried and both are wrong in a way that is
     /// invisible: flooring the offset admits a letterbox column, and ceiling
     /// the far edge admits one on the other side. At 512 rows either is 512
-    /// background pixels inside the region the bias bullet averages over.
+    /// background pixels counted as picture.
+    ///
+    /// **The harm is not to the bias bullet.** Both sides paint the declared
+    /// clear colour in the letterbox, so a wrongly admitted column is black on
+    /// both sides, which is clipped to the same extreme and therefore
+    /// uninformative, and it never reaches the bias denominator at all. The
+    /// two things it does break:
+    ///
+    /// 1. `informativeFraction` is informative pixels over image-rectangle
+    ///    pixels, so an admitted column inflates the denominator alone and
+    ///    pushes the fraction down towards `INFORMATIVE_FRACTION_FLOOR`. The
+    ///    lowest fraction among the views the identity run does not call weak
+    ///    is 0.10074 against a floor of 0.10, so the margin is 0.0007 and 512
+    ///    of 262144 pixels is 0.00195 of the rectangle. Reproduce the fraction
+    ///    from `informativeFraction` in the `compare.json` that
+    ///    `./target/release/ocelli-compare identity` writes.
+    /// 2. The `letterbox-only` qualifier fires only when the image region
+    ///    carries NO difference and the background carries one. A fit error in
+    ///    a column that should have been letterbox then lands inside the image
+    ///    region, the qualifier cannot fire, and a difference in the fit is
+    ///    attributed to the picture and to us.
     ///
     /// The result is clamped to the canvas, because the published scale
     /// carries floating point noise and a frame fitted DOWN into the canvas

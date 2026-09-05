@@ -1048,6 +1048,122 @@ mod detection_tests {
         assert_eq!(choose_candidate(&adapters), Some(1));
     }
 
+    /// The device-type preference order, best first.
+    ///
+    /// This is the order the tie-break inside a candidate class has to apply,
+    /// and it is a strict order rather than a set of preferences: a discrete
+    /// GPU is a better answer than an integrated one, an integrated one than a
+    /// virtualised one, a virtualised one than an adapter that will not say,
+    /// and anything at all than an adapter that has already told us it is a
+    /// rasteriser. Spike gate A7 puts the adapter's reported type second of its
+    /// three signals, "where a fallback adapter identifies itself as one", so
+    /// `DeviceType::Cpu` is last by the adapter's own admission.
+    const RANKED_DEVICE_TYPES: [wgpu::DeviceType; 5] = [
+        wgpu::DeviceType::DiscreteGpu,
+        wgpu::DeviceType::IntegratedGpu,
+        wgpu::DeviceType::VirtualGpu,
+        wgpu::DeviceType::Other,
+        wgpu::DeviceType::Cpu,
+    ];
+
+    /// **Every step of that order, in both list positions.** The
+    /// discrete-beats-integrated step had a test and the four steps below it
+    /// did not, so any reordering of the lower half was invisible.
+    ///
+    /// Both orders are asserted for each pair, because a rank comparison that
+    /// had collapsed into "whichever came first" would satisfy one of them and
+    /// fail the other, and a rank comparison that had collapsed into
+    /// "whichever came last" would do the reverse.
+    ///
+    /// Every adapter here is a B-candidate on the same backend, so the class
+    /// term of the ranking is constant and only the device type varies.
+    #[test]
+    fn the_device_type_preference_is_strict_at_every_step() {
+        for (position, better) in RANKED_DEVICE_TYPES.into_iter().enumerate() {
+            for worse in RANKED_DEVICE_TYPES.into_iter().skip(position + 1) {
+                let good = facts(wgpu::Backend::Vulkan, better, "better", false);
+                let bad = facts(wgpu::Backend::Vulkan, worse, "worse", false);
+                assert_eq!(
+                    choose_candidate(&[good.clone(), bad.clone()]),
+                    Some(0),
+                    "{better:?} listed first lost to {worse:?}"
+                );
+                assert_eq!(
+                    choose_candidate(&[bad, good]),
+                    Some(1),
+                    "{better:?} listed second lost to {worse:?}"
+                );
+            }
+        }
+    }
+
+    /// **A wrong preference is a wrong record and not only a wrong choice.**
+    /// The ranked adapter is the one whose reported limits fill [`Caps`] and
+    /// whose identity fills [`TierEvidence`], so an adapter ranked above the
+    /// one it should be ranked below puts another machine's figures into the
+    /// record that a misdetection is later diagnosed from.
+    #[test]
+    fn the_ranked_adapters_own_limits_are_the_ones_recorded() {
+        let mut virtualised = facts(
+            wgpu::Backend::Vulkan,
+            wgpu::DeviceType::VirtualGpu,
+            "Paravirtual Adapter",
+            false,
+        );
+        virtualised.max_tex_3d = 256;
+        virtualised.max_buffer = 16_777_216;
+        let mut discrete = facts(
+            wgpu::Backend::Vulkan,
+            wgpu::DeviceType::DiscreteGpu,
+            "NVIDIA GeForce RTX 4090",
+            false,
+        );
+        discrete.max_tex_3d = 2048;
+        discrete.max_buffer = 268_435_456;
+
+        let resolved = classify(
+            &signals(vec![virtualised, discrete], None),
+            TierRequest::Auto,
+        );
+        assert_eq!(resolved.caps.max_tex_3d, 2048);
+        assert_eq!(resolved.caps.max_buffer, 268_435_456);
+        assert_eq!(
+            resolved.evidence.candidate.map(|chosen| chosen.name),
+            Some("NVIDIA GeForce RTX 4090".to_owned())
+        );
+    }
+
+    /// **An exact tie is broken by enumeration order, and the earlier adapter
+    /// wins.** Two adapters of the same candidate class and the same device
+    /// type are indistinguishable to the ranking, and the answer still has to
+    /// be one adapter rather than whichever one the platform happened to
+    /// enumerate last. Adapter enumeration order is not a stable fact of a
+    /// machine: it moves with a driver update, with a hotplugged display and
+    /// with a `WGPU_ADAPTER_NAME` in the environment. A resolver that followed
+    /// it would report a different `Caps` on the same machine on two
+    /// consecutive days, and deviation D-07's whole point is that the tier is
+    /// diagnosable after the fact.
+    ///
+    /// The limits differ so the assertion can see WHICH adapter was chosen
+    /// rather than only that some choice was made.
+    #[test]
+    fn an_exact_tie_is_won_by_the_earlier_adapter() {
+        let mut first = discrete_webgpu();
+        first.name = "First Adapter".to_owned();
+        first.max_tex_3d = 4096;
+        let mut second = discrete_webgpu();
+        second.name = "Second Adapter".to_owned();
+        second.max_tex_3d = 8192;
+
+        assert_eq!(choose_candidate(&[first.clone(), second.clone()]), Some(0));
+        let resolved = classify(&signals(vec![first, second], None), TierRequest::Auto);
+        assert_eq!(resolved.caps.max_tex_3d, 4096);
+        assert_eq!(
+            resolved.evidence.candidate.map(|chosen| chosen.name),
+            Some("First Adapter".to_owned())
+        );
+    }
+
     /// `Backend::Noop` renders nothing and stores no texels. It is never a
     /// candidate, whatever else is present.
     #[test]
@@ -1073,6 +1189,109 @@ mod detection_tests {
             false,
         );
         assert_eq!(adapter.candidate_tier(), Some(Tier::B));
+    }
+
+    /// **The boundary between the two GPU tiers, and it is the backend.** HLD
+    /// section 7: "Tier A is WebGPU: compute shaders, storage buffers, 3D
+    /// textures to 2048. Tier B is WebGL2 through wgpu's downlevel profile:
+    /// fragment shaders only, no compute, no storage buffers, a conservative
+    /// 3D-texture floor of 256." Tier A is named by the API that serves it and
+    /// tier B by a different API, so an adapter reached through `Backend::Gl`
+    /// is a B-candidate however capable it is.
+    ///
+    /// That distinction is not theoretical. A native GLES 3.1 driver reports
+    /// `DownlevelFlags::COMPUTE_SHADERS`, and wgpu's GL backend is the same
+    /// backend on the desktop as in a browser. Reading the flag before the
+    /// backend would resolve tier A on it, and section 7's tier A promises
+    /// storage buffers and 3D textures to 2048 that a WebGL2 context cannot
+    /// give. A feature that then assumed them would not fail, it would run
+    /// somewhere else, which is the misdetection deviation D-07 exists for
+    /// arriving from the other direction.
+    ///
+    /// `tests/classify_is_total.rs` cannot cover this and must not be asked
+    /// to. Its `a_candidates` count calls `candidate_tier`, the function under
+    /// test, so on this branch the property is a tautology.
+    #[test]
+    fn a_gl_adapter_reporting_compute_shaders_is_still_a_b_candidate() {
+        let adapter = facts(
+            wgpu::Backend::Gl,
+            wgpu::DeviceType::DiscreteGpu,
+            "Mesa Intel(R) Arc(tm) Graphics",
+            true,
+        );
+        assert_eq!(adapter.candidate_tier(), Some(Tier::B));
+
+        let resolved = classify(&signals(vec![adapter], None), TierRequest::Auto);
+        assert_eq!(resolved.caps.tier, Tier::B);
+        assert_eq!(resolved.evidence.candidate_tier, Some(Tier::B));
+        // Section 7 puts compute in tier A only, so an adapter placed in tier B
+        // reports no compute whatever its own downlevel flags said.
+        assert!(!resolved.caps.compute);
+    }
+
+    // -----------------------------------------------------------------------
+    // The adapter-type signal.
+    // -----------------------------------------------------------------------
+
+    /// **Every variant, because the two that abstain are the load-bearing
+    /// ones.** Spike gate A7 gives the adapter's reported type as a signal
+    /// "where a fallback adapter identifies itself as one", which licenses
+    /// `Software` on `DeviceType::Cpu` and nothing else. `DiscreteGpu` and
+    /// `IntegratedGpu` are the adapter naming real hardware. `VirtualGpu` and
+    /// `Other` are neither claim: a paravirtual adapter in a hypervisor may be
+    /// backed by a passed-through GPU or by a rasteriser on the host, and the
+    /// type does not say which. A7's own rule is that no signal is sufficient
+    /// alone, so a signal picking a side it has no evidence for is worse than
+    /// one that abstains.
+    #[test]
+    fn the_adapter_type_signal_speaks_only_where_a7_licenses_it() {
+        let verdict = |device_type| {
+            facts(wgpu::Backend::Gl, device_type, "Clean Name", false).device_type_verdict()
+        };
+        assert_eq!(
+            verdict(wgpu::DeviceType::Cpu),
+            SoftwareVerdict::Software,
+            "an adapter identifying itself as a rasteriser was not believed"
+        );
+        assert_eq!(
+            verdict(wgpu::DeviceType::DiscreteGpu),
+            SoftwareVerdict::Hardware
+        );
+        assert_eq!(
+            verdict(wgpu::DeviceType::IntegratedGpu),
+            SoftwareVerdict::Hardware
+        );
+        assert_eq!(
+            verdict(wgpu::DeviceType::VirtualGpu),
+            SoftwareVerdict::Unknown,
+            "a virtualised adapter was read as a claim about the hardware \
+             behind it"
+        );
+        assert_eq!(verdict(wgpu::DeviceType::Other), SoftwareVerdict::Unknown);
+    }
+
+    /// **What `VirtualGpu` abstaining actually buys.** A rasteriser inside a
+    /// hypervisor is the estate deviation D-07 was raised for, and wgpu's GLES
+    /// backend reports `VirtualGpu` there as readily as `Other`.
+    /// [`SOFTWARE_RENDERER_STRINGS`] states its residue in those terms, so the
+    /// claim and the coverage have to agree.
+    ///
+    /// If the adapter type said `Hardware` on a virtualised adapter it would
+    /// take step 6 before the renderer string ever got its turn, and this
+    /// llvmpipe adapter would keep tier B on the strength of a device-type
+    /// claim that carries no measurement at all.
+    #[test]
+    fn a_virtual_gpu_does_not_out_rank_a_software_renderer_string() {
+        let adapter = facts(
+            wgpu::Backend::Gl,
+            wgpu::DeviceType::VirtualGpu,
+            "llvmpipe (LLVM 15.0.7, 256 bits)",
+            false,
+        );
+        let resolved = classify(&signals(vec![adapter], None), TierRequest::Auto);
+        assert_eq!(resolved.caps.tier, Tier::Cpu);
+        assert_eq!(resolved.evidence.decided_by, DecidedBy::RendererString);
+        assert_eq!(resolved.evidence.adapter_type, SoftwareVerdict::Unknown);
     }
 
     // -----------------------------------------------------------------------
@@ -1147,19 +1366,58 @@ mod detection_tests {
     /// over `SOFTWARE_RENDERER_STRINGS`, deliberately: a loop over the list
     /// passes vacuously when the list is emptied, and emptying the list is
     /// exactly the mutation that has to go red.
+    ///
+    /// **And each row stands for exactly one entry**, which is what makes the
+    /// claim true entry by entry rather than in aggregate. The `gallium` row
+    /// used to read "Gallium 0.4 on llvmpipe", which matches `llvmpipe` on its
+    /// own, so removing `gallium` from the list left this test green and the
+    /// coverage table in `docs/lld/tier-resolution.md` claiming otherwise. The
+    /// paired entry and the single-match assertion below are the fix, and they
+    /// hold for a row added later as well as for these seven.
     #[test]
     fn each_a7_software_renderer_string_resolves_cpu() {
         let renderers = [
-            "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
-            "llvmpipe (LLVM 15.0.7, 256 bits)",
-            "softpipe",
-            "Microsoft Basic Render Driver",
-            "Gallium 0.4 on llvmpipe",
-            "Mesa OffScreen",
-            "ANGLE (Software Adapter, Direct3D11 vs_5_0 ps_5_0)",
+            (
+                "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+                "swiftshader",
+            ),
+            ("llvmpipe (LLVM 15.0.7, 256 bits)", "llvmpipe"),
+            ("softpipe", "softpipe"),
+            (
+                "Microsoft Basic Render Driver",
+                "microsoft basic render driver",
+            ),
+            ("Gallium 0.4 on AMD RADV POLARIS10", "gallium"),
+            ("Mesa OffScreen", "mesa offscreen"),
+            (
+                "ANGLE (Software Adapter, Direct3D11 vs_5_0 ps_5_0)",
+                "angle (software",
+            ),
         ];
-        for renderer in renderers {
+        // One row per entry, in the list's own order. An entry added to A7's
+        // list with no row here goes red rather than being covered by
+        // somebody else's string.
+        assert_eq!(
+            renderers.map(|(_, entry)| entry),
+            SOFTWARE_RENDERER_STRINGS,
+            "the rows and A7's list have drifted apart"
+        );
+
+        for (renderer, entry) in renderers {
+            let lowered = renderer.to_lowercase();
+            let matched: Vec<&str> = SOFTWARE_RENDERER_STRINGS
+                .into_iter()
+                .filter(|needle| lowered.contains(*needle))
+                .collect();
+            assert_eq!(
+                matched,
+                vec![entry],
+                "{renderer} does not stand for {entry} alone, so dropping \
+                 {entry} would leave this row green"
+            );
+
             let adapter = facts(wgpu::Backend::Gl, wgpu::DeviceType::Other, renderer, false);
+            assert_eq!(adapter.renderer_string_match(), Some(entry));
             let resolved = classify(&signals(vec![adapter], None), TierRequest::Auto);
             assert_eq!(
                 resolved.caps.tier,
@@ -1379,6 +1637,75 @@ mod detection_tests {
             resolved.evidence.override_outcome,
             OverrideOutcome::RefusedUnrecognised
         );
+    }
+
+    /// **The accepted set is exactly four words, and nothing near them.**
+    ///
+    /// The two tests above show that each of the four words is accepted and
+    /// that two chosen strings are not. Neither of them notices an alias being
+    /// ADDED, and an alias is the shape this parser fails in: `OCELLI_TIER=c`
+    /// quietly meaning tier C on one deployment and being refused on the next
+    /// is the silent ignore that A7's "always allow an operator override" and
+    /// [`TierRequest::Unrecognised`] exist together to prevent. The value
+    /// arrives from an environment variable natively and from a query
+    /// parameter in a browser, so somebody will type the short form.
+    ///
+    /// So the set is pinned rather than sampled: every string of at most three
+    /// characters over the alphabet an override could plausibly be spelled in,
+    /// plus the four words themselves and a handful of longer neighbours. The
+    /// four words and the empty string are accepted and every one of the
+    /// remaining fifty-six thousand is [`TierRequest::Unrecognised`].
+    #[test]
+    fn the_override_parser_accepts_exactly_its_four_words() {
+        const RECOGNISED: [&str; 5] = ["", "a", "b", "cpu", "auto"];
+        const ALPHABET: &str = "abcdefghijklmnopqrstuvwxyz0123456789-_";
+        /// Longer than the exhaustive sweep reaches, and each one a plausible
+        /// spelling somebody would expect to work.
+        const NEIGHBOURS: [&str; 8] = [
+            "auto1", "autos", "acpu", "cpu1", "cpus", "tier-a", "tier-c", "c-p-u",
+        ];
+
+        let mut candidates: Vec<String> = Vec::new();
+        candidates.push(String::new());
+        for first in ALPHABET.chars() {
+            candidates.push(first.to_string());
+            for second in ALPHABET.chars() {
+                candidates.push(format!("{first}{second}"));
+                for third in ALPHABET.chars() {
+                    candidates.push(format!("{first}{second}{third}"));
+                }
+            }
+        }
+        for extra in RECOGNISED.into_iter().chain(NEIGHBOURS) {
+            candidates.push(extra.to_owned());
+        }
+
+        for candidate in &candidates {
+            let parsed = Tier::from_override_str(candidate);
+            let expected = RECOGNISED.contains(&candidate.as_str());
+            assert_eq!(
+                parsed != TierRequest::Unrecognised,
+                expected,
+                "{candidate:?} parsed as {parsed:?}"
+            );
+        }
+
+        // And the four words mean what they say, so pinning the SIZE of the
+        // set cannot be satisfied by swapping two of its members.
+        assert_eq!(
+            Tier::from_override_str("a"),
+            TierRequest::Requested(Tier::A)
+        );
+        assert_eq!(
+            Tier::from_override_str("b"),
+            TierRequest::Requested(Tier::B)
+        );
+        assert_eq!(
+            Tier::from_override_str("cpu"),
+            TierRequest::Requested(Tier::Cpu)
+        );
+        assert_eq!(Tier::from_override_str("auto"), TierRequest::Auto);
+        assert_eq!(Tier::from_override_str(""), TierRequest::Auto);
     }
 
     #[test]

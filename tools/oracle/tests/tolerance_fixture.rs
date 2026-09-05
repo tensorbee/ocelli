@@ -24,8 +24,10 @@
 //! because a pixel clipped to the same extreme on both sides cannot express a
 //! divergence and counting it in the denominator hides one. This header quoted
 //! the superseded wording until the fourth pass. The two regions coincide in
-//! the fixtures below, which is stated at `verdict` and is why nothing here
-//! measured the difference.
+//! the fixtures below, which is stated at `verdict`, so nothing here can
+//! measure the difference. The test that does is
+//! `the_bias_bound_is_fed_the_informative_region_and_not_the_rectangle` in
+//! `tools/oracle/src/attribution.rs`.
 //!
 //! "1 LSB" is one 8-bit display code. The reference emits RGBA8 canvas frames
 //! and nothing else, so the 16-bit reading is not evaluable against this
@@ -77,9 +79,19 @@ fn pair(deltas: &[(usize, i16)]) -> Result<(Frame, Frame), Box<dyn Error>> {
 /// and every image pixel is informative. The full-frame, image-rectangle and
 /// informative statistics are therefore the same numbers, which is what makes
 /// each boundary below a statement about the BOUND rather than about the
-/// region. Which region the comparator picks is measured over the corpus by
-/// `ocelli-compare census` instead, and it is not a question a hand-built
-/// frame can answer.
+/// region.
+///
+/// **Which region the comparator picks is therefore not decided here, and
+/// until the sprint review's fifth pass it was not decided anywhere a
+/// `cargo test` could reach.** It is decided by
+/// `the_bias_bound_is_fed_the_informative_region_and_not_the_rectangle` in
+/// `tools/oracle/src/attribution.rs`, which builds a frame whose two regions
+/// disagree about the verdict. Over the corpus it is measured by
+/// `ocelli-compare census`.
+///
+/// The bound is fed the INFORMATIVE channel below, which is the region
+/// `build_statistics` feeds it, so this file asserts a bound over the region
+/// production evaluates rather than one beside it.
 fn verdict(
     deltas: &[(usize, i16)],
 ) -> Result<(tolerance::MonochromeVerdict, tolerance::BiasVerdict), Box<dyn Error>> {
@@ -90,13 +102,13 @@ fn verdict(
         .full
         .channel(0)
         .ok_or("no channel 0 in the full-frame statistics")?;
-    let image: &ChannelStats = diff
-        .image
+    let informative: &ChannelStats = diff
+        .informative
         .channel(0)
-        .ok_or("no channel 0 in the image statistics")?;
+        .ok_or("no channel 0 in the informative statistics")?;
     Ok((
         tolerance::monochrome_predicate(full)?,
-        tolerance::bias_bound(image)?,
+        tolerance::bias_bound(informative)?,
     ))
 }
 
@@ -259,7 +271,7 @@ fn a_negative_bias_fails_at_the_same_magnitude() -> Outcome {
 #[test]
 fn the_constants_match_the_quoted_section_25_1_text() {
     assert!(
-        tolerance::SECTION_25_1_MONOCHROME.contains("<= 1 LSB on at least 99.9% of pixels"),
+        tolerance::SECTION_25_1_MONOCHROME.contains("≤ 1 LSB on at least 99.9% of pixels"),
         "the quoted rule must carry the fraction the constant claims"
     );
     assert!(

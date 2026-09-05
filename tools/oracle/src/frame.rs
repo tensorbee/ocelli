@@ -363,7 +363,9 @@ pub struct FrameDifference {
     /// Every pixel of the frame. This is the region 25.1's monochrome rule is
     /// evaluated over: "of pixels", excluding nothing.
     pub full: RegionStats,
-    /// The image rectangle. This is the region 25.1's bias bullet names.
+    /// The image rectangle. This is NOT the region 25.1's bias bullet names,
+    /// which is `informative` below. It is the rectangle that bounds it, and
+    /// it is the denominator of `informative_fraction`.
     pub image: RegionStats,
     /// The letterbox. Both sides paint the declared clear colour here, so a
     /// difference in this region is a difference in the fit and not in the

@@ -147,11 +147,20 @@ pub enum Effect {
     /// LINEAR_EXACT sits `u / w` below LINEAR before the renderer quantises,
     /// where `u` is the LINEAR display value and `w` the window width, so a
     /// pixel drops one display code with probability `u / w` and the rest do
-    /// not. An accumulator over the image rectangle reproduces that exactly
-    /// and deterministically. A pixel at either display extreme is excluded,
-    /// because PS3.3's two clamp conditions decide what can move there and
-    /// neither extreme can. `apply_to_frame` carries the derivation at the
-    /// site, and it is the only statement of this arithmetic in the file.
+    /// not, and at `u > w` it drops more than one. An accumulator over the
+    /// image rectangle reproduces that exactly and deterministically.
+    ///
+    /// **Both display extremes are excluded, and the two exclusions are not
+    /// equally tight.** PS3.3's two lower clamp conditions coincide, so a
+    /// pixel at 0 cannot move at any width and excluding it is exact. The
+    /// upper clamps differ by a whole unit of `x`, so a pixel at 255 cannot
+    /// move at `w >= 510` and CAN move below it, over a band of
+    /// `1 - w / 510` input units below LINEAR's upper clamp. An 8-bit frame
+    /// does not carry the stored value behind a 255, so excluding the whole
+    /// population is the conservative reading there rather than a statement
+    /// that nothing could have moved. `apply_to_frame` carries the derivation
+    /// at the site, and it is the only statement of this arithmetic in the
+    /// file.
     ///
     /// **This exists because `AddDelta` could not represent the real thing.**
     /// A flat delta over a declared fraction of the image is a caricature: it
@@ -251,7 +260,8 @@ pub const CATALOGUE: &[Mutation] = &[
         why: "The real thing rather than a caricature of it. LINEAR_EXACT sits \
               `u / w` below LINEAR before the renderer quantises, so a pixel \
               drops one code with probability `u / w` and the rest do not, \
-              which an accumulator reproduces exactly and deterministically. `plus-one-on-two-fifths-of-the-image` moves 40 \
+              which an accumulator reproduces exactly and deterministically. \
+              `plus-one-on-two-fifths-of-the-image` moves 40 \
               per cent of the image by a whole code and clears the bias bound \
               several times over, which proves the bound catches THAT and says \
               nothing about the divergence HLD 18.3 is about. This one is the \
@@ -717,10 +727,13 @@ fn set_sidecar(
 ///
 /// # Errors
 /// When the frame cannot carry the declared damage, for instance when the
-/// image rectangle holds fewer unclipped pixels than the mutation needs. That
-/// is an error rather than a smaller mutation, because a catalogue entry that
-/// quietly did less than it declared would report a guard as watched when it
-/// was not.
+/// image rectangle holds fewer unclipped pixels than the mutation needs, or
+/// when it carries under one drop's worth of the LINEAR to LINEAR_EXACT
+/// divergence. And when the damage delivered is not the damage declared: the
+/// swap counts its drops and refuses if the total is not `floor(sum(u) / w)`.
+/// All of these are errors rather than smaller mutations, because a catalogue
+/// entry that quietly did less than it declared would report a guard as
+/// watched when it was not.
 pub fn apply_to_frame(
     mutation: &Mutation,
     frame: &mut Frame,
@@ -809,29 +822,66 @@ pub fn apply_to_frame(
             // lower edge `x = c + w/2 - 1` is `(1 - 1/w) * 255 = 255 - 255/w`.
             // Rounded to eight bits that is still 255 unless `255 / w > 0.5`,
             // so **at `w >= 510` a pixel at 255 cannot move for any stored
-            // value whatever**, and below 510 it can move only for the part of
-            // a single unit of `x` out of `w`.
+            // value whatever**. Below 510 it CAN move, and over exactly one
+            // band: LINEAR_EXACT rounds under 255 when
+            // `((x - c) / w + 0.5) * 255 < 254.5`, which is
+            // `x < c + w/2 - w/510`, so the movable band runs from
+            // `c + w/2 - 1` to `c + w/2 - w/510` and is `1 - w/510` input
+            // units wide. It is empty at `w = 510` and widens as the window
+            // narrows.
             //
             // The accumulator's drop rate is `u / w`, which is HIGHEST at
-            // `u = 255`. That is exactly backwards: 255 is the display value
-            // that can move least. Excluding it is also what stops the
-            // mutation perturbing the informative region, since a pixel that
-            // stays at an extreme on both sides stays uninformative, so the
-            // measured bias keeps the numerator and the denominator the
-            // divergence actually has.
+            // `u = 255`, while 255 is the display value whose stored values
+            // can move over the NARROWEST band and, at or above 510, over no
+            // band at all. Excluding it is also what stops the mutation
+            // perturbing the informative region, since a pixel that stays at
+            // an extreme on both sides stays uninformative, so the measured
+            // bias keeps the numerator and the denominator the divergence
+            // actually has.
             //
             // An 8-bit frame does not carry the stored value behind a 255, so
-            // there is no way to tell a pixel just inside the band from one
-            // far outside it. Excluding the whole population is the
-            // conservative reading and it is the same reading already taken at
-            // 0.
+            // there is no way to tell a pixel inside the band from one outside
+            // it. Excluding the whole population is exact at `w >= 510` and
+            // the conservative reading below it, where it under-damages the
+            // frame by whatever share of the 255s fell in a band of
+            // `1 - w/510` input units. The exclusion at 0 is exact at every
+            // width, because the lower clamps coincide.
             //
-            // **The residue is discarded, and that is stated rather than
-            // left to be noticed.** When the scan ends the accumulator holds
-            // `sum(u) mod w`, which is less than `w` by construction, and no
-            // drop is taken for it. So the mutation applies exactly
-            // `floor(sum(u) / w)` drops and never `round`, and the most a
-            // frame can lose to the residue is one drop.
+            // **The residue is discarded, and the bound on it is now
+            // enforced rather than asserted.** Each pixel takes
+            // `accumulator / w` drops and keeps `accumulator % w`, so the
+            // accumulator is below `w` after every pixel BY CONSTRUCTION, and
+            // the scan applies exactly `floor(sum(u) / w)` drops and never
+            // `round`. The most a frame loses to the residue is under one
+            // drop, and `drops_applied` is compared against `sum(u) / w`
+            // below so the delivered quantity is the declared one rather than
+            // a quantity nobody counted.
+            //
+            // **A single `if` was wrong below `w = 255`, and the sprint
+            // review's fifth pass measured it.** One subtraction per pixel
+            // leaves the accumulator at or above `w` whenever `u >= 2w`, and
+            // `u` runs to 254, so `acc < w` held only while every
+            // participating `u` was smaller than `w`. Frame
+            // `[200, 200, 200]` at `w = 100` gave `[199, 199, 199]`: three
+            // drops where `floor(600 / 100)` is six, and a residue of 300.
+            //
+            // **A drop of more than one code is the divergence and not an
+            // artefact of the accumulator.** `LINEAR(x) - LINEAR_EXACT(x)` is
+            // `u / w` display codes exactly, so at `w = 100` a pixel at 200
+            // diverges by two whole codes and a mutation applying one
+            // under-damages the frame. Refusing narrow windows instead would
+            // give the catalogue nothing to say exactly where the divergence
+            // is largest, so the loop is corrected rather than the domain
+            // narrowed. The corpus's narrowest window today is 256, which is
+            // why nothing measured this, and a CT brain window of 80 or any
+            // MR window below 255 reaches it.
+            //
+            // **The per-pixel drop cannot take a pixel below zero.** The
+            // accumulator is under `w` before the add, so
+            // `drops <= floor((w - 1 + u) / w) = floor(1 + (u - 1) / w)`,
+            // which for `w >= 1` is at most `1 + (u - 1) = u`. A participating
+            // `u` is at least 1, so `grey - drops` is never negative and the
+            // `saturating_sub` below never saturates.
             let Some(window_width) = window_width.filter(|w| *w > 0) else {
                 return Err(MutationError::Apply(
                     mutation.name,
@@ -842,7 +892,8 @@ pub fn apply_to_frame(
             };
             let w = u64::from(window_width);
             let mut accumulator = 0_u64;
-            let mut moved = 0_u64;
+            let mut participating_sum = 0_u64;
+            let mut drops_applied = 0_u64;
             for y in image.y0..image.y0.saturating_add(image.height) {
                 for x in image.x0..image.x0.saturating_add(image.width) {
                     let pixel = frame.pixel(x, y)?;
@@ -850,24 +901,44 @@ pub fn apply_to_frame(
                     if *grey == 0 || *grey == u8::MAX {
                         continue;
                     }
+                    participating_sum = participating_sum.saturating_add(u64::from(*grey));
                     accumulator = accumulator.saturating_add(u64::from(*grey));
-                    if accumulator >= w {
-                        accumulator -= w;
-                        let byte = grey.saturating_sub(1);
+                    let drops = accumulator / w;
+                    accumulator %= w;
+                    if drops > 0 {
+                        let byte = grey.saturating_sub(u8::try_from(drops).unwrap_or(u8::MAX));
                         frame.set_pixel(x, y, [byte, byte, byte, u8::MAX])?;
-                        moved = moved.saturating_add(1);
+                        drops_applied = drops_applied.saturating_add(drops);
                     }
                 }
             }
-            if moved == 0 {
+            let declared = participating_sum / w;
+            if drops_applied == 0 {
                 return Err(MutationError::Apply(
                     mutation.name,
                     format!(
                         "the swap moved no pixel at window width {window_width}. \
                          The display values in the image rectangle that are \
-                         neither 0 nor 255 sum to less than {window_width}, so \
-                         there is under one drop's worth of divergence to show \
-                         rather than a defect here"
+                         neither 0 nor 255 sum to {participating_sum}, which is \
+                         less than {window_width}, so there is under one drop's \
+                         worth of divergence to show rather than a defect here"
+                    ),
+                ));
+            }
+            // **The delivered quantity, checked against the declared one.**
+            // Until the fifth pass the only thing asked of the scan was that
+            // it moved SOMETHING, so one drop on a frame owing 262144 of them
+            // passed. The catalogue declares `floor(sum(u) / w)` drops, so
+            // that is what is counted and compared.
+            if drops_applied != declared {
+                return Err(MutationError::Apply(
+                    mutation.name,
+                    format!(
+                        "the swap applied {drops_applied} drops at window width \
+                         {window_width} and the display values it accumulated \
+                         sum to {participating_sum}, which declares \
+                         {declared}. The accumulator and the quantity this \
+                         mutation claims to apply have parted company"
                     ),
                 ));
             }
@@ -1026,6 +1097,64 @@ mod tests {
             "the refusal must say what was measured: {message}"
         );
         assert!(!message.contains("black"), "and must not infer: {message}");
+        Ok(())
+    }
+
+    /// **The narrow-window case, which is DEFECT 1 of the sprint review's
+    /// fifth pass.** The accumulator took one drop per pixel, so its residue
+    /// was bounded by `w` only while every participating `u` was smaller than
+    /// `w`. `u` runs to 254, so any window under 255 broke that, and the
+    /// doc comment claimed the bound held "by construction".
+    ///
+    /// Hand-computed at `w = 100` on `[200, 200, 200]`, per pixel:
+    ///
+    /// | pixel | u | accumulator after add | drops | residue | result |
+    /// |-------|---|-----------------------|-------|---------|--------|
+    /// | 0 | 200 | 200 | **2** | 0 | 198 |
+    /// | 1 | 200 | 200 | **2** | 0 | 198 |
+    /// | 2 | 200 | 200 | **2** | 0 | 198 |
+    ///
+    /// Six drops, and `floor(sum(u) / w) = floor(600 / 100) = 6` confirms the
+    /// count. Two codes per pixel is the divergence itself and not an
+    /// artefact: `LINEAR(x) - LINEAR_EXACT(x)` is `u / w` display codes, which
+    /// is `200 / 100 = 2` here.
+    ///
+    /// Under the single `if` this replaces the frame came back
+    /// `[199, 199, 199]`: three drops instead of six, and a residue of 300
+    /// left in an accumulator the comment said could not exceed 100.
+    #[test]
+    fn a_window_narrower_than_the_display_range_takes_every_drop_it_owes() -> Outcome {
+        let swap = the_swap()?;
+        let mut frame = Frame::from_monochrome(3, 1, &[200, 200, 200])?;
+        apply_to_frame(swap, &mut frame, &Rect::full(3, 1), Some(100))?;
+        assert_eq!(
+            frame,
+            Frame::from_monochrome(3, 1, &[198, 198, 198])?,
+            "floor(600 / 100) is six drops, two on each pixel"
+        );
+        Ok(())
+    }
+
+    /// The same defect one step further in, where a single pixel owes more
+    /// drops than the residue of the pixels before it.
+    ///
+    /// `[254, 3, 3]` at `w = 5`, hand-computed:
+    ///
+    /// | pixel | u | accumulator after add | drops | residue | result |
+    /// |-------|---|-----------------------|-------|---------|--------|
+    /// | 0 | 254 | 254 | **50** | 4 | 204 |
+    /// | 1 | 3 | 7 | **1** | 2 | 2 |
+    /// | 2 | 3 | 5 | **1** | 0 | 2 |
+    ///
+    /// 52 drops, and `floor(260 / 5) = 52`. The first pixel alone owes fifty,
+    /// which no per-pixel `if` can deliver, and the largest drop a pixel can
+    /// owe is its own value, so 204 is nowhere near the floor of zero.
+    #[test]
+    fn one_pixel_can_owe_many_drops_and_takes_them_all() -> Outcome {
+        let swap = the_swap()?;
+        let mut frame = Frame::from_monochrome(3, 1, &[254, 3, 3])?;
+        apply_to_frame(swap, &mut frame, &Rect::full(3, 1), Some(5))?;
+        assert_eq!(frame, Frame::from_monochrome(3, 1, &[204, 2, 2])?);
         Ok(())
     }
 

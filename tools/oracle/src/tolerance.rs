@@ -17,16 +17,28 @@
 
 use crate::frame::{ChannelStats, StatsError};
 
-/// 25.1's first bullet, verbatim except for the two normalisations this
-/// repository's prose checker requires outside `docs/hld/`: the source's
-/// prose semicolon is written as a comma and its `≤` as `<=`. No word is
-/// changed.
+/// 25.1's first bullet, verbatim. Every character, the `≤` and the prose
+/// semicolon included.
+///
+/// **They were written as `<=` and `,` until the sprint review's fifth pass,
+/// on the stated grounds that this repository's prose checker required it
+/// outside `docs/hld/`.** It does not.
+/// `scripts/prose_check.py`'s `INCLUDE_PREFIXES` and `INCLUDE_EXACT` cover
+/// `.claude/`, `docs/sprints/`, `docs/lld/`, `docs/runbooks/`,
+/// `docs/spikes/` and a named list of root markdown, and no Rust source is in
+/// scope for any gate. Reproduce with
+/// `python3 -c "import sys; sys.path.insert(0, 'scripts'); import
+/// prose_check; print(prose_check.in_scope('tools/oracle/src/tolerance.rs'))"`,
+/// which prints `False`. The substitution bought nothing and cost the
+/// quotation check its teeth, because it had to be applied to the
+/// specification side as well and a `.replace(';', ",")` over the whole file
+/// weakens every comparison in it.
 pub const SECTION_25_1_MONOCHROME: &str = "Monochrome 16-bit (CT, MR, CR, DR): \
-maximum absolute difference <= 1 LSB on at least 99.9% of pixels, zero pixels \
+maximum absolute difference ≤ 1 LSB on at least 99.9% of pixels; zero pixels \
 differing by more than 2.";
 
 /// 25.1's bias bullet, added in S03 by operator decision through F-011's
-/// design plan, transcribed under the same two normalisations.
+/// design plan. Verbatim, like the rest.
 pub const SECTION_25_1_BIAS: &str = "Systematic bias, monochrome: signed mean \
 difference over the informative region within 0.1 of one display code, \
 evaluated only where input identity, declared parameters and geometry already \
@@ -39,7 +51,7 @@ conversion legitimately differ.";
 
 /// 25.1's geometry bullet.
 pub const SECTION_25_1_GEOMETRY: &str = "Geometry: world coordinates within \
-1e-6 mm, canvas coordinates within a quarter pixel.";
+1e-6 mm; canvas coordinates within a quarter pixel.";
 
 /// "on at least 99.9% of pixels". At least, so the comparison is `>=`.
 pub const MONOCHROME_WITHIN_ONE_LSB_FRACTION: f64 = 0.999;
@@ -73,8 +85,16 @@ pub const MONOCHROME_MAX_ABS_DIFF: u8 = 2;
 /// is one pixel's divergence and not an average over any region. What the
 /// oracle measures over a region is `mean(u) / w`, and on this corpus's
 /// synthetic soft-tissue rows, whose content is spread across the window, that
-/// lands within a thousandth of 0.32 for exactly that reason. On the real
-/// soft-tissue CT rows it runs from 0.269 to 0.284.
+/// lands close to 0.32 for exactly that reason. **Close, and not within a
+/// thousandth, which is what this said until the sprint review's fifth pass.**
+/// Twenty-two of the twenty-three synthetic rows at `windowWidth` 400 measure
+/// between -0.3193 and -0.3200, so those are within 0.0007 of 0.32.
+/// `synthetic/ct_multiframe_perframe` is -0.3185, which is 0.0015 away and
+/// over the claimed bound. On the real soft-tissue CT rows it runs from -0.269
+/// to -0.284.
+///
+/// The signs are the measurement's own. The swap makes the candidate darker,
+/// so every bias it produces is negative, and 25.1's bound is two-sided.
 ///
 /// So 0.1 sits about three times below what the swap actually produces on a
 /// soft-tissue row and far above the zero expected when two implementations
@@ -273,6 +293,44 @@ pub fn bias_bound(region: &ChannelStats) -> Result<BiasVerdict, ToleranceError> 
 
 #[cfg(test)]
 mod tests {
+    /// Section 25.1 of `docs/hld/22-testing-and-tolerance.md`, from its own
+    /// heading to the next heading of any level or to the end of the file.
+    ///
+    /// The empty string when the heading is absent, which the caller asserts
+    /// against rather than reading as a vacuous pass.
+    fn section_25_1(hld: &str) -> &str {
+        let heading = "### 25.1 ";
+        let Some(start) = hld.find(heading) else {
+            return "";
+        };
+        let body = hld.get(start..).unwrap_or_default();
+        let after_heading = body.get(heading.len()..).unwrap_or_default();
+        match after_heading.find("\n#") {
+            Some(end) => body.get(..heading.len() + end).unwrap_or_default(),
+            None => body,
+        }
+    }
+
+    /// The slice really is the section and really does stop at its end. A
+    /// helper that silently returned the whole file would restore exactly the
+    /// weakness this replaced.
+    #[test]
+    fn the_section_slice_is_the_section() {
+        let hld = include_str!("../../../docs/hld/22-testing-and-tolerance.md");
+        let section = section_25_1(hld);
+        assert!(section.starts_with("### 25.1 "));
+        assert!(section.len() < hld.len(), "it must not be the whole file");
+        assert!(
+            section.contains("Tuning tolerance per failure"),
+            "the section's own opening line"
+        );
+        assert!(
+            !section.contains("## 25. Testing"),
+            "the parent heading is above 25.1 and must not be inside the slice"
+        );
+        assert_eq!(section_25_1("nothing here"), "");
+    }
+
     /// **The transcribed bullets are compared against the specification.**
     ///
     /// They are presented as verbatim quotations of HLD 25.1 and until the
@@ -288,25 +346,34 @@ mod tests {
     /// **All four bullets, and until the fourth pass it was two.** The loop
     /// covered the bias and colour bullets only, and the reason was not
     /// declared anywhere: the monochrome and geometry bullets each carry a
-    /// prose semicolon and the monochrome one a `≤`, both of which this
-    /// repository's voice rules make the constants write as `,` and `<=`
-    /// outside `docs/hld/`. The normalisation was applied to the constant and
-    /// not to the specification string being searched, so those two could
-    /// never match and were quietly dropped instead of failing. The two
-    /// substitutions are now applied to the SPEC side as well, which is the
-    /// only place they belong, and the loop covers what the constants claim.
+    /// prose semicolon and the monochrome one a `≤`, which the constants used
+    /// to write as `,` and `<=`. The fourth pass added the missing two by
+    /// undoing that substitution on the SPECIFICATION side, which made the
+    /// check weaker rather than wider: `.replace(';', ",")` over the whole
+    /// file means a bullet whose semicolon had become a comma still matched.
+    ///
+    /// **The fifth pass deleted both substitutions and the reason for them.**
+    /// They were justified by this repository's prose checker, which does not
+    /// cover Rust source at all, so nothing ever required them. The constants
+    /// now carry `≤` and `;` and the comparison is byte for byte after
+    /// whitespace collapse.
+    ///
+    /// **And the search is confined to section 25.1.** It used to run over the
+    /// whole of `22-testing-and-tolerance.md`, so a bullet that moved out of
+    /// the tolerance section into the prose above or below it would still have
+    /// matched, and the constant would have gone on claiming to quote 25.1.
     #[test]
     fn the_transcribed_bullets_match_the_specification() {
         let hld = include_str!("../../../docs/hld/22-testing-and-tolerance.md");
-        // The two normalisations the constants declare, undone on the
-        // specification rather than on the quotation, so a real difference in
-        // wording still fails.
-        let spec: String = hld
-            .replace('\u{2264}', "<=")
-            .replace(';', ",")
+        let spec: String = section_25_1(hld)
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
+        assert!(
+            spec.contains("Tolerance policy"),
+            "section 25.1 was not found in the HLD file, so the loop below \
+             would be searching an empty string and reporting success"
+        );
         for (label, quoted) in [
             (
                 "Monochrome 16-bit (CT, MR, CR, DR)",

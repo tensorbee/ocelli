@@ -20,8 +20,13 @@ not a pass. A probe builder that silently stops mutating anything therefore
 turns this red rather than green. The message is the one
 `tools/oracle/tests/faults.mjs` already uses.
 
-**The mandatory control.** Every invoke is also run against the UNMUTATED
-sandbox and must exit 0. That is precisely the thing whose absence made F-010's
+**The mandatory control.** Every distinct CONTROL is run against the UNMUTATED
+sandbox and must exit with the status its probe declares, which is 0 for all
+but two of them. `split_hld` and `corpus-tests` have no healthy state a sandbox
+can build, so their control is the DIFFERENT refusal a healthy repository
+gives, declared as `control_status` and `control_expect`, and this sentence
+said "every invoke must exit 0" while the code beside it read
+`probe.control_status`. It is the thing whose absence made F-010's
 round 12 worthless: its harness was broken, so every "all refusals red" result
 had a red baseline and proved nothing. The control does two more jobs. It
 proves the sandbox is a faithful copy, because a guard that refuses an
@@ -61,7 +66,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from guards import sandbox as sb  # noqa: E402
 from guards.catalogue import DEFECTS, GUARDS, Probe  # noqa: E402
-from guards.census import BUDGET, ROOT, load_budget  # noqa: E402
+from guards.census import (BUDGET, BUDGET_NOTE, ROOT,  # noqa: E402
+                           load_budget)
 
 RED = "\033[31m"
 GREEN = "\033[32m"
@@ -485,8 +491,15 @@ def main() -> int:
     if args.list:
         for guard_id, probe in probes:
             defect = f"  KNOWN DEFECT {probe.defect}" if probe.defect else ""
+            # `needs` is printed since the S03 review's fifth pass. Two files
+            # sent a reader here for it, `.github/workflows/ci.yml`'s
+            # guards-deep comment and `docs/lld/guards.md`, both saying to read
+            # the command rather than the sentence, and the command did not
+            # answer. A pointer to a command that does not carry the field is
+            # worse than the sentence it replaced, because the sentence at
+            # least said something.
             print(f"{probe.profile:5} L{probe.level} {probe.polarity:6} "
-                  f"{probe.id:38} {guard_id}{defect}")
+                  f"needs={probe.needs:9} {probe.id:38} {guard_id}{defect}")
             # `note` is where the R2 rationale for a probe's INPUT is written,
             # and it reached no output at all until the S03 review's second
             # pass counted it set on half the catalogue and read by nothing.
@@ -580,15 +593,11 @@ def _budget_problems(profile: str, elapsed: float, record: bool) -> list[str]:
     timings = budget.setdefault("wall_clock_seconds", {})
     if record:
         timings[profile] = round(elapsed, 1)
-        budget.setdefault(
-            "note",
-            "Recorded measurements, not guesses. `wall_clock_seconds` is what "
-            "the harness took on the machine that recorded it. `constants` is "
-            "the declared-constant ratchet, `constants_count` and "
-            "`gates_declared` are the counts that catch one of those being "
-            "removed rather than changed, `oracle_faults` is the fault-count "
-            "ratchet and `uncovered` is the uncovered-refusal ratchet, all "
-            "written by scripts/guard_census.py --record.")
+        # The note is `scripts/guards/census.py`'s BUDGET_NOTE, declared
+        # once. It was written out in full here and consulted nowhere else,
+        # so a key added to the budget left this sentence describing the
+        # previous set and `setdefault` could never refresh it.
+        budget.setdefault("note", BUDGET_NOTE)
         BUDGET.write_text(json.dumps(budget, indent=2, sort_keys=True) + "\n")
         print(f"  {profile} wall clock recorded at {elapsed:.1f}s")
         return []

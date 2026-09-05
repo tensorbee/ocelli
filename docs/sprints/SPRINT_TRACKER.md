@@ -31,7 +31,8 @@ the oracle rather than the volume port work of M2 onward.
 `not measured`, each with the reason recorded in the cell: three stories ran
 concurrently in worker worktrees whose agents terminated on a session rate
 limit, two ran beside each other with one story's oracle runs inside the other's
-wall clock, and the remaining two overlapped the sprint review's remediation.
+wall clock, one overlapped the sprint review's remediation, and one ran serial
+in the canonical worktree with several full oracle runs inside its wall clock.
 Most rows in this file read `not measured` and the measured ones are all S01 and
 S02. No count is transcribed into this sentence, because the table below is the
 count:

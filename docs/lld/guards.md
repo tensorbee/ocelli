@@ -19,10 +19,15 @@ guards that bullet is now a gate rather than a habit. Section 27.3's other
 bullets, and its application to LUT and geometry arithmetic, remain a human's
 exactly as written.
 
-**No count appears in this file.** A number written into prose about this
-harness goes stale inside a single sprint, because the harness moves and the
-sentence beside it does not. Every quantity here is named by the command that
-prints it instead.
+**No count of a quantity this harness measures appears in this file.** A number
+written into prose about the size of the harness goes stale inside a single
+sprint, because the harness moves and the sentence beside it does not. Every
+such quantity is named by the command that prints it instead. Counts of things
+this harness does NOT measure are fine and there are about twenty of them
+below, four cleanup layers and five tripwire reads among them. The earlier
+wording said "no count appears in this file" and about twenty followed it, all
+of them true, which made the rule read as broken when it was only worded too
+widely.
 
 ## Four pieces that check each other
 
@@ -113,8 +118,11 @@ A `Probe` carries the mutation, the invoke, and:
 - **`control`**, **`control_status`** and **`control_expect`**.
 
 `python3 scripts/guard_probe.py --list` prints every probe with its profile,
-level, polarity, guard and any declared defect, and the `note` field carrying
-the rationale for its input.
+level, polarity, `needs`, guard and any declared defect, and the `note` field
+carrying the rationale for its input. `needs` reached that output only in the
+S03 review's fifth pass, and until then this file and
+`.github/workflows/ci.yml` both sent a reader to the command for it and the
+command did not answer.
 
 ### Known defects
 
@@ -212,14 +220,21 @@ not a pass. A probe builder that silently stops mutating anything therefore
 turns the run red rather than green, and `Sandbox.substitute` refuses a no-op
 edit by name at the point of the edit.
 
-**The mandatory control.** Every distinct invoke is also run against the
-UNMUTATED sandbox and must exit 0. Its absence is what made round 12 of F-010's
-review worthless: the harness was broken, so every earlier all-refusals-red
-result had a red baseline and proved nothing. The control does two further
-jobs. It proves the sandbox is a faithful copy, because a guard refusing an
-unmutated copy means the copy is wrong. And when a control's declared status is
-non-zero it must refuse for a DIFFERENT reason than the probe, so a probe over
-a guard that refuses everything cannot read as a pass.
+**The mandatory control.** Every distinct control is run against the UNMUTATED
+sandbox and must exit with the status its probe declares. That status is
+usually 0, and for two probes it is deliberately not: `split_hld` and
+`corpus-tests` have no healthy state a sandbox can build, so their control is
+the DIFFERENT refusal a healthy repository gives, declared as
+`control_status` and `control_expect`. The paragraph below says the same thing
+and this one used to contradict it by claiming every invoke must exit 0.
+
+The control's absence is what made round 12 of F-010's review worthless: the
+harness was broken, so every earlier all-refusals-red result had a red baseline
+and proved nothing. The control does two further jobs. It proves the sandbox is
+a faithful copy, because a guard refusing an unmutated copy means the copy is
+wrong. And when a control's declared status is non-zero it must refuse for a
+DIFFERENT reason than the probe, so a probe over a guard that refuses
+everything cannot read as a pass.
 
 `_prepare_control` holds the minimum healthy state an invoke needs, written in
 one place rather than hidden inside each probe, because a control that quietly
@@ -255,6 +270,30 @@ It was a threshold, `copied > 100` over a walk that counts the sandbox's own
 must be claimed by exactly one entry, so the catalogue cannot fall behind.
 Every entry must claim at least one site, so a deleted refusal cannot leave a
 stale entry that reads as coverage.
+
+**a2. The per-entry site count, for the gap check a leaves open.** The census
+exists so that a guard added next month arrives with its test, and that rule
+did not apply to a guard added to a file the catalogue ALREADY claims. Most
+entries claim their file with `"*"`, so a new `problems.append` in a claimed
+file lands in the probed bucket and no number anywhere moves. The S03 review's
+fifth pass measured it from the other side, on this harness's own census
+module: the fourth pass had added 224 lines to it, four of them new refusal
+branches, and each could be deleted on its own with the census, the floor probe
+profile and the unit suite all green.
+
+So the site count of every catch-all entry is recorded in
+`ci/guard-probe-budget.json` under `entry_sites` and compared for EQUALITY. A
+refusal added to a claimed file, or removed from one, fails until the number is
+re-recorded in the same change, which is check c's "put the widening in the
+diff" applied to a different loss. It does not claim the new refusal is probed.
+It claims a reviewer sees that the file grew one.
+
+Equality and not a ratchet, because a refusal DELETED from a claimed file is
+equally invisible: the entry goes on claiming the other sites in its file. The
+catalogue was the alternative home for these numbers, one per entry, and it was
+rejected. The budget already carries every other recorded value and `--record`
+already writes them all in one command, where sixty numbers spread through the
+catalogue would be sixty things to hand-edit.
 
 **b. Gate and hook coverage, in both directions.** Every name in
 `bin/ocelli.sh`'s `GATES` array has an entry or an explicit `DELEGATED` reason,
@@ -381,8 +420,18 @@ harness exists to fix.
   than on the pull request. That is the strongest claim the cost allows.
 
 `guards-deep` is excluded by name in two places, `bin/ocelli.sh`'s `--floor`
-arm and `scripts/ci_floor_check.py`'s `NOT_IN_FLOOR`. Both are needed: miss
-either and the `ci` gate demands a CI step for a gate the floor never runs.
+arm and `scripts/ci_floor_check.py`'s `NOT_IN_FLOOR`. **The mechanism that
+joins them is set equality, in both directions**, and this paragraph said
+something else until the S03 review's fifth pass. It said that missing either
+list "makes the `ci` gate demand a CI step for a gate the floor never runs",
+which is the claim `bin/ocelli.sh`'s own comment made and which the fourth pass
+measured false: adding `prose` to the shell list alone left the `ci` gate at
+exit 0 while `gate --floor` silently stopped running `prose`. A gate leaving
+the floor removes work rather than adding a demand, so that direction had no
+detection at all. `ci_floor_check.py` PARSES the runner's `case` line now and
+refuses a set that differs from `NOT_IN_FLOOR` either way, both files record
+the measurement, and this file was the last place still carrying the sentence
+they were rewritten to remove.
 
 `scripts/lint_policy_check.py` is in the `guards` gate rather than in `clippy`
 because it is check c's class of problem rather than clippy's. The `clippy`
@@ -409,6 +458,8 @@ guesses, plus a `note` restating that:
 - `constants_count`, so a constant removed together with its digest is noticed
 - `gates_declared`, so a row deleted from `bin/ocelli.sh`'s `GATES` array is
   noticed
+- `entry_sites`, the refusal count of every entry claiming its file with `"*"`,
+  so a refusal added to an already-claimed file moves a number
 - `uncovered`, the uncovered-refusal ceiling and whether the sweep is complete,
   the second derived from the first rather than remembered
 - `oracle_faults`, the fault count the adoption check ratchets against

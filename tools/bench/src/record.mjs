@@ -60,6 +60,16 @@ export const WORSE = "worse";
  * it declares four. A fifth arriving with a new subject is a decision about
  * which way is better, and defaulting it to "an increase is worse" would make
  * that decision silently and in the wrong direction half the time.
+ *
+ * **The throw is not the guard, though, and it was being counted as one.** It
+ * fires inside `withinTolerance`, which `--compare` reaches only for a subject
+ * that already owns a baseline on the machine running it, so a fifth unit
+ * lands in the tree with `gate bench` green and fails later on whichever
+ * machine happens to own that baseline. `INCREASE_MEANS and the registry
+ * declare the same units` in `tools/bench/tests/record_test.mjs` is the
+ * binding, and it is the same one
+ * `the_recorded_bands_match_the_checked_in_file` gives
+ * `FillRateBands::RECORDED` and `ci/tier-thresholds.json`.
  */
 export const INCREASE_MEANS = {
   ms: WORSE,

@@ -49,6 +49,7 @@ import json
 import re
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from .sandbox import Sandbox
@@ -188,24 +189,33 @@ def _first_no_std_crate(box: Sandbox) -> str:
     raise AssertionError("no crate declares no_std, so there is none to lose")
 
 
-def _floor_gate_with_own_step(box: Sandbox) -> str:
-    """A floor gate whose CI step is a `bin/ocelli.sh gate <name>` line.
+def _not_in_floor(box: Sandbox) -> set[str]:
+    """The gates `NOT_IN_FLOOR` excludes, read from the repository.
 
-    Read from `.github/workflows/ci.yml`, which is the artefact the guard is
-    about. The gates to skip come from `NOT_IN_FLOOR`, which is the
-    repository's own declaration of what the floor excludes and is itself in
-    the declared-constant ratchet. It was an undocumented literal here, and a
-    literal that matches neither `NOT_IN_FLOOR` nor anything in the workflow
-    is a probe input nobody can check.
+    One reader rather than three. This parse was written out in
+    `_floor_gate_with_own_step` and again in `_a_non_floor_gate_ci_runs`, and
+    a third copy was about to be added for the fifth pass's probes.
+    `NOT_IN_FLOOR` is the repository's own declaration of what the floor
+    excludes and is itself in the declared-constant ratchet, so a literal here
+    would be a probe input nobody can check.
     """
-    workflow = box.read(".github/workflows/ci.yml")
     declared = re.search(r"^NOT_IN_FLOOR = \{(.*?)\}",
                          box.read("scripts/ci_floor_check.py"), re.M | re.S)
     if declared is None:
         raise AssertionError(
             "scripts/ci_floor_check.py declares no NOT_IN_FLOOR, so this "
             "probe cannot tell a floor gate from one CI runs elsewhere.")
-    excluded = set(re.findall(r'"([a-z-]+)"', declared.group(1)))
+    return set(re.findall(r'"([a-z-]+)"', declared.group(1)))
+
+
+def _floor_gate_with_own_step(box: Sandbox) -> str:
+    """A floor gate whose CI step is a `bin/ocelli.sh gate <name>` line.
+
+    Read from `.github/workflows/ci.yml`, which is the artefact the guard is
+    about.
+    """
+    workflow = box.read(".github/workflows/ci.yml")
+    excluded = _not_in_floor(box)
     for match in re.finditer(r"bin/ocelli\.sh gate ([a-z-]+)", workflow):
         if match.group(1) not in excluded:
             return match.group(1)
@@ -492,9 +502,18 @@ def _sprint_plan_absent(box: Sandbox) -> None:
 def _sprint_plan_wrong_estimate(box: Sandbox) -> None:
     """Change one sprint-table row's estimate and leave the backlog alone.
 
-    This is the drift the S03 review found in the tree: F-X014 read `1w` in
-    the plan and `2w` in the backlog and the allocation, and `--check`
-    compared only the sprint, so nothing could see it.
+    The refusal is derived from `gen_sprint_plan.py`'s own docstring rule, that
+    a planned F-ID appears with the sprint and the estimate the allocation
+    carries. It is NOT derived from a drift found in the tree, and this
+    docstring said it was in the strongest form available until the S03
+    review's fifth pass checked the claim. **No committed state ever held
+    F-X014 at two different estimates**: `git show fe18a91:` gives `1w` in
+    `SPRINT_PLAN.md`, `BACKLOG.md` and `allocation.json`, and
+    `git show 4139a54:` gives `2w` in all three. Pass 3 widened the story and
+    the plan row lagged inside that same edit, which is a drift that lasted one
+    edit and that no check has ever caught. The probe is worth having anyway,
+    for the reason the guard census gives everywhere else: a comparison nobody
+    has watched go red is indistinguishable from one that is broken.
     """
     text = box.read("docs/sprints/SPRINT_PLAN.md")
     row = re.search(r"^\|\s*F-X?\d{3}[a-z]?\s*\|[^|]*\|[^|]*\|[^|]*\|"
@@ -562,6 +581,76 @@ def _sprint_plan_stale_goal_line(box: Sandbox) -> None:
         raise AssertionError("SPRINT_PLAN.md carries no goal line")
     box.substitute("docs/sprints/SPRINT_PLAN.md", goal.group(0),
                    "**Goal**: A title no story in the allocation carries.")
+
+
+def _sprint_plan_row_in_two_sprints(box: Sandbox) -> None:
+    """Copy a late sprint's story row into the first sprint's table.
+
+    `gen_sprint_plan.py`'s own docstring says every planned F-ID appears in
+    "exactly one sprint table", and the parser let the last occurrence win, so
+    the copy agreed with the allocation and nothing saw the duplicate.
+    Measured in the S03 review's fifth pass: copying S72's F-149 row into S01's
+    table left `--check` at exit 0. A story planned into two sprints is a
+    planning error that reads as a plan.
+    """
+    head = re.compile(r"^####\s+Sprint\s+S\d+\s*$")
+    story = re.compile(r"^\|\s*F-X?\d{3}[a-z]?\s*\|")
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    heads = [i for i, line in enumerate(lines) if head.match(line.rstrip("\n"))]
+    if len(heads) < 2:
+        raise AssertionError("SPRINT_PLAN.md carries fewer than two sprints")
+    rows = [i for i in range(heads[-1], len(lines)) if story.match(lines[i])]
+    if not rows:
+        raise AssertionError("the last sprint table carries no story row")
+    first_rows = [i for i in range(heads[0], heads[1]) if story.match(lines[i])]
+    if not first_rows:
+        raise AssertionError("the first sprint table carries no story row")
+    lines.insert(first_rows[0], lines[rows[0]])
+    box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+
+
+def _sprint_plan_milestone_summary_deleted(box: Sandbox) -> None:
+    """Delete one generated milestone summary line.
+
+    The comparison was positional, so an absent line shifted every line after
+    it and the refusal named the wrong milestone, which is a message a
+    maintainer cannot act on. The lines are matched on the sprint span they
+    name now, and an absent span is refused by name.
+    """
+    text = box.read("docs/sprints/SPRINT_PLAN.md")
+    line = re.search(r"^_S\d+ to S\d+, \d+ stories, \d+ engineer-weeks\._$",
+                     text, re.M)
+    if line is None:
+        raise AssertionError("SPRINT_PLAN.md carries no milestone summary line")
+    box.substitute("docs/sprints/SPRINT_PLAN.md", line.group(0), "")
+
+
+def _sprint_plan_extra_milestone_summary(box: Sandbox) -> None:
+    """Add a summary line for a span the allocation has no milestone for."""
+    text = box.read("docs/sprints/SPRINT_PLAN.md")
+    line = re.search(r"^_S\d+ to S\d+, \d+ stories, \d+ engineer-weeks\._$",
+                     text, re.M)
+    if line is None:
+        raise AssertionError("SPRINT_PLAN.md carries no milestone summary line")
+    box.substitute("docs/sprints/SPRINT_PLAN.md", line.group(0),
+                   line.group(0) + "\n\n_S98 to S99, 1 stories, "
+                                   "1 engineer-weeks._")
+
+
+def _sprint_plan_two_goal_lines(box: Sandbox) -> None:
+    """Give one sprint a second `**Goal**` line above the generated one.
+
+    The parser kept the FIRST per sprint, so a stale paragraph above a
+    corrected one won and the corrected one was never read. `render` writes
+    exactly one.
+    """
+    text = box.read("docs/sprints/SPRINT_PLAN.md")
+    goal = re.search(r"^\*\*Goal\*\*: (.+)$", text, re.M)
+    if goal is None:
+        raise AssertionError("SPRINT_PLAN.md carries no **Goal** line")
+    box.substitute("docs/sprints/SPRINT_PLAN.md", goal.group(0),
+                   "**Goal**: something a previous edit left behind.\n\n"
+                   + goal.group(0))
 
 
 def _stale_codex_adapter(box: Sandbox) -> None:
@@ -807,6 +896,130 @@ def _widen_a_declared_constant(box: Sandbox) -> None:
                    '{".dcm"}')
 
 
+def _retire_a_declared_constant(box: Sandbox) -> None:
+    """Delete one `Constant` AND its recorded row. The two-line cleanup.
+
+    The ratchet on the ratchet, and it was watched by nothing. Both loops go
+    quiet afterwards, the one over `CONSTANTS` and the one over the recorded
+    rows, so the single mechanism that notices a guard being WIDENED rather
+    than broken could be disarmed in a commit that reads as tidying up and the
+    widening land in the next commit, also green. The count is what catches it.
+
+    The entry removed is the LAST one in the tuple, found by structure rather
+    than named, so this probe does not go stale when the catalogue's constants
+    are reordered.
+    """
+    text = box.read("scripts/guards/catalogue.py")
+    entries = list(re.finditer(
+        r"^    Constant\(\"[\w.-]+\", \"([^\"]+)\", \"(\w+)\",.*?\n"
+        r"(?=^    Constant\(|^\)$)", text, re.M | re.S))
+    if not entries:
+        raise AssertionError(
+            "the catalogue declares no Constant this probe can retire, so the "
+            "ratchet on the ratchet cannot be exercised.")
+    last = entries[-1]
+    box.substitute("scripts/guards/catalogue.py", last.group(0), "")
+    budget = json.loads(box.read("ci/guard-probe-budget.json"))
+    key = f"{last.group(1)}:{last.group(2)}"
+    if key not in budget.get("constants", {}):
+        raise AssertionError(
+            f"{key} is declared in CONSTANTS and has no recorded row, so this "
+            f"probe would leave an orphan-row refusal rather than the "
+            f"narrowing it is about.")
+    del budget["constants"][key]
+    box.write("ci/guard-probe-budget.json",
+              json.dumps(budget, indent=2, sort_keys=True) + "\n")
+
+
+def _an_unclaimed_executable_hook(box: Sandbox) -> None:
+    """Add an executable file under `.githooks/` with no catalogue entry.
+
+    A hook is a refusal a clone that opts in actually runs, so one nobody
+    declared is one nobody probed. The branch that says so was added by the
+    S03 review's fourth pass and deleting it left the census, the floor probe
+    profile and the unit suite all green.
+
+    The body carries no refusal shape, so the state this builds is exactly an
+    undeclared HOOK and not an undeclared refusal site, which check a already
+    covers.
+    """
+    box.write(".githooks/probe-hook", "#!/bin/sh\nexit 0\n").chmod(0o755)
+
+
+def _the_oracle_runner_is_gone(box: Sandbox) -> None:
+    """Delete `tools/oracle/run.mjs`, the runner that replays the faults.
+
+    The adoption check used to read `if runner.is_file() and ...`, which failed
+    OPEN: deleting the runner skipped the branch entirely, so removing it was
+    quieter than breaking it while the same loss of `faults.mjs` three lines
+    above was refused. The fourth pass closed that and nothing watched the
+    close.
+    """
+    box.delete("tools/oracle/run.mjs")
+
+
+def _an_unrecognised_guard_kind(box: Sandbox) -> None:
+    """Mistype one entry's `kind`, which decides which bucket it lands in.
+
+    An unrecognised kind is not `"guard"`, so the entry's refusals leave the
+    uncovered ratchet and are reported as declared out of scope. A typo is
+    enough, the validation that says so was added by the fourth pass, and
+    deleting that validation left every count here unchanged.
+
+    The line is found by SHAPE, an eight-space-indented `kind=` field, rather
+    than by the value it holds. Searching for the value found this function's
+    own argument first and mutated the probe instead of a catalogue entry, so
+    the census exited 0 and the harness reported the guard silent.
+    """
+    text = box.read("scripts/guards/catalogue.py")
+    field = re.search(r'^ {8}kind="[a-z-]+",$', text, re.M)
+    if field is None:
+        raise AssertionError(
+            "no catalogue entry declares a `kind` field on its own line, so "
+            "this probe cannot mistype one.")
+    box.substitute("scripts/guards/catalogue.py", "\n" + field.group(0) + "\n",
+                   '\n        kind="probe-typo",\n')
+
+
+def _drop_the_entry_site_counts(box: Sandbox) -> None:
+    """Remove the recorded per-entry site counts from the budget."""
+    _budget_drop(box, "entry_sites")
+
+
+def _a_refusal_in_an_already_claimed_file(box: Sandbox) -> None:
+    """Add a refusal to a file a catch-all catalogue entry already claims.
+
+    This is the gap the fifth pass named. Check a makes a guard added next
+    month arrive with its test, and that rule did not apply to a guard added to
+    a file the catalogue already claims: most entries claim their file with
+    `"*"`, so a new `problems.append` lands in the probed bucket and no number
+    moves. The pass measured it from the other side, on this harness's own
+    census module, where four new refusal branches could each be deleted with
+    everything staying green.
+
+    The file is chosen from the catalogue's own catch-all entries rather than
+    named, and the refusal is appended in a function nothing calls, so the
+    guard it is added to still behaves exactly as before.
+    """
+    text = box.read("scripts/guards/catalogue.py")
+    for match in re.finditer(r'file="(scripts/[\w/]+\.py)",\s*\n\s*gate=',
+                             text):
+        target = match.group(1)
+        if not (box.path / target).is_file():
+            continue
+        if 'claims=("*",)' not in text[match.end():match.end() + 600]:
+            continue
+        box.append(target,
+                   "\n\ndef _probe_added_refusal(problems):\n"
+                   "    problems.append("
+                   "'a refusal added to a file the catalogue already "
+                   "claims')\n")
+        return
+    raise AssertionError(
+        "no catalogue entry claims a Python guard under scripts/ with a "
+        "catch-all, so the gap this probe is about cannot be built.")
+
+
 def _lint_policy_weakened(box: Sandbox) -> None:
     box.substitute("Cargo.toml", 'cast_possible_truncation = "deny"',
                    'cast_possible_truncation = "allow"')
@@ -881,22 +1094,30 @@ def _expect_attribute_at_a_crate_root(box: Sandbox) -> None:
 
 
 def _no_crate_sources_at_all(box: Sandbox) -> None:
-    """Delete every `.rs` file under `crates/`.
+    """Delete every `.rs` file in every workspace MEMBER.
 
     A scan that read nothing is not a scan that found nothing. The check
     printed `0 .rs file(s) carry no inner allow` and exited 0 over exactly
     this state, which is AGENTS.md's named failure of answering a question
     about an empty set in the language of success.
+
+    Every member and not `crates/` alone, which is the fifth pass's finding
+    arriving in this probe. With the walk widened to the manifest's members,
+    emptying `crates/` left thirteen `.rs` files in `tools/oracle`, so the
+    probe stopped building the state it is about and reported the guard
+    silent, which is exactly what the harness's inverted success is for.
     """
     removed = 0
-    for path in sorted((box.path / "crates").rglob("*.rs")):
-        if "target" in path.parts:
-            continue
-        path.unlink()
-        removed += 1
+    for member in _member_directories(box):
+        for path in sorted(member.rglob("*.rs")):
+            if path.relative_to(member).parts[:1] == ("target",):
+                continue
+            path.unlink()
+            removed += 1
     if removed == 0:
-        raise AssertionError("no crate carries a .rs file already, so this "
-                             "probe cannot create the state it is about")
+        raise AssertionError("no workspace member carries a .rs file already, "
+                             "so this probe cannot create the state it is "
+                             "about")
 
 
 def _named_allow_outside_the_crate_root(box: Sandbox) -> None:
@@ -911,19 +1132,208 @@ def _named_allow_outside_the_crate_root(box: Sandbox) -> None:
 
 
 def _item_allow_with_a_reason(box: Sandbox) -> None:
-    """The form HLD 27.1's note PERMITS, at the expression that needs it.
+    """The forms HLD 27.1's note PERMITS, at the expression that needs it.
 
     An outer `#[allow(...)]` on one item, which is the deliberate visible
     choice the note asks for. One character separates it from the refused
-    form, so a guard that refused this would be refusing the remedy it
+    inner form, so a guard that refused this would be refusing the remedy it
     recommends in its own message.
+
+    FOUR item kinds since the S03 review's fifth pass, and that is the point.
+    The probe planted its allow on a `fn` alone, so the guard's new refusal of
+    an outer allow on a `mod` had nothing asserting it does not also refuse
+    the other item kinds. A `fn`, a `struct`, an `impl` and a statement are
+    each local in the way 27.1's note means and a `mod` is not.
     """
     box.append(
         _a_crate_module_file(box),
         "\n// HLD 27.1's note, the deliberate visible choice at the "
-        "expression\n// that needs it.\n"
+        "expression\n// that needs it. None of these is a `mod`.\n"
         "#[allow(clippy::cast_possible_truncation, reason = \"probe\")]\n"
-        "pub fn probe_local_allow(x: i64) -> i32 {\n    x as i32\n}\n")
+        "pub fn probe_local_allow(x: i64) -> i32 {\n    x as i32\n}\n"
+        "\n#[allow(clippy::cast_possible_truncation, reason = \"probe\")]\n"
+        "pub struct ProbeLocalAllow(pub i32);\n"
+        "\n#[allow(clippy::cast_possible_truncation, reason = \"probe\")]\n"
+        "impl ProbeLocalAllow {\n"
+        "    pub fn make(x: i64) -> i32 {\n        x as i32\n    }\n}\n"
+        "\npub fn probe_local_statement(x: i64) -> i32 {\n"
+        "    #[allow(clippy::cast_possible_truncation, reason = \"probe\")]\n"
+        "    let narrowed = x as i32;\n    narrowed\n}\n")
+
+
+def _workspace_members(box: Sandbox) -> list[str]:
+    """The globs `Cargo.toml`'s `[workspace] members` declares, in order.
+
+    Read from the manifest, which is the artefact the guard was wrong about.
+    A literal `crates/*` here would be the very assumption that cost the
+    workspace its fourteenth member.
+    """
+    block = re.search(r"^\[workspace\]$(.*?)(?=^\[|\Z)", box.read("Cargo.toml"),
+                      re.M | re.S)
+    listing = re.search(r"^\s*members\s*=\s*\[(.*?)\]", block.group(1),
+                        re.M | re.S) if block else None
+    if listing is None:
+        raise AssertionError("Cargo.toml declares no [workspace] members, so "
+                             "these probes have no member to work on.")
+    return re.findall(r'"([^"]+)"', listing.group(1))
+
+
+def _member_directories(box: Sandbox) -> list[Path]:
+    """Every directory the manifest's `members` globs resolve to."""
+    found: list[Path] = []
+    for pattern in _workspace_members(box):
+        hits = (sorted(box.path.glob(pattern)) if "*" in pattern
+                else [box.path / pattern])
+        found.extend(p for p in hits if (p / "Cargo.toml").is_file())
+    if not found:
+        raise AssertionError("Cargo.toml's members resolve to no directory "
+                             "carrying a manifest")
+    return found
+
+
+def _a_crate_root_with_a_module(box: Sandbox) -> tuple[str, str]:
+    """A crate root declaring a `mod` item, and that item's line.
+
+    The FIRST crate root is not enough. Most crates here are a single file, so
+    `_a_crate_root` returned one with no module in it and the probe could not
+    build the state it is about, which the harness reported as a builder
+    failure rather than as a pass.
+    """
+    for crate in sorted((box.path / "crates").iterdir()):
+        lib = crate / "src" / "lib.rs"
+        if not lib.is_file():
+            continue
+        module = re.search(r"^(?:pub )?mod [a-z_]+;$",
+                           lib.read_text(encoding="utf-8"), re.M)
+        if module is not None:
+            return f"crates/{crate.name}/src/lib.rs", module.group(0)
+    raise AssertionError(
+        "no crate root declares a `mod` item, so there is no module for a "
+        "probe to put an outer allow on.")
+
+
+def _a_member_outside_crates(box: Sandbox) -> str:
+    """A workspace member the old hard-coded `crates/` walk never reached.
+
+    Derived from the manifest rather than named. `tools/oracle` is the one
+    today, a compiled member with thirteen `.rs` files that was checked for
+    neither `[lints] workspace = true` nor an inner allow.
+    """
+    for pattern in _workspace_members(box):
+        if pattern.startswith("crates/") or "*" in pattern:
+            continue
+        if (box.path / pattern / "Cargo.toml").is_file():
+            return pattern
+    raise AssertionError(
+        "every workspace member is under crates/, so there is no member "
+        "outside the old walk for this probe to plant anything in. If that is "
+        "now true of the repository, this probe has nothing to say and the "
+        "hole it is about cannot be built.")
+
+
+def _member_outside_crates_uninherited(box: Sandbox) -> None:
+    """Drop `[lints] workspace = true` from a member outside `crates/`.
+
+    Measured together with the group allow below: with both applied, the check
+    exited 0 printing "13 crate(s) inherit the table, 33 .rs file(s)". The
+    manifest says fourteen members.
+    """
+    member = _a_member_outside_crates(box)
+    box.substitute(f"{member}/Cargo.toml", "[lints]\nworkspace = true", "")
+
+
+def _member_outside_crates_group_allow(box: Sandbox) -> None:
+    """`#![allow(clippy::pedantic)]` in a member outside `crates/`.
+
+    The same attribute `lint-policy.group-allow` plants in a crate root, in
+    the half of the workspace the walk never visited. Measured under the
+    pinned 1.97.1 toolchain that the attribute silences four of HLD 27.1's
+    five lints.
+    """
+    member = _a_member_outside_crates(box)
+    sources = sorted(p for p in (box.path / member).rglob("*.rs")
+                     if p.relative_to(box.path / member).parts[:1]
+                     != ("target",))
+    if not sources:
+        raise AssertionError(
+            f"{member} carries no .rs file, so this probe cannot plant an "
+            f"attribute in the part of the workspace the walk missed.")
+    _prepend(box, sources[0].relative_to(box.path).as_posix(),
+             "#![allow(clippy::pedantic)]")
+
+
+def _unresolvable_workspace_member(box: Sandbox) -> None:
+    """Name a member that is not there.
+
+    cargo refuses this workspace. The check walked the members it could
+    resolve and reported the smaller number as a pass, which is
+    `AGENTS.md`'s named failure of answering a question about a smaller set
+    in the language of success.
+    """
+    patterns = _workspace_members(box)
+    box.substitute("Cargo.toml", json.dumps(patterns),
+                   json.dumps([*patterns, "tools/probe-absent-member"]))
+
+
+def _no_workspace_members_at_all(box: Sandbox) -> None:
+    """Delete the `members` key. Every check below then reads an empty set."""
+    patterns = _workspace_members(box)
+    box.substitute("Cargo.toml", f"members = {json.dumps(patterns)}", "")
+
+
+def _whitespace_in_the_lint_path(box: Sandbox) -> None:
+    """`#![allow(clippy :: pedantic)]`, which Rust reads as `clippy::pedantic`.
+
+    MEASURED under the pinned 1.97.1 toolchain, on a crate carrying
+    `cast_possible_truncation = "deny"` and one `x as i32` in a module file:
+    no attribute exits 101, this attribute exits 0, and `clippy:: pedantic`
+    exits 0 too. The captured name carried its spaces into the set lookup and
+    matched nothing, so the whole `REFUSED_GROUPS` list was one space away
+    from being unreachable.
+    """
+    _prepend(box, _a_crate_root(box), "#![allow(clippy :: pedantic)]")
+
+
+def _outer_allow_on_a_module(box: Sandbox) -> None:
+    """`#[allow(...)]` on a `mod` item, which governs the whole module tree.
+
+    Derived from HLD 27.1's note, which asks for a deliberate visible choice
+    at the expression that needs it. A module item is not an expression, and
+    the scope was MEASURED: with one `x as i32` in `src/inner.rs` and
+    `src/lib.rs` reading
+    `#[allow(clippy::cast_possible_truncation)] pub mod inner;`, cargo clippy
+    goes from 101 to 0 under the pinned 1.97.1 toolchain. That is the same
+    scope the guard already refused for an inner attribute, and the guard's
+    stated reason for permitting the outer form was that it is local.
+    """
+    root, module = _a_crate_root_with_a_module(box)
+    box.substitute(root, module,
+                   "#[allow(clippy::cast_possible_truncation)]\n" + module)
+
+
+def _group_row_in_the_workspace_table(box: Sandbox) -> None:
+    """A group row in `[workspace.lints.clippy]`, in TOML's inline form.
+
+    MEASURED under the pinned 1.97.1 toolchain: on a crate carrying
+    `cast_possible_truncation = "deny"`, adding
+    `pedantic = { level = "allow", priority = 1 }` beside it takes cargo
+    clippy from 101 to 0, because the higher priority is applied last and the
+    group wins. The row regex matched a quoted level only, so this was
+    invisible and the check went on printing that all five lints were at or
+    above HLD 27.1's level.
+    """
+    # HLD 27.1's first row, quoted here as `_lint_policy_weakened` quotes it.
+    # The lint comes from the specification's table and not from the guard's
+    # transcription of it.
+    row = re.search(r'^cast_possible_truncation = "[a-z]+"$',
+                    box.read("Cargo.toml"), re.M)
+    if row is None:
+        raise AssertionError(
+            "Cargo.toml carries no `cast_possible_truncation` row in the "
+            "quoted form, so this probe cannot add a group row beside one.")
+    box.substitute("Cargo.toml", row.group(0),
+                   row.group(0) +
+                   '\npedantic = { level = "allow", priority = 1 }')
 
 
 def _ci_arm_commands(box: Sandbox, gate: str) -> list[str]:
@@ -1002,13 +1412,7 @@ def _a_non_floor_gate_ci_runs(box: Sandbox) -> str:
     column comes from `bin/ocelli.sh`'s own GATES table, which is what says
     `oracle` is the one excluded gate CI may not run.
     """
-    declared = re.search(r"^NOT_IN_FLOOR = \{(.*?)\}",
-                         box.read("scripts/ci_floor_check.py"), re.M | re.S)
-    if declared is None:
-        raise AssertionError(
-            "scripts/ci_floor_check.py declares no NOT_IN_FLOOR, so this "
-            "probe cannot tell an excluded gate from a floor one.")
-    excluded = set(re.findall(r'"([a-z-]+)"', declared.group(1)))
+    excluded = _not_in_floor(box)
     runner = box.read("bin/ocelli.sh")
     gpu = set(re.findall(r'^\s*"([a-z-]+)\|YES\|', runner, re.M))
     workflow = box.read(".github/workflows/ci.yml")
@@ -1070,6 +1474,155 @@ def _exclude_a_floor_gate_in_the_runner_only(box: Sandbox) -> None:
                 if g not in names)
     box.substitute("bin/ocelli.sh", f"in {'|'.join(names)})",
                    f"in {'|'.join([*names, gate])})")
+
+
+def _a_floor_gate_with_no_arm_command(box: Sandbox) -> str:
+    """A floor gate CI names whose arm yields no extractable command.
+
+    `ci_floor_check.py`'s own claim is that such a gate can only be satisfied
+    by a step naming it, because `all([])` is true and a vacuous pass would be
+    the widest hole in the file. The claim was FALSE for `panic`: an arm ended
+    at the next case LABEL rather than at its `;;`, so it swallowed the comment
+    block introducing the following arm and the command regex read commands out
+    of prose.
+    """
+    excluded = _not_in_floor(box)
+    workflow = box.read(".github/workflows/ci.yml")
+    for gate in re.findall(r'^\s*"([a-z-]+)\|no\|', box.read("bin/ocelli.sh"),
+                           re.M):
+        if gate in excluded or _ci_arm_commands(box, gate):
+            continue
+        if f"bin/ocelli.sh gate {gate}" in workflow:
+            return gate
+    raise AssertionError(
+        "every floor gate CI names by gate has an extractable arm command, so "
+        "there is no gate whose only route to CI is the name, and this probe "
+        "cannot build the state it is about.")
+
+
+def _a_command_a_runner_comment_names(box: Sandbox) -> str:
+    """A command string that appears inside a `run_gate` COMMENT.
+
+    This is the class of string the old arm parser leaked into the arm before
+    it. `npm run test` reached `arms['panic']` from the `bench` comment
+    block's sentence about `npm run test:browser`, and that command appears
+    nowhere in the `panic` arm. Adding a step that runs it is a legitimate
+    change to `ci.yml` and it must not satisfy an unrelated gate.
+    """
+    runner = box.read("bin/ocelli.sh")
+    body = runner[runner.index("run_gate() {"):runner.index("skip() {")]
+    for line in body.splitlines():
+        if "#" not in line:
+            continue
+        found = re.findall(r"(?:python3 |npm run |cargo |ci/)[\w./ -]+",
+                           line.split("#", 1)[1])
+        if found:
+            return re.sub(r"\s+", " ", found[0]).strip()
+    raise AssertionError(
+        "no comment inside run_gate names a command, so the string the old "
+        "parser leaked cannot be reconstructed and this probe would build a "
+        "state that is not the one it is about.")
+
+
+def _swap_a_named_gate_step_for_an_unrelated_command(box: Sandbox) -> None:
+    """Delete the step naming a no-command gate and add a legitimate one.
+
+    The measured bypass, in full. Deleting the `bin/ocelli.sh gate panic` step
+    alone already refused. Adding a real `- run: npm run test` step beside it
+    returned the check to exit 0 with "all 25 floor gate(s) are invoked by CI",
+    because the arm parser had read that very string out of the comment block
+    beneath the arm. `panic` is HLD section 23's wasm panic-hook proof, the one
+    property no native test can observe.
+    """
+    gate = _a_floor_gate_with_no_arm_command(box)
+    command = _a_command_a_runner_comment_names(box)
+    workflow = box.read(".github/workflows/ci.yml")
+    line = next(l for l in workflow.splitlines()
+                if f"bin/ocelli.sh gate {gate}" in l)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(".github/workflows/ci.yml", line,
+                   f"{indent}- run: {command}")
+
+
+def _a_gate_whose_arm_names_a_test_suite(box: Sandbox) -> tuple[str, str]:
+    """A floor gate CI names by gate, and one arm command carrying `-p`.
+
+    `-p <suite>` is what a `unittest discover` command narrows itself with, and
+    it sat after a `\\` continuation, which the extraction class stopped at. So
+    the recorded arm command was the discovery root alone and `runs_command`
+    matched any unittest step at all.
+    """
+    excluded = _not_in_floor(box)
+    workflow = box.read(".github/workflows/ci.yml")
+    for gate in re.findall(r'^\s*"([a-z-]+)\|no\|', box.read("bin/ocelli.sh"),
+                           re.M):
+        if gate in excluded:
+            continue
+        if f"bin/ocelli.sh gate {gate}" not in workflow:
+            continue
+        for command in _ci_arm_commands(box, gate):
+            if " -p " in command:
+                return gate, command
+    raise AssertionError(
+        "no floor gate CI names by gate has an arm command carrying `-p`, so "
+        "there is no narrowed discovery for this probe to widen.")
+
+
+def _replace_a_gate_step_with_a_narrowed_arm(box: Sandbox) -> None:
+    """Run a gate's arm command by command, with a suite that finds nothing.
+
+    Every command of the arm is present and one of them discovers zero tests.
+    Under the parser that dropped everything after a `\\` continuation the
+    recorded command was `python3 -B -m unittest discover -s scripts/tests`,
+    `runs_command` searches rather than matches, and this exited 0.
+    """
+    gate, narrowed = _a_gate_whose_arm_names_a_test_suite(box)
+    commands = _ci_arm_commands(box, gate)
+    suite = narrowed.split(" -p ", 1)[1].strip()
+    workflow = box.read(".github/workflows/ci.yml")
+    line = next(l for l in workflow.splitlines()
+                if f"bin/ocelli.sh gate {gate}" in l)
+    indent = " " * (len(line) - len(line.lstrip()))
+    steps = "\n".join(
+        f"{indent}- run: "
+        f"{command.replace(suite, 'test_nothing_at_all.py')}"
+        for command in commands)
+    box.substitute(".github/workflows/ci.yml", line, steps)
+
+
+def _reformat_the_runner_exclusion_list(box: Sandbox) -> None:
+    """Rewrite the `--floor` exclusion as one case arm per name.
+
+    A cosmetic reformat that changes nothing about which gates the floor runs,
+    and that the exclusion parser cannot read. It is refused, which is right,
+    and until the fifth pass it arrived as a bare `RuntimeError` traceback with
+    no `FAIL:` header, so the refusal could not be acted on by the person who
+    made the edit.
+    """
+    line, names = _runner_exclusion_list(box)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(
+        "bin/ocelli.sh", line.strip(),
+        'case "$name" in\n'
+        + "".join(f"{indent}  {name}) continue ;;\n" for name in names)
+        + f"{indent}esac")
+
+
+def _hide_the_run_gate_region(box: Sandbox) -> None:
+    """Rename `run_gate`, so the arm parser cannot find the region at all."""
+    box.substitute("bin/ocelli.sh", "run_gate() {", "run_one_gate() {")
+
+
+def _empty_the_run_gate_region(box: Sandbox) -> None:
+    """Leave the region markers and put no case arm between them.
+
+    The other half of the same refusal. A region this parser can find and read
+    no arm out of would give every gate an empty arm, `covers` would fall back
+    to the gate-name route for all of them, and the per-command rule would hold
+    over nothing.
+    """
+    box.substitute("bin/ocelli.sh", "run_gate() {",
+                   "run_gate() {\nskip() {\n")
 
 
 def _reorder_the_runner_exclusion_list(box: Sandbox) -> None:
@@ -1469,6 +2022,63 @@ GUARDS: tuple[Guard, ...] = (
                        "reordering that changes nothing, and this repository "
                        "has already paid once for a positional read of a "
                        "Cargo entry in probe `pins.table-form`."),
+            Probe("ci-floor.gate-with-no-arm-command",
+                  _swap_a_named_gate_step_for_an_unrelated_command,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "and nothing in",
+                  note="The worst thing the fifth pass found. An arm ended at "
+                       "the next case LABEL rather than at its `;;`, so it "
+                       "swallowed the comment block introducing the following "
+                       "arm and the command regex read commands out of prose: "
+                       "`arms['panic']` came out as `['npm run test']`, from "
+                       "the `bench` comment block's sentence about "
+                       "`npm run test:browser`. Deleting the "
+                       "`bin/ocelli.sh gate panic` step refused, and adding a "
+                       "legitimate `- run: npm run test` step beside the "
+                       "deletion returned the check to exit 0 with `all 25 "
+                       "floor gate(s) are invoked by CI`. `panic` is HLD "
+                       "section 23's wasm panic-hook proof, the one property "
+                       "no native test can observe."),
+            Probe("ci-floor.narrowed-arm-command",
+                  _replace_a_gate_step_with_a_narrowed_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "runs only part of it on",
+                  note="Every command of the arm appears as a step and one of "
+                       "them discovers zero tests. The extraction class "
+                       "stopped at a `\\` continuation, so `-p <suite>` fell "
+                       "off the end of `errors`, `bench` and `guards`, and "
+                       "`runs_command` searches rather than matches, so any "
+                       "unittest step satisfied any of them. Measured at exit "
+                       "0 with `-p test_nothing_at_all.py`."),
+            Probe("ci-floor.exclusion-list-unreadable",
+                  _reformat_the_runner_exclusion_list,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "exclusion list where this parser looks for it",
+                  note="A cosmetic reformat into one case arm per name. The "
+                       "refusal is right, the floor's exclusion decision "
+                       "cannot be read from that shape, and until the fifth "
+                       "pass it arrived as a bare RuntimeError traceback with "
+                       "no `FAIL:` header. Fail-closed is not the same as "
+                       "actionable, and the fragment this probe expects is "
+                       "printed under the header now."),
+            Probe("ci-floor.run-gate-region-unreadable",
+                  _hide_the_run_gate_region,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "carries no `run_gate() {`",
+                  note="The arm parser's own empty-set case. It used to be a "
+                       "bare `str.index` ValueError. A parser that cannot "
+                       "find the region gives every gate an empty arm, and an "
+                       "empty arm is exactly what `covers` treats as "
+                       "gate-name-only."),
+            Probe("ci-floor.no-arms-at-all",
+                  _empty_the_run_gate_region,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "declares no case arm this parser can read",
+                  note="The region is present and holds no arm. Every gate "
+                       "would then fall back to the gate-name route and the "
+                       "per-command rule would hold over nothing, which is "
+                       "the same vacuous pass `covers` refuses one level "
+                       "down."),
             Probe("ci-floor.comment-only",
                   lambda box: _delete_ci_step(box, leave_comment=True),
                   script("python3", "scripts/ci_floor_check.py"),
@@ -1496,7 +2106,18 @@ GUARDS: tuple[Guard, ...] = (
               "workflow's own comment claims a push to `main` as well and "
               "that half is unproven, which the OK line says in as many "
               "words rather than leaving a reader to infer the stronger "
-              "claim.",
+              "claim. The third limit is the arm-command extractor's own "
+              "vocabulary. It recognises `python3 `, `npm run `, `cargo ` and "
+              "`ci/`, so `node`, `wasm-pack` and `\"$0\"` are invisible and "
+              "the three `node --test` suites in `bench`, the wasm-pack build "
+              "in `panic` and the `\"$0\"` self-calls in `wasm` and `native` "
+              "are not demanded of CI by a check whose message says every "
+              "command in the arm is. Nothing is lost today, because each of "
+              "those four gates is invoked by NAME in ci.yml and a step "
+              "naming a gate runs its arm entire by definition. Widening the "
+              "vocabulary would cost the other claim: `panic` would stop "
+              "being a gate with no extractable command, and probe "
+              "`ci-floor.gate-with-no-arm-command` is what watches that one.",
     ),
 
     # -- D-04's chain, the part CI reads ------------------------------------
@@ -1759,11 +2380,48 @@ GUARDS: tuple[Guard, ...] = (
         spec="`.claude/WORKFLOW.md`, the sprint plan is derived and not "
              "hand-maintained",
         refuses="A sprint plan that disagrees with the backlog about which "
-                "sprint a story is in or how large it is, a generated "
-                "milestone summary or goal line that has drifted from the "
-                "allocation it is written from, and an absent plan.",
+                "sprint a story is in or how large it is, a story planned "
+                "into two sprint tables at once, a generated milestone "
+                "summary or goal line that has drifted from the allocation it "
+                "is written from or that is absent, duplicated or spurious, "
+                "and an absent plan.",
         claims=("*",),
         probes=(
+            Probe("sprint-plan.two-sprint-tables",
+                  _sprint_plan_row_in_two_sprints,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "SPRINT_PLAN.md sprint tables",
+                  note="The rule comes from the guard's own docstring, that "
+                       "every planned F-ID appears in \"exactly one sprint "
+                       "table\", which was stated and not checked: the parser "
+                       "let the last occurrence win. Measured in the fifth "
+                       "pass at exit 0 with S72's F-149 row copied into "
+                       "S01's table, where it agreed with the allocation "
+                       "because the later row overwrote it."),
+            Probe("sprint-plan.milestone-summary-absent",
+                  _sprint_plan_milestone_summary_deleted,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "carries no summary line for it",
+                  note="The lines were compared by POSITION, so one absent "
+                       "line shifted every line after it and the refusal "
+                       "named the wrong milestone. They are matched on the "
+                       "sprint span they name now, which is the identity a "
+                       "reader has anyway."),
+            Probe("sprint-plan.milestone-summary-spurious",
+                  _sprint_plan_extra_milestone_summary,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "has no milestone spanning those sprints",
+                  note="The other direction of the same span comparison. A "
+                       "summary line is generated, so one the allocation "
+                       "cannot account for is hand-written prose wearing a "
+                       "generated line's shape."),
+            Probe("sprint-plan.two-goal-lines", _sprint_plan_two_goal_lines,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "**Goal** lines",
+                  note="The parser kept the FIRST goal line per sprint, so a "
+                       "stale paragraph above a corrected one won and the "
+                       "corrected one was never read. `render` writes exactly "
+                       "one per sprint."),
             Probe("sprint-plan.absent", _sprint_plan_absent,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
                   "does not exist"),
@@ -2228,7 +2886,91 @@ GUARDS: tuple[Guard, ...] = (
                        "`#[allow(...)]` on one item with a reason IS that "
                        "choice. One character separates it from the refused "
                        "form, so a guard that refused this would be refusing "
-                       "the remedy its own message recommends."),
+                       "the remedy its own message recommends. FOUR item "
+                       "kinds since the fifth pass, a fn, a struct, an impl "
+                       "and a statement, because the probe planted on a `fn` "
+                       "alone and the guard now refuses the same attribute on "
+                       "a `mod`."),
+            Probe("lint-policy.outer-allow-on-a-module",
+                  _outer_allow_on_a_module,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "an outer attribute on a `mod` item covers the whole "
+                  "module tree",
+                  note="The refusal above's other half, and the guard used to "
+                       "give opposite verdicts on the same scope. It refused "
+                       "an inner attribute at a crate root BECAUSE it covers "
+                       "the crate, and permitted an outer one on a module, "
+                       "which covers a module. MEASURED under the pinned "
+                       "1.97.1 toolchain: `src/inner.rs` with one `x as i32` "
+                       "and `src/lib.rs` reading "
+                       "`#[allow(clippy::cast_possible_truncation)] pub mod "
+                       "inner;` takes cargo clippy from 101 to 0. The accept "
+                       "probe planted its outer allow on a `fn`, so the `mod` "
+                       "case was never exercised in either direction."),
+            Probe("lint-policy.whitespace-in-the-lint-path",
+                  _whitespace_in_the_lint_path,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "allows the lint group",
+                  note="Rust tokenises `clippy :: pedantic` exactly as "
+                       "`clippy::pedantic`, and the captured name carried its "
+                       "spaces into the set lookup and matched nothing. So "
+                       "the whole nine-name REFUSED_GROUPS list was one space "
+                       "away from unreachable. MEASURED under 1.97.1: no "
+                       "attribute exits 101, `#![allow(clippy :: pedantic)]` "
+                       "exits 0, `#![allow(clippy:: pedantic)]` exits 0 and "
+                       "`#![expect(clippy :: cast_possible_truncation)]` "
+                       "exits 0."),
+            Probe("lint-policy.member-outside-crates-uninherited",
+                  _member_outside_crates_uninherited,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "does not inherit the workspace lint table",
+                  note="The workspace has fourteen members and the check read "
+                       "thirteen: `crates/` was hard-coded and Cargo.toml "
+                       "says `members = [\"crates/*\", \"tools/oracle\"]`. "
+                       "The member is read from the manifest here rather than "
+                       "named, because a literal would be the same assumption "
+                       "that cost the workspace its fourteenth member."),
+            Probe("lint-policy.member-outside-crates-group-allow",
+                  _member_outside_crates_group_allow,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "allows the lint group",
+                  note="The other half of the same hole. With both this and "
+                       "the uninherited probe applied, the check exited 0 "
+                       "printing `13 crate(s) inherit the table, 33 .rs "
+                       "file(s)`, and the census exited 0 beside it. "
+                       "`tools/oracle` is a compiled member with thirteen "
+                       "`.rs` files."),
+            Probe("lint-policy.member-unresolvable",
+                  _unresolvable_workspace_member,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "resolves to no directory carrying a Cargo.toml",
+                  note="cargo refuses this workspace. A check that walks the "
+                       "members it can resolve and reports the smaller number "
+                       "as a pass is AGENTS.md's named failure of answering a "
+                       "question about a smaller set in the language of "
+                       "success."),
+            Probe("lint-policy.no-members-declared",
+                  _no_workspace_members_at_all,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "declares no `members` this parser can read",
+                  note="The empty-set case for the member walk, which is the "
+                       "same shape as `lint-policy.nothing-scanned` one level "
+                       "up. With no member the inheritance pass, the "
+                       "attribute pass and the file count all answer a "
+                       "question about nothing."),
+            Probe("lint-policy.group-row-in-the-workspace-table",
+                  _group_row_in_the_workspace_table,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "carries the lint GROUP",
+                  note="The table switching itself off in one line. The row "
+                       "regex matched a quoted level only, so "
+                       "`pedantic = { level = \"allow\", priority = 1 }` was "
+                       "invisible and the check went on printing that all "
+                       "five lints were at or above 27.1's level. MEASURED "
+                       "under 1.97.1: that row beside "
+                       "`cast_possible_truncation = \"deny\"` takes cargo "
+                       "clippy from 101 to 0, because the higher priority is "
+                       "applied last."),
         ),
         limit="`REFUSED_GROUPS` is a list of nine names that exists only in "
               "the guard, and a probe can only ever write one of them, so "
@@ -2250,11 +2992,78 @@ GUARDS: tuple[Guard, ...] = (
         spec="`.claude/plans/F-X009-design.md` section 7, completeness proved "
              "mechanically",
         refuses="A refusal site no catalogue entry claims, an entry no site "
-                "backs, a floor entry needing a GPU, a browser or the corpus, "
-                "a declared constant changed without its recorded value, and "
-                "an uncovered count that has grown.",
+                "backs, an entry whose declared kind is not one of the two, a "
+                "floor entry needing a GPU, a browser or the corpus, a "
+                "declared constant changed or retired without its recorded "
+                "value, an executable hook with no entry, an oracle fault "
+                "catalogue nothing replays, a catch-all entry whose refusal "
+                "count has moved, and an uncovered count that has grown.",
         claims=("*",),
         probes=(
+            Probe("census.constants-count-shrunk",
+                  _retire_a_declared_constant,
+                  script("python3", "scripts/guard_census.py"),
+                  "Narrowing the declared-constant ratchet",
+                  note="The ratchet on the ratchet, and it was watched by "
+                       "nothing until the fifth pass. Deleting a `Constant` "
+                       "together with its recorded row is a two-line edit "
+                       "that reads as a cleanup and leaves every other check "
+                       "here green, because the loop over CONSTANTS no longer "
+                       "visits it and the loop over the recorded rows no "
+                       "longer sees it. So the one mechanism that notices a "
+                       "guard being WIDENED could be disarmed in one green "
+                       "commit and the widening land in the next, also "
+                       "green."),
+            Probe("census.unclaimed-executable-hook",
+                  _an_unclaimed_executable_hook,
+                  script("python3", "scripts/guard_census.py"),
+                  "is executable in a clone that opts in",
+                  note="A hook is a refusal a clone that opts in actually "
+                       "runs, so one nobody declared is one nobody probed. "
+                       "The branch was added by the fourth pass and deleting "
+                       "it left the census, the floor probe profile and the "
+                       "unit suite all green. The planted hook carries no "
+                       "refusal shape, so what this builds is an undeclared "
+                       "HOOK and not an undeclared refusal site."),
+            Probe("census.oracle-runner-gone", _the_oracle_runner_is_gone,
+                  script("python3", "scripts/guard_census.py"),
+                  "so the `oracle` gate has no runner",
+                  note="This branch was added precisely because the previous "
+                       "version failed OPEN: `if runner.is_file() and ...` "
+                       "meant deleting the runner skipped the check "
+                       "entirely, so removing it was quieter than breaking "
+                       "it, while the same loss of faults.mjs three lines "
+                       "above was refused. Nothing watched the close."),
+            Probe("census.unrecognised-kind", _an_unrecognised_guard_kind,
+                  script("python3", "scripts/guard_census.py"),
+                  "which is not one of",
+                  note="`kind` decides which bucket an entry's refusals land "
+                       "in, and a typo is not `\"guard\"`, so the entry "
+                       "leaves the uncovered ratchet and is reported as "
+                       "declared out of scope. That is the quietest way to "
+                       "move refusals out of the count, the validation was "
+                       "added by the fourth pass, and deleting the validation "
+                       "changed no number anywhere."),
+            Probe("census.no-entry-site-count", _drop_the_entry_site_counts,
+                  script("python3", "scripts/guard_census.py"),
+                  "records no per-entry site count"),
+            Probe("census.refusal-in-a-claimed-file",
+                  _a_refusal_in_an_already_claimed_file,
+                  script("python3", "scripts/guard_census.py"),
+                  "refusal site(s) to",
+                  note="The mechanism gap the fifth pass named, and the "
+                       "reason the four probes above it exist at all. Check a "
+                       "makes a guard added next month arrive with its test, "
+                       "and that rule did not reach a guard added to a file "
+                       "the catalogue ALREADY claims: most entries use "
+                       "`claims=(\"*\",)`, so a new `problems.append` lands "
+                       "in the probed bucket and no number moves. Measured on "
+                       "this harness's own census module, where four new "
+                       "refusal branches could each be deleted with the "
+                       "census, the floor probes and the unit suite all "
+                       "green. The recorded per-entry count is what moves "
+                       "now, so the addition is at least visible in the "
+                       "diff."),
             Probe("census.unclaimed-site",
                   lambda box: _stage(
                       box, "scripts/probe_new_guard.py",

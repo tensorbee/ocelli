@@ -51,10 +51,12 @@ Part III work appears in a parity plan. This table was WRITTEN from
 paragraph used to deny. The generator runs once at bootstrap and after that
 this file is hand-curated, so nothing rewrites a row when the allocation moves.
 What holds it is `python3 scripts/gen_sprint_plan.py --check`, which asserts
-every planned F-ID's sprint and estimate against the allocation. **The check
-does not read the goal paragraphs or the milestone summary lines**, and the S03
-sprint review found both stale: an S04 goal line still carrying F-X014's old
-title, and M1's summary line one week behind its own table.
+every planned F-ID's sprint and estimate against the allocation. It reads the
+`**Goal**:` lines and the `_SNN to SNN, N stories, N engineer-weeks._` lines
+too, and it did not until the S03 review's fourth pass, which found both
+stale: an S04 goal line still carrying F-X014's old title, and M1's summary
+line one week behind its own table. **What it still does not read is every
+other sentence in this file**, all of which is hand-curated prose.
 
 | Hook | F-ID | Epic ref | Sprint | Now |
 |------|------|----------|--------|-----|
@@ -109,7 +111,7 @@ _S01 to S05, 28 stories, 65 engineer-weeks._
 
 #### Sprint S04
 
-**Goal**: CI gate: every PR renders the full corpus, Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract, One parity-target version string, and a licence in the published wasm package, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it, The reference's own SIGMOID width divergence, and what D14's bound says about it, Price the HTJ2K decoder route after gate A1 failed, Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing, Execute the skills' worked examples, because the skills gate asserts nothing about their numbers, Try the next adapter when the best candidate cannot open a device, and record what was attempted, Close the four measured escapes from the wasm linear memory view ban, which needs type-aware linting.
+**Goal**: CI gate: every PR renders the full corpus, Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract, One parity-target version string, and a licence in the published wasm package, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it, The reference's own SIGMOID width divergence, and what D14's bound says about it, Price the HTJ2K decoder route after gate A1 failed, Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing, Execute the skills' worked examples, because the skills gate asserts nothing about their numbers, Try the next adapter when the best candidate cannot open a device, and record what was attempted, Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
@@ -125,7 +127,7 @@ _S01 to S05, 28 stories, 65 engineer-weeks._
 | F-X014 | Y1.9 | Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing | Build | 2w |
 | F-X015 | Y1.10 | Execute the skills' worked examples, because the skills gate asserts nothing about their numbers | Build | 1w |
 | F-X016 | Y1.11 | Try the next adapter when the best candidate cannot open a device, and record what was attempted | Rust | 1w |
-| F-X017 | Y1.12 | Close the four measured escapes from the wasm linear memory view ban, which needs type-aware linting | Build | 2w |
+| F-X017 | Y1.12 | Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting | Build | 2w |
 
 #### Sprint S05
 

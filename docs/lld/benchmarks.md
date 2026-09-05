@@ -329,7 +329,18 @@ every `subject_story` resolves to a real F-ID, that every row naming no story ha
 a runner and every row whose story is not done has none, that no runner file
 exists without a registry row, that no baseline entry exists for a subject whose
 story is not done, that every baseline entry names a host class and a tolerance
-with its provenance, and that the two harnesses' playwright pins are equal. The
+with its provenance, and that the two harnesses' playwright pins are equal.
+
+**The node suites carry one assertion the Python gate does not.** `INCREASE_MEANS`
+in `tools/bench/src/record.mjs` and the units declared in
+`tools/bench/subjects.json` are asserted to be the same set, in both directions.
+Before that binding, changing a subject's unit to a word `INCREASE_MEANS` does
+not know left `bin/ocelli.sh gate bench` at exit 0, because the throw fires
+inside `--compare` and only on a machine that already owns a baseline for that
+subject. It is the same shape as `the_recorded_bands_match_the_checked_in_file`,
+a constant in source asserted equal to the checked-in file it claims to follow.
+
+The
 gate then runs the guard's own negative cases and all five node suites.
 
 **Five and not four, since the S03 review's fourth pass.**

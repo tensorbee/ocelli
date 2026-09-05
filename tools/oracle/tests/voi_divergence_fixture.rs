@@ -213,8 +213,13 @@ const LINEAR_EXACT_CODES: [u8; 16] = [
 /// bias bullet exists to see.
 const DIFFERING: u64 = 7;
 
-/// Four by four is the sixteen inputs above, and the whole frame is image, so
-/// the image rectangle the bias bullet names is the whole of it.
+/// Four by four is the sixteen inputs above, and the whole frame is image. No
+/// code in either table is 0 or 255, so no pixel is clipped and the informative
+/// region the bias bullet names is the whole frame too. The two regions
+/// coincide here, so nothing in this file distinguishes them, and the test
+/// that does is
+/// `the_bias_bound_is_fed_the_informative_region_and_not_the_rectangle` in
+/// `tools/oracle/src/attribution.rs`.
 const SIDE: u32 = 4;
 
 fn divergence_pair() -> Result<
@@ -238,13 +243,17 @@ fn divergence_pair() -> Result<
         .channel(0)
         .ok_or("no channel 0 in the full-frame statistics")?
         .clone();
-    let image = diff
-        .image
+    // The INFORMATIVE region, which is what `build_statistics` feeds the
+    // bound. It is the whole frame here, because no code in either table is 0
+    // or 255, but naming the region the comparator uses keeps this file from
+    // asserting a bound over a region production does not evaluate.
+    let informative = diff
+        .informative
         .channel(0)
-        .ok_or("no channel 0 in the image statistics")?;
+        .ok_or("no channel 0 in the informative statistics")?;
     Ok((
         tolerance::monochrome_predicate(&stats)?,
-        tolerance::bias_bound(image)?,
+        tolerance::bias_bound(informative)?,
         stats,
     ))
 }
@@ -315,11 +324,11 @@ fn the_bias_negates_exactly_when_the_sides_are_swapped() -> Outcome {
         Rect::full(SIDE, SIDE),
         ChannelSet::Monochrome,
     )?;
-    let image = diff
-        .image
+    let informative = diff
+        .informative
         .channel(0)
-        .ok_or("no channel 0 in the image statistics")?;
-    let bias = tolerance::bias_bound(image)?;
+        .ok_or("no channel 0 in the informative statistics")?;
+    let bias = tolerance::bias_bound(informative)?;
     assert_eq!(bias.signed_mean_diff.to_bits(), (-0.4375_f64).to_bits());
     assert!(!bias.passes);
     Ok(())

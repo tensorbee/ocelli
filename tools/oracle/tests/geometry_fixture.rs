@@ -1,20 +1,23 @@
 //! The image rectangle, and HLD 25.1's geometry bound at each boundary.
 //!
 //! The rectangle matters twice. It is what separates a difference in the
-//! picture from a difference in the letterbox, and it BOUNDS the region the
-//! bias bullet is evaluated over. The bullet says "signed mean difference over
-//! the informative region", not over the rectangle, and the difference is
-//! load-bearing: the informative region is the subset of this rectangle that
-//! is not clipped to the same extreme on both sides. So a rectangle wrong by a
-//! column is wrong in the denominator of every bias number the comparator
-//! reports.
+//! picture from a difference in the letterbox, and it is the denominator of
+//! `informativeFraction`. It BOUNDS the region the bias bullet is evaluated
+//! over and it is not that region: the bullet says "signed mean difference
+//! over the informative region", which is the subset of this rectangle that is
+//! not clipped to the same extreme on both sides.
 //!
-//! **A wrong column is caught here and not elsewhere.** It moves the bias by a
-//! fraction of a display code, which no corpus view would report as a failure,
-//! so `an_edge_exactly_on_a_pixel_centre_belongs_to_the_image` below is the
-//! only thing standing between an off-by-one edge rule and silence. Today's
-//! corpus carries no extent landing on a pixel centre, which is exactly why
-//! that case is constructed rather than waited for.
+//! **A wrong column is caught here and not elsewhere.** It does NOT move the
+//! bias: a letterbox column is the declared clear colour on both sides, so it
+//! is clipped to the same extreme, is not informative, and never enters the
+//! bias denominator. What it moves is `informativeFraction`, whose denominator
+//! is this rectangle, and the `letterbox-only` qualifier, which can only fire
+//! when the image region carries no difference at all. Neither shows up as a
+//! corpus failure, so
+//! `an_edge_exactly_on_a_pixel_centre_belongs_to_the_image` below is the only
+//! thing standing between an off-by-one edge rule and silence. Today's corpus
+//! carries no extent landing on a pixel centre, which is exactly why that case
+//! is constructed rather than waited for.
 //!
 //! **The canvas scale is READ, not re-derived.** `canvasScale` in
 //! `tools/oracle/src/params.mjs` computes canvas pixels per source pixel from
@@ -95,7 +98,10 @@ fn the_worked_case_rectangle_reproduces_the_reference_black_fraction() -> Outcom
 /// A rule that floored the offset would have started at column 42 and a rule
 /// that ceiled the far edge would have ended at 469, and both would have
 /// counted a letterbox column as image. At 512 rows that is 512 pixels of
-/// background inside the region the bias bullet averages over.
+/// background counted as picture: 0.00195 of the rectangle added to the
+/// denominator of `informativeFraction`, against a measured margin of 0.0007
+/// above the floor, and a column in which a fit error can no longer be
+/// reported as `letterbox-only`.
 #[test]
 fn a_fractional_extent_takes_the_pixels_whose_centres_are_inside() -> Outcome {
     let extent = CanvasExtent {

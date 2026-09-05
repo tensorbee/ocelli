@@ -179,11 +179,16 @@ and server targets entry points rather than rewrites.
 
 ### D-10, wgpu two sprints early
 
-`ocelli-render` and `ocelli-compute` link wgpu from F-008 rather than F-039,
+`ocelli-render` and `ocelli-compute` link wgpu from F-008 rather than F-037,
 and both drop `#![cfg_attr(not(test), no_std)]` because wgpu needs `std`. The
-pin is untouched. `scripts/no_std_check.py` reads the attribute from each
-crate's source rather than carrying an exemption list, so these two left the
-check by construction.
+pin is untouched. **F-037 and not F-039**, for the reason the section above
+gives twice: F-037 is E6.1 in S11, device init and capability tiering, and
+F-039 is E6.3 in S13 and is OffscreenCanvas. The root `Cargo.toml` comment
+D-10 is written against said F-039 until the S03 review's fifth pass, and
+D-10's row in `docs/hld/DEVIATIONS.md` quotes that spelling rather than
+endorsing it. `scripts/no_std_check.py` reads the attribute from each crate's
+source rather than carrying an exemption list, so these two left the check by
+construction.
 
 `ocelli-wasm` does not depend on `ocelli-render`, so **the wasm size budget is
 unaffected by this story**. The first story that makes the wasm module reach

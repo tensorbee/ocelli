@@ -66,6 +66,53 @@ The `#[allow(...)]` outer form on one item is deliberately NOT refused. That is
 the visible, local choice 27.1's note asks for. The gap between the two is one
 character, which is why the refusal names the whole attribute it found.
 
+## Four more holes, all measured in the S03 review's fifth pass
+
+**The workspace has fourteen members and this read thirteen.** `crates/` was
+hard-coded here and `Cargo.toml` says `members = ["crates/*", "tools/oracle"]`.
+`tools/oracle` is a compiled member with thirteen `.rs` files, checked for
+neither `[lints] workspace = true` nor an inner allow. Measured: removing
+`[lints] workspace = true` from `tools/oracle/Cargo.toml` AND prepending
+`#![allow(clippy::pedantic)]` to `tools/oracle/src/lib.rs` left this check at
+exit 0 printing "13 crate(s) inherit the table, 33 .rs file(s)", and left the
+census at exit 0. The members are read from the manifest now, globbed, and a
+pattern resolving to nothing is refused rather than walked past. The count in
+the OK line is derived from that walk rather than written as a literal.
+
+**Whitespace in the lint path defeated `REFUSED_GROUPS`.** Rust tokenises
+`clippy :: pedantic` exactly as `clippy::pedantic`. Measured under the pinned
+1.97.1 toolchain on a crate carrying `cast_possible_truncation = "deny"` and
+one `x as i32`, with the attribute in a module file: no attribute exits 101,
+`#![allow(clippy :: pedantic)]` exits 0, `#![allow(clippy:: pedantic)]` exits 0,
+and `#![expect(clippy :: cast_possible_truncation)]` exits 0. The captured name
+had spaces in it and matched no entry in the set. Names are normalised now, and
+a `reason = "..."` clause is stripped before the split so it cannot be read as
+a lint name.
+
+**The outer form is not always local.** `#[allow(...)]` on a `mod` item governs
+the whole module tree, which is the same scope an inner attribute in that
+module's file has. Measured the same way: with `src/inner.rs` carrying one
+`x as i32` and `src/lib.rs` reading
+`#[allow(clippy::cast_possible_truncation)] pub mod inner;`, cargo clippy goes
+from 101 to 0, and `#[allow(clippy::pedantic)] pub mod inner;` does the same.
+So the guard refused an inner attribute at a crate root because it covers the
+crate, and permitted an outer one on a module, which covers a module. Same
+scope, opposite verdicts, and the accept probe planted its outer allow on a
+`fn`, so the `mod` case was never exercised. An outer `allow` or `expect` whose
+next non-trivial token is `mod` is refused now. On a `fn`, an `impl`, a
+`struct`, a statement or an expression it is still permitted, and both
+directions are probed.
+
+**A group row in the workspace table itself.** The row regex matched a quoted
+level only, so `pedantic = { level = "allow", priority = 1 }` in
+`[workspace.lints.clippy]` was invisible and this check went on printing
+"5 clippy lint(s) at or above HLD 27.1's level" at exit 0. Measured: that one
+row beside `cast_possible_truncation = "deny"` takes cargo clippy from 101 to
+0, because the higher priority is applied last and the group wins. The census's
+digest over the table caught it, so the gate held, but this check was wrong
+about all five. The inline form is parsed now and a group row weaker than
+`deny` is refused.
+
 ## The one departure, declared rather than discovered
 
 `unsafe_code = "deny"` is NOT in `Cargo.toml`. HLD 27.2 R5 is enforced instead
@@ -87,7 +134,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CARGO = ROOT / "Cargo.toml"
-CRATES = ROOT / "crates"
 RUNNER = ROOT / "bin" / "ocelli.sh"
 
 # HLD 27.1, transcribed. The table is the specification. There is a second copy
@@ -154,20 +200,137 @@ BLANKET = ("no lint in HLD 27.1's table under clippy 1.97.1, and it is a "
 INNER_ALLOW = re.compile(
     r"#!\[[^\]]*?\b(?:allow|expect)\(([^)]*)\)[^\]]*\]")
 
+# The OUTER form, `#[allow(...)]`, which is refused only when it governs a
+# `mod`. On a `fn`, an `impl`, a `struct`, a statement or an expression it is
+# the deliberate, visible, LOCAL choice 27.1's note asks for and it stays
+# permitted. On a module item it governs the whole module tree, which is the
+# scope an inner attribute in that module's file has, and the guard was
+# refusing one and permitting the other for opposite stated reasons.
+OUTER_ALLOW = re.compile(
+    r"#\[[^\]]*?\b(?:allow|expect)\(([^)]*)\)[^\]]*\]")
+
+# Whitespace, line comments, block comments and further outer attributes, all
+# of which may sit between an attribute and the item it is attached to. An
+# attribute followed by `#[cfg(test)]` and then `mod tests` still governs the
+# module, so another attribute is trivia here rather than a terminator.
+TRIVIA = re.compile(r"(?:\s+|//[^\n]*|/\*.*?\*/|#!?\[[^\]]*\])*", re.S)
+
+# A module item, with the visibility and `unsafe` qualifiers Rust allows in
+# front of it. `mod x;` and `mod x { ... }` are the same scope for this rule.
+MODULE_ITEM = re.compile(r"(?:pub\s*(?:\([^)]*\)\s*)?)?(?:unsafe\s+)?mod\b")
+
+# RFC 2383's `reason = "..."` clause, removed before the argument list is split
+# on commas. Left in, it became a lint name of its own and, worse, a reason
+# carrying a comma split into two names neither of which is one.
+REASON = re.compile(
+    r"""\breason\s*=\s*(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')""")
+
+# One row of a `[workspace.lints.*]` table, in both TOML forms: the quoted
+# level and the inline table. The inline form was invisible, and
+# `pedantic = { level = "allow", priority = 1 }` is measured to take cargo
+# clippy from 101 to 0 on a crate denying cast_possible_truncation.
+LINT_ROW = re.compile(
+    r'^\s*([A-Za-z_][\w:-]*)\s*=\s*(?:"([a-z]+)"|\{([^}]*)\})\s*$')
+
 # A stricter level satisfies a weaker requirement and not the other way round.
 STRENGTH = {"allow": 0, "warn": 1, "deny": 2, "forbid": 3}
 
 
-def crate_sources(crate: Path) -> list[Path]:
-    """Every `.rs` file in a crate, sorted, with build output skipped.
+def member_patterns(text: str) -> tuple[list[str], list[str]]:
+    """The globs `[workspace] members` declares, and what `exclude` removes."""
+    block = re.search(r"^\[workspace\]$(.*?)(?=^\[|\Z)", text, re.M | re.S)
+    if block is None:
+        return [], []
+
+    def listing(key: str) -> list[str]:
+        found = re.search(rf"^\s*{key}\s*=\s*\[(.*?)\]", block.group(1),
+                          re.M | re.S)
+        return re.findall(r'"([^"]+)"', found.group(1)) if found else []
+
+    return listing("members"), listing("exclude")
+
+
+def workspace_members(text: str) -> tuple[list[Path], list[str]]:
+    """Every directory `[workspace] members` resolves to, and the refusals.
+
+    Read from the manifest rather than from a hard-coded `crates/`. The
+    workspace has fourteen members and `crates/*` is thirteen of them.
+    `tools/oracle` is the fourteenth, a compiled member with thirteen `.rs`
+    files that was checked for neither `[lints] workspace = true` nor an inner
+    allow, and both routes were measured to silence a denied lint.
+
+    A pattern that resolves to no directory carrying a manifest is REFUSED
+    rather than skipped. cargo would refuse that workspace too, and a member
+    this function cannot find is a member whose sources are not scanned, which
+    the walk would otherwise report as a smaller number and a pass.
+    """
+    patterns, excluded = member_patterns(text)
+    problems: list[str] = []
+    if not patterns:
+        problems.append(
+            "Cargo.toml's [workspace] declares no `members` this parser can "
+            "read, so there is no member to inspect and every check below "
+            "would answer a question about an empty set in the language of "
+            "success.")
+        return [], problems
+    skip = {(ROOT / name).resolve() for name in excluded}
+    members: list[Path] = []
+    for pattern in patterns:
+        if "*" in pattern:
+            hits = sorted(p for p in ROOT.glob(pattern)
+                          if (p / "Cargo.toml").is_file())
+        else:
+            path = ROOT / pattern
+            hits = [path] if (path / "Cargo.toml").is_file() else []
+        if not hits:
+            problems.append(
+                f"the workspace member `{pattern}` resolves to no directory "
+                f"carrying a Cargo.toml. cargo would refuse this workspace, "
+                f"and this check would otherwise walk one member fewer, scan "
+                f"its sources not at all, and report the smaller number as a "
+                f"pass.")
+            continue
+        members.extend(p for p in hits if p.resolve() not in skip)
+    if not members and not problems:
+        problems.append(
+            f"Cargo.toml's [workspace] declares {len(patterns)} member "
+            f"pattern(s) and `exclude` removes every directory they resolve "
+            f"to, so there is no member to inspect. An empty walk is not an "
+            f"empty finding.")
+    return sorted(set(members)), problems
+
+
+def member_sources(member: Path) -> list[Path]:
+    """Every `.rs` file in a workspace member, sorted, build output skipped.
 
     Not `src/lib.rs`. An inner attribute in `src/main.rs` is a second crate
     root and one in any module file governs that module, both measured, so a
     pass that reads one file answers a question about one file and says so by
     succeeding.
+
+    `<member>/target/` at depth 1 ONLY. The previous rule skipped any path
+    component named `target`, and the build directory is at the repository
+    root, so all it could ever skip was a source module called `target`. HLD
+    section 13 makes that a likely name in a rendering codebase and skipping
+    it would be silent.
     """
-    return sorted(path for path in crate.rglob("*.rs")
-                  if "target" not in path.relative_to(crate).parts)
+    return sorted(path for path in member.rglob("*.rs")
+                  if path.relative_to(member).parts[:1] != ("target",))
+
+
+def _names_in(argument_list: str) -> list[str]:
+    """The lint names an `allow(...)` or `expect(...)` argument list holds.
+
+    Whitespace inside a name is removed before the comparison, because Rust
+    tokenises `clippy :: pedantic` exactly as `clippy::pedantic` and measuring
+    it under the pinned toolchain showed the spaced form silencing the lint
+    while the set lookup matched nothing. A `reason = "..."` clause is stripped
+    first, so it is neither read as a lint name nor split into two by a comma
+    inside its own string.
+    """
+    return [re.sub(r"\s+", "", name)
+            for name in REASON.sub("", argument_list).split(",")
+            if re.sub(r"\s+", "", name)]
 
 
 def allowed_lints(source: str) -> list[tuple[str, str]]:
@@ -180,23 +343,57 @@ def allowed_lints(source: str) -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
     for match in INNER_ALLOW.finditer(source):
         attribute = " ".join(match.group(0).split())
-        for name in match.group(1).split(","):
-            name = name.strip()
-            if name:
-                found.append((name, attribute))
+        for name in _names_in(match.group(1)):
+            found.append((name, attribute))
+    return found
+
+
+def module_allows(source: str) -> list[tuple[str, str]]:
+    """Every lint name an OUTER attribute allows on a `mod` item.
+
+    The scope is the whole module tree, measured: with one `x as i32` in
+    `src/inner.rs` and `src/lib.rs` reading
+    `#[allow(clippy::cast_possible_truncation)] pub mod inner;`, cargo clippy
+    goes from 101 to 0 under the pinned 1.97.1 toolchain. That is the scope an
+    inner attribute in `src/inner.rs` has, and the guard refused one and
+    permitted the other.
+    """
+    found: list[tuple[str, str]] = []
+    for match in OUTER_ALLOW.finditer(source):
+        rest = source[match.end():]
+        trivia = TRIVIA.match(rest)
+        tail = rest[trivia.end():] if trivia else rest
+        if not MODULE_ITEM.match(tail):
+            continue
+        attribute = " ".join(match.group(0).split())
+        for name in _names_in(match.group(1)):
+            found.append((name, attribute))
     return found
 
 
 def table(text: str, name: str) -> dict[str, str]:
+    """One `[workspace.lints.*]` table, in both of TOML's forms.
+
+    The inline form was invisible, so a group row switching the whole table off
+    left this check printing "5 clippy lint(s) at or above HLD 27.1's level"
+    at exit 0. A row whose inline table carries no readable `level` yields the
+    empty string, which is weaker than every level in `STRENGTH` and is
+    therefore refused rather than skipped.
+    """
     block = re.search(rf"^\[{re.escape(name)}\]$(.*?)(?=^\[|\Z)", text,
                       re.M | re.S)
     if block is None:
         return {}
     found = {}
     for line in block.group(1).splitlines():
-        match = re.match(r'^\s*([a-z_:]+)\s*=\s*"([a-z]+)"', line)
-        if match:
+        match = LINT_ROW.match(line)
+        if match is None:
+            continue
+        if match.group(2) is not None:
             found[match.group(1)] = match.group(2)
+            continue
+        level = re.search(r'level\s*=\s*"([a-z]+)"', match.group(3))
+        found[match.group(1)] = level.group(1) if level else ""
     return found
 
 
@@ -224,10 +421,40 @@ def main() -> int:
                 f"Weakening one is a design-plan decision with a recorded "
                 f"rationale, not an edit made to get a build green.")
 
+    # A group row in the workspace table itself. The inner-attribute pass below
+    # watches a crate putting a lint back to sleep, and nothing watched the
+    # table doing it in one line.
+    for table_name, prefix, rows in (
+            ("[workspace.lints.clippy]", "clippy::", clippy),
+            ("[workspace.lints.rust]", "", rust)):
+        for lint, level in sorted(rows.items()):
+            if f"{prefix}{lint}" not in REFUSED_GROUPS:
+                continue
+            if STRENGTH.get(level, 0) >= STRENGTH["deny"]:
+                continue
+            problems.append(
+                f"{table_name} carries the lint GROUP `{lint}` at "
+                f"'{level or 'a level this parser cannot read'}'. HLD 27.1's "
+                f"table names five lints and no group, and a group row weaker "
+                f"than 'deny' switches lints off without naming one of them. "
+                f"Measured under the pinned 1.97.1 toolchain: adding "
+                f"`pedantic = {{ level = \"allow\", priority = 1 }}` beside "
+                f"`cast_possible_truncation = \"deny\"` takes cargo clippy "
+                f"from 101 to 0, because the higher priority is applied last "
+                f"and the group wins. Allow the single lint at the expression "
+                f"that needs it, with a reason.")
+
     # The declared departure. One of the two mechanisms must be present.
     lint_level = rust.get("unsafe_code")
     script = (ROOT / "scripts" / "unsafe_allowlist_check.py").is_file()
-    gate = 'unsafe|no|' in RUNNER.read_text(encoding="utf-8")
+    # The ARM, not the GATES table row. `'unsafe|no|' in RUNNER` matched the
+    # row in the gate inventory, which is a description, so replacing the
+    # `unsafe)` arm with `true` left this check asserting a substitution it had
+    # not established. The `ci` gate catches that separately and this one is no
+    # longer wrong about it.
+    gate = re.search(
+        r"^\s*unsafe\)[^\n]*?python3 scripts/unsafe_allowlist_check\.py",
+        RUNNER.read_text(encoding="utf-8"), re.M) is not None
     if lint_level is not None and STRENGTH.get(lint_level, 0) >= 2:
         unsafe_by = f"[workspace.lints.rust] unsafe_code = \"{lint_level}\""
     elif script and gate:
@@ -242,42 +469,50 @@ def main() -> int:
             "the two, and removing the script without adding the lint leaves "
             "HLD 27.2 R5 enforced by nothing.")
 
-    # Every crate inherits the table. A crate that stops is the second way to
-    # the same place, and no lint level notices it.
-    crates = sorted(c for c in CRATES.iterdir() if (c / "Cargo.toml").is_file())
-    if not crates:
-        problems.append(
-            "no crate under crates/ carries a manifest, so this check has "
-            "nothing to inspect and would say so by succeeding.")
-    for crate in crates:
-        manifest = (crate / "Cargo.toml").read_text(encoding="utf-8")
+    # Every workspace MEMBER inherits the table. A member that stops is the
+    # second way to the same place, and no lint level notices it. The members
+    # are read from the manifest rather than assumed to be `crates/*`, because
+    # they are not: `tools/oracle` is the fourteenth.
+    members, member_problems = workspace_members(text)
+    problems += member_problems
+    for member in members:
+        where = member.relative_to(ROOT).as_posix()
+        manifest = (member / "Cargo.toml").read_text(encoding="utf-8")
         if not re.search(r"^\[lints\]\s*$\s*^workspace\s*=\s*true\s*$",
                          manifest, re.M):
             problems.append(
-                f"{crate.name} does not inherit the workspace lint table. "
+                f"{where} does not inherit the workspace lint table. "
                 f"`[lints]` with `workspace = true` is what makes HLD 27.1 "
-                f"apply to it, and a crate without it compiles under a "
+                f"apply to it, and a member without it compiles under a "
                 f"smaller set of rules while the `clippy` gate stays green.")
 
     # An inner `allow` or `expect` puts a denied lint back to sleep for a
-    # whole crate or a whole module. By name, and by any group that
-    # contains one.
+    # whole crate or a whole module, and an OUTER one on a `mod` item does the
+    # same for that module tree. By name, and by any group that contains one.
     named = set(REQUIRED_CLIPPY) | set(REQUIRED_RUST)
     scanned = 0
-    for crate in crates:
-        for path in crate_sources(crate):
+    for member in members:
+        for path in member_sources(member):
             scanned += 1
             where = path.relative_to(ROOT).as_posix()
-            for name, attribute in allowed_lints(
-                    path.read_text(encoding="utf-8")):
+            source = path.read_text(encoding="utf-8")
+            attributes = ([(n, a, "inner") for n, a in allowed_lints(source)] +
+                          [(n, a, "module") for n, a in module_allows(source)])
+            for name, attribute, shape in attributes:
+                scope = (
+                    "an inner attribute is not the deliberate, visible choice "
+                    "27.1's note asks for: at a crate root it covers the "
+                    "crate and in a module file it covers that module"
+                    if shape == "inner" else
+                    "an outer attribute on a `mod` item covers the whole "
+                    "module tree, measured, which is the same scope as an "
+                    "inner attribute inside that module and not the local "
+                    "choice 27.1's note asks for")
                 bare = name.removeprefix("clippy::")
                 if bare in named:
                     problems.append(
                         f"{where} re-allows `{bare}` with `{attribute}`. HLD "
-                        f"27.1 denies it, and an inner attribute is not the "
-                        f"deliberate, visible choice 27.1's note asks for: at "
-                        f"a crate root it covers the crate and in a module "
-                        f"file it covers that module. Allow it at the "
+                        f"27.1 denies it, and {scope}. Allow it at the "
                         f"expression that needs it, with a reason.")
                     continue
                 if name in REFUSED_GROUPS:
@@ -296,20 +531,21 @@ def main() -> int:
                         f"float_cmp sat in `correctness` until clippy 1.76.")
                     problems.append(
                         f"{where} allows the lint group `{name}` with "
-                        f"`{attribute}`, {why} Allow the single lint at the "
-                        f"expression that needs it, with a reason.")
+                        f"`{attribute}`, {why} {scope[0].upper()}{scope[1:]}. "
+                        f"Allow the single lint at the expression that needs "
+                        f"it, with a reason.")
 
     # A scan that read nothing is not a scan that found nothing. Measured
     # while proving the `expect` route above: a tree whose crates carry no
     # `.rs` file at all printed `0 .rs file(s) carry no inner allow` and
     # exited 0, which is AGENTS.md's named failure of answering a question
     # about an empty set in the language of success.
-    if crates and not scanned:
+    if members and not scanned:
         problems.append(
-            f"{len(crates)} crate(s) inherit the lint table and not one "
-            f"`.rs` file was read, so the inner-attribute pass proved "
-            f"nothing and would have said OK. Either the crate layout moved "
-            f"or `crate_sources` stopped finding sources.")
+            f"{len(members)} workspace member(s) inherit the lint table and "
+            f"not one `.rs` file was read, so the attribute pass proved "
+            f"nothing and would have said OK. Either the layout moved or "
+            f"`member_sources` stopped finding sources.")
 
     if problems:
         print("FAIL: the HLD 27.1 lint policy")
@@ -317,11 +553,17 @@ def main() -> int:
             print(f"  {problem}")
         return 1
 
+    # Every number here is derived from the walk that produced it. The member
+    # count was the literal `crates/` glob until the fifth pass, and it read
+    # thirteen while cargo built fourteen.
     print(f"OK: {len(REQUIRED_CLIPPY)} clippy lint(s) at or above HLD 27.1's "
-          f"level, {len(crates)} crate(s) inherit the table, {scanned} "
-          f".rs file(s) carry no inner allow or expect of a denied lint or "
-          f"of a group "
-          f"holding one, unsafe_code denied by {unsafe_by}")
+          f"level and no group row weaker than deny, {len(members)} workspace "
+          f"member(s) resolved from "
+          f"{', '.join(repr(p) for p in member_patterns(text)[0])} inherit "
+          f"the table, "
+          f"{scanned} .rs file(s) carry no inner allow or expect of a denied "
+          f"lint or of a group holding one, and none on a `mod` item, "
+          f"unsafe_code denied by {unsafe_by}")
     return 0
 
 

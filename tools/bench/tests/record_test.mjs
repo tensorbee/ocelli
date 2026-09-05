@@ -2,6 +2,7 @@
 // --accept rewrites only the named subject.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -11,6 +12,7 @@ import {
   compareRecord,
   DOWN,
   emptyBaseline,
+  INCREASE_MEANS,
   movedSubjects,
   MOVED,
   NO_BASELINE,
@@ -20,6 +22,8 @@ import {
   withinTolerance,
   WORSE,
 } from "../src/record.mjs";
+import { SUBJECTS_PATH } from "../src/paths.mjs";
+import { parseRegistry } from "../src/registry.mjs";
 import { hostClassKey } from "../src/hostclass.mjs";
 import { INCOMPARABLE, MEASURED, UNAVAILABLE } from "../src/state.mjs";
 
@@ -113,6 +117,44 @@ test("a unit that declares no direction is refused, not defaulted", () => {
     /declares no direction/);
   assert.throws(() => withinTolerance(10, 12, 0.1, undefined),
     /declares no direction/);
+});
+
+test("INCREASE_MEANS and the registry declare the same units", () => {
+  // The test above proves the THROW. It does not prove that the throw is ever
+  // reached, and it is not reached by anything in the floor: `withinTolerance`
+  // runs under `bench --compare` and only for a subject that already owns a
+  // baseline on the machine running it. Measured on this tree, changing
+  // decode.frame's unit to "furlongs" in tools/bench/subjects.json left
+  // `bin/ocelli.sh gate bench` at exit 0, so a unit with no stated direction
+  // lands green here and fails later on whichever machine owns that baseline.
+  //
+  // This is the binding, and its shape is `caps.rs`'s
+  // `the_recorded_bands_match_the_checked_in_file`: a constant in source and
+  // the checked-in file it claims to follow, asserted equal. Both directions,
+  // because a unit the registry declares with no direction is a comparison
+  // that cannot report better or worse, and a direction for a unit no subject
+  // declares is a row that has outlived the subject it was added for.
+  const { subjects } = parseRegistry(readFileSync(SUBJECTS_PATH, "utf8"));
+  const declared = new Set(subjects.map((subject) => subject.unit));
+  const stated = new Set(Object.keys(INCREASE_MEANS));
+
+  for (const unit of declared) {
+    assert.ok(
+      stated.has(unit),
+      `tools/bench/subjects.json declares the unit ${JSON.stringify(unit)} ` +
+        "and INCREASE_MEANS states no direction for it, so a comparison of " +
+        "that subject cannot say whether the figure got better or worse. Add " +
+        "it with the reason, which is a decision and not a default.",
+    );
+  }
+  for (const unit of stated) {
+    assert.ok(
+      declared.has(unit),
+      `INCREASE_MEANS states a direction for ${JSON.stringify(unit)} and no ` +
+        "subject declares it. The registry is the authority on units, so the " +
+        "row is stale rather than the registry being incomplete.",
+    );
+  }
 });
 
 test("a baseline of zero cannot carry a fractional tolerance", () => {

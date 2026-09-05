@@ -85,13 +85,13 @@ GATES=(
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
 )
 
-gate_needs_gpu() {
-  local entry
-  for entry in "${GATES[@]}"; do
-    [ "${entry%%|*}" = "$1" ] && { [ "$(echo "$entry" | cut -d'|' -f2)" = "YES" ]; return; }
-  done
-  return 1
-}
+# `gate_needs_gpu()` used to sit here and was called by nothing. It is REMOVED
+# rather than wired in, because the GPU column already has a reader that
+# matters: `scripts/ci_floor_check.py`'s `gpu_gates()` parses this array and
+# uses `YES` to decide which excluded gate CI is not supposed to run at all,
+# which is deviation D-04. A second reader nothing calls is a place to look
+# that answers no question, and its absence would never have been noticed,
+# which is the same argument that removed `s01_pre_oracle` below.
 
 run_gate() {
   local name=$1

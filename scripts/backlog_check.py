@@ -8,9 +8,15 @@ Checks, in order of how much a failure costs:
    Whether `SPRINT_PLAN.md` agrees with the backlog about a story's
    sprint and its estimate is `scripts/gen_sprint_plan.py --check`,
    in this same gate. `main()` has never had a step 2, and this line
-   read as though it did until the S03 review's third pass, which is
-   how F-X014 held two different estimates. The numbering below keeps
-   its gap rather than closing it, so the list and the code match.
+   read as though it did until the S03 review's third pass added the
+   estimate comparison there. **F-X014 never held two different
+   estimates in any committed state**, and this line said it did until
+   the fifth pass checked: `git show fe18a91:` gives `1w` in the plan,
+   the backlog and the allocation, and `git show 4139a54:` gives `2w`
+   in all three. Pass 3 widened the story and the plan row lagged
+   inside that same edit, so the drift was real for the length of one
+   edit and no check has ever caught it. The numbering below keeps its
+   gap rather than closing it, so the list and the code match.
 3. The two recorded import defects are still DECLARED, so a dependency that
    does not exist cannot be quietly repointed and forgotten.
 4. Every `done` story has a `SPRINT_TRACKER.md` row and an `AS_BUILT.md` entry.

@@ -145,7 +145,9 @@ no GPU and no browser and Ocelli needs both.
 Early. S01 delivered the `ocelli-core` types and the corpus. S02 delivered the
 build and packaging paths and the reference half of the oracle. S03 gave the
 oracle a verdict, resolved the runtime tier, answered Appendix A gates A1 and
-A2, and gave every repository guard a standing probe. See
+A2, and gave the repository's refusals a standing harness. That last one is
+not "every guard": `python3 scripts/guard_census.py` prints the bucket watched
+by nothing, and it is not empty. See
 `docs/sprints/CURRENT_SPRINT.md` and `docs/lld/`.
 
 What exists, in the order it matters:
@@ -171,5 +173,8 @@ What exists, in the order it matters:
 
 Most of `docs/hld/` Part II is still unimplemented, so where this file and that
 directory disagree about what exists, that directory is describing the target
-and this one is describing today. **No port code has been written**, which is
-decision D7 holding: the oracle exists first.
+and this one is describing today. **No pixel, LUT or geometry port code has
+been written**, which is decision D7 holding: the oracle exists first. S03 did
+add Rust that HLD Part II specifies, the tier resolution of section 7 and the
+error model of section 23, so the unqualified form of that sentence stopped
+being true and the qualified one is the claim.

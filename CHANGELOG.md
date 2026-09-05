@@ -66,8 +66,12 @@ Repository bootstrap. Nothing is published.
   deterministically, and the two that do not are recorded with their reason in
   `tools/oracle/unsupported.json`.
 - The oracle's volume and reformat pass. Four series directories declared in
-  `tools/oracle/volume-params.json` are assembled into cornerstone3D volumes and
-  rendered as three orthogonal reformats each, on their own page opened only
+  `tools/oracle/volume-params.json` are attempted, three are assembled into
+  cornerstone3D volumes and rendered as three orthogonal reformats each, and the
+  fourth, `real/ct_cmb_mml`, is refused as declared because two of its members
+  project to the same position on the slice normal. Twelve reformats are
+  declared and nine are written, which `tools/oracle/out/run.json` records under
+  `volumes`. They render on their own page opened only
   after the stack page has closed, so the existing stack frames are provably
   untouched. Series geometry is measured from the files themselves through
   PS3.3 C.7.6.2.1.1 rather than from any cornerstone3D module, which is what

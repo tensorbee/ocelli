@@ -6,10 +6,12 @@ proves the DECLARATION is complete, which is the half a probe cannot reach:
 a probe run over a catalogue that has fallen behind is a green answer to a
 question nobody asked.
 
-Six checks, described in `scripts/guards/census.py`. The two that matter most
-are the bidirectional site matching, which makes a guard added next month
-arrive with its test or turn CI red, and the declared-constant ratchet, which
-is the only thing that notices a guard being widened rather than broken.
+The checks are lettered in `scripts/guards/census.py`. The three that matter
+most are the bidirectional site matching, which makes a guard added next month
+arrive with its test or turn CI red, the per-entry site count, which is what
+makes that rule reach a guard added to a file the catalogue ALREADY claims, and
+the declared-constant ratchet, which is the only thing that notices a guard
+being widened rather than broken.
 
 Usage:
   python3 scripts/guard_census.py                 # the floor census
@@ -155,6 +157,21 @@ def record_constants() -> int:
     budget["oracle_faults"] = census.oracle_adoption(None)[0]
     sites = discover()
     matches, _ = match_sites(sites)
+    # The per-entry site count for the catch-all entries. This is the number
+    # that moves when a refusal is added to a file the catalogue already
+    # claims, and nothing recorded it, so the census's own rule that a guard
+    # arrives with its test did not reach the census's own files.
+    entry_sites = census.catch_all_sites(matches)
+    previous_sites = budget.get("entry_sites", {})
+    for guard_id in sorted(set(entry_sites) | set(previous_sites)):
+        was = previous_sites.get(guard_id)
+        now = entry_sites.get(guard_id)
+        if was is not None and now is not None and was != now:
+            print(f"  `{guard_id}` moves from {was} refusal site(s) to {now}. "
+                  f"Say in this diff which refusal was added or removed and "
+                  f"what watches it now.")
+    budget["entry_sites"] = entry_sites
+    budget["note"] = census.BUDGET_NOTE
     uncovered = sum(len(m.sites) for m in matches
                     if m.guard.kind == "guard" and not m.guard.covered)
     ratchet = budget.setdefault("uncovered", {})
@@ -175,6 +192,7 @@ def record_constants() -> int:
     BUDGET.write_text(json.dumps(budget, indent=2, sort_keys=True) + "\n")
     print(f"recorded {len(constants)} constant(s), "
           f"constants_count={len(CONSTANTS)}, gates_declared={len(gates)}, "
+          f"entry_sites over {len(entry_sites)} catch-all entry(ies), "
           f"uncovered={uncovered}, "
           f"sweep_complete={ratchet['sweep_complete']}")
     return 0

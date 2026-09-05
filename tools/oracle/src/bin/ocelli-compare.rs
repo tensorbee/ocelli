@@ -1,20 +1,24 @@
 //! `ocelli-compare`, the comparator's runner.
 //!
-//! Two exercises, and neither is a `cargo test`. They need
-//! `tools/oracle/out/`, and an `#[ignore]` test that needs a directory reads
-//! as a pass on the day it did not run, which is a shape this repository
-//! refuses.
+//! Three commands, and none of them is a `cargo test`. All three need a
+//! rendered run under `tools/oracle/out/`, and an `#[ignore]` test that needs
+//! a directory reads as a pass on the day it did not run, which is a shape
+//! this repository refuses.
 //!
 //! ```text
 //! ocelli-compare identity  [--reference DIR] [--candidate DIR] [--out DIR]
 //! ocelli-compare mutations [--reference DIR] [--candidate DIR]
-//! ocelli-compare census    [--reference DIR]
+//! ocelli-compare census    [--reference DIR] [--candidate DIR]
 //! ```
+//!
+//! `--candidate` defaults to `--reference` for every command including
+//! `census`, whose baseline is a full comparison of the two directories, so
+//! passing it there changes which views the census finds gating.
 //!
 //! `identity` compares a directory against itself, which proves the plumbing
 //! over every view. `mutations` replays the declared catalogue and requires
 //! each entry to produce the verdict written beside it, which is what proves
-//! detection. `bin/ocelli.sh compare` runs both.
+//! detection. `bin/ocelli.sh compare` runs those two.
 //!
 //! `census` reports nothing about correctness and gates nothing. It exists
 //! because four tracked files carry counts of which corpus views the bias
@@ -538,7 +542,6 @@ fn detectability(
         });
     }
 
-    let gating = measured.len().saturating_add(declined.len());
     let bound = MONOCHROME_SIGNED_MEAN_BIAS;
     println!("id\twindowWidth\tbiasInformative\tbiasImageRect");
     for row in &measured {
@@ -567,9 +570,23 @@ fn detectability(
         .iter()
         .max_by(|a, b| a.image_bias.abs().total_cmp(&b.image_bias.abs()));
 
-    println!("gating class-one views: {gating}");
+    // **The totals add up, and until the sprint review's fifth pass they only
+    // appeared to.** `gating` counted the declined views as well, while
+    // `can_fail` and `cannot` partition the MEASURED ones alone, so the moment
+    // any view declined the swap the three printed numbers stopped summing and
+    // said nothing about it. Both counts are named.
+    let gating = measured.len().saturating_add(declined.len());
+    println!(
+        "gating class-one views: {gating} ({} measured, {} declined)",
+        measured.len(),
+        declined.len()
+    );
     println!("can fail the bias bound over the informative region: {can_fail}");
-    println!("cannot: {}", blind.len());
+    println!(
+        "cannot: {} (can-fail plus cannot is the {} measured)",
+        blind.len(),
+        measured.len()
+    );
     if let Some(smallest) = blind.iter().map(|row| row.window_width).min() {
         println!("smallest blind window: {smallest}");
     }
