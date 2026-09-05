@@ -212,6 +212,39 @@ async fn measure_chosen(
     (true, measure(&device, &queue, clock))
 }
 
+/// The fragments one timed run shades: every texel of an `edge` by `edge`
+/// target, once per pass.
+///
+/// **The numerator of the fill rate, extracted so the floor can assert it.**
+/// It was an expression inside [`run`], and the only test over it recomputed
+/// the same expression in its own body, which asserts the arithmetic against
+/// itself: dropping the `passes` factor left the crate green. `passes` is not
+/// decoration, it is a factor of sixteen between the two workloads, and
+/// dividing a real adapter's measured rate by sixteen pushes it under
+/// [`crate::caps::FillRateBands::hardware_floor_pps`] and demotes a hardware
+/// adapter to tier C, which is deviation D-07's misdetection arriving from
+/// the direction the resolver is supposed to catch.
+///
+/// A plain `fn` rather than a `const fn`. `u64::from` is not callable in a
+/// const function on stable, and the alternative is `as`, which HLD section
+/// 27.3 makes a human review item and the workspace denies for truncation.
+/// The constant-ness buys nothing here and the cast would cost a review.
+fn fragments(edge: u32, passes: u32) -> u64 {
+    u64::from(edge) * u64::from(edge) * u64::from(passes)
+}
+
+/// Whether the full pass is affordable, given what the calibration cost.
+///
+/// [`CALIBRATION_BUDGET_NANOS`] is a ceiling ON the calibration, not a figure
+/// the calibration has to beat: the rule is "if the calibration took LONGER
+/// than this", and a calibration that took exactly the budget did not take
+/// longer than it, so the full pass still runs. Extracted from [`measure`] so
+/// the boundary is assertable without an adapter, which deviation D-04 leaves
+/// the floor without.
+const fn full_pass_is_affordable(calibration_nanos: u64) -> bool {
+    calibration_nanos <= CALIBRATION_BUDGET_NANOS
+}
+
 /// The two-stage measurement.
 ///
 /// A small calibration pass first, so a slow rasteriser does not hang startup.
@@ -262,7 +295,7 @@ fn measure(
         CALIBRATION_PASSES,
         clock,
     )?;
-    if calibration.elapsed_nanos > CALIBRATION_BUDGET_NANOS {
+    if !full_pass_is_affordable(calibration.elapsed_nanos) {
         return Some(calibration);
     }
     run(device, queue, &pipeline, FULL_EDGE, FULL_PASSES, clock).or(Some(calibration))
@@ -369,8 +402,8 @@ fn run(
     Some(FillRate {
         // Every texel of the target is covered by the oversized triangle
         // exactly once per pass, so this is the fragment count and not an
-        // estimate. `u64::from` throughout, so there is no cast to review.
-        pixels_shaded: u64::from(edge) * u64::from(edge) * u64::from(passes),
+        // estimate.
+        pixels_shaded: fragments(edge, passes),
         elapsed_nanos,
     })
 }
@@ -379,19 +412,55 @@ fn run(
 mod tests {
     use super::{
         CALIBRATION_BUDGET_NANOS, CALIBRATION_EDGE, CALIBRATION_PASSES, FULL_EDGE, FULL_PASSES,
-        WORKLOAD_WGSL,
+        WORKLOAD_WGSL, fragments, full_pass_is_affordable,
     };
+
+    /// **The fragment count, against figures computed by hand from what the
+    /// workload does, and not against the expression that produces it.**
+    ///
+    /// Deviation D-07 judges an adapter on pixels shaded per second, and this
+    /// count is that rate's numerator. The workload draws one oversized
+    /// triangle covering every texel of the target exactly once, and it does
+    /// that once per pass, so a run of `passes` passes over an `edge` by
+    /// `edge` target shades `edge * edge * passes` fragments.
+    ///
+    /// The first three rows have a `passes` greater than one and a product
+    /// `edge * edge` alone cannot reach, which is what makes the factor load
+    /// bearing. Dropping it from the production expression left the crate
+    /// green, because the only test over it rebuilt `edge * edge * passes` in
+    /// its own body from the same constants and so asserted the arithmetic
+    /// against itself. Sixteen of the seventeen fragments of the full pass
+    /// would then vanish from the numerator, a real adapter's measured rate
+    /// would be divided by sixteen, and a machine over
+    /// `FillRateBands::hardware_floor_pps` would fall under it and be demoted
+    /// to tier C, which renders nothing and presents as a slow viewer.
+    #[test]
+    fn the_fragment_count_is_every_texel_once_per_pass() {
+        // Four texels, three passes, twelve fragments.
+        assert_eq!(fragments(2, 3), 12);
+        // Sixteen texels, sixteen passes, 256 fragments.
+        assert_eq!(fragments(4, 16), 256);
+        // One texel, two passes, and a pass is still a pass.
+        assert_eq!(fragments(1, 2), 2);
+        // The smallest case there is.
+        assert_eq!(fragments(1, 1), 1);
+        // The two workloads. 256 * 256 is 65,536, over one pass.
+        assert_eq!(fragments(CALIBRATION_EDGE, CALIBRATION_PASSES), 65_536);
+        // 1024 * 1024 is 1,048,576 texels, over sixteen passes.
+        assert_eq!(fragments(FULL_EDGE, FULL_PASSES), 16_777_216);
+    }
 
     /// The full pass has to be enough larger than the calibration that a real
     /// adapter's figure is not dominated by submission overhead, and the
     /// calibration has to be small enough that a rasteriser reaches the budget
     /// rather than hanging startup.
+    ///
+    /// Both figures come from the production [`fragments`], so the ratio is a
+    /// claim about the workloads this crate actually issues.
     #[test]
     fn the_full_pass_is_much_larger_than_the_calibration() {
-        let calibration = u64::from(CALIBRATION_EDGE)
-            * u64::from(CALIBRATION_EDGE)
-            * u64::from(CALIBRATION_PASSES);
-        let full = u64::from(FULL_EDGE) * u64::from(FULL_EDGE) * u64::from(FULL_PASSES);
+        let calibration = fragments(CALIBRATION_EDGE, CALIBRATION_PASSES);
+        let full = fragments(FULL_EDGE, FULL_PASSES);
         assert_eq!(calibration, 65_536);
         assert_eq!(full, 16_777_216);
         assert_eq!(full / calibration, 256);
@@ -403,6 +472,33 @@ mod tests {
     #[test]
     fn the_calibration_budget_is_two_milliseconds() {
         assert_eq!(CALIBRATION_BUDGET_NANOS, 2_000_000);
+    }
+
+    /// **The budget is a ceiling ON the calibration, and the boundary belongs
+    /// to the affordable side.** The rule is "if the calibration took longer
+    /// than this", and a calibration that took exactly the budget did not take
+    /// longer than the budget, so the full pass still runs.
+    ///
+    /// The boundary and both its neighbours, because a comparison that had
+    /// collapsed to one side satisfies a test that only probes the far ends.
+    /// It is driven through [`full_pass_is_affordable`] rather than through
+    /// [`super::measure`], which needs an adapter that deviation D-04 leaves
+    /// the CI floor without.
+    ///
+    /// Getting this wrong is not a wrong number, it is a MISSING one: the full
+    /// pass never runs, every machine is classified on the 65,536-fragment
+    /// calibration, and that figure carries the submission overhead the full
+    /// pass exists to dilute.
+    #[test]
+    fn the_full_pass_runs_at_the_budget_and_not_past_it() {
+        assert!(full_pass_is_affordable(0));
+        assert!(full_pass_is_affordable(1_999_999));
+        assert!(
+            full_pass_is_affordable(CALIBRATION_BUDGET_NANOS),
+            "a calibration that took exactly the budget was read as over it"
+        );
+        assert!(!full_pass_is_affordable(2_000_001));
+        assert!(!full_pass_is_affordable(u64::MAX));
     }
 
     /// The shader is the workload, so its entry points and its ALU step count

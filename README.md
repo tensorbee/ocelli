@@ -4,8 +4,14 @@ A Rust and WebAssembly medical imaging core for the browser. Named after the
 three simple eyes a bee carries alongside its compound eyes. Pronounced
 **oh-SELL-eye**.
 
-**Status: bootstrap.** The workspace, the workflow and the gates exist. No
-imaging code has been written. See `docs/sprints/CURRENT_SPRINT.md`.
+**Status: early.** The workspace, the workflow and the gates exist, and so now
+do the differential oracle's two halves, the golden corpus, every build target,
+the runtime tier resolution and the error model. **No pixel, LUT or geometry
+port code has been written**, which is decision D7 holding: the oracle exists
+before the code it validates. This paragraph read "bootstrap, no imaging code
+has been written" until the S03 review's seventh pass, and the unqualified form
+had stopped being true. See `docs/sprints/CURRENT_SPRINT.md` for the sprint and
+`CLAUDE.md` for what exists in the order it matters.
 
 ## Standing on cornerstone3D
 

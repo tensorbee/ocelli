@@ -46,16 +46,45 @@ words of its own, and it is a real loss everywhere else. `sites_collapsed()`
 below counts it and `scripts/guard_census.py` prints the number, so the loss is
 reported rather than assumed to be zero.
 
+**A message that is an EXPRESSION is not words, and the seventh pass measured
+what treating it as words cost.** `problems.append(message)` normalises to the
+literal token `message`, so `scripts/guard_probe.py`'s two inverted-success
+refusals, at the `refuse` branch and at the `accept` branch, were ONE site.
+Deleting the first of them and returning `"pass"` left `entry_sites`
+unmoved at 19, the census at exit 0, the self test at 10 properties, the floor
+profile at 106 probes red and the unit suite at 49, with the mechanism that
+gives every probe result its meaning removed. So a message expression carrying
+no string literal of its own, and one whose literals normalise away to nothing,
+falls back to the enclosing function name plus an ordinal within that function.
+`_fallback_identity` builds it. The ordinal is a real cost, because reordering
+two such refusals inside one function does churn their keys, and it is smaller
+than the cost of two refusals sharing one: an expression has no words to
+reword, so there is nothing a reader could have been asked to re-read.
+
 ## What it does not find
 
 A refusal expressed as a bare return value that a caller turns into an exit
 status, `return False` and `return 1` above all, because those carry no words
 and there is nothing for a catalogue entry to claim. A returned list of MESSAGES
-is found, which is the correction the sixth pass made. Also not found: a message
-built into a local variable and appended in a later statement, and a refusal
-inside `crates/`. The last is the scope boundary decision 7 of
+is found, which is the correction the sixth pass made. **A message built into a
+local variable and appended in a later statement IS found**, and the sentence
+here said it was not until the seventh pass: `problems.append(` carries no
+requirement that its argument be a literal, so `scripts/guard_probe.py:260` and
+`:273` and `tools/oracle/check_sidecars.py:558` were all found, all three with
+an identity taken from a variable name. What is not found is a refusal inside
+`crates/`, which is the scope boundary decision 7 of
 `.claude/plans/F-X009-design.md` records: a runtime refusal inside a crate is
 that crate's story's test, not this one's.
+
+**Six of the sites these shapes find are not refusals of their own**, and they
+are carried anyway rather than special-cased. `scripts/corpus_check.py:255` and
+`:262` and `scripts/no_std_check.py:130` are `problems += [...]` continuation
+lines that indent the detail under the refusal appended just above them, and
+`tools/oracle/check_sidecars.py:663` and `:749` and
+`scripts/corpus_tests.py:140` hand a call's result to `extend` or return it. A
+shape test cannot tell those from a refusal without reading the program, and
+narrowing the shapes to exclude them would lose real refusals written the same
+way. They cost one catalogue claim each and no accuracy in either ratchet.
 
 Nor does it find one in prose. A Python docstring or comment that quotes a
 refusal shape, such as the table above, is masked before the scan runs, because
@@ -173,6 +202,37 @@ def _normalise(text: str) -> str:
 # one takes the message from whatever punctuation came next.
 SHAPE_BRACKET = {"py-problem-list": "[", "py-return-list": "["}
 
+# A Python `def`, with its indentation, for `_enclosing_function`. `class` is
+# deliberately absent: every refusal in this repository's guards sits in a
+# function, and a method would report its class rather than itself.
+DEF_LINE = re.compile(r"^([ \t]*)(?:async[ \t]+)?def[ \t]+(\w+)", re.M)
+
+
+def _enclosing_function(text: str, offset: int) -> str:
+    """The Python function a byte offset sits inside, innermost first.
+
+    Indentation decides, which is what Python itself uses, so a nested helper
+    such as `check` inside `self_test` is reported rather than the outer
+    function. Returns the empty string for a top-level offset and for any
+    language that is not Python, where the caller falls back to the shape.
+    """
+    line_start = text.rfind("\n", 0, offset) + 1
+    line_end = text.find("\n", offset)
+    line = text[line_start:line_end if line_end != -1 else len(text)]
+    site_indent = len(line) - len(line.lstrip())
+    stack: list[tuple[int, str]] = []
+    for match in DEF_LINE.finditer(text):
+        if match.start() >= line_start:
+            break
+        indent = len(match.group(1).expandtabs(8))
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        stack.append((indent, match.group(2)))
+    for indent, name in reversed(stack):
+        if indent < site_indent:
+            return name
+    return ""
+
 
 def _balanced(text: str, open_at: int, opening: str = "(") -> str:
     """The argument list of a call whose opening bracket is at `open_at`."""
@@ -198,16 +258,18 @@ def _balanced(text: str, open_at: int, opening: str = "(") -> str:
 def mask_python_prose(text: str) -> str:
     """Blank Python docstrings and comments, preserving every byte offset.
 
-    The shape table at the top of this module is SEVEN markdown rows quoting
-    seven refusal shapes, of which five are detectable when the table is
-    scanned unmasked: `raise SystemExit(` is followed by a backtick where the
-    shape wants a quote, and a bare `exit 1` inside a table cell is not at the
-    start of its line. So the census's headline counted five refusals of prose
-    and deleting the documentation turned the gate red. The earlier count here
-    said five rows and five sites, which happened to name the right number of
-    sites for the wrong reason. Masking is by replacement with spaces rather
-    than deletion, so line numbers and the bracket-matching in `_balanced` are
-    unaffected.
+    The shape table at the top of this module is TEN markdown rows quoting ten
+    refusal shapes, of which eight are detectable when the table is scanned
+    unmasked: `raise SystemExit(` is followed by a backtick where the shape
+    wants a quote, and a bare `exit 1` inside a table cell is not at the start
+    of its line. So the census's headline counted eight refusals of prose and
+    deleting a documentation row turned the gate red. Both numbers are
+    measured rather than read off the table, because this sentence said five
+    rows and five sites when there were seven and five, and was corrected once
+    already to seven and five while the sixth pass was adding the three list
+    shapes that made it ten and eight. Masking is by replacement with spaces
+    rather than deletion, so line numbers and the bracket-matching in
+    `_balanced` are unaffected.
 
     A refusal message is never a triple-quoted literal in this repository and
     never lives in a comment, so nothing real is masked. A file that does not
@@ -244,27 +306,43 @@ def mask_python_prose(text: str) -> str:
 def _sites_in(rel: str, text: str) -> list[Site]:
     if rel.endswith(".py"):
         text = mask_python_prose(text)
-    found: list[Site] = []
+    # (line, shape, offset, message, words), in source order. Sorted before the
+    # fallback identities are assigned, because the ordinal in one has to count
+    # up the file rather than up whichever shape happened to be scanned first.
+    raw: list[tuple[int, str, int, str, bool]] = []
     for shape, pattern in SHAPES.items():
         for match in pattern.finditer(text):
             line = text.count("\n", 0, match.start()) + 1
+            words = True
             if shape in {"sh-fail", "sh-exit"}:
-                raw = text[match.start():text.find("\n", match.start())]
-                message = _normalise(raw) or f"exit 1 at line {line}"
+                head = text[match.start():text.find("\n", match.start())]
+                message = _normalise(head) or f"exit 1 at line {line}"
                 if shape == "sh-exit":
                     # A bare `exit 1` carries no words of its own, so its
                     # identity is the file and the shape. There are eight in
                     # the repository and each is the tail of a guard whose
-                    # message was printed above it.
+                    # message was printed above it. That is the ONE declared
+                    # collapse and it keeps its declared identity.
                     message = f"{rel}: bare shell refusal"
             else:
                 opening = SHAPE_BRACKET.get(shape, "(")
                 bracket = text.index(opening, match.start())
-                message = _normalise(_balanced(text, bracket, opening))
-            if not message:
-                message = f"{rel}:{line}"
-            found.append(Site(file=rel, shape=shape, message=message,
-                              line=line))
+                argument = _balanced(text, bracket, opening)
+                # Whether the refusal carries words at all. `_normalise` hands
+                # back the expression itself when it finds no string literal,
+                # so `problems.append(message)` would otherwise be identified
+                # by a local variable's name and collide with every other
+                # refusal in the file that appends the same variable.
+                words = STRING.search(argument) is not None
+                message = _normalise(argument)
+            raw.append((line, shape, match.start(), message, words))
+
+    counters: dict[str, int] = {}
+    found: list[Site] = []
+    for line, shape, offset, message, words in sorted(raw):
+        if not words or not message:
+            message = _fallback_identity(rel, text, shape, offset, counters)
+        found.append(Site(file=rel, shape=shape, message=message, line=line))
     # A bare shell refusal has one identity per file, not one per occurrence,
     # and any two refusals whose messages normalise identically collapse the
     # same way. `sites_collapsed` counts what that costs.
@@ -272,6 +350,35 @@ def _sites_in(rel: str, text: str) -> list[Site]:
     for site in found:
         deduped.setdefault(site.key, site)
     return sorted(deduped.values(), key=lambda s: (s.line, s.shape))
+
+
+def _fallback_identity(rel: str, text: str, shape: str, offset: int,
+                       counters: dict[str, int]) -> str:
+    """The identity of a refusal that prints no words this scan can read.
+
+    Two shapes reach here. A message that is an EXPRESSION, such as
+    `problems.append(message)`, whose normalised form is a local variable's
+    name and therefore identical for every refusal in the file that appends the
+    same variable. And a message whose literals normalise away to nothing, such
+    as the `problems += [f"    {uid}" for uid in missing]` continuation lines
+    that indent detail under the refusal above them.
+
+    Both used to take an identity a reader cannot act on. The first took the
+    variable's name, which is how `scripts/guard_probe.py`'s two
+    inverted-success refusals became one site. The second took `file:line`,
+    which is the identity this module's own header says it deliberately is not.
+
+    The replacement is the enclosing function plus an ordinal within it, and
+    the shape plus an ordinal within the file where there is no enclosing
+    function to name. Renaming the function or moving one of two such refusals
+    past the other churns the key, which is the trade: an expression carries no
+    words, so there is no reword for a churn to force a re-read of.
+    """
+    scope = _enclosing_function(text, offset) if rel.endswith(".py") else ""
+    label = f"{scope}()" if scope else shape
+    counters[label] = counters.get(label, 0) + 1
+    return (f"{rel}: refusal with no message of its own, "
+            f"{label} #{counters[label]}")
 
 
 def tracked_sources() -> list[str]:

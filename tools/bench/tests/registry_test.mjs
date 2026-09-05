@@ -14,6 +14,7 @@ import {
   parseRegistry,
   REQUIRED_FIELDS,
   resolveSubjects,
+  VALID_STATUS,
 } from "../src/registry.mjs";
 
 const ROW = {
@@ -130,6 +131,50 @@ test("resolution reports whether the subject exists", () => {
     [true, true, false]);
   assert.deepEqual(resolved.map((one) => one.storyStatus),
     [null, "done", "pending"]);
+});
+
+test("only a done story makes a subject exist, over every status", () => {
+  // `resolveSubjects` was only ever driven with `done` and `pending`, so
+  // `in-progress`, `archived` and `superseded` never reached it and
+  // `status === "done"` mutated to `status !== "pending"` left the suite
+  // green. The output that mutation produces is the one `src/state.mjs` calls
+  // "the defect this whole story is most likely to produce": a plausible
+  // number recorded beside a story that has not landed.
+  //
+  // The three that were never driven are the ones it matters most for.
+  // `archived` and `superseded` are exactly the statuses a stale subject row
+  // outlives, and a superseded story is one whose subject was REPLACED rather
+  // than delivered, so reading either as delivered would let this harness time
+  // a subject that no longer exists.
+  //
+  // The expectation is a table and deliberately not `status === "done"`
+  // recomputed here, which would assert the implementation against itself.
+  // Its authority is `scripts/bench_check.py`, which refuses a runner file and
+  // a baseline entry on `status != "done"` twice over, and this module's own
+  // header rule that a rule living on one side only is a defect.
+  const DELIVERED = {
+    pending: false,
+    "in-progress": false,
+    done: true,
+    archived: false,
+    superseded: false,
+  };
+  assert.deepEqual(Object.keys(DELIVERED), [...VALID_STATUS],
+    "the accepted status set moved and this table no longer covers it");
+
+  for (const [status, delivered] of Object.entries(DELIVERED)) {
+    const subjects = parseRegistry(
+      registryText([{ ...ROW, subject_story: "F-001" }]),
+    ).subjects;
+    const [resolved] = resolveSubjects(subjects, {
+      allocationFids: new Set(["F-001"]),
+      statuses: new Map([["F-001", status]]),
+    });
+    assert.equal(resolved.storyStatus, status);
+    assert.equal(resolved.subjectExists, delivered,
+      `a story that is ${JSON.stringify(status)} was read as ` +
+        `${resolved.subjectExists ? "delivered" : "not delivered"}`);
+  }
 });
 
 test("allocationFids reads the tracked allocation", () => {

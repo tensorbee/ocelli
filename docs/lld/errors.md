@@ -220,8 +220,21 @@ shell's "no record available". The export exists for wasm32, where `usize` is
 The hook formats into a stack-local buffer, stores the message bytes, then
 `msg_len`, then `code`, then `version`, and **the magic last**. A hook that
 panics part way through leaves the magic at `0`, and the shell reads that as
-**no record** rather than as a valid record with garbage in it. That ordering
-is driven by a test rather than asserted in a comment.
+**no record** rather than as a valid record with garbage in it.
+
+**That ordering is driven through `record` itself, and until the seventh review
+pass it was not.** `fill` and `seal` are split so a test can drive the rule,
+and the test that looked like it did called the two from its own body, so what
+it asserted was the order it had just written. Swapping the two calls inside
+`record` left the crate green. The state that swap produces is the torn record
+this design exists to exclude: the magic reads `OCP1`, `code` is still `0`,
+`readPanicRecord` returns a record that reads as PRESENT, and `describeError(0)`
+reports that this build does not recognise the code instead of section 23's
+sentence. Reading the record afterwards cannot tell the two orders apart,
+because both leave it byte-identical, so `fill` stamps what the magic held at
+the instant it began and `record_writes_the_body_before_the_magic` asserts it
+held the absent value. The stamp is `#[cfg(test)]` and the shipped hook makes
+exactly the stores it made before.
 
 ### The message writer truncates and returns `Ok`
 
@@ -281,10 +294,16 @@ the production allowance does not read as three files when it is two:
 itself, which nothing can grow, and the rule is syntactic and cannot tell that
 memory from the core's.
 
-The comment above `NO_CACHED_WASM_VIEW_MEMBER` carries a MEASURED list of
-shapes that escape the ban, taken with a probe file and `npx eslint` rather
-than reasoned about, along with a fourth selector and the one site in
-`packages/` and `examples/` it would cost. **That list is a sample and not the
+The comment above `RESTRICTED` and `BAN` in `eslint.config.js` carries a
+MEASURED list of shapes that escape the ban, taken with a probe file and
+`npx eslint` rather than reasoned about, along with a fourth selector and the
+one site in `packages/` and `examples/` it would cost. **It is that comment and
+not the one above `NO_CACHED_WASM_VIEW_MEMBER`**, which this paragraph named
+until the seventh review pass. The comment above the first selector carries the
+alias shapes and the third selector and nothing else, so a reader sent there
+finds neither the escape list nor the fourth selector, and a cross-reference
+that lands on the wrong comment in the right file is harder to notice than one
+that lands on the wrong file. **That list is a sample and not the
 set**, and the fourth selector does not close all of it: the S03 review's fifth
 pass measured three further routes and the sixth confirmed that
 `new DataView(wasm.memory["buffer"])` escapes the fourth selector too, because

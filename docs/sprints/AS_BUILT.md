@@ -680,11 +680,15 @@ generalises it.
 **Crates / packages modified.** `crates/ocelli-render/`,
 `crates/ocelli-native/`, `packages/core/src/capabilities.ts`,
 `ci/tier-thresholds.json`, `ci/target-feature-baseline.json`.
-**Tests added.** 39 added in `ocelli-render`, bringing that crate to 43,
-covering the classifier, the override
+**Tests added.** 39 added in `ocelli-render`, counted as ADDITIONS in this
+story's diff rather than as a crate total, covering the classifier, the override
 outcomes, the band edges in both directions, and a totality property, plus one
 deliberately ignored test that is the measurement instrument and needs a real
-adapter.
+adapter. **The crate total is not transcribed here.** It was written as 43,
+which matched the 43 `#[test]` attributes this crate carried at `9df8539`, and
+later passes added to the crate while rewriting this entry in place and did not
+re-measure it. `cargo test -p ocelli-render --all-targets -- --list` lists the
+tests across both targets and is the count.
 **Fixture provenance.** No DICOM arithmetic in this story. The fill-rate bands
 are a recorded measurement whose provenance is stated per figure in
 `ci/tier-thresholds.json`, and `the_recorded_bands_match_the_checked_in_file`
@@ -840,7 +844,21 @@ CharLS, so their agreement is not independent evidence and the answer says so.
 **Corpus.** pass, 91 rows.
 **Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. Decode is CPU
 work on every tier and this story registers no decoder.
-**LLD updated.** `docs/lld/corpus.md` and `docs/lld/oracle.md` gained pointers.
+**LLD updated.** **Nothing, at completion, and this field claimed two files.**
+`git show --stat 3d5b0bc -- docs/lld/` is empty, and so is the same command over
+the ledger commits `baf09b0` and `c1e8836`. Before the correction below,
+`git grep -n "F-X006" -- docs/lld/` exited 1 and neither file's
+`**F-IDs that contributed:**` line nor the `docs/lld/README.md` index named the
+story. The design plan's `## LLD impact` list named exactly two
+updates, so `/complete-feature` step 9 was skipped and the field was written
+from the plan rather than from the tree. **This is the same defect pass 3 found
+on F-X009, whose entry claimed three LLD updates that did not exist**, and the
+second instance survived six passes. The S03 review's seventh pass wrote both
+updates: `docs/lld/corpus.md` now says what F-X006 narrowed about the
+`jpegls_*` conformance caveat and what it did not narrow about the `j2k_*` one,
+and `docs/lld/oracle.md`'s "this does not answer A1 or A2" paragraph now points
+at the two answer files and says why neither answer moves a reference frame.
+Both are dated to that pass and not to completion.
 **Deviations from the design plan.** One. The plan says the harness depends on
 `openjp2` directly and it depends on `jpeg2k` with `openjp2` selected, because
 `openjp2` 0.6.1 exposes no safe in-memory stream and the only other route needs
@@ -905,14 +923,29 @@ definitions the unavailable subjects are fixed against.
 **Crates / packages modified.** `tools/bench/`, `scripts/bench_check.py`,
 `ci/bench-baseline.json`, `bin/ocelli.sh`, `.github/workflows/ci.yml`,
 `eslint.config.js`, `AGENTS.md`, `.gitignore`, `package.json`.
-**Tests added.** 43 across four pure `node:test` suites, 5 in a browser suite,
-and 25 cases in the guard's own test. Eighteen mutations were observed red by
-the author, and one was re-run independently at integration with its control
-green.
+**Tests added.** Five `node:test` suites under `tools/bench/tests/`, plus 25
+cases in the guard's own test. Eighteen mutations were observed red by the
+author, and one was re-run independently at integration with its control green.
+**Neither suite count is transcribed here.** They were written as 43 across four
+pure suites and 5 in a browser suite, and both statements have moved: the
+review's fourth pass took the module-scope `playwright` import out of
+`wasm_cold_start.mjs`, so `cold_start_test.mjs` is in the floor and only ONE of
+its five cases needs a browser, and the four pure suites have grown since. The
+`bench` arm of `bin/ocelli.sh gate` names the five files and `node --test`
+prints the totals, reporting the browser case as skipped unless
+`OCELLI_BENCH_BROWSER=1` is set.
 **Fixture provenance.** No DICOM arithmetic. The one recorded figure states its
 provenance and its tolerance is derived rather than chosen, from an observed
-spread of 2.2 to 2.5 ms across fifteen runs and from `performance.now()` being
-quantised to 0.1 ms, which is itself over 4 per cent of a figure that small.
+spread and from `performance.now()` being quantised to 0.1 ms, which is itself
+over 4 per cent of a figure that small. **The spread is recorded in two
+accounts that disagree and neither is recoverable after the fact**, which the
+review's fourth pass found and which this entry asserted as one figure for
+three passes after it. `ci/bench-baseline.json`'s `tolerance_provenance` said
+fifteen runs between 2.2 and 2.5 ms. The comment beside `ITERATIONS` in
+`tools/bench/src/runners/wasm_cold_start.mjs` and `docs/lld/benchmarks.md` both
+say eleven runs between 2.3 and 2.5 ms. The recorded 25 per cent covers either,
+so the tolerance does not turn on which is right, and the next story to
+re-baseline this subject replaces both accounts with its own calibration.
 **Verification.** `bin/ocelli.sh gate --floor` ALL GREEN over 24 gates, plus
 `gate corpus` pass.
 **Corpus.** pass, 91 rows.
@@ -1109,12 +1142,15 @@ and D-11 cited.
 **Crates / packages modified.** `tools/oracle/src/` and `tests/`,
 `tools/oracle/Cargo.toml`, the root `Cargo.toml`, `bin/ocelli.sh`,
 `scripts/staged_content_check.py`, `.gitignore`.
-**Tests added.** 64 added in `ocelli-oracle`, bringing that crate to 65, being
-42 unit, 10 tolerance fixture, 5 VOI divergence fixture, 6 geometry fixture and
-2 property. Plus a mutation catalogue replayed on every oracle gate. **No entry
-count is transcribed here.** It was 20 when this entry was written and the
-sprint review has moved it twice since, so
-`grep -c '^    Mutation {' tools/oracle/src/mutations.rs` is the count.
+**Tests added.** 64 added in `ocelli-oracle`, counted as ADDITIONS in this
+story's diff, being 42 unit, 10 tolerance fixture, 5 VOI divergence fixture, 6
+geometry fixture and 2 property. **The crate total is not transcribed here.** It
+was written as 65 and every review pass since has added to this crate while
+rewriting this entry in place, so `cargo test -p ocelli-oracle --all-targets --
+--list` is the count. Plus a mutation catalogue replayed on every oracle gate,
+whose entry count is not transcribed here either: it was 20 when this entry was
+written and the sprint review has moved it twice since, so
+`grep -c '^    Mutation {' tools/oracle/src/mutations.rs` is that count.
 **Fixture provenance.** Hand-computed from PS3.3 and from HLD 18.2's formulas.
 **Deviation D-13 is honoured**: no fixture asserts `LINEAR_EXACT(-160) = 1.594`,
 the value is computed as `0.000` from the formula, and the other three rows of
@@ -1355,6 +1391,65 @@ only M1's was wrong, at 16 stories and 40 weeks. The sixth pass measured that,
 because the fifth pass narrowed this claim in `BACKLOG.md` and left the copy
 here saying every headline number. Each figure it claimed now has a command
 beside it in that file.
+
+### Pass 5, `f51a9ea`
+
+Twenty-one defects, aimed at the pass 4 remediation on the argument that the
+newest code is the least reviewed code, and nearly all of one shape: **the fix
+was written against the route somebody demonstrated rather than against the
+rule.** The lint policy took a third and a fourth route, `#![allow(clippy ::
+pedantic)]` with spaces and an outer allow on a `mod` item, and the walk read
+`crates/` while `Cargo.toml` declares fourteen members. A floor gate could still
+be deleted from CI while the check said all 25 ran, because the arm splitter
+ended an arm at the next case label rather than at its own terminator. The
+census had given itself no probes. The mutation's residue invariant was false
+below a window of 255. And the region decision pass 2 called the sprint's
+central fix had no test outside a run needing the rendered corpus and a GPU.
+
+Three of the twenty-one were this record's own, and two of them are in this
+section rather than in a story entry. **This pass rewrote F-011's entry in
+place**, replacing the bias figure with `ocelli-compare census` because the
+number had been superseded twice while the sentence stood. It rewrote the
+append-only paragraph above, deleting the four-entry list and recording that six
+entries were rewritten and not four. And the commit count this record had
+already corrected once was wrong again, because the commit that corrected it
+carries the same subject and counted itself out, so the number is gone and the
+command stands in its place. A `CHANGELOG.md` bullet claiming twelve reformats
+where nine are written was the third, reintroducing a count pass 1 had already
+fixed in two other files.
+
+### Pass 6, `a5a9a9c`
+
+Six defects, and the areas had separated: the record and the crates returned two
+between them. The comparator's white-pixel exclusion was wrong for the fourth
+consecutive pass, in the block CLAUDE.md section 27.3 tells a human to check
+against the cited specification section rather than against the comment above
+it. The lint policy took a fifth route, a trailing TOML comment making a row
+invisible to a regex anchored on end of line. And the guard scanner could not
+see eight refusals that were already there, gate A4's wasm size ceiling among
+them, because they are written as `problems += [...]` or as a returned list
+literal, so deleting that ceiling left the census reporting exactly the same 544
+refusals at exit 0.
+
+Two were this record's own and both are in this section. `.claude/reviews/S03-sprint-review.md`
+claimed every S03 pass ended `profile=sprint` over 28 gates, in the paragraph
+whose whole argument is that the trailer records what actually ran, and pass 1's
+two commits record `profile=feature` over 25. **And correcting the append-only
+paragraph above, pass 5 had deleted a list of four entries and left "them"
+pointing at "five wrong numbers" rather than at the entries**, so the sentence
+read as five corrected to six. Both fixes are visible in
+`git show a5a9a9c --stat -- docs/sprints/AS_BUILT.md`, which reports 11
+insertions and 6 deletions, all of them in this section and none in a story
+entry.
+
+### These two subsections were added by pass 7
+
+They did not exist until then, while `f51a9ea` and `a5a9a9c` had both edited
+this section and `f51a9ea` had also rewritten F-011's story entry in place.
+**That is this section's own argument turned on itself**, and it is the reason
+the passes are recorded here per pass rather than left in `git log`. Both were
+written from the two commit messages, which
+`git log --oneline --grep='^S03, sprint review pass' 36adc98..HEAD` lists.
 
 **Notes for future sessions.**
 - **A count and the mechanism it describes must be edited by the same hand or

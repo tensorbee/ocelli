@@ -118,8 +118,8 @@ and a mutation is an input to a test: it derives from the specification too.
 |------|-------|---------|
 | 1 | 23 defects and 32 smells, three of them blocking. The rest were records asserting things the tree did not do, swept in one commit | remediated |
 | 2 | 20 defects, 19 smells. The bias bound detected nothing. The census counted a refusal as watched when its entry named a test that never opened the file. In-plane spacing was compared by nothing. Two DICOM skills reproduced HLD 18.3's wrong `LINEAR_EXACT(-160)` | remediated |
-| 3 | 10 defects and 6 smells, a tally that appears in no commit message and nowhere in this tree, so it is the row that fails this file's own rule. Pass 2's mutation was a caricature. The bound's blind spot starts at width 678 and not 2550. Three LLD updates were claimed and none existed | remediated |
-| 4 | Four independent reviewers on disjoint areas. The tally is in an untracked notebook and is not reproducible from this tree, which is also true of pass 3's and is not true of passes 1 and 2, whose commit messages carry theirs. Pass 3's replacement mutation was still not the divergence. A group `#![allow]` switched off four of HLD 27.1's five denied lints with both gates green. The `covered_by` directory route was satisfied by the catalogue itself. This record stated a caught defect that never existed | remediated |
+| 3 | 10 defects and 6 smells, a tally that appears in no commit message and nowhere else in this tree, so it is the one row that fails this file's own rule. Pass 2's mutation was a caricature. The bound's blind spot starts at width 678 and not 2550. Three LLD updates were claimed and none existed | remediated |
+| 4 | Four independent reviewers on disjoint areas returned 34 defects and 27 smells, which `8fbfc88`'s message carries in the same form passes 1 and 2 carry theirs, so pass 3's is the only tally this tree does not record. Pass 3's replacement mutation was still not the divergence. A group `#![allow]` switched off four of HLD 27.1's five denied lints with both gates green. The `covered_by` directory route was satisfied by the catalogue itself. This record stated a caught defect that never existed | remediated |
 | 5 | Four reviewers again, on the same areas, with the pass-4 remediation as the primary target. A floor gate could be deleted from CI while the check said all 25 ran. `#![allow(clippy :: pedantic)]` with spaces defeated the fix for `#![allow(clippy::pedantic)]`. Four of the five refusals pass 4 added to the census were watched by nothing. The mutation's residue invariant was false below `w = 255` | remediated |
 | 6 | Three reviewers. Six defects, against twenty-one and thirty-four before. The comparator's white-pixel exclusion carried a wrong consequence of PS3.3 for the fourth consecutive pass. A TOML trailing comment was the fifth route past the lint policy. Eight refusals in scanned guard files, including gate A4's wasm size ceiling, were invisible to the scanner | remediated |
 
@@ -377,6 +377,16 @@ the census reporting exactly the same number of refusals and exiting 0. So
 `entry_sites`, added one pass earlier precisely to notice a refusal added to an
 already-claimed file, could not see a refusal written in that shape. Three
 shapes were added and the count moved from 544 to 566.
+
+**Eight and twenty-two are different numbers and this record used to set them
+beside each other without saying so.** Eight is what the pass found by hand in
+scanned guard files. Twenty-two is what the three new shapes then surfaced, and
+`git show a5a9a9c -- ci/guard-probe-budget.json` is where it is measured: eleven
+`entry_sites` figures move and their deltas sum to exactly 22. `a5a9a9c`'s
+message attributes the split, sixteen being pre-existing refusals that were
+always invisible, the eight among them, and six being the new probes' own
+refusals. So the eight are a subset of the sixteen and never were the whole of
+the movement.
 
 **The shape of the remaining work is now clear.** Six passes have not exhausted
 the guard harness or the comparator, and each pass costs less than the one

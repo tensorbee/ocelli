@@ -1471,16 +1471,59 @@ mod detection_tests {
     /// The list is matched case-insensitively and across all three of `name`,
     /// `driver` and `driver_info`, because different backends put the useful
     /// text in different fields.
+    ///
+    /// **Each field carries the string on its own, with the other two clean.**
+    /// Until the seventh review pass only `driver_info` did, and `driver` is
+    /// `String::new()` in every fixture in this module including
+    /// [`facts`], so dropping `driver` from the haystack left the crate green
+    /// while this test's own name and the function's doc comment both claimed
+    /// three fields. Dropping `name` and dropping `driver_info` were both
+    /// already red, so the gap was one field wide and it was the one nothing
+    /// ever filled.
+    ///
+    /// `driver` is not a hypothetical field. wgpu reports the Vulkan ICD's
+    /// name there, which is where `llvmpipe` and SwiftShader announce
+    /// themselves on a Vulkan backend, while the GLES backend puts the same
+    /// information in `name`. A7's signal is the renderer string wherever the
+    /// platform happens to have put it.
     #[test]
     fn the_renderer_string_match_is_case_insensitive_and_covers_every_field() {
-        let mut adapter = facts(
-            wgpu::Backend::Gl,
-            wgpu::DeviceType::Other,
-            "Clean Name",
-            false,
+        let clean = || {
+            facts(
+                wgpu::Backend::Gl,
+                wgpu::DeviceType::Other,
+                "Clean Name",
+                false,
+            )
+        };
+
+        let mut by_name = clean();
+        by_name.name = "SwiftShader Device (Subzero)".to_owned();
+        assert_eq!(
+            by_name.renderer_string_match(),
+            Some("swiftshader"),
+            "the name field is not in the haystack"
         );
-        adapter.driver_info = "SWIFTSHADER build 1.2.3".to_owned();
-        assert_eq!(adapter.renderer_string_match(), Some("swiftshader"));
+
+        let mut by_driver = clean();
+        by_driver.driver = "llvmpipe".to_owned();
+        assert_eq!(
+            by_driver.renderer_string_match(),
+            Some("llvmpipe"),
+            "the driver field is not in the haystack"
+        );
+
+        let mut by_driver_info = clean();
+        by_driver_info.driver_info = "SWIFTSHADER build 1.2.3".to_owned();
+        assert_eq!(
+            by_driver_info.renderer_string_match(),
+            Some("swiftshader"),
+            "the driver_info field is not in the haystack"
+        );
+
+        // An adapter clean in all three matches nothing, so none of the three
+        // above can be satisfied by a function that matches everything.
+        assert_eq!(clean().renderer_string_match(), None);
     }
 
     /// A7's list is seven entries and every one is lowercase, because the
@@ -1723,10 +1766,9 @@ mod detection_tests {
     /// is what stops the record from claiming a measurement it never took.
     #[test]
     fn an_override_of_cpu_short_circuits_every_other_signal() {
-        let resolved = classify(
-            &signals(vec![discrete_webgpu()], Some(at_hardware_floor())),
-            TierRequest::Requested(Tier::Cpu),
-        );
+        let mut asked = signals(vec![discrete_webgpu()], Some(at_hardware_floor()));
+        asked.simd = SimdSupport::Simd128;
+        let resolved = classify(&asked, TierRequest::Requested(Tier::Cpu));
         assert_eq!(resolved.caps.tier, Tier::Cpu);
         assert_eq!(resolved.evidence.decided_by, DecidedBy::Override);
         assert_eq!(
@@ -1736,6 +1778,68 @@ mod detection_tests {
         assert_eq!(resolved.evidence.measured_tier, None);
         assert_eq!(resolved.evidence.candidate, None);
         assert_eq!(resolved.evidence.fill_rate, None);
+        assert_eq!(resolved.evidence.adapters_seen, 0);
+        // The short circuit asks the platform nothing. It does not stop being
+        // this build, so what this build can do about SIMD is still recorded,
+        // and it is the value the signals carried rather than a default.
+        assert_eq!(resolved.evidence.simd, SimdSupport::Simd128);
+
+        // **What makes the two absences above mean "short-circuited" rather
+        // than "never recorded at all".** The same adapter and the same
+        // measurement under `Auto` DO reach the record, so an evidence field
+        // that had stopped being filled by anything would fail here rather
+        // than pass above. That distinction is the whole value of the record:
+        // `TierEvidence` says it is how a misdetection gets diagnosed on an
+        // estate nobody can attach a debugger to, and a field that is always
+        // empty diagnoses nothing.
+        let measured = classify(&asked, TierRequest::Auto);
+        assert_eq!(measured.evidence.fill_rate, Some(at_hardware_floor()));
+        assert_eq!(measured.evidence.adapters_seen, 1);
+        assert_eq!(measured.evidence.simd, SimdSupport::Simd128);
+    }
+
+    /// **Every recorded signal, none of them at its fixture default.**
+    ///
+    /// `adapters_seen`, `fill_rate` and `simd` all survived mutation to `0`,
+    /// `None` and `SimdSupport::NotApplicable`, because every other case in
+    /// this module offers exactly one adapter, takes no measurement, and runs
+    /// on a native host where `SimdSupport::build_target()` is
+    /// `NotApplicable` anyway. Three fields of the record a misdetection is
+    /// diagnosed from could be dropped without a test noticing.
+    ///
+    /// So the signals here are none of those: three adapters rather than one
+    /// or zero, a measurement rather than none, and a `simd` a native build
+    /// cannot produce. `adapters_seen` is how many the INSTANCE offered and
+    /// not how many were candidates, so the count includes the two that lost
+    /// the ranking.
+    #[test]
+    fn the_evidence_records_the_signals_it_was_given() {
+        let mut asked = signals(
+            vec![integrated_gl(), discrete_webgpu(), integrated_gl()],
+            Some(at_hardware_floor()),
+        );
+        asked.simd = SimdSupport::Simd128;
+
+        let resolved = classify(&asked, TierRequest::Auto);
+        assert_eq!(
+            resolved.evidence.adapters_seen, 3,
+            "the record lost the count of adapters the instance offered"
+        );
+        assert_eq!(
+            resolved.evidence.fill_rate,
+            Some(at_hardware_floor()),
+            "the record kept the verdict and lost the figure it was reached from"
+        );
+        assert_eq!(
+            resolved.evidence.simd,
+            SimdSupport::Simd128,
+            "the record lost what this build can do about SIMD"
+        );
+        assert_eq!(resolved.evidence.bands, TEST_BANDS);
+        assert!(resolved.evidence.device_created);
+        // The chosen candidate is still the A-candidate, so the count above is
+        // a count of the offer and not of the choice.
+        assert_eq!(resolved.evidence.candidate_tier, Some(Tier::A));
     }
 
     /// Tier A needs an A-candidate. With only a fragment-only adapter present

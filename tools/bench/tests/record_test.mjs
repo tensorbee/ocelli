@@ -74,6 +74,31 @@ test("the tolerance is applied on BOTH sides of the baseline", () => {
   assert.equal(withinTolerance(10, 8.9, 0.1, "ms").within, false);
 });
 
+test("a figure sitting exactly on the tolerance is INSIDE it", () => {
+  // The boundary itself, which nothing probed. The test above steps to either
+  // side of a 0.1 tolerance, at 0.09 and 0.11, and never onto it, so `<=`
+  // mutated to `<` left the suite green. Both neighbouring guards in this
+  // function are covered and this was the one untested boundary in it.
+  //
+  // The boundary belongs to the inside, and that is not a preference. Spike
+  // gate A7.3 names ci/wasm-size-budget.json's mechanism as the one to follow,
+  // and `scripts/pin_and_size_check.py` refuses on `size > ceiling`, so a
+  // figure exactly at the ceiling passes there. A tolerance stated as a
+  // fraction that excluded its own value would mean a 10 per cent tolerance
+  // admits less than 10 per cent.
+  assert.equal(withinTolerance(10, 11, 0.1, "ms").within, true,
+    "a figure exactly 10 per cent above a baseline was outside a 10 per cent " +
+      "tolerance");
+  // Both sides, because the tolerance is applied both ways.
+  assert.equal(withinTolerance(10, 9, 0.1, "ms").within, true,
+    "a figure exactly 10 per cent below a baseline was outside a 10 per cent " +
+      "tolerance");
+  // And the far side of the boundary, so the comparison cannot have collapsed
+  // into one that admits everything.
+  assert.equal(withinTolerance(10, 11.000001, 0.1, "ms").within, false);
+  assert.equal(withinTolerance(10, 8.999999, 0.1, "ms").within, false);
+});
+
 test("the direction and the fraction are reported", () => {
   const up = withinTolerance(10, 12, 0.1, "ms");
   assert.equal(up.direction, UP);
@@ -249,6 +274,33 @@ test("a baseline naming no host class is INCOMPARABLE, not a match", () => {
     assert.match(compared.subjects[0].comparison.reason,
       /no host class or no instrument/);
   }
+});
+
+test("the comparison reads the RECORDED unit and not the run's", () => {
+  // The comment at the call site states the decision and nothing held it:
+  // every other case here builds a run whose unit already equals its
+  // baseline's, so `recorded.unit` and `entry.unit` were indistinguishable and
+  // swapping them left the suite green.
+  //
+  // A subject whose unit changed under a baseline that still names the old one
+  // is comparing two different quantities, and the unit is the only thing that
+  // says which way is better. So the two units here have OPPOSITE polarity in
+  // INCREASE_MEANS: read against the recorded `ms` a figure that rose is
+  // `worse`, and read against the run's `pixels_per_second` the same rise is
+  // `better`. That is a regression printed as an improvement in the field a
+  // reader looks at first, which is the defect `INCREASE_MEANS` was added for
+  // arriving by a different route.
+  const changedUnit = record({
+    subjects: [
+      { id: "wasm.cold_start", unit: "pixels_per_second", state: MEASURED,
+        value: 12 },
+    ],
+  });
+  const entry = compareRecord(changedUnit, baselineWith(10, 0.3)).subjects[0];
+  assert.equal(entry.comparison.direction, UP);
+  assert.equal(entry.comparison.sense, WORSE,
+    "the run's own unit set the polarity, so a duration that rose by 20 per " +
+      "cent was reported as an improvement against a baseline recorded in ms");
 });
 
 test("nothing recorded anywhere is NO_BASELINE, not a pass", () => {

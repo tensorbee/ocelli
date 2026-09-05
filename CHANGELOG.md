@@ -114,7 +114,11 @@ Repository bootstrap. Nothing is published.
   codestream when forced to, so HTJ2K reports unavailable until F-X013 prices a
   route. HLD section 15.2 names `openjp2` as the wasm choice, and that is
   measured not to work.
-- A standing probe for every repository guard. `bin/ocelli.sh gate guards`
+- A standing probe harness for the repository's guards, and **not for every
+  guard**, which is what this line claimed for four sentences before qualifying
+  itself until the S03 review's seventh pass. `python3 scripts/guard_census.py`
+  prints the bucket watched by nothing and it is not empty.
+  `bin/ocelli.sh gate guards`
   drives each probed refusal into its rejected state in a disposable repository
   and requires it to fire, and a probe whose guard exits zero is a failure of
   the harness rather than a pass. The census refuses in both directions, so a

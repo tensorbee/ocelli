@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -1427,6 +1428,176 @@ def _exclude_a_named_workspace_member(box: Sandbox) -> None:
     _member_outside_crates_group_allow(box)
 
 
+def _comment_in_the_lint_path(box: Sandbox) -> None:
+    """`#![allow(clippy::/*c*/pedantic)]`, which Rust reads as the group allow.
+
+    The same input as `lint-policy.whitespace-in-the-lint-path` one lexer rule
+    further on. Rust removes a comment before it sees a token, so the two are
+    the same attribute, and the guard normalised whitespace and nothing else.
+    MEASURED under the pinned 1.97.1 toolchain on a crate carrying
+    `cast_possible_truncation = "deny"` and one `x as i32`: baseline exit 101,
+    this attribute exit 0,
+    `#![allow(clippy::/*c*/cast_possible_truncation)]` exit 0, and the
+    newline-and-`//` form exit 0. Planted in a sandbox clone of this repository
+    the whole `guards` gate was green.
+    """
+    _prepend(box, _a_crate_root(box), "#![allow(clippy::/*c*/pedantic)]")
+
+
+def _unreadable_lint_argument(box: Sandbox) -> None:
+    """A block comment holding the `)` the attribute regex stops at.
+
+    The second half of the same route, and it is not closed by stripping
+    comments: `INNER_ALLOW` captures up to the first `)` and this puts one
+    inside a comment, so what reaches the name split is the fragment
+    `clippy::/*` and no set contains it. MEASURED under the pinned 1.97.1
+    toolchain: `#![allow(clippy::/*)*/pedantic)]` takes cargo clippy from 101
+    to 0 on a crate denying `cast_possible_truncation`. The guard refuses the
+    unreadable argument list by name rather than reading a fragment as an
+    unrecognised lint.
+    """
+    _prepend(box, _a_crate_root(box), "#![allow(clippy::/*)*/pedantic)]")
+
+
+def _rustflags_allow_a_denied_lint(box: Sandbox) -> None:
+    """`.cargo/config.toml` lowering a denied lint for the whole workspace.
+
+    cargo reads this file and nothing in `scripts/`, `bin/`, `ci/`,
+    `.githooks/` or `.github/` mentioned `rustflags` before the seventh pass.
+    MEASURED under the pinned 1.97.1 toolchain on a minimal crate carrying
+    `cast_possible_truncation = "deny"` and one `x as i32`: no config exits
+    101, `[build] rustflags = ["-Aclippy::pedantic"]` exits 0,
+    `["-Aclippy::cast_possible_truncation"]` exits 0, the
+    `[target.'cfg(all())']` form exits 0 and the bare-string form exits 0.
+    There is no `.cargo/` in this repository today, so the state is the file's
+    arrival rather than an edit to one.
+
+    The lint written is the group, for the same reason
+    `lint-policy.group-allow` writes it: it names none of HLD 27.1's five and
+    switches four of them off.
+    """
+    box.write(".cargo/config.toml",
+              '[build]\nrustflags = ["-Aclippy::pedantic"]\n')
+
+
+def _a_cargo_config_that_lowers_nothing(box: Sandbox) -> None:
+    """A `.cargo/config.toml` carrying no allow of a denied lint.
+
+    The direction that says which fix was made. The guard refuses the FLAG and
+    not the file, because a cargo config is the ordinary home for an alias, a
+    linker choice, a target runner and `[net]` settings, none of which touches
+    a lint level. A guard that refused the file's existence would be refusing a
+    legitimate state, which is the runbook's own sentence, and would push a
+    real need into a workaround nothing watches. `-D warnings` here is a
+    RAISING flag and must be permitted.
+    """
+    box.write(".cargo/config.toml",
+              '[build]\nrustflags = ["-Dwarnings"]\n\n'
+              '[alias]\nprobe-check = "check --workspace"\n')
+
+
+def _a_path_dependency_member(box: Sandbox) -> None:
+    """A crate cargo makes a member through a path dependency.
+
+    `[workspace] members` is not the member set: cargo additionally makes every
+    path dependency of a member a member. MEASURED in the S03 review's seventh
+    pass on this repository: adding `vendor/probe` and
+    `probe-vendored = { path = "../../vendor/probe" }` to
+    `crates/ocelli-core/Cargo.toml` made `cargo metadata --no-deps` report 15
+    packages while the guard printed "14 workspace member(s)" at exit 0 and the
+    census exited 0 beside it. The new crate carries no `[lints] workspace =
+    true`, so it compiles under a smaller set of rules, and that is the fifth
+    pass's `tools/oracle` defect reached through a different key.
+
+    The crate deliberately carries no `[lints]` section, because the refusal
+    this drives is the inheritance one and the point is that the crate was
+    never asked.
+    """
+    root = _a_crate_root(box)
+    member = Path(root).parent.parent.as_posix()
+    box.write("vendor/probe/Cargo.toml",
+              '[package]\nname = "probe-vendored"\nversion = "0.0.0"\n'
+              'edition = "2021"\n')
+    box.write("vendor/probe/src/lib.rs", "pub fn probe() {}\n")
+    manifest = box.read(f"{member}/Cargo.toml")
+    line = 'probe-vendored = { path = "../../vendor/probe" }'
+    if "[dependencies]" in manifest:
+        box.substitute(f"{member}/Cargo.toml", "[dependencies]",
+                       f"[dependencies]\n{line}")
+    else:
+        box.write(f"{member}/Cargo.toml",
+                  f"{manifest}\n[dependencies]\n{line}\n")
+
+
+def _a_module_source_outside_the_member(box: Sandbox) -> tuple[str, str]:
+    """Where a `#[path]` module outside the member goes, and its `#[path]`.
+
+    Relative to the crate root file rather than at a fixed depth, so the probe
+    does not go stale if the layout moves.
+    """
+    root = _a_crate_root(box)
+    outside = "probe-shared/shared.rs"
+    relative = os.path.relpath(outside, Path(root).parent.as_posix())
+    return outside, relative
+
+
+def _a_module_outside_the_member(box: Sandbox) -> None:
+    """A module whose source is outside the member, carrying a group allow.
+
+    `#[path]` puts a module's source anywhere, and a walk of
+    `member.rglob("*.rs")` never opens it. MEASURED under the pinned 1.97.1
+    toolchain: a crate whose `src/lib.rs` reads
+    `#[path = "../../shared_outside/shared.rs"] pub mod shared;` and whose
+    `shared.rs` holds one `x as i32` exits 101, and with
+    `#![allow(clippy::pedantic)]` at the top of that file it exits 0 while the
+    guard never reads the file.
+    """
+    outside, relative = _a_module_source_outside_the_member(box)
+    box.write(outside, "#![allow(clippy::pedantic)]\n"
+                       "pub fn probe(x: i64) -> i32 { x as i32 }\n")
+    box.append(_a_crate_root(box),
+               f'\n#[path = "{relative}"]\npub mod probe_shared;\n')
+
+
+def _a_clean_module_outside_the_member(box: Sandbox) -> None:
+    """The same layout with nothing switched off, which must be accepted.
+
+    A module source outside the member directory is legal Rust and says
+    nothing about lint levels on its own, so following `#[path]` must not turn
+    the layout itself into a refusal.
+    """
+    outside, relative = _a_module_source_outside_the_member(box)
+    box.write(outside, "pub fn probe(x: i64) -> i64 { x + 1 }\n")
+    box.append(_a_crate_root(box),
+               f'\n#[path = "{relative}"]\npub mod probe_shared;\n')
+
+
+def _a_required_row_with_a_tail(box: Sandbox) -> None:
+    """A required row whose line carries text that is not a comment.
+
+    What `lint-policy.commented-required-row-is-permitted` claims to
+    discriminate and does not. MEASURED in the seventh pass: deleting `_row_body`
+    entirely and loosening `LINT_ROW`'s tail to `.*$` leaves both that accept
+    probe and `lint-policy.group-row-with-a-trailing-comment` green, so the
+    quote-aware twenty-line function the sixth pass added is deletable with the
+    harness silent. This is the input that tells the two repairs apart: with the
+    tail anchored the row is not a row and the guard says the lint is absent,
+    and with the tail loosened to `.*$` the same line reads as a `deny` row and
+    the guard says nothing at all.
+
+    `and we mean it` and not a `#` comment, deliberately. A comment is what
+    `_row_body` legitimately removes.
+    """
+    row = re.search(r'^cast_possible_truncation = "[a-z]+"$',
+                    box.read("Cargo.toml"), re.M)
+    if row is None:
+        raise AssertionError(
+            "Cargo.toml carries no `cast_possible_truncation` row in the "
+            "quoted form, so this probe has no row to put a tail on.")
+    box.substitute("Cargo.toml", row.group(0),
+                   f"{row.group(0)} and we mean it")
+
+
 def _ci_arm_commands(box: Sandbox, gate: str) -> list[str]:
     """A gate's arm commands, read through the guard's own runner parser.
 
@@ -1675,7 +1846,18 @@ def _expand_a_gate_step_into_its_visible_commands(box: Sandbox) -> None:
     nothing was lost, because these gates "are each invoked by NAME in ci.yml",
     was enforced by nothing.
     """
-    gate = _a_gate_with_an_unextractable_arm_command(box)
+    _expand_the_step_for(box, _a_gate_with_an_unextractable_arm_command(box))
+
+
+def _expand_the_step_for(box: Sandbox, gate: str) -> None:
+    """Replace ONE named gate's CI step with its extractable arm commands.
+
+    Taken as an argument rather than resolved here, because a caller that has
+    already mutated the runner must expand the step for the gate it mutated.
+    Resolving twice picked a DIFFERENT gate the second time and the probe then
+    refused for that gate instead, which reads as a pass and discriminates
+    nothing. Measured while building `ci-floor.work-inside-an-if`.
+    """
     commands = _ci_arm_commands(box, gate)
     workflow = box.read(".github/workflows/ci.yml")
     line = next(l for l in workflow.splitlines()
@@ -1846,6 +2028,134 @@ def _nested_case_in_a_gate_arm(box: Sandbox) -> None:
         "dropped silently and would refuse for an unrelated reason.")
 
 
+def _work_inside_an_if_in_a_gate_arm(box: Sandbox) -> None:
+    """Wrap an arm's unextractable command in an `if`, and expand its step.
+
+    The measured bypass, in full. `unseen_commands` splits statements on
+    `[\\n;{}()]|&&|\\|\\||\\|`, so `if node --test ...; then true; fi` is ONE
+    statement whose head is `if`, and `if` was a head the scan treated as not
+    being the work. Dropping the head dropped the command with it. MEASURED in
+    the S03 review's seventh pass: with the `bench` arm's `node --test` line
+    wrapped that way and the `bin/ocelli.sh gate bench` step replaced by its two
+    `python3` commands, `unseen_commands` reported `bench: None` and the check
+    exited 0, which is five node suites out of CI. That is byte for byte the
+    outcome the sixth pass measured and turned into a rule, reached through the
+    statement scanner instead of through the extractor.
+
+    Both halves are needed. The wrap alone changes no verdict, because the gate
+    is still named in `ci.yml`, and expanding the step alone is what the sixth
+    pass's probe already covers.
+    """
+    import ci_floor_check
+    gate = _a_gate_with_an_unextractable_arm_command(box)
+    runner = box.read("bin/ocelli.sh")
+    region = runner[runner.index("run_gate() {"):runner.index("skip() {")]
+    arm = re.search(rf"^[ \t]*{re.escape(gate)}\).*?;;", region, re.M | re.S)
+    if arm is None:
+        raise AssertionError(
+            f"the `{gate}` arm is not readable as a case label through to its "
+            f"`;;`, so this probe cannot wrap its work without rewriting the "
+            f"arm and would be building a different state.")
+    head = ci_floor_check.unseen_commands(runner)[gate][0].split(" ", 1)[0]
+    at = re.search(rf"(?<![\w./-]){re.escape(head)}[ \t]", arm.group(0))
+    if at is None:
+        raise AssertionError(
+            f"the `{gate}` arm's unextractable command does not begin with a "
+            f"word this probe can find in the arm text, so the wrap would land "
+            f"somewhere other than in front of the command.")
+    text = arm.group(0)
+    box.substitute(
+        "bin/ocelli.sh", text,
+        f"{text[:at.start()]}if {text[at.start():-2]}; then true; fi ;;")
+    # THIS gate's step, not whichever gate a second resolution would pick. The
+    # wrap has just made this arm's unextractable command invisible to a broken
+    # `unseen_commands`, so re-resolving would find a different gate and the
+    # probe would refuse for that one, which reads as a pass and discriminates
+    # nothing. Measured while building this probe.
+    _expand_the_step_for(box, gate)
+
+
+def _nested_case_after_a_keyword(box: Sandbox) -> None:
+    """A nested `case` introduced by `then`, which the refusal did not see.
+
+    `NESTED_CASE` required `case` to follow the start of the arm body or one of
+    `[\\n;{}()&|]`, so a keyword and a space defeated it while `ARM` went on
+    truncating the body at the inner `;;`. MEASURED on a synthetic arm: the body
+    was kept only as far as the inner case, `arms` held one command, `unseen`
+    was `None`, no refusal fired, and a real second command after the inner
+    case was dropped at exit 0.
+
+    The arm is chosen for the property rather than named, exactly as
+    `_nested_case_in_a_gate_arm` chooses one: a single-line arm whose
+    extractable command `ci.yml` runs, so that WITHOUT the refusal this exits 0
+    rather than refusing for an unrelated reason. The command appended after
+    the inner case is a real one from the same arm, so what the truncation
+    drops is work CI is supposed to run.
+    """
+    runner = box.read("bin/ocelli.sh")
+    workflow = box.read(".github/workflows/ci.yml")
+    body = runner[runner.index("run_gate() {"):runner.index("skip() {")]
+    for line in body.splitlines():
+        match = re.match(r"^([ \t]*)([a-z-]+)\)(.*);;\s*$", line)
+        if match is None or "case" in match.group(3):
+            continue
+        commands = _ci_arm_commands(box, match.group(2))
+        if not commands or not all(c in workflow for c in commands):
+            continue
+        pad = match.group(1) + " " * (len(match.group(2)) + 1)
+        box.substitute(
+            "bin/ocelli.sh", line,
+            f"{match.group(1)}{match.group(2)}){match.group(3).rstrip()} &&\n"
+            f"{pad}if true; then case \"$OSTYPE\" in *) : ;; esac; fi &&\n"
+            f"{pad}{commands[0]} --probe-extra ;;")
+        return
+    raise AssertionError(
+        "no gate has a single-line arm this probe can extend with a `then "
+        "case`, because none has an extractable command that ci.yml runs, so "
+        "the keyword-position shape cannot be built and the run would refuse "
+        "for an unrelated reason. The message is worded apart from "
+        "`_nested_case_in_a_gate_arm`'s deliberately: two refusals in one file "
+        "whose words normalise alike are ONE site to the census, so a probe on "
+        "either would read as covering both.")
+
+
+def _widen_a_ci_step_past_its_arm_command(box: Sandbox) -> None:
+    """Add an argument to a CI step that the gate's arm command does not carry.
+
+    `runs_command` tested for a SUBSTRING, so a step running the arm's command
+    plus arguments satisfied it. MEASURED in the seventh pass: changing a CI
+    step to `python3 scripts/prose_check.py --only-this-one-file README.md`
+    left the check at exit 0 with the gate reported as invoked, while CI
+    checked one file. `ci-floor.narrowed-arm-command` probes the opposite
+    direction, an argument the arm already carried being narrowed, and cannot
+    see an argument being added.
+
+    The step is chosen for the property rather than named: a floor gate whose
+    arm is ONE extractable command that `ci.yml` runs verbatim, so the widened
+    step is the only route to the gate and nothing else covers it.
+    """
+    excluded = _not_in_floor(box)
+    workflow = box.read(".github/workflows/ci.yml")
+    for gate in re.findall(r'^\s*"([a-z-]+)\|no\|', box.read("bin/ocelli.sh"),
+                           re.M):
+        if gate in excluded or f"bin/ocelli.sh gate {gate}" in workflow:
+            continue
+        commands = _ci_arm_commands(box, gate)
+        if len(commands) != 1:
+            continue
+        line = next((l for l in workflow.splitlines()
+                     if l.strip() == f"- run: {commands[0]}"), None)
+        if line is None:
+            continue
+        box.substitute(".github/workflows/ci.yml", line,
+                       f"{line} --probe-only-this-one-file README.md")
+        return
+    raise AssertionError(
+        "no floor gate is run by a CI step whose command is exactly its one "
+        "arm command, so there is no step this probe can widen without "
+        "changing what else covers the gate.")
+
+
 def _reorder_the_runner_exclusion_list(box: Sandbox) -> None:
     """Rewrite the runner's exclusion list in a different order, same names.
 
@@ -1860,6 +2170,121 @@ def _reorder_the_runner_exclusion_list(box: Sandbox) -> None:
                              "there is no order to change")
     box.substitute("bin/ocelli.sh", f"in {'|'.join(names)})",
                    f"in {'|'.join(reversed(names))})")
+
+
+# ---------------------------------------------------------------------------
+# The harness's own inverted success, which nothing watched until the seventh
+# pass. `scripts/guard_probe.py`'s docstring calls a probe whose guard exits 0
+# "a FAILURE OF THE HARNESS, not a pass", and that sentence was carried by two
+# `problems.append(message)` statements no probe reached. Measured: deleting
+# the first of them and returning `"pass"` instead left `entry_sites` at 19,
+# the census at exit 0 over "566 refusal(s), all claimed", `--self-test` at 0
+# with 10 properties, `--profile floor` at 0 with 106 probes red and the unit
+# suite at 49. The whole `guards` gate was ALL GREEN with the single mechanism
+# that gives every probe result its meaning removed.
+# ---------------------------------------------------------------------------
+
+
+# The signature every guard script in `scripts/` writes. The state below
+# replaces the first statement of `main` rather than the top of the file, and
+# that is deliberate: several probe builders IMPORT the guard they aim at to
+# choose their input, and a `sys.exit(0)` at module scope would take those
+# builders down with it and turn a HARNESS report into an `error` report, which
+# is red for the wrong reason.
+GUARD_MAIN = "def main() -> int:"
+
+
+def _a_probe_over_a_single_script(box: Sandbox) -> tuple[str, str]:
+    """A floor probe whose whole guard is one `python3 scripts/<name>.py`.
+
+    Selected for the property rather than named, because the property is what
+    the state below needs: a guard that can be made to stop refusing by one
+    edit to one file, and a probe whose declared reason for running it is that
+    it refuses. A named probe would go stale the day it moved, and this
+    catalogue has already paid for a probe whose discrimination rested on an
+    accident of ordering.
+
+    `control is None` matters. The state this feeds neuters the guard, so the
+    control has to be the same invoke against the unmutated sandbox: it must be
+    the run that PASSES on a healthy copy, or the harness's refusal would be
+    read as the control's rather than as the probe's.
+    """
+    for guard in GUARDS:
+        if not guard.file.startswith("scripts/") \
+                or not guard.file.endswith(".py"):
+            continue
+        for probe in guard.probes:
+            if probe.polarity != "refuse" or probe.defect:
+                continue
+            if probe.mutate is None or probe.control is not None:
+                continue
+            if probe.profile != "floor" or probe.needs != "none":
+                continue
+            if probe.invoke.key != f"python3 {guard.file}":
+                continue
+            if GUARD_MAIN not in box.read(guard.file):
+                continue
+            return guard.file, probe.id
+    raise AssertionError(
+        "no floor probe in this catalogue drives a guard that is one "
+        "`python3 scripts/<name>.py` with a `main()` this builder can neuter, "
+        "so the state this probe is about cannot be built and it would report "
+        "the harness healthy without having tested it.")
+
+
+def _a_guard_that_refuses_nothing(box: Sandbox) -> None:
+    """Make the guard one catalogue probe aims at exit 0 on every input.
+
+    This is the inverted-success rule's own rejected state, and the harness has
+    to REPORT it rather than counting the probe as green. Nothing built it
+    until the seventh pass, so `probe-runner` carried one probe, an accept
+    probe on `--self-test`, for nineteen refusal sites.
+
+    The guard still runs, still imports, and still prints its own OK line's
+    absence, which is what makes this the shape a real regression takes: a
+    check rewritten until it no longer detects anything is a check that exits
+    0, not one that crashes.
+    """
+    guard_file, _ = _a_probe_over_a_single_script(box)
+    box.substitute(
+        guard_file, GUARD_MAIN,
+        f"{GUARD_MAIN}\n    return 0  # planted: a guard that refuses nothing")
+
+
+def _the_harness_must_refuse_a_guard_that_refuses_nothing(
+        box: Sandbox) -> "subprocess.CompletedProcess[str]":
+    """`guard_probe.py --only <the neutered guard's probe>`, status INVERTED.
+
+    The inversion is the whole reason this probe discriminates, and it took a
+    measurement to establish. The obvious form is a `refuse` probe: neuter a
+    guard, run the harness, require a non-zero status. MEASURED in the S03
+    review's seventh pass with the defect planted, the append at `run_probe`'s
+    refuse branch deleted and `"pass"` returned instead: the inner harness
+    exits 0, the OUTER harness reads that through the same deleted branch, and
+    the probe prints `red` and exits 0. A probe cannot report a refusal through
+    the refusal it is watching.
+
+    `run_probe` has two such branches, one per polarity, and they are two
+    refusal sites rather than one since `scripts/guards/discover.py` stopped
+    identifying a refusal by the local variable its message was built in. So
+    this probe is declared `accept` over the inverted status, and its own
+    failure therefore travels through the OTHER branch, the one for a guard
+    that refused a legitimate state. With the defect planted the outer harness
+    reports HARNESS at "expected the guard to ACCEPT and it exited 1".
+
+    The id is resolved from the catalogue at run time rather than written into
+    the invoke's key, for the same reason the builder resolves the file that
+    way.
+    """
+    _, probe_id = _a_probe_over_a_single_script(box)
+    done = box.run(["python3", "scripts/guard_probe.py", "--only", probe_id])
+    return subprocess.CompletedProcess(
+        done.args, 0 if done.returncode != 0 else 1, done.stdout, done.stderr)
+
+
+HARNESS_OVER_ONE_PROBE = Invoke(
+    key="guard_probe --only <a probe whose guard is one script>, inverted",
+    run=_the_harness_must_refuse_a_guard_that_refuses_nothing)
 
 
 # ---------------------------------------------------------------------------
@@ -2360,6 +2785,57 @@ GUARDS: tuple[Guard, ...] = (
                        "per-command rule would hold over nothing, which is "
                        "the same vacuous pass `covers` refuses one level "
                        "down."),
+            Probe("ci-floor.work-inside-an-if",
+                  _work_inside_an_if_in_a_gate_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "so it cannot demand those commands step by step",
+                  note="`unseen_commands` failed OPEN on an `if` arm. It "
+                       "splits statements on `[\\n;{}()]|&&|\\|\\||\\|`, so "
+                       "`then <cmd>` and `do <cmd>` are one statement whose "
+                       "head is a keyword, and the keyword was in the list of "
+                       "heads treated as not being the work. MEASURED: "
+                       "wrapping the `bench` arm's `node --test` line as "
+                       "`if node --test ...; then true; fi` and replacing the "
+                       "`gate bench` step with its two `python3` commands gave "
+                       "`unseen bench: None` and exit 0, five node suites out "
+                       "of CI. That is byte for byte the outcome pass 6 "
+                       "measured and made a rule, reached through the "
+                       "statement scanner instead of through the extractor. "
+                       "The declared limit said such an arm \"would be read as "
+                       "having none\", which is true only when the WHOLE arm "
+                       "is inside the `if`."),
+            Probe("ci-floor.nested-case-after-a-keyword",
+                  _nested_case_after_a_keyword,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "holds a nested `case`",
+                  note="`NESTED_CASE` required `case` to follow `^` or one of "
+                       "`[\\n;{}()&|]`, so a keyword and a space defeated it "
+                       "while `ARM` went on truncating the arm at the inner "
+                       "`;;`. MEASURED on a synthetic arm: the body was kept "
+                       "only as far as the inner case, `arms` held one "
+                       "command, `unseen` was `None`, no refusal fired and a "
+                       "real command after the inner case was dropped "
+                       "silently at exit 0. `case` is matched at any statement "
+                       "position now, and the keyword list is spelled out "
+                       "rather than replaced by a bare `\\bcase\\b`, because "
+                       "a word boundary sits inside `--lower-case` too."),
+            Probe("ci-floor.widened-ci-step",
+                  _widen_a_ci_step_past_its_arm_command,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "and nothing in",
+                  note="`runs_command` prefix-matched, so a CI step running "
+                       "the arm's command PLUS arguments satisfied it. "
+                       "MEASURED: changing a step to `python3 "
+                       "scripts/prose_check.py --only-this-one-file "
+                       "README.md` left the check at exit 0 with the gate "
+                       "reported as invoked while CI checked one file. "
+                       "`ci-floor.narrowed-arm-command` probes the opposite "
+                       "direction, an argument the arm already carried being "
+                       "narrowed, and could not see one being added. The "
+                       "comparison is on the argument VECTOR now, with the "
+                       "interpreter normalised and one declared addition, "
+                       "`--require-prerequisites` on corpus_tests.py, which "
+                       "is strictly stronger than the arm."),
             Probe("ci-floor.comment-only",
                   lambda box: _delete_ci_step(box, leave_comment=True),
                   script("python3", "scripts/ci_floor_check.py"),
@@ -2403,13 +2879,22 @@ GUARDS: tuple[Guard, ...] = (
               "the `all([])` claim still holds, because `panic`, `native` and "
               "`oracle` still yield no extractable command and "
               "`ci-floor.no-arm-command-gate-behind-a-condition` is what "
-              "watches `bool(arm)`. The fourth limit is what "
-              "`unseen_commands` itself cannot judge: a statement whose first "
-              "word is in `SHELL_NOISE` is treated as not being the work, so "
-              "an arm that did its work inside an `if` or a `for` would be "
-              "read as having none. Nothing does today, and `ARM` refuses a "
-              "nested `case` outright rather than truncating the arm at its "
-              "inner `;;`.",
+              "watches `bool(arm)`. The fourth limit STATED THE WRONG "
+              "CONSEQUENCE until the seventh pass. It said a statement whose "
+              "first word is in `SHELL_NOISE` is not the work, so an arm that "
+              "did its work inside an `if` or a `for` \"would be read as "
+              "having none\", and that is true only when the WHOLE arm is "
+              "inside the `if`. The measured shape is narrower and worse: "
+              "`if node --test ...; then true; fi` is one statement whose head "
+              "is a keyword, so dropping the head dropped the command and left "
+              "every OTHER command in the arm visible, which is a gate that "
+              "reads as fully covered with one command gone. The head is "
+              "dropped and the remainder RE-SCANNED now, `SHELL_INTRODUCERS` "
+              "and `SHELL_NOISE` are the two halves of that split, and "
+              "`ci-floor.work-inside-an-if` watches it. What is left as a "
+              "limit is the split itself: a builtin's remainder is treated as "
+              "arguments, so a command hidden after `command` or `eval` in a "
+              "form this file does not model would still be invisible.",
     ),
 
     # -- D-04's chain, the part CI reads ------------------------------------
@@ -3130,10 +3615,12 @@ GUARDS: tuple[Guard, ...] = (
         probes=(
             Probe("lint-policy.weakened", _lint_policy_weakened,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "is 'allow' and HLD 27.1 requires"),
+                  "is 'allow' and HLD 27.1 requires",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.uninherited", _lint_policy_uninherited,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "does not inherit the workspace lint table"),
+                  "does not inherit the workspace lint table",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.group-allow", _group_allow_at_a_crate_root,
                   script("python3", "scripts/lint_policy_check.py"),
                   "allows the lint group",
@@ -3149,14 +3636,17 @@ GUARDS: tuple[Guard, ...] = (
                        "NAME, so both the `clippy` gate and the `guards` gate "
                        "went green with the arithmetic denies switched off, "
                        "which is the defect class CLAUDE.md names as the one "
-                       "that reaches patients."),
+                       "that reaches patients.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.expect-attribute",
                   _expect_attribute_at_a_crate_root,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "re-allows"),
+                  "re-allows",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.nothing-scanned", _no_crate_sources_at_all,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "not one `.rs` file was read"),
+                  "not one `.rs` file was read",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.allow-outside-the-crate-root",
                   _named_allow_outside_the_crate_root,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3167,7 +3657,8 @@ GUARDS: tuple[Guard, ...] = (
                        "Measured that it applies: with `src/lib.rs` carrying "
                        "nothing but `pub mod inner;` and the attribute in "
                        "`src/inner.rs`, cargo clippy goes from 101 to 0. An "
-                       "inner attribute in a module file governs that module."),
+                       "inner attribute in a module file governs that module.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.item-allow-is-permitted",
                   _item_allow_with_a_reason,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3182,7 +3673,8 @@ GUARDS: tuple[Guard, ...] = (
                        "kinds since the fifth pass, a fn, a struct, an impl "
                        "and a statement, because the probe planted on a `fn` "
                        "alone and the guard now refuses the same attribute on "
-                       "a `mod`."),
+                       "a `mod`.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.outer-allow-on-a-module",
                   _outer_allow_on_a_module,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3198,7 +3690,8 @@ GUARDS: tuple[Guard, ...] = (
                        "`#[allow(clippy::cast_possible_truncation)] pub mod "
                        "inner;` takes cargo clippy from 101 to 0. The accept "
                        "probe planted its outer allow on a `fn`, so the `mod` "
-                       "case was never exercised in either direction."),
+                       "case was never exercised in either direction.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.whitespace-in-the-lint-path",
                   _whitespace_in_the_lint_path,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3211,7 +3704,8 @@ GUARDS: tuple[Guard, ...] = (
                        "attribute exits 101, `#![allow(clippy :: pedantic)]` "
                        "exits 0, `#![allow(clippy:: pedantic)]` exits 0 and "
                        "`#![expect(clippy :: cast_possible_truncation)]` "
-                       "exits 0."),
+                       "exits 0.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.member-outside-crates-uninherited",
                   _member_outside_crates_uninherited,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3221,7 +3715,8 @@ GUARDS: tuple[Guard, ...] = (
                        "says `members = [\"crates/*\", \"tools/oracle\"]`. "
                        "The member is read from the manifest here rather than "
                        "named, because a literal would be the same assumption "
-                       "that cost the workspace its fourteenth member."),
+                       "that cost the workspace its fourteenth member.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.member-outside-crates-group-allow",
                   _member_outside_crates_group_allow,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3231,7 +3726,8 @@ GUARDS: tuple[Guard, ...] = (
                        "printing `13 crate(s) inherit the table, 33 .rs "
                        "file(s)`, and the census exited 0 beside it. "
                        "`tools/oracle` is a compiled member with thirteen "
-                       "`.rs` files."),
+                       "`.rs` files.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.member-unresolvable",
                   _unresolvable_workspace_member,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3240,7 +3736,8 @@ GUARDS: tuple[Guard, ...] = (
                        "members it can resolve and reports the smaller number "
                        "as a pass is AGENTS.md's named failure of answering a "
                        "question about a smaller set in the language of "
-                       "success."),
+                       "success.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.no-members-declared",
                   _no_workspace_members_at_all,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3249,7 +3746,8 @@ GUARDS: tuple[Guard, ...] = (
                        "same shape as `lint-policy.nothing-scanned` one level "
                        "up. With no member the inheritance pass, the "
                        "attribute pass and the file count all answer a "
-                       "question about nothing."),
+                       "question about nothing.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.group-row-in-the-workspace-table",
                   _group_row_in_the_workspace_table,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3262,7 +3760,8 @@ GUARDS: tuple[Guard, ...] = (
                        "under 1.97.1: that row beside "
                        "`cast_possible_truncation = \"deny\"` takes cargo "
                        "clippy from 101 to 0, because the higher priority is "
-                       "applied last."),
+                       "applied last.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.group-row-with-a-trailing-comment",
                   _group_row_after_a_blank_line_with_a_trailing_comment,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3280,7 +3779,8 @@ GUARDS: tuple[Guard, ...] = (
                        "`pedantic = { level = \"allow\", priority = 1 } "
                        "# keeps noise down` appended, exit 0. In this "
                        "repository the same row left this check at 0, the "
-                       "census at 0 and `gate guards` ALL GREEN."),
+                       "census at 0 and `gate guards` ALL GREEN.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.commented-required-row-is-permitted",
                   _required_row_with_a_trailing_comment,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3294,7 +3794,8 @@ GUARDS: tuple[Guard, ...] = (
                        "probe above and would also read "
                        "`cast_possible_truncation = \"deny\" is what we want` "
                        "as a row. A comment on a required row weakens "
-                       "nothing and the guard has to say so."),
+                       "nothing and the guard has to say so.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.excluded-named-member",
                   _exclude_a_named_workspace_member,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -3311,7 +3812,125 @@ GUARDS: tuple[Guard, ...] = (
                        "through a different key, and `gate guards` went red "
                        "only because probe "
                        "`lint-policy.member-outside-crates-group-allow` "
-                       "happens to pick `tools/oracle`."),
+                       "happens to pick `tools/oracle`.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.comment-in-the-lint-path",
+                  _comment_in_the_lint_path,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "allows the lint group",
+                  note="The sixth route past this guard and the second "
+                       "lexer rule it did not know. `_names_in` normalised "
+                       "whitespace and nothing else, and Rust strips comments "
+                       "before it sees a token, so `clippy::/*x*/pedantic` is "
+                       "the same token stream as `clippy::pedantic`. MEASURED "
+                       "with cargo on a minimal crate under the pinned "
+                       "1.97.1: baseline exit 101, "
+                       "`#![allow(clippy::/*c*/pedantic)]` exit 0, "
+                       "`#![allow(clippy::/*c*/cast_possible_truncation)]` "
+                       "exit 0, and a newline-and-`//`-comment form exit 0. "
+                       "Planted in a sandbox clone of this repository the "
+                       "whole `guards` gate was green.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.unreadable-lint-argument",
+                  _unreadable_lint_argument,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "could not read to its end",
+                  note="The half of the same route that stripping comments "
+                       "does not close. `INNER_ALLOW` captures up to the "
+                       "first `)` and a block comment can hold one, so what "
+                       "reaches the name split is the fragment `clippy::/*`. "
+                       "MEASURED under 1.97.1: "
+                       "`#![allow(clippy::/*)*/pedantic)]` exits 0 on a crate "
+                       "denying cast_possible_truncation. The guard fails "
+                       "CLOSED on a list it did not read to its end rather "
+                       "than reporting a fragment as an unrecognised lint.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.rustflags-allow",
+                  _rustflags_allow_a_denied_lint,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "in `rustflags`",
+                  note="`.cargo/config.toml` is read by cargo and was read by "
+                       "nothing here: no file under scripts/, bin/, ci/, "
+                       ".githooks/ or .github/ mentioned `rustflags`. "
+                       "MEASURED on the minimal crate: "
+                       "`[build] rustflags = [\"-Aclippy::pedantic\"]` exit "
+                       "0, `[\"-Aclippy::cast_possible_truncation\"]` exit 0, "
+                       "the `[target.'cfg(all())']` form exit 0 and the "
+                       "bare-string form exit 0. Added to an ocelli sandbox, "
+                       "where there is no `.cargo/` today, every check stayed "
+                       "green.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.cargo-config-is-permitted",
+                  _a_cargo_config_that_lowers_nothing,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "cargo config(s) lower no denied lint through rustflags",
+                  polarity="accept",
+                  note="The direction that says which decision was made. The "
+                       "guard refuses the FLAG and not the file. A cargo "
+                       "config is the ordinary home for an alias, a linker "
+                       "choice, a target runner and `[net]` settings, and a "
+                       "guard refusing its existence would be refusing a "
+                       "legitimate state and pushing a real need into a "
+                       "workaround nothing watches. `-D warnings` here RAISES "
+                       "a level and must be permitted.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.path-dependency-member",
+                  _a_path_dependency_member,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "does not inherit the workspace lint table",
+                  note="`[workspace] members` is not the member set. cargo "
+                       "makes every path dependency of a member a member too, "
+                       "and `workspace_members` read only the globs. "
+                       "MEASURED: adding `vendor/probe` and "
+                       "`probe-vendored = { path = \"../../vendor/probe\" }` "
+                       "to a crate manifest made `cargo metadata --no-deps` "
+                       "report 15 packages while the guard printed \"14 "
+                       "workspace member(s)\" at exit 0 and the census exited "
+                       "0. That is pass 5's `tools/oracle` defect through a "
+                       "different key, which is why the set comes from cargo "
+                       "now rather than from a harder read of the globs.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.module-outside-the-member",
+                  _a_module_outside_the_member,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "allows the lint group",
+                  note="`member_sources` globbed `member.rglob(\"*.rs\")`, so "
+                       "a `#[path]` module whose source is outside the member "
+                       "directory was never opened. MEASURED under 1.97.1: a "
+                       "crate whose lib.rs reads `#[path = "
+                       "\"../../shared_outside/shared.rs\"] pub mod shared;` "
+                       "exits 101, and with `#![allow(clippy::pedantic)]` at "
+                       "the top of that file it exits 0 while the guard never "
+                       "reads it.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.clean-module-outside-the-member",
+                  _a_clean_module_outside_the_member,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "`#[path]` modules followed",
+                  polarity="accept",
+                  note="The other direction. A module source outside the "
+                       "member directory is legal Rust and says nothing about "
+                       "lint levels, so following `#[path]` must not turn the "
+                       "layout itself into a refusal.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.required-row-with-a-tail",
+                  _a_required_row_with_a_tail,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "is in HLD 27.1's table and is not in",
+                  note="What `lint-policy.commented-required-row-is-permitted` "
+                       "claims to discriminate and does not. MEASURED in the "
+                       "seventh pass: deleting `_row_body` entirely and "
+                       "loosening `LINT_ROW`'s tail to `.*$` leaves both that "
+                       "accept probe and "
+                       "`lint-policy.group-row-with-a-trailing-comment` green, "
+                       "so the quote-aware twenty-line function the sixth pass "
+                       "added is deletable with the harness silent. "
+                       "`cast_possible_truncation = \"deny\" and we mean it` "
+                       "is the input that tells the two repairs apart: "
+                       "anchored, the line is not a row and the guard says the "
+                       "lint is absent, and loosened to `.*$` the same line "
+                       "reads as a `deny` row and the guard says nothing.",
+                  needs="cargo", profile="deep"),
         ),
         limit="`REFUSED_GROUPS` is a list of nine names that exists only in "
               "the guard, and a probe can only ever write one of them, so "
@@ -3331,7 +3950,27 @@ GUARDS: tuple[Guard, ...] = (
               "e3d02e83d8b52dab and the census refuses. That division of "
               "labour is why the sixth pass had to fix both the row regex and "
               "the constant's capture, and it is the reason a probe here is "
-              "not the whole answer.",
+              "not the whole answer. A DOTTED-KEY row is the second residual "
+              "of the same shape and the sixth pass's wording named only the "
+              "first: `pedantic.level = \"allow\"` beside "
+              "`pedantic.priority = 1` is measured to take cargo clippy from "
+              "101 to 0, because `LINT_ROW`'s name class excludes `.`. The "
+              "same declared constant refuses it on the digest, so the "
+              "division of labour holds and only the sentence was short. The "
+              "third limit arrived with the seventh pass's fix and is the "
+              "PROFILE: this guard reads its member set from `cargo metadata "
+              "--no-deps`, so every probe here declares `needs=\"cargo\"` and "
+              "sits in `guards-deep` rather than in the floor, which is the "
+              "same rule `nostd` already lives under for `cargo tree`. The "
+              "guard itself still runs on every pull request in the `guards` "
+              "gate. What moved to push-to-main is the harness watching the "
+              "guard, and that cost buys a member set cargo computes rather "
+              "than one this file guesses at, after two passes in which the "
+              "guess was wrong through a different key each time. The fourth "
+              "limit is what a rustflags scan cannot reach: cargo also reads "
+              "`$CARGO_HOME/config.toml`, the `RUSTFLAGS` environment "
+              "variable and `--config` on the command line, none of which is "
+              "in this repository.",
     ),
 
     # -- this story's own machinery, watched by the same runner ------------
@@ -3525,7 +4164,54 @@ GUARDS: tuple[Guard, ...] = (
                   note="The harness's own refusals only ever run on a "
                        "mismatch, which no gate run produces. Same reason "
                        "tools/oracle/check_sidecars.py carries one."),
+            Probe("probe-runner.a-guard-that-refuses-nothing",
+                  _a_guard_that_refuses_nothing,
+                  HARNESS_OVER_ONE_PROBE,
+                  "did not fire, so it is a guard nobody has watched fail",
+                  polarity="accept",
+                  control_status=1,
+                  control_expect="refusal probe(s) drove",
+                  note="THE inverted-success rule, and it was watched by "
+                       "nothing while it was the sentence that gives every "
+                       "other result in this harness its meaning. The input "
+                       "is this file's own docstring, not the runner's "
+                       "source: \"A probe whose guard exits 0 is a FAILURE OF "
+                       "THE HARNESS, not a pass.\" So the state is a guard "
+                       "that exits 0 on every input, built by returning from "
+                       "`main` before the first check rather than by breaking "
+                       "the file, because a check rewritten until it detects "
+                       "nothing exits 0 and does not crash. MEASURED in the "
+                       "S03 review's seventh pass: with `problems.append` at "
+                       "the refuse branch deleted and `\"pass\"` returned "
+                       "instead, the census exited 0 at 566 refusals, "
+                       "`--self-test` exited 0 with 10 properties, "
+                       "`--profile floor` exited 0 with 106 probes red, the "
+                       "unit suite passed 49, and `entry_sites` for this "
+                       "entry stayed at 19. The whole `guards` gate was ALL "
+                       "GREEN. Declared `accept` over an INVERTED status, and "
+                       "that is not a flourish: the obvious `refuse` form was "
+                       "measured green under the same defect, because a probe "
+                       "cannot report a refusal through the refusal it is "
+                       "watching. The inversion routes this probe's own "
+                       "failure through the other polarity's branch. The "
+                       "control is the DIFFERENT status a healthy repository "
+                       "gives, 1 rather than 0, for the same reason "
+                       "split_hld's is."),
         ),
+        limit="This entry's other refusals are watched by "
+              "`probe-runner.self-test`, and one class of mutation to this "
+              "catalogue reaches the harness as `error` rather than as "
+              "`HARNESS`. A probe builder that resolves its own target "
+              "through the guard it aims at, which "
+              "`_expand_a_gate_step_into_its_visible_commands` does through "
+              "`ci_floor_check.unseen_commands`, raises when that function is "
+              "broken, and `run_probe` reports a builder failure as `error`. "
+              "Both are red and both fail the gate, so nothing is lost, and a "
+              "reader who expects `HARNESS` and sees `error` is reading the "
+              "builder's refusal rather than the harness's. The builder above "
+              "avoids the same trap by editing `main`'s first statement "
+              "rather than the top of the guard's file, so a builder that "
+              "imports the guard still runs.",
     ),
     Guard(
         id="sandbox",
@@ -3804,13 +4490,20 @@ GUARDS: tuple[Guard, ...] = (
         file="tools/bench/page/app.mjs",
         gate="bench",
         spec="HLD section 26",
-        refuses="A page serving an incomplete copy of the wasm artefact.",
+        refuses="A page serving an incomplete copy of the wasm artefact, and "
+                "a mark count that does not match the phase list.",
         claims=("*",),
         covered_by=("tools/bench/tests/cold_start_test.mjs",),
-        limit="Same browser dependency as the fifth test bench.cold-start "
-              "describes. The four tests that joined the `bench` gate do not "
-              "serve the page, so this entry's refusal is watched only when "
-              "a developer runs the harness. Owner F-X014.",
+        limit="TWO refusals, and only the first carries the browser "
+              "dependency bench.cold-start describes. The artefact refusal is "
+              "watched only when a developer runs the harness. The mark-count "
+              "refusal is watched in the floor, by `a mark count that does "
+              "not match the phase list is refused`, which the S03 review's "
+              "seventh pass added beside `phaseTable`: the page's phase "
+              "arithmetic was reachable only through the browser test and "
+              "`PHASES.length === marks.length - 1` was asserted nowhere, so "
+              "a mark added with no phase beside it left the total right and "
+              "misaligned every label. Owner F-X014.",
     ),
     Guard(
         id="panic-probe",

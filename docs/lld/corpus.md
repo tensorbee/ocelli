@@ -1,6 +1,6 @@
 # The golden corpus
 
-**F-IDs that contributed:** F-009, F-X007
+**F-IDs that contributed:** F-009, F-X006, F-X007
 **Last updated:** 2026-09-05
 
 The corpus is the input every later correctness claim is measured on. It lives
@@ -159,6 +159,19 @@ uniform, which is ordinary for real data and is measured rather than judged.
   case is absorbed into class two by modality.
 - **The `j2k_*` and `jpegls_*` cases are encoded and decoded by the same
   library**, so the conformance check on them is weaker than on the rest.
+  **F-X006 narrowed this for the two `jpegls_*` rows and for neither `j2k_*`
+  one.** `pure_jpegls` 2.0.0 is a standard implementation rather than a CharLS
+  port, and it decoded both: byte-identical to the uncompressed reference `R`
+  for `.80`, which is encoder-independent because `R` is
+  `scripts/corpus_synth.py`'s ramp rather than any codec's output, and within
+  ISO/IEC 14495-1's declared `NEAR` of 3 for `.81`. **`dcmdjpls` agreeing is
+  not independent evidence**, because DCMTK and the `pyjpegls` that encoded
+  these rows both wrap CharLS, and `docs/spikes/A2-jpeg-ls.md` says so beside
+  its own digests. The `j2k_*` rows gained nothing from that spike:
+  `openjp2` 0.6.1 is a C2Rust port of the OpenJPEG that encoded them, so its
+  native decode is the same library on both sides, and `j2k_lossy` was compared
+  against no other party at all. `docs/spikes/A1-htj2k-openjp2.md` carries
+  those digests.
 - **No encapsulation edge cases.** Every compressed case is one frame in one
   fragment with a populated Basic Offset Table, so multi-fragment frames, a
   multi-frame encapsulated instance and an empty Basic Offset Table are

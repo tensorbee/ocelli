@@ -52,8 +52,27 @@ pub enum MutatedSide {
 /// known rather than on whichever identifier sorts first.
 #[derive(Clone, Copy, Debug)]
 pub enum Target {
-    /// The first class-one stack view that passes cleanly, so the mutation's
-    /// effect on the outcome is unambiguous.
+    /// The first class-one `MONOCHROME2` stack view that passes cleanly, so
+    /// the mutation's effect on the outcome is unambiguous.
+    ///
+    /// **The photometric interpretation is part of the target and not a
+    /// description of what today's corpus happens to hold.**
+    /// `Effect::VoiLinearExactSwap` only ever DARKENS, and `apply_to_frame`'s
+    /// derivation says why that is the LINEAR to LINEAR_EXACT divergence:
+    /// `y_E` sits `y_L / w` BELOW `y_L`. Under `MONOCHROME1` the ramp is
+    /// inverted, PS3.3 C.7.6.3.1.2, so the rendered byte is `255 - y`, the
+    /// drop direction reverses and the two display-extreme exclusions swap
+    /// ends. The same accumulator applied there would still be detected, and
+    /// would still not be the divergence, which is the exact shape of the
+    /// defect the review's third pass found in `round(u - u / w)`.
+    ///
+    /// Until this narrowing, only `real` sorting before `synthetic` in the
+    /// `BTreeSet` kept the swap off `synthetic__cr_monochrome1`, which is a
+    /// `mono16` stack view that passes. That is the same accident smell S4
+    /// named on `MeasuredReformat`, and here it guarded arithmetic rather than
+    /// a ladder rung, so it is closed by the predicate rather than described.
+    /// `ColourClassTwo` below is the precedent: a target narrowed by the frame
+    /// property the mutation's meaning depends on.
     MeasuredStack,
     /// The first volume reformat that passes cleanly. Present so the
     /// catalogue reaches the nine views `rows[]` does not name.
@@ -599,6 +618,11 @@ pub fn resolve_target(
             record.kind == ViewKind::Stack
                 && record.class == ToleranceClass::MonochromeSixteenBit
                 && record.outcome == Outcome::Pass
+                // Positively `MONOCHROME2`, not merely "not `MONOCHROME1`". A
+                // stack sidecar that carries no photometric interpretation is
+                // one whose ramp direction is unknown, and the swap's
+                // direction is only derivable when it is known.
+                && record.photometric_interpretation.as_deref() == Some("MONOCHROME2")
         }
         Target::MeasuredReformat => {
             record.kind == ViewKind::VolumeReformat && record.outcome == Outcome::Pass
@@ -793,6 +817,34 @@ pub fn apply_to_frame(
             // deterministic, so the mutation is reproducible, and it needs no
             // float, no cast and no rounding decision.
             //
+            // **EVERYTHING BELOW ASSUMES `MONOCHROME2`, AND UNDER
+            // `MONOCHROME1` EVERY DIRECTION IN IT REVERSES.** PS3.3
+            // C.7.6.3.1.2 defines `MONOCHROME1` so that the MINIMUM value is
+            // displayed as white, which is the greyscale ramp of
+            // `MONOCHROME2` inverted, so the byte in the rendered frame is
+            // `255 - y` and not `y`: a LOWER display value from C.11.2 is a
+            // BRIGHTER code here. The accumulated `u` would have to be
+            // `255 - byte` rather than `byte`, the `saturating_sub` would have
+            // to be an add, and the two exclusions would swap ends, the EXACT
+            // one moving to the byte 255 and the CONSERVATIVE one to the byte
+            // 0. Applying this arm unchanged to an inverted frame still
+            // produces a one-sided difference the bound detects, so nothing
+            // goes red, and that is precisely the failure this file already
+            // repudiated once: a mutation that is detected but is not the
+            // thing it says it is.
+            //
+            // `Target::MeasuredStack` is narrowed to a `MONOCHROME2` view so
+            // the catalogue cannot reach an inverted one. `ocelli-compare
+            // census` is NOT narrowed, because its argument is about the whole
+            // gating population, and today that population carries exactly one
+            // inverted row, `synthetic__cr_monochrome1`. Its reported
+            // `w=4096 bias=-0.0311` therefore has the WRONG SIGN and a
+            // magnitude that is near-right only because `mean(u)` and
+            // `255 - mean(u)` are close on that frame. It moves no verdict,
+            // since the bound is two-sided and 0.0311 is far under 0.1, and
+            // the census paragraph in `docs/lld/comparator.md` says so rather
+            // than leaving the number to be read as measured.
+            //
             // **BOTH display extremes are excluded, and the reason is not the
             // same at each end.** Derived from PS3.3 rather than from the
             // shape of the code below.
@@ -821,23 +873,41 @@ pub fn apply_to_frame(
             // `c' - w'/2 = (c - 0.5) - (w - 1)/2 = c - w/2`, so a stored value
             // clamping to black under one function clamps under the other.
             // What carries the rest is that `y_E = y_L * (w - 1) / w` lies in
-            // `[0, y_L)` everywhere the two functions are unclamped, so
-            // `round(y_L) = 0` forces `round(y_E) = 0`. Coincident clamps
-            // alone say nothing about the unclamped values just above them,
-            // and this comment used to stop there.
+            // `[0, y_L]` everywhere the two functions are unclamped, so
+            // `round(y_L) = 0` forces `round(y_E) = 0`. The bracket is CLOSED
+            // at the top, because `y_E = y_L` at `y_L = 0`, and the half-open
+            // form this used to be written in is the empty interval at exactly
+            // the value the sentence is about. Coincident clamps alone say
+            // nothing about the unclamped values just above them, and this
+            // comment used to stop there.
             //
             // **The exclusion at 255 is CONSERVATIVE at every width and exact
             // at none.** A pixel the reference rendered 255 has
             // `round(y_L) = 255`, so `y_L >= 254.5`, and it moves when
             // `round(y_E) != 255`, that is when `y_L - y_L/w < 254.5`, that is
-            // when `y_L < 254.5 * w / (w - 1)`. So the movable set in
-            // display-value space is
+            // when `y_L < 254.5 * w / (w - 1)`. A display value cannot exceed
+            // 255, so the movable set in display-value space is
             //
-            //     y_L in [254.5, min(255, 254.5 * w / (w - 1)))
+            //     y_L in [254.5, 254.5 * w / (w - 1))   intersected   [0, 255]
             //
-            // of width `254.5 / (w - 1)` capped at `0.5`. It is NON-EMPTY at
-            // every width, because 254.5 is strictly below
-            // `254.5 * w / (w - 1)` for every finite `w`.
+            // which is the CLOSED `[254.5, 255]` for `w < 510`, `[254.5, 255)`
+            // at `w = 510`, and strictly inside `[254.5, 255)` above it. It is
+            // NON-EMPTY at every finite `w >= 2`, because 254.5 is strictly
+            // below `254.5 * w / (w - 1)` there.
+            //
+            // **The top is open in the FORMULA and that is not a `min` with
+            // 255.** Below 510 the formula's top lies ABOVE 255, so no `y_L`
+            // reaches it and every display value up to and INCLUDING 255
+            // moves. `y_L` is exactly 255 at `x = c + w/2 - 1`, the last
+            // stored value LINEAR does not clamp, and at `w = 100`, 256 and
+            // 400 that stored value is the ONLY mover the fixture's table
+            // carries, `w = 400, x = 239` being the row that table hand-works.
+            // Writing the top as `min(255, ...)` with an open bracket excluded
+            // it, and the clamped interval `(c + w/2 - 1, c + w/2]` below is
+            // open at its left, so it fell into neither stated region while
+            // the fixture's own table moved it. The measure of the band is
+            // `254.5 / (w - 1)` capped at `0.5`, and that cap is where the
+            // `min` belongs and the only thing it means.
             //
             // **What `w >= 510` buys is only that a CLAMPED pixel cannot
             // move**, and four review passes in a row read that as the whole
@@ -851,14 +921,33 @@ pub fn apply_to_frame(
             // two regimes and must not be written as one.
             //
             // Measured over integer stored values at centre 40, counting `x`
-            // where LINEAR rounds to 255 and LINEAR_EXACT does not: `w = 400`
-            // gives 1, `w = 510` gives 0, and 512, 600, 1000, 2048 and 4096
-            // each give 1. The 0 at 510 is where the integers happen to fall
-            // and not a property. In stored-value units the movable band is
-            // `509/510` of one input unit wide at EVERY width, which holds at
-            // most one integer and sometimes none.
+            // where LINEAR rounds to 255 and LINEAR_EXACT does not. The
+            // fixture tabulates TWELVE widths and these are seven of them,
+            // named because they bracket the two numbers the old derivation
+            // treated as boundaries: `w = 400` gives 1, `w = 510` gives 0, and
+            // 512, 600, 1000, 2048 and 4096 each give 1. The other five rows
+            // are 100, 255, 256, 509 and 511, and 255 is the second and last
+            // width in the table with no mover. The 0 at 510 is where the
+            // integers happen to fall and not a property.
+            //
+            // **In stored-value units the movable set is ONE contiguous
+            // interval at every width, with no case split at all.** Write
+            // `u = x - c`. `y_L` reaches 254.5 at `u = (254w - 509)/510` and
+            // `y_E` reaches it at `u = 254w/510`, both solved from the two
+            // formulas above, and a stored value moves exactly on
+            //
+            //     u in [ (254w - 509)/510 , 254w/510 )
+            //
+            // which is `509/510` of one input unit wide at EVERY width and
+            // holds at most one integer and sometimes none. That one interval
+            // covers the pixels LINEAR ROUNDED up to 255 and the pixels it
+            // CLAMPED to 255 together, so 510 sorts nothing here either: it
+            // moves the clamp point `u = w/2 - 1` across the interval and
+            // changes neither endpoint.
             // `the_white_exclusion_is_conservative_at_every_width_and_exact_at_none`
-            // in the fixture named above pins all of that.
+            // and `the_movable_band_is_non_empty_at_every_width` in the
+            // fixture named above pin all of that, the second by evaluating
+            // both formulas at both endpoints rather than by a literal.
             //
             // An 8-bit frame does not carry the stored value behind a 255, so
             // there is no way to tell a pixel inside the band from one outside
@@ -910,11 +999,20 @@ pub fn apply_to_frame(
             // which for `w >= 1` is at most `1 + (u - 1) = u`. A participating
             // `u` is at least 1, so `grey - drops` is never negative and the
             // `saturating_sub` below never saturates.
-            let Some(window_width) = window_width.filter(|w| *w > 0) else {
+            //
+            // **`w >= 2`, not `w >= 1`.** C.11.2.1.2 needs `w >= 1`, but at
+            // `w = 1` LINEAR's `w' = w - 1` is 0, which is the division that
+            // section warns about, so at that one width there is no `y_L` and
+            // no divergence to show rather than a small one. The fixture's
+            // transcription documents the same bound for the same reason. The
+            // corpus's narrowest window is 256, so nothing reaches this, which
+            // is exactly why it is written down.
+            let Some(window_width) = window_width.filter(|w| *w >= 2) else {
                 return Err(MutationError::Apply(
                     mutation.name,
-                    "this view's sidecar carries no positive window width, so \
-                     the LINEAR to LINEAR_EXACT divergence is not defined for it"
+                    "this view's sidecar carries no window width of 2 or more, \
+                     so the LINEAR to LINEAR_EXACT divergence is not defined \
+                     for it: LINEAR divides by `w - 1`"
                         .to_owned(),
                 ));
             };
@@ -1020,11 +1118,14 @@ pub fn apply_to_frame(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::error::Error;
 
-    use super::{CATALOGUE, Mutation, PixelCount, apply_to_frame, fraction_budget};
+    use super::{CATALOGUE, Mutation, PixelCount, apply_to_frame, fraction_budget, resolve_target};
     use crate::frame::{Frame, Rect};
-    use crate::tolerance::MONOCHROME_WITHIN_ONE_LSB_FRACTION;
+    use crate::report::{Outcome as ViewOutcome, Side, ViewRecord};
+    use crate::sidecar::ViewKind;
+    use crate::tolerance::{MONOCHROME_WITHIN_ONE_LSB_FRACTION, ToleranceClass};
 
     type Outcome = Result<(), Box<dyn Error>>;
 
@@ -1050,10 +1151,11 @@ mod tests {
     /// **The exclusions are PS3.3's, not the accumulator's, and they are not
     /// equally tight.** `apply_to_frame` carries the derivation. At 0 the
     /// exclusion is exact at every width: the lower clamps coincide, and above
-    /// them `y_E` lies in `[0, y_L)`, so `round(y_L) = 0` forces
+    /// them `y_E` lies in `[0, y_L]`, so `round(y_L) = 0` forces
     /// `round(y_E) = 0`. At 255 it is conservative at every width and exact at
-    /// none, because a pixel LINEAR ROUNDED up to 255 moves whenever
-    /// `y_L < 254.5 * w / (w - 1)`, and that band is non-empty at every width.
+    /// none, because a pixel LINEAR rounded or clamped to 255 moves whenever
+    /// `y_L < 254.5 * w / (w - 1)`, a band that is non-empty at every width
+    /// and that includes the display value 255 itself below `w = 510`.
     /// An 8-bit frame cannot tell a 255 inside the band from one outside it,
     /// so the accumulator skips the whole population, which under-damages the
     /// frame and never over-damages it.
@@ -1241,6 +1343,97 @@ mod tests {
             denominator: 5,
         };
         assert_eq!(count.resolve(262_144, 196_608).ok(), Some(78_643));
+    }
+
+    /// A passing class-one stack record, shaped only as far as
+    /// `resolve_target` reads it.
+    fn stack_record(id: &str, photometric: Option<&str>) -> ViewRecord {
+        ViewRecord {
+            id: id.to_owned(),
+            kind: ViewKind::Stack,
+            class: ToleranceClass::MonochromeSixteenBit,
+            outcome: ViewOutcome::Pass,
+            qualifiers: BTreeSet::new(),
+            side: Side::None,
+            rung: "pixels",
+            notes: Vec::new(),
+            parameter_divergences: Vec::new(),
+            geometry_divergences: Vec::new(),
+            register_entry: None,
+            statistics: None,
+            monochrome_frame: true,
+            photometric_interpretation: photometric.map(str::to_owned),
+        }
+    }
+
+    /// **`Target::MeasuredStack` must skip an inverted view, and the order of
+    /// the records must not be what decides it.**
+    ///
+    /// `synthetic__cr_monochrome1` is a `mono16` stack view that passes, so
+    /// before the target carried a photometric interpretation the only thing
+    /// keeping the swap off it was `real` sorting before `synthetic` in the
+    /// `BTreeSet` the runner iterates. This puts the inverted record FIRST,
+    /// which is the order that accident does not survive.
+    ///
+    /// Under `MONOCHROME1` the rendered byte is `255 - y`, PS3.3 C.7.6.3.1.2,
+    /// so the swap's drop direction reverses. The mutation would still be
+    /// detected there and would still not be the divergence it declares.
+    #[test]
+    fn the_measured_stack_target_skips_an_inverted_view() -> Outcome {
+        let swap = the_swap()?;
+        let records = vec![
+            stack_record("synthetic__cr_monochrome1", Some("MONOCHROME1")),
+            stack_record("real__ct_cmb_mml__00000001", Some("MONOCHROME2")),
+        ];
+        let resolved = resolve_target(swap, &records).map_err(|error| error.to_string())?;
+        assert_eq!(resolved, "real__ct_cmb_mml__00000001");
+        Ok(())
+    }
+
+    /// A stack whose sidecar declares no photometric interpretation is not a
+    /// target either, and a run holding nothing but those refuses.
+    ///
+    /// Refusing is the right answer rather than falling back to the first
+    /// passing stack: `MutationError::NoTarget` says the corpus changed shape
+    /// under the catalogue, which is a thing to look at, and a silent fallback
+    /// would put the swap back on a frame whose ramp direction is unknown.
+    #[test]
+    fn a_stack_with_no_declared_ramp_is_not_a_measured_stack() -> Outcome {
+        let swap = the_swap()?;
+        let records = vec![
+            stack_record("synthetic__cr_monochrome1", Some("MONOCHROME1")),
+            stack_record("a__view__with__no__attributes", None),
+        ];
+        assert!(
+            resolve_target(swap, &records).is_err(),
+            "an inverted view and a view with no declared ramp are not targets"
+        );
+        Ok(())
+    }
+
+    /// **A window of 1 is refused, because LINEAR has no value at it.**
+    /// C.11.2.1.2 puts `w' = w - 1` in the denominator, so at `w = 1` there is
+    /// no `y_L` and therefore no divergence to show rather than a small one.
+    /// The corpus's narrowest window is 256, so nothing reaches this, which is
+    /// why it is a test and not a measurement.
+    #[test]
+    fn the_swap_refuses_a_window_of_one() -> Outcome {
+        let swap = the_swap()?;
+        let mut frame = Frame::from_monochrome(3, 1, &[200, 200, 200])?;
+        let Err(error) = apply_to_frame(swap, &mut frame, &Rect::full(3, 1), Some(1)) else {
+            return Err("a window of 1 was accepted, where LINEAR divides by w - 1 = 0".into());
+        };
+        let message = error.to_string();
+        assert!(
+            message.contains("2 or more"),
+            "the refusal must say what it needed: {message}"
+        );
+        assert_eq!(
+            frame,
+            Frame::from_monochrome(3, 1, &[200, 200, 200])?,
+            "and the frame is untouched"
+        );
+        Ok(())
     }
 
     /// Every catalogue entry has a distinct name, because the runner reports

@@ -28,6 +28,42 @@ export const PHASES = [
 ];
 
 /**
+ * The per-phase durations and the total, from the marks taken around them.
+ *
+ * One mark before the first phase and one after each, so five phases take six
+ * marks. **`PHASES.length === marks.length - 1` was stated nowhere and
+ * asserted nowhere**, and the arithmetic that depends on it was reachable only
+ * through the browser test, which the floor skips. A mark added without a
+ * phase name beside it leaves the TOTAL correct, because the total is the last
+ * mark minus the first, and shifts every label onto a neighbour's duration.
+ * That defeats the stated reason the phases exist: a module that grew is
+ * supposed to move `compile` and nothing else, and a reader chasing a
+ * regression would be told the wrong half moved.
+ *
+ * So the count is refused rather than trusted, and this function is pure and
+ * exported so `tests/cold_start_test.mjs` can drive it with no browser.
+ *
+ * @param {number[]} marks one more than `PHASES.length` timestamps, in order
+ * @returns {{phases: object, total: number}}
+ */
+export function phaseTable(marks) {
+  if (marks.length !== PHASES.length + 1) {
+    throw new Error(
+      `${marks.length} marks were taken for ${PHASES.length} phases. One ` +
+        `mark before the first phase and one after each is ` +
+        `${PHASES.length + 1}. Any other count labels a phase with a ` +
+        `duration that belongs to its neighbour, and leaves the total right ` +
+        `while every part of it is wrong.`,
+    );
+  }
+  const phases = {};
+  for (const [index, name] of PHASES.entries()) {
+    phases[name] = marks[index + 1] - marks[index];
+  }
+  return { phases, total: marks[marks.length - 1] - marks[0] };
+}
+
+/**
  * One cold start.
  *
  * Called exactly once per page. A second call in the same page would be nearly
@@ -74,13 +110,8 @@ export async function measure() {
   const version = glue.ocelli_version();
   marks.push(performance.now());
 
-  const phases = {};
-  for (const [index, name] of PHASES.entries()) {
-    phases[name] = marks[index + 1] - marks[index];
-  }
   return {
-    phases,
-    total: marks[marks.length - 1] - marks[0],
+    ...phaseTable(marks),
     version,
     artefact_bytes: bytes.byteLength,
   };
@@ -90,4 +121,15 @@ export async function measure() {
 // nothing would otherwise be indistinguishable from a page that measured
 // nothing, which is the oracle's stated defect one level up.
 globalThis.__bench = { measure, PHASES };
-document.getElementById("status").textContent = "ready";
+
+// **The one line that needs a DOM, and the only reason this file needed one.**
+// Guarded so the module can be IMPORTED outside a browser, which is what puts
+// `phaseTable` in the floor gate. It is the same trade
+// `src/runners/wasm_cold_start.mjs` already makes by importing playwright
+// inside `run()`: one line of indirection buys a standing test, and the
+// browser requirement stays on the code that actually needs a browser. In a
+// browser `document` is always defined, so the page behaves exactly as before,
+// a missing `#status` element included.
+if (typeof document !== "undefined") {
+  document.getElementById("status").textContent = "ready";
+}

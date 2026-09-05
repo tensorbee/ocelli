@@ -462,7 +462,25 @@ the render path is wired in from S11. That crate had an empty
 
 ## The guards this adds
 
-For F-X009, which gives every guard a standing test.
+**Not for F-X009, and this line used to say they were.** F-X009's census scans
+`scripts/`, `ci/`, `.githooks/`, `bin/` and `tools/`, and `docs/lld/guards.md`
+says `crates/` is deliberately absent, because a runtime refusal inside a crate
+is that crate's story's test rather than that harness's. The census prints that
+boundary on every green run. Seventeen of the eighteen rows below name a file
+under `crates/` and the eighteenth names one under `packages/`, so **F-X009
+watches none of them.**
+
+That was worse than the stale cross-references already corrected elsewhere in
+this directory, because it did not merely point at the wrong harness. It named
+as the covering harness the one thing that prints, every time it runs, the
+bucket it does not scan.
+
+What actually runs these is `bin/ocelli.sh gate test` for the seventeen Rust
+rows and `gate packages`, which is where `npm run test` lives, for the
+TypeScript one. Both are in the CI floor. What tests THEM
+is a review pass mutating the code each row covers and confirming the row goes
+red, which is HLD 27.3's third bullet and is recorded per row in
+`.claude/reviews/`.
 
 | Guard | Where | What it refuses |
 |-------|-------|-----------------|
@@ -470,6 +488,11 @@ For F-X009, which gives every guard a standing test.
 | `classify_is_total_and_never_invents_a_tier` | `crates/ocelli-render/tests/classify_is_total.rs` | Tier A without an A-candidate, tier B without any candidate, tier C with a non-zero `Caps`, a panic on any signal combination |
 | `each_a7_software_renderer_string_resolves_cpu` | `caps.rs` | **Any single** A7 renderer string being dropped from the list, and an entry added to it with no case of its own. Each row is a whole renderer string paired with the one entry it stands for, the rows are asserted equal to the constant in order, and each row is asserted to match its own entry and no other. Until the fifth review pass the `gallium` row read `"Gallium 0.4 on llvmpipe"`, which matches `llvmpipe` on its own, so the entry-by-entry claim this row makes was not true of `gallium` |
 | `the_a7_list_is_seven_lowercase_entries` | `caps.rs` | An entry added in mixed case, which the lowercase match would never find |
+| `the_renderer_string_match_is_case_insensitive_and_covers_every_field` | `caps.rs` | Any one of `name`, `driver` and `driver_info` leaving the haystack. Each field carries an A7 string on its own with the other two clean. Until the seventh review pass only `driver_info` did, and `driver` is `String::new()` in every fixture, so dropping it was invisible while this row's own name claimed three fields |
+| `the_evidence_records_the_signals_it_was_given` | `caps.rs` | `adapters_seen`, `fill_rate` or `simd` dropping out of `TierEvidence`. Three adapters rather than one, a measurement rather than none, and a `simd` a native build cannot produce, so no field can be satisfied by the value a fixture would have given it anyway |
+| `an_override_of_cpu_short_circuits_every_other_signal` | `caps.rs` | The tier C short circuit measuring anything, and separately the record simply never carrying a measurement. It classifies the SAME signals under `Auto` as well, so `fill_rate == None` here means short-circuited rather than never recorded |
+| `the_fragment_count_is_every_texel_once_per_pass` | `probe.rs` | The `passes` factor leaving `pixels_shaded`. Asserted against figures computed by hand from what the workload draws, through the production `fragments`, and three of the rows have a `passes` above one. Dropping the factor divides a real adapter's measured rate by sixteen, which pushes hardware under `hardware_floor_pps` into a silent tier C demotion |
+| `the_full_pass_runs_at_the_budget_and_not_past_it` | `probe.rs` | The calibration budget's comparison moving off the boundary. The rule is "took longer than this", so a calibration exactly at the budget still affords the full pass. Driven through `full_pass_is_affordable`, because `measure` needs an adapter that deviation D-04 leaves the floor without |
 | `a_real_mesa_gpu_that_both_hints_abstain_on_is_demoted` | `caps.rs` | The `gallium` narrowing being restated as complete. It asserts the demotion that survives it as well as the containment it provides |
 | `a_gl_adapter_reporting_compute_shaders_is_still_a_b_candidate` | `caps.rs` | The boundary between the two GPU tiers being read off the downlevel flags rather than off the backend. HLD section 7 names tier B by its API, so a native GLES adapter reporting `COMPUTE_SHADERS` is still tier B. The proptest cannot cover this and must not be asked to: its `a_candidates` count calls `candidate_tier`, so on that branch the property is a tautology |
 | `the_adapter_type_signal_speaks_only_where_a7_licenses_it` | `caps.rs` | `VirtualGpu` or `Other` being read as a claim in either direction. A7 licenses the signal "where a fallback adapter identifies itself as one", and `SOFTWARE_RENDERER_STRINGS`'s stated residue leans on `VirtualGpu` abstaining |

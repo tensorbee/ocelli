@@ -191,6 +191,16 @@ run_gate() {
     # Every probe here runs with no cargo, no npm, no wasm-pack, no browser,
     # no corpus and no GPU, which is what puts it in the floor. The census
     # REFUSES an entry that declares otherwise and sits in the floor anyway.
+    #
+    # The GATE is not under that rule and one command in this arm needs cargo.
+    # scripts/lint_policy_check.py reads the workspace member set from
+    # `cargo metadata --no-deps`, because `[workspace] members` is not that set
+    # and a crate reached as a path dependency was measured linted by cargo and
+    # never walked by the guard. `nostd` is in the floor on the same footing
+    # and has been since it started running `cargo tree`, and the CI job that
+    # runs this gate installs the pinned toolchain. What follows for the
+    # PROBES is that every `lint-policy` one declares `needs="cargo"` and runs
+    # in `guards-deep` below.
     guards)      python3 scripts/lint_policy_check.py &&
                  python3 scripts/guard_census.py &&
                  python3 scripts/guard_probe.py --self-test &&

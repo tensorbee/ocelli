@@ -95,4 +95,17 @@ test("the instrument is compared separately from the machine", () => {
   const partial = sameInstrument(a, { node: a.node, playwright: a.playwright });
   assert.equal(partial.same, false);
   assert.deepEqual(partial.differing, ["chromium"]);
+  // **And the other direction, which is the one that reaches the key union.**
+  // The case above is already seen by `Object.keys(a)` on its own, so dropping
+  // `...Object.keys(b)` from the set left the suite green while the parallel
+  // guard on `sameHostClass` was covered in both directions. The direction it
+  // dropped is the one that actually happens: the baseline is the older
+  // record, so it is the side that carries a field this run does not, and a
+  // baseline naming a tool the run never captured would have compared as
+  // identical and been given a verdict.
+  const richerBaseline = sameInstrument(a, { ...a, gpu: "Apple M5 Max" });
+  assert.equal(richerBaseline.same, false,
+    "an instrument key the recorded side carries and this run does not was " +
+      "read as a match");
+  assert.deepEqual(richerBaseline.differing, ["gpu"]);
 });

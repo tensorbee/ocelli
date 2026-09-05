@@ -289,6 +289,17 @@ pub struct ViewRecord {
     /// row into class two by modality. Publishing the flag is what stops the
     /// next 8-bit greyscale row re-deriving that from scratch.
     pub monochrome_frame: bool,
+    /// The reference sidecar's `/attributes/photometricInterpretation`, or
+    /// `None` where the sidecar carries no `attributes` block at all, which is
+    /// every volume reformat.
+    ///
+    /// **Not published in `to_json`, because it is an input to target
+    /// resolution rather than a fact about the comparison.** It exists so
+    /// `mutations::resolve_target` can keep `Effect::VoiLinearExactSwap` off
+    /// an inverted frame, where the divergence it models runs the other way.
+    /// `monochrome_frame` above is published because it answers a question the
+    /// report is asked. This one answers a question the catalogue is asked.
+    pub photometric_interpretation: Option<String>,
 }
 
 impl ViewRecord {
@@ -579,6 +590,7 @@ mod tests {
             register_entry: None,
             statistics: None,
             monochrome_frame: true,
+            photometric_interpretation: Some("MONOCHROME2".to_owned()),
         }
     }
 

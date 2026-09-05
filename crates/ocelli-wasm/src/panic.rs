@@ -160,13 +160,42 @@ impl core::fmt::Write for MessageBuffer {
     }
 }
 
+/// **Test-only.** What the magic word held at the instant [`fill`] began.
+///
+/// Section 23's rule is about the ORDER of the two stores and not about the
+/// record they leave behind. `fill` then `seal` and `seal` then `fill` finish
+/// with byte-identical records, so no reading of the record afterwards can
+/// tell them apart, and a test that calls the two itself only asserts the
+/// order its own body wrote. The torn state the split exists to prevent is a
+/// body being written while the magic already says a record is present, so
+/// `fill` stamps what the magic said as it started and
+/// `record_writes_the_body_before_the_magic` asserts it said absent.
+///
+/// Compiled out entirely off `cfg(test)`, so the shipped hook makes exactly
+/// the stores it made before. Same justification as
+/// [`MessageBuffer::truncated`]: a property a test can assert directly rather
+/// than infer.
+#[cfg(test)]
+static MAGIC_WHEN_FILL_BEGAN: AtomicU32 = AtomicU32::new(FILL_HAS_NOT_RUN);
+
+/// The stamp's value before anything stamps it.
+///
+/// [`PANIC_MAGIC`] is `0x3150_434F` and an absent record's magic is `0`, so
+/// neither can be mistaken for "`fill` never ran".
+#[cfg(test)]
+const FILL_HAS_NOT_RUN: u32 = u32::MAX;
+
 /// Fill the record's body, leaving the magic unwritten.
 ///
 /// Split from [`seal`] so the ordering rule is a thing the tests can drive
 /// rather than a comment. A hook that panics part way through leaves the magic
 /// at `0`, and the shell then reads the record as **absent** rather than as
-/// present with garbage in it.
+/// present with garbage in it. The test that drives it through [`record`] is
+/// `record_writes_the_body_before_the_magic`, by way of
+/// [`MAGIC_WHEN_FILL_BEGAN`].
 fn fill(code: u32, message: &MessageBuffer) {
+    #[cfg(test)]
+    MAGIC_WHEN_FILL_BEGAN.store(PANIC_SLOT.magic.load(Ordering::Relaxed), Ordering::Relaxed);
     let filled = message.filled();
     for (slot, byte) in PANIC_SLOT.msg.iter().zip(filled.iter()) {
         slot.store(*byte, Ordering::Relaxed);
@@ -328,8 +357,9 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     use super::{
-        MESSAGE_CAPACITY, MessageBuffer, PANIC_MAGIC, PANIC_RECORD_BYTES, PANIC_RECORD_VERSION,
-        PANIC_SLOT, fill, record, record_address, record_len, seal,
+        FILL_HAS_NOT_RUN, MAGIC_WHEN_FILL_BEGAN, MESSAGE_CAPACITY, MessageBuffer, PANIC_MAGIC,
+        PANIC_RECORD_BYTES, PANIC_RECORD_VERSION, PANIC_SLOT, fill, record, record_address,
+        record_len, seal,
     };
     use core::sync::atomic::Ordering;
     use ocelli_core::ErrorCode;
@@ -356,6 +386,7 @@ mod tests {
         for slot in &PANIC_SLOT.msg {
             slot.store(0, Ordering::Relaxed);
         }
+        MAGIC_WHEN_FILL_BEGAN.store(FILL_HAS_NOT_RUN, Ordering::Relaxed);
         guard
     }
 
@@ -502,6 +533,58 @@ mod tests {
             message.contains(" at "),
             "the location separator is missing from {message}"
         );
+    }
+
+    /// **The ordering rule, driven through [`record`] rather than written by
+    /// the test itself.**
+    ///
+    /// `a_record_with_no_magic_reads_as_absent` above calls `fill` and then
+    /// `seal` from its own body, so what it asserts is the order that body
+    /// wrote. Swapping the two calls inside `record` left it green, and the
+    /// state that swap produces is exactly the torn record section 23's
+    /// presence test exists to exclude: `magic` reads `OCP1` while `code` is
+    /// still `0`, `readPanicRecord` in `packages/core/src/panic.ts` returns a
+    /// record that reads as PRESENT, and `describeError(0)` then reports that
+    /// this build does not recognise the code instead of the sentence section
+    /// 23 asks for.
+    ///
+    /// So the assertion here is the invariant itself, taken from inside the
+    /// hook: **the body is never written while the magic says a record is
+    /// present.** Only writing the body first can satisfy it.
+    #[test]
+    fn record_writes_the_body_before_the_magic() {
+        let _guard = exclusive();
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(record));
+
+        let outcome = std::panic::catch_unwind(|| {
+            assert!(
+                an_invariant_that_does_not_hold(),
+                "deliberate panic, the ordering probe"
+            );
+        });
+
+        // Snapshot before asserting, for the reason
+        // `a_real_panic_leaves_a_well_formed_record` gives.
+        std::panic::set_hook(previous);
+        let seen_by_fill = MAGIC_WHEN_FILL_BEGAN.load(Ordering::Relaxed);
+        let magic = PANIC_SLOT.magic.load(Ordering::Relaxed);
+        let code = PANIC_SLOT.code.load(Ordering::Relaxed);
+
+        assert!(outcome.is_err());
+        assert_ne!(
+            seen_by_fill, FILL_HAS_NOT_RUN,
+            "record() sealed a record whose body it never filled"
+        );
+        assert_eq!(
+            seen_by_fill, 0,
+            "the body was written while the magic already said a record was \
+             present, which is the torn record the split exists to prevent"
+        );
+        // And the record is present and complete once the hook has returned,
+        // so the assertion above cannot be satisfied by never sealing at all.
+        assert_eq!(magic, PANIC_MAGIC);
+        assert_eq!(code, u32::from(ErrorCode::Panicked.number()));
     }
 
     /// A panic whose message is longer than the buffer still leaves a record,

@@ -46,8 +46,14 @@ A refusal built as a list, `problems += [...]`, `problems.extend(...)` or
 `return ["..."]`, was invisible: eight in scanned guard files, including the
 wasm size ceiling of HLD Appendix A gate A4. Deleting that ceiling left the
 headline at 544 and exit 0, and only a probe caught it. Those shapes are
-scanned now. A refusal whose message is built into a local variable first is
-still invisible, and that limit is declared in `discover.py` rather than here.
+scanned now. **A refusal whose message is built into a local variable first is
+FOUND**, and the sentence here said it was not until the S03 review's seventh
+pass: `problems.append(` carries no requirement that its argument be a literal.
+What was true is that such a refusal took its IDENTITY from the variable's
+name, so `scripts/guard_probe.py`'s two inverted-success refusals were ONE site
+and deleting the first of them moved no number here at all. `discover.py`
+gives those a fallback identity now and declares the remaining limits where the
+scan is rather than here.
 
 **b. Gate and hook coverage, in both directions.** Every name in
 `bin/ocelli.sh`'s `GATES` array has an entry or an explicit `delegated`

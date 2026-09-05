@@ -35,6 +35,7 @@ import {
   run,
   workspaceVersion,
 } from "../src/runners/wasm_cold_start.mjs";
+import { PHASES, phaseTable } from "../page/app.mjs";
 import { repoPath } from "../src/paths.mjs";
 
 test("the workspace version comes from [workspace.package]", () => {
@@ -74,6 +75,47 @@ test("the served path refusal fires on a walk out of the directory", () => {
     "a malformed percent escape reached the filesystem");
   assert.equal(resolveServedPath(base, "/../page-other/x"), null,
     "a sibling directory sharing a prefix was served");
+});
+
+test("each phase is labelled with its own interval, not a neighbour's", () => {
+  // The page's phase arithmetic was reachable only through the browser test,
+  // which the floor skips, so nothing observed it at all. It is pure, so it
+  // costs the floor nothing to drive it directly.
+  //
+  // Six marks one millisecond apart would make every phase look right whatever
+  // the indexing did, so the intervals here are all different and none is a
+  // multiple of another. Each phase is asserted against the interval its own
+  // name stands for, computed by hand: an off-by-one in the loop shifts every
+  // label onto its neighbour's number.
+  const marks = [100, 101, 105, 130, 132, 140];
+  const { phases, total } = phaseTable(marks);
+  assert.equal(phases.glue_module_script, 1);
+  assert.equal(phases.fetch, 4);
+  assert.equal(phases.compile, 25);
+  assert.equal(phases.instantiate, 2);
+  assert.equal(phases.first_call, 8);
+  assert.equal(total, 40);
+  // The total is the sum of the parts, which is what makes a shifted label
+  // invisible in the number a reader checks first.
+  assert.equal(
+    Object.values(phases).reduce((sum, one) => sum + one, 0), total);
+});
+
+test("a mark count that does not match the phase list is refused", () => {
+  // `PHASES.length === marks.length - 1` was stated nowhere and asserted
+  // nowhere. Adding a mark without a phase beside it leaves the total right
+  // and misaligns every label, which defeats the reason the phases exist:
+  // a module that grew is supposed to move `compile` and nothing else.
+  assert.equal(PHASES.length, 5,
+    "the phase list changed, so the counts below are no longer the ones the " +
+      "page takes");
+  const good = [0, 1, 2, 3, 4, 5];
+  assert.doesNotThrow(() => phaseTable(good));
+  for (const bad of [[], [0], good.slice(0, 5), [...good, 6]]) {
+    assert.throws(() => phaseTable(bad),
+      /marks were taken for 5 phases/,
+      `${bad.length} marks were accepted for 5 phases`);
+  }
 });
 
 /**

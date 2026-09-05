@@ -342,8 +342,39 @@ a constant in source asserted equal to the checked-in file it claims to follow.
 
 That gate then runs the guard's own negative cases and all five node suites.
 
+**Three decisions the node suites state in prose were held by nothing until the
+seventh review pass**, and all three were found by mutating the source rather
+than by reading it.
+
+- **`subjectExists` is `status === "done"` and not "not pending".**
+  `resolveSubjects` was only ever driven with `done` and `pending`, so
+  `in-progress`, `archived` and `superseded` never reached it and the two
+  spellings were indistinguishable. Reading either of the last two as delivered
+  is exactly the `REFUSED` state `src/state.mjs` calls the defect this harness
+  is most likely to produce, and a superseded story is one whose subject was
+  replaced rather than built. Every status now goes through it against a table,
+  and the authority for that table is `scripts/bench_check.py`, which refuses a
+  runner file and a baseline entry on `status != "done"` twice over.
+- **The comparison reads the RECORDED unit and not the run's.** Nothing built a
+  run whose unit differed from its baseline's, so the two were the same value.
+  The two units in the test now have opposite polarity in `INCREASE_MEANS`, so
+  taking the wrong one prints a duration that rose as an improvement.
+- **A figure exactly on the tolerance is inside it.** The existing case stepped
+  to either side of a 0.1 tolerance and never onto it. The boundary follows the
+  mechanism A7.3 names: `scripts/pin_and_size_check.py` refuses on
+  `size > ceiling`, so a figure at the ceiling passes there, and a tolerance
+  stated as a fraction that excluded its own value would mean a 10 per cent
+  tolerance admits less than 10 per cent.
+
+`sameInstrument` gained the fourth. It compares the UNION of both sides' keys,
+and only one direction was covered: a key the run carries and the baseline does
+not. The other direction is the one that happens, because the baseline is the
+older record, so a baseline naming a tool this run never captured would have
+compared as identical and been given a verdict. The parallel guard on
+`sameHostClass` was already covered both ways.
+
 **Five and not four, since the S03 review's fourth pass.**
-`tools/bench/tests/cold_start_test.mjs` holds five tests and only the last
+`tools/bench/tests/cold_start_test.mjs` holds seven tests and only the last
 needs a browser, but `wasm_cold_start.mjs` imported `playwright` at module
 scope, so the file could not be loaded at all without a playwright install and
 the whole suite sat outside the gate. `workspaceVersion`, `median`,
@@ -353,6 +384,21 @@ escape and a sibling directory sharing a prefix, were watched by nothing. The
 runner now takes playwright with `await import` inside `run()`, and the browser
 test is opted into with `OCELLI_BENCH_BROWSER=1`, which
 `npm run test:browser` in `tools/bench` sets. The gate still needs no browser.
+
+**The page's own arithmetic joined the floor the same way, in the seventh
+pass.** `tools/bench/page/app.mjs` computes the five phase durations from six
+marks, and that loop was reachable only through the browser test the floor
+skips, so nothing observed it. The relationship it depends on,
+`PHASES.length === marks.length - 1`, was stated nowhere and asserted nowhere,
+and a mark added without a phase name beside it leaves the TOTAL correct while
+shifting every label onto a neighbour's duration. That defeats the reason the
+five phases exist at all: a module that grew is supposed to move `compile` and
+nothing else, so a misaligned label sends a reader chasing the wrong half. The
+arithmetic is now `phaseTable`, exported and pure, it refuses a mark count that
+does not match the phase list, and the one line needing a DOM is guarded on
+`typeof document` so the module imports outside a browser. That is the same
+one-line trade the runner already makes with `await import`, and the page
+behaves identically because `document` is always defined in a browser.
 
 **A comparison that is not a gate.** `bin/ocelli.sh bench` runs what it can and
 writes the record. `bin/ocelli.sh bench --compare` compares against the baseline

@@ -132,11 +132,25 @@ replaces, and it leaves the `all([])` argument standing: `panic`, `native` and
 through `bool(arm)`, and widening `COMMAND_PREFIXES` is still not what happened
 here. Only the sentence that was taken on trust is now mechanical.
 
-A statement whose first word is a shell builtin or a control keyword is not a
-command for this purpose. `[ -d node_modules ]`, `command -v wasm-pack`, `skip`,
-`echo` and `return` decide whether the real work runs and are not the work, so
-counting them would demand a gate-name step for `lint`, `types` and `packages`,
-which run their whole arm as steps today and are not weaker for it.
+A statement whose first word is a shell builtin is not a command for this
+purpose. `[ -d node_modules ]`, `command -v wasm-pack`, `skip`, `echo` and
+`return` decide whether the real work runs and are not the work, so counting
+them would demand a gate-name step for `lint`, `types` and `packages`, which
+run their whole arm as steps today and are not weaker for it.
+
+**A control KEYWORD is different, and treating it as the same thing was a
+fail-open.** `STATEMENT_BREAK` splits on newline, semicolon, brace, bracket and
+the two boolean operators, so `if node --test x; then true; fi` is ONE statement
+whose head is `if`, and `if` sat in the builtin list. The S03 review's seventh
+pass measured the outcome:
+wrapping the `bench` arm's `node --test` line that way and replacing the
+`gate bench` step with its two `python3` commands gave `unseen bench: None` and
+exit 0, five node suites out of CI, which is byte for byte the outcome the
+sixth pass measured and made a rule. So the head is dropped and the REST OF THE
+STATEMENT IS RE-SCANNED. `SHELL_INTRODUCERS` holds the keywords that introduce
+a statement and `SHELL_NOISE` holds the heads whose remainder is arguments, and
+the split matters: re-scanning past `[` would report `-d node_modules ]` as an
+unseen command and refuse `lint`, `types` and `packages`.
 
 ## A gate outside the floor can still be a gate CI is supposed to run
 
@@ -188,18 +202,34 @@ ratchet, so the pair is now watched by a mechanism rather than by a comment.
 
 That the CI step is EQUIVALENT to the gate. `ci.yml` deliberately runs several
 gates as their underlying command rather than through the gate runner, so the
-match is on the command. A step that ran `cargo clippy` without
-`-D warnings` would satisfy this check and be wrong. Making CI call
-`bin/ocelli.sh gate --floor` as one step would close that too, and it is not
-this script's call to make: it would collapse the job matrix that gives CI its
-useful per-area failure names.
+match is on the command. Making CI call `bin/ocelli.sh gate --floor` as one step
+would close that, and it is not this script's call to make: it would collapse
+the job matrix that gives CI its useful per-area failure names.
 
-The one normalisation is the Python interpreter. `corpus-tests` runs
-`python3 scripts/corpus_tests.py` through the gate runner and
-`uv run scripts/corpus_tests.py --require-prerequisites` in CI, which is
-deliberate and documented at that step: `uv` supplies pydicom, and
-`--require-prerequisites` makes a skip red rather than green. The script path
-and everything after it must still match, so only the interpreter may differ.
+**The example this paragraph used to give was false**, and it is worth naming
+because it was cited as the reason for a design decision. It said "a step that
+ran `cargo clippy` without `-D warnings` would satisfy this check and be
+wrong". MEASURED in the S03 review's seventh pass: dropping `-- -D warnings`
+from the CI step gives exit 1, "the `clippy` gate is in the CI floor and
+nothing in ci.yml runs it", because the arm command is the whole string
+including the flags. The real hole in that class was the direction the
+comparison was made in, and it is closed below.
+
+`runs_command` compares the argument VECTORS for equality, and it used to test
+for a substring. MEASURED the same pass: changing a CI step to
+`python3 scripts/prose_check.py --only-this-one-file README.md` left this check
+at exit 0 with `prose` reported as invoked, while CI checked one file.
+`ci-floor.narrowed-arm-command` probes the opposite direction, an argument the
+arm already carried being narrowed, and could not see an argument being added.
+
+The one normalisation is the Python interpreter, and the one permitted addition
+is `PERMITTED_ADDITIONS`. `corpus-tests` runs `python3 scripts/corpus_tests.py`
+through the gate runner and `uv run scripts/corpus_tests.py
+--require-prerequisites` in CI, which is deliberate and documented at that step:
+`uv` supplies pydicom, and `--require-prerequisites` makes a skip red rather
+than green, which is STRICTLY STRONGER than the arm. That exception is declared
+with its reason in one place rather than granted by a loose comparison
+everywhere.
 
 Usage: python3 scripts/ci_floor_check.py
 """
@@ -520,17 +550,65 @@ def invoked_gates(commands: list[Command]) -> set[str]:
     return names
 
 
-def runs_command(command: str, commands: list[Command]) -> bool:
-    """Whether CI runs a gate arm's command, interpreter aside."""
-    command = command.strip()
-    if not command:
+# The interpreter, normalised away before two argv are compared. `uv run` and
+# `python3` are the same run of the same script and only one of them supplies
+# pydicom, which is why the `corpus-tests` step uses it.
+INTERPRETER = re.compile(r"^(?:python3|uv\s+run)\s+")
+
+# The ONE place a CI step may run more than a gate arm's command, with the
+# reason it may. Everything else added to a step changes what the gate means,
+# and the S03 review's seventh pass measured the cost of a substring match:
+# changing a CI step to `python3 scripts/prose_check.py --only-this-one-file
+# README.md` left this check at exit 0 with `prose` reported as invoked, while
+# CI checked one file. `ci-floor.narrowed-arm-command` probes the same class
+# from the other side and could not see this one, because it narrowed an
+# argument the arm already carried rather than adding one.
+#
+# The addition here is strictly STRONGER than the arm: the gate runner reports
+# a skipped prerequisite as a pass and `--require-prerequisites` makes it red,
+# which is why the CI step is written that way and why the workflow says so at
+# the step.
+PERMITTED_ADDITIONS: dict[str, tuple[frozenset[str], str]] = {
+    "scripts/corpus_tests.py": (
+        frozenset({"--require-prerequisites"}),
+        "it makes an absent prerequisite RED rather than a green skip, which "
+        "is strictly stronger than the gate arm's run"),
+}
+
+
+def _argv(text: str) -> list[str]:
+    """One command as its argument vector, with the interpreter normalised."""
+    return INTERPRETER.sub("python3 ", text.strip()).split()
+
+
+def _permitted_extension(wanted: list[str], got: list[str]) -> bool:
+    """Is `got` `wanted` plus only additions declared for the script it runs."""
+    if len(got) <= len(wanted) or got[:len(wanted)] != wanted:
         return False
-    python = re.match(r"^python3\s+(.*)$", command)
-    if python:
-        pattern = re.compile(
-            r"(?:python3|uv run)\s+" + re.escape(python.group(1)))
-        return any(pattern.search(line.text) for line in commands)
-    return any(command in line.text for line in commands)
+    for name, (additions, _) in PERMITTED_ADDITIONS.items():
+        if name in wanted:
+            return all(token in additions for token in got[len(wanted):])
+    return False
+
+
+def runs_command(command: str, commands: list[Command]) -> bool:
+    """Whether CI runs a gate arm's command, interpreter aside.
+
+    EQUALITY over the argument vector, not a substring. A substring match said
+    yes to a step running the arm's command plus arguments that narrowed it,
+    and this file's own docstring named the equivalence it does not check while
+    leaving this the way in. The one declared exception is
+    `PERMITTED_ADDITIONS`, which is a superset the workflow documents at its
+    step and which is strictly stronger than the arm.
+    """
+    wanted = _argv(command)
+    if not wanted:
+        return False
+    for line in commands:
+        got = _argv(line.text)
+        if got == wanted or _permitted_extension(wanted, got):
+            return True
+    return False
 
 
 def steps_running(gate: str, arms: dict[str, list[str]],
@@ -606,21 +684,61 @@ CONTINUATION = re.compile(r"\\\n\s*")
 ARM = re.compile(r"^[ \t]*([a-z-]+)\)(.*?);;", re.M | re.S)
 
 # A `case` keyword at a statement position inside an arm body.
-NESTED_CASE = re.compile(r"(?:^|[\n;{}()&|])\s*case\b")
+#
+# A KEYWORD is a statement position too, and the S03 review's seventh pass
+# measured what leaving it out cost. The previous pattern required `case` to
+# follow the start of the body or one of `[\n;{}()&|]`, so `then case` and
+# `do case` slipped past it while `ARM` still truncated the body at the inner
+# `;;`. Measured on a synthetic `prose` arm reading
+# `python3 scripts/prose_check.py && if true; then case "$OSTYPE" in *) : ;;
+# esac; fi && python3 scripts/prose_check.py --extra`: the body was kept only
+# as far as the inner case, `arms['prose']` held one command, `unseen` was
+# `None`, no refusal fired and the real second `python3` command after the
+# inner case was dropped at exit 0.
+#
+# The keyword list is spelled out rather than replaced by a bare `\bcase\b`,
+# because a word boundary sits inside `--lower-case` too and an option is not
+# a nested statement. `case` must also be FOLLOWED by whitespace, which the
+# keyword always is and an option ending in `-case` is not.
+NESTED_CASE = re.compile(
+    r"(?:^|[\n;{}()&|]|\b(?:then|do|else|elif|!)[ \t])[ \t]*case[ \t]")
 
 # Where one shell statement ends and the next begins, for the unseen-command
 # scan. `{` and `}` are separators here and never statement heads.
 STATEMENT_BREAK = re.compile(r"[\n;{}()]|&&|\|\||\|")
 
-# Statement heads that are not the work a gate does. A builtin or a control
-# keyword decides whether the real command runs, and demanding a gate-name step
-# for one of them would refuse `lint`, `types` and `packages`, which run their
-# whole arm as CI steps today and lose nothing by it.
+# Keywords that INTRODUCE a statement rather than being one. What follows one
+# of these is the work, so the head is dropped and the REST OF THE STATEMENT IS
+# RE-SCANNED rather than discarded with it.
+#
+# Discarding it was a fail-open, and the S03 review's seventh pass measured the
+# outcome exactly. `STATEMENT_BREAK` splits on `[\n;{}()]|&&|\|\||\|`, so
+# `if node --test ...; then true; fi` is one statement whose head is `if`,
+# and `if` sat in the noise list below. Wrapping the `bench` arm's `node --test`
+# line that way and replacing the `gate bench` step with its two `python3`
+# commands gave `unseen bench: None` and exit 0, which is five node suites out
+# of CI. That is byte for byte the outcome the sixth pass measured and made a
+# rule.
+#
+# `eval` is here and not below, because `eval python3 x` runs the command.
+SHELL_INTRODUCERS = frozenset({
+    "if", "then", "elif", "else", "while", "until", "do", "!", "time", "eval",
+})
+
+# Statement heads that are not the work a gate does, and whose REMAINDER is
+# arguments rather than a command. A builtin decides whether the real command
+# runs and is not the work, and demanding a gate-name step for one of them
+# would refuse `lint`, `types` and `packages`, which run their whole arm as CI
+# steps today and lose nothing by it. `[ -d node_modules ]` is the shape: its
+# head is a builtin and `-d node_modules ]` is not a command, so re-scanning
+# past THESE heads would report an argument list as an unseen command.
+#
+# `for` is here rather than above for the same reason: what follows it is a
+# variable and a word list, and the command lives after the `do`.
 SHELL_NOISE = frozenset({
     "[", "[[", "test", "command", "echo", "printf", "return", "exit", "skip",
-    "local", "if", "then", "elif", "else", "fi", "for", "while", "until",
-    "do", "done", "case", "esac", "true", "false", ":", "set", "shift",
-    "read", "cd", "export", "unset", "eval",
+    "local", "fi", "for", "done", "case", "esac", "true", "false", ":", "set",
+    "shift", "read", "cd", "export", "unset",
 })
 
 
@@ -686,14 +804,23 @@ def unseen_commands(runner: str) -> dict[str, list[str]]:
     and until the sixth pass that was a sentence in this file's docstring
     rather than a rule. It is a rule now, and `main` applies it per event.
 
-    Shell builtins and control keywords are not commands here, for the reason
-    `SHELL_NOISE` gives.
+    Shell builtins are not commands here, for the reason `SHELL_NOISE` gives.
+    A control KEYWORD is not a command either, and dropping it takes the rest
+    of the statement with it unless the rest is re-scanned, which is the
+    fail-open `SHELL_INTRODUCERS` records and closes.
     """
     unseen: dict[str, list[str]] = {}
     for gate, text in arm_bodies(runner).items():
         found: list[str] = []
         for raw in STATEMENT_BREAK.split(text):
             statement = re.sub(r"\s+", " ", raw).strip()
+            # `if node --test x` is one statement and `node --test x` is the
+            # work in it. Looped, because `while ! python3 x` is two heads.
+            while statement.split(" ", 1)[0] in SHELL_INTRODUCERS:
+                head, _, rest = statement.partition(" ")
+                statement = rest.strip()
+                if not statement:
+                    break
             if not statement:
                 continue
             if statement.startswith(COMMAND_PREFIXES):

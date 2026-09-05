@@ -310,8 +310,20 @@ files moved no number at all. One of them was `scripts/pin_and_size_check.py`'s
 wasm size ceiling, which is HLD Appendix A gate A4's own number: deleting it
 left the census headline byte-identical and exit 0, and only a probe caught it.
 Those three shapes are scanned now. A refusal whose message is assembled into a
-local variable before it is appended is still invisible, and `discover.py`
-declares that where the scan is rather than here.
+local variable before it is appended **is found**, and this sentence said it
+was not until the S03 review's seventh pass. `problems.append(` carries no
+requirement that its argument be a literal, so `scripts/guard_probe.py:260` and
+`:273` and `tools/oracle/check_sidecars.py:558` were all found. What was true is
+that each took its IDENTITY from the variable's name, which made the two
+inverted-success refusals in `guard_probe.py` ONE site: deleting the first of
+them, the refusal that makes "a probe whose guard exits 0 is a FAILURE OF THE
+HARNESS" true, and returning `"pass"` instead, left `entry_sites` at 19, the
+census at exit 0, `--self-test` at 10 properties, the floor profile at 106
+probes red and the unit suite at 49, with the whole `guards` gate ALL GREEN and
+the mechanism that gives every probe result its meaning removed. A message
+carrying no string literal of its own now falls back to the enclosing function
+plus an ordinal, and `discover.py` declares the remaining limits where the scan
+is rather than here.
 
 **b. Gate and hook coverage, in both directions.** Every name in
 `bin/ocelli.sh`'s `GATES` array has an entry or an explicit `DELEGATED` reason,
@@ -426,7 +438,15 @@ harness exists to fix.
   harness self test, the floor probe profile and the catalogue's unit suite.
   Every probe in it runs with no cargo, no npm, no wasm-pack, no browser, no
   corpus and no GPU, and check d refuses an entry that declares otherwise and
-  sits in the floor anyway.
+  sits in the floor anyway. **The GATE is not under that rule and the S03
+  review's seventh pass made the difference visible.** `lint_policy_check.py`
+  reads its member set from `cargo metadata --no-deps` now, because
+  `[workspace] members` is not the member set and a crate reached as a path
+  dependency was measured to be linted by cargo and never walked here. So that
+  guard needs cargo, exactly as `no_std_check.py` has always needed it for
+  `cargo tree`, and every `lint-policy` probe moved to `needs="cargo"` and the
+  deep profile with it. The floor gate still runs the guard on every pull
+  request. What moved to push-to-main is the harness watching the guard.
 - **`guards-deep`**, not in the floor. `--profile deep` is every probe, so this
   re-runs the floor set and adds the ones that need a toolchain, plus the
   census at `--profile deep`. Every probe it adds today declares `needs`

@@ -568,17 +568,32 @@ neither function clamps, the whole divergence is
 **The two exclusions are not equally tight, and four review passes in a row got
 the upper one wrong.** At 0 it is exact at every width. The lower clamps are
 equal, since `(c - 0.5) - (w - 1)/2 = c - w/2`, and above them
-`y_E = y_L * (w - 1) / w` lies in `[0, y_L)`, so `round(y_L) = 0` forces
-`round(y_E) = 0`. Coincident clamps alone would not carry that, which is what
-this section used to claim.
+`y_E = y_L * (w - 1) / w` lies in `[0, y_L]`, so `round(y_L) = 0` forces
+`round(y_E) = 0`. The bracket is closed at the top, because `y_E = y_L` at
+`y_L = 0` and the half-open form this used to be written in is the empty
+interval at exactly the value the sentence is about. Coincident clamps alone
+would not carry that either, which is what this section used to claim.
 
 **At 255 the exclusion is conservative at every width and exact at none.** A
 pixel the reference rendered 255 has `y_L >= 254.5`, and it moves when
-`y_L - y_L / w < 254.5`, which is `y_L < 254.5 * w / (w - 1)`. So the movable
-set in display-value space is `y_L` in
-`[254.5, min(255, 254.5 * w / (w - 1)))`, of width `254.5 / (w - 1)` capped at
-`0.5`, and 254.5 is strictly below `254.5 * w / (w - 1)` at every finite width,
-so the band never closes.
+`y_L - y_L / w < 254.5`, which is `y_L < 254.5 * w / (w - 1)`. A display value
+cannot exceed 255, so the movable set in display-value space is `y_L` in
+`[254.5, 254.5 * w / (w - 1))` intersected with `[0, 255]`, which is the
+**closed** `[254.5, 255]` for `w < 510`, `[254.5, 255)` at `w = 510`, and
+strictly inside `[254.5, 255)` above it. 254.5 is strictly below
+`254.5 * w / (w - 1)` at every finite `w >= 2`, so the band never closes.
+
+**The top is open in the formula and that is not a `min` with 255.** Below 510
+the formula's top lies above 255, so no `y_L` reaches it and every display
+value up to and including 255 moves. `y_L` is exactly 255 at
+`x = c + w/2 - 1`, the last stored value LINEAR does not clamp, and at
+`w = 100`, 256 and 400 that stored value is the only mover the fixture's table
+carries, `w = 400, x = 239` being the row the table hand-works. This paragraph
+wrote the top as `min(255, 254.5 * w / (w - 1))` with an open bracket, which
+excluded it, and the clamped interval `(c + w/2 - 1, c + w/2]` named in the
+next paragraph is open at its left, so that stored value fell into neither
+stated region while the fixture's own table moved it. `254.5 / (w - 1)` capped at `0.5` is the band's **measure**, and the
+cap is the only thing the `min` ever meant.
 
 **What `w >= 510` buys is only that a clamped pixel cannot move.**
 `254.5 * w / (w - 1) >= 255` exactly when `w <= 510`, which is the only place
@@ -587,13 +602,30 @@ LINEAR_EXACT does not, the lowest `y_E` is `255 - 255/w`, which rounds back to
 255 exactly when `w >= 510`. That says nothing about the pixels LINEAR rounded
 up to 255 from below, so 510 is not a threshold separating two regimes and must
 not be written as one. Measured over integer stored values at centre 40,
-counting `x` where LINEAR rounds to 255 and LINEAR_EXACT does not, `w = 400`
-gives 1, `w = 510` gives 0, and 512, 600, 1000, 2048 and 4096 each give 1. The
-0 at 510 is where the integers happen to fall: in stored-value units the
-movable band is `509/510` of one input unit wide at every width, which holds at
-most one integer and sometimes none. Reproduce with
+counting `x` where LINEAR rounds to 255 and LINEAR_EXACT does not. The fixture
+tabulates twelve widths and these are seven of them, named because they bracket
+the two numbers the old derivation treated as boundaries: `w = 400` gives 1,
+`w = 510` gives 0, and 512, 600, 1000, 2048 and 4096 each give 1. The other
+five rows are 100, 255, 256, 509 and 511, and 255 is the second and last width
+in the table with no mover. The 0 at 510 is where the integers happen to fall.
+
+**In stored-value units the movable set is one contiguous interval at every
+width, with no case split at all.** Write `u = x - c`. `y_L` reaches 254.5 at
+`u = (254w - 509)/510` and `y_E` reaches it at `u = 254w/510`, both solved from
+the two formulas, and a stored value moves exactly on
+`u` in `[ (254w - 509)/510, 254w/510 )`, which is `509/510` of one input unit
+wide at every width and holds at most one integer and sometimes none. That one
+interval covers the pixels LINEAR rounded up to 255 and the pixels it clamped
+to 255 together, so 510 sorts nothing here either: it moves the clamp point
+`u = w/2 - 1` across the interval and changes neither endpoint. Reproduce with
 `cargo test -p ocelli-oracle --test voi_divergence_fixture`, which pins the
-band, the counts and the clamped-pixel case.
+band, the counts and the clamped-pixel case, and which now evaluates both
+transcribed formulas AT both endpoints rather than asserting a literal derived
+from neither. Until the seventh pass this section's `509/510` was checked
+entirely in closed form: mutating the C.11.2.1.2 transcription took six of the
+file's twelve other tests red and left the band test green. It now takes seven
+of thirteen red, the band test among them, and mutating C.11.2.1.3.2 instead
+fails the band test on its `254w/510` endpoint.
 
 An 8-bit frame does not carry the stored value behind a 255, so there is no way
 to tell a pixel inside the band from one outside it, and excluding the whole
@@ -602,6 +634,27 @@ frame by whatever share of the 255s fell in the band and never over-damages it,
 so no pixel is wrongly moved. It also keeps the mutation from perturbing the
 informative region, which is what kept the numerator and the denominator
 honest.
+
+**Every direction above assumes `MONOCHROME2`, and under `MONOCHROME1` all of
+them reverse.** PS3.3 C.7.6.3.1.2 defines `MONOCHROME1` so that the minimum
+value is displayed as white, which is the `MONOCHROME2` ramp inverted, so the
+byte in the rendered frame is `255 - y`. The accumulated `u` would have to be
+`255 - byte` rather than `byte`, the drop would have to be an add, and the two
+exclusions would swap ends, the exact one moving to the byte 255 and the
+conservative one to the byte 0. Applied unchanged to an inverted frame the swap
+still produces a one-sided difference the bound detects, so nothing goes red,
+which is the same failure shape as `round(u - u/w)` below: detected, and not
+the thing it claims to be.
+
+`Target::MeasuredStack` is therefore narrowed to a `MONOCHROME2` view and the
+predicate is positive rather than "not `MONOCHROME1`", so a stack whose ramp
+direction is undeclared is not a target either. Before that narrowing the only
+thing keeping the swap off `synthetic__cr_monochrome1`, a `mono16` stack view
+that passes, was `real` sorting before `synthetic` in the `BTreeSet` the runner
+iterates, which is the accident smell S4 named on `MeasuredReformat` and here
+it was guarding arithmetic rather than a ladder rung.
+`the_measured_stack_target_skips_an_inverted_view` in `mutations.rs` puts the
+inverted record first, which is the order the accident does not survive.
 
 It said `round(u - u/w)` here and in the variant's own doc comment until the
 sprint review's fourth pass, and `apply_to_frame`'s comment 600 lines below it
@@ -641,6 +694,17 @@ views and averages over the image rectangle instead: **0 of 70** exceed the
 bound, the largest being -0.0853, while over the informative region 51 of 70 do.
 The mutation's own target sits at -0.0773 over the rectangle, a 23 per cent
 margin below the bound.
+
+**The census is not narrowed to `MONOCHROME2` and one of its 70 rows is
+inverted.** Its argument is about the whole gating population, so it applies
+the same darkening accumulator to `synthetic__cr_monochrome1` and reports
+`w=4096 bias=-0.0311`. That number has the **wrong sign** for an inverted ramp,
+and its magnitude is near-right only because `mean(u)` and `255 - mean(u)` are
+close on that frame. It moves no verdict, since the bound is two-sided and
+0.0311 is far under 0.1, and the row is one of the 19 blind ones for a reason
+that does not depend on the sign at all: `255 / 4096` is 0.062, so no
+divergence on it can reach the bound in either direction. Reproduce with
+`./target/release/ocelli-compare census`.
 
 Until the fourth pass that argument rested on a modelling error and a margin of
 half a per cent. The accumulator dropped white pixels, so the same measurement

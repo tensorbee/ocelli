@@ -1,6 +1,6 @@
 # The oracle, reference half
 
-**F-IDs that contributed:** F-010, F-X007, F-X009
+**F-IDs that contributed:** F-010, F-X006, F-X007, F-X009
 **Last updated:** 2026-09-05
 
 HLD section 11 names cornerstone3D as the reference the differential harness
@@ -544,11 +544,23 @@ Two rows of ninety-one. Both are in `unsupported.json` with the full reasoning.
 about why.** A1 asks whether HTJ2K decodes correctly "in openjp2 under wasm32,
 bit-exact against OpenJPH", and A2 asks what the JPEG-LS answer is, "CharLS
 bridge, self-compiled CharLS, or a young pure-Rust crate". Both are questions
-about Ocelli's own codec build, which does not exist yet. What this story gives
-them is the other half of the measurement: all three HTJ2K rows and both
-JPEG-LS rows decode, present and read back through the reference, so there are
-reference frames for those five rows to be compared against once there is
-something to compare.
+about Ocelli's own codec build, which does not exist yet. What this half of the
+harness gives them is the other half of the measurement: all three HTJ2K rows
+and both JPEG-LS rows decode, present and read back through the reference, so
+there are reference frames for those five rows to be compared against once
+there is something to compare.
+
+**F-X006 answered them, and the answers are in `docs/spikes/`.**
+`A1-htj2k-openjp2.md` records `Fail`, because `openjp2` 0.6.1 does not link for
+`wasm32-unknown-unknown` and traps on every codestream once forced to, HTJ2K and
+JPEG 2000 Part 1 alike, so HTJ2K has no decoder and F-X013 prices the route.
+`A2-jpeg-ls.md` records `Pure Rust`, `pure_jpegls` 2.0.0 on every target. Read
+those beside this paragraph rather than in place of it: **neither answer moves a
+reference frame here.** The oracle decodes those five rows with the four
+`@cornerstonejs/codec-*` binaries listed above, so it is unaffected by which
+decoder Ocelli picks,
+which is the property that lets the reference judge the decoder rather than
+share its fate.
 
 ## Output, and why none of it is committed
 

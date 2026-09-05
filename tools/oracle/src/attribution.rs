@@ -652,6 +652,16 @@ pub fn compare_view(
     let monochrome_frame = reference_frame.first_non_monochrome().is_none()
         && candidate_frame.first_non_monochrome().is_none();
 
+    // Read from the REFERENCE sidecar, which is the side the mutation
+    // catalogue resolves its targets against. A reformat sidecar carries no
+    // `attributes` block at all, so this is `None` there and no reformat can
+    // satisfy a target that asks for a photometric interpretation.
+    let photometric_interpretation = reference
+        .json
+        .pointer("/attributes/photometricInterpretation")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+
     for (frame, side) in [
         (reference_frame, "the reference"),
         (candidate_frame, "the candidate"),
@@ -876,6 +886,7 @@ pub fn compare_view(
         register_entry,
         statistics: Some(statistics),
         monochrome_frame,
+        photometric_interpretation,
     })
 }
 

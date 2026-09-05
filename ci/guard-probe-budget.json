@@ -156,14 +156,14 @@
     "backlog": 10,
     "bench": 32,
     "bench.cold-start": 7,
-    "bench.page": 1,
+    "bench.page": 2,
     "bench.record": 6,
     "bench.registry": 13,
     "bench.runner": 9,
     "bench.state": 3,
     "bindgen": 3,
     "bootstrap-importer": 5,
-    "catalogue": 48,
+    "catalogue": 54,
     "census": 34,
     "census-runbook": 3,
     "ci-floor": 13,
@@ -178,7 +178,7 @@
     "hooks.commit-msg": 3,
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
-    "lint-policy": 12,
+    "lint-policy": 17,
     "nostd": 5,
     "oracle.faults": 22,
     "oracle.faults-declaration": 2,
@@ -198,7 +198,7 @@
     "panic-probe": 1,
     "pins": 10,
     "populate-corpus": 10,
-    "probe-runner": 19,
+    "probe-runner": 20,
     "prose": 3,
     "provenance": 4,
     "runner": 1,
@@ -224,6 +224,6 @@
   },
   "wall_clock_seconds": {
     "deep": 17.2,
-    "floor": 16.5
+    "floor": 18.1
   }
 }
