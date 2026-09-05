@@ -12,8 +12,8 @@ What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 | `@ocelli/core` | The TypeScript shell of HLD section 10 | none |
 | `@ocelli/react` | The React binding | `@ocelli/core` at an exact version |
 
-Both are scaffolds. The public API is designed in F-095 and the boundary is
-built in F-096.
+Both are scaffolds. The public API is designed in F-100 and the boundary is
+built in F-101.
 
 ## There is no bundler, and that is a decision rather than an omission
 
@@ -29,7 +29,7 @@ property of the tarball's `exports` map and its emitted module syntax, not of a
 build step in this repository, so the pipeline proves the property directly
 instead of adding a tool that would hide it.
 
-Revisit this when the wasm consumption path lands in F-096. `wasm-pack --target
+Revisit this when the wasm consumption path lands in F-101. `wasm-pack --target
 web` emits an ESM module plus a `.wasm` asset, and bundlers treat that asset
 specially. If a bundler is needed then, it is added then, with a named reason.
 
@@ -99,7 +99,7 @@ state.
 It stays literally true after F-002, which produces
 `crates/ocelli-wasm/pkg` on a machine that ran the build. What changed is that
 the function now has a real question to answer. **Answering it belongs to
-F-096**, and a test asserts the current answer so that the change is visible in
+F-101**, and a test asserts the current answer so that the change is visible in
 a diff rather than happening quietly.
 
 `VERSION` is asserted against a literal for the same reason

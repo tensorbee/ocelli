@@ -269,7 +269,7 @@ case "$command" in
     #    `wait-timeout`, which does not compile for wasm32 and is not supposed
     #    to. What ships to a browser is the lib, so that is what is proved.
     #    Running the tests under wasm32 needs wasm-bindgen-test and a browser
-    #    runner, which is F-096's and the oracle's ground, not this gate's.
+    #    runner, which is F-101's and the oracle's ground, not this gate's.
     echo "  2/4 eleven shared crates plus ocelli-wasm build for wasm32"
     cargo check --workspace --exclude ocelli-native \
       --target wasm32-unknown-unknown

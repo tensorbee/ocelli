@@ -8,7 +8,7 @@
  *
  * Fixed 48-byte stride, so this side is arithmetic and not deserialisation.
  *
- * Scaffold. F-096 (E16.2) implements it against the real ring.
+ * Scaffold. F-101 (E16.2) implements it against the real ring.
  */
 
 /** `RingHeader` in `ocelli-wasm/src/ring.rs`, four u32 fields. */

@@ -25,7 +25,7 @@ describe("@ocelli/core", () => {
    * honest answer rather than a failure to start. The example viewer uses it
    * to render a "core not built" state.
    *
-   * **When F-096 makes this detect a real core, this test has to change**, and
+   * **When F-101 makes this detect a real core, this test has to change**, and
    * that is the point of asserting it now. The change becomes visible in a
    * diff instead of happening quietly.
    */

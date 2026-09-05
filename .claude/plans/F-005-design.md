@@ -301,7 +301,7 @@ mechanism. Every decision below is this plan's rather than the HLD's.
    an upward arrow and gives a decode worker none.
 7. **What the shell's own copy of viewport state is.** Section 23 makes holding
    it a design constraint on the shell and does not define it. Nothing in the
-   repository defines a viewport yet, and F-095 designs the public API.
+   repository defines a viewport yet, and F-100 designs the public API.
 8. **Whether `console_error_panic_hook` means that crate or that behaviour.**
 
 ## Approach
@@ -545,8 +545,8 @@ spawn a replacement or replay viewport state. Those need a worker and a
 viewport, and this repository has neither. The rule it encodes is the one that
 can be true today and has to be true before either exists: **once a
 `CoreStatus` is `fatal` it never returns to `ok`, and no further call is made
-into that instance.** The teardown and rebuild are F-096's, and the shell-side
-state record that gets replayed is F-095's. See `## Open questions` 5.
+into that instance.** The teardown and rebuild are F-101's, and the shell-side
+state record that gets replayed is F-100's. See `## Open questions` 5.
 
 ### F, the second permitted view, which the HLD already anticipated
 
@@ -580,7 +580,7 @@ function neither stores it nor returns it. The returned `PanicRecord` carries
 copied bytes and a decoded string.
 
 **A third file is not granted.** `packages/core/src/ring.ts` will need one when
-F-096 gives it a real ring to drain, and that is F-096's design plan to argue,
+F-101 gives it a real ring to drain, and that is F-101's design plan to argue,
 not this one's.
 
 ### G, `console_error_panic_hook`, and what the words mean
@@ -631,12 +631,12 @@ sink.** The production sink is the event ring, and the ring does not exist:
 `crates/ocelli-wasm/src/ring.rs` is named by `CLAUDE.md`, by the unsafe
 allow-list and by `packages/core/src/ring.ts`'s doc comment, and is not a file
 in this repository. **F-005 does not create it.** Under `debug_assertions` a
-log line goes to `console`, which is a real sink today, and F-096 adds the one
+log line goes to `console`, which is a real sink today, and F-101 adds the one
 call site that pushes the same 32 bytes into the ring. Fixing the format now
 and the transport later is the right order, because the format is what both
 sides have to agree on and the transport is one function.
 
-**Two ring rules are stated here so F-096 inherits them rather than inventing
+**Two ring rules are stated here so F-101 inherits them rather than inventing
 them.**
 
 - **An error event must never be lost to ring overflow.** Section 17.3's
@@ -654,12 +654,12 @@ them.**
 
 Named, because an omission and a decision read identically later.
 
-- `crates/ocelli-wasm/src/ring.rs`. F-096.
-- `Session`, `apply_commands`, `alloc`, `commit_frame`. F-096.
-- The `ViewportState` struct of 17.4. F-096. This story fixes the meaning of
+- `crates/ocelli-wasm/src/ring.rs`. F-101.
+- `Session`, `apply_commands`, `alloc`, `commit_frame`. F-101.
+- The `ViewportState` struct of 17.4. F-101. This story fixes the meaning of
   `flags` bit 2 and the latch rule, and writes them into `docs/lld/errors.md`.
-- Worker creation, teardown or replacement. F-096, and there are no workers.
-- The shell's replayable copy of viewport state. F-095 designs the public API.
+- Worker creation, teardown or replacement. F-101, and there are no workers.
+- The shell's replayable copy of viewport state. F-100 designs the public API.
 - Any mapping of a DICOM, codec or render error. Those codes arrive with the
   stories that produce them.
 
@@ -921,10 +921,10 @@ defines, and the sprint runs them in the same tree.
    nothing" is called a design constraint on the shell and not an afterthought.
    This plan honours it by defining `CoreStatus` and the never-returns-to-ok
    rule, and stops there, because there is no viewport, no worker and no public
-   API yet, and F-095 designs the last of those. The alternative reading is
-   that F-005 should specify the replayable state record now so F-095 inherits
+   API yet, and F-100 designs the last of those. The alternative reading is
+   that F-005 should specify the replayable state record now so F-100 inherits
    a requirement rather than discovering one. **Blocks**: the size of
-   `packages/core/src/fatal.ts` and whether F-095's plan gains an inherited
+   `packages/core/src/fatal.ts` and whether F-100's plan gains an inherited
    constraint from this one.
 
 6. **Which of F-004 and F-005 re-baselines the wasm size budget, and how is the

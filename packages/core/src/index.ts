@@ -15,7 +15,7 @@
  *
  * What does NOT live here: anything a pixel touches.
  *
- * Scaffold. The public API is designed in F-095 (E16.1).
+ * Scaffold. The public API is designed in F-100 (E16.1).
  */
 
 export { writeFrame } from "./bulk.js";

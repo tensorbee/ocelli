@@ -16,7 +16,7 @@
 //! `ocelli-core/src/cast.rs`. `scripts/unsafe_allowlist_check.py` enforces it.
 //!
 //! Scaffold only. F-001 creates the crate, F-002 builds the wasm pipeline
-//! around it, F-096 builds the boundary.
+//! around it, F-101 builds the boundary.
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -27,7 +27,7 @@ pub const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 
 /// The built core's version, as the shell sees it.
 ///
-/// This is the module's entire exported surface until F-096 (E16.2) builds the
+/// This is the module's entire exported surface until F-101 (E16.2) builds the
 /// boundary, and it exists for two reasons that are both about measurement
 /// rather than about features.
 ///

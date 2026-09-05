@@ -15,7 +15,7 @@
  * allocate first, build the view after the allocation, use it immediately,
  * let it go. Never hoist the view, never store it on `this`, never return it.
  *
- * Scaffold. F-096 (E16.2) implements the boundary this talks to.
+ * Scaffold. F-101 (E16.2) implements the boundary this talks to.
  */
 
 /** The subset of a wasm module's exports this file needs. */

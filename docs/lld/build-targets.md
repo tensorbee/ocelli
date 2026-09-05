@@ -69,7 +69,7 @@ That is the same defect class as widening a tolerance to make a test pass.
 ### The exported surface
 
 One function, `ocelli_version()`, returning the workspace version. It is the
-module's entire export until F-096 (E16.2) builds the boundary.
+module's entire export until F-101 (E16.2) builds the boundary.
 
 It exists for measurement rather than for features. Fat LTO with `strip =
 true` lets the linker discard anything unreachable, so a module with no
@@ -103,7 +103,7 @@ Four steps, each exit code read from the command itself.
 that flag pulls in dev-dependencies, and `proptest` reaches `wait-timeout`,
 which does not compile for wasm32 and is not meant to. What ships to a browser
 is the lib. Running the test suite under wasm32 needs `wasm-bindgen-test` and a
-browser runner, which is the oracle's and F-096's ground. A native build does
+browser runner, which is the oracle's and F-101's ground. A native build does
 run its tests, so step 3 has to compile them.
 
 ### The two entry points
@@ -223,7 +223,7 @@ not run" and "the check ran and was happy" must not look the same.
 
 - **wasm-pack warns that `crates/ocelli-wasm/` carries no LICENSE file.** The
   licences are at the repository root. The generated `pkg/` is not published
-  by anything today, and whether it is published at all is F-096's and
+  by anything today, and whether it is published at all is F-101's and
   `/release`'s question, not this one.
 - **Step 4 starts vacuous.** Eleven crates that are currently scaffolds with
   one dependency between them show no feature difference at all, so the guard
