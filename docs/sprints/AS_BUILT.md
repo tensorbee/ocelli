@@ -940,3 +940,85 @@ be. And `scripts/ci_floor_check.py` has a hole the change nearly exercised.
   either side of the merge. Checked at integration and safe, because the guard
   refuses a runner for a story that is not done and does not demand one for a
   story that is.
+
+## F-X007, Oracle volume and MPR reference renders, completed 2026-09-05
+
+**What was built.** A second pass over the corpus. Four series directories
+declared in a committed `tools/oracle/volume-params.json` are assembled into
+cornerstone3D volumes and rendered as three orthogonal reformats each, in their
+own page opened only after the stack page has closed, so the eighty-nine
+existing frames are provably untouched. `src/geometry.mjs` measures each series
+from the files themselves rather than from any cornerstone3D module, applying
+PS3.3 C.7.6.2.1.1 directly.
+
+**The recorded divergence is now three pairs of equal digests rather than a
+sentence.** cornerstone3D 5.8.2 derives through-plane spacing from the endpoints
+alone, `|d_last - d_first| / (N - 1)`, discarding every interior gap, so it has
+nothing to apply a tolerance to. The two synthetic series were built so slice
+7's displacement cancels at the endpoints, which means the reference resolves
+2.5 mm for both and is predicted to render them identically. It does, in all
+three orientations, and `volume-truth.json` asserts it. The day the reference
+stops averaging, that assertion goes red and names the reason.
+
+**Two real series were not what the plan assumed.** `real/ct_cmb_mml` is not one
+spatial volume: 27 instances resolve to 9 distinct positions across 3 acquisition
+numbers, so it is refused at the `volume-geometry` boundary with the colliding
+paths named, and the refusal is declared so it is accounted for in both
+directions. `real/mr_eay131` carries 15 different windows, one per instance, and
+gaps running 5 to 50 mm, and the reference built a uniform 10 mm grid over it
+without a warning. **That is HLD section 19's defect visible in real clinical
+data rather than only in a case constructed to show it.**
+
+**HLD sections implemented.** Section 19's volume representation, section 11's
+validation architecture, section 16's coordinate spaces, section 25.1's geometry
+tolerance, section 28's framing.
+**Deviations.** None. D-11 cited.
+**Crates / packages modified.** `tools/oracle/` only, plus two LLD files.
+`render-params.json`, `page/app.mjs`, `Cargo.toml`, `src/lib.rs`,
+`bin/ocelli.sh`, `corpus/manifest.tsv` and `scripts/corpus_synth.py` are all
+untouched, confirmed by `git diff --name-only`.
+**Tests added.** 210 cases across twelve `node:test` suites, and eleven new
+fault injectors, each observed red at its own boundary. Ten mutations observed
+red and reverted.
+**Fixture provenance.** Geometry is hand-computed from PS3.3 C.7.6.2.1.1 and
+from `scripts/corpus_synth.py`'s own constants, never from a cornerstone3D
+module. `volume-truth.json` carries the expectation per subject.
+**Verification.** `bin/ocelli.sh gate --floor` ALL GREEN over 24 gates, plus
+`gate corpus` and `gate oracle`, which is a full sprint profile over 26.
+**Corpus.** pass, 91 rows.
+**Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. This story runs
+somebody else's renderer, under SwiftShader, which is a property of the
+reference and not a tier declaration by Ocelli.
+**LLD updated.** `docs/lld/oracle.md` substantially, replacing the "stack
+viewports only" section whose content is now false. `docs/lld/corpus.md`
+updated.
+**Deviations from the design plan.** Four, all reported. The plan assumed all
+four directories were volumes and one is not. It assumed the volume refusal was
+unreachable by the corpus as it stands, and the window disagreement reaches it.
+Five contract fields differ from the plan's sketch. And `dataType` is
+`Int16Array` rather than `Uint16Array`, because a negative `RescaleIntercept`
+branches the reference's own volume property derivation.
+
+**Notes for future sessions.**
+- **The volume boundaries do not run in the order they are listed.**
+  `volume-geometry` is the driver's and therefore runs LAST, after the page has
+  presented and read back every orientation. That is why a subject can be
+  refused having already rendered three reformats, and it is now written in
+  `docs/lld/oracle.md` rather than left to be derived.
+- **A counter with no identity on it is a counter nothing can contradict.** The
+  volume counters initially reported what was attempted where the same
+  `boundaries` object reported what was achieved for stacks. The
+  single-counter identity that existed covered `reformatsWritten` alone, which
+  is why the defect survived the first fix. The identity now covers the trio.
+- **A mutation passed at first and exposed a real fixture gap.** Replacing the
+  mean gap with the median left every test green, because mean and median are
+  both exactly 2.5 on both corpus series, so no fixture could tell the formulas
+  apart. A four-slice fixture where they differ was added before the mutation
+  would go red.
+- **Six of the nine volume reformats are low-information**, and both AXIAL
+  frames are 100 per cent black and white. The `framePairs` claim is carried by
+  SAGITTAL and CORONAL, which cut across slices and so have somewhere for a
+  1.25 mm displacement to show. F-011's `weak` qualifier has to reach volume
+  views, and `lowInformation` rows carry `kind` so it can.
+- **F-011 gets no real CT volume reference**, because the only real CT series in
+  the corpus is the one that is not a volume.
