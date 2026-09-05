@@ -1087,4 +1087,186 @@ mod tests {
     fn negative_zero_is_a_divergence() {
         assert!(!json_equal(&json!(0.0), &json!(-0.0)));
     }
+
+    // ---- Rung 3's narrowing, watched -----------------------------------
+    //
+    // **These three tests are the S03 sprint review's smell S4.** The
+    // `!geometry.is_empty()` narrowing on the volume-divergence rung was
+    // watched by exactly one thing: the mutation
+    // `plus-three-on-one-pixel-of-a-reformat`, whose `Target::MeasuredReformat`
+    // resolves through a `BTreeSet` and therefore landed on the one divergent
+    // subject only because `real` sorts before `synthetic`. Reverting the
+    // narrowing left `cargo test -p ocelli-oracle` green, and adding one
+    // synthetic subject whose identifier sorted first would have left the
+    // mutation green too.
+    //
+    // The pair below pins the behaviour to what it means rather than to an
+    // iteration order: the SAME declared divergence explains a geometry
+    // difference and does not explain a pixel difference on a view whose
+    // geometry agrees. Neither test can be satisfied by the corpus changing
+    // shape, because both sides are built here.
+
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::path::PathBuf;
+
+    use serde_json::Value;
+
+    use super::{CompareError, Context, compare_view};
+    use crate::frame::Frame;
+    use crate::report::{Outcome, Qualifier, Side};
+    use crate::sidecar::{DeclaredView, Run, Sidecar, ViewKind};
+
+    const SUBJECT: &str = "subject-under-test";
+    const VIEW: &str = "subject-under-test__AXIAL";
+    const SIDE_PIXELS: u32 = 16;
+
+    /// One side of a reformat comparison, built by hand.
+    ///
+    /// Everything a test does not vary is identical on the two sides, so a
+    /// divergence in the record can only have come from what the test changed.
+    fn reformat_run(parallel_scale: f64, declares_divergence: bool) -> Run {
+        let divergence = if declares_divergence {
+            json!({
+                "field": "spacing[2]",
+                "reference": 10.0,
+                "truth": null,
+                "attributedTo": "reference",
+                "why": "the reference resolves one spacing for a series whose gaps differ"
+            })
+        } else {
+            Value::Null
+        };
+        let sidecar = Sidecar {
+            id: VIEW.to_owned(),
+            kind: ViewKind::VolumeReformat,
+            json: json!({
+                "kind": "volume-reformat",
+                "camera": {
+                    "position": [0.0, 0.0, 100.0],
+                    "focalPoint": [0.0, 0.0, 0.0],
+                    "viewUp": [0.0, 1.0, 0.0],
+                    "viewPlaneNormal": [0.0, 0.0, 1.0],
+                    "parallelScale": parallel_scale
+                },
+                "reformat": { "millimetresPerCanvasPixel": 0.5 },
+                "frame": { "width": SIDE_PIXELS, "height": SIDE_PIXELS }
+            }),
+        };
+        let mut views = BTreeMap::new();
+        views.insert(
+            VIEW.to_owned(),
+            DeclaredView {
+                id: VIEW.to_owned(),
+                kind: ViewKind::VolumeReformat,
+                path: None,
+                subject: Some(SUBJECT.to_owned()),
+            },
+        );
+        let mut sidecars = BTreeMap::new();
+        sidecars.insert(VIEW.to_owned(), sidecar);
+        let mut categories = BTreeMap::new();
+        categories.insert(VIEW.to_owned(), vec!["mono16".to_owned()]);
+        Run {
+            directory: PathBuf::from("built-in-memory"),
+            json: json!({
+                "volumes": [{ "id": SUBJECT, "referenceDivergence": divergence }]
+            }),
+            views,
+            sidecars,
+            raw_present: BTreeSet::new(),
+            by_path: BTreeMap::new(),
+            categories,
+        }
+    }
+
+    /// The reformat pair, with one pixel three codes brighter on the
+    /// candidate.
+    ///
+    /// Three codes is 25.1's "zero pixels differing by more than 2", so the
+    /// predicate fails at any count and `gate_failed` is true. One pixel in
+    /// 256 at three codes is a signed mean of 0.0117, well inside the 0.1 bias
+    /// bound, so the bias is not what fails and `Qualifier::Bias` stays off.
+    fn compare_reformat(
+        candidate_parallel_scale: f64,
+        declares_divergence: bool,
+    ) -> Result<crate::report::ViewRecord, CompareError> {
+        let reference_run = reformat_run(100.0, declares_divergence);
+        let candidate_run = reformat_run(candidate_parallel_scale, declares_divergence);
+        let register = Register::default();
+        let empty: BTreeSet<String> = BTreeSet::new();
+        let context = Context {
+            reference: &reference_run,
+            candidate: &candidate_run,
+            register: &register,
+            low_information: &empty,
+            downsampled: &empty,
+        };
+        let mut greys = [100_u8; 256];
+        let reference_frame = Frame::from_monochrome(SIDE_PIXELS, SIDE_PIXELS, &greys)?;
+        if let Some(first) = greys.first_mut() {
+            *first = 103;
+        }
+        let candidate_frame = Frame::from_monochrome(SIDE_PIXELS, SIDE_PIXELS, &greys)?;
+        compare_view(&context, VIEW, &reference_frame, &candidate_frame)
+    }
+
+    /// **The narrowing.** A declared through-plane spacing divergence does not
+    /// explain a pixel difference on a view whose geometry agrees, so the
+    /// ladder falls through rung 3 to rung 5 and attributes it to us.
+    ///
+    /// Remove `&& !geometry.is_empty()` from the rung and this test reports
+    /// `unmeasured` attributed to the reference, which is the comparator
+    /// excusing our own defect with somebody else's.
+    #[test]
+    fn a_declared_divergence_does_not_excuse_a_pixel_difference_when_geometry_agrees()
+    -> Result<(), CompareError> {
+        let record = compare_reformat(100.0, true)?;
+        assert!(
+            record.geometry_divergences.is_empty(),
+            "the two sides carry the same camera and the same scale, so \
+             nothing should have been measured: {:?}",
+            record.geometry_divergences
+        );
+        assert_eq!(record.rung, "pixels");
+        assert_eq!(record.outcome, Outcome::Fail);
+        assert_eq!(record.side, Side::Ours);
+        assert!(!record.qualifiers.contains(&Qualifier::ReferenceDivergence));
+        Ok(())
+    }
+
+    /// The same declared divergence, on a view whose geometry ALSO diverges.
+    /// Here it is an explanation, rung 3 answers, and the outcome is
+    /// `unmeasured` attributed to the reference.
+    ///
+    /// Without this half, the test above would be satisfied by deleting the
+    /// rung altogether.
+    #[test]
+    fn the_same_divergence_does_explain_a_geometry_difference() -> Result<(), CompareError> {
+        let record = compare_reformat(100.001, true)?;
+        assert!(!record.geometry_divergences.is_empty());
+        assert_eq!(record.rung, "volume-divergence");
+        assert_eq!(record.outcome, Outcome::Unmeasured);
+        assert_eq!(record.side, Side::Reference);
+        assert!(record.qualifiers.contains(&Qualifier::ReferenceDivergence));
+        assert!(
+            record
+                .qualifiers
+                .contains(&Qualifier::DivergentWhileUnmeasured),
+            "a gate failure absorbed into `unmeasured` still fails the run"
+        );
+        Ok(())
+    }
+
+    /// The same geometry difference with NO declared divergence is rung 4,
+    /// attributed to the fit. This is what says the two tests above are about
+    /// the divergence and not about the geometry.
+    #[test]
+    fn a_geometry_difference_with_no_declared_divergence_is_the_fit() -> Result<(), CompareError> {
+        let record = compare_reformat(100.001, false)?;
+        assert_eq!(record.rung, "geometry");
+        assert_eq!(record.outcome, Outcome::Fail);
+        assert_eq!(record.side, Side::Fit);
+        assert!(record.qualifiers.contains(&Qualifier::GeometryDivergence));
+        Ok(())
+    }
 }

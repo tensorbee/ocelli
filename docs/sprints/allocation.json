@@ -4013,6 +4013,48 @@
    "depends_fids": [
     "F-X006"
    ]
+  },
+  {
+   "fid": "F-X014",
+   "eid": "Y1.9",
+   "phase": "P1",
+   "epic": "EY Sprint follow-ups",
+   "epic_key": "EY",
+   "story": "Close the two guard holes F-X009 declared and S03 did not fix",
+   "layer": "Build",
+   "weeks": 1,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-X009"
+   ],
+   "notes": "F-X009 gave every repository refusal a standing probe and declared four existing guards defective rather than fixing them, which was the right call for a story whose job was the census. TWO were closed during the S03 sprint review's second pass and their declarations removed in the same change, which is the two-directional ratchet working: a declared defect whose probe starts passing fails the gate until the declaration goes. G-01 is closed, ci_floor_check.py no longer does a substring test at all, and closing it turned up a live instance nobody had suspected, since corpus-tests was passing only on a comment in ci.yml while CI actually ran the script through a different interpreter. G-03 is closed, pin_and_size_check.py now parses Cargo.toml with tomllib and reads the version key rather than the first quoted string, which removes a demonstrated bypass of a CLAUDE.md hard rule. TWO REMAIN and this story is those. G-02, no_std_check.py builds its crate set from the crates that match the attribute, so a crate deleting it stops being checked rather than being reported. The NO_STD_CRATES ratchet F-X009 added is a second mechanism and not a fix, and it is why this one is not urgent. G-04, validate-handoff needs a literal Head field and parses the branch as a bare token, so backticks break it and this repository writes every path in backticks, which cost one handoff rewritten at integration in S03. It is a false positive rather than a fail-open, which is why it is last. Each fix must be observed red before it is claimed, and each closes by making its declared defect probe start passing, at which point the census fails until the declaration is removed in the same change.",
+   "milestone": "M1",
+   "sprint": "S04",
+   "added": true,
+   "depends_fids": [
+    "F-X009"
+   ]
+  },
+  {
+   "fid": "F-X015",
+   "eid": "Y1.10",
+   "phase": "P1",
+   "epic": "EY Sprint follow-ups",
+   "epic_key": "EY",
+   "story": "Execute the skills' worked examples, because the skills gate asserts nothing about their numbers",
+   "layer": "Build",
+   "weeks": 1,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-X009"
+   ],
+   "notes": "bin/ocelli.sh gate skills runs only sync_agent_skills.py --check, which compares a SHA-256 of each skill against its Codex adapter. It detects that a skill CHANGED and asserts nothing whatever about whether a number inside it is right. Nothing in scripts, bin, ci or githooks executes a skill's fenced block or checks a value against a formula. That matters more than it sounds, because .claude/skills/dicom-expert and dicom-tooling are what an agent loads BEFORE writing the LUT chain, so a wrong value there reaches ocelli-pixel by the shortest path there is. Measured in the S03 sprint review: both skills reproduced HLD 18.3's LINEAR_EXACT(-160) = 1.594, which deviation D-13 records as wrong because both functions clamp at -160 and section 18.2's formula gives 0.000, and separately TWO of the eight claimed output numbers in dicom-tooling's own Python block were wrong. All of those had survived every gate this repository runs. They are corrected now and the block is byte-identical to its real output, so a gate arm that ran each python fence and diffed it against the fenced output beneath would pass today and would have caught all three then. The good counter-shape already exists in the same file: the stored_value block carries three asserts and passes when run. This story builds that arm. Note the interaction with F-X009's census, which will want a catalogue entry for whatever new refusal it adds.",
+   "milestone": "M1",
+   "sprint": "S04",
+   "added": true,
+   "depends_fids": [
+    "F-X009"
+   ]
   }
  ]
 }

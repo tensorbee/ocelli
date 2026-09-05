@@ -171,8 +171,13 @@ async fn measure_chosen(
         label: Some("ocelli tier probe"),
         required_features: wgpu::Features::empty(),
         // The adapter's OWN limits, never `Limits::default()`. Requesting
-        // limits an adapter does not provide returns
-        // `Err(RequestDeviceError::LimitsExceeded)`, and a downlevel GL
+        // limits an adapter does not provide fails the request:
+        // `Adapter::request_device` returns `Err(wgpu::RequestDeviceError)`,
+        // which in the pinned 30.0.1 is an opaque struct over a private
+        // `RequestDeviceErrorKind` (`src/api/device.rs:790` and `:805`). The
+        // underlying `LimitsExceeded` belongs to `wgpu_core`, which `wgpu`
+        // does not re-export, so the reason is reachable from here only
+        // through `Display`. A downlevel GL
         // adapter does not meet the WebGPU defaults, which is the whole reason
         // tier B exists.
         required_limits: adapter.limits(),
@@ -206,12 +211,17 @@ fn measure(
     // A warm-up whose figure is thrown away. The FIRST submission on a fresh
     // device pays for lazy pipeline compilation, driver initialisation and
     // command-buffer setup, and timing it measures startup latency rather than
-    // fill rate. Measured on the machine in `ci/tier-thresholds.json`: about
-    // 9 ms for the first 65,536 fragments, and between 11 and 18 times less
-    // for exactly the same work immediately afterwards. Without this the
-    // calibration measures that first-run cost as the machine's fill rate, and
-    // 9 ms is over `CALIBRATION_BUDGET_NANOS`, so the full pass never runs and
-    // the startup latency is the figure that gets recorded.
+    // fill rate. Measured on the machine in `ci/tier-thresholds.json`, twenty
+    // release runs of this exact pair in fresh processes: the first 65,536
+    // fragments took 5.4 to 9.3 ms, median 6.1, and the same work immediately
+    // afterwards took 0.32 to 0.70 ms, median 0.36. The ratio ranged from 8.8
+    // to 20.7 and is one machine's noise rather than a bound.
+    //
+    // The only figure this code depends on is the low end. Without the
+    // discard, the calibration measures that first-run cost as the machine's
+    // fill rate, and the first submission was over
+    // `CALIBRATION_BUDGET_NANOS` on all twenty runs, so the full pass never
+    // runs and the startup latency is the figure that gets recorded.
     let _warm_up = run(
         device,
         queue,

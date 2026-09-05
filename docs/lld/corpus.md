@@ -18,10 +18,10 @@ pixels.** The oracle attempts all four series directories and
 assembles three of them into volumes, rendering three orthogonal reformats of
 each. The fourth, `real/ct_cmb_mml`, is refused as declared, because its 27
 instances resolve to only 9 distinct positions on the slice normal and a series
-that cannot be one volume is named rather than averaged. so a row's projected
-`ImagePositionPatient` decides something rather than only travelling in a
-sidecar. Where a row sits, and whether its directory is one spatial volume at
-all, is now a checked claim. See "Stack and volume, and what each covers" in
+that cannot be one volume is named rather than averaged. A row's projected
+`ImagePositionPatient` therefore decides something rather than only travelling
+in a sidecar. Where a row sits, and whether its directory is one spatial volume
+at all, is now a checked claim. See "Stack and volume, and what each covers" in
 `oracle.md`.
 
 ## Two layers, because neither alone is enough

@@ -75,6 +75,19 @@ const RENDER_PARAMS_KEYS = [
 /** The only `expect` a frame pair may carry, because it is the only one checked. */
 const PAIR_EXPECTATIONS = new Set(["identical"]);
 
+/**
+ * The spacing components `compareGeometry` actually compares against the
+ * reference, and therefore the only ones a declared `referenceDivergence` may
+ * name. A divergence nobody checks is a sentence, not a record.
+ *
+ * `spacing[2]` is the through-plane spacing, compared against the gaps this
+ * harness measures from the files. `spacing[0]` and `spacing[1]` are the
+ * in-plane pair, compared against PixelSpacing (0028,0030) CROSSWISE, and they
+ * joined this list in the S03 sprint review: until then the harness compared
+ * no in-plane spacing against the reference at all.
+ */
+const COMPARED_SPACING_FIELDS = ["spacing[0]", "spacing[1]", "spacing[2]"];
+
 /** The subject id for a corpus directory. */
 export function subjectIdFor(seriesDirectory) {
   return `${RESERVED_VOLUME_PREFIX}${seriesDirectory.replace(/\//g, "__")}`;
@@ -468,12 +481,13 @@ export function validateVolumeTruth(parsed, params) {
       const divergence = entry.referenceDivergence;
       requireText(divergence?.field, `subjects.${id}.referenceDivergence.field`, where);
       requireText(divergence?.why, `subjects.${id}.referenceDivergence.why`, where);
-      if (divergence.field !== "spacing[2]") {
+      if (!COMPARED_SPACING_FIELDS.includes(divergence.field)) {
         throw new Error(
           `${where}: subjects.${id} declares a divergence in ` +
-            `${JSON.stringify(divergence.field)}, and the only field the ` +
-            `harness compares is "spacing[2]". A divergence nobody checks is a ` +
-            `sentence, not a record.`,
+            `${JSON.stringify(divergence.field)}, and the fields the harness ` +
+            `compares are ` +
+            `${COMPARED_SPACING_FIELDS.map((field) => JSON.stringify(field)).join(", ")}. ` +
+            `A divergence nobody checks is a sentence, not a record.`,
         );
       }
       if (divergence.attributedTo !== "reference" && divergence.attributedTo !== "ocelli") {
@@ -617,6 +631,81 @@ export function compareGeometry({
     measured.gapsMm.every((gap) => within(gap, referenceZ, toleranceMm));
   const declaredDivergence = truth?.referenceDivergence ?? null;
 
+  // A subject declares at most one divergence, so every branch below asks for
+  // the one naming ITS field rather than for any divergence at all. Without
+  // that, declaring an in-plane divergence would silently excuse a
+  // through-plane one.
+  const divergenceIn = (field) =>
+    declaredDivergence !== null && declaredDivergence.field === field
+      ? declaredDivergence
+      : null;
+
+  // **The in-plane spacing, against the reference's own. The S03 sprint
+  // review's smell S18 is that nothing compared it at all.**
+  //
+  // PS3.3 C.7.6.2.1.1 gives PixelSpacing (0028,0030) as [between rows, between
+  // columns]. cornerstone3D 5.8.2 builds its volume spacing as
+  // `[PixelSpacing[1], PixelSpacing[0], zSpacing]` in
+  // `generateVolumePropsFromImageIds`, so the two orderings are REVERSED with
+  // respect to each other and the two arrays must agree crosswise. Its own
+  // locals for that pair are named `rowSpacing` and `columnSpacing` in the
+  // reversed sense, so the names in the vendored bundle are no guide.
+  //
+  // A transposition is invisible on a square-pixel series and renders a
+  // plausible, stably hashing frame on any other, which is what the corpus's
+  // non-square [0.5, 0.25] row exists to catch. Like the through-plane check
+  // it needs no truth, so it sits above the uniformity early return and
+  // answers for a real series too.
+  const referenceInPlane = Array.isArray(referenceGeometry?.spacing)
+    ? referenceGeometry.spacing
+    : null;
+  const measuredInPlane = Array.isArray(measured.pixelSpacing)
+    ? measured.pixelSpacing
+    : null;
+  const inPlaneDeclared = divergenceIn("spacing[0]") ?? divergenceIn("spacing[1]");
+  if (referenceInPlane === null || referenceInPlane.length < 2 ||
+      measuredInPlane === null || measuredInPlane.length !== 2) {
+    problems.push(
+      `${subjectId}: the in-plane spacing cannot be compared. The reference ` +
+        `published ${JSON.stringify(referenceGeometry?.spacing)} and the ` +
+        `harness measured ${JSON.stringify(measured.pixelSpacing)}. A check ` +
+        `that quietly does nothing is worse than no check.`,
+    );
+  } else {
+    const inPlaneAgrees =
+      within(referenceInPlane[0], measuredInPlane[1], toleranceMm) &&
+      within(referenceInPlane[1], measuredInPlane[0], toleranceMm);
+    const transposed =
+      !inPlaneAgrees &&
+      within(referenceInPlane[0], measuredInPlane[0], toleranceMm) &&
+      within(referenceInPlane[1], measuredInPlane[1], toleranceMm);
+    if (!inPlaneAgrees && inPlaneDeclared === null) {
+      problems.push(
+        `${subjectId}: cornerstone3D resolved the in-plane spacing as ` +
+          `[${referenceInPlane[0]}, ${referenceInPlane[1]}] and the files ` +
+          `declare PixelSpacing (0028,0030) as ` +
+          `[${measuredInPlane[0]}, ${measuredInPlane[1]}]. PS3.3 C.7.6.2.1.1 ` +
+          `makes PixelSpacing [between rows, between columns] and the ` +
+          `reference emits [PixelSpacing[1], PixelSpacing[0], zSpacing], so ` +
+          `the two must agree crosswise and volume-truth.json declares no ` +
+          `referenceDivergence for it.` +
+          (transposed
+            ? ` They agree in order instead, which is the transposition ` +
+              `itself rather than a rounding.`
+            : ``),
+      );
+    }
+    if (inPlaneAgrees && inPlaneDeclared !== null) {
+      problems.push(
+        `${subjectId}: volume-truth.json declares a referenceDivergence in ` +
+          `${inPlaneDeclared.field} and it did not occur. The reference's ` +
+          `in-plane spacing agrees with PixelSpacing (0028,0030). Remove the ` +
+          `entry: a stale claim reads as a known limit and hides a reference ` +
+          `that improved.`,
+      );
+    }
+  }
+
   if (!truth || truth.uniform === null) {
     // Decision 3 of the design round: a real series is measured and judged by
     // nothing. HLD 25.1's 1e-6 mm is a comparison tolerance and is exact for
@@ -624,7 +713,7 @@ export function compareGeometry({
     // would produce a verdict the corpus cannot support. That is about
     // UNIFORMITY. The reference divergence below is a different question and
     // is answered.
-    if (!referenceDescribesEveryGap && declaredDivergence === null) {
+    if (!referenceDescribesEveryGap && divergenceIn("spacing[2]") === null) {
       problems.push(
         `${subjectId}: cornerstone3D resolved spacing[2] as ${referenceZ} mm ` +
           `and the measured gaps are ${JSON.stringify(measured.gapsMm)}, so ` +
@@ -681,7 +770,7 @@ export function compareGeometry({
   // Hoisted above the uniformity early return, so a subject that declines to
   // judge uniformity still answers this. Reused rather than recomputed.
   const referenceAgreesWithTruth = referenceDescribesEveryGap;
-  const divergence = declaredDivergence;
+  const divergence = divergenceIn("spacing[2]");
   if (!referenceAgreesWithTruth && divergence === null) {
     problems.push(
       `${subjectId}: cornerstone3D resolved spacing[2] as ${referenceZ} mm and ` +
@@ -715,7 +804,12 @@ export function compareGeometry({
     truth: record,
     uniform,
     referenceAgreesWithTruth,
-    referenceDivergence: divergence,
+    // The DECLARED divergence, whatever spacing component it names, and not
+    // just the through-plane one the branches above ask for. F-011's rung 3
+    // attributes a geometry difference to the reference on this field, and an
+    // in-plane divergence explains one exactly as a through-plane divergence
+    // does. The early return above publishes the same thing.
+    referenceDivergence: declaredDivergence,
     problems,
   };
 }

@@ -205,6 +205,29 @@ taken so this crate would not hold a second copy of `canvasScale` from
 `tools/oracle/src/params.mjs`. HLD section 18's rule that a piece of arithmetic
 exists exactly once is about the LUT chain, and the reasoning generalises.
 
+**A volume's in-plane spacing is compared against the reference's own,
+crosswise.** PS3.3 C.7.6.2.1.1 gives PixelSpacing (0028,0030) as [between rows,
+between columns], and cornerstone3D 5.8.2 builds its volume spacing as
+`[PixelSpacing[1], PixelSpacing[0], zSpacing]`, so the two arrays agree
+crosswise and the reference's own locals for that pair are named `rowSpacing`
+and `columnSpacing` in the reversed sense. **Until the S03 sprint review the
+harness compared no in-plane spacing against the reference at all.** A
+transposition is invisible on a square-pixel series and renders a plausible,
+stably hashing frame on any other, which is what the corpus's non-square
+`[0.5, 0.25]` row exists to catch. `compareGeometry` now compares both
+components, above the uniformity early return so a real series is answered too,
+and says so explicitly when the two agree in order rather than crosswise, which
+is the transposition itself. Comparing them in order turns seven tests in
+`tools/oracle/tests/volume_test.mjs` red.
+
+**A reformat's scale is published unrounded.**
+`reformat.millimetresPerCanvasPixel` is the only number the reformat rung
+compares, and `reformat_scale_divergences` amplifies a difference in it by half
+the canvas height before testing it against a quarter of a canvas pixel. It was
+written through `toFixed(6)`, which discarded up to 5e-7 mm before the
+comparator could see it. Determinism is measured on the frame digest and not on
+this field, so the rounding was protecting nothing.
+
 ### Component 4, pixels
 
 Alpha is asserted to be 255 on every pixel of both sides and is never included
@@ -320,7 +343,9 @@ carries `divergent-while-unmeasured` and fails the run on its own.
    assigned by default.
 3. **A register entry matches, or F-X007's own `referenceDivergence` is set** on
    the subject and the pixels diverge with parameters agreeing. Attributed to
-   the reference, with a PS3.3 citation where the register supplies one.
+   the reference, with a PS3.3 citation where the register supplies one. The
+   `referenceDivergence` half additionally requires the geometry to have
+   diverged, for the reason stated under the list.
 4. **Geometry is outside 25.1's bound, or the difference is confined to the
    letterbox.** Attributed to the fit rather than to the LUT chain.
 5. **Pixels diverge with parameters and geometry agreeing.** **Attributed to
@@ -329,6 +354,26 @@ carries `divergent-while-unmeasured` and fails the run on its own.
    register says otherwise. That default direction is the conservative one, and
    it is what makes the instrument useful under D7: the burden is on us to show
    the reference is wrong, not on the reference to show it is right.
+
+**`referenceDivergence` explains a geometry difference and does not explain a
+pixel difference on its own.** Every divergence a subject may declare names a
+spacing component, and a wrong spacing shows up as a geometry difference.
+Letting one absorb a pixel difference on a view whose geometry agrees would be
+the comparator excusing our own defect with somebody else's, so rung 3 carries
+`!geometry.is_empty()`.
+
+The S03 sprint review found that narrowing watched by an accident.
+`plus-three-on-one-pixel-of-a-reformat` lands on the one subject carrying a
+declared divergence only because `real` sorts before `synthetic` in the
+`BTreeSet` the records are iterated from, so a synthetic subject sorting first
+would have retired the guard in silence. Three unit tests in `attribution.rs`
+now build both sides themselves and hold the three cases apart: a declared
+divergence with geometry agreeing is `fail` attributed to ours, the same
+divergence with geometry diverging is `unmeasured` attributed to the reference,
+and a geometry difference with nothing declared is `fail` attributed to the fit.
+Removing the narrowing turns the first of the three red and leaves the other two
+green, which is what says the pair is about the divergence rather than about the
+geometry.
 
 `rowsTouched` and `columnsTouched` are PUBLISHED and do not automatically
 attribute. A resampling phase error touches whole rows and columns while a LUT
@@ -372,6 +417,19 @@ oracle before writing the code it validates" could not be failed by the
 tolerance the HLD wrote down. `tools/oracle/tests/voi_divergence_fixture.rs`
 asserts exactly that, and asserting it is the finding rather than a bug in the
 test.
+
+**That fixture's own numbers are now assertable.** It carried HLD 18.3's four
+worked rows as three-decimal literals and asserted only that they round to equal
+display codes, so a mistyped value survived anywhere inside a half-code band.
+Each display value is now written as the exact rational its formula produces,
+`102000/798` at the window centre and `102000/800` beside it, and compared
+against HLD 18.2's two formulas transcribed into exact integer arithmetic. The
+comparison is by cross-multiplication and carries no tolerance at all, so a
+numerator wrong by one fails it, and the thirty-two codes in the fixture's own
+pixel tables are checked the same way. HLD 18.3 prints the centre row as
+`127.819`, which is the exact value truncated rather than rounded, and its
+`-60` row as `63.910`, which is rounded, so the rationals are the values and the
+printed decimals are a rendering of them.
 
 **What the bound is proven to do.** It detects the actual swap, and the
 mutation that proves it is `the-actual-linear-exact-swap`, which applies
@@ -624,7 +682,7 @@ because `git add -f` exists, so `COMPARE_OUTPUT_PREFIXES` in
 
 ## The mutation catalogue
 
-Twenty entries in `tools/oracle/src/mutations.rs`, every one replayed on every
+Twenty-one entries in `tools/oracle/src/mutations.rs`, every one replayed on every
 oracle gate. Each declares a target, an effect and the verdict it must produce,
 and the runner fails the gate when an entry is not detected.
 
@@ -648,7 +706,9 @@ outcome. Six entries are worth naming.
   comparison reporting as a complete one.
 - `plus-three-on-one-pixel-of-a-reformat` damages a view that `rows[]` does not
   name, so a catalogue that only ever damaged a stack row could not have caught
-  a comparator reading one list.
+  a comparator reading one list. Its `Target::MeasuredReformat` is NOT pinned to
+  a subject carrying a declared reference divergence, and nothing may assume it
+  is. Rung 3's narrowing is watched by the three unit tests named above instead.
 
 Per `docs/sprints/CURRENT_SPRINT.md`, the mutation that proves a guard must not
 be run in the same command that adds the guard, which is why the catalogue is

@@ -7,7 +7,7 @@ description: "Deep DICOM reference for Ocelli. The information model, data eleme
 
 Canonical source: `.claude/skills/dicom-expert/SKILL.md`.
 
-Source SHA-256: `28cebe99c1c63865095d07dffb00ac7e8d09d64d3bb15e3221009e51fd8223aa`.
+Source SHA-256: `b68b60418d9c2947a34ea8d29d3285d1b84514d128fb0b44fa9b5ad7f87914d4`.
 
 Before acting, read the canonical source completely and follow it using this
 host's available tools. Treat invocation arguments as arguments to that

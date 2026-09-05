@@ -613,6 +613,66 @@ test("a projected position 5e-7 mm out of place does not", () => {
 // `referenceDivergence` at rung 3, so a null sent it to rung 5, whose default
 // is `ours`. The guard's own message is the specification here: a divergence
 // nobody wrote down is a divergence F-011 would attribute to Ocelli.
+// PS3.3 C.7.6.2.1.1 makes PixelSpacing (0028,0030) `[between rows, between
+// columns]`, and cornerstone3D 5.8.2 builds its volume spacing as
+// `[PixelSpacing[1], PixelSpacing[0], zSpacing]`, so the two arrays must agree
+// CROSSWISE. A transposition is invisible on a square-pixel series and renders
+// a plausible, stably hashing frame on any other.
+//
+// **These three tests are named for the check.** Until the S03 sprint review's
+// second pass nothing compared in-plane spacing against the reference at all,
+// and when the comparison was added its only coverage was seven unrelated tests
+// that happened to go red. Coverage that rides on an accident is coverage
+// nobody can find when it breaks.
+test("the in-plane spacing is compared crosswise and agrees on the corpus", () => {
+  const committed = readVolumeTruth();
+  const result = compareGeometry({
+    subjectId: "volume__synthetic__ct_series_uniform",
+    measured: UNIFORM,
+    referenceGeometry: REFERENCE,
+    truth: committed.subjects.volume__synthetic__ct_series_uniform,
+    toleranceMm: committed.toleranceMm,
+  });
+  assert.deepEqual(result.problems, []);
+});
+
+test("an in-plane spacing agreeing IN ORDER is refused as a transposition", () => {
+  const committed = readVolumeTruth();
+  // The reference reports the pair the other way round, which is what a
+  // transposed index looks like from here.
+  const transposed = {
+    ...REFERENCE,
+    spacing: [REFERENCE.spacing[1], REFERENCE.spacing[0], REFERENCE.spacing[2]],
+  };
+  const result = compareGeometry({
+    subjectId: "volume__synthetic__ct_series_uniform",
+    measured: UNIFORM,
+    referenceGeometry: transposed,
+    truth: committed.subjects.volume__synthetic__ct_series_uniform,
+    toleranceMm: committed.toleranceMm,
+  });
+  assert.ok(
+    result.problems.some((problem) => /in-plane/.test(problem)),
+    `a transposed in-plane pair must be refused, got ${JSON.stringify(result.problems)}`,
+  );
+});
+
+test("a wrong in-plane magnitude is refused as well as a wrong order", () => {
+  const committed = readVolumeTruth();
+  const wrong = { ...REFERENCE, spacing: [9.5, REFERENCE.spacing[1], REFERENCE.spacing[2]] };
+  const result = compareGeometry({
+    subjectId: "volume__synthetic__ct_series_uniform",
+    measured: UNIFORM,
+    referenceGeometry: wrong,
+    truth: committed.subjects.volume__synthetic__ct_series_uniform,
+    toleranceMm: committed.toleranceMm,
+  });
+  assert.ok(
+    result.problems.some((problem) => /in-plane/.test(problem)),
+    `a wrong in-plane magnitude must be refused, got ${JSON.stringify(result.problems)}`,
+  );
+});
+
 test("an unclassified subject is not judged on uniformity", () => {
   const committed = readVolumeTruth();
   const result = compareGeometry({

@@ -2,10 +2,13 @@
 // The benchmark harness. HLD section 26: "Measure with the benchmark harness
 // before optimising anything." This is the harness that sentence names.
 //
-// It is an INSTRUMENT, not a report. Ten of its eleven subjects have nothing to
+// It is an INSTRUMENT, not a report. Most of its subjects have nothing to
 // measure in this tree, because decision D7 puts the oracle and the instruments
 // before the port code, and the harness says so and names the story a reader
-// should go and read. It substitutes no proxy workload, times no stub and
+// should go and read. `--list` is the authority on how many and which, because
+// it reads each subject's blocking story out of the backlog and a count written
+// here goes stale the first time a story lands, which is exactly what happened
+// to the sentence this one replaces. It substitutes no proxy workload, times no stub and
 // invents no number.
 //
 // The HLD states no performance target of any kind. Not a millisecond, not a

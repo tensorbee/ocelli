@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prove the catalogue is complete, and that no guard has been quietly widened.
 
-Five checks, because none of them is sufficient alone.
+Six checks, because none of them is sufficient alone.
 
 **a. Refusal-site discovery, strict in both directions.** Every site
 `scripts/guards/discover.py` finds must be claimed by exactly one catalogue
@@ -12,9 +12,10 @@ That is the discipline `docs/lld/oracle.md` already applies to
 
 **b. Gate and hook coverage.** Every name in `bin/ocelli.sh`'s `GATES` array
 has an entry or an explicit `delegated` declaration with a reason, and every
-executable under `.githooks/` has entries. The array is parsed with the idiom
-`scripts/ci_floor_check.py` already uses, so the repository has one parser for
-it and not two.
+executable under `.githooks/` has entries. The array is parsed with the same
+regex `scripts/ci_floor_check.py` uses, and it is a second copy of that regex
+rather than a shared one. `bin/ocelli.sh` carries a third. Nothing joins the
+three, which is a duplication this module does not get to describe away.
 
 **c. The declared-constant ratchet.** The class of weakening no probe can
 reach. A probe proves a guard still refuses what it refuses, and cannot notice
@@ -28,6 +29,22 @@ into a mechanism rather than a convention.
 **e. The uncovered ratchet.** The count may only decrease. A new uncovered
 refusal fails the floor, and once the sweep is recorded complete any non-zero
 count fails `--sprint`.
+
+**f. `covered_by` names a test that reaches the file.** An entry with no probe
+here claims a standing test elsewhere, and until the S03 review's second pass
+nothing checked that the test opens the file it is claimed to cover. One did
+not: `bench.runner` named a suite that never mentions `tools/bench/run.mjs`,
+and its nine refusals were counted as watched. So each named path must resolve,
+and at least one of them must reach the guarded file, by naming it, by
+importing it, in either direction, or by declaring identifiers the guarded file
+implements by name. That last shape is the oracle's: `faults.mjs` declares the
+fault ids and the page implements each one.
+
+**What the coverage number is and is not.** It is an ENTRY-level claim summed
+over refusal sites. `covered_by` says a standing test reaches the file, and
+check f verifies that. Neither says the named test drives THIS refusal red, and
+`report_lines` says so where the number is printed rather than leaving a reader
+to assume otherwise. Only a probe in this harness has been watched fail.
 """
 
 from __future__ import annotations
@@ -39,7 +56,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .catalogue import CONSTANTS, DEFECTS, GUARDS, Constant, Guard
-from .discover import Site, discover
+from .discover import SCAN_SUFFIXES, Site, discover, sites_collapsed
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 BUDGET = ROOT / "ci" / "guard-probe-budget.json"
@@ -82,6 +99,13 @@ def profile_problems(rows: list[tuple[str, str, str]]) -> list[str]:
 
     Each row is (probe id, needs, profile). Taken as data rather than read off
     the catalogue so the rule itself has a level-1 probe.
+
+    The two floor branches are `if`/`elif` and that is load-bearing. Written as
+    two independent `if`s the second subsumed the first, so the GPU sentence
+    could never be the only one printed, and deleting the GPU branch outright
+    changed nothing a probe or a test could see. Both of this module's floor
+    tests and `census.floor-needing-a-gpu` matched on the words the two
+    messages share.
     """
     problems = []
     for probe_id, needs, profile in rows:
@@ -91,7 +115,7 @@ def profile_problems(rows: list[tuple[str, str, str]]) -> list[str]:
                 f"`--floor` is the gate set that runs with no GPU, no browser "
                 f"and no corpus, and a floor entry needing one of those makes "
                 f"that claim false.")
-        if profile == "floor" and needs not in {"none"}:
+        elif profile == "floor" and needs != "none":
             problems.append(
                 f"{probe_id} needs {needs} and may not be in the floor. An "
                 f"entry is floor only when its run needs no cargo, no npm, no "
@@ -191,6 +215,81 @@ def match_sites(sites: list[Site]) -> tuple[list[Match], list[str]]:
                 f"refusal, or the census counts its coverage twice.")
 
     return matches, problems
+
+
+# A path inside a `covered_by` sentence. The rest of the sentence is prose for
+# a reader and this is the part a machine can check.
+COVERED_PATH = re.compile(
+    r"([\w][\w./-]*\.(?:py|mjs|js|sh|ts|json)|[\w][\w./-]*/)")
+
+# A record declared as `"kebab-name": {`, which is the shape
+# `tools/oracle/src/faults.mjs` uses for the faults the render pages implement
+# by name. Two files linked this way are linked more tightly than by a
+# filename mention, and nothing else in the catalogue is shaped like it.
+DECLARED_ID = re.compile(r'^ {2}"([a-z0-9]+(?:-[a-z0-9]+)+)":\s*\{', re.M)
+
+
+def _reaches(covering: str, target: Path) -> str | None:
+    """Does `covering`'s text reach the file at `target`."""
+    if target.name in covering:
+        return "names it"
+    if f"{target.parent.name}/{target.stem}" in covering:
+        return "names it"
+    if re.search(rf"\bimport\b[^\n]*\b{re.escape(target.stem)}\b", covering):
+        return "imports it"
+    return None
+
+
+def covered_by_problems(root: Path | None = None) -> list[str]:
+    """Check f. A named standing test has to open the file it is named for.
+
+    Cheap and blunt on purpose. It cannot show that the test drives a
+    particular refusal red, and nothing claims it does. What it does show is
+    that the test and the file are connected at all, which is the thing that
+    was asserted about `tools/bench/run.mjs` and was not true.
+    """
+    base = root or ROOT
+    problems: list[str] = []
+    for guard in GUARDS:
+        if not guard.covered_by:
+            continue
+        target = base / guard.file
+        target_text = (target.read_text(encoding="utf-8", errors="replace")
+                       if target.is_file() else "")
+        reached: list[str] = []
+        for claim in guard.covered_by:
+            match = COVERED_PATH.search(claim)
+            if match is None:
+                continue
+            named = base / match.group(1)
+            if named.is_dir():
+                reached.append(f"{match.group(1)} exists")
+                continue
+            if not named.is_file():
+                problems.append(
+                    f"catalogue entry `{guard.id}` is covered by "
+                    f"{match.group(1)}, which is not in this repository. A "
+                    f"claim of coverage naming a file that is gone reads as "
+                    f"coverage forever.")
+                continue
+            text = named.read_text(encoding="utf-8", errors="replace")
+            how = (_reaches(text, Path(guard.file))
+                   or _reaches(target_text, Path(match.group(1))))
+            if how is None and any(
+                    name in target_text
+                    for name in DECLARED_ID.findall(text)):
+                how = "declares ids it implements"
+            if how is not None:
+                reached.append(f"{match.group(1)} {how}")
+        if not reached:
+            problems.append(
+                f"catalogue entry `{guard.id}` claims {guard.file} is covered "
+                f"by a standing test, and no test it names opens that file. "
+                f"Either name one that does, or record the gap: a false claim "
+                f"of coverage is worse than the gap it hides, because the gap "
+                f"can be fixed and the claim will be counted as coverage "
+                f"forever.")
+    return problems
 
 
 def oracle_adoption(recorded: int | None) -> tuple[int, list[str]]:
@@ -311,23 +410,18 @@ def run(profile: str = "floor") -> tuple[int, list[str]]:
     rows = [(p.id, p.needs, p.profile) for g in GUARDS for p in g.probes]
     problems += profile_problems(rows)
 
+    # f. A named standing test has to open the file it is named for.
+    problems += covered_by_problems()
+
     # The oracle adoption is verified rather than asserted.
     _, oracle_problems = oracle_adoption(budget.get("oracle_faults"))
     problems += oracle_problems
 
-    # e. The uncovered ratchet.
-    uncovered_sites = 0
-    uncovered: list[str] = []
-    for match in matches:
-        if match.guard.kind != "guard":
-            continue
-        if match.guard.covered:
-            continue
-        uncovered_sites += len(match.sites)
-        uncovered.append(
-            f"{match.guard.id} ({match.guard.file}, {len(match.sites)} "
-            f"refusal(s)): {match.guard.reason or 'no reason recorded'} "
-            f"[owner {match.guard.owner or 'unassigned'}]")
+    # e. The uncovered ratchet. `report_lines` is what names each uncovered
+    # entry, its reason and its owner. This only counts, because `run()`
+    # returns a count and problems and nothing else.
+    uncovered_sites = sum(len(m.sites) for m in matches
+                          if m.guard.kind == "guard" and not m.guard.covered)
 
     ratchet = budget.get("uncovered", {})
     ceiling = ratchet.get("sites")
@@ -352,7 +446,16 @@ def run(profile: str = "floor") -> tuple[int, list[str]]:
 
 
 def report_lines(profile: str = "floor") -> list[str]:
-    """What the census prints on a green run, in the shape a skip takes."""
+    """What the census prints on a green run, in the shape a skip takes.
+
+    **Every number here is an entry-level count summed over refusal sites.**
+    It says which BUCKET a refusal's guard entry is in, and not that this
+    refusal has been driven red. The wording says so, because the earlier
+    wording, "N watched by M probes, N by a named standing test, 0 watched by
+    nothing", read as a per-refusal claim and was not one: 76 probes cannot
+    drive 227 refusals red, and the S03 review measured 37 of 77 sites in four
+    entries never executed by the test their entry named.
+    """
     sites = discover()
     matches, _ = match_sites(sites)
     lines = []
@@ -368,14 +471,24 @@ def report_lines(profile: str = "floor") -> list[str]:
         f"OK: {len(sites)} refusal(s) in {len({s.file for s in sites})} "
         f"file(s), all claimed")
     lines.append(
-        f"  {probed_sites} watched by {probes} probe(s) in this harness, "
-        f"{adopted} by a named standing test, {out_of_scope} declared out of "
-        f"scope, {uncovered} watched by nothing")
+        f"  {probed_sites} belong to an entry carrying one of this harness's "
+        f"{probes} probe(s), {adopted} to an entry naming a standing test "
+        f"that opens the file, {out_of_scope} declared out of scope, "
+        f"{uncovered} watched by nothing")
+    lines.append(
+        f"  These are ENTRY-level buckets summed over sites, not a count of "
+        f"refusals driven red. {sites_collapsed()} further refusal(s) share "
+        f"another's words and are not counted at all. Refusals under "
+        f"`crates/` and in any file that is not "
+        f"{', '.join(sorted(SCAN_SUFFIXES))} are outside this scan by "
+        f"decision 7 of F-X009's plan, so this is not every refusal in the "
+        f"repository.")
     for match in matches:
         if match.guard.kind == "guard" and not match.guard.covered:
             lines.append(f"  UNCOVERED  {match.guard.id} "
                          f"({len(match.sites)} refusal(s)) "
-                         f"{match.guard.reason}")
+                         f"[owner {match.guard.owner or 'unassigned'}] "
+                         f"{match.guard.reason or 'no reason recorded'}")
         if match.guard.limit:
             lines.append(f"  LIMIT      {match.guard.id}: {match.guard.limit}")
     for defect, text in sorted(DEFECTS.items()):

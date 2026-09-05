@@ -13,9 +13,12 @@ deterministic, and it cannot be satisfied by intention.
 
 ## The defect this exists for
 
-Ten of the eleven rows in `tools/bench/subjects.json` have nothing to measure in
-this tree. There is no decoder, no renderer, no worker and no boundary, which is
+Most of the rows in `tools/bench/subjects.json` have nothing to measure in this
+tree. There is no decoder, no renderer, no worker and no boundary, which is
 decision D7 holding: the oracle and the instruments exist before the port code.
+No count is written here, because a written count goes stale the first time a
+story lands and one already did. `node tools/bench/run.mjs --list` prints the
+split and reads `docs/sprints/BACKLOG.md` to do it.
 
 **A benchmark harness under time pressure invents a workload, produces a
 plausible number, and that number then sits in a tracked file describing
@@ -409,11 +412,17 @@ def main() -> int:
         return 1
 
     subjects = registry.get("subjects", [])
-    measurable = [s for s in subjects if s.get("subject_story") is None]
+    # Counted and LABELLED as what it is. A row naming no blocking story is not
+    # the same set as the rows with a subject in this tree: a row whose story
+    # has since landed also has one, which is what F-004 did to
+    # `tier.startup_microbenchmark`. `node tools/bench/run.mjs --list` is the
+    # authority on that split, because it resolves every story against
+    # docs/sprints/BACKLOG.md.
+    unblocked = [s for s in subjects if s.get("subject_story") is None]
     recorded = sum(len(block.get("subjects", {}))
                    for block in baseline.get("host_classes", {}).values())
-    print(f"OK: {len(subjects)} benchmark subject(s), {len(measurable)} with a "
-          f"subject in this tree, {recorded} recorded baseline entr(ies) "
+    print(f"OK: {len(subjects)} benchmark subject(s), {len(unblocked)} naming "
+          f"no blocking story, {recorded} recorded baseline entr(ies) "
           f"across {len(baseline.get('host_classes', {}))} host class(es)")
     return 0
 

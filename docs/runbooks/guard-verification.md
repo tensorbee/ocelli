@@ -2,13 +2,13 @@
 
 ## Why this exists
 
-`docs/sprints/CURRENT_SPRINT.md` states it as a standing expectation of S01:
-
-> **Every guard is seen red before it is claimed.** Remove or revert the thing
-> a guard protects, one at a time, and watch it fail. A guard that has never
-> been observed failing is a guard nobody has tested, and this repository now
-> has seventeen of them written in one sitting by one author. Treat that as a
-> liability until each has been seen red once.
+**Every guard is seen red before it is claimed.** Remove or revert the thing a
+guard protects, one at a time, and watch it fail. A guard that has never been
+observed failing is a guard nobody has tested. That was written as a standing
+expectation of S01 in `docs/sprints/CURRENT_SPRINT.md`, against a count of
+guards that is long out of date, and `15f7450` removed the paragraph when the
+sprint moved on. It is restated here, without the count, because this document
+is where it lives now. `bin/ocelli.sh gate --list` is the current inventory.
 
 The failure mode is specific and it is not hypothetical. A guard that exits
 zero on a clean tree looks identical to a guard whose detection is broken, and
@@ -192,11 +192,13 @@ defect this whole document is about. Re-render it with
 `python3 scripts/guard_census.py --render-runbook`, and the `guards` gate
 carries the `--check`.
 
-Four rows are marked as failing today, three of them in the floor profile and
-one, `G-02`, in the deep one. Each is a hole this sprint found in a guard that
-was already here, and a probe that fails for a declared reason is reported
-rather than hidden. A probe marked with a defect that starts PASSING fails the
-gate, because the hole was fixed and the declaration became a lie.
+A row marked with a `G-` number is a probe that fails today, against a hole
+this sprint found in a guard that was already here. The rows carry the numbers
+and the list beneath the table carries each hole in full, so no sentence here
+counts them and none can go stale against them. A probe that fails for a
+declared reason is reported rather than hidden. A probe marked with a defect
+that starts PASSING fails the gate, because the hole was fixed and the
+declaration became a lie, which is how two of the four were retired in S03.
 
 The rows the earlier table records and this one does not are not gaps in
 coverage. Rows 21 to 25 are the oracle's, and they are adopted rather than
@@ -217,7 +219,7 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 6 | `scripts/staged_content_check.py` | `content.spike-output`, level 3 | must refuse, output carries `spike output` | floor | `bin/ocelli.sh gate guards` |
 | 7 | `scripts/staged_content_check.py` | `content.build-artefact`, level 3 | must refuse, output carries `build artefact` | floor | `bin/ocelli.sh gate guards` |
 | 8 | `scripts/staged_content_check.py` | `content.size-limit`, level 3 | must refuse, output carries `byte limit` | floor | `bin/ocelli.sh gate guards` |
-| 9 | `scripts/unsafe_allowlist_check.py` | `unsafe.third-file`, level 3 | must refuse, output carries `outside the allow-list` | floor | `bin/ocelli.sh gate guards` |
+| 9 | `scripts/unsafe_allowlist_check.py` | `unsafe.third-file`, level 3 | must refuse, output carries ``unsafe` outside the allow-list (HLD section 27.2 R5)` | floor | `bin/ocelli.sh gate guards` |
 | 10 | `scripts/prose_check.py` | `prose.em-dash`, level 3 | must refuse, output carries `em-dash` | floor | `bin/ocelli.sh gate guards` |
 | 11 | `scripts/prose_check.py` | `prose.semicolon`, level 3 | must refuse, output carries `semicolon in prose` | floor | `bin/ocelli.sh gate guards` |
 | 12 | `scripts/prose_check.py` | `prose.commit-message`, level 3 | must refuse, output carries `semicolon in prose` | floor | `bin/ocelli.sh gate guards` |
@@ -229,12 +231,12 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 18 | `scripts/pin_and_size_check.py` | `pins.range`, level 3 | must refuse, output carries `is a RANGE, not an exact pin` | floor | `bin/ocelli.sh gate guards` |
 | 19 | `scripts/pin_and_size_check.py` | `pins.absent`, level 3 | must refuse, output carries `is not declared in [workspace.dependencies]` | floor | `bin/ocelli.sh gate guards` |
 | 20 | `scripts/pin_and_size_check.py` | `pins.size-ceiling`, level 3 | must refuse, output carries `byte ceiling` | floor | `bin/ocelli.sh gate guards` |
-| 21 | `scripts/pin_and_size_check.py` | `pins.table-form`, level 3 **G-03, fails today** | must ACCEPT, output carries `pinned exactly` | floor | `bin/ocelli.sh gate guards` |
+| 21 | `scripts/pin_and_size_check.py` | `pins.table-form`, level 3 | must ACCEPT, output carries `pinned exactly` | floor | `bin/ocelli.sh gate guards` |
 | 22 | `scripts/no_std_check.py` | `nostd.reaches-std`, level 3 | must refuse, output carries `reaches a std feature` | deep | `bin/ocelli.sh gate guards-deep` |
 | 23 | `scripts/no_std_check.py` | `nostd.none-declared`, level 3 | must refuse, output carries `no crate under crates/ declares no_std` | deep | `bin/ocelli.sh gate guards-deep` |
 | 24 | `scripts/no_std_check.py` | `nostd.loses-a-crate`, level 3 **G-02, fails today** | must refuse, output carries `stopped declaring no_std` | deep | `bin/ocelli.sh gate guards-deep` |
 | 25 | `scripts/ci_floor_check.py` | `ci-floor.missing-step`, level 3 | must refuse, output carries `and nothing in` | floor | `bin/ocelli.sh gate guards` |
-| 26 | `scripts/ci_floor_check.py` | `ci-floor.comment-only`, level 3 **G-01, fails today** | must refuse, output carries `and nothing in` | floor | `bin/ocelli.sh gate guards` |
+| 26 | `scripts/ci_floor_check.py` | `ci-floor.comment-only`, level 3 | must refuse, output carries `and nothing in` | floor | `bin/ocelli.sh gate guards` |
 | 27 | `scripts/verify_ledger.py` | `ledger.no-record`, level 3 | must refuse, output carries `no verification recorded for the staged tree` | floor | `bin/ocelli.sh gate guards` |
 | 28 | `scripts/verify_ledger.py` | `ledger.red-corpus`, level 3 | must refuse, output carries `the corpus is RED for tree` | floor | `bin/ocelli.sh gate guards` |
 | 29 | `scripts/verify_ledger.py` | `ledger.require-corpus`, level 3 | must refuse, output carries `and this gate requires 'pass'` | floor | `bin/ocelli.sh gate guards` |
@@ -262,7 +264,7 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 51 | `scripts/sprint_workflow.py` | `handoff.wrong-branch`, level 3 | must refuse, output carries `does not start with` | floor | `bin/ocelli.sh gate guards` |
 | 52 | `scripts/sprint_workflow.py` | `handoff.backticked-branch`, level 3 **G-04, fails today** | must ACCEPT, output carries `validates` | floor | `bin/ocelli.sh gate guards` |
 | 53 | `scripts/sprint_workflow.py` | `sprint-lifecycle.not-in-sprint`, level 3 | must refuse, output carries `is not in sprint` | floor | `bin/ocelli.sh gate guards` |
-| 54 | `scripts/error_code_check.py` | `errors.renumbered`, level 3 | must refuse, output carries `FAIL` | floor | `bin/ocelli.sh gate guards` |
+| 54 | `scripts/error_code_check.py` | `errors.renumbered`, level 3 | must refuse, output carries `so this is a renumbering` | floor | `bin/ocelli.sh gate guards` |
 | 55 | `scripts/bench_check.py` | none in this harness | A benchmark registry whose subject stories do not resolve, a subject whose story has not landed carrying a runner or a recorded number, and a playwright pin that has drifted between the two harnesses. | - | scripts/tests/test_bench_check.py (25 cases, run by the `bench` gate, which is in the floor) |
 | 56 | `scripts/corpus_check.py` | `corpus.digest-mismatch`, level 3 | must refuse, output carries `does not match its manifest digest` | floor | `bin/ocelli.sh gate guards` |
 | 57 | `scripts/corpus_check.py` | `corpus.absent`, level 3 | must refuse, output carries `corpus cases are absent` | floor | `bin/ocelli.sh gate guards` |
@@ -284,7 +286,7 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 73 | `scripts/guards/census.py` | `census.no-ceiling`, level 3 | must refuse, output carries `records no uncovered ceiling` | floor | `bin/ocelli.sh gate guards` |
 | 74 | `scripts/guards/census.py` | `census.orphan-recorded-constant`, level 3 | must refuse, output carries `is not declared in the catalogue's CONSTANTS` | floor | `bin/ocelli.sh gate guards` |
 | 75 | `scripts/guards/census.py` | `census.gate-without-an-entry`, level 3 | must refuse, output carries `has no catalogue entry and no `delegated` reason` | floor | `bin/ocelli.sh gate guards` |
-| 76 | `scripts/guards/census.py` | `census.floor-needing-a-gpu`, level 1 | must refuse, output carries `may not be in the floor` | floor | `bin/ocelli.sh gate guards` |
+| 76 | `scripts/guards/census.py` | `census.floor-needing-a-gpu`, level 1 | must refuse, output carries `no GPU, no browser and no corpus` | floor | `bin/ocelli.sh gate guards` |
 | 77 | `scripts/guard_census.py` | `census-runbook.markers-gone`, level 3 | must refuse, output carries `carries no generated-table markers` | floor | `bin/ocelli.sh gate guards` |
 | 78 | `scripts/guard_probe.py` | `probe-runner.self-test`, level 3 | must ACCEPT, output carries `OK` | floor | `bin/ocelli.sh gate guards` |
 | 79 | `scripts/guards/sandbox.py` | none in this harness | A git call outside the sandbox, a git call in a directory this harness did not create, and the `rm --cached` and `checkout --` pair the runbook records as a false-green trap. | - | scripts/guard_probe.py --self-test; scripts/tests/test_guard_catalogue.py |
@@ -307,16 +309,14 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 96 | `tools/bench/src/registry.mjs` | none in this harness | A registry entry with no subject story, a duplicate subject, and a runner for a subject whose story has not landed. | - | tools/bench/tests/registry_test.mjs (run by the `bench` gate) |
 | 97 | `tools/bench/src/record.mjs` | none in this harness | A record written against a host class it was not measured on, and a malformed baseline. | - | tools/bench/tests/record_test.mjs; tools/bench/tests/hostclass_test.mjs |
 | 98 | `tools/bench/src/state.mjs` | none in this harness | A run state the harness cannot resume from. | - | tools/bench/tests/state_test.mjs |
-| 99 | `tools/bench/run.mjs` | none in this harness | An argument the harness does not accept, a subject that does not exist, a comparison on a machine that does not own the baseline, and a browser that is not installed. | - | scripts/tests/test_bench_check.py (the 7 argument refusals and the 4 run-time refusals, run by the `bench` gate) |
+| 99 | `tools/bench/run.mjs` | none in this harness | An argument the harness does not accept, a subject that does not exist, a comparison on a machine that does not own the baseline, and a browser that is not installed. | - | nothing |
 | 100 | `tools/bench/src/runners/wasm_cold_start.mjs` | none in this harness | A cold-start measurement taken against a stub, an incomplete artefact copy, and a page that never reported. | - | tools/bench/tests/cold_start_test.mjs |
 | 101 | `tools/bench/page/app.mjs` | none in this harness | A page serving an incomplete copy of the wasm artefact. | - | tools/bench/tests/cold_start_test.mjs |
 | 102 | `scripts/panic_probe.mjs` | none in this harness | A run that measured the probe's stub rather than the module. | - | bin/ocelli.sh gate panic, which builds a second module carrying the panic-probe feature and runs this file on every floor gate |
 
 Known defects this table names, in full:
 
-- **G-01.** scripts/ci_floor_check.py is fail-open on a comment. It tests `gate <name>` as a plain substring over the whole workflow file, so a YAML comment naming a gate satisfies it with the real step deleted. The floor's claim to be what CI runs is then false and nothing says so.
 - **G-02.** scripts/no_std_check.py loses a crate rather than failing. Its crate set is built from the crates that match the attribute, so a crate deleting it is not reported, it stops being checked. The only backstop fires when NO crate declares it. The recorded NO_STD_CRATES constant is what catches it today.
-- **G-03.** scripts/pin_and_size_check.py parses positionally. The version is the FIRST quoted string in the entry, so a table form reports the wrong token. The dangerous direction is a table whose first quoted value starts with `=`, which passes with the real version unread.
 - **G-04.** scripts/sprint_workflow.py validate-handoff has an undocumented contract. It needs a literal `**Head**` and parses the branch as a bare token, so backticks break it, and this repository writes every path in backticks. It cost one handoff rewritten at integration in S03.
 
 What a probe above does NOT reach, declared rather than left to be discovered:
@@ -324,7 +324,7 @@ What a probe above does NOT reach, declared rather than left to be discovered:
 - **`scripts/source_provenance_check.py`.** The URL clause has no probe, deliberately. `docs/SOURCE-POLICY.md` names the projects and does not name their addresses, so a probe would have to take its input from the guard's own URL list, which is the R2 failure this catalogue exists to avoid: it would assert the current regex and pass forever once the regex was weakened. The list itself is a declared constant in the ratchet, so a change to it is caught there and lands in front of a reviewer.
 - **`scripts/verify_ledger.py`.** `assert` with a real record cannot be controlled green in the sandbox without recording one first, so the control for this invoke records a passing entry and then asserts.
 - **`scripts/verify_ledger.py`.** The `records a RED corpus` and `records corpus=` branches of check-commit need a commit carrying a trailer this harness would have to forge, and the commit-msg hook refuses exactly that. They are reached instead by ledger.assert's equivalents.
-- **`scripts/sprint_workflow.py`.** The other twenty-two refusals in this file belong to the sprint lifecycle commands, and the entry below owns them.
+- **`scripts/sprint_workflow.py`.** The other twenty-two refusals in this file belong to the sprint lifecycle commands, and the entry below owns them. The field list is a second limit and a sharper one. Both probes here are about the BRANCH rule, and reaching it means writing a handoff that passes the field check first, so their input carries the five `**Field**` markers from the tool's own tuple. `.claude/commands/complete-feature.md` names six items including the files touched, which the tool does not require, so the citation and the code do not agree and no probe can see that. `HANDOFF_FIELDS` is in the declared-constant ratchet instead, which is what puts a change to the contract in front of a reviewer. G-04 is the same undocumented contract seen from the branch side.
 - **`scripts/sprint_workflow.py`.** One probe over the shape shared by every lifecycle refusal. The remaining branches need a sprint mid-flight, which the sandbox cannot build without writing sprint state, and docs/sprints/ is outside this story's write set.
 - **`scripts/bench_check.py`.** No level-3 probe. The suite above is the negative-case set for this guard and it runs on every floor gate, so a level-3 probe would need a second registry fixture that the suite already carries.
 - **`scripts/target_feature_check.py`.** The per-target divergence branch itself needs a dependency whose features differ by target, which cannot be built from the locked graph without a network fetch. Owner F-X010.
@@ -339,10 +339,10 @@ Declared out of scope. Each of these carries refusals that the census counts and
 
 - **`scripts/populate_corpus.py`.** A corpus acquisition tool a developer runs by hand. No gate and no CI step invokes it, and its first act is to refuse when the locked Python environment is absent, which the sandbox always is because `.venv` is not tracked. The property its refusals protect, that a case matches the digest its manifest row records, is verified afterwards and independently by scripts/corpus_check.py, which IS in a gate and whose digest and presence refusals are both probed above.
 - **`scripts/import_backlog_xlsx.py`.** A bootstrap importer over a private spreadsheet that is not in this repository and is not fetched by anything. No gate and no CI step invokes it. Its OUTPUT is tracked, and that output is watched by scripts/backlog_check.py and scripts/gen_sprint_plan.py, both of which are in the floor and both of which carry probes above.
-- **`tools/spikes/a1-htj2k/run.mjs`.** A throwaway spike harness for Appendix A gate A1, invoked by no gate and by no CI step. Its output directory IS guarded, by the content.spike-output probe above.
-- **`tools/spikes/common/compare.mjs`.** Shared helper for the same throwaway spike harnesses. Same argument as spikes.a1.
-- **`tools/spikes/common/extract.py`.** The spike harnesses' corpus extractor, invoked by no gate. Its refusals protect a throwaway measurement rather than the repository, and its output directory IS guarded, by the content.spike-output probe above.
-- **`tools/spikes/a2-jpeg-ls/anchors.py`.** A throwaway spike harness for Appendix A gate A2, invoked by no gate. Same argument as spikes.a1.
+- **`tools/spikes/a1-htj2k/run.mjs`.** A throwaway spike harness for Appendix A gate A1, invoked by no gate and by no CI step. `content.spike-output` guards its output DIRECTORY and is not a backstop for its refusals, unlike the probed backstops populate-corpus and bootstrap-importer name. Nothing watches these go red.
+- **`tools/spikes/common/compare.mjs`.** Shared helper for the same throwaway spike harnesses, invoked by no gate and by no CI step. The measurement is throwaway and the ANSWER is not: this file produced every digest in both Appendix A answer files, and `docs/spikes/GATES.md`'s A1 verdict and the decision to file F-X013 rest on them. Its own suite, `tools/spikes/common/tests/compare_test.mjs`, is run by nothing, which is pass 1's smell S19 and is unfixed. Out of scope here means no gate runs the file, not that its refusals did not matter. Owner F-X010.
+- **`tools/spikes/common/extract.py`.** The spike harnesses' corpus extractor, invoked by no gate. Its refusals protect a throwaway measurement rather than the repository. `content.spike-output` guards the output DIRECTORY, which is not a backstop for these refusals, so nothing watches them go red.
+- **`tools/spikes/a2-jpeg-ls/anchors.py`.** A throwaway spike harness for Appendix A gate A2, invoked by no gate. Same argument as spikes.a1, including that its output directory being guarded is not a backstop for its refusals.
 
 <!-- END GENERATED PROBE TABLE -->
 

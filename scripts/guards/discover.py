@@ -25,19 +25,33 @@ not churn the catalogue, and rewording a message must force a re-read of what
 the refusal is for. That is the same trade `docs/lld/oracle.md` records for the
 fault catalogue's `expect` fragments.
 
+**What that identity costs.** Two different refusals in one file whose messages
+normalise to the same words are one site, so a probe on either reads as
+covering both. That is deliberate for the bare `exit 1` shape, which has no
+words of its own, and it is a real loss everywhere else. `sites_collapsed()`
+below counts it and `scripts/guard_census.py` prints the number, so the loss is
+reported rather than assumed to be zero.
+
 ## What it does not find
 
 A refusal expressed as a return value that a caller turns into an exit status
 without a message of its own, and a refusal inside `crates/`. The second is the
 scope boundary decision 7 of `.claude/plans/F-X009-design.md` records: a
 runtime refusal inside a crate is that crate's story's test, not this one's.
+
+Nor does it find one in prose. A Python docstring or comment that quotes a
+refusal shape, such as the table above, is masked before the scan runs, because
+a documentation row counted as a refusal inflates the census's headline with
+prose and makes deleting a paragraph turn the gate red.
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
 import re
 import subprocess
+import tokenize
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,10 +81,17 @@ STRING = re.compile(r'"(?:[^"\\]|\\.)*"' r"|'(?:[^'\\]|\\.)*'"
 SHAPES: dict[str, re.Pattern[str]] = {
     "py-problem": re.compile(r"problems\.append\(", re.M),
     # `scripts/verify_ledger.py` refuses by printing and returning 1 rather
-    # than by collecting, and four of its five branches are invisible to the
-    # `problems.append` shape. Adding this shape found them, which is the
-    # bidirectional discipline working in the direction that matters.
-    "py-print-fail": re.compile(r"print\(\s*f?[\"']FAIL", re.M),
+    # than by collecting, so every one of its eight refusal sites is invisible
+    # to the `problems.append` shape: it has none. Adding this shape found
+    # them, which is the bidirectional discipline working in the direction that
+    # matters.
+    #
+    # The optional placeholder before FAIL is not cosmetic. `guard_probe.py`
+    # writes `print(f"{RED}FAIL{OFF}: the guard harness")`, so without it the
+    # census that refuses a refusal no entry claims could not see the
+    # top-level refusal of the file that runs it.
+    "py-print-fail": re.compile(r"print\(\s*f?[\"'](?:\{[^{}\"']*\})?FAIL",
+                                re.M),
     "py-exit": re.compile(r"sys\.exit\(\s*(?=[\"'f])", re.M),
     # `raise SystemExit(` and `raise SomethingError(` are the same refusal in
     # a module that is imported rather than run. `scripts/guards/sandbox.py`
@@ -139,7 +160,50 @@ def _balanced(text: str, open_at: int) -> str:
     return text[open_at:open_at + 400]
 
 
+def mask_python_prose(text: str) -> str:
+    """Blank Python docstrings and comments, preserving every byte offset.
+
+    The shape table at the top of this module is five markdown rows quoting
+    five refusal shapes. Scanned as code they are five refusal sites, so the
+    census's headline counted prose and deleting the documentation turned the
+    gate red. Masking is by replacement with spaces rather than deletion, so
+    line numbers and the bracket-matching in `_balanced` are unaffected.
+
+    A refusal message is never a triple-quoted literal in this repository and
+    never lives in a comment, so nothing real is masked. A file that does not
+    tokenise is left alone: this module reports refusals, it does not police
+    syntax.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        return text
+    offsets = [0]
+    for line in text.splitlines(keepends=True):
+        offsets.append(offsets[-1] + len(line))
+    out = list(text)
+    for token in tokens:
+        body = token.string.lstrip("rbufRBUF")
+        if token.type == tokenize.COMMENT:
+            pass
+        elif token.type == tokenize.STRING and body[:3] in ('"""', "'''"):
+            pass
+        else:
+            continue
+        try:
+            start = offsets[token.start[0] - 1] + token.start[1]
+            end = offsets[token.end[0] - 1] + token.end[1]
+        except IndexError:  # pragma: no cover, a truncated token table
+            continue
+        for index in range(start, min(end, len(out))):
+            if out[index] != "\n":
+                out[index] = " "
+    return "".join(out)
+
+
 def _sites_in(rel: str, text: str) -> list[Site]:
+    if rel.endswith(".py"):
+        text = mask_python_prose(text)
     found: list[Site] = []
     for shape, pattern in SHAPES.items():
         for match in pattern.finditer(text):
@@ -160,7 +224,9 @@ def _sites_in(rel: str, text: str) -> list[Site]:
                 message = f"{rel}:{line}"
             found.append(Site(file=rel, shape=shape, message=message,
                               line=line))
-    # A bare shell refusal has one identity per file, not one per occurrence.
+    # A bare shell refusal has one identity per file, not one per occurrence,
+    # and any two refusals whose messages normalise identically collapse the
+    # same way. `sites_collapsed` counts what that costs.
     deduped: dict[str, Site] = {}
     for site in found:
         deduped.setdefault(site.key, site)
@@ -181,19 +247,50 @@ def tracked_sources() -> list[str]:
     return sorted(names)
 
 
+def _read(rel: str, base: Path) -> str | None:
+    path = base / rel
+    if not path.is_file():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return None
+
+
 def discover(root: Path | None = None) -> list[Site]:
     base = root or ROOT
     sites: list[Site] = []
     for rel in tracked_sources():
-        path = base / rel
-        if not path.is_file():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        sites.extend(_sites_in(rel, text))
+        text = _read(rel, base)
+        if text is not None:
+            sites.extend(_sites_in(rel, text))
     return sites
+
+
+def sites_collapsed(root: Path | None = None) -> int:
+    """How many refusals a site's words-based identity merged away.
+
+    Reported rather than assumed to be zero, because a probe on one of two
+    refusals that normalise alike reads as covering both. The bare `exit 1`
+    shape is excluded: it has no words of its own and one identity per file is
+    its declared identity rather than a loss.
+    """
+    base = root or ROOT
+    collapsed = 0
+    for rel in tracked_sources():
+        text = _read(rel, base)
+        if text is None:
+            continue
+        if rel.endswith(".py"):
+            text = mask_python_prose(text)
+        raw = 0
+        for shape, pattern in SHAPES.items():
+            if shape == "sh-exit":
+                continue
+            raw += len(pattern.findall(text))
+        kept = len([s for s in _sites_in(rel, text) if s.shape != "sh-exit"])
+        collapsed += max(raw - kept, 0)
+    return collapsed
 
 
 if __name__ == "__main__":

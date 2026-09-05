@@ -26,6 +26,11 @@ import json
 import sys
 from pathlib import Path
 
+# See `scripts/guard_probe.py` for why this is here and why it is before the
+# import: importing `guards.*` writes `__pycache__` inside the repository
+# otherwise, and this file runs on every floor gate.
+sys.dont_write_bytecode = True
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from guards import census  # noqa: E402
@@ -133,12 +138,24 @@ def record_constants() -> int:
     matches, _ = match_sites(sites)
     uncovered = sum(len(m.sites) for m in matches
                     if m.guard.kind == "guard" and not m.guard.covered)
-    budget.setdefault("uncovered", {})
-    budget["uncovered"]["sites"] = uncovered
-    budget["uncovered"].setdefault("sweep_complete", uncovered == 0)
+    ratchet = budget.setdefault("uncovered", {})
+    previous = ratchet.get("sites")
+    if previous is not None and uncovered > previous:
+        print(f"  the uncovered ceiling RISES from {previous} to {uncovered}. "
+              f"That is the ratchet going the wrong way, and it belongs in "
+              f"this diff with a reason beside it.")
+    if ratchet.get("sweep_complete") and uncovered > 0:
+        # Derived and not remembered. `setdefault` left this true forever once
+        # it had been true once, so a run that found uncovered refusals wrote
+        # a ceiling that contradicted the flag beside it.
+        print(f"  the sweep was recorded complete and is not: {uncovered} "
+              f"refusal(s) are watched by nothing.")
+    ratchet["sites"] = uncovered
+    ratchet["sweep_complete"] = uncovered == 0
     BUDGET.parent.mkdir(parents=True, exist_ok=True)
     BUDGET.write_text(json.dumps(budget, indent=2, sort_keys=True) + "\n")
-    print(f"recorded {len(constants)} constant(s), uncovered={uncovered}")
+    print(f"recorded {len(constants)} constant(s), uncovered={uncovered}, "
+          f"sweep_complete={ratchet['sweep_complete']}")
     return 0
 
 

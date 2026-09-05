@@ -105,13 +105,33 @@ class ProfileAgreesWithNeeds(unittest.TestCase):
         rows = [(p.id, p.needs, p.profile) for g in GUARDS for p in g.probes]
         self.assertEqual(census.profile_problems(rows), [])
 
+    # The two floor branches share the words "may not be in the floor", and
+    # the second subsumes the first, so both of these and the
+    # `census.floor-needing-a-gpu` probe went on passing with the GPU rule
+    # deleted. Each now asserts the sentence its own branch writes, and that
+    # the OTHER branch's sentence is absent.
+    GPU_SENTENCE = "no GPU, no browser and no corpus"
+    TOOLCHAIN_SENTENCE = "no cargo, no npm, no wasm-pack"
+
     def test_a_floor_entry_needing_a_gpu_is_refused(self) -> None:
         problems = census.profile_problems([("probe", "gpu", "floor")])
-        self.assertTrue(any("may not be in the floor" in p for p in problems))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(self.GPU_SENTENCE, problems[0])
+        self.assertNotIn(self.TOOLCHAIN_SENTENCE, problems[0])
+
+    def test_a_floor_entry_needing_a_browser_or_the_corpus_is_refused(
+            self) -> None:
+        for needs in ("browser", "corpus"):
+            with self.subTest(needs):
+                problems = census.profile_problems([("p", needs, "floor")])
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn(self.GPU_SENTENCE, problems[0])
 
     def test_a_floor_entry_needing_cargo_is_refused(self) -> None:
         problems = census.profile_problems([("probe", "cargo", "floor")])
-        self.assertTrue(any("may not be in the floor" in p for p in problems))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(self.TOOLCHAIN_SENTENCE, problems[0])
+        self.assertNotIn(self.GPU_SENTENCE, problems[0])
 
     def test_a_deep_entry_needing_a_browser_is_allowed(self) -> None:
         self.assertEqual(census.profile_problems([("p", "browser", "deep")]),
@@ -139,6 +159,73 @@ class SpecCitationsResolve(unittest.TestCase):
                                    r"toml|js))`", guard.spec):
                 with self.subTest(f"{guard.id}:{path}"):
                     self.assertTrue((ROOT / path).exists(), path)
+
+    def test_every_cited_section_of_a_cited_document_exists(self) -> None:
+        """`spec` is the normative citation and the first field to read.
+
+        Checking only that the FILE exists let `section 7a` stand in a plan
+        with sections 0 to 10 and decisions 1 to 9, which the S03 review's
+        second pass found. A citation nobody can follow is not a citation.
+        """
+        cited = re.compile(r"`([\w./-]+\.md)`\s+(section|decision)\s+"
+                           r"(\d+[a-z]?)")
+        found = 0
+        for guard in GUARDS:
+            for path, kind, number in cited.findall(guard.spec):
+                with self.subTest(f"{guard.id}:{path} {kind} {number}"):
+                    self.assertTrue((ROOT / path).is_file(), path)
+                    text = (ROOT / path).read_text(encoding="utf-8")
+                    anchor = (rf"^#{{2,4}} {re.escape(number)}\."
+                              if kind == "section"
+                              else rf"^\*\*{re.escape(number)}\.")
+                    self.assertRegex(text, re.compile(anchor, re.M))
+                    found += 1
+        self.assertGreater(found, 0, "no spec cites a numbered section, so "
+                                     "this test proved nothing")
+
+
+class CoveredByNamesATestThatOpensTheFile(unittest.TestCase):
+    """Check f of the census, asserted here as well as run there.
+
+    `bench.runner` claimed `scripts/tests/test_bench_check.py (the 7 argument
+    refusals and the 4 run-time refusals)` and that suite never opens
+    `tools/bench/run.mjs`, so nine refusals were counted as watched by a test
+    that cannot reach them. Nothing verified the claim, in either place.
+    """
+
+    def test_the_real_catalogue_agrees(self) -> None:
+        self.assertEqual(census.covered_by_problems(), [])
+
+    def test_a_test_that_does_not_open_the_file_is_refused(self) -> None:
+        from guards.catalogue import Guard
+        unrelated = Guard(
+            id="probe", file="tools/bench/run.mjs", gate="-", spec="none",
+            refuses="A sentence long enough to satisfy the well-formed test.",
+            claims=("*",),
+            covered_by=("scripts/tests/test_corpus_check.py",))
+        problems = self._problems_for(unrelated)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("no test it names opens that file", problems[0])
+
+    def test_a_named_test_that_is_gone_is_refused(self) -> None:
+        from guards.catalogue import Guard
+        missing = Guard(
+            id="probe", file="tools/bench/run.mjs", gate="-", spec="none",
+            refuses="A sentence long enough to satisfy the well-formed test.",
+            claims=("*",),
+            covered_by=("scripts/tests/test_no_such_file.py",))
+        problems = self._problems_for(missing)
+        self.assertTrue(any("not in this repository" in p for p in problems))
+
+    @staticmethod
+    def _problems_for(guard: object) -> list[str]:
+        import guards.census as module
+        original = module.GUARDS
+        module.GUARDS = (guard,)
+        try:
+            return module.covered_by_problems()
+        finally:
+            module.GUARDS = original
 
 
 class DiscoveryFindsTheShapes(unittest.TestCase):
@@ -185,11 +272,51 @@ class DiscoveryFindsTheShapes(unittest.TestCase):
             discover._sites_in("probe.py",
                                "problems.append('other words')\n")[0].key)
 
+    # Named from the outside and not from `SCAN_EXCLUDE`. The earlier test
+    # asserted `not name.startswith(discover.SCAN_EXCLUDE)` using the very
+    # constant it was testing, and `str.startswith(())` is always False, so
+    # `SCAN_EXCLUDE = ()` left it green with the scanner reading every test
+    # suite in the repository.
+    TEST_SUITES = (
+        "scripts/tests/test_guard_catalogue.py",
+        "scripts/tests/test_bench_check.py",
+        "tools/oracle/tests/faults.mjs",
+        "tools/bench/tests/registry_test.mjs",
+    )
+
     def test_it_does_not_scan_test_suites(self) -> None:
         """A test's own assertions are not guards, and scanning them would
         make every throw in a suite a site needing a catalogue entry."""
-        for name in discover.tracked_sources():
-            self.assertFalse(name.startswith(discover.SCAN_EXCLUDE), name)
+        scanned = set(discover.tracked_sources())
+        self.assertTrue(scanned)
+        for name in self.TEST_SUITES:
+            with self.subTest(name):
+                self.assertTrue((ROOT / name).is_file(),
+                                f"{name} is gone, so this test now names "
+                                f"nothing and proves nothing")
+                self.assertNotIn(name, scanned)
+
+    def test_a_docstring_shape_table_is_not_a_refusal(self) -> None:
+        """Five rows of this module's own shape table were counted as five
+        refusals, so deleting the documentation turned the census red."""
+        body = ('"""A module.\n\n'
+                '| `problems.append(` | Python | a collected problem |\n'
+                '| `throw new Error(` | JavaScript | a refusal |\n'
+                '"""\n'
+                "# print(\"FAIL: this is a comment\")\n"
+                "def check(problems):\n"
+                "    problems.append('the only real refusal here')\n")
+        sites = discover._sites_in("probe.py", body)
+        self.assertEqual([s.message for s in sites],
+                         ["the only real refusal here"])
+
+    def test_a_coloured_printed_refusal_is_a_site(self) -> None:
+        """`guard_probe.py` prints `print(f"{RED}FAIL{OFF}: ...")`, so the
+        census that refuses an unclaimed refusal could not see the top-level
+        refusal of the file that runs it."""
+        sites = discover._sites_in(
+            "probe.py", 'print(f"{RED}FAIL{OFF}: the guard harness")\n')
+        self.assertEqual([s.shape for s in sites], ["py-print-fail"])
 
     def test_it_does_not_scan_crates(self) -> None:
         """Decision 7 of the design plan: a runtime refusal inside a crate is
@@ -218,6 +345,25 @@ class TheEnvironmentScrub(unittest.TestCase):
             with self.subTest(verb):
                 with self.assertRaises(sandbox.SandboxError):
                     sandbox.repo_read(verb, "--help")
+
+    def test_repo_read_refuses_the_write_forms_of_config(self) -> None:
+        """`config` is a read or a write depending on its next argument.
+
+        `git config core.hooksPath X` inside REPO_ROOT rewrites the
+        developer's clone, and the verb was not in the forbidden list at all
+        because the tripwire needs `config --get`.
+        """
+        for args in (("config", "core.hooksPath", ".githooks"),
+                     ("config", "--unset", "core.hooksPath"),
+                     ("config", "--global", "user.name", "x"),
+                     ("config",)):
+            with self.subTest(" ".join(args)):
+                with self.assertRaises(sandbox.SandboxError):
+                    sandbox.repo_read(*args)
+
+    def test_repo_read_still_allows_the_read_forms_of_config(self) -> None:
+        """A tripwire that cannot read `core.hooksPath` watches nothing."""
+        self.assertIn("core.", sandbox.repo_read("config", "--list"))
 
 
 class TheTripwire(unittest.TestCase):
@@ -282,9 +428,50 @@ class TheDeclaredConstantRatchet(unittest.TestCase):
                     f"strict the guard is")
 
     def test_a_changed_value_changes_its_digest(self) -> None:
-        first = census.constant_digest('{".dcm", ".dicom", ".ima"}')
-        second = census.constant_digest('{".dcm"}')
-        self.assertNotEqual(first, second)
+        # Two arbitrary strings. They used to be a third copy of another
+        # guard's source line, which is the duplication the ratchet exists to
+        # remove rather than to spread.
+        self.assertNotEqual(census.constant_digest("a strict value"),
+                            census.constant_digest("a weaker value"))
+
+    def test_no_declared_constant_swallows_another(self) -> None:
+        """`constant_value` compiles with `re.S`, so `(.*)$` is greedy across
+        newlines and captures the rest of the file.
+
+        Measured on five patterns in S03: `TOLERANCE`'s recorded value was
+        3,426 characters of `pin_and_size_check.py` and its digest moved
+        whenever any line below it changed, which is not a ratchet on the
+        tolerance at all. A capture that reaches another declared constant is
+        the detectable form of that mistake.
+        """
+        names = {c.name for c in CONSTANTS}
+        for constant in CONSTANTS:
+            value = census.constant_value(constant, ROOT) or ""
+            for other in sorted(names - {constant.name}):
+                with self.subTest(f"{constant.name} < {other}"):
+                    self.assertNotIn(
+                        f"{other} = ", value,
+                        f"{constant.file}:{constant.name} captured the "
+                        f"declaration of {other}, so its recorded digest "
+                        f"moves when unrelated lines change and stands still "
+                        f"for nothing")
+
+    def test_no_declared_constant_captures_greedily(self) -> None:
+        """The shape of the same mistake, asserted where it is written.
+
+        The test above catches a greedy capture only when it happens to reach
+        another declared constant, and `TOLERANCE` was the last one in its
+        file, so it swallowed 3,426 characters and no value test could see it.
+        `(.*)` under `re.S` is the defect itself, so it is refused here.
+        """
+        for constant in CONSTANTS:
+            with self.subTest(f"{constant.file}:{constant.name}"):
+                self.assertNotIn(
+                    "(.*)", constant.pattern,
+                    f"{constant.name}'s pattern captures greedily and "
+                    f"census.constant_value compiles with re.S, so `.` "
+                    f"matches newlines and the capture runs to the last line "
+                    f"that can close it. Write `(.*?)` or a bounded class.")
 
     def test_a_tunable_constant_is_still_recorded(self) -> None:
         """A tunable value is still in the ratchet, because the point is that

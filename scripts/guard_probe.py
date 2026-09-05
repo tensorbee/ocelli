@@ -48,6 +48,15 @@ import tempfile
 import time
 from pathlib import Path
 
+# Before the first import of `guards.*`, and that ordering is the point.
+# `scrubbed_env` sets PYTHONDONTWRITEBYTECODE for CHILDREN. The parent is the
+# process that imports these modules and builds every probe's rejected state
+# from them, so without this it wrote `scripts/guards/__pycache__` inside the
+# developer's repository on every run. `.gitignore` covers it, so the tripwire
+# could not see it either, and a stale `.pyc` is capable of making the harness
+# build a rejected state that does not match its source.
+sys.dont_write_bytecode = True
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from guards import sandbox as sb  # noqa: E402
@@ -276,19 +285,42 @@ def run_probe(box: sb.Sandbox, guard_id: str, probe: Probe,
 # The harness's own self test
 # ---------------------------------------------------------------------------
 
+SELF_TEST_PROPERTIES = (
+    "the choke point refuses a cwd inside the real repository",
+    "the choke point refuses a directory this harness did not create",
+    "the banned `rm --cached` pair is refused by name",
+    "the environment scrub removes an inherited GIT_DIR",
+    "a probe builder that mutates nothing is a named failure",
+    "the sandbox is a faithful copy of the repository",
+    "the tripwire sees a planted change to each thing it captures",
+    "an unknown `--only` id refuses rather than selecting nothing",
+    "a run in which zero probes executed refuses",
+    "every declared defect is claimed by a probe, and the other way",
+)
+
+
 def self_test() -> int:
     """The refusals in this harness only ever run on a mismatch.
 
     No gate run produces one, which is the same reason
     `tools/oracle/check_sidecars.py` carries a self test.
+
+    **The printed count is derived from what actually ran.** It was a
+    hardcoded "(10 properties)", so deleting properties 9 and 10 still printed
+    ten and exited 0, and `probe-runner.self-test` is an accept probe that
+    cannot see a number. `SELF_TEST_PROPERTIES` above names each one and a
+    property whose block is gone fails here rather than shrinking the self
+    test quietly.
     """
     problems: list[str] = []
+    reached: set[int] = set()
 
     def check(label: str, condition: bool, detail: str = "") -> None:
         if not condition:
             problems.append(f"{label}: {detail}")
 
     # 1. The choke point refuses a cwd inside the real repository.
+    reached.add(1)
     inside = sb.Sandbox(path=ROOT / "scripts")
     try:
         inside.git("status")
@@ -299,6 +331,7 @@ def self_test() -> int:
               str(error))
 
     # 2. A directory this harness did not create is refused.
+    reached.add(2)
     with tempfile.TemporaryDirectory() as other:
         elsewhere = sb.Sandbox(path=Path(other))
         try:
@@ -310,6 +343,7 @@ def self_test() -> int:
                   "this harness created" in str(error), str(error))
 
     # 3. The banned pair is refused by name.
+    reached.add(3)
     with sb.sandbox() as box:
         try:
             box.git("rm", "--cached", "README.md")
@@ -319,6 +353,7 @@ def self_test() -> int:
                   str(error))
 
         # 4. The environment scrub removes an inherited GIT_DIR.
+        reached.add(4)
         os.environ["GIT_DIR"] = str(ROOT / ".git")
         try:
             env = sb.scrubbed_env()
@@ -332,6 +367,7 @@ def self_test() -> int:
             del os.environ["GIT_DIR"]
 
         # 5. A probe builder that mutates nothing is a named failure.
+        reached.add(5)
         try:
             box.substitute("README.md", "a string that is not in the file",
                            "x")
@@ -341,11 +377,13 @@ def self_test() -> int:
                   str(error))
 
         # 6. The sandbox is a faithful copy, by count.
+        reached.add(6)
         copied = len(list(box.path.rglob("*")))
         check("sandbox is populated", copied > 100,
               f"only {copied} entries were copied")
 
     # 7. The tripwire detects a planted change to each thing it captures.
+    reached.add(7)
     before = sb.tripwire_capture()
     for label in dict(sb.TRIPWIRE_READS):
         planted = dict(before)
@@ -357,6 +395,7 @@ def self_test() -> int:
           sb.tripwire_compare(before, before) == [], "it fired on itself")
 
     # 8. An unknown --only id refuses rather than selecting nothing.
+    reached.add(8)
     try:
         selected("floor", ["no-such-probe"])
         problems.append("--only accepted an id no entry declares")
@@ -365,22 +404,34 @@ def self_test() -> int:
               in str(error), str(error))
 
     # 9. A run in which zero probes executed refuses.
+    reached.add(9)
     check("zero probes refuses", _zero_is_not_a_pass(0) is not None,
           "a run over an empty selection reported a pass")
 
     # 10. Every declared defect is claimed by a probe, and the other way.
+    reached.add(10)
     declared = {p.defect for g in GUARDS for p in g.probes if p.defect}
     check("defects are claimed", declared == set(DEFECTS),
           f"catalogue probes name {sorted(declared)}, DEFECTS names "
           f"{sorted(DEFECTS)}")
+
+    absent = [f"{n}. {SELF_TEST_PROPERTIES[n - 1]}"
+              for n in range(1, len(SELF_TEST_PROPERTIES) + 1)
+              if n not in reached]
+    if absent:
+        problems.append(
+            "the self test declares " + str(len(SELF_TEST_PROPERTIES)) +
+            " properties and these never ran: " + "; ".join(absent) +
+            ". A property whose block was deleted leaves the printed count "
+            "standing for work nothing did.")
 
     if problems:
         print("FAIL: the guard harness's own self test")
         for problem in problems:
             print(f"  {problem}")
         return 1
-    print("OK: the guard harness refuses what it says it refuses "
-          "(10 properties)")
+    print(f"OK: the guard harness refuses what it says it refuses "
+          f"({len(reached)} properties)")
     return 0
 
 
@@ -415,7 +466,16 @@ def main() -> int:
             defect = f"  KNOWN DEFECT {probe.defect}" if probe.defect else ""
             print(f"{probe.profile:5} L{probe.level} {probe.polarity:6} "
                   f"{probe.id:38} {guard_id}{defect}")
-        print(f"{len(probes)} probe(s)")
+            # `note` is where the R2 rationale for a probe's INPUT is written,
+            # and it reached no output at all until the S03 review's second
+            # pass counted it set on half the catalogue and read by nothing.
+            if probe.note:
+                print(f"{DIM}      {probe.note}{OFF}")
+        refusals = [p for _, p in probes if p.polarity == "refuse"]
+        guards = {gid for gid, p in probes if p.polarity == "refuse"}
+        print(f"{len(probes)} probe(s): {len(refusals)} that must drive a "
+              f"guard red, over {len(guards)} guard(s), and "
+              f"{len(probes) - len(refusals)} that must be accepted")
         return 0
 
     empty = _zero_is_not_a_pass(len(probes))
@@ -426,6 +486,13 @@ def main() -> int:
     problems: list[str] = []
     notes: list[str] = []
     counts = {"pass": 0, "fail": 0, "known-defect": 0, "error": 0}
+    # Counted separately because they are different quantities and the summary
+    # line reported one of them under the other's name until the S03 review's
+    # second pass. `counts["pass"]` is a PROBE count and includes the accept
+    # probes, which were never red, so it was never the number of guards
+    # observed red.
+    drove_red: set[str] = set()
+    accepted = 0
 
     before = sb.tripwire_capture()
     started = time.monotonic()
@@ -438,6 +505,11 @@ def main() -> int:
                 continue
             outcome = run_probe(box, guard_id, probe, problems, notes)
             counts[outcome] += 1
+            if outcome == "pass":
+                if probe.polarity == "refuse":
+                    drove_red.add(guard_id)
+                else:
+                    accepted += 1
             mark = {"pass": f"{GREEN}red{OFF}", "fail": f"{RED}HARNESS{OFF}",
                     "known-defect": f"{RED}defect{OFF}",
                     "error": f"{RED}error{OFF}"}[outcome]
@@ -464,10 +536,15 @@ def main() -> int:
         for problem in problems:
             print(f"  {problem}")
         return 1
-    print(f"{GREEN}OK{OFF}: {counts['pass']} guard(s) observed red for their "
-          f"declared reason, {counts['known-defect']} known defect(s) still "
-          f"open, {len(set(p.invoke.key for _, p in probes))} control(s) "
-          f"green, {elapsed:.1f}s")
+    # `controls` is keyed exactly as `run_controls` dedupes, on the control's
+    # own invoke and its declared status and fragment. Counting distinct
+    # `probe.invoke.key` instead reported the wrong number in both profiles,
+    # because eleven probes declare a control that is not their invoke.
+    print(f"{GREEN}OK{OFF}: {counts['pass'] - accepted} refusal probe(s) drove "
+          f"{len(drove_red)} guard(s) red for their declared reason, "
+          f"{accepted} accept probe(s) green, {counts['known-defect']} known "
+          f"defect(s) still open, {len(controls)} control(s) green, "
+          f"{elapsed:.1f}s")
     return 0
 
 

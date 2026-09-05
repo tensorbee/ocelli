@@ -109,11 +109,19 @@ in S16. The cluster is off by five, which is the signature of an F-numbering
 carried over from before five stories were inserted.
 
 **Those comments were corrected in S03, by commit `d74ad3a`, and every live one
-of them now names F-101.** Two sites deliberately keep the old number, in
-`bin/ocelli.sh` and `crates/ocelli-wasm/Cargo.toml`, because each quotes what an
-earlier comment said and changing the number there would falsify an accurate
-record of a past error. `docs/sprints/AS_BUILT.md` keeps its own instances for
-the same reason, since it is append-only history and no story edits it. What this
+of them now names F-101.** Six occurrences of the old number survive in the
+code tree, in `bin/ocelli.sh`, `crates/ocelli-wasm/Cargo.toml`,
+`scripts/bench_check.py`, `tools/bench/src/registry.mjs` and two blocks of
+`tools/bench/subjects.json`. Every one of them is an account of the past error
+rather than a live attribution, so correcting the number there would falsify an
+accurate record. Count them rather than trusting this sentence:
+
+```bash
+grep -rn F-096 bin/ ci/ crates/ scripts/ tools/ .githooks/
+```
+
+`docs/sprints/AS_BUILT.md` keeps its own instances for the same reason, since
+it is append-only history and no story edits it. What this
 story does instead is make the class of mistake unrepeatable in the registry: a
 `subject_story` that names no real F-ID fails the gate, and one that names the
 wrong real F-ID is why the rows carry a definition and a specification citation

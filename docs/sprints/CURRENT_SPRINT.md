@@ -15,12 +15,17 @@ gates that decide the codec architecture.
 | F-011 | E2.3 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w | done |
 | F-X006 | Y1.1 | Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders | Test | 3w | done |
 | F-X007 | Y1.2 | Oracle volume and MPR reference renders, so the spacing rows are asked something | Test | 3w | done |
-| F-X009 | Y1.4 | A standing test for every repository guard, not a mutation run once at authoring time | Build | 3w | pending |
+| F-X009 | Y1.4 | A standing test for every repository guard, not a mutation run once at authoring time | Build | 3w | done |
 
-Count the rows rather than trusting a sentence:
+**The Status column above is hand-typed and nothing derives it, so it goes
+stale.** No script reads this file's table: `scripts/backlog_check.py` never
+opens it, and `scripts/sprint_workflow.py` reads only the sprint name from the
+title. `docs/sprints/BACKLOG.md` is the authority on status. Read the two
+together rather than trusting either sentence:
 
 ```bash
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S03 / {print $2, $9}'
 ```
 
 ## What this sprint is

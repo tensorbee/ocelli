@@ -670,8 +670,8 @@ deviation D-12 says this crate must not grow. The clock is the caller's.
 30.0.1 ships `webgpu` among its default features and not `webgl`, read from the
 pinned crate's own manifest, so `ocelli-render` could reach WebGPU on wasm32 and
 could not reach WebGL2. That is deviation **D-14**, and the measured cost today
-is zero bytes because `ocelli-wasm` has an empty dependency table and never
-reaches wgpu.
+is zero bytes because `ocelli-wasm` does not depend on `ocelli-render` and so
+never reaches wgpu, whatever else that crate depends on.
 
 **HLD sections implemented.** Section 7's tiers, section 22's `Caps` shape,
 section 9 and decision D5, section 31's degrade-never-fail rule as D-07
@@ -872,11 +872,12 @@ time to `measured`, `unavailable` naming the blocking story, or `incomparable`
 on a host-class mismatch, and a fourth state, a recorded number for a subject
 that does not exist, is refused by a gate rather than left to discipline.
 
-**Ten of the eleven subjects had nothing to measure when this story landed, and
-the harness says so.** Nine are blocked on a story that has not landed, which is
-decision D7 holding rather than a shortfall. The tenth,
-`tier.startup_microbenchmark`, was blocked on F-004, which landed in this same
-sprint, so it now reports a `done` story and still has no runner.
+**Nine of the eleven subjects had nothing to measure when this story landed, and
+the harness says so.** All nine are blocked on a story that has not landed,
+which is decision D7 holding rather than a shortfall. The other two do have a
+subject: `wasm.cold_start` measures the release wasm artefact, and
+`tier.startup_microbenchmark` was blocked on F-004, which landed earlier in this
+same sprint, so it reports a `done` story and still has no runner.
 `bin/ocelli.sh bench --list` is the authority on the split rather than any
 sentence, because it reads the backlog and a written count goes stale the first
 time a story lands. No proxy workload was

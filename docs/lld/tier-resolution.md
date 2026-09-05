@@ -134,11 +134,13 @@ shading.
 
 **The warm-up is not tidiness.** The first submission on a fresh device pays
 for lazy pipeline compilation, driver initialisation and command-buffer setup.
-Measured on an Apple M5 Max: 6.2 ms for the first 65,536 fragments, and three
-orders of magnitude less for exactly the same work immediately afterwards.
-Without the warm-up, the calibration classifies a current Apple GPU at 10.5
-megapixels per second, which is below the software band, and the whole
-resolver would then have the deviation D-07 misdetection with its sign
+Measured on an Apple M5 Max, twenty release runs in fresh processes: 5.4 to
+9.3 ms for the first 65,536 fragments, median 6.1, and 0.32 to 0.70 ms, median
+0.36, for exactly the same work immediately afterwards. That is a factor of
+between 8.8 and 20.7, and the spread is this machine's noise rather than a
+bound. Without the warm-up, the calibration classifies a current Apple GPU at
+about 10.5 megapixels per second, which is below the software band, and the
+whole resolver would then have the deviation D-07 misdetection with its sign
 flipped.
 
 The two-stage split after that exists so a genuine rasteriser does not hang
@@ -371,9 +373,9 @@ the render path is wired in from S11. That crate had an empty
 
 ## What this story deliberately does not do
 
-- **It does not wire tier resolution into `ocelli-wasm`.** That module has an
-  no dependency on `ocelli-render` and so never reaches wgpu, the boundary is E16.2
-  in S16, and no browser path of the resolver can run before F-039 in S11.
+- **It does not wire tier resolution into `ocelli-wasm`.** That module has no
+  dependency on `ocelli-render` and so never reaches wgpu. The boundary is
+  E16.2 in S16, and no browser path of the resolver can run before F-039 in S11.
   Wiring it now would add an entry point nothing calls and re-baseline the
   wasm size budget for a feature with no user. F-004 touches
   `ci/wasm-size-budget.json` not at all.

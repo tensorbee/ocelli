@@ -19,6 +19,21 @@ predates the build pipeline story. `wasm-pack` runs a wasm-bindgen CLI whose
 version must match the crate version, so a range lets the two drift and the
 mismatch reads as a build break rather than as a resolution change.
 
+**How the entry is read, and why it is not a regex.** Cargo accepts two forms,
+`wgpu = "=30.0.1"` and `wgpu = { version = "=30.0.1", features = [...] }`.
+The first version of this script took the FIRST quoted string in the entry as
+the version, which is positional rather than structural, and the S03 sprint
+review measured what that costs:
+
+    wgpu = { default-features = false, features = ["=noop"], version = "30" }
+
+printed `OK: wgpu pinned exactly`. The version read was `=noop`, which starts
+with `=`, and the real version was a caret range nobody looked at. A hard rule
+in CLAUDE.md, "wgpu is pinned exactly", was defeated by the ORDER of the keys.
+So the file is parsed with `tomllib` and the version is taken from the
+`version` key. A table that declares no version at all is refused rather than
+guessed at.
+
 **The size budget.** Story E1.2 is "wasm-pack build pipeline with a hard size
 budget gate", and Appendix A gate A4 asks whether binary size and cold start
 land within budget at all, estimating 3 to 8 MB uncompressed before tuning with
@@ -39,8 +54,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -71,28 +86,46 @@ EXACT_PINNED = {
 TOLERANCE = 0.05
 
 
+def declared_version(entry: object) -> str | None:
+    """The version a `[workspace.dependencies]` entry declares.
+
+    A bare string IS the version. A table declares it under the `version`
+    key, and the rest of the table is features, a path or a
+    `default-features` flag, any of which may hold a string that starts with
+    `=`. `None` means the entry declares no version this check can read, and
+    that is refused rather than assumed to be exact.
+    """
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        version = entry.get("version")
+        return version if isinstance(version, str) else None
+    return None
+
+
 def check_pins() -> list[str]:
-    text = CARGO.read_text()
-    block = re.search(r"^\[workspace\.dependencies\]$(.*?)(?=^\[|\Z)",
-                      text, re.M | re.S)
-    if block is None:
+    try:
+        cargo = tomllib.loads(CARGO.read_text())
+    except tomllib.TOMLDecodeError as error:
+        return [f"Cargo.toml does not parse as TOML: {error}"]
+    declared = cargo.get("workspace", {}).get("dependencies")
+    if not isinstance(declared, dict):
         return ["Cargo.toml has no [workspace.dependencies] section"]
 
     problems = []
     for crate, reason in sorted(EXACT_PINNED.items()):
-        entry = re.search(rf'^\s*{re.escape(crate)}\s*=\s*(.+)$',
-                          block.group(1), re.M)
-        if entry is None:
+        if crate not in declared:
             problems.append(
                 f"{crate} is not declared in [workspace.dependencies], "
                 f"and it must be, pinned exactly. {reason}")
             continue
-        value = entry.group(1)
-        version = re.search(r'"([^"]+)"', value)
-        if version is None:
-            problems.append(f"{crate}: cannot read a version from {value!r}")
+        spec = declared_version(declared[crate])
+        if spec is None:
+            problems.append(
+                f"{crate}: cannot read a version from "
+                f"{declared[crate]!r}. An entry with no `version` key is "
+                f"not an exact pin, whatever else the table holds. {reason}")
             continue
-        spec = version.group(1)
         if not spec.startswith("="):
             problems.append(
                 f"{crate} = \"{spec}\" is a RANGE, not an exact pin. {reason}")

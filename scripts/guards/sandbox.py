@@ -104,15 +104,32 @@ def repo_read(*args: str) -> str:
     `ls-files` for the copy, and the tripwire's status reads. Nothing here
     takes a write verb, and `git()` below refuses to run against REPO_ROOT at
     all, so a write can only arrive by editing this function.
+
+    `config` is the one verb that is a read or a write depending on its next
+    argument, and `git config core.hooksPath X` in REPO_ROOT would rewrite the
+    developer's `.git/config`. The tripwire needs `config --get`, so the verb
+    cannot simply be banned: the READ forms are listed and everything else is
+    refused. The whole safety argument of this file is that a reviewer reads
+    these two functions and then knows the harness cannot write, and a verb
+    that is one argument away from a write breaks that.
     """
     forbidden = {"add", "commit", "rm", "checkout", "reset", "clean", "init",
                  "apply", "merge", "rebase", "push", "worktree", "gc",
                  "write-tree", "update-index", "stash", "restore", "switch",
                  "mv", "tag", "branch", "fetch", "pull", "am", "cherry-pick"}
+    config_reads = {"--get", "--get-all", "--get-regexp", "--list", "-l",
+                    "--get-urlmatch"}
     if args and args[0] in forbidden:
         raise SandboxError(
             f"repo_read refuses `git {args[0]}`. This function is the only "
             f"path to the developer's repository and it is read-only.")
+    if args and args[0] == "config" and (
+            len(args) < 2 or args[1] not in config_reads):
+        raise SandboxError(
+            f"repo_read refuses `git config {' '.join(args[1:2])}`. `config` "
+            f"is a read only in its {', '.join(sorted(config_reads))} forms. "
+            f"Every other form writes, and `core.hooksPath` written here is "
+            f"the developer's clone.")
     return subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True,
                           text=True, check=True,
                           env=scrubbed_env()).stdout
@@ -287,7 +304,19 @@ def build() -> Sandbox:
     for name in names:
         source = REPO_ROOT / name
         if not source.is_file():
-            continue
+            # Refused rather than skipped. A tracked path that is a symlink, a
+            # gitlink or a broken link was dropped silently, so the sandbox
+            # differed from the repository and a guard about that path could
+            # not fire. There are none today, every tracked entry being
+            # 100644 or 100755, and a silent divergence between the copy and
+            # the original is the one thing the control run assumes away.
+            raise SandboxError(
+                f"{name} is tracked and is not a regular file in the working "
+                f"tree. The sandbox is a copy of `git ls-files`, so a path it "
+                f"cannot copy makes the copy differ from the repository and "
+                f"every probe over that path prove nothing. Symlink, gitlink "
+                f"or deleted-but-tracked, each needs a decision rather than a "
+                f"skip.")
         destination = target / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
@@ -308,7 +337,18 @@ class sandbox:  # noqa: N801, a context manager reads better lower case here
     1. the `finally` below
     2. SIGINT and SIGTERM handlers that remove it and re-raise
     3. `sweep_stale` on the next run, for a `kill -9`
-    4. nothing is ever written inside REPO_ROOT, so there is no residue there
+    4. no git call writes inside REPO_ROOT, so there is no residue there
+
+    Point 4 said "nothing is ever written inside REPO_ROOT" until the S03
+    review's second pass, and that was false. `scrubbed_env` sets
+    `PYTHONDONTWRITEBYTECODE` for CHILDREN, and the PARENT is the process that
+    imports `guards.*`, so a run left `scripts/guards/__pycache__` behind.
+    `.gitignore` covers it, so the tripwire's `ls-files --others
+    --exclude-standard` could not see it either, and a stale `.pyc` is capable
+    of making the harness build a rejected state that does not match its
+    source, which is the one failure the inversion argument assumes away.
+    `scripts/guard_probe.py` and `scripts/guard_census.py` now set
+    `sys.dont_write_bytecode` before that import.
     """
 
     def __init__(self) -> None:

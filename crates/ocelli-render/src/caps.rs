@@ -692,10 +692,6 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
             measured_by,
             OverrideOutcome::RefusedUnconstructible(Tier::A),
         ),
-        // Forcing tier B onto a rasteriser the evidence called software is
-        // deliberately allowed, because that is how the misdetection gets
-        // diagnosed on the estate it happens on. It is recorded, so it is
-        // never silent.
         // Same clamp, same reason. Forcing tier B onto an adapter the evidence
         // called software stays allowed, because that is how a misdetection
         // gets diagnosed on the estate it happens on. Forcing it where no

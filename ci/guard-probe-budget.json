@@ -10,6 +10,11 @@
       "guard": "device",
       "tunable": false
     },
+    "ci/check-device-ownership.sh:OWNED_ACCESSORS": {
+      "digest": "a8f8c2967de78d46",
+      "guard": "device",
+      "tunable": false
+    },
     "crates/*/src/lib.rs:NO_STD_CRATES": {
       "digest": "a7d75f8deccc3710",
       "guard": "nostd",
@@ -17,6 +22,11 @@
     },
     "eslint.config.js:LINEAR_MEMORY_ALLOWANCE": {
       "digest": "0f511cb2956fefc1",
+      "guard": "lint-policy",
+      "tunable": false
+    },
+    "eslint.config.js:NO_CACHED_WASM_MEMORY_ALIAS": {
+      "digest": "5db3b2b3e3cad8d3",
       "guard": "lint-policy",
       "tunable": false
     },
@@ -56,7 +66,7 @@
       "tunable": false
     },
     "scripts/pin_and_size_check.py:TOLERANCE": {
-      "digest": "5cdcba12a9fa4e4b",
+      "digest": "0602d7c813c1f6e7",
       "guard": "pins",
       "tunable": true
     },
@@ -85,13 +95,18 @@
       "guard": "provenance",
       "tunable": false
     },
+    "scripts/sprint_workflow.py:HANDOFF_FIELDS": {
+      "digest": "88c23fe498dee282",
+      "guard": "handoff",
+      "tunable": false
+    },
     "scripts/staged_content_check.py:ARTEFACT_PARTS": {
       "digest": "9e1edb881ab884b8",
       "guard": "content",
       "tunable": false
     },
     "scripts/staged_content_check.py:COMPARE_OUTPUT_PREFIXES": {
-      "digest": "967177d4662a668a",
+      "digest": "713a5b97d46fbba4",
       "guard": "content",
       "tunable": false
     },
@@ -101,12 +116,12 @@
       "tunable": false
     },
     "scripts/staged_content_check.py:MAX_BYTES": {
-      "digest": "fa91539ed7239c31",
+      "digest": "205d51957b8913d0",
       "guard": "content",
       "tunable": true
     },
     "scripts/staged_content_check.py:ORACLE_OUTPUT_PREFIXES": {
-      "digest": "97536d18f79c9e3f",
+      "digest": "0c546a9672945746",
       "guard": "content",
       "tunable": false
     },
@@ -116,7 +131,7 @@
       "tunable": true
     },
     "scripts/staged_content_check.py:SPIKE_OUTPUT_PREFIXES": {
-      "digest": "fed8fa985c7be3ee",
+      "digest": "c6d2111ee7a744f2",
       "guard": "content",
       "tunable": false
     },
@@ -134,8 +149,8 @@
   "note": "Recorded measurements, not guesses. `wall_clock_seconds` is what the harness took on the machine that recorded it. `constants` is the declared-constant ratchet and `uncovered` is the uncovered-refusal ratchet, both written by scripts/guard_census.py --record.",
   "oracle_faults": 23,
   "uncovered": {
-    "sites": 0,
-    "sweep_complete": true
+    "sites": 9,
+    "sweep_complete": false
   },
   "wall_clock_seconds": {
     "deep": 17.2,

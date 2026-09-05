@@ -2,9 +2,9 @@
   "$about": [
     "The benchmark harness's subject registry. One row per thing this project will ever measure, and the row exists from the moment the measurement is DEFINED rather than from the moment it becomes possible.",
     "HLD section 26's last rule is 'Measure with the benchmark harness before optimising anything.' The rule names an instrument and the HLD gives it no shape, so this file is the shape. See docs/lld/benchmarks.md.",
-    "THE DEFECT THIS FILE EXISTS TO PREVENT is a plausible number recorded for a subject that does not exist. Ten of the eleven rows below have no subject in the tree today, because decision D7 puts the oracle and the instruments before the port code. A row with a `subject_story` that is not `done` is reported `unavailable`, it names the story a reader should go and read, and scripts/bench_check.py refuses both a runner file and a ci/bench-baseline.json entry for it.",
+    "THE DEFECT THIS FILE EXISTS TO PREVENT is a plausible number recorded for a subject that does not exist. Most of the rows below have no subject in the tree today, because decision D7 puts the oracle and the instruments before the port code. A row with a `subject_story` that is not `done` is reported `unavailable`, it names the story a reader should go and read, and scripts/bench_check.py refuses both a runner file and a ci/bench-baseline.json entry for it. NO COUNT IS WRITTEN HERE, because a written count goes stale the first time a story lands, and this one already has. `node tools/bench/run.mjs --list` prints the split and reads the backlog to do it.",
     "The definition is fixed NOW, from the specification, for every row including the ones with no subject. That is what stops the story that lands the runner from redefining the measurement into something easier to take.",
-    "Every `subject_story` was resolved through docs/sprints/allocation.json rather than copied from a comment. That is not a formality: comments across this tree once named F-096 as the boundary story, and F-096 is E15.3, measurement persistence, in S36, while E16.2 is F-101 in S16. Those comments were corrected in S02 and now name F-101. Resolving through the allocation is what stops the registry inheriting the next mistake of that shape."
+    "Every `subject_story` was resolved through docs/sprints/allocation.json rather than copied from a comment. That is not a formality: comments across this tree once named F-096 as the boundary story, and F-096 is E15.3, measurement persistence, in S36, while E16.2 is F-101 in S16. Those comments were corrected in S03, by commit d74ad3a, and now name F-101. Resolving through the allocation is what stops the registry inheriting the next mistake of that shape."
   ],
   "$fields": {
     "id": "Stable identifier. The runner file, when one exists, is src/runners/<id with dots replaced by underscores>.mjs",
@@ -89,7 +89,7 @@
       "tiers": ["A", "B", "C"],
       "subject_story": "F-101",
       "feeds": [],
-      "note": "F-101 is E16.2, S16. Resolved through docs/sprints/allocation.json, not from a comment: comments here once named F-096 for this work, and F-096 is E15.3, measurement persistence, in S36. They were corrected in S02."
+      "note": "F-101 is E16.2, S16. Resolved through docs/sprints/allocation.json, not from a comment: comments here once named F-096 for this work, and F-096 is E15.3, measurement persistence, in S36. They were corrected in S03, by commit d74ad3a."
     },
     {
       "id": "interaction.scroll",

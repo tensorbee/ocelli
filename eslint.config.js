@@ -20,7 +20,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 // so the allowance is file-scoped to `packages/core/src/bulk.ts` instead, and
 // that file is expected to stay small enough that the difference does not
 // matter. Widening the allowance to a second file is a design-plan decision.
-// TWO selectors, not one, and the second exists because the first did not
+// A SECOND selector was added because the first did not
 // catch what this repository already writes. The original matched only
 // `new DataView(wasm.memory.buffer)`, where argument 0's object is itself a
 // member expression ending in `memory`. `packages/core/src/panic.ts`
@@ -31,14 +31,20 @@ import reactHooks from "eslint-plugin-react-hooks";
 // passed silently. So the ban this gate advertises was not banning the shape
 // the codebase uses.
 //
-// **The residual limit, stated rather than left to be discovered.** A caller
-// that destructures twice, `const { buffer } = wasm.memory`, reaches
-// `new DataView(buffer)` with a bare identifier as argument 0, and neither
-// selector matches that without banning the identifier `buffer` everywhere,
-// which would fire on ordinary code. HLD 17.2's rule is about intent and no
-// AST selector expresses intent. What these two cover is every shape present
-// in this repository today, and F-X009 owns the standing probe that keeps
-// them honest.
+// A THIRD selector was added by the S03 review's second pass, because the
+// first two are keyed on the identifier NAME `memory`. Four shapes were
+// measured escaping them:
+//
+//   const { buffer } = wasm.memory;  new DataView(buffer);
+//   const mem = wasm.memory;         new DataView(mem.buffer);
+//   const { memory: m } = wasm;      new DataView(m.buffer);
+//   const buf = wasm.memory.buffer;  new DataView(buf);
+//
+// A view cannot be matched once its argument is a bare identifier the rule
+// has never seen, so the third selector matches the ALIAS instead, at the
+// declaration that takes linear memory or its buffer out of the module
+// object. That is one step earlier than the view and it is the step every
+// escaping shape above has in common.
 const NO_CACHED_WASM_VIEW_MEMBER = {
   selector:
     'NewExpression[callee.name=/(Array|DataView)$/]' +
@@ -65,7 +71,116 @@ const NO_CACHED_WASM_VIEW_DESTRUCTURED = {
     "returns the pointer, use it, and let it go. See HLD section 17.2.",
 };
 
-export default tseslint.config(
+// The alias shape. `wasm.memory` or `wasm.memory.buffer` bound to a name, in
+// either declaration form, which is what every shape the two view selectors
+// miss does first.
+const NO_CACHED_WASM_MEMORY_ALIAS = {
+  selector:
+    'VariableDeclarator[init.property.name="memory"],' +
+    'VariableDeclarator[init.property.name="buffer"]' +
+    '[init.object.property.name="memory"],' +
+    'VariableDeclarator > ObjectPattern > Property[key.name="memory"]',
+  message:
+    "Do not take wasm memory or its buffer out into a binding here. A view " +
+    "built over the alias is the same hazard as a view built over " +
+    "`wasm.memory.buffer`, and renaming what it is reached through is what " +
+    "makes it invisible to a lint. Build the view inside " +
+    "packages/core/src/bulk.ts, immediately after the alloc that returns " +
+    "the pointer, use it, and let it go. See HLD section 17.2.",
+};
+
+// **What still escapes, stated rather than left to be discovered.** All three
+// selectors are anchored on a variable declaration or on the literal member
+// chain. A view over memory reached any other way is not matched: a function
+// parameter, an assignment to a binding that already exists, the return value
+// of a call, a class field read through `this`, and the computed form
+// `wasm["memory"]`. HLD 17.2's rule is about intent and no AST selector
+// expresses intent.
+//
+// **What watches these three.** All three selectors and the allowance list are
+// declared constants in `scripts/guards/catalogue.py`'s ratchet, so weakening
+// one of them lands in front of a reviewer as a changed digest.
+// `assertTheBanIsIntact` below is what watches the OTHER direction, a further
+// config block switching the rule off tree-wide, which the ratchet cannot
+// see because it reads two named strings rather than the whole file. **No
+// probe drives this rule red**, so nothing here observes the selectors
+// failing to fire. That is the standing gap, and it is a gap in `gate lint`
+// rather than in the ratchet.
+const RESTRICTED = "no-restricted-syntax";
+const BAN = [
+  NO_CACHED_WASM_VIEW_MEMBER,
+  NO_CACHED_WASM_VIEW_DESTRUCTURED,
+  NO_CACHED_WASM_MEMORY_ALIAS,
+];
+
+// The file lists permitted to switch the ban off, and nothing else may. Each
+// appears exactly once. The reasoning for each is at the block that uses it.
+const ALLOWED_TO_DISABLE = [
+  ["packages/core/src/bulk.ts", "packages/core/src/panic.ts"],
+  ["packages/core/src/*.test.ts"],
+];
+
+/**
+ * Refuse a config that weakens the cached-wasm-view ban anywhere.
+ *
+ * The S03 review's second pass measured this: a FOURTH block naming any
+ * wider glob and setting `"no-restricted-syntax": "off"` turns the ban off
+ * across the tree, eslint reports nothing because that is exactly what a flat
+ * config is for, and the ratchet over the two selector strings sees no change
+ * because neither string moved. So the config checks itself as it loads:
+ * exactly one block may set the rule, it must set all three selectors at
+ * error, and every other mention of the rule must be one of the declared
+ * allowances. A throw here fails `npm run lint` and every
+ * gate that runs it, which is the loudest failure this file can produce.
+ */
+function assertTheBanIsIntact(config) {
+  const disabled = [];
+  let enforced = 0;
+  for (const entry of config) {
+    const setting = entry?.rules?.[RESTRICTED];
+    if (setting === undefined) continue;
+    const level = Array.isArray(setting) ? setting[0] : setting;
+    const where = JSON.stringify(entry.files ?? null);
+    if (level === "off" || level === 0) {
+      disabled.push(where);
+      continue;
+    }
+    const selectors = Array.isArray(setting) ? setting.slice(1) : [];
+    const intact =
+      level === "error" &&
+      selectors.length === BAN.length &&
+      BAN.every((rule, index) => selectors[index] === rule);
+    if (!intact) {
+      throw new Error(
+        `eslint.config.js: the block for ${where} sets ${RESTRICTED} to ` +
+          "something other than the three cached-wasm-view selectors at " +
+          "error. HLD 17.2's ban is not a preference. See the comment above " +
+          "NO_CACHED_WASM_VIEW_MEMBER.",
+      );
+    }
+    enforced += 1;
+  }
+  if (enforced !== 1) {
+    throw new Error(
+      `eslint.config.js: ${enforced} block(s) enforce ${RESTRICTED} and ` +
+        "exactly one must. HLD 17.2's ban is stated once, over " +
+        "**/*.{ts,tsx}, so that a reader can find it.",
+    );
+  }
+  const allowed = ALLOWED_TO_DISABLE.map((files) => JSON.stringify(files));
+  const surplus = disabled.filter((where) => !allowed.includes(where));
+  if (surplus.length > 0 || disabled.length !== allowed.length) {
+    throw new Error(
+      `eslint.config.js: ${RESTRICTED} is switched off for ${disabled} and ` +
+        `the only lists permitted to switch it off are ${allowed}. ` +
+        "Widening the allowance is a design-plan decision, and adding a " +
+        "further block is how the ban gets turned off tree-wide without " +
+        "anyone editing the rule. See HLD section 17.2.",
+    );
+  }
+}
+
+const config = tseslint.config(
   {
     ignores: [
       "**/dist/**",
@@ -91,7 +206,7 @@ export default tseslint.config(
   {
     files: ["**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-syntax": ["error", NO_CACHED_WASM_VIEW_MEMBER, NO_CACHED_WASM_VIEW_DESTRUCTURED],
+      "no-restricted-syntax": ["error", ...BAN],
     },
   },
   {
@@ -251,8 +366,9 @@ export default tseslint.config(
     //
     // `WebAssembly` is granted because these drivers instantiate a module
     // directly. **They do build a view over that module's linear memory**, and
-    // that is deliberate rather than an oversight. NO_CACHED_WASM_VIEW above is
-    // scoped to `**/*.{ts,tsx}` and does not reach a `.mjs` file, and the
+    // that is deliberate rather than an oversight. The cached-wasm-view ban
+    // above is scoped to `**/*.{ts,tsx}` and does not reach a `.mjs` file,
+    // and the
     // allowance is NOT widened here. The harnesses obey section 17.2's actual
     // requirement anyway: each view is built immediately after the exported
     // `out_ptr()` that returns the offset, copied out with `.slice()`, and let
@@ -268,3 +384,7 @@ export default tseslint.config(
     },
   },
 );
+
+assertTheBanIsIntact(config);
+
+export default config;

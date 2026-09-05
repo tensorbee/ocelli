@@ -163,15 +163,35 @@ for hu in (-160, 40, 240, -60):
           f"{voi_linear_exact(hu, 40, 400):8.3f}")
 ```
 
-Expected, and these four rows go into the Rust suite **before** the shader is
-written:
+What that block prints, verbatim, and these four rows go into the Rust suite
+**before** the shader is written:
 
 ```
-  -160     0.000     1.594
-    40   127.819   127.500
+  -160     0.000     0.000
+    40   127.820   127.500
    240   255.000   255.000
    -60    63.910    63.750
 ```
+
+**CORRECTION, deviation D-13 in `docs/hld/DEVIATIONS.md`. Do not write 1.594
+into a fixture.** HLD section 18.3's own table gives 1.594 for the first row's
+LINEAR_EXACT and that value is wrong.
+Section 18.2's formula clamps at `x <= c - w/2`, which is 40 - 200 = -160,
+and -160 is not greater than -160, so the result is `ymin`.
+The body evaluates to 0.000 there in any case, from
+`((-160 - 40) / 400 + 0.5) * 255`,
+so no boundary convention produces 1.594. That figure is
+`voi_linear_exact(-157.5, 40, 400)`,
+which the block above will print if you ask it.
+Where section 18.3's worked value disagrees with section 18.2's formula, the
+formula is the specification, which is why the block above is run rather than
+transcribed. The asymmetry the row was reaching for lives at the UPPER bound,
+where LINEAR clamps at 239 and LINEAR_EXACT at 240.
+
+**Row two reads 127.820 here and 127.819 in HLD section 18.3.** The exact value
+is 127.819548..., so this is `:8.3f` rounding against the HLD's truncation and
+not a disagreement. Assert against the formula, never against a transcribed
+digit.
 
 **At the window centre the two functions differ by 0.32 of 255.** Invisible in
 a screenshot, immediate in a pixel diff. That single number is the argument for

@@ -32,8 +32,10 @@ should interrogate.
 
 ## What a known defect is
 
-Three probes in this catalogue fail today, and each one is a hole this sprint
-found in a guard that was already there. A `defect` field names the hole. A
+A probe that fails today because the guard it aims at has a hole this sprint
+found. A `defect` field names the hole and `DEFECTS` at the foot of this file
+carries them in full, so the count lives in one place and no sentence here can
+go stale against it. `python3 scripts/guard_probe.py --list` marks each. A
 known-defect probe that FAILS is reported and does not fail the gate. A
 known-defect probe that PASSES fails the gate, because the hole was fixed and
 the declaration is now a lie. That is the ratchet pointing in the direction
@@ -190,13 +192,24 @@ def _floor_gate_with_own_step(box: Sandbox) -> str:
     """A floor gate whose CI step is a `bin/ocelli.sh gate <name>` line.
 
     Read from `.github/workflows/ci.yml`, which is the artefact the guard is
-    about, and not from the guard.
+    about. The gates to skip come from `NOT_IN_FLOOR`, which is the
+    repository's own declaration of what the floor excludes and is itself in
+    the declared-constant ratchet. It was an undocumented literal here, and a
+    literal that matches neither `NOT_IN_FLOOR` nor anything in the workflow
+    is a probe input nobody can check.
     """
     workflow = box.read(".github/workflows/ci.yml")
+    declared = re.search(r"^NOT_IN_FLOOR = \{(.*?)\}",
+                         box.read("scripts/ci_floor_check.py"), re.M | re.S)
+    if declared is None:
+        raise AssertionError(
+            "scripts/ci_floor_check.py declares no NOT_IN_FLOOR, so this "
+            "probe cannot tell a floor gate from one CI runs elsewhere.")
+    excluded = set(re.findall(r'"([a-z-]+)"', declared.group(1)))
     for match in re.finditer(r"bin/ocelli\.sh gate ([a-z-]+)", workflow):
-        if match.group(1) not in {"native", "wasm", "packages"}:
+        if match.group(1) not in excluded:
             return match.group(1)
-    raise AssertionError("no CI step invokes a gate by name")
+    raise AssertionError("no CI step invokes a floor gate by name")
 
 
 # ---------------------------------------------------------------------------
@@ -351,13 +364,35 @@ def _bindgen_target_gated(box: Sandbox) -> None:
 
 
 def _bindgen_in_source(box: Sandbox) -> None:
+    """A real D2 violation, not a string shaped to satisfy a grep.
+
+    D2 is that `wasm-bindgen` appears in exactly one crate, and what that bans
+    is a second crate USING it. The earlier probe appended a string literal
+    reading `wasm_bindgen`, which satisfies the guard's word-boundary grep and
+    is not a violation of anything.
+    """
     box.append("crates/ocelli-geom/src/lib.rs",
-               "\npub fn probe() -> &'static str { \"wasm_bindgen\" }\n")
+               "\nuse wasm_bindgen::prelude::*;\n\n"
+               "#[wasm_bindgen]\npub fn probe_exported() {}\n")
 
 
 def _device_creator(box: Sandbox) -> None:
-    box.append("crates/ocelli-geom/src/lib.rs",
-               "\npub fn probe_adapter() { let _ = request_adapter; }\n")
+    """A crate other than the renderer bringing a device into existence.
+
+    Written from HLD section 31's sentence, "ocelli-compute never creates a
+    `wgpu::Device`, it borrows the one ocelli-render owns", and from wgpu's own
+    API for doing so. `Adapter::request_device` is how a `wgpu::Device` comes
+    into existence, and the crate it is planted in is the crate section 31
+    names. Neither choice was read off `ci/check-device-ownership.sh`'s
+    `CREATORS` list, which is what the earlier `let _ = request_adapter;`
+    amounted to.
+    """
+    box.append("crates/ocelli-compute/src/lib.rs",
+               "\n/// Probe: HLD 31 forbids exactly this.\n"
+               "pub async fn probe_own_device(adapter: &wgpu::Adapter) {\n"
+               "    let _ = adapter.request_device("
+               "&wgpu::DeviceDescriptor::default()).await;\n"
+               "}\n")
 
 
 def _device_context_gone(box: Sandbox) -> None:
@@ -366,6 +401,16 @@ def _device_context_gone(box: Sandbox) -> None:
 
 
 def _device_owned_accessor(box: Sandbox) -> None:
+    """An accessor that hands an owned device out of `GpuContext`.
+
+    The one probe here whose input cannot come from anywhere but the guard's
+    own vocabulary: the rule bans a SHAPE of accessor and the guard is a list
+    of four names, so a probe must write one of the four or nothing fires.
+    HLD 31 names none of them. `OWNED_ACCESSORS` is therefore in the
+    declared-constant ratchet, which is the compensating mechanism: narrowing
+    the list to the one name this probe writes fails the census in the same
+    change, where a probe alone would stay green with three shapes unguarded.
+    """
     box.append("crates/ocelli-render/src/gpu.rs",
                "\n// probe\npub fn into_device() {}\n")
 
@@ -620,6 +665,28 @@ def _budget_add_constant(box: Sandbox) -> None:
               json.dumps(budget, indent=2, sort_keys=True) + "\n")
 
 
+def _widen_a_declared_constant(box: Sandbox) -> None:
+    """Widen the DICOM suffix allow-list, read from the file rather than typed.
+
+    The earlier version carried
+    `DICOM_SUFFIXES = {".dcm", ".dicom", ".ima"}` as a literal, which is a
+    second copy of another guard's source line inside this catalogue. The
+    ratchet's rule is that a strictness-deciding value cannot change without
+    its recorded value changing with it, so the probe only has to produce SOME
+    change to that value, and reading the current one is how it stays true
+    when the list grows.
+    """
+    current = re.search(r"^DICOM_SUFFIXES = (\{.*?\})$",
+                        box.read("scripts/staged_content_check.py"), re.M)
+    if current is None:
+        raise AssertionError(
+            "scripts/staged_content_check.py declares no DICOM_SUFFIXES, so "
+            "the ratchet has nothing to widen and this probe would report its "
+            "guard silent.")
+    box.substitute("scripts/staged_content_check.py", current.group(1),
+                   '{".dcm"}')
+
+
 def _lint_policy_weakened(box: Sandbox) -> None:
     box.substitute("Cargo.toml", 'cast_possible_truncation = "deny"',
                    'cast_possible_truncation = "allow"')
@@ -710,11 +777,17 @@ GUARDS: tuple[Guard, ...] = (
         probes=(
             Probe("unsafe.third-file", _unsafe_in_a_third_file,
                   script("python3", "scripts/unsafe_allowlist_check.py"),
-                  "outside the allow-list",
+                  "`unsafe` outside the allow-list (HLD section 27.2 R5)",
                   note="The probe appends to a crate that is neither of the "
                        "two R5 names. It deliberately does NOT test "
                        "`is_unsafe` or `unsafe` in a doc comment, which are "
-                       "facts about the current regex rather than about R5."),
+                       "facts about the current regex rather than about R5. "
+                       "The fragment is the refusal HEADER and not the bare "
+                       "words `outside the allow-list`, which the guard's OK "
+                       "line also contains: with an accept probe that would "
+                       "have been a false green, and here it was kept from "
+                       "mattering only by the exit-status check running "
+                       "first."),
         ),
     ),
 
@@ -834,11 +907,14 @@ GUARDS: tuple[Guard, ...] = (
                   script("python3", "scripts/pin_and_size_check.py"),
                   "pinned exactly",
                   polarity="accept",
-                  defect="G-03",
                   note="The pin is UNCHANGED and still exact, only written in "
                        "the table form Cargo accepts. R4 is about the version "
                        "being exact and says nothing about the entry's shape, "
-                       "so the guard must still find it."),
+                       "so the guard must still find it. This was G-03 and "
+                       "failed until S03: the version was read positionally "
+                       "as the first quoted string in the entry, so a table "
+                       "whose first value happened to start with `=` passed "
+                       "with a caret range unread."),
         ),
     ),
 
@@ -898,11 +974,13 @@ GUARDS: tuple[Guard, ...] = (
                   lambda box: _delete_ci_step(box, leave_comment=True),
                   script("python3", "scripts/ci_floor_check.py"),
                   "and nothing in",
-                  defect="G-01",
-                  note="A YAML COMMENT naming the gate satisfies the "
-                       "substring test with the real step deleted. The claim "
-                       "the floor makes is that CI RUNS the gate, and a "
-                       "comment runs nothing."),
+                  note="A YAML comment naming the gate, with the real step "
+                       "deleted. The claim the floor makes is that CI RUNS "
+                       "the gate, and a comment runs nothing. This was G-01 "
+                       "and failed until S03: the check was a plain substring "
+                       "test over the whole workflow file, which a comment "
+                       "satisfied, and which `gate guards` also satisfied "
+                       "from inside `gate guards-deep`."),
         ),
     ),
 
@@ -1108,7 +1186,11 @@ GUARDS: tuple[Guard, ...] = (
         probes=(
             Probe("device.creator", _device_creator,
                   script("ci/check-device-ownership.sh"),
-                  "creates a GPU device or surface"),
+                  "creates a GPU device or surface",
+                  note="Input from section 31's own sentence and from wgpu's "
+                       "API for creating a device, planted in the crate "
+                       "section 31 names. Not from the guard's CREATORS "
+                       "list, which is separately in the ratchet."),
             Probe("device.contract-gone", _device_context_gone,
                   script("ci/check-device-ownership.sh"),
                   "no longer defines GpuContext",
@@ -1204,7 +1286,18 @@ GUARDS: tuple[Guard, ...] = (
                        "rewritten at integration this sprint."),
         ),
         limit="The other twenty-two refusals in this file belong to the "
-              "sprint lifecycle commands, and the entry below owns them.",
+              "sprint lifecycle commands, and the entry below owns them. The "
+              "field list is a second limit and a sharper one. Both probes "
+              "here are about the BRANCH rule, and reaching it means writing "
+              "a handoff that passes the field check first, so their input "
+              "carries the five `**Field**` markers from the tool's own "
+              "tuple. `.claude/commands/complete-feature.md` names six items "
+              "including the files touched, which the tool does not require, "
+              "so the citation and the code do not agree and no probe can see "
+              "that. `HANDOFF_FIELDS` is in the declared-constant ratchet "
+              "instead, which is what puts a change to the contract in front "
+              "of a reviewer. G-04 is the same undocumented contract seen "
+              "from the branch side.",
     ),
     Guard(
         id="sprint-lifecycle",
@@ -1242,7 +1335,13 @@ GUARDS: tuple[Guard, ...] = (
         probes=(
             Probe("errors.renumbered", _renumber_an_error_code,
                   script("python3", "scripts/error_code_check.py"),
-                  "FAIL"),
+                  "so this is a renumbering",
+                  note="The fragment names the RENUMBERING branch and not the "
+                       "`FAIL:` header. This script produces four independent "
+                       "problem classes under two headers, so a probe that "
+                       "expected `FAIL` rode on whichever one still worked: "
+                       "with the Rust-registry comparison deleted it stayed "
+                       "green on the range check alone."),
         ),
         covered_by=("scripts/tests/test_error_code_check.py "
                     "(15 cases, run by the `errors` gate)",),
@@ -1572,11 +1671,7 @@ GUARDS: tuple[Guard, ...] = (
                   note="This is the mechanism that makes a guard added next "
                        "month arrive with its test. The author sees red in "
                        "CI on the push that adds the refusal."),
-            Probe("census.changed-constant",
-                  lambda box: box.substitute(
-                      "scripts/staged_content_check.py",
-                      'DICOM_SUFFIXES = {".dcm", ".dicom", ".ima"}',
-                      'DICOM_SUFFIXES = {".dcm"}'),
+            Probe("census.changed-constant", _widen_a_declared_constant,
                   script("python3", "scripts/guard_census.py"),
                   "changed without its recorded value",
                   note="The class of weakening no probe can reach. After the "
@@ -1623,8 +1718,11 @@ GUARDS: tuple[Guard, ...] = (
                       "    [('probe', 'gpu', 'floor')]);\n"
                       "print('\\n'.join(bad));\n"
                       "sys.exit(1 if bad else 0)\n"),
-                  "may not be in the floor",
+                  "no GPU, no browser and no corpus",
                   level=1,
+                  note="The fragment is the GPU branch's own sentence. `may "
+                       "not be in the floor` is in both floor branches, so it "
+                       "went on matching with the GPU rule deleted.",
                   control=python_snippet(
                       "census.profile_agrees, healthy",
                       "import sys; sys.path.insert(0, 'scripts');\n"
@@ -1694,10 +1792,16 @@ GUARDS: tuple[Guard, ...] = (
         id="discover",
         file="scripts/guards/discover.py",
         gate="guards",
-        spec="`.claude/plans/F-X009-design.md` section 7a",
+        spec="`.claude/plans/F-X009-design.md` section 7, completeness proved "
+             "mechanically",
         refuses="Nothing on its own. It is the scanner the census refuses "
                 "from.",
         claims=("*",),
+        silent="This module prints nothing and raises nothing, so it has no "
+               "refusal site to claim. It carried five until the S03 review's "
+               "second pass: the shape table in its own docstring, counted as "
+               "code, which inflated the census headline with prose and made "
+               "deleting a documentation row turn the gate red.",
         covered_by=("scripts/tests/test_guard_catalogue.py",),
     ),
     Guard(
@@ -1913,9 +2017,16 @@ GUARDS: tuple[Guard, ...] = (
                 "not exist, a comparison on a machine that does not own the "
                 "baseline, and a browser that is not installed.",
         claims=("*",),
-        covered_by=("scripts/tests/test_bench_check.py "
-                    "(the 7 argument refusals and the 4 run-time refusals, "
-                    "run by the `bench` gate)",),
+        owner="F-X010",
+        reason="Nothing watches these nine refusals. This entry claimed "
+               "`scripts/tests/test_bench_check.py (the 7 argument refusals "
+               "and the 4 run-time refusals)` until the S03 review's second "
+               "pass measured it: that suite never opens `run.mjs`, "
+               "`bench_check.py` carries no mirror of its argument "
+               "validation, and the four node suites the `bench` gate runs do "
+               "not reference it either. Seven plus four is also eleven and "
+               "there are nine. A claim of coverage that is false is worse "
+               "than the gap it hides, so the gap is recorded instead.",
     ),
     Guard(
         id="bench.cold-start",
@@ -1981,8 +2092,10 @@ GUARDS: tuple[Guard, ...] = (
         claims=("*",),
         kind="not-a-guard",
         reason="A throwaway spike harness for Appendix A gate A1, invoked by "
-               "no gate and by no CI step. Its output directory IS guarded, "
-               "by the content.spike-output probe above.",
+               "no gate and by no CI step. `content.spike-output` guards its "
+               "output DIRECTORY and is not a backstop for its refusals, "
+               "unlike the probed backstops populate-corpus and "
+               "bootstrap-importer name. Nothing watches these go red.",
     ),
     Guard(
         id="spikes.compare",
@@ -1992,8 +2105,15 @@ GUARDS: tuple[Guard, ...] = (
         refuses="Nothing this repository verifies.",
         claims=("*",),
         kind="not-a-guard",
-        reason="Shared helper for the same throwaway spike harnesses. Same "
-               "argument as spikes.a1.",
+        reason="Shared helper for the same throwaway spike harnesses, invoked "
+               "by no gate and by no CI step. The measurement is throwaway "
+               "and the ANSWER is not: this file produced every digest in "
+               "both Appendix A answer files, and `docs/spikes/GATES.md`'s A1 "
+               "verdict and the decision to file F-X013 rest on them. Its own "
+               "suite, `tools/spikes/common/tests/compare_test.mjs`, is run "
+               "by nothing, which is pass 1's smell S19 and is unfixed. Out "
+               "of scope here means no gate runs the file, not that its "
+               "refusals did not matter. Owner F-X010.",
     ),
     Guard(
         id="spikes.extract",
@@ -2005,8 +2125,9 @@ GUARDS: tuple[Guard, ...] = (
         kind="not-a-guard",
         reason="The spike harnesses' corpus extractor, invoked by no gate. "
                "Its refusals protect a throwaway measurement rather than the "
-               "repository, and its output directory IS guarded, by the "
-               "content.spike-output probe above.",
+               "repository. `content.spike-output` guards the output "
+               "DIRECTORY, which is not a backstop for these refusals, so "
+               "nothing watches them go red.",
     ),
     Guard(
         id="spikes.a2",
@@ -2017,7 +2138,9 @@ GUARDS: tuple[Guard, ...] = (
         claims=("*",),
         kind="not-a-guard",
         reason="A throwaway spike harness for Appendix A gate A2, invoked by "
-               "no gate. Same argument as spikes.a1.",
+               "no gate. Same argument as spikes.a1, including that its "
+               "output directory being guarded is not a backstop for its "
+               "refusals.",
     ),
 )
 
@@ -2061,15 +2184,15 @@ CONSTANTS: tuple[Constant, ...] = (
     Constant("content", "scripts/staged_content_check.py", "ARTEFACT_PARTS",
              r"^ARTEFACT_PARTS = (\{.*?\})"),
     Constant("content", "scripts/staged_content_check.py", "MAX_BYTES",
-             r"^MAX_BYTES = (.*)$", tunable=True,
+             r"^MAX_BYTES = (.*?)$", tunable=True,
              why="A size limit somebody may legitimately raise for a "
                  "particular file, with a reason in the design plan."),
     Constant("content", "scripts/staged_content_check.py",
-             "ORACLE_OUTPUT_PREFIXES", r"^ORACLE_OUTPUT_PREFIXES = (.*)$"),
+             "ORACLE_OUTPUT_PREFIXES", r"^ORACLE_OUTPUT_PREFIXES = (.*?)$"),
     Constant("content", "scripts/staged_content_check.py",
-             "SPIKE_OUTPUT_PREFIXES", r"^SPIKE_OUTPUT_PREFIXES = (.*)$"),
+             "SPIKE_OUTPUT_PREFIXES", r"^SPIKE_OUTPUT_PREFIXES = (.*?)$"),
     Constant("content", "scripts/staged_content_check.py",
-             "COMPARE_OUTPUT_PREFIXES", r"^COMPARE_OUTPUT_PREFIXES = (.*)$"),
+             "COMPARE_OUTPUT_PREFIXES", r"^COMPARE_OUTPUT_PREFIXES = (.*?)$"),
     Constant("content", "scripts/staged_content_check.py",
              "SIZE_EXEMPT_SUFFIXES",
              r"path\.suffix not in (\{[^}]*\})", tunable=True,
@@ -2093,7 +2216,7 @@ CONSTANTS: tuple[Constant, ...] = (
     Constant("pins", "scripts/pin_and_size_check.py", "EXACT_PINNED",
              r"^EXACT_PINNED = \{(.*?)^\}"),
     Constant("pins", "scripts/pin_and_size_check.py", "TOLERANCE",
-             r"^TOLERANCE = (.*)$", tunable=True,
+             r"^TOLERANCE = (.*?)$", tunable=True,
              why="Growth tolerated before the size gate fails. A story that "
                  "grows the module 5% should say why, and raising this is "
                  "one of the things it might say."),
@@ -2110,7 +2233,27 @@ CONSTANTS: tuple[Constant, ...] = (
     Constant("backlog", "scripts/backlog_check.py", "VALID_STATUS",
              r"^VALID_STATUS = (\{.*?\})$"),
     Constant("device", "ci/check-device-ownership.sh", "CREATORS",
-             r"^CREATORS='(.*)'$"),
+             r"^CREATORS='(.*?)'$"),
+    # The accessor shapes exist only in this grep. HLD 31 names none of them,
+    # so `device.owned-accessor` has to write one of the four and narrowing
+    # the four to that one left the probe green with three shapes unguarded.
+    # This is the mechanism that notices, and it is why CREATORS' exposure was
+    # always smaller than the accessor list's.
+    Constant("device", "ci/check-device-ownership.sh", "OWNED_ACCESSORS",
+             r"grep -qE 'pub fn \(([a-z_|]+)\)'",
+             why="The accessor shapes that defeat section 31 without any "
+                 "crate calling a creator. Four names, and a probe can only "
+                 "ever write one of them."),
+    # `validate-handoff`'s required fields, which are a contract nothing else
+    # documents. `.claude/commands/complete-feature.md` names six items and
+    # this tuple requires five, so the handoff probes have to write the tuple
+    # to reach the branch check they are actually about. Recording it is what
+    # makes a change to the contract land in a diff.
+    Constant("handoff", "scripts/sprint_workflow.py", "HANDOFF_FIELDS",
+             r'for field in (\("Branch".*?\)):',
+             why="G-04's undocumented contract. A field added or removed here "
+                 "changes what every worker must write and is documented "
+                 "nowhere else."),
     Constant("lint-policy", "Cargo.toml", "workspace.lints",
              r"^\[workspace\.lints\.clippy\]\n(.*?)\n\n",
              why="HLD 27.1's denied lint table, verbatim."),
@@ -2126,6 +2269,15 @@ CONSTANTS: tuple[Constant, ...] = (
              r"^const NO_CACHED_WASM_VIEW_MEMBER = \{\n  selector:\n(.*?)\n  message"),
     Constant("lint-policy", "eslint.config.js", "NO_CACHED_WASM_VIEW_DESTRUCTURED",
              r"^const NO_CACHED_WASM_VIEW_DESTRUCTURED = \{\n  selector:\n(.*?)\n  message"),
+    # A THIRD selector since the S03 sprint review's second pass. The two
+    # above are keyed on a view built directly over `wasm.memory.buffer` or
+    # over a destructured `memory`, and both miss an alias: `const mem =
+    # wasm.memory` and `const { buffer } = wasm.memory` escaped them. A view
+    # over the alias is the same hazard, so the third selector is recorded on
+    # the same footing as the other two.
+    Constant("lint-policy", "eslint.config.js", "NO_CACHED_WASM_MEMORY_ALIAS",
+             r"^const NO_CACHED_WASM_MEMORY_ALIAS = \{\n  selector:\n"
+             r"(.*?)\n  message"),
     Constant("lint-policy", "eslint.config.js", "LINEAR_MEMORY_ALLOWANCE",
              r'files: (\["packages/core/src/bulk\.ts".*?\])',
              why="HLD 17.2 says two functions. F-005 widened this from one "
@@ -2141,21 +2293,11 @@ CONSTANTS: tuple[Constant, ...] = (
 
 
 DEFECTS = {
-    "G-01": "scripts/ci_floor_check.py is fail-open on a comment. It tests "
-            "`gate <name>` as a plain substring over the whole workflow file, "
-            "so a YAML comment naming a gate satisfies it with the real step "
-            "deleted. The floor's claim to be what CI runs is then false and "
-            "nothing says so.",
     "G-02": "scripts/no_std_check.py loses a crate rather than failing. Its "
             "crate set is built from the crates that match the attribute, so "
             "a crate deleting it is not reported, it stops being checked. The "
             "only backstop fires when NO crate declares it. The recorded "
             "NO_STD_CRATES constant is what catches it today.",
-    "G-03": "scripts/pin_and_size_check.py parses positionally. The version "
-            "is the FIRST quoted string in the entry, so a table form reports "
-            "the wrong token. The dangerous direction is a table whose first "
-            "quoted value starts with `=`, which passes with the real version "
-            "unread.",
     "G-04": "scripts/sprint_workflow.py validate-handoff has an undocumented "
             "contract. It needs a literal `**Head**` and parses the branch as "
             "a bare token, so backticks break it, and this repository writes "

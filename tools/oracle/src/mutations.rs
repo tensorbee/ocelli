@@ -57,6 +57,16 @@ pub enum Target {
     MeasuredStack,
     /// The first volume reformat that passes cleanly. Present so the
     /// catalogue reaches the nine views `rows[]` does not name.
+    ///
+    /// **It is not pinned to a subject carrying a declared reference
+    /// divergence and nothing here should assume it is.** On today's corpus it
+    /// resolves to `volume__real__mr_eay131__AXIAL`, which does carry one, but
+    /// only because records are iterated from a `BTreeSet` and `real` sorts
+    /// before `synthetic`. The S03 sprint review's smell S4 is that the
+    /// `!geometry.is_empty()` narrowing on the attribution ladder's rung 3 was
+    /// watched by that accident alone. It is now watched by three unit tests
+    /// in `attribution.rs`, which build both sides themselves and cannot be
+    /// satisfied by an iteration order.
     MeasuredReformat,
     /// The first class-two view. Its outcome is `unmeasured` before and after,
     /// so what a mutation must show there is DETECTION and not a verdict.

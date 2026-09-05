@@ -835,9 +835,18 @@ async function renderSubjectInner(request) {
         // has no source pixel grid to be a magnification of, and publishing a
         // number that means something else under the same name is the defect
         // this project calls quietly wrong.
-        millimetresPerCanvasPixel: Number(
-          ((2 * camera.parallelScale) / params.canvas.height).toFixed(6),
-        ),
+        //
+        // **Published unrounded, and the S03 sprint review's smell S17 is
+        // why.** This is the only number the comparator's reformat rung
+        // compares, through `reformat_scale_divergences`, which amplifies a
+        // difference by `canvas_height / 2` before testing it against a
+        // quarter of a canvas pixel. Rounding it to six decimals here would
+        // discard a real scale difference of up to 5e-7 mm before the
+        // comparator ever saw it, which is a divergence quietly removed by the
+        // instrument that exists to find it. JSON carries the double exactly,
+        // and determinism is measured on the frame digest rather than on this
+        // field, so there is nothing for the rounding to have been protecting.
+        millimetresPerCanvasPixel: (2 * camera.parallelScale) / params.canvas.height,
         cameraMode,
       },
       frame: {
