@@ -122,7 +122,13 @@
       "citation": "none, and that is the point",
       "why": "A real MR series from TCIA, recorded for the same reason and judged by the same nothing. It is here so F-011 has a volume reference at a second modality and a second in-plane resolution.",
       "uniform": null,
-      "referenceDivergence": null
+      "referenceDivergence": {
+        "field": "spacing[2]",
+        "reference": 10.000000544956752,
+        "truth": null,
+        "attributedTo": "reference",
+        "why": "cornerstone3D 5.8.2 computes through-plane spacing as Math.abs(d_last - d_first) / (numImages - 1) from the ENDPOINTS ONLY, in utilities/calculateSpacingBetweenImageIds.js, so no interior gap is ever compared with any other and there is nothing for a tolerance to apply to. On this series that is not a subtle effect. The harness measures the gaps as 10, 5, 5, 5, 5, 5, 5, 10, 10, 5, 5, 10, 10 and 50 mm, a maximum deviation from the mean of 40 mm, and the reference resolves a single 10.000000544956752 mm grid over all of it without a warning, an error or a console line. `truth` is null because this is a real series and decision 3 of the S03 design round declines to judge a real series' uniformity, since HLD 25.1's 1e-6 mm is a comparison tolerance that is exact for the synthetic subjects by construction and would classify almost any real series as non-uniform. Declining to judge uniformity is not declining to measure the reference's divergence, and conflating the two is the defect the S03 sprint review found here. This entry is what makes F-011's attribution ladder reach rung 3 and say `reference` rather than falling through to rung 5, whose default is `ours`. HLD section 19 warns that using a single spacing where the projected positions disagree compresses the volume along z and leaves every axial view looking perfect, and this is that warning observed on real clinical data rather than on a case built to show it."
+      }
     }
   },
   "framePairs": [

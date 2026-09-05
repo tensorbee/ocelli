@@ -363,14 +363,16 @@ resolver can never return is not a tier.
 
 The pin and the workspace entry are untouched and only the consuming crate's
 feature set changes, which is the shape deviation D-09 set for glam. Measured
-cost today is zero bytes, because `ocelli-wasm` has an empty `[dependencies]`
-table and never reaches wgpu, so the size budget moves only when the render
-path is wired in from S11.
+cost today is zero bytes, because `ocelli-wasm` does not depend on
+`ocelli-render` and so never reaches wgpu, so the size budget moves only when
+the render path is wired in from S11. That crate had an empty
+`[dependencies]` table when this was written and F-005 has since added
+`ocelli-core` to it, which changes the premise and not the conclusion.
 
 ## What this story deliberately does not do
 
 - **It does not wire tier resolution into `ocelli-wasm`.** That module has an
-  empty `[dependencies]` table and exports one function, the boundary is E16.2
+  no dependency on `ocelli-render` and so never reaches wgpu, the boundary is E16.2
   in S16, and no browser path of the resolver can run before F-039 in S11.
   Wiring it now would add an entry point nothing calls and re-baseline the
   wasm size budget for a feature with no user. F-004 touches

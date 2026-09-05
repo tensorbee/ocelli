@@ -374,11 +374,34 @@ export function validateVolumeTruth(parsed, params) {
           );
         }
       }
-      if (entry.referenceDivergence !== null) {
+      // A `referenceDivergence` IS allowed on an entry that classifies
+      // nothing, and this rule used to forbid it. The reasoning it carried,
+      // that a divergence is measured against a truth, conflates two
+      // questions. Whether the reference's single through-plane spacing
+      // describes the measured gaps is answered by comparing cornerstone3D's
+      // own resolved `spacing[2]` against gaps this harness measured from the
+      // files, and no declared truth enters it. What a truth would be needed
+      // for is a UNIFORMITY verdict, which `uniform: null` declines to give,
+      // and that is decision 3 of the S03 design round and stands.
+      //
+      // Found by the S03 sprint review. The same conflation sat in three
+      // places: here, in the early return in `compareGeometry`, and in a unit
+      // test that asserted the resulting silence was correct. Its consequence
+      // was that `real/mr_eay131` published `referenceDivergence: null` while
+      // its gaps ran 5 to 50 mm against a resolved 10 mm, and F-011's
+      // attribution ladder reads that field at rung 3, so a null sent it to
+      // rung 5 whose default is `ours`.
+      //
+      // What IS still required is that such an entry states a `truth` of null
+      // rather than a number, because a number there would be a uniformity
+      // claim wearing a divergence's clothes.
+      if (entry.referenceDivergence !== null &&
+          entry.referenceDivergence.truth !== null) {
         throw new Error(
-          `${where}: subjects.${id} classifies nothing and declares a ` +
-            `referenceDivergence. A divergence is measured against a truth, ` +
-            `and this entry states none.`,
+          `${where}: subjects.${id} classifies nothing, so its ` +
+            `referenceDivergence must state a truth of null. It states ` +
+            `${JSON.stringify(entry.referenceDivergence.truth)}, which is a ` +
+            `uniformity claim by another name.`,
         );
       }
       continue;
@@ -573,16 +596,51 @@ export function compareGeometry({
     toleranceMm,
   };
 
+  // Whether the reference's single through-plane spacing describes every
+  // measured gap needs NO truth. It compares cornerstone3D's own resolved
+  // spacing[2] against gaps this harness measured from the files, so it is
+  // answerable for a real series exactly as it is for a synthetic one.
+  // Computed HERE, above the uniformity early return, and not below it.
+  //
+  // **This was a defect and the sprint review found it.** The early return
+  // below skipped the whole block, so `real/mr_eay131` shipped
+  // `referenceDivergence: null` while its gaps ran 5 to 50 mm against a
+  // resolved 10 mm. F-011's attribution ladder reads that field at rung 3, so
+  // a null sent the ladder to rung 5, whose default is "ours". The guard's own
+  // message says why that matters: a divergence nobody wrote down is a
+  // divergence F-011 would attribute to Ocelli. Declining to JUDGE a real
+  // series' uniformity is decision 3 and stands. Declining to MEASURE the
+  // reference's divergence was an accident of where the return sat.
+  const referenceZ = referenceGeometry?.spacing?.[2];
+  const referenceDescribesEveryGap =
+    typeof referenceZ === "number" &&
+    measured.gapsMm.every((gap) => within(gap, referenceZ, toleranceMm));
+  const declaredDivergence = truth?.referenceDivergence ?? null;
+
   if (!truth || truth.uniform === null) {
     // Decision 3 of the design round: a real series is measured and judged by
     // nothing. HLD 25.1's 1e-6 mm is a comparison tolerance and is exact for
     // the synthetic subjects by construction. Applying it to a real series
-    // would produce a verdict the corpus cannot support.
+    // would produce a verdict the corpus cannot support. That is about
+    // UNIFORMITY. The reference divergence below is a different question and
+    // is answered.
+    if (!referenceDescribesEveryGap && declaredDivergence === null) {
+      problems.push(
+        `${subjectId}: cornerstone3D resolved spacing[2] as ${referenceZ} mm ` +
+          `and the measured gaps are ${JSON.stringify(measured.gapsMm)}, so ` +
+          `the reference's single through-plane spacing does not describe ` +
+          `this series, and volume-truth.json declares no referenceDivergence ` +
+          `for it. A divergence nobody wrote down is a divergence F-011 would ` +
+          `attribute to Ocelli. This subject declares uniform null, which ` +
+          `declines to judge the series and does not excuse an undeclared ` +
+          `divergence.`,
+      );
+    }
     return {
       truth: record,
       uniform: null,
-      referenceAgreesWithTruth: null,
-      referenceDivergence: null,
+      referenceAgreesWithTruth: referenceDescribesEveryGap,
+      referenceDivergence: declaredDivergence,
       problems,
     };
   }
@@ -620,12 +678,10 @@ export function compareGeometry({
   // spacing describes EVERY gap. cornerstone3D 5.8.2 computes that number from
   // the endpoints alone, so on a series whose interior gaps differ it answers a
   // mean that no interior slice sits at.
-  const referenceZ = referenceGeometry?.spacing?.[2];
-  const referenceAgreesWithTruth =
-    typeof referenceZ === "number" &&
-    measured.gapsMm.every((gap) => within(gap, referenceZ, toleranceMm));
-
-  const divergence = truth.referenceDivergence ?? null;
+  // Hoisted above the uniformity early return, so a subject that declines to
+  // judge uniformity still answers this. Reused rather than recomputed.
+  const referenceAgreesWithTruth = referenceDescribesEveryGap;
+  const divergence = declaredDivergence;
   if (!referenceAgreesWithTruth && divergence === null) {
     problems.push(
       `${subjectId}: cornerstone3D resolved spacing[2] as ${referenceZ} mm and ` +

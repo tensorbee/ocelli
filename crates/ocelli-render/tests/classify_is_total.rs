@@ -173,10 +173,33 @@ proptest! {
             );
         }
 
-        // Without an override, a GPU tier means a device was created on a
-        // candidate, and the tier is that candidate's own.
+        // A GPU tier ALWAYS means a device was created, whatever was
+        // requested. This used to be guarded by `request == TierRequest::Auto`
+        // and therefore said nothing about the override path, which is where
+        // the S03 sprint review found the defect: `OCELLI_TIER=a` on a host
+        // where no device could be opened returned `Tier::A` with
+        // `Applied(A)`, because the override arm checked only that a tier-A
+        // adapter had been ENUMERATED. An adapter existing and a device
+        // opening are different facts.
+        //
+        // Deviation D-07 is why this is not cosmetic. Tier resolution exists so
+        // that a machine which cannot run a GPU path is told so, and an
+        // override able to manufacture a tier out of an adapter listing is that
+        // same defect arriving through the door marked diagnostic.
+        if resolved.caps.tier != Tier::Cpu {
+            prop_assert!(
+                signals.device_created,
+                "resolved {:?} with no device created, request {:?}",
+                resolved.caps.tier,
+                request
+            );
+            prop_assert!(!resolved.caps.compute || resolved.caps.tier == Tier::A);
+        }
+
+        // The candidate identity still only holds without an override, because
+        // forcing tier B onto an A-candidate is deliberately allowed and
+        // recorded.
         if request == TierRequest::Auto && resolved.caps.tier != Tier::Cpu {
-            prop_assert!(signals.device_created);
             prop_assert_eq!(resolved.evidence.candidate_tier, Some(resolved.caps.tier));
         }
     }

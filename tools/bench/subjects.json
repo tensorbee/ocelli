@@ -146,7 +146,7 @@
       "tiers": ["A", "B", "C"],
       "subject_story": "F-004",
       "feeds": ["A7.2"],
-      "note": "F-004 OWNS this micro-benchmark and F-006 only records it. They are two artefacts sharing a word: F-004's runs on every production session and returns a tier, this one is a development instrument that returns a recorded number. The runner, when it is written, invokes F-004's own instrument, `cargo test -p ocelli-render --release -- --ignored --nocapture measures_a_fill_rate_on_this_machine`, and reads crates/ocelli-render/src/probe.rs's output. It reimplements nothing. F-004's code has landed and its BACKLOG.md row is not `done` yet, so this row is `unavailable` today."
+      "note": "F-004 OWNS this micro-benchmark and F-006 only records it. They are two artefacts sharing a word: F-004's runs on every production session and returns a tier, this one is a development instrument that returns a recorded number. The runner, when it is written, invokes F-004's own instrument, `cargo test -p ocelli-render --release -- --ignored --nocapture measures_a_fill_rate_on_this_machine`, and reads crates/ocelli-render/src/probe.rs's output. It reimplements nothing. F-004 has since landed and its BACKLOG.md row is `done`, so this row is no longer blocked by a pending story. It stays without a runner until one is written, and the gate does not demand one, which is a gap this note records rather than hides."
     }
   ]
 }

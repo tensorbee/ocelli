@@ -870,8 +870,14 @@ time to `measured`, `unavailable` naming the blocking story, or `incomparable`
 on a host-class mismatch, and a fourth state, a recorded number for a subject
 that does not exist, is refused by a gate rather than left to discipline.
 
-**Ten of the eleven subjects have nothing to measure, and the harness says so.**
-That is decision D7 holding rather than a shortfall. No proxy workload was
+**Ten of the eleven subjects had nothing to measure when this story landed, and
+the harness says so.** Nine are blocked on a story that has not landed, which is
+decision D7 holding rather than a shortfall. The tenth,
+`tier.startup_microbenchmark`, was blocked on F-004, which landed in this same
+sprint, so it now reports a `done` story and still has no runner.
+`bin/ocelli.sh bench --list` is the authority on the split rather than any
+sentence, because it reads the backlog and a written count goes stale the first
+time a story lands. No proxy workload was
 substituted, no stub was timed and no number was invented. The design fixes
 every subject's DEFINITION now, from the specification, including the ones with
 no subject, so a later story adds a runner into a slot with no latitude to

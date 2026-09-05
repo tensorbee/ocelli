@@ -20,7 +20,26 @@ import reactHooks from "eslint-plugin-react-hooks";
 // so the allowance is file-scoped to `packages/core/src/bulk.ts` instead, and
 // that file is expected to stay small enough that the difference does not
 // matter. Widening the allowance to a second file is a design-plan decision.
-const NO_CACHED_WASM_VIEW = {
+// TWO selectors, not one, and the second exists because the first did not
+// catch what this repository already writes. The original matched only
+// `new DataView(wasm.memory.buffer)`, where argument 0's object is itself a
+// member expression ending in `memory`. `packages/core/src/panic.ts`
+// destructures first, `const { memory } = wasm`, which makes argument 0's
+// object a bare identifier and the selector misses it. Measured in the S03
+// sprint review: appending both shapes to a file with no allowance produced
+// exactly ONE eslint error, on the literal form, and the destructured form
+// passed silently. So the ban this gate advertises was not banning the shape
+// the codebase uses.
+//
+// **The residual limit, stated rather than left to be discovered.** A caller
+// that destructures twice, `const { buffer } = wasm.memory`, reaches
+// `new DataView(buffer)` with a bare identifier as argument 0, and neither
+// selector matches that without banning the identifier `buffer` everywhere,
+// which would fire on ordinary code. HLD 17.2's rule is about intent and no
+// AST selector expresses intent. What these two cover is every shape present
+// in this repository today, and F-X009 owns the standing probe that keeps
+// them honest.
+const NO_CACHED_WASM_VIEW_MEMBER = {
   selector:
     'NewExpression[callee.name=/(Array|DataView)$/]' +
     '[arguments.0.property.name="buffer"]' +
@@ -28,6 +47,20 @@ const NO_CACHED_WASM_VIEW = {
   message:
     "Do not build a view over wasm memory here. Any wasm memory growth " +
     "detaches it and the next write fails far from the cause. Build the view " +
+    "inside packages/core/src/bulk.ts, immediately after the alloc that " +
+    "returns the pointer, use it, and let it go. See HLD section 17.2.",
+};
+
+// The destructured shape, `const { memory } = wasm; new DataView(memory.buffer)`.
+const NO_CACHED_WASM_VIEW_DESTRUCTURED = {
+  selector:
+    'NewExpression[callee.name=/(Array|DataView)$/]' +
+    '[arguments.0.property.name="buffer"]' +
+    '[arguments.0.object.name="memory"]',
+  message:
+    "Do not build a view over wasm memory here, and destructuring the " +
+    "memory out first does not change that. Any wasm memory growth detaches " +
+    "the view and the next write fails far from the cause. Build the view " +
     "inside packages/core/src/bulk.ts, immediately after the alloc that " +
     "returns the pointer, use it, and let it go. See HLD section 17.2.",
 };
@@ -58,7 +91,7 @@ export default tseslint.config(
   {
     files: ["**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-syntax": ["error", NO_CACHED_WASM_VIEW],
+      "no-restricted-syntax": ["error", NO_CACHED_WASM_VIEW_MEMBER, NO_CACHED_WASM_VIEW_DESTRUCTURED],
     },
   },
   {
@@ -79,6 +112,28 @@ export default tseslint.config(
     // when F-101 gives it a real ring to drain, and that is F-101's plan to
     // argue.
     files: ["packages/core/src/bulk.ts", "packages/core/src/panic.ts"],
+    rules: {
+      "no-restricted-syntax": "off",
+    },
+  },
+  {
+    // A SEPARATE block, deliberately not folded into the production list
+    // above, because it is a different category and merging the two would
+    // make the production allowance read as three files when it is two.
+    //
+    // `panic.test.ts` constructs its own `new WebAssembly.Memory(...)` and
+    // builds a view over it to write the fixture record. There is no module,
+    // no `alloc` and nothing that can grow that memory, so HLD 17.2's hazard,
+    // a cached view detaching when linear memory grows, cannot arise. The rule
+    // is syntactic and cannot tell a standalone memory from the core's.
+    //
+    // This surfaced in the S03 sprint review and is worth recording. The rule
+    // matched only `new DataView(wasm.memory.buffer)` and missed
+    // `const { memory } = wasm; new DataView(memory.buffer)`, which is what
+    // this repository actually writes. Tightening it to catch the destructured
+    // shape is what made this file visible. It was never exempt, it was never
+    // matched.
+    files: ["packages/core/src/*.test.ts"],
     rules: {
       "no-restricted-syntax": "off",
     },

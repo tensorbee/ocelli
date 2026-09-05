@@ -54,11 +54,30 @@ proptest! {
         let (Ok(fm), Ok(rm)) = (f.signed_mean_diff(), r.signed_mean_diff()) else {
             return Err(TestCaseError::fail("a signed mean did not compute"));
         };
+        // Bit-for-bit, with the ONE exception IEEE 754 requires: negating zero
+        // gives negative zero, whose sign bit differs, so `0.0f64.to_bits()`
+        // is 0 and `(-0.0f64).to_bits()` is 1 << 63. Two frames that differ
+        // nowhere have a signed mean of exactly zero, and that is the most
+        // ordinary input there is rather than an edge case.
+        //
+        // **Found by proptest failing intermittently**, during the S03 sprint
+        // review's remediation and not before, because the generator has to
+        // land on two identical frames to reach it. A test that fails on one
+        // run in many is worse than one that fails always, so this is written
+        // down rather than reseeded away. The property meant is that the two
+        // directions are exact negations, and `0.0 == -0.0` is true in IEEE
+        // 754, so comparing the values expresses it and comparing the bits
+        // overstates it.
+        // `+ 0.0` is the normalisation and not padding: it maps negative zero
+        // to positive zero and leaves every other value alone, so the
+        // comparison stays a bit comparison on integers. `float_cmp` is denied
+        // at the workspace and writing `fm == -rm` here would need an
+        // `#[allow]`, which this project does not grant to move on.
         prop_assert_eq!(
-            fm.to_bits(),
-            (-rm).to_bits(),
-            "the signed mean negates exactly, bit for bit, and does not merely \
-             agree to an epsilon"
+            (fm + 0.0).to_bits(),
+            (-rm + 0.0).to_bits(),
+            "the signed mean negates exactly, bit for bit once signed zero is \
+             normalised, and does not merely agree to an epsilon"
         );
     }
 }

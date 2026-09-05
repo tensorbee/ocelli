@@ -719,7 +719,22 @@ pub fn compare_view(
             entry.id, entry.citation, entry.reference_does
         ));
         (Outcome::Unmeasured, Side::Reference, "register")
-    } else if let Some(measured) = volume_divergence.filter(|_| gate_failed) {
+    // **`!geometry.is_empty()` is load-bearing and was added by the S03 sprint
+    // review.** F-X007's `referenceDivergence` names a FIELD, and every
+    // entry that exists names a geometry field, `spacing[2]`. A divergence in
+    // the through-plane spacing explains a geometry difference. It does not
+    // explain an arbitrary pixel difference on a view whose geometry agrees,
+    // and attributing one to the other would be the comparator excusing our
+    // own defect with somebody else's.
+    //
+    // This was latent until the review, because no volume subject carried a
+    // declared divergence and the rung could never fire. Declaring the real
+    // MR series' divergence, which is the fix for the defect one rung above
+    // this one, made it fire and turned a three-code single-pixel mutation
+    // from `fail` into `unmeasured`. The catalogue caught it immediately,
+    // which is what the catalogue is for.
+    } else if let Some(measured) = volume_divergence.filter(|_| gate_failed && !geometry.is_empty())
+    {
         qualifiers.insert(Qualifier::ReferenceDivergence);
         notes.push(format!(
             "F-X007 measured a reference divergence on this subject and the \

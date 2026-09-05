@@ -318,16 +318,40 @@ test("a truth entry whose gaps do not follow from its projections is refused", (
   assert.throws(() => validateVolumeTruth(bad, params()), /do not follow from/);
 });
 
-test("an unclassified subject may not also declare a reference divergence", () => {
-  const bad = truth();
-  bad.subjects.volume__a__b.referenceDivergence = {
+// An unclassified subject MAY declare a reference divergence, and this test
+// asserted the opposite until the S03 sprint review. Whether the reference's
+// single through-plane spacing describes the measured gaps is answered without
+// any declared truth, by comparing cornerstone3D's own resolved `spacing[2]`
+// against gaps measured from the files. Only a UNIFORMITY verdict needs a
+// truth, and `uniform: null` declines to give one.
+test("an unclassified subject may declare a reference divergence", () => {
+  const ok = truth();
+  ok.subjects.volume__a__b.referenceDivergence = {
     field: "spacing[2]",
     reference: 2.5,
     truth: null,
     attributedTo: "reference",
     why: "because",
   };
-  assert.throws(() => validateVolumeTruth(bad, params()), /classifies nothing/);
+  assert.doesNotThrow(() => validateVolumeTruth(ok, params()));
+});
+
+// What it may NOT do is state a non-null truth there, because that is a
+// uniformity claim wearing a divergence's clothes on an entry that just said
+// it classifies nothing.
+test("an unclassified subject's divergence may not state a truth", () => {
+  const bad = truth();
+  bad.subjects.volume__a__b.referenceDivergence = {
+    field: "spacing[2]",
+    reference: 2.5,
+    truth: 2.5,
+    attributedTo: "reference",
+    why: "because",
+  };
+  assert.throws(
+    () => validateVolumeTruth(bad, params()),
+    /must state a truth of null/,
+  );
 });
 
 test("a frame pair naming an undeclared subject is refused", () => {
@@ -571,10 +595,25 @@ test("a projected position 5e-7 mm out of place does not", () => {
   assert.deepEqual(result.problems, []);
 });
 
-// An unclassified subject is asked nothing, which is decision 3 of the design
-// round applied. A real series would otherwise be reported as non-uniform
-// against a tolerance that was never meant for it.
-test("an unclassified subject is measured and judged by nothing", () => {
+// An unclassified subject is not JUDGED on uniformity, which is decision 3 of
+// the design round applied: a real series would otherwise be reported as
+// non-uniform against a tolerance that was never meant for it.
+//
+// **It is still MEASURED against the reference.** This test asserted
+// `problems: []` and `referenceAgreesWithTruth: null` until the S03 sprint
+// review, and in doing so it encoded a defect rather than a requirement. The
+// early return for `uniform === null` skipped the reference comparison as
+// well as the uniformity verdict, so `real/mr_eay131` shipped
+// `referenceDivergence: null` while its gaps ran 5 to 50 mm against a resolved
+// 10 mm. Whether the reference's single spacing describes the measured gaps
+// needs no truth at all, because it compares cornerstone3D's own resolved
+// number against gaps this harness measured from the files.
+//
+// The consequence was not theoretical. F-011's attribution ladder reads
+// `referenceDivergence` at rung 3, so a null sent it to rung 5, whose default
+// is `ours`. The guard's own message is the specification here: a divergence
+// nobody wrote down is a divergence F-011 would attribute to Ocelli.
+test("an unclassified subject is not judged on uniformity", () => {
   const committed = readVolumeTruth();
   const result = compareGeometry({
     subjectId: "volume__real__ct_cmb_mml",
@@ -583,9 +622,43 @@ test("an unclassified subject is measured and judged by nothing", () => {
     truth: committed.subjects.volume__real__ct_cmb_mml,
     toleranceMm: committed.toleranceMm,
   });
-  assert.deepEqual(result.problems, []);
   assert.equal(result.uniform, null);
-  assert.equal(result.referenceAgreesWithTruth, null);
+});
+
+test("an unclassified subject is still measured against the reference", () => {
+  const committed = readVolumeTruth();
+  const result = compareGeometry({
+    subjectId: "volume__real__ct_cmb_mml",
+    measured: NONUNIFORM,
+    referenceGeometry: REFERENCE,
+    truth: committed.subjects.volume__real__ct_cmb_mml,
+    toleranceMm: committed.toleranceMm,
+  });
+  // The reference resolves 2.5 mm and the measured gaps include 3.75 and 1.25,
+  // so it does not describe this series. That is a boolean and not a null.
+  assert.equal(result.referenceAgreesWithTruth, false);
+  // And because this subject's truth entry declares no divergence, saying so
+  // is a problem rather than a silence.
+  assert.equal(result.problems.length, 1);
+  assert.match(result.problems[0], /declares no referenceDivergence/);
+  assert.match(result.problems[0], /does not excuse an undeclared/);
+});
+
+test("a declared divergence satisfies the guard on an unclassified subject", () => {
+  const committed = readVolumeTruth();
+  // `real/mr_eay131` is the committed case: uniform null, and a divergence
+  // that IS declared. It must produce no problem from that branch.
+  const result = compareGeometry({
+    subjectId: "volume__real__mr_eay131",
+    measured: NONUNIFORM,
+    referenceGeometry: REFERENCE,
+    truth: committed.subjects.volume__real__mr_eay131,
+    toleranceMm: committed.toleranceMm,
+  });
+  assert.equal(result.uniform, null);
+  assert.equal(result.referenceAgreesWithTruth, false);
+  assert.deepEqual(result.problems, []);
+  assert.equal(result.referenceDivergence.attributedTo, "reference");
 });
 
 // ---------------------------------------------------------------------------

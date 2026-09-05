@@ -672,7 +672,17 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
             DecidedBy::Override,
             OverrideOutcome::Applied(Tier::Cpu),
         ),
-        TierRequest::Requested(Tier::A) if has_a_candidate => (
+        // `has_a_candidate` alone is NOT enough, and the S03 sprint review
+        // found that it was being used alone. An adapter appearing in the
+        // enumeration says a tier-A adapter EXISTS, and `device_created` says
+        // one could actually be opened. The measured path already refuses a
+        // GPU tier without a device, at `DecidedBy::NoDevice`, and the
+        // override bypassed that: `OCELLI_TIER=a` on a host where no device
+        // could be created returned tier A with `Applied(A)`, against this
+        // step's own promise that an override is clamped to what is
+        // constructible. `RefusedUnconstructible` already existed for exactly
+        // this and was unreachable on this path.
+        TierRequest::Requested(Tier::A) if has_a_candidate && signals.device_created => (
             Tier::A,
             DecidedBy::Override,
             OverrideOutcome::Applied(Tier::A),
@@ -686,7 +696,12 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
         // deliberately allowed, because that is how the misdetection gets
         // diagnosed on the estate it happens on. It is recorded, so it is
         // never silent.
-        TierRequest::Requested(Tier::B) if candidate_tier.is_some() => (
+        // Same clamp, same reason. Forcing tier B onto an adapter the evidence
+        // called software stays allowed, because that is how a misdetection
+        // gets diagnosed on the estate it happens on. Forcing it where no
+        // device could be created is a different thing and is refused, because
+        // there is no GPU path to be had.
+        TierRequest::Requested(Tier::B) if candidate_tier.is_some() && signals.device_created => (
             Tier::B,
             DecidedBy::Override,
             OverrideOutcome::Applied(Tier::B),

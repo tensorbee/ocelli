@@ -13,11 +13,20 @@ Until the harness existed the rule was unenforceable, because there was nothing
 to measure with, and a rule with no instrument is satisfied by whoever is
 confident. `tools/bench` is the instrument. This file is the design behind it.
 
-**It is an instrument and not a report.** Ten of its eleven subjects have
-nothing to measure in this tree. There is no decoder, no renderer, no worker and
-no boundary, which is decision D7 holding: the oracle and the instruments exist
-before the port code. The harness says so, names the story a reader should go
-and read, and records no number for any of them.
+**It is an instrument and not a report.** One of its eleven subjects has a
+runner and a recorded number. Nine are blocked on a story that has not landed,
+because there is no decoder, no renderer, no worker and no boundary, which is
+decision D7 holding: the oracle and the instruments exist before the port code.
+The eleventh, `tier.startup_microbenchmark`, is the awkward one and is written
+down rather than rounded off: F-004 landed in this same sprint, so its story is
+`done` and it still has no runner. The harness says so, names the story a reader
+should go and read, and records no number for any of the ten.
+
+**`bin/ocelli.sh bench --list` is the authority on that split and this
+paragraph is not.** It reports each subject's blocking story and that story's
+current backlog status, so it moves when the backlog moves. A count written
+here goes stale the first time a story lands, which is exactly what happened to
+the sentence this one replaces.
 
 ## The defect it exists to prevent
 
