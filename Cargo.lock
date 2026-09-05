@@ -634,6 +634,7 @@ version = "0.1.0"
 dependencies = [
  "glam",
  "proptest",
+ "thiserror",
  "trybuild",
 ]
 
@@ -680,6 +681,7 @@ version = "0.1.0"
 name = "ocelli-wasm"
 version = "0.1.0"
 dependencies = [
+ "ocelli-core",
  "wasm-bindgen",
 ]
 

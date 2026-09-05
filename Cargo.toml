@@ -65,7 +65,16 @@ dicom = { version = "0.10", default-features = false }
 # declare.
 glam = { version = "0.30", default-features = false, features = ["libm"] }
 bytemuck = { version = "1", features = ["derive"] }
-thiserror = "2"
+# HLD section 15.2 writes `thiserror = "2"`. The version is untouched and
+# only the feature set differs, which is deviation D-15: section 4 puts the
+# error model in `ocelli-core`, which carries
+# `#![cfg_attr(not(test), no_std)]`, thiserror's default feature is `std`,
+# and `cargo tree -e normal,features` then reports `thiserror feature "std"`,
+# which is the exact string `scripts/no_std_check.py` searches for. Setting
+# `default-features = false` at the MEMBER is ignored by Cargo with a
+# warning when the workspace entry does not set it, so the fix has to be
+# here. Activated by F-005, and already used by `ocelli-compute`.
+thiserror = { version = "2", default-features = false }
 
 # Dev-dependencies, not part of HLD section 15.2's list, which covers what
 # ships. `proptest` is the harness section 25's round-trip listing is written

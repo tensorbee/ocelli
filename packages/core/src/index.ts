@@ -24,6 +24,30 @@ export type { BulkSink, WasmMemory } from "./bulk.js";
 export { readEvent, EVENT_STRIDE, HEADER_BYTES } from "./ring.js";
 export type { DrainResult, OcelliEvent } from "./ring.js";
 
+export {
+  decodeRecord,
+  describeError,
+  ERROR_CODE,
+  LOG_LEVEL,
+  RECORD_BYTES,
+  SEVERITY,
+} from "./errors.js";
+export type { OcelliRecord, RecordOperands } from "./errors.js";
+
+export {
+  PANIC_FALLBACK_CODE,
+  PANIC_HEADER_BYTES,
+  PANIC_MAGIC,
+  PANIC_MESSAGE_CAPACITY,
+  PANIC_RECORD_BYTES,
+  PANIC_RECORD_VERSION,
+  readPanicRecord,
+} from "./panic.js";
+export type { PanicMemory, PanicRecord } from "./panic.js";
+
+export { CORE_OK, fatalFromPanic, isUsable, nextStatus } from "./fatal.js";
+export type { CoreStatus } from "./fatal.js";
+
 /** Package version, kept in step with the crate versions by `/release`. */
 export const VERSION = "0.1.0";
 

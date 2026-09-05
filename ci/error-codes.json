@@ -1,0 +1,95 @@
+{
+  "note": "The error-code registry. HLD section 23: 'Error codes are stable and versioned. The shell switches on the code, the message is for humans and may change.' The words are in the specification and the mechanism is not, so this file is it. scripts/error_code_check.py asserts that crates/ocelli-core/src/error.rs, packages/core/src/errors.ts and this file agree, that no number and no name is reused, and that every code falls inside the range its producing crate declares. Adding a code is one appended entry in three places. Renumbering one is refused. Removing one is allowed, because a removed code is a real event and a gate nobody can satisfy is a gate somebody disables, but reusing its number is not.",
+  "version": 1,
+  "ranges": [
+    {
+      "crate": "ocelli-core",
+      "first": 1,
+      "last": 99,
+      "covers": "The boundary and the instance lifecycle. Codes that are not any one subsystem's."
+    },
+    {
+      "crate": "ocelli-dicom",
+      "first": 100,
+      "last": 199,
+      "covers": "Parsing, data elements, VRs and the metadata model."
+    },
+    {
+      "crate": "ocelli-codec",
+      "first": 200,
+      "last": 299,
+      "covers": "Transfer-syntax decode and the codec registry."
+    },
+    {
+      "crate": "ocelli-pixel",
+      "first": 300,
+      "last": 399,
+      "covers": "The LUT chain and pixel arithmetic."
+    },
+    {
+      "crate": "ocelli-geom",
+      "first": 400,
+      "last": 499,
+      "covers": "Image plane geometry and the coordinate transforms."
+    },
+    {
+      "crate": "ocelli-volume",
+      "first": 500,
+      "last": 599,
+      "covers": "Volume construction, residency and reformatting."
+    },
+    {
+      "crate": "ocelli-render",
+      "first": 600,
+      "last": 699,
+      "covers": "Device init, capability tiering, the render graph and device loss."
+    },
+    {
+      "crate": "ocelli-compute",
+      "first": 700,
+      "last": 799,
+      "covers": "Compute kernels dispatched on the renderer's device."
+    },
+    {
+      "crate": "ocelli-cache",
+      "first": 800,
+      "last": 899,
+      "covers": "Residency, eviction and the fetch path."
+    },
+    {
+      "crate": "ocelli-seg",
+      "first": 900,
+      "last": 999,
+      "covers": "Segmentation representations and the annotation SR tree."
+    },
+    {
+      "crate": "ocelli-viewport",
+      "first": 1000,
+      "last": 1099,
+      "covers": "Viewport lifecycle, tools and interaction state."
+    }
+  ],
+  "codes": [
+    {
+      "name": "Panicked",
+      "number": 1,
+      "crate": "ocelli-core",
+      "producer": "crates/ocelli-wasm/src/panic.rs",
+      "summary": "A Rust panic reached the panic hook. The instance is poisoned and must not be reused."
+    },
+    {
+      "name": "Unavailable",
+      "number": 700,
+      "crate": "ocelli-compute",
+      "producer": "crates/ocelli-compute/src/lib.rs, ComputeError::Unavailable",
+      "summary": "The feature cannot run on the resolved tier and declares no fallback."
+    },
+    {
+      "name": "Workgroup",
+      "number": 701,
+      "crate": "ocelli-compute",
+      "producer": "crates/ocelli-compute/src/lib.rs, ComputeError::Workgroup",
+      "summary": "The kernel asked for a workgroup size this device cannot dispatch."
+    }
+  ]
+}

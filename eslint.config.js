@@ -38,7 +38,11 @@ export default tseslint.config(
       "**/dist/**",
       "**/pkg/**",
       "**/node_modules/**",
-      "target/**",
+      // `**/` rather than a bare prefix: wasm-pack writes the panic-probe
+      // module into `crates/ocelli-wasm/target/panic-probe`, which
+      // `target/**` does not match, and eslint would then lint generated
+      // wasm-bindgen glue.
+      "**/target/**",
       "corpus/**",
     ],
   },
@@ -51,8 +55,23 @@ export default tseslint.config(
     },
   },
   {
-    // The one file permitted to build a view over linear memory.
-    files: ["packages/core/src/bulk.ts"],
+    // The TWO files permitted to build a view over linear memory, which is
+    // what HLD section 17.2 says: "outside the two functions that are allowed
+    // to do it". The specification expected two and this repository had one
+    // only because nothing else needed linear memory yet.
+    //
+    // `bulk.ts` writes bytes down, between an `alloc` and the `commit` that
+    // takes ownership back. `panic.ts` reads the panic record up, AFTER the
+    // instance has trapped, which is the safest possible instance of the
+    // hazard the rule guards: no wasm code can run, so memory cannot grow
+    // between the view's construction and its last use.
+    //
+    // Widening this list is a design-plan decision and
+    // `.claude/plans/F-005-design.md` item F is the one that added the second
+    // entry. A THIRD is not granted: `packages/core/src/ring.ts` will need one
+    // when F-101 gives it a real ring to drain, and that is F-101's plan to
+    // argue.
+    files: ["packages/core/src/bulk.ts", "packages/core/src/panic.ts"],
     rules: {
       "no-restricted-syntax": "off",
     },
@@ -61,6 +80,23 @@ export default tseslint.config(
     files: ["packages/react/**/*.{ts,tsx}", "examples/**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks },
     rules: reactHooks.configs.recommended.rules,
+  },
+  {
+    // The repository's own node scripts. Plain ESM JavaScript, run by
+    // `bin/ocelli.sh`, never bundled and never shipped. The globals are listed
+    // rather than pulled from a `globals` package, for the reason the oracle
+    // block below gives, and `no-undef` still catches a typo in any of them.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        WebAssembly: "readonly",
+        TextDecoder: "readonly",
+        TextEncoder: "readonly",
+        URL: "readonly",
+      },
+    },
   },
   {
     // The oracle harness (F-010). Plain ESM JavaScript rather than TypeScript,

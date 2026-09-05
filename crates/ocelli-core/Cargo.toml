@@ -14,6 +14,12 @@ workspace = true
 [dependencies]
 # HLD section 16: `pub struct Transform<A, B> { m: glam::DMat4, ... }`.
 glam = { workspace = true }
+# HLD section 23, "thiserror in the core crates", and section 4's crate table,
+# which puts the error model in this crate. Deviation D-15 disables the default
+# `std` feature at the WORKSPACE entry, because this crate is `no_std` and
+# because Cargo ignores `default-features = false` written here when the
+# workspace entry does not set it.
+thiserror = { workspace = true }
 
 [dev-dependencies]
 # HLD section 25's round-trip listing is written against proptest.

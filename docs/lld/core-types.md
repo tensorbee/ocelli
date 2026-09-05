@@ -2,23 +2,37 @@
 
 **Area**: `crates/ocelli-core`
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1
-**F-IDs that contributed:** F-001
-**Last updated:** 2026-09-04
+**F-IDs that contributed:** F-001, F-005
+**Last updated:** 2026-09-05
 
 Living current-state document. It describes what the code does today.
 
 ## What is here
 
-`ocelli-core` holds two modules, both re-exported at the crate root so callers
+`ocelli-core` holds three modules, all re-exported at the crate root so callers
 write `ocelli_core::Pt` rather than `ocelli_core::space::Pt`.
 
 | Module | Contents |
 |--------|----------|
 | `space` | `Canvas`, `World`, `Index`, `Pt<S>`, `Transform<A, B>` |
 | `value` | `Stored`, `Modality`, `Display` |
+| `error` | `ErrorCode`, `Severity`, `LogLevel`, `Record`, `RecordError` |
 
-The crate is `#![cfg_attr(not(test), no_std)]` and has one dependency, `glam`,
-for `DMat4`. No `unsafe`, no `wasm-bindgen`, no allocation, no I/O.
+The crate is `#![cfg_attr(not(test), no_std)]` and has two dependencies, `glam`
+for `DMat4` and `thiserror` for the error model. No `unsafe`, no
+`wasm-bindgen`, no allocation, no I/O.
+
+**`error` is here because HLD section 4's crate table puts it here.** The row
+reads "Types, coordinate spaces, geometry primitives, error model. No I/O." It
+is not `ocelli-wasm`'s, whose row is "The only crate that may import
+wasm-bindgen. Boundary, commands, event ring." The module is specified in
+`docs/lld/errors.md` and only its placement belongs to this file.
+
+`thiserror` is this crate's first non-`glam` dependency, and it arrives under
+deviation **D-15**, which disables its default `std` feature at the workspace
+entry. Same shape as D-09 and the same reason: the default entry would defeat
+the `no_std` posture this crate declares, and `bin/ocelli.sh gate nostd` would
+go red. Verified both ways.
 
 ## Coordinate spaces
 

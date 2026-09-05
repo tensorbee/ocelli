@@ -1,6 +1,6 @@
 # GPU ownership
 
-**F-IDs that contributed:** F-008
+**F-IDs that contributed:** F-005, F-008
 **Last updated:** 2026-09-05
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
@@ -115,6 +115,15 @@ because "unavailable" without them is a message nobody can act on. Deviation
 D-07's rule is unchanged by this story: a feature that cannot run on the
 resolved tier reports unavailable and never silently produces a different
 answer.
+
+**Both variants now have a stable number at the boundary**, added by F-005:
+`ErrorCode::Unavailable` is 700 and `ErrorCode::Workgroup` is 701, registered
+in `ci/error-codes.json` inside `ocelli-compute`'s declared range of 700 to
+799. The Rust types are unchanged and no conversion is written yet, because
+nothing crosses the boundary until F-101. What the numbers buy today is that a
+tier C session reports a tier A feature unavailable in exactly the encoding a
+tier A session would use to report a device loss, so the shell needs one path
+for that situation and not two. See `docs/lld/errors.md`.
 
 ## What this story deliberately does not do
 

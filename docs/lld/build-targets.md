@@ -1,6 +1,6 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-007, F-008
+**F-IDs that contributed:** F-002, F-005, F-007, F-008
 **Last updated:** 2026-09-05
 
 The wasm build pipeline, the size budget, and the invariants that keep the
@@ -159,7 +159,7 @@ reported `ocelli-native` present under wasm32 and could not tell that from a
 real violation. The table is enforced where it can be: the `compile_error!` in
 `ocelli-native`, and steps 1 to 3 building each target for real.
 
-## The size budget## The size budget
+## The size budget
 
 `ci/wasm-size-budget.json` holds a recorded measurement and a 5% tolerance.
 `scripts/pin_and_size_check.py --with-size` compares the built module against
@@ -167,6 +167,26 @@ it. The first run records and passes, because a budget invented before the
 first measurement would be either meaningless or immediately wrong.
 
 **First measurement: 14,104 bytes**, on 2026-09-04.
+
+**Current baseline: 16,388 bytes**, re-baselined by F-005 on 2026-09-05. The
+delta is 2,284 bytes, which is 16.2 per cent and therefore over the tolerance,
+and it was declared rather than discovered. `ci/wasm-size-budget.json` carries
+the attribution and the two measurements it rests on:
+
+- Base commit `d74ad3a` rebuilt on the same toolchain reproduces 14,104 bytes
+  exactly, so the delta is F-005's and not drift.
+- Raising the panic record's `MESSAGE_CAPACITY` from 512 to 1,536 bytes leaves
+  the module **byte-identical** at 16,388, because a zeroed static needs no
+  data segment. So the 528-byte record costs the module nothing, and
+  `ocelli-core` becoming a dependency of `ocelli-wasm` for the first time costs
+  nothing measurable either, since the only thing reached is one enum
+  discriminant and fat LTO drops the rest.
+
+**What the delta actually is** is the panic hook's code:
+`std::panic::set_hook`, the boxed closure it takes, the `core::fmt` machinery
+that formats the panic location, and the `Any` downcast that reads the payload.
+It has no bearing on gate A4, whose estimate is three orders of magnitude
+larger and dominated by Naga.
 
 **That number is not an answer to Appendix A gate A4 and must not be read as
 one.** A4 asks whether binary size and cold start land within budget and
@@ -180,6 +200,37 @@ gate does not mean "you exceeded a budget", it means **"the module changed
 size and the change was not declared"**. `--accept-size` is the declaration,
 and the design plan that used it says why. The gate only starts meaning the
 other thing once the module is feature-complete.
+
+## The exported surface, and the panic probe
+
+The module exports four functions of ours, up from one. wasm-bindgen
+adds its own, and `memory`, which are the glue's and not this table's.
+
+| Export | Called |
+|--------|--------|
+| `ocelli_version()` | Any time. F-002's measurement root |
+| `install_panic_hook()` | Once, by a worker, before any other call |
+| `panic_record_ptr()` | Once, straight after instantiation. Cached |
+| `panic_record_len()` | Once, straight after instantiation. Cached |
+
+The last three are F-005's, and `docs/lld/errors.md` is where they are
+specified. The property that matters for this file is that **none of them is
+called after a trap**, so the panic path adds no post-trap requirement on the
+module.
+
+**`wasm32-unknown-unknown` is `panic = "abort"` in every profile**, not only in
+the release profile HLD section 15.2 sets it in, because it is the target's own
+default. `rustc --print cfg --target wasm32-unknown-unknown` reports
+`panic="abort"` with no profile involved. That is worth stating here because
+this file describes the build, and the obvious reading of section 15.2 is that
+a dev wasm build unwinds. It does not.
+
+`bin/ocelli.sh gate panic` builds a **second** module, carrying the
+`panic-probe` cargo feature, into `crates/ocelli-wasm/target/panic-probe`,
+which is gitignored. That feature adds one export that panics on purpose, and
+the shipped artefact does not carry it, so the module `bin/ocelli.sh wasm`
+measures has no way to be asked to panic. `AGENTS.md` forbids a feature flag
+without a named user, and the named user is `scripts/panic_probe.mjs`.
 
 ## The isolation invariant
 

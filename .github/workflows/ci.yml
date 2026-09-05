@@ -97,6 +97,10 @@ jobs:
       - run: python3 scripts/pin_and_size_check.py
       # D-09. A wasm32 build still succeeds when a no_std crate reaches std.
       - run: python3 scripts/no_std_check.py
+      # HLD section 23, "error codes are stable and versioned". The words are
+      # in the specification and the mechanism is not, so this is it. Runs
+      # through the gate, which also runs the guard's own negative cases.
+      - run: bin/ocelli.sh gate errors
       # docs/SOURCE-POLICY.md and HLD gate A6. No allowlist.
       - run: python3 scripts/source_provenance_check.py
       - run: python3 scripts/staged_content_check.py --tracked
@@ -238,3 +242,10 @@ jobs:
       # directly, so that the size check and the build stay one definition
       # that CI and a developer both get.
       - run: bin/ocelli.sh gate wasm
+
+      # F-005, HLD section 23. The panic hook running under `panic = "abort"`
+      # on wasm32 is a property no native test can observe, and the whole
+      # error design rests on it. Node instantiates the module directly, so
+      # this needs no browser and no new dependency, and it sits in this job
+      # because it is the one with wasm-pack.
+      - run: bin/ocelli.sh gate panic

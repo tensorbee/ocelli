@@ -59,6 +59,8 @@ GATES=(
   "unsafe|no|no unsafe outside the two permitted files (HLD 27.2 R5)"
   "pins|no|wgpu pinned exactly (HLD 15.2, 27.2 R4)"
   "nostd|no|no_std crates reach no dependency std feature (D-09)"
+  "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
+  "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "prose|no|voice rules over operator-facing prose"
   "content|no|no DICOM and no build artefacts tracked"
@@ -95,6 +97,24 @@ run_gate() {
     unsafe)      python3 scripts/unsafe_allowlist_check.py ;;
     pins)        python3 scripts/pin_and_size_check.py ;;
     nostd)       python3 scripts/no_std_check.py ;;
+    # F-005. The guard, then its own negative cases. Chained on `&&` for the
+    # reason the backlog arm gives: a case arm returns the status of its LAST
+    # command, so an unchained first command can fail and be reported green.
+    errors)      python3 scripts/error_code_check.py &&
+                 python3 -m unittest discover -s scripts/tests \
+                   -p test_error_code_check.py ;;
+    # F-005, HLD section 23. wasm32-unknown-unknown is `panic = "abort"` in
+    # every profile, so nothing on the host can observe what a real trap leaves
+    # behind. This builds a SECOND module carrying the `panic-probe` feature,
+    # into its own out-dir under the gitignored crates/ocelli-wasm/target, so
+    # the artefact `wasm` measures never carries a way to be asked to panic.
+    panic)       command -v wasm-pack >/dev/null || {
+                   echo "wasm-pack is not installed. See docs/DEVELOPER_SETUP.md" >&2
+                   return 1
+                 }
+                 wasm-pack build crates/ocelli-wasm --target web \
+                   --out-dir target/panic-probe -- --features panic-probe &&
+                 node scripts/panic_probe.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py ;;
     prose)       python3 scripts/prose_check.py ;;
     content)     python3 scripts/staged_content_check.py --tracked ;;
