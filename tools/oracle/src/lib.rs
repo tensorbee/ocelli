@@ -1,7 +1,13 @@
-//! Differential harness against cornerstone3D v5.8.9.
+//! Differential harness against cornerstone3D 5.8.2, deviation D-11.
 //!
 //! Nothing else in the port should start before this works
 //! (`docs/hld/25-first-ten-files.md`, entry 4).
+//!
+//! The REFERENCE half is built, and it is not Rust. `../run.mjs` and the rest
+//! of `tools/oracle` render every corpus row through the pinned cornerstone3D
+//! under headless Chromium and write reference pixels plus a metadata sidecar.
+//! See `docs/lld/oracle.md`. This crate is the OCELLI half of the same
+//! harness, which F-011 onwards builds.
 //!
 //! The tolerance policy is written down once and held, in
 //! `docs/hld/22-testing-and-tolerance.md` section 25.1. A tolerance change is

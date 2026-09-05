@@ -39,11 +39,12 @@ mechanism that makes generated Rust safe to merge at volume. A `/verify` that
 skips it is not a weaker gate, it is a different gate that does not check the
 thing this project is most likely to get wrong.
 
-There is one bootstrap exception. S01 builds the corpus and contains no port
-code, while F-010 in S02 builds the oracle. `gate --sprint` reports the absent
-oracle as a named skip only when the active sprint is S01 and F-010 is still
-pending in S02. `gate --all` has no exception. Once F-010 moves from pending,
-the sprint profile is strict too.
+There was one bootstrap exception, and it is gone. S01 built the corpus and
+contained no port code, while F-010 in S02 built the oracle, so `gate --sprint`
+reported the absent oracle as a named skip. F-010 removed the mechanism along
+with the skip. **Neither profile has an exception now, and the oracle gate has
+no skip path at all**: an absent reference stack is a refusal from
+`bin/ocelli.sh`, which is a failure to fix rather than a state to record.
 
 So: `corpus=absent` is permitted while the corpus is being assembled in S01 and
 is recorded honestly as `absent`. It is **not** permitted at

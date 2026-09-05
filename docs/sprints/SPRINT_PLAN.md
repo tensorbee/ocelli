@@ -59,7 +59,7 @@ Part III work appears in a parity plan. This table is generated from
 
 The workspace builds to wasm and to native, and the oracle renders the corpus through cornerstone3D before any port code exists.
 
-_S01 to S05, 22 stories, 54 engineer-weeks._
+_S01 to S05, 23 stories, 56 engineer-weeks._
 
 #### Sprint S01
 
@@ -98,7 +98,7 @@ _S01 to S05, 22 stories, 54 engineer-weeks._
 
 #### Sprint S04
 
-**Goal**: CI gate: every PR renders the full corpus, Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract, One parity-target version string, and a licence in the published wasm package, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it.
+**Goal**: CI gate: every PR renders the full corpus, Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract, One parity-target version string, and a licence in the published wasm package, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it, The reference's own SIGMOID width divergence, and what D14's bound says about it.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
@@ -109,6 +109,7 @@ _S01 to S05, 22 stories, 54 engineer-weeks._
 | F-X008 | Y1.3 | One parity-target version string, and a licence in the published wasm package | Build | 1w |
 | F-X010 | Y1.5 | CI floor equivalence, and the identical --sprint and --all gate profiles | Build | 2w |
 | F-X011 | Y1.6 | Cross-machine reference determinism, and what the oracle claims about it | Test | 2w |
+| F-X012 | Y1.7 | The reference's own SIGMOID width divergence, and what D14's bound says about it | Test | 2w |
 
 #### Sprint S05
 

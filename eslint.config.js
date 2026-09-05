@@ -62,4 +62,49 @@ export default tseslint.config(
     plugins: { "react-hooks": reactHooks },
     rules: reactHooks.configs.recommended.rules,
   },
+  {
+    // The oracle harness (F-010). Plain ESM JavaScript rather than TypeScript,
+    // and the only part of the repository whose files run in BOTH node and a
+    // browser: `tools/oracle/src/voi.mjs` is bundled into the render page and
+    // is also imported under node by the unit tests, so the window a frame is
+    // rendered with and the window recorded in its sidecar come from one
+    // tested function.
+    //
+    // The globals are listed rather than pulled from a `globals` package,
+    // because adding a dependency to name a dozen identifiers is worse than
+    // naming them. `no-undef` still catches a typo in any of them.
+    files: ["tools/oracle/**/*.mjs"],
+    ignores: ["tools/oracle/page/**"],
+    languageOptions: {
+      globals: {
+        Buffer: "readonly",
+        process: "readonly",
+        console: "readonly",
+        globalThis: "readonly",
+        URL: "readonly",
+        structuredClone: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+      },
+    },
+  },
+  {
+    // The render page, and only it. The split runs both ways: the node block
+    // above excludes this directory, and this block grants no node globals, so
+    // `no-undef` catches a driver file reaching for `document` and a page file
+    // reaching for `process`.
+    files: ["tools/oracle/page/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        window: "readonly",
+        document: "readonly",
+        navigator: "readonly",
+        crypto: "readonly",
+        atob: "readonly",
+        btoa: "readonly",
+        File: "readonly",
+        CustomEvent: "readonly",
+      },
+    },
+  },
 );

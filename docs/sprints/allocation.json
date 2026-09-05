@@ -349,7 +349,7 @@
    "depends_eids": [
     "E2.2"
    ],
-   "notes": "Tolerance is a written policy, not a magic number",
+   "notes": "Tolerance is a written policy, not a magic number From F-010: 16 corpus frames are too saturated for a pixel diff to show a divergence in the clipped values. F-010 names them in run.json and does not solve them, because a second render at a wider window is a comparator decision. Decide it here.",
    "milestone": "M1",
    "sprint": "S03",
    "depends_fids": [
@@ -3965,6 +3965,27 @@
     "F-010"
    ],
    "notes": "F-010 claims determinism it can support: identical digests across two runs on one machine and one browser build, with SwiftShader forced so the reference does not depend on a GPU. It does not claim cross-machine reproducibility, and decision D14 is why the stronger claim is not made. That leaves an untested assumption at the point the oracle becomes shared: a second developer, or CI on manual dispatch, may produce different reference digests for reasons nobody has measured, and the failure would present as a port defect in F-011 rather than as an environment difference. Measure it on a second machine and a second Chromium build, publish the observed bound, and make run.json carry whatever identifies the difference.",
+   "milestone": "M1",
+   "sprint": "S04",
+   "added": true,
+   "depends_fids": [
+    "F-010"
+   ]
+  },
+  {
+   "fid": "F-X012",
+   "eid": "Y1.7",
+   "phase": "P1",
+   "epic": "EY Sprint follow-ups",
+   "epic_key": "EY",
+   "story": "The reference's own SIGMOID width divergence, and what D14's bound says about it",
+   "layer": "Test",
+   "weeks": 2,
+   "depends_eids": [],
+   "depends_fids_declared": [
+    "F-010"
+   ],
+   "notes": "F-010 found a defect in the REFERENCE, not in this project. cornerstone3D 5.8.2's toLowHighRange applies LINEAR's (w - 1) / 2 to SIGMOID, and PS3.3 C.11.2.1.3.1 gives SIGMOID its own width constraint which is not LINEAR's. F-010's own minimumWidth is PS3.3-correct and therefore disagrees with the reference. It is unreachable today because all 85 windowed corpus rows resolve LINEAR, and the first SIGMOID row added to the corpus meets it. This matters more than its size suggests: decision D14 commits to publishing a MEASURED divergence against cornerstone3D, and here the oracle would be measuring our correct arithmetic against the reference's incorrect arithmetic and reporting it as our divergence. Decide and record which side the bound is stated against, add a SIGMOID corpus row so the case is exercised rather than reasoned about, and state the answer in docs/lld/oracle.md where the divergence is already recorded.",
    "milestone": "M1",
    "sprint": "S04",
    "added": true,

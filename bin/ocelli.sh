@@ -40,7 +40,7 @@ Gates
   gate --list            what each gate covers
   gate <name>...         run named gates
   gate --floor           the gates CI runs: no GPU, no corpus, no browser
-  gate --sprint          sprint gate, with the S01 pre-oracle exception
+  gate --sprint          sprint gate, every gate with no exception
   gate --all             every gate, including the GPU and corpus tiers
 
 Environment
@@ -149,15 +149,18 @@ run_gate() {
 # summary it did not watch produce.
 skip() { echo "SKIPPED: $*"; return 3; }
 
-s01_pre_oracle() {
-  grep -qx '# Current sprint, S01' docs/sprints/CURRENT_SPRINT.md &&
-    grep -Eq '^\| F-010 \| E2\.2 \| S02 \| .* \| Test \| 4w \| F-009 \| pending \|$' \
-      docs/sprints/BACKLOG.md
-}
+# The S01 pre-oracle exception used to live between `skip` and `gates_cmd`, as
+# `s01_pre_oracle`. It let `gate --sprint` report an absent oracle as a named
+# skip while S01 was building the corpus the oracle needs. F-010 built the
+# oracle, so the condition can no longer be true, and the function is REMOVED
+# rather than left in place with one that cannot fire. A dead exception is a
+# live misreading: the next person to see a skipped oracle gate would have to
+# prove it could not have applied instead of reading that it cannot exist.
+# `.claude/WORKFLOW.md` records the same removal, in the same change.
 
+# Select and run gates, counting a pass, a named skip and a failure apart.
 gates_cmd() {
   local selected=() entry name gpu desc failed=() skipped=() passed=0 status
-  local profile=named
 
   case "${1:-}" in
     --list)
@@ -168,7 +171,6 @@ gates_cmd() {
       done
       return 0 ;;
     --floor)
-      profile=floor
       for entry in "${GATES[@]}"; do
         IFS='|' read -r name gpu desc <<<"$entry"
         # The CI floor. `oracle` needs a GPU and a browser. `corpus` needs the
@@ -179,10 +181,8 @@ gates_cmd() {
         selected+=("$name")
       done ;;
     --sprint)
-      profile=sprint
       for entry in "${GATES[@]}"; do selected+=("${entry%%|*}"); done ;;
     --all)
-      profile=all
       for entry in "${GATES[@]}"; do selected+=("${entry%%|*}"); done ;;
     "")  usage; return 2 ;;
     *)   selected=("$@") ;;
@@ -191,13 +191,7 @@ gates_cmd() {
   for name in "${selected[@]}"; do
     printf '%s>> %s%s\n' "$DIM" "$name" "$OFF"
     status=0
-    if [ "$name" = oracle ] && [ "$profile" = sprint ] &&
-       [ ! -d tools/oracle/node_modules ] && s01_pre_oracle; then
-      skip "S01 precedes F-010, so no oracle exists yet. This exception is" \
-        "limited to the sprint profile while F-010 remains pending in S02." || status=$?
-    else
-      run_gate "$name" || status=$?
-    fi
+    run_gate "$name" || status=$?
     case "$status" in
       0) passed=$((passed + 1)) ;;
       3) skipped+=("$name") ;;
@@ -296,10 +290,23 @@ case "$command" in
     ;;
 
   oracle)
+    # The refusal has two halves, and the second is the one that bites later.
+    #
+    # Absent is obvious. PRESENT BUT NOT AT THE PINNED VERSIONS is the case
+    # that would otherwise produce reference frames from a reference nobody
+    # pinned, and output from a moving reference is not reference output. That
+    # half lives in run.mjs, because node can read an installed package.json
+    # and shell cannot without another dependency, and it is a refusal rather
+    # than a warning.
+    #
+    # `run.mjs` is the whole harness: the pins, the pure unit tests, two passes
+    # over the corpus for determinism, the pydicom cross-read of the sidecars,
+    # and the fault-injection self test. One place to look, and `--help` says
+    # what each flag turns off.
     if [ ! -d tools/oracle/node_modules ]; then
-      echo "The oracle is not installed yet. It is built by F-010 (E2.2)." >&2
-      echo "Nothing else in the port should start before it works" >&2
-      echo "(docs/hld/25-first-ten-files.md, entry 4)." >&2
+      echo "The oracle's reference stack is not installed." >&2
+      echo "Run: (cd tools/oracle && npm ci && npx playwright install chromium)" >&2
+      echo "See docs/lld/oracle.md for what it is and why it is pinned." >&2
       exit 1
     fi
     node tools/oracle/run.mjs "$@"

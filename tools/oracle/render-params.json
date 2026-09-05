@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "$notes": [
+    "The render parameters for the cornerstone3D reference renders (F-010).",
+    "A rendered frame is a function of the window, the camera, the canvas size and the interpolation. The DICOM file carries only the first of those, so the rest are declared here. Two runs that disagree on any of them produce two correct frames that differ, which would read in F-011 as a port defect.",
+    "Resolution order: `base`, then every rule in `rules` whose `match` holds, in file order, later winning. A rule REPLACES a key wholesale rather than merging into it. The rules that fired, and their reasons, are recorded per row in the output sidecar.",
+    "`canvas` and `background` are properties of the run rather than of a row, because one viewport serves every row. `tools/oracle/src/params.mjs` refuses a rule that tries to set either, rather than recording a parameter that did not take effect.",
+    "A change here changes every reference frame. Treat it the way docs/hld/22-testing-and-tolerance.md section 25.1 treats a tolerance: a pull request with a rationale, reviewed like code."
+  ],
+  "base": {
+    "canvas": {
+      "width": 512,
+      "height": 512,
+      "why": "Fixed and square, so no row's aspect ratio decides the output size. Most corpus frames are smaller than this and are magnified into it. Two real rows are not: real/dx_varepop/00000001.dcm is 879 by 1168 and real/us_cmb_crc/00000001.dcm is 590 by 819, and both are fitted DOWN under NEAREST, which discards source pixels. The sidecar records the source Rows and Columns beside the canvas size for exactly that reason, and run.json counts the downsampled rows."
+    },
+    "background": [0, 0, 0],
+    "interpolation": "NEAREST",
+    "camera": {
+      "mode": "reset",
+      "why": "cornerstone3D's own resetCamera, which fits the image to the canvas. Deterministic once the canvas size is fixed. `reset` is the only mode the page implements and it refuses any other value rather than ignoring it. The resulting camera is recorded per row in the sidecar rather than assumed."
+    },
+    "voi": {
+      "source": "file",
+      "why": "PS3.3 C.11.2. The window in the file is the presentation the file asks for. Where the file has none, the per-modality default declared below applies, rather than whatever the renderer would have chosen."
+    },
+    "allowUniform": false
+  },
+  "informationFloor": {
+    "extremeFractionWarnAbove": 0.95,
+    "why": "A frame can pass every boundary and still be nearly useless to compare. The synthetic transfer-syntax rows are full-range ramps that declare a soft-tissue CT window, so most of the ramp clips to white and a codec error in the high values would be invisible to a pixel diff. This is not a failure, the frame is exactly what the file asked for, so the run counts these rows and names them rather than refusing them. `black` plus `white` over the whole canvas includes the letterbox around the image, which is why the threshold is high rather than tight."
+  },
+  "modalityVoiDefaults": {
+    "CT": {
+      "windowCenter": 40,
+      "windowWidth": 400,
+      "voiLutFunction": "LINEAR",
+      "why": "The soft-tissue window. docs/hld/15-lut-chain.md section 18.3 works its LINEAR against LINEAR_EXACT example at the centre of this window, so it is the window this project already reasons about."
+    },
+    "*": {
+      "rule": "full-range",
+      "why": "No fixed window is right for an arbitrary MR, CR, DX, US or SC frame, and a fixed one that clipped everything to black would produce a frame that passes a digest check and shows nothing. The full-range rule derives the window from the image's own minimum and maximum under PS3.3 C.11.2.1.2, so every stored value lands inside the display range and no value is clipped. See tools/oracle/src/voi.mjs for the derivation."
+    }
+  },
+  "rules": [
+    {
+      "match": { "category": "colour" },
+      "apply": { "voi": { "source": "none" } },
+      "why": "PS3.3 C.11.2 puts the VOI LUT in the grayscale pipeline. An RGB or YBR frame has no VOI stage, so asking for one would record a window that did not act on anything."
+    }
+  ]
+}

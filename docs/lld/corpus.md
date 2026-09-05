@@ -8,6 +8,12 @@ outside git under ignored `corpus/data` behind `corpus/manifest.tsv`, which is
 deviation **D-05**. `corpus/README.md` is the operator-facing guide. This file
 is the design behind it.
 
+**Read [oracle.md](oracle.md) beside this one.** The corpus is the input and
+the oracle is what renders it, so the two are one instrument. That file records
+which rows cornerstone3D 5.8.2 cannot render and why, which is a fact about the
+reference rather than about the corpus, and it names which rows the reference
+half covers as pixels while leaving them untouched as geometry.
+
 ## Two layers, because neither alone is enough
 
 The `category` column records which layer a case belongs to.

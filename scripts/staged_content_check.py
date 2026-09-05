@@ -29,6 +29,17 @@ DICOM_SUFFIXES = {".dcm", ".dicom", ".ima"}
 ARTEFACT_PARTS = {"node_modules", "target", "pkg", "dist"}
 MAX_BYTES = 2 * 1024 * 1024
 
+# Oracle output (F-010). A reference frame of a real corpus row is a rendered
+# PICTURE of patient data, and every real row in corpus/manifest.tsv carries
+# `burned-in-unchecked` because HLD story E22.3, which would detect burned-in
+# annotation, is not built. The DICOM refusal below would not catch a PNG, and
+# neither would the size limit: a 512 by 512 PNG is tens of kilobytes.
+#
+# `.gitignore` already covers this path. That is not enough on its own, because
+# `git add -f` exists and an image in history is not removed by a later commit.
+# The guard belongs here, as a mechanism, and not there, as a habit.
+ORACLE_OUTPUT_PREFIXES = ("tools/oracle/out/",)
+
 # DICOM Part 10 preamble: 128 zero bytes then "DICM". A file with no suffix
 # is checked by magic, because `anon001` is a very normal way to receive one.
 DICM_OFFSET = 128
@@ -67,6 +78,15 @@ def main() -> int:
         if not path.is_file():
             continue
         parts = set(Path(name).parts)
+
+        if name.startswith(ORACLE_OUTPUT_PREFIXES):
+            problems.append(
+                f"{name}: oracle output. A reference frame of a real corpus "
+                f"row is a rendered picture of patient data, and every real "
+                f"row is marked burned-in-unchecked. Nothing under "
+                f"tools/oracle/out/ is ever committed. Regenerate it with "
+                f"`bin/ocelli.sh oracle`.")
+            continue
 
         if looks_like_dicom(path):
             problems.append(

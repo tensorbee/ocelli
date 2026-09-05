@@ -5,9 +5,12 @@ workers, TypeScript shell on the main thread, a deliberately narrow boundary
 between them.
 
 **cornerstone3D is our reference oracle, and we read it and learn from it.** It
-is MIT licensed and in bounds. Phase 1 targets feature parity with v5.8.9 and
-every frame is diffed against it before merge, which is a debt to acknowledge
-rather than a rivalry to advertise. Keep that tone in anything public.
+is MIT licensed and in bounds. Phase 1 targets feature parity with **5.8.2**
+and every frame is diffed against it before merge, which is a debt to
+acknowledge rather than a rivalry to advertise. Keep that tone in anything
+public. The HLD says v5.8.9 throughout and that version does not exist, which
+is deviation **D-11**. A parity claim against a version nobody can install is
+not a claim anyone can check, so the number here is the one the oracle pins.
 
 **Read `.claude/WORKFLOW.md` before changing anything.** It wins on process.
 `docs/hld/` wins on what to build.
@@ -54,7 +57,7 @@ From `docs/hld/11-decision-log.md`. Raise a deviation in
 | D14 | Claim MEASURED divergence, never bit-exact reproducibility. |
 
 **Two numbering namespaces, and they nearly collide.** `D1` to `D14` above are
-the HLD's own decisions. `D-01` to `D-07` in `docs/hld/DEVIATIONS.md` are
+the HLD's own decisions. `D-01` to `D-12` in `docs/hld/DEVIATIONS.md` are
 places this repository departs from the HLD. **`D7` and `D-07` are different
 things**: D7 is the oracle-before-port-code decision, D-07 is the CPU tier.
 Always write the hyphen for a deviation.
@@ -108,7 +111,7 @@ stories.
 bin/ocelli.sh check <crate>        # inner loop
 bin/ocelli.sh gate --list          # what each gate covers
 bin/ocelli.sh gate --floor         # what CI runs: no GPU, no corpus
-bin/ocelli.sh gate --sprint        # sprint verification, including bootstrap policy
+bin/ocelli.sh gate --sprint        # sprint verification, every gate, no exception
 bin/ocelli.sh gate --all           # everything, including oracle and corpus
 bin/ocelli.sh wasm                 # wasm-pack build + size budget
 bin/ocelli.sh oracle               # the differential harness (needs a GPU)
@@ -133,9 +136,29 @@ no GPU and no browser and Ocelli needs both.
 
 ## Current state
 
-Bootstrap. Thirteen crate skeletons, no implementation. S01 is F-001 (core
-types) and F-009 (the corpus). See `docs/sprints/CURRENT_SPRINT.md`.
+Early. S01 delivered the `ocelli-core` types and the corpus. S02 delivered the
+build and packaging paths and the reference half of the oracle. See
+`docs/sprints/CURRENT_SPRINT.md` and `docs/lld/`.
 
-Nothing in `docs/hld/` Part II has been implemented yet, so where this file and
-that directory disagree about what exists, that directory is describing the
-target and this one is describing today.
+What exists, in the order it matters:
+
+- **The oracle's reference half.** `tools/oracle` renders every applicable
+  corpus row through cornerstone3D 5.8.2 under headless Chromium on
+  SwiftShader and writes reference pixels plus a metadata sidecar. It compares
+  nothing yet, which is F-011.
+- **The corpus**, 91 rows behind `corpus/manifest.tsv`, covering all sixteen
+  transfer syntaxes the codec registry claims.
+- **`ocelli-core`**, the coordinate and value spaces, entries 1 and 2 of the
+  first-ten-files list.
+- **Every build target.** wasm through `wasm-pack` with a recorded size
+  budget, the two native entry points, and a cross-target proof that both
+  build from the same eleven shared crates.
+- **The GPU device-sharing contract**, `GpuContext` in `ocelli-render` and
+  `ComputeCtx` in `ocelli-compute`, section 38's Phase 1 hook.
+- **The npm packaging pipeline**, proven against a consumer outside the
+  workspace.
+
+Most of `docs/hld/` Part II is still unimplemented, so where this file and that
+directory disagree about what exists, that directory is describing the target
+and this one is describing today. **No port code has been written**, which is
+decision D7 holding: the oracle exists first.

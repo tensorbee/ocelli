@@ -81,12 +81,16 @@ was broken.
 gate covers. Four profiles:
 
 - **`--floor`**, everything needing no GPU and no corpus. This is what CI runs.
-- **`--sprint`**, everything in `--all`, with one bootstrap exception. On S01
-  only, while F-010 remains pending in S02, the absent oracle is a named skip.
-  S01 builds the corpus the oracle needs and contains no port code. The
-  exception cannot apply once F-010 moves from pending.
+- **`--sprint`**, everything in `--all`. It carried one bootstrap exception,
+  which was named here, implemented in `bin/ocelli.sh` as `s01_pre_oracle`, and
+  applied only on S01 while F-010 remained pending: the absent oracle was a
+  named skip, because S01 built the corpus the oracle needs and contained no
+  port code. **F-010 built the oracle, so the exception is gone.** The function
+  was removed rather than left with a condition that can no longer be true,
+  because a dead exception is a live misreading. The two profiles are now the
+  same set of gates.
 - **`--all`**, the floor plus `corpus` and `oracle`. This is what a human runs
-  before a release. It has no bootstrap exception.
+  before a release.
 - **named gates**, the inner loop.
 
 ### Everything runs natively, and there is no container path

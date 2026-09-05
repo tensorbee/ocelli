@@ -54,3 +54,9 @@ Repository bootstrap. Nothing is published.
   workspace installs and imports it under `bundler` and `node16` resolution,
   and `npm publish --dry-run` exercises the registry path without publishing.
   `@ocelli/core` and `@ocelli/react` now ship a README and their licences.
+- The differential oracle's reference half. `bin/ocelli.sh oracle` renders
+  every applicable corpus row through cornerstone3D 5.8.2 in headless Chromium
+  on SwiftShader and writes reference pixels plus a metadata sidecar, or a
+  precise failure at one of four named boundaries. 89 of 91 rows render
+  deterministically, and the two that do not are recorded with their reason in
+  `tools/oracle/unsupported.json`. It compares nothing yet, which is F-011.

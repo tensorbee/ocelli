@@ -534,3 +534,104 @@ gate that invites being disabled is the wrong trade.
   `ocelli_version()` is in `crates/ocelli-wasm`. Comparing a constant to the
   file it was copied from restates it. Comparing the two files is
   `package_check.py`'s job.
+
+## F-010, Headless cornerstone3D reference renderer, completed 2026-09-05
+
+**What was built.** The reference half of the differential harness, and the
+instrument every later story is validated against. `tools/oracle/run.mjs`
+drives Playwright-controlled headless Chromium on SwiftShader, renders every
+applicable corpus row through cornerstone3D 5.8.2, and writes one raw frame,
+one PNG and one metadata sidecar each, or a precise failure. It compares
+nothing. Comparison is F-011.
+
+**Measured, and reproduced independently.** The oracle was run in the canonical
+worktree, a different checkout from the one that built it, and reproduced the
+worker's numbers exactly: 91 rows applicable, 91 reached, 90 decoded, 90
+presented, 89 read back, 2 accounted for by `unsupported.json`, determinism
+identical across two passes on one browser build, 89 sidecars agreeing with an
+independent pydicom read, and 12 fault injections red at their named boundary.
+
+**The two rows cornerstone3D 5.8.2 cannot render**, both diagnosed against the
+standard rather than reported as failures:
+
+- `synthetic/us_ybr_full_422.dcm` fails at **read back and not at decode**.
+  PS3.3 C.7.6.3.1.2: 4:2:2 stores Y1 Y2 Cb Cr per pixel pair, so the frame is
+  480 bytes where `Rows*Columns*SamplesPerPixel` would be 720. cornerstone
+  sizes the texture the naive way, the browser refuses the short upload, and
+  the frame reads back uniform black while the load RESOLVES. Without the
+  read-back guard this row would have been given a stable digest for a blank
+  frame and counted as covered.
+- `syntax/deflated_explicit_vr_le.dcm`, PS3.5 A.5. The default loader path does
+  not inflate before parsing.
+
+All three HTJ2K rows and both JPEG-LS rows render.
+
+**HLD sections implemented.** `docs/hld/08-validation-architecture.md` section
+11. `docs/hld/25-first-ten-files.md` entry 4.
+`docs/hld/22-testing-and-tolerance.md` section 25.1, transcribed as what F-011
+will apply, not applied here.
+**Deviations.** D-11, cornerstone3D pinned at 5.8.2 because Appendix B's
+v5.8.9 does not exist. Raised by the design round, not by this story.
+**Crates / packages modified.** `tools/oracle/` in full, plus `bin/ocelli.sh`,
+`eslint.config.js`, `scripts/staged_content_check.py`, `CLAUDE.md`,
+`docs/lld/`, `docs/runbooks/guard-verification.md`, `.claude/WORKFLOW.md`,
+`.claude/commands/verify.md`, `.claude/commands/close-sprint.md` and the two
+generated adapters.
+**Tests added.** 137 in seven `node:test` suites, plus 12 fault injectors run
+by the gate on every pass, plus `check_sidecars.py` re-reading every row with
+pydicom.
+**Fixture provenance.** Nine hand-written fixture rows agree with PS3.3, and
+89 sidecars agree with an independent pydicom read of the same files. The
+expected values come from the standard through pydicom, per HLD 27.2 R2, never
+from what the harness printed.
+**Verification.** `bin/ocelli.sh gate --sprint` on the merged tree, **ALL GREEN
+over 23 gates with zero skips**. The first run in this project in which every
+gate, `wasm` and `oracle` included, passed together on one tree.
+**Corpus.** pass. 91 rows verified, 0 missing, 0 mismatched.
+**Tier coverage.** A (WebGPU) n/a, B (WebGL2) n/a, C (CPU) n/a. This story runs
+somebody else's renderer. Ocelli's tiers are resolved by F-004 and exercised
+against this output by F-011. The rows are named because it would be easy to
+read a story that renders as declaring a tier, and it does not.
+**LLD updated.** `docs/lld/oracle.md`, created. `docs/lld/README.md` gained a
+row. `docs/lld/corpus.md` gained a pointer.
+**Deviations from the design plan.** Four, all reported rather than worked
+around, and two of them corrections to the plan itself:
+
+- The plan says `CLAUDE.md` and `README.md` both state the parity target as
+  v5.8.9. `README.md` states no version at all.
+- The plan describes four boundary faults. Twelve injectors are implemented,
+  because a boundary can fail in more than one way worth separating.
+- The plan mentions no page server or bundler. Both are needed, because a
+  module worker cannot start from `file://` and cornerstone3D's ESM tree does
+  not load without one. The plan's actual constraint holds: corpus bytes reach
+  the page through `page.evaluate`, so no server in this harness reads
+  `corpus/data`.
+- The plan says `vitest` and the suites are `node:test`.
+
+**Notes for future sessions.**
+- **A defect was found in the REFERENCE, not in this project.** cornerstone3D
+  5.8.2's `toLowHighRange` applies LINEAR's `(w - 1) / 2` to SIGMOID, where
+  PS3.3 C.11.2.1.3.1 gives SIGMOID its own constraint. Unreachable today
+  because all 85 windowed rows resolve LINEAR. It matters because D14 commits
+  to publishing a measured divergence, and here the oracle would measure our
+  correct arithmetic against the reference's incorrect arithmetic and report it
+  as ours. **F-X012.**
+- **`PS3.3 C.11.2.1.2.1` was withdrawn**, not defended. Nobody could quote the
+  sentence, so the rule is stated without a clause number and grounded in
+  cornerstone3D 5.8.2's own default parameter instead. A rule grounded in the
+  artefact the harness must match beats one grounded in an unquotable clause.
+- **The review loop ran thirteen passes and never came back clean.** It
+  oscillated at 20, 9, 5, 7, 4, 3, 4, 2, 5, 5, 5, 3, 2 blocking items while the
+  diff grew from +5762 to +10321, because each remediation added surface for
+  the next pass to find defects in. It was closed by changing strategy, not by
+  more passes, and the final review was taken by the integrator, who is
+  independent of the author. See `.claude/reviews/S02-sprint-pass-2.md`.
+- **The guard sweep found the mutation harness itself was broken.**
+  `node --test tests/` treats the directory as a test and fails before running
+  anything, so earlier rounds' "all refusals red" results had a red baseline
+  and proved nothing. Re-run against a 137-pass baseline, six of 26 refusals
+  were watched by nothing. **F-X009** generalises this to every guard in the
+  repository.
+- **Nothing under `tools/oracle/out/` is committed**, 269 files produced and
+  zero tracked. A reference frame of a real corpus row is a rendered picture of
+  patient data and every real row is `burned-in-unchecked`.
