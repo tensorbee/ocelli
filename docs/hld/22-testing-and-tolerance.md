@@ -41,6 +41,8 @@ Write it down once and hold it. Tuning tolerance per failure is how a suite stop
 
 - **Monochrome 16-bit (CT, MR, CR, DR):** maximum absolute difference ≤ 1 LSB on at least 99.9% of pixels; zero pixels differing by more than 2.
 
+- **Systematic bias, monochrome:** signed mean difference over the image rectangle within 0.1 of one display code, evaluated only where input identity, declared parameters and geometry already agree. Added in S03 by operator decision through F-011's design plan. A maximum-difference bound cannot separate a systematic window-function divergence from rounding noise: LINEAR against LINEAR_EXACT at the soft-tissue window differs by 255 × (x + 160) / 159600, which peaks at 0.6375 of a display code and therefore never exceeds one code after quantisation to an 8-bit frame, so the bound above passes it everywhere. That divergence is one-sided and averages 0.32 of a code at the window centre, where the difference between two correct implementations averages zero. The bias bound is what makes the divergence §18.3 exists to warn about detectable by the oracle.
+
 - **Colour and ultrasound:** perceptual difference below a stated threshold, because chroma subsampling and YBR conversion legitimately differ.
 
 - **Geometry:** world coordinates within 1e-6 mm; canvas coordinates within a quarter pixel.
