@@ -231,7 +231,7 @@ At least 99.9% of pixels within 1, and no pixel exceeding 2. A pixel differing
 by exactly 2 is permitted, for up to 0.1% of the frame. A pixel differing by 3
 is never permitted, at any count.
 
-Plus 25.1's bias bullet, over the image rectangle:
+Plus 25.1's bias bullet, over the informative region:
 
 > `|signedMeanDiff| <= 0.1`
 
@@ -340,9 +340,20 @@ statistics are in the record so a human can raise the third.
 ## What the bias bound is, and what it is not
 
 25.1 gained a fourth bullet in S03, by operator decision through F-011's design
-plan: signed mean difference over the image rectangle within 0.1 of one display
-code, evaluated only where input identity, declared parameters and geometry
-already agree.
+plan: signed mean difference over the **informative region** within 0.1 of one
+display code, evaluated only where input identity, declared parameters and
+geometry already agree.
+
+**It said "image rectangle" until the sprint review's second pass, and over that
+region it detected nothing.** The per-pixel divergence is exactly `u / w`, where
+`u` is the LINEAR display value, so the mean over a region is `mean(u) / w`. A
+pixel clipped to black or white on both sides differs by nothing whatever the
+arithmetic underneath says, so averaging over the whole rectangle divides the
+divergence the unclipped pixels do show by a denominator full of pixels that
+structurally cannot show one. Measured over all 71 gating class-one views on
+this corpus, the largest observable bias over the image rectangle was **0.0825**
+and a 0.1 bound caught **none of them**. Over the informative region the same
+soft-tissue CT rows run to about 0.28.
 
 It exists because of a finding this story made. At the soft-tissue window,
 
@@ -362,11 +373,30 @@ tolerance the HLD wrote down. `tools/oracle/tests/voi_divergence_fixture.rs`
 asserts exactly that, and asserting it is the finding rather than a bug in the
 test.
 
-**What the bound is proven to do.** It DETECTS. The mutation
-`plus-one-on-two-fifths-of-the-image` is that signature at corpus scale and the
-bound fails it, and the sixteen hand-computed values in
-`voi_divergence_fixture.rs` produce a signed mean of exactly `7/16 = 0.4375`,
-which is over four times the bound.
+**What the bound is proven to do.** It detects the actual swap, and the
+mutation that proves it is `the-actual-linear-exact-swap`, which applies
+`round(u - u/w)` to every pixel using the view's own declared window. That is
+the divergence rather than a stand-in for it.
+
+**`plus-one-on-two-fifths-of-the-image` is kept and is not that proof.** It
+moves 40 per cent of the image by a whole code where the real divergence moves
+each pixel by a sub-code amount that only sometimes crosses a rounding
+boundary, so it clears the bound several times over. It proves the bound catches
+a large one-sided difference. It says nothing about whether the bound catches
+the divergence HLD 18.3 is about, and reading it as that proof is what let the
+bound ship over a region where it detected nothing.
+
+**The region is load-bearing and is proved so.** Reverting the evaluation to the
+image rectangle makes `the-actual-linear-exact-swap` come back `NOT DETECTED`
+with the view passing, and the run exits 1 on the undetected mutation. Restoring
+the informative region detects all 21.
+
+**A structural limit, stated because no region choice removes it.** The largest
+divergence any view can show is `255 / w`, so **a view whose window is wider
+than 2550 cannot reach this bound at all**. The corpus already carries rows at
+`w = 4096`, including `real/dx_varepop/00000001.dcm` and
+`synthetic/cr_monochrome1.dcm`. Those views are not protected by this bullet and
+nothing here pretends they are.
 
 **What the bound is not.** It is NOT calibrated against measured divergence.
 **Its false-positive rate is unmeasured and unmeasurable in this sprint**,

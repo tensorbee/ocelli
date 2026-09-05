@@ -899,7 +899,36 @@ fn build_statistics(
                 .channel(0)
                 .ok_or_else(|| CompareError::Register("no image channel 0".to_owned()))?;
             let predicate = tolerance::monochrome_predicate(full_channel)?;
-            let bias = tolerance::bias_bound(image_channel)?;
+            // **The bias is evaluated over the INFORMATIVE region, not the
+            // image rectangle, and the S03 sprint review's second pass is why.**
+            //
+            // A pixel clipped to black or white on both sides differs by
+            // nothing, whatever the underlying arithmetic says, so it cannot
+            // express a divergence. Averaging over the whole rectangle divides
+            // the divergence the unclipped pixels DO show by a denominator that
+            // includes every pixel that structurally cannot show one.
+            //
+            // Measured on this corpus at the time of the change: the per-pixel
+            // divergence between LINEAR and LINEAR_EXACT is exactly `u / w`,
+            // where `u` is the LINEAR display value. Over the image rectangle
+            // the largest observable bias across all 71 gating class-one views
+            // was 0.0825, so a 0.1 bound detected NONE of them. Over the
+            // informative region the same views run to 0.28 on the soft-tissue
+            // CT rows, which is where section 18.3's worked example lives.
+            //
+            // A view whose informative region is empty is already `weak` and
+            // already `unmeasured`, so it does not gate and the bias is not
+            // evaluated for it rather than being invented.
+            let bias = match diff.informative.channel(0) {
+                Some(informative_channel) if informative_channel.pixels() > 0 => {
+                    tolerance::bias_bound(informative_channel)?
+                }
+                _ => tolerance::BiasVerdict {
+                    signed_mean_diff: 0.0,
+                    passes: true,
+                },
+            };
+            let _ = image_channel;
             (predicate.passes, bias.passes, bias.signed_mean_diff)
         } else {
             let mean = image

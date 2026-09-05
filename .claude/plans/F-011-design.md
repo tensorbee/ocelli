@@ -1335,7 +1335,15 @@ worked example produces at the window centre, and far above the zero expected
 when two implementations agree, because the divergence is one-sided and
 rounding noise is not. **The known risk is stated rather than discovered later:
 two correct implementations using different rounding conventions could carry a
-small systematic bias with no defect behind it.** That is why the bound is
+small systematic bias with no defect behind it.**
+
+**A second risk was NOT anticipated here and the sprint review's second pass
+found it.** This plan says "over the image rectangle", and over that region the
+bound detects nothing on this corpus, because a clipped pixel cannot express a
+divergence and the rectangle is mostly clipped. The implementation evaluates it
+over the informative region instead. The lesson is that the bound's REGION is as
+load-bearing as its value, and this plan reasoned carefully about the value and
+not at all about the region. That is why the bound is
 evaluated only after the parameter rung has already agreed, and why the
 rounding convention is part of what the parameter rung compares. If a real
 divergence is later measured that this bound misclassifies, widening it is a

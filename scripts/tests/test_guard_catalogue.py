@@ -221,6 +221,40 @@ class TheEnvironmentScrub(unittest.TestCase):
 
 
 class TheTripwire(unittest.TestCase):
+    # The tripwire is the mechanism behind `sandbox.py`'s opening claim that
+    # nothing here may write inside the real repository. Every other test in
+    # this class iterates over `TRIPWIRE_READS`, so with that tuple emptied
+    # they all pass vacuously and the claim is watched by nothing. The S03
+    # sprint review's second pass proved exactly that: `TRIPWIRE_READS = ()`
+    # left thirty tests and the self test green.
+    #
+    # So the SET is asserted here, by name, from the outside. Adding a read is
+    # a deliberate change to this list. Removing one fails here rather than
+    # quietly shrinking what the tripwire watches.
+    EXPECTED_READS = {"HEAD", "unstaged", "staged", "untracked", "hooksPath"}
+
+    def test_it_watches_exactly_the_declared_set(self) -> None:
+        labels = {label for label, _ in sandbox.TRIPWIRE_READS}
+        self.assertEqual(
+            labels,
+            self.EXPECTED_READS,
+            "the tripwire's coverage changed. Each of these is a way the "
+            "developer's repository could be disturbed: the commit it is on, "
+            "its unstaged and staged content, its untracked files, and whether "
+            "its hooks are enabled. Removing one narrows what a probe run is "
+            "allowed to disturb without saying so.",
+        )
+
+    def test_each_declared_read_actually_runs_a_git_command(self) -> None:
+        for label, args in sandbox.TRIPWIRE_READS:
+            with self.subTest(label):
+                self.assertTrue(args, f"{label} names no git command")
+                self.assertIn(
+                    args[0],
+                    {"rev-parse", "diff", "ls-files", "config", "status"},
+                    f"{label} does not read anything git knows about",
+                )
+
     def test_it_reports_a_planted_change_to_each_thing_it_captures(
             self) -> None:
         before = {label: "before" for label, _ in sandbox.TRIPWIRE_READS}

@@ -132,6 +132,21 @@ pub enum Effect {
     /// pixel where the result would clip, so the delta the frame carries is
     /// the delta the catalogue declared.
     AddDelta { count: PixelCount, delta: i16 },
+    /// Apply the actual LINEAR to LINEAR_EXACT swap to every pixel.
+    ///
+    /// The per-pixel divergence is exactly `u / w`, where `u` is the LINEAR
+    /// display value and `w` the window width, so the swapped value is
+    /// `round(u - u / w)`. Derived in exact rational arithmetic over five
+    /// windows in the S03 sprint review, not fitted.
+    ///
+    /// **This exists because `AddDelta` could not represent the real thing.**
+    /// A flat delta over a declared fraction of the image is a caricature: it
+    /// moves every chosen pixel by a whole code, where the real divergence
+    /// moves each pixel by a sub-code amount that only sometimes crosses a
+    /// rounding boundary, and it moves them uniformly where the real one is
+    /// proportional to the display value. A mutation that clears the bound by
+    /// four times proves the bound catches THAT mutation and nothing else.
+    VoiLinearExactSwap,
     /// Shift the frame one canvas pixel to the right.
     TranslateOnePixel,
     /// Swap the red and blue lanes.
@@ -215,6 +230,29 @@ pub const CATALOGUE: &[Mutation] = &[
             outcome: Outcome::Pass,
             qualifiers: &[],
             side: Side::None,
+        },
+    },
+    Mutation {
+        name: "the-actual-linear-exact-swap",
+        why: "The real thing rather than a caricature of it. Every pixel moves \
+              by `u / w`, which is the exact divergence between LINEAR and \
+              LINEAR_EXACT derived in rational arithmetic, so most pixels do \
+              not cross a rounding boundary at all and the ones that do move \
+              by a single code. `plus-one-on-two-fifths-of-the-image` moves 40 \
+              per cent of the image by a whole code and clears the bias bound \
+              several times over, which proves the bound catches THAT and says \
+              nothing about the divergence HLD 18.3 is about. This one is the \
+              divergence. It is also why the bound is evaluated over the \
+              informative region: over the whole image rectangle this mutation \
+              is NOT detected on any view in the corpus, because the clipped \
+              pixels that cannot show it outnumber the ones that can.",
+        side: MutatedSide::Candidate,
+        target: Target::MeasuredStack,
+        effect: Effect::VoiLinearExactSwap,
+        expect: Expectation::View {
+            outcome: Outcome::Fail,
+            qualifiers: &[Qualifier::Bias],
+            side: Side::Ours,
         },
     },
     Mutation {
@@ -554,6 +592,7 @@ pub fn touches_the_frame(mutation: &Mutation) -> bool {
     matches!(
         mutation.effect,
         Effect::AddDelta { .. }
+            | Effect::VoiLinearExactSwap
             | Effect::TranslateOnePixel
             | Effect::SwapRedAndBlue
             | Effect::SetAlpha(_)
@@ -629,6 +668,7 @@ pub fn apply_to_run(mutation: &Mutation, run: &mut Run, target: &str) -> Result<
             Ok(())
         }
         Effect::AddDelta { .. }
+        | Effect::VoiLinearExactSwap
         | Effect::TranslateOnePixel
         | Effect::SwapRedAndBlue
         | Effect::SetAlpha(_) => Ok(()),
@@ -666,6 +706,7 @@ pub fn apply_to_frame(
     mutation: &Mutation,
     frame: &mut Frame,
     image: &Rect,
+    window_width: Option<u32>,
 ) -> Result<(), MutationError> {
     match mutation.effect {
         Effect::AddDelta { count, delta } => {
@@ -694,6 +735,52 @@ pub fn apply_to_frame(
                         "the image rectangle holds only {applied} pixels that can \
                          carry a delta of {delta} without clipping, and {wanted} \
                          were declared"
+                    ),
+                ));
+            }
+            Ok(())
+        }
+        Effect::VoiLinearExactSwap => {
+            // The view's OWN window, read from its sidecar by the caller. Not a
+            // constant in the catalogue, because a divergence of `u / w` is a
+            // statement about the window the frame was actually rendered with,
+            // and a catalogue that hardcoded one would silently stop describing
+            // the view the day the target resolved elsewhere.
+            let Some(window_width) = window_width.filter(|w| *w > 0) else {
+                return Err(MutationError::Apply(
+                    mutation.name,
+                    "this view's sidecar carries no positive window width, so \
+                     the LINEAR to LINEAR_EXACT divergence is not defined for it"
+                        .to_owned(),
+                ));
+            };
+            // `round(u * (w - 1) / w)` in integers, which is exactly
+            // `round(u - u / w)`. `(2a + b) / (2b)` is round-half-up for
+            // non-negative integers, so there is no float, no `as` cast and no
+            // rounding decision left implicit. u is at most 255 and w fits a
+            // u32, so u64 cannot overflow here.
+            let w = u64::from(window_width);
+            let mut moved = 0_u64;
+            for y in image.y0..image.y0.saturating_add(image.height) {
+                for x in image.x0..image.x0.saturating_add(image.width) {
+                    let pixel = frame.pixel(x, y)?;
+                    let Some(grey) = pixel.first() else { continue };
+                    let u = u64::from(*grey);
+                    let swapped = (2 * u * (w - 1) + w) / (2 * w);
+                    let byte = u8::try_from(swapped).unwrap_or(*grey);
+                    if byte != *grey {
+                        moved = moved.saturating_add(1);
+                    }
+                    frame.set_pixel(x, y, [byte, byte, byte, u8::MAX])?;
+                }
+            }
+            if moved == 0 {
+                return Err(MutationError::Apply(
+                    mutation.name,
+                    format!(
+                        "the swap moved no pixel at window width {window_width}, \
+                         so this view cannot show the divergence and declaring it \
+                         detectable would be false"
                     ),
                 ));
             }

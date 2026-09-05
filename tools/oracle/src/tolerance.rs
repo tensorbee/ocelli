@@ -197,7 +197,24 @@ pub fn monochrome_predicate(stats: &ChannelStats) -> Result<MonochromeVerdict, T
     })
 }
 
-/// 25.1's bias bullet, evaluated over the image rectangle.
+/// 25.1's bias bullet, evaluated over the INFORMATIVE region.
+///
+/// Not the image rectangle. A pixel clipped to black or white on both
+/// sides differs by nothing whatever the arithmetic underneath says, so
+/// including it in the denominator divides a real divergence by pixels
+/// that structurally cannot show one. Measured on this corpus, that
+/// choice was the difference between detecting 0 of 71 gating class-one
+/// views and detecting the soft-tissue CT rows where HLD 18.3's worked
+/// example lives.
+///
+/// **A structural limit worth knowing before trusting this.** The
+/// per-pixel divergence between LINEAR and LINEAR_EXACT is exactly
+/// `u / w`, where `u` is the LINEAR display value in 0 to 255 and `w`
+/// is the window width. So the largest divergence any view can show is
+/// `255 / w`, and for `w > 2550` this bound is UNREACHABLE no matter
+/// which region it is taken over. The corpus already carries rows at
+/// `w = 4096`. Those views are not protected by this bound and nothing
+/// pretends otherwise.
 #[derive(Clone, Copy, Debug)]
 pub struct BiasVerdict {
     pub signed_mean_diff: f64,

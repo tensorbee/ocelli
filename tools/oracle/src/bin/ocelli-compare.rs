@@ -267,7 +267,18 @@ fn read_side(
             .ok_or_else(|| format!("{id} has no sidecar"))?;
         let rect = image_rect_for(sidecar.kind, sidecar, frame.width(), frame.height())
             .map_err(|error| error.to_string())?;
-        apply_to_frame(mutation, &mut frame, &rect).map_err(|error| error.to_string())?;
+        // The view's own declared window, as an integer. `as_u64` rather
+        // than a rounded `as_f64`, because `as` casts are denied here and a
+        // non-integral width is a case this mutation genuinely cannot express
+        // rather than one to round into shape. Declining is reported by the
+        // effect with its own message.
+        let window_width = sidecar
+            .json
+            .pointer("/voi/windowWidth")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|w| u32::try_from(w).ok());
+        apply_to_frame(mutation, &mut frame, &rect, window_width)
+            .map_err(|error| error.to_string())?;
     }
     Ok(frame)
 }

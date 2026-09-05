@@ -1053,11 +1053,23 @@ the integrator, in exact rational arithmetic. The operator's answer was to add a
 signed-mean bias bound to 25.1, within 0.1 of a display code, evaluated only
 where inputs, parameters and geometry already agree.
 
-**That bound is proved to be what catches it.** At integration the constant was
-widened from 0.1 to 0.7 and the catalogue entry carrying the swap signature went
-`NOT DETECTED`, with the view becoming `pass` and the run exiting 1. Restored,
-twenty of twenty are detected and the run exits 0. The analytic argument and the
-mechanism agree.
+**That bound did not catch it as first shipped, and the sprint review's second
+pass found that.** The bound was evaluated over the image rectangle, and the
+per-pixel divergence is exactly `u / w`, so a rectangle full of pixels clipped
+to black or white divides the divergence the unclipped ones show by a
+denominator that cannot show one. Measured across all 71 gating class-one views,
+the largest observable bias over the rectangle was 0.0825 and a 0.1 bound caught
+none of them. The proof that had been accepted, a mutation moving 40 per cent of
+the image by a whole code, cleared the bound several times over and was a
+caricature of a divergence that moves each pixel by a sub-code amount.
+
+**It is now evaluated over the informative region and it does catch the real
+thing**, proved by a mutation that IS the real thing: `round(u - u / w)` applied
+to every pixel using the view's own declared window. Reverting the region to the
+rectangle makes that mutation come back `NOT DETECTED` with the view passing.
+A structural limit remains and is recorded rather than hidden: the largest
+divergence any view can show is `255 / w`, so a window wider than 2550 cannot
+reach the bound at all, and the corpus carries two such rows.
 
 **HLD sections implemented.** Section 25 and 25.1, including the bias bullet
 this sprint added. Section 11's requirement that metadata is diffed alongside
