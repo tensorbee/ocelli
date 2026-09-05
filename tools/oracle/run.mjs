@@ -3,7 +3,15 @@
 // the pinned cornerstone3D in headless Chromium and emit reference pixels or a
 // precise failure. F-010, HLD section 11, decision D7.
 //
-// It does not compare anything. Comparison is F-011.
+// It does not compare anything against Ocelli. Comparison is F-011.
+//
+// F-X007 adds a SECOND pass over the same corpus. Where the stack pass renders
+// one frame of one instance, the volume pass assembles the four series
+// directories declared in `volume-params.json` into volumes and renders three
+// orthogonal reformats of each, so the twenty synthetic spacing rows are asked
+// something about their geometry rather than only about their pixels. It runs
+// in its own page, after the stack page has been closed, so nothing it does can
+// move a stack frame.
 //
 // THE DEFECT THIS FILE EXISTS TO PREVENT, from docs/sprints/CURRENT_SPRINT.md:
 //
@@ -24,7 +32,27 @@
 //                  single value. A blank canvas reads back perfectly and
 //                  hashes stably, which is why it needs its own check.
 //
-// Each of the four is observed red by `--inject`, see `tests/faults.mjs`.
+// The volume pass adds four more, and the first of them exists because a
+// volume has a degeneracy the stack path has no analogue for:
+//
+//   5. VOLUME LOADED      every member parsed, the volume built, its slice
+//                         count is the member count, its sorted image ids are a
+//                         permutation of the members with no repeats, and its z
+//                         profile is the ramp `scripts/corpus_synth.py` wrote.
+//                         A volume assembled from the wrong slices, or from one
+//                         slice ten times, renders a perfectly plausible frame
+//                         that hashes stably.
+//   6. VOLUME GEOMETRY    the harness's OWN reading of the series geometry, from
+//                         the files and never from a cornerstone3D module,
+//                         matches `volume-truth.json` within HLD 25.1's 1e-6 mm,
+//                         and the reference either agrees with it or diverges in
+//                         a way that file declares.
+//   7. REFORMAT PRESENTED cornerstone3D's own IMAGE_RENDERED fired for the
+//                         orientation, with a timeout. Never a fixed sleep.
+//   8. REFORMAT READ BACK the reformat came back, at the declared size, not one
+//                         value and not still the sentinel.
+//
+// Each of the eight is observed red by `--inject`, see `tests/faults.mjs`.
 //
 // Nothing under `out/` is ever committed. A reference frame of a real corpus
 // row is a rendered picture of patient data and every real row in
@@ -53,6 +81,20 @@ import {
   resolveRenderParams,
   RENDER_PARAMS_PATH,
 } from "./src/params.mjs";
+import {
+  VOLUME_PARAMS_PATH,
+  VOLUME_TRUTH_PATH,
+  checkSubjectsAgainstManifest,
+  checkZProfile,
+  compareGeometry,
+  comparePairs,
+  frameIdFor,
+  measureSubject,
+  readVolumeParams,
+  readVolumeTruth,
+  selectSubjects,
+  validateVolumeTruth,
+} from "./src/volume.mjs";
 import { isEntryPoint, oraclePath, repoPath } from "./src/paths.mjs";
 import { installedVersion } from "./src/pins.mjs";
 import { serveDirectory } from "./src/server.mjs";
@@ -62,6 +104,7 @@ import {
   openOutput,
   prepareOutput,
   writeRow,
+  writeVolumeFrame,
 } from "./src/output.mjs";
 import {
   claimedRows,
@@ -72,8 +115,12 @@ import {
 import {
   FAULTS,
   faultedBytes,
+  faultedMemberBytes,
   faultedParams,
+  faultedVolumeRequest,
+  faultedVolumeResult,
   pageFaultName,
+  pageVolumeFaultName,
   skipsRow,
 } from "./src/faults.mjs";
 // The self test is the runner, not the catalogue. It re-enters this file
@@ -410,6 +457,7 @@ async function runUnitTests() {
     [
       "--test",
       "tests/args_test.mjs",
+      "tests/geometry_test.mjs",
       "tests/manifest_test.mjs",
       "tests/output_test.mjs",
       "tests/params_test.mjs",
@@ -419,6 +467,7 @@ async function runUnitTests() {
       "tests/server_test.mjs",
       "tests/sidecar_test.mjs",
       "tests/unsupported_test.mjs",
+      "tests/volume_test.mjs",
     ],
     { cwd: oraclePath() },
   );
@@ -450,7 +499,27 @@ const CHROMIUM_ARGS = [
   "--hide-scrollbars",
 ];
 
-async function openPage(origin, params) {
+/**
+ * The two pages, and what each is called in the browser.
+ *
+ * Two documents in two browser contexts, not two viewports in one. The volume
+ * pass could probably have shared the stack page's rendering engine, since
+ * cornerstone3D 5.8.2 defaults to a seven-context pool, and "probably" is not a
+ * property worth spending F-011's schedule on while it is reading the stack
+ * frames this story must not move.
+ */
+const STACK_PAGE = {
+  document: "index.html",
+  loadedFlag: "__oracleLoaded",
+  api: "__oracle",
+};
+const VOLUME_PAGE = {
+  document: "volume.html",
+  loadedFlag: "__oracleVolumeLoaded",
+  api: "__oracleVolume",
+};
+
+async function openPage(origin, params, which) {
   const browser = await chromium.launch({ args: CHROMIUM_ARGS });
   const context = await browser.newContext({
     deviceScaleFactor: 1,
@@ -463,14 +532,14 @@ async function openPage(origin, params) {
 
   const console_ = [];
   page.on("console", (message) => {
-    console_.push(`[${message.type()}] ${message.text()}`);
+    console_.push(`[${which.document}] [${message.type()}] ${message.text()}`);
   });
   page.on("pageerror", (error) => {
-    console_.push(`[pageerror] ${String(error?.message ?? error)}`);
+    console_.push(`[${which.document}] [pageerror] ${String(error?.message ?? error)}`);
   });
 
-  await page.goto(`${origin}/index.html`, { waitUntil: "load" });
-  await page.waitForFunction("window.__oracleLoaded === true", null, {
+  await page.goto(`${origin}/${which.document}`, { waitUntil: "load" });
+  await page.waitForFunction(`window.${which.loadedFlag} === true`, null, {
     timeout: 60_000,
   });
 
@@ -479,16 +548,20 @@ async function openPage(origin, params) {
   // object the way both agree on keeps `no-undef` able to catch a node-side
   // file that reaches for a browser global by mistake.
   const environment = await page.evaluate(
-    (setup) => globalThis.__oracle.ready(setup),
-    {
-      canvas: params.canvas,
-      background: params.background,
-      wasmBasePath: `${origin}/wasm/`,
-    },
+    ([api, setup]) => globalThis[api].ready(setup),
+    [
+      which.api,
+      {
+        canvas: params.canvas,
+        background: params.background,
+        wasmBasePath: `${origin}/wasm/`,
+      },
+    ],
   );
 
   return {
     page,
+    api: which.api,
     environment,
     console: console_,
     close: async () => {
@@ -596,6 +669,100 @@ async function renderPass(session, rows, spec, options, pass) {
     process.stdout.write(
       `  ${result.ok ? "ok  " : "FAIL"} ${row.path}` +
         (result.ok ? ` ${result.frame.sha256.slice(0, 12)}` : ` (${result.boundary})`) +
+        "\n",
+    );
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// One pass over the volume subjects
+// ---------------------------------------------------------------------------
+
+/**
+ * Assemble and reformat every attempted subject, once.
+ *
+ * The member ATTRIBUTES come from the stack pass, not from a second reader.
+ * `page/app.mjs` already read each file's Image Plane module straight from the
+ * bytes with `dicom-parser`, `check_sidecars.py` already cross-reads that
+ * against pydicom, and a second reader in the volume page would be a second
+ * copy of the one thing this harness most needs to be single. The BYTES are
+ * re-read from the corpus, because the page needs files to hand cornerstone3D
+ * and the stack pass did not keep them.
+ */
+async function volumePass(session, subjects, context, options, pass) {
+  const { stackResults, rowsByPath, spec, volumeParams, volumeTruth } = context;
+  const results = new Map();
+
+  for (const subject of subjects) {
+    // Resolved from the subject's OWN first member and not from the run's
+    // first row. `canvas` and `background` cannot be set by a rule so they are
+    // the same either way, and `interpolation`, `camera` and the VOI policy
+    // can be, so a subject must be given the parameters its own rows resolve.
+    const params = resolveRenderParams(spec, rowsByPath.get(subject.members[0]));
+    const members = [];
+    for (const path of subject.members) {
+      // Already digest-checked against the manifest by `renderPass`, which
+      // every member went through: a subject is attempted only when all of its
+      // members are in this run's selection, and every selected row is
+      // rendered as a stack first.
+      const bytes = await readFile(join(CORPUS_DATA, path));
+      const faulted =
+        options.inject !== null && path === subject.members[0];
+      const sent = faulted ? faultedMemberBytes(options.inject, bytes) : bytes;
+      const stack = stackResults.get(path);
+      members.push({
+        path,
+        id: rowId(path),
+        sha256: digestOf(bytes),
+        stackSidecar: `${rowId(path)}.json`,
+        // The reading `page/app.mjs` took during the stack pass. Null only if
+        // that row failed before it, which the stack boundaries already refuse.
+        attributes: stack?.result?.attributes ?? null,
+        bytesBase64: Buffer.from(sent).toString("base64"),
+      });
+    }
+
+    const truth = volumeTruth.subjects?.[subject.id] ?? null;
+    let request = {
+      id: subject.id,
+      seriesDirectory: subject.seriesDirectory,
+      members,
+      orientations: volumeParams.orientations,
+      params,
+      blendMode: volumeParams.blendMode,
+      slabThicknessMm: volumeParams.slabThicknessMm,
+      cameraMode: volumeParams.cameraMode,
+      loadTimeoutMs: volumeParams.loadTimeoutMs,
+      renderTimeoutMs: RENDER_TIMEOUT_MS,
+      zProfileVoxel: truth?.zProfile?.voxel ?? null,
+      includePixels: pass === 1,
+      fault: options.inject !== null ? pageVolumeFaultName(options.inject) : null,
+    };
+    if (options.inject !== null) {
+      request = faultedVolumeRequest(options.inject, request);
+    }
+
+    const pageResult = await session.page.evaluate(
+      ([api, payload]) => globalThis[api].renderSubject(payload),
+      [session.api, request],
+    );
+    // The members travel back with the result so that a fault aimed at the
+    // geometry boundary has one object to perturb, and so the sidecar's member
+    // block and the geometry are computed from the same list.
+    let record = { ...pageResult, members };
+    if (options.inject !== null) {
+      record = faultedVolumeResult(options.inject, record);
+    }
+
+    results.set(subject.id, { subject, params, request, truth, result: record });
+    const digests = (record.frames ?? [])
+      .map((frame) => `${frame.orientation} ${frame.frame.sha256.slice(0, 12)}`)
+      .join("  ");
+    process.stdout.write(
+      `  ${record.ok ? "ok  " : "FAIL"} ${subject.id} ` +
+        `(${subject.members.length} member(s))` +
+        (record.ok ? `  ${digests}` : ` (${record.boundary})`) +
         "\n",
     );
   }
@@ -741,15 +908,46 @@ export async function runOracle(argv) {
     );
   }
 
+  // The two committed volume declarations, read and cross-checked before a
+  // browser starts. Both are strict in both directions: every declared member
+  // is a manifest row, every manifest row carrying the `series` category token
+  // belongs to exactly one subject, and every subject has a truth entry.
+  const volumeParams = readVolumeParams();
+  const volumeTruth = validateVolumeTruth(readVolumeTruth(), volumeParams);
+  if (volumeTruth.cornerstone3DVersion !== installed["@cornerstonejs/core"]) {
+    throw new Error(
+      `volume-truth.json records what cornerstone3D ` +
+        `${volumeTruth.cornerstone3DVersion} does with these series and the ` +
+        `installed version is ${installed["@cornerstonejs/core"]}. What one ` +
+        `version does is not a fact about another.`,
+    );
+  }
+  const manifestProblems = checkSubjectsAgainstManifest(volumeParams, allRows);
+  if (manifestProblems.length > 0) {
+    throw new Error(
+      `the volume subject declaration and the corpus disagree:\n  ` +
+        manifestProblems.join("\n  "),
+    );
+  }
+  const selected = selectSubjects(
+    volumeParams,
+    new Set(rows.map((row) => row.path)),
+  );
+  if (selected.problems.length > 0) {
+    throw new Error(selected.problems.join("\n  "));
+  }
+
   await buildPage();
 
   const baseParams = resolveRenderParams(spec, rows[0]);
   const server = await serveDirectory(PAGE_DIST);
   let session;
+  let volumeSession = null;
   const started = Date.now();
   let passes;
+  let volumePasses = null;
   try {
-    session = await openPage(server.origin, baseParams);
+    session = await openPage(server.origin, baseParams, STACK_PAGE);
     assertReferenceEnvironment(session.environment);
     process.stdout.write(
       `cornerstone3D ${installed["@cornerstonejs/core"]} on ` +
@@ -761,9 +959,43 @@ export async function runOracle(argv) {
       process.stdout.write("second pass, for determinism\n");
       passes.push(await renderPass(session, rows, spec, options, 2));
     }
+
+    // The stack page is CLOSED before the volume page opens. Sequential and
+    // not concurrent, so the stack render is provably the same program it was
+    // and the two passes cannot contend for one browser's decode worker.
+    await session.close();
+    session.closed = true;
+
+    if (selected.attempted.length > 0) {
+      const volumeContext = {
+        stackResults: passes[0],
+        rowsByPath: new Map(rows.map((row) => [row.path, row])),
+        spec,
+        volumeParams,
+        volumeTruth,
+      };
+      volumeSession = await openPage(server.origin, baseParams, VOLUME_PAGE);
+      assertReferenceEnvironment(volumeSession.environment);
+      process.stdout.write(
+        `volume pass, ${selected.attempted.length} subject(s), ` +
+          `${volumeParams.orientations.join(", ")}\n`,
+      );
+      volumePasses = [
+        await volumePass(volumeSession, selected.attempted, volumeContext, options, 1),
+      ];
+      if (!options.once) {
+        process.stdout.write("second volume pass, for determinism\n");
+        volumePasses.push(
+          await volumePass(volumeSession, selected.attempted, volumeContext, options, 2),
+        );
+      }
+    }
   } finally {
-    if (session) {
+    if (session && !session.closed) {
       await session.close();
+    }
+    if (volumeSession) {
+      await volumeSession.close();
     }
     await server.close();
   }
@@ -775,15 +1007,21 @@ export async function runOracle(argv) {
     passes,
     installed,
     environment: session.environment,
-    consoleLines: session.console,
+    consoleLines: [...session.console, ...(volumeSession?.console ?? [])],
     unsupported,
+    volumeParams,
+    volumeTruth,
+    volumeSubjects: selected.attempted,
+    volumePasses,
+    volumeEnvironment: volumeSession?.environment ?? null,
     elapsedMs: Date.now() - started,
   });
 }
 
 async function report(context) {
   const { options, rows, spec, passes, installed, environment, unsupported,
-    consoleLines, elapsedMs } = context;
+    consoleLines, elapsedMs, volumeParams, volumeTruth, volumeSubjects,
+    volumePasses, volumeEnvironment } = context;
   const first = passes[0];
   const problems = [];
 
@@ -872,6 +1110,7 @@ async function report(context) {
     const extreme = stats.blackFraction + stats.whiteFraction;
     if (extreme > threshold) {
       lowInformation.push({
+        kind: "stack",
         path,
         extremeFraction: Number(extreme.toFixed(6)),
         blackFraction: Number(stats.blackFraction.toFixed(6)),
@@ -921,6 +1160,265 @@ async function report(context) {
     }
   }
 
+  // ---- The volume pass -------------------------------------------------
+  //
+  // Four more boundaries. The geometry one is here rather than in the page,
+  // because only the driver holds `volume-truth.json` and because the
+  // measurement is taken from the FILES by `src/geometry.mjs`, which never
+  // reads a cornerstone3D module. A harness that transcribed the reference's
+  // own answer could not show the reference getting a series wrong, and on the
+  // non-uniform subject it does.
+  const volumeCounts = {
+    volumesApplicable: volumeSubjects.length,
+    volumesBuilt: 0,
+    volumesRefused: 0,
+    volumesRefusedAsDeclared: 0,
+    // ALL THREE MEAN ACHIEVED, and they mean it the way the stack half's
+    // `readBack` does: a reformat counted here is one that survived every
+    // boundary and is a file in `out/`.
+    //
+    // They read the declared total once, and it was a defect. The volume
+    // pass's boundaries do not run in the order they are listed:
+    // `volume-geometry` is the DRIVER's and runs LAST, after the page has
+    // presented and read back every orientation. So a subject refused there
+    // has already rendered three reformats that are not reference output, and
+    // adding them here made one `boundaries` object use `readBack` to mean
+    // "achieved and written" for stacks and "attempted and discarded" for
+    // reformats. `readBack: 89` equals the files on disk, so
+    // `reformatsReadBack` has to as well.
+    //
+    // Nothing is lost by that. What a refused subject reached is recorded per
+    // subject in `volumes[]`, which is where a fact about one subject belongs.
+    reformatsPresented: 0,
+    reformatsReadBack: 0,
+    reformatsWritten: 0,
+    // The DECLARED total, under a name that says so. Four subjects at three
+    // orientations is twelve, whatever happens to any of them.
+    reformatsDeclared:
+      volumeSubjects.length * volumeParams.orientations.length,
+  };
+  const volumeRecords = [];
+  const volumeFrames = {};
+  const volumeWritable = [];
+  const volumeFirst = volumePasses ? volumePasses[0] : new Map();
+
+  for (const subject of volumeSubjects) {
+    const entry = volumeFirst.get(subject.id);
+    if (!entry) {
+      problems.push(
+        `volume-loaded: subject ${subject.id} was never attempted. A subject ` +
+          `that was never attempted is a failure, not an absence.`,
+      );
+      volumeCounts.volumesRefused += 1;
+      continue;
+    }
+    const { result, truth } = entry;
+    // What the page reached for THIS subject, recorded on the subject rather
+    // than added to a total. A refused subject's own record then says how far
+    // it got, and the totals stay a statement about the reference output.
+    const reached = {
+      reformatsPresented: result.stage?.reformats ?? 0,
+      reformatsReadBack: (result.frames ?? []).length,
+    };
+
+    // `volume-truth.json`'s per-subject `expectedRefusal`, which is the volume
+    // pass's `unsupported.json`. A series that CANNOT be one volume is
+    // declared and named with its reason rather than silently dropped, and the
+    // claim is strict in both directions: an undeclared refusal fails the run
+    // and a declared refusal that does not occur fails it too.
+    const expected = truth?.expectedRefusal ?? null;
+    const accountedFor = (boundary, error) =>
+      expected !== null &&
+      expected.boundary === boundary &&
+      String(error ?? "").includes(expected.errorContains);
+
+    if (!result.ok) {
+      volumeCounts.volumesRefused += 1;
+      const named = accountedFor(result.boundary, result.error);
+      if (named) {
+        volumeCounts.volumesRefusedAsDeclared += 1;
+      } else {
+        problems.push(
+          `${result.boundary}: volume subject ${subject.id} failed and ` +
+            `volume-truth.json does not account for it: ${result.error}`,
+        );
+      }
+      volumeRecords.push({
+        id: subject.id,
+        seriesDirectory: subject.seriesDirectory,
+        memberCount: subject.members.length,
+        outcome: named ? "refused-as-declared" : "refused",
+        boundary: result.boundary,
+        error: result.error,
+        expectedRefusal: named ? expected : null,
+        ...reached,
+        frames: [],
+      });
+      continue;
+    }
+
+    // The harness's own geometry. `measureSubject` refuses a member with no
+    // Image Plane attributes, a series whose members disagree about the
+    // orientation or the pixel spacing, direction cosines that are not unit
+    // and perpendicular, and two members at one position. Each of those is a
+    // series that cannot be one volume, and each has a unit test.
+    let measured;
+    try {
+      measured = measureSubject(
+        result.members.map((member) => ({
+          path: member.path,
+          imagePositionPatient: member.attributes?.imagePositionPatient ?? null,
+          imageOrientationPatient: member.attributes?.imageOrientationPatient ?? null,
+          pixelSpacing: member.attributes?.pixelSpacing ?? null,
+        })),
+      );
+    } catch (error) {
+      volumeCounts.volumesRefused += 1;
+      const message = String(error?.message ?? error);
+      const named = accountedFor("volume-geometry", message);
+      if (named) {
+        volumeCounts.volumesRefusedAsDeclared += 1;
+      } else {
+        problems.push(`volume-geometry: ${subject.id}: ${message}`);
+      }
+      volumeRecords.push({
+        id: subject.id,
+        seriesDirectory: subject.seriesDirectory,
+        memberCount: subject.members.length,
+        outcome: named ? "refused-as-declared" : "refused",
+        boundary: "volume-geometry",
+        error: message,
+        expectedRefusal: named ? expected : null,
+        // This subject DID render its reformats. The page presented and read
+        // back three, and the driver then refused it, so none of the three is
+        // reference output and none is in the totals. Recorded here so that
+        // work is visible rather than erased.
+        ...reached,
+        frames: [],
+      });
+      continue;
+    }
+
+    // Past every refusal, so this subject is a volume. Counted here rather than
+    // at the build, so `volumesBuilt` and `volumesRefused` are exclusive and
+    // the accounting identity below means something.
+    volumeCounts.volumesBuilt += 1;
+    volumeCounts.reformatsPresented += reached.reformatsPresented;
+    volumeCounts.reformatsReadBack += reached.reformatsReadBack;
+    if (expected !== null) {
+      problems.push(
+        `volume-truth.json declares that ${subject.id} is refused at ` +
+          `${expected.boundary} and it was not. Remove the entry: a stale ` +
+          `claim reads as a known limit and hides a subject that became a ` +
+          `volume.`,
+      );
+    }
+
+    const comparison = compareGeometry({
+      subjectId: subject.id,
+      measured,
+      referenceGeometry: result.referenceGeometry,
+      truth,
+      toleranceMm: volumeTruth.toleranceMm,
+    });
+    for (const problem of comparison.problems) {
+      problems.push(`volume-geometry: ${problem}`);
+    }
+
+    // The z profile, where the subject's content declares one. The volume's
+    // version of the stack page's identity check, and the only one that reads
+    // the assembled voxels.
+    if (truth?.zProfile) {
+      if (result.zProfile === null) {
+        problems.push(
+          `volume-loaded: ${subject.id}: volume-truth.json declares a z ` +
+            `profile and the page sampled none`,
+        );
+      } else {
+        for (const problem of checkZProfile(
+          subject.id,
+          result.zProfile.values,
+          truth.zProfile,
+        )) {
+          problems.push(`volume-loaded: ${problem}`);
+        }
+      }
+    }
+
+    volumeFrames[subject.id] = Object.fromEntries(
+      result.frames.map((frame) => [frame.orientation, frame.frame.sha256]),
+    );
+    volumeRecords.push({
+      id: subject.id,
+      seriesDirectory: subject.seriesDirectory,
+      memberCount: subject.members.length,
+      outcome: "built",
+      boundary: null,
+      error: null,
+      referenceAgreesWithTruth: comparison.referenceAgreesWithTruth,
+      referenceDivergence: comparison.referenceDivergence,
+      voiMembersAgree: result.voiMembersAgree,
+      ...reached,
+      referenceGeometry: result.referenceGeometry,
+      measuredGeometry: {
+        normal: measured.normal,
+        gapsMm: measured.gapsMm,
+        meanGapMm: measured.meanGapMm,
+        medianGapMm: measured.medianGapMm,
+        minGapMm: measured.minGapMm,
+        maxGapMm: measured.maxGapMm,
+        maxDeviationFromMeanMm: measured.maxDeviationFromMeanMm,
+        uniform: comparison.uniform,
+        toleranceMm: comparison.truth.toleranceMm,
+        voxelAxes: measured.voxelAxes,
+      },
+      zProfile: result.zProfile,
+      frames: result.frames.map((frame) => ({
+        id: frameIdFor(subject.id, frame.orientation),
+        orientation: frame.orientation,
+        sha256: frame.frame.sha256,
+      })),
+    });
+    volumeWritable.push({ entry, measured, comparison });
+    volumeCounts.reformatsWritten += result.frames.length;
+
+    // A saturated reformat is the same fact as a saturated stack frame and is
+    // counted the same way, under the same declared threshold.
+    for (const frame of result.frames) {
+      const stats = frame.frame.statistics;
+      const extreme = stats.blackFraction + stats.whiteFraction;
+      if (extreme > threshold) {
+        lowInformation.push({
+          kind: "volume-reformat",
+          id: frameIdFor(subject.id, frame.orientation),
+          extremeFraction: Number(extreme.toFixed(6)),
+          blackFraction: Number(stats.blackFraction.toFixed(6)),
+          whiteFraction: Number(stats.whiteFraction.toFixed(6)),
+          voi: result.voi,
+        });
+      }
+    }
+  }
+
+  // The falsifiable prediction, checked rather than assumed. cornerstone3D
+  // 5.8.2 takes the mean gap from the endpoints alone, so the uniform and the
+  // non-uniform subjects hand it the same grid, and it is predicted to render
+  // them to bit-identical reformats. If it ever stops averaging, this goes red
+  // and names the orientation.
+  //
+  // Only pairs whose BOTH subjects this run attempted. A `--rows` selection
+  // that picks up one side of a pair and not the other has not falsified
+  // anything, and failing it would make every partial run red for a reason
+  // that is about the selection rather than about the reference. A pair whose
+  // subjects WERE attempted and produced no frames still fails, which is the
+  // case that matters.
+  const attemptedIds = new Set(volumeSubjects.map((subject) => subject.id));
+  const applicablePairs = (volumeTruth.framePairs ?? []).filter(
+    (pair) => attemptedIds.has(pair.left) && attemptedIds.has(pair.right),
+  );
+  const pairs = comparePairs(applicablePairs, volumeFrames);
+  problems.push(...pairs.problems);
+
   // An injected run exists to be RED. Reaching the end with nothing wrong is
   // the fault having failed to fire, and it is the one outcome an injection
   // must never report as success. `runSelfTest` checks the boundary and the
@@ -947,6 +1445,50 @@ async function report(context) {
     );
   }
 
+  // Every applicable subject either became a volume or was refused, and
+  // nothing else is a legitimate outcome. Each refused subject has already
+  // pushed its own problem unless volume-truth.json accounts for it, so this
+  // is the accounting cross-check on top: it catches a counter that stopped
+  // counting.
+  if (volumeCounts.volumesBuilt + volumeCounts.volumesRefused !==
+      volumeCounts.volumesApplicable) {
+    problems.push(
+      `accounting: ${volumeCounts.volumesApplicable} volume subject(s) ` +
+        `applicable, ${volumeCounts.volumesBuilt} built and ` +
+        `${volumeCounts.volumesRefused} refused, which does not add up. Every ` +
+        `subject is one or the other.`,
+    );
+  }
+  // The identity over the WHOLE TRIO, not over one counter of it.
+  //
+  // Written for `reformatsWritten` alone at first, and that is exactly why the
+  // defect it was meant to catch survived: `reformatsPresented` and
+  // `reformatsReadBack` were counting the declared total while the identity
+  // watched only the third number. A counter with no identity on it is a
+  // counter nothing can contradict.
+  //
+  // All three describe the same set of frames, the ones that survived every
+  // boundary and reached `out/`, so all three are the same number and that
+  // number is fixed by the subjects that became volumes.
+  const expectedReformats =
+    volumeCounts.volumesBuilt * volumeParams.orientations.length;
+  for (const [name, count] of [
+    ["reformatsPresented", volumeCounts.reformatsPresented],
+    ["reformatsReadBack", volumeCounts.reformatsReadBack],
+    ["reformatsWritten", volumeCounts.reformatsWritten],
+  ]) {
+    if (count !== expectedReformats) {
+      problems.push(
+        `accounting: ${volumeCounts.volumesBuilt} volume(s) built at ` +
+          `${volumeParams.orientations.length} orientation(s) each is ` +
+          `${expectedReformats} reference reformat(s), and ${name} is ` +
+          `${count}. Every one of the three counts the frames that survived ` +
+          `every boundary and reached the output directory, so a difference ` +
+          `is one of them counting something else.`,
+      );
+    }
+  }
+
   if (options.reportUnsupported) {
     process.stdout.write(
       `${JSON.stringify({ candidates: observedUnsupported }, null, 2)}\n`,
@@ -970,11 +1512,12 @@ async function report(context) {
     for (const [path, entry] of first) {
       const second = passes[1].get(path);
       if (!second) {
-        mismatches.push({ path, reason: "the second pass never attempted it" });
+        mismatches.push({ kind: "stack", path, reason: "the second pass never attempted it" });
         continue;
       }
       if (entry.result.ok !== second.result.ok) {
         mismatches.push({
+          kind: "stack",
           path,
           reason: `pass one ${entry.result.ok ? "succeeded" : "failed"} and ` +
             `pass two ${second.result.ok ? "succeeded" : "failed"}`,
@@ -986,6 +1529,7 @@ async function report(context) {
       // comparing only the boolean would call that pair deterministic.
       if (!entry.result.ok && entry.result.boundary !== second.result.boundary) {
         mismatches.push({
+          kind: "stack",
           path,
           reason: `failed at ${entry.result.boundary} then at ` +
             `${second.result.boundary}`,
@@ -994,11 +1538,66 @@ async function report(context) {
       }
       if (entry.result.ok && entry.result.frame.sha256 !== second.result.frame.sha256) {
         mismatches.push({
+          kind: "stack",
           path,
           reason: `${entry.result.frame.sha256} then ${second.result.frame.sha256}`,
         });
       }
     }
+
+    // The volume pass is measured the same way and reported in the same list,
+    // with `id` where a stack entry uses `path`, because a volume frame is not
+    // a corpus row. A subject that failed both times still has to fail the
+    // SAME WAY, for the reason the stack half gives.
+    if (volumePasses && volumePasses.length > 1) {
+      for (const [id, entry] of volumeFirst) {
+        const second = volumePasses[1].get(id);
+        if (!second) {
+          mismatches.push({ kind: "volume-reformat", id, reason: "the second pass never attempted it" });
+          continue;
+        }
+        if (entry.result.ok !== second.result.ok) {
+          mismatches.push({
+            kind: "volume-reformat",
+            id,
+            reason: `pass one ${entry.result.ok ? "succeeded" : "failed"} and ` +
+              `pass two ${second.result.ok ? "succeeded" : "failed"}`,
+          });
+          continue;
+        }
+        if (!entry.result.ok) {
+          if (entry.result.boundary !== second.result.boundary) {
+            mismatches.push({
+              kind: "volume-reformat",
+              id,
+              reason: `failed at ${entry.result.boundary} then at ${second.result.boundary}`,
+            });
+          }
+          continue;
+        }
+        for (const frame of entry.result.frames) {
+          const other = second.result.frames.find(
+            (candidate) => candidate.orientation === frame.orientation,
+          );
+          if (!other) {
+            mismatches.push({
+              kind: "volume-reformat",
+              id: frameIdFor(id, frame.orientation),
+              reason: "the second pass produced no frame for this orientation",
+            });
+            continue;
+          }
+          if (frame.frame.sha256 !== other.frame.sha256) {
+            mismatches.push({
+              kind: "volume-reformat",
+              id: frameIdFor(id, frame.orientation),
+              reason: `${frame.frame.sha256} then ${other.frame.sha256}`,
+            });
+          }
+        }
+      }
+    }
+
     determinism = {
       passes: passes.length,
       measured: true,
@@ -1007,16 +1606,16 @@ async function report(context) {
     };
     if (mismatches.length > 0) {
       problems.push(
-        `determinism: ${mismatches.length} row(s) rendered differently on the ` +
+        `determinism: ${mismatches.length} frame(s) rendered differently on the ` +
           `second pass of the same browser: ` +
-          mismatches.map((m) => `${m.path} (${m.reason})`).join(", "),
+          mismatches.map((m) => `${m.path ?? m.id} (${m.reason})`).join(", "),
       );
     }
   }
 
   // ---- The run record --------------------------------------------------
   const runRecord = {
-    story: "F-010",
+    story: "F-010, F-X007",
     // No `ok` field and no `problems` field. This file is written ONLY by a
     // run that passed every boundary, so its existence is the claim, and a
     // field that could only ever say `true` or `[]` would be one more thing to
@@ -1030,6 +1629,10 @@ async function report(context) {
       sidecarCrossRead: options.metadataCheck,
       faultSelfTest: options.selfTest,
       determinismPasses: passes.length,
+      // False only when this run's row selection contained no complete volume
+      // subject. A run that skipped the volume pass must not be
+      // indistinguishable from one that did it.
+      volumePass: volumePasses !== null,
     },
     partial: options.rows !== null,
     inject: options.inject,
@@ -1037,10 +1640,13 @@ async function report(context) {
     manifestSha256: await digestOfManifest(),
     renderParamsSha256: digestOf(await readFile(RENDER_PARAMS_PATH)),
     unsupportedSha256: digestOf(await readFile(UNSUPPORTED_PATH)),
+    volumeParamsSha256: digestOf(await readFile(VOLUME_PARAMS_PATH)),
+    volumeTruthSha256: digestOf(await readFile(VOLUME_TRUTH_PATH)),
     packages: installed,
     page: environment,
+    volumePage: volumeEnvironment,
     host: { platform: platform(), release: release(), arch: arch(), hostname: hostname(), node: process.version },
-    boundaries: counts,
+    boundaries: { ...counts, ...volumeCounts },
     determinism,
     unsupportedObserved: observedUnsupported,
     lowInformation: {
@@ -1048,7 +1654,13 @@ async function report(context) {
       rows: lowInformation,
     },
     downsampled,
+    // STACK ONLY, and it stays that way. The accounting identity
+    // `readBack + unsupported === applicable` is asserted over this array, and
+    // mixing volume frames into it would break an assertion that currently
+    // means something exact. Every entry carries `kind` so F-011 dispatches on
+    // the field rather than on the array it came out of.
     rows: [...first].map(([path, entry]) => ({
+      kind: "stack",
       path,
       id: rowId(path),
       ok: entry.result.ok,
@@ -1056,6 +1668,8 @@ async function report(context) {
       error: entry.result.error ?? null,
       sha256: entry.result.ok ? entry.result.frame.sha256 : null,
     })),
+    volumes: volumeRecords,
+    framePairs: pairs.records,
   };
 
   // ---- Output ----------------------------------------------------------
@@ -1076,6 +1690,17 @@ async function report(context) {
       for (const [, entry] of first) {
         if (entry.result.ok) {
           await writeRow(options.out, entry, environment, installed);
+        }
+      }
+      for (const { entry, measured, comparison } of volumeWritable) {
+        for (const frame of entry.result.frames) {
+          await writeVolumeFrame(options.out, entry, frame, {
+            measured,
+            comparison,
+            volumeParams,
+            environment: volumeEnvironment,
+            installed,
+          });
         }
       }
       await writeFile(
@@ -1118,10 +1743,46 @@ async function report(context) {
       `decoded ${counts.decoded}, presented ${counts.presented}, ` +
       `read back ${counts.readBack}, unsupported ${counts.unsupported}\n`,
   );
+  if (volumePasses !== null) {
+    process.stdout.write(
+      `volumes     applicable ${volumeCounts.volumesApplicable}, built ` +
+        `${volumeCounts.volumesBuilt}, refused ${volumeCounts.volumesRefused} ` +
+        `(${volumeCounts.volumesRefusedAsDeclared} accounted for by ` +
+        `volume-truth.json), reformats declared ` +
+        `${volumeCounts.reformatsDeclared}, presented ` +
+        `${volumeCounts.reformatsPresented}, read back ` +
+        `${volumeCounts.reformatsReadBack}, written ` +
+        `${volumeCounts.reformatsWritten}\n`,
+    );
+    for (const pair of pairs.records) {
+      const identical = pair.orientations.filter((entry) => entry.identical).length;
+      process.stdout.write(
+        `frame pair  ${pair.left} against ${pair.right}: ${identical} of ` +
+          `${pair.orientations.length} orientation(s) identical, expected ` +
+          `${pair.expect}\n`,
+      );
+    }
+  } else {
+    process.stdout.write(
+      `volumes     none, this run's row selection contains no complete volume ` +
+        `subject. run.json records checks.volumePass false.\n`,
+    );
+  }
   if (determinism.measured) {
     process.stdout.write(
       `determinism two passes on this browser build, ` +
         `${determinism.matched ? "identical" : "DIFFERENT"}\n`,
+    );
+  }
+  const disagreeing = volumeRecords.filter(
+    (record) => record.voiMembersAgree === false,
+  );
+  if (disagreeing.length > 0) {
+    process.stdout.write(
+      `NOTE  ${disagreeing.length} volume subject(s) have members that resolve ` +
+        `DIFFERENT windows, and one volume viewport carries one voiRange, so ` +
+        `the frame was rendered with the first member's. Every member's own ` +
+        `window is in the sidecar under voiMembers. See volumes in run.json.\n`,
     );
   }
   if (downsampled.length > 0) {
@@ -1172,7 +1833,8 @@ async function report(context) {
   }
 
   process.stdout.write(
-    `OK: ${counts.readBack} reference frame(s) in ${options.out}\n`,
+    `OK: ${counts.readBack} stack and ${volumeCounts.reformatsWritten} volume ` +
+      `reformat reference frame(s) in ${options.out}\n`,
   );
   return 0;
 }

@@ -12,6 +12,16 @@ the `fixture` row of the design plan's test table: expected values come from
 PS3.3 through pydicom, and from the generator's own constants for the named
 rows below, never from what the harness printed.
 
+Since F-X007 the output holds two shapes of sidecar and the top-level `kind`
+field says which. `"stack"` is one frame of one instance and keeps every check
+it has always had. `"volume-reformat"` is one orthogonal reformat of an
+assembled series, and what is cross-read there is the PER-MEMBER geometry,
+because that is where its load-bearing metadata lives: a wrong
+ImagePositionPatient places a slice in the wrong plane and the reformat still
+looks like an image. Completeness is strict in both directions on both
+partitions, and a sidecar carrying neither `kind` is refused rather than
+guessed at.
+
 Two checks, and both are needed:
 
 1. Every attribute in every sidecar matches pydicom's reading of the same file.
@@ -44,6 +54,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 CORPUS = ROOT / "corpus" / "data"
 MANIFEST = ROOT / "corpus" / "manifest.tsv"
 UNSUPPORTED = ROOT / "tools" / "oracle" / "unsupported.json"
+VOLUME_PARAMS = ROOT / "tools" / "oracle" / "volume-params.json"
+VOLUME_TRUTH = ROOT / "tools" / "oracle" / "volume-truth.json"
 
 try:
     import pydicom
@@ -257,6 +269,40 @@ EXPECTED_CORNERSTONE = {
 }
 
 
+# Hand-written, from PS3.3 C.7.6.2.1.1 and scripts/corpus_synth.py's own
+# constants, for the two synthetic volume subjects. These are the numbers the
+# whole of F-X007 rests on, so they are asserted against pydicom's independent
+# reading of the same files rather than against what the harness measured.
+#
+#   SERIES_ORIENTATION = ["0.8", "0.6", "0.0", "0.0", "0.0", "-1.0"]
+#   SERIES_NORMAL = (-0.6, 0.8, 0.0), which is row x col and is unit length
+#   SERIES_SPACING = 2.5, SERIES_SLICES = 10
+#   NONUNIFORM_SLICE = 7, NONUNIFORM_OFFSET = 1.25
+#   NON_SQUARE_SPACING = ["0.5", "0.25"], and PS3.3 C.7.6.2.1.1 reads that as
+#   [between rows, between columns]
+#
+# case_series writes ImagePositionPatient as f"{d_k * axis:.6f}" for each axis
+# of the normal, so the projection of slice k onto the normal is d_k.
+SERIES_NORMAL = (-0.6, 0.8, 0.0)
+SERIES_TRUTH = {
+    "synthetic/ct_series_uniform": [
+        0.0, 2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 22.5],
+    "synthetic/ct_series_nonuniform": [
+        0.0, 2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 18.75, 20.0, 22.5],
+}
+
+# HLD 25.1, "Geometry: world coordinates within 1e-6 mm". The same tolerance
+# tools/oracle/volume-truth.json declares, and this file sets no other.
+GEOMETRY_TOLERANCE_MM = 1e-6
+
+# The two tags scripts/corpus_synth.py deliberately does NOT rely on, checked
+# on the files rather than described in a comment. SpacingBetweenSlices
+# (0018,0088) is absent from every member of both series and SliceThickness
+# (0018,0050) is 2.5 on every member of both, so a reader that took either tag
+# would answer 2.5 for a series whose gaps are 2.5, 3.75 and 1.25.
+SERIES_SLICE_THICKNESS = 2.5
+
+
 def _numeric(value):
     """A DICOM numeric string or number as a float, or None."""
     if value is None:
@@ -347,6 +393,155 @@ def _coverage(sidecars: dict) -> list[str]:
     return problems
 
 
+def _dot(a, b) -> float:
+    return sum(x * y for x, y in zip(a, b))
+
+
+def _check_volume_sidecars(volumes: dict, partial: bool) -> list[str]:
+    """Cross-read every volume sidecar's per-member geometry with pydicom.
+
+    The stack partition already checks the pixel-module attributes of the same
+    files. What is new here is the geometry: ImagePositionPatient,
+    ImageOrientationPatient, PixelSpacing and SliceThickness are what decide
+    where a slice sits in the volume, and a wrong one produces a reformat that
+    still looks like an image.
+
+    Files are read once and reused, because the `volume` block is repeated
+    identically in all three orientation sidecars of a subject and reading each
+    member three times over would be three times the work for one answer.
+    """
+    problems: list[str] = []
+    declared = json.loads(VOLUME_PARAMS.read_text())
+    truth = json.loads(VOLUME_TRUTH.read_text())
+    subjects = {entry["id"]: entry for entry in declared["subjects"]}
+    orientations = declared["orientations"]
+
+    # A subject volume-truth.json declares as refused produces no reformat and
+    # no sidecar, by design. `real/ct_cmb_mml` is the one: twenty-seven
+    # instances at nine distinct positions, so it is not one spatial volume.
+    # The refusal is checked by the run itself, strict in both directions, and
+    # what this exclusion does is stop the completeness check demanding a
+    # sidecar for a frame nobody claims should exist.
+    refused = {
+        subject_id
+        for subject_id, entry in (truth.get("subjects") or {}).items()
+        if entry.get("expectedRefusal") is not None
+    }
+    expected_frames = {
+        f"{subject_id}__{orientation}"
+        for subject_id in subjects
+        if subject_id not in refused
+        for orientation in orientations
+    }
+    if not partial:
+        for missing in sorted(expected_frames - set(volumes)):
+            problems.append(
+                f"{missing}: volume-params.json declares this reformat and no "
+                f"sidecar was produced for it")
+    for extra in sorted(set(volumes) - expected_frames):
+        problems.append(
+            f"{extra}: a volume sidecar for a reformat volume-params.json "
+            f"does not declare")
+
+    datasets: dict[str, object] = {}
+
+    def dataset_for(row_path: str):
+        if row_path not in datasets:
+            datasets[row_path] = pydicom.dcmread(
+                str(CORPUS / row_path), stop_before_pixels=True)
+        return datasets[row_path]
+
+    for frame_id, sidecar in sorted(volumes.items()):
+        block = sidecar.get("volume") or {}
+        subject_id = block.get("id")
+        subject = subjects.get(subject_id)
+        if subject is None:
+            problems.append(
+                f"{frame_id}: names subject {subject_id}, which "
+                f"volume-params.json does not declare")
+            continue
+        members = block.get("members") or []
+        if [member["path"] for member in members] != subject["members"]:
+            problems.append(
+                f"{frame_id}: its member list is not the one "
+                f"volume-params.json declares for {subject_id}")
+            continue
+
+        directory = subject["seriesDirectory"]
+        synthetic = directory in SERIES_TRUTH
+        projections = []
+        for member in members:
+            row_path = member["path"]
+            if not (CORPUS / row_path).is_file():
+                problems.append(f"{row_path}: not present under corpus/data")
+                continue
+            dataset = dataset_for(row_path)
+            for field, keyword in (
+                    ("imagePositionPatient", "ImagePositionPatient"),
+                    ("imageOrientationPatient", "ImageOrientationPatient"),
+                    ("pixelSpacing", "PixelSpacing")):
+                expected = _as_list(dataset.get(keyword, None))
+                actual = member.get(field, "<absent from the sidecar>")
+                if not _equal(expected, actual):
+                    problems.append(
+                        f"{frame_id}: {row_path} {field} is "
+                        f"{_show(row_path, actual)} in the sidecar and "
+                        f"{_show(row_path, expected)} in the file")
+            expected_thickness = _numeric(dataset.get("SliceThickness", None))
+            actual_thickness = member.get("sliceThickness",
+                                          "<absent from the sidecar>")
+            if not _equal(expected_thickness, actual_thickness):
+                problems.append(
+                    f"{frame_id}: {row_path} sliceThickness is "
+                    f"{_show(row_path, actual_thickness)} in the sidecar "
+                    f"and {_show(row_path, expected_thickness)} in the file")
+
+            if not synthetic:
+                continue
+            position = _as_list(dataset.get("ImagePositionPatient", None))
+            if position is not None:
+                projections.append(_dot(position, SERIES_NORMAL))
+            # SpacingBetweenSlices (0018,0088) is deliberately absent and
+            # SliceThickness (0018,0050) is deliberately the nominal 2.5 on
+            # BOTH series. A reader that took either would answer 2.5 for a
+            # series whose gaps are 2.5, 3.75 and 1.25, which is the trap the
+            # non-uniform series exists for. Asserted on the FILES, because an
+            # absence is not something a sidecar can carry.
+            if "SpacingBetweenSlices" in dataset:
+                problems.append(
+                    f"{row_path}: carries SpacingBetweenSlices, and "
+                    f"scripts/corpus_synth.py case_series omits it so the "
+                    f"ground truth is the projected IPP difference")
+            if not _equal(SERIES_SLICE_THICKNESS, expected_thickness):
+                problems.append(
+                    f"{row_path}: SliceThickness is not "
+                    f"{SERIES_SLICE_THICKNESS}, so the two series no longer "
+                    f"look identical to a reader that trusts that tag")
+
+        if not synthetic:
+            continue
+        # The hand-written fixture. PS3.3 C.7.6.2.1.1 and the generator's own
+        # constants, read out of the files by a second library in a second
+        # language, so the harness's measurement and this one cannot be wrong
+        # in the same direction unless two parsers share a bug.
+        expected_projections = SERIES_TRUTH[directory]
+        if len(projections) != len(expected_projections):
+            problems.append(
+                f"{frame_id}: {len(projections)} member(s) carry a position "
+                f"and PS3.3 with scripts/corpus_synth.py gives "
+                f"{len(expected_projections)}")
+            continue
+        for index, (actual, expected) in enumerate(
+                zip(projections, expected_projections)):
+            if abs(actual - expected) > GEOMETRY_TOLERANCE_MM:
+                problems.append(
+                    f"{frame_id}: {members[index]['path']} projects onto the "
+                    f"slice normal at {actual} mm and PS3.3 C.7.6.2.1.1 with "
+                    f"scripts/corpus_synth.py gives {expected} mm, outside HLD "
+                    f"25.1's {GEOMETRY_TOLERANCE_MM} mm")
+    return problems
+
+
 def _self_test() -> int:
     """Exercise the helpers that only ever run on a mismatch.
 
@@ -407,11 +602,12 @@ def main() -> int:
              "on a mismatch, and exit")
     parser.add_argument(
         "--partial", action="store_true",
-        help="the run rendered a subset of the manifest, so the three "
+        help="the run rendered a subset of the manifest, so the four "
              "completeness claims do not apply: a sidecar for every row, a "
-             "sidecar for every named fixture row, and an assertion for every "
-             "value the corpus renders. Every per-sidecar comparison and every "
-             "fixture assertion still runs.")
+             "sidecar for every named fixture row, an assertion for every "
+             "value the corpus renders, and a sidecar for every declared "
+             "reformat. Every per-sidecar comparison and every fixture "
+             "assertion still runs.")
     args = parser.parse_args()
     if args.self_test:
         return _self_test()
@@ -422,13 +618,25 @@ def main() -> int:
         return 1
 
     sidecars = {}
+    volumes = {}
+    problems: list[str] = []
     for path in sorted(out.glob("*.json")):
         if path.name == "run.json":
             continue
         sidecar = json.loads(path.read_text())
-        sidecars[sidecar["row"]["path"]] = sidecar
-
-    problems: list[str] = []
+        # The discriminator, not the file name. F-011 dispatches on this field
+        # and so does this checker, so a sidecar carrying neither value is
+        # refused rather than guessed at: a shape nobody recognises is a shape
+        # nobody checked.
+        kind = sidecar.get("kind")
+        if kind == "stack":
+            sidecars[sidecar["row"]["path"]] = sidecar
+        elif kind == "volume-reformat":
+            volumes[path.stem] = sidecar
+        else:
+            problems.append(
+                f"{path.name}: kind is {json.dumps(kind)}, and every sidecar "
+                f"is \"stack\" or \"volume-reformat\"")
 
     # The set of sidecars on disk, checked against the manifest independently
     # of what the driver believed it wrote.
@@ -449,8 +657,10 @@ def main() -> int:
                         f"carry")
 
     if not sidecars:
-        print(f"FAIL: no sidecars in {out}")
+        print(f"FAIL: no stack sidecars in {out}")
         return 1
+
+    problems.extend(_check_volume_sidecars(volumes, args.partial))
 
     compared = 0
     for row_path, sidecar in sorted(sidecars.items()):
@@ -543,9 +753,11 @@ def main() -> int:
         for problem in problems:
             print(f"  {problem}")
         return 1
-    print(f"OK: {compared} sidecar(s) agree with pydicom, {fixtures} "
+    print(f"OK: {compared} stack sidecar(s) agree with pydicom, {fixtures} "
           f"hand-written fixture row(s) agree with PS3.3, {resolved} row(s) "
-          f"of resolved reference metadata agree with the generator")
+          f"of resolved reference metadata agree with the generator, "
+          f"{len(volumes)} volume reformat sidecar(s) agree with pydicom on "
+          f"their per-member geometry")
     return 0
 
 

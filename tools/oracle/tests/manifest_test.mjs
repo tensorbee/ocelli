@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 
 import {
   MANIFEST_COLUMNS,
+  RESERVED_VOLUME_PREFIX,
   parseManifest,
   rowId,
   digestOfManifest,
@@ -165,6 +166,26 @@ test("a path with a relative segment is refused", () => {
 
 test("an absolute path is refused, because every row is relative", () => {
   assert.throws(() => rowId("/etc/passwd.dcm"), /is absolute/);
+});
+
+// The volume pass writes its own frames into that same flat directory under
+// ids beginning `volume__`, so the two name spaces are one name space. No
+// committed row reduces to that prefix, which is exactly why the refusal needs
+// a test rather than an observation: the collision would be silent and the
+// second writer would win.
+test("a corpus path reducing to the reserved volume prefix is refused", () => {
+  assert.equal(RESERVED_VOLUME_PREFIX, "volume__");
+  for (const path of [
+    "volume__synthetic__ct_series_uniform__AXIAL.dcm",
+    "volume/__x.dcm",
+    "volume__x.dcm",
+  ]) {
+    assert.throws(() => rowId(path), /is reserved for the volume pass/, path);
+  }
+  // And the adjacent shapes that are not the prefix are still accepted, so the
+  // refusal is about the prefix and not about the word.
+  assert.equal(rowId("volumes/a.dcm"), "volumes__a");
+  assert.equal(rowId("a/volume__b.dcm"), "a__volume__b");
 });
 
 // Every row writes `<id>.png`, `<id>.raw` and `<id>.json` into one flat

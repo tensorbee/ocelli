@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "cornerstone3DVersion": "5.8.2",
+  "toleranceMm": 1e-06,
+  "$notes": [
+    "The hand-computed ground truth for each volume subject, and the recorded fact of what cornerstone3D 5.8.2 does with it. tools/oracle/volume-params.json declares what to render, this file declares what is true, and the two are separate because they are reviewed by different people for different reasons.",
+    "Every number under a synthetic subject is derived from PS3.3 C.7.6.2.1.1 and from scripts/corpus_synth.py's own constants, never from what cornerstone3D returned and never from what tools/oracle/src/geometry.mjs returned. The derivation is written out in the subject's `citation` and `why`.",
+    "`toleranceMm` is HLD 25.1's geometry line, 'world coordinates within 1e-6 mm'. This file sets no other tolerance and changes none.",
+    "Strict in both directions. Every declared subject in volume-params.json has an entry here and every entry here names a declared subject. The harness's own measured geometry must match a declared expectation within the tolerance, and a mismatch fails the run. A declared referenceDivergence that does not occur fails the run, and a reference that diverges from the truth with no declared entry fails the run, so this file cannot grow into a list of excuses and a stale claim cannot hide a reference that improved.",
+    "`uniform: null` means the question was NOT ASKED, not that the answer is unknown to the harness. HLD 25.1's 1e-6 mm is a comparison tolerance and is exact for the two synthetic subjects by construction. It would classify almost any real series as non-uniform, which is a verdict the corpus cannot support, so the two real subjects publish maxDeviationFromMeanMm and are classified by nothing. Deciding a uniformity policy for real data belongs to the story that builds the volume.",
+    "Nothing here says what Ocelli should DO with a non-uniform series. No volume builder exists, decision D7 holds, and no HLD section states a refusal policy, a threshold or what a caller sees. This file makes that decision CHECKABLE and takes none of it."
+  ],
+  "subjects": {
+    "volume__synthetic__ct_series_uniform": {
+      "citation": "PS3.3 C.7.6.2.1.1, and scripts/corpus_synth.py case_series",
+      "why": "SERIES_ORIENTATION is [0.8, 0.6, 0, 0, 0, -1], so row is (0.8, 0.6, 0) and col is (0, 0, -1) and their cross product is (-0.6, 0.8, 0), whose length is sqrt(0.36 + 0.64) and therefore exactly 1. case_series writes ImagePositionPatient as d_k times that normal, so each slice's projection onto it is d_k. SERIES_SPACING is 2.5 and SERIES_SLICES is 10, so d_k is 2.5k and every gap is 2.5.",
+      "normal": [
+        -0.6,
+        0.8,
+        0.0
+      ],
+      "projectionsMm": [
+        0,
+        2.5,
+        5,
+        7.5,
+        10,
+        12.5,
+        15,
+        17.5,
+        20,
+        22.5
+      ],
+      "gapsMm": [
+        2.5,
+        2.5,
+        2.5,
+        2.5,
+        2.5,
+        2.5,
+        2.5,
+        2.5,
+        2.5
+      ],
+      "uniform": true,
+      "zProfile": {
+        "voxel": [
+          10,
+          6
+        ],
+        "expectedFirstValue": 1056,
+        "expectedStepPerSlice": 16,
+        "citation": "PS3.3 C.11.1 Modality LUT, and scripts/corpus_synth.py trap_frame and ct_common",
+        "why": "The volume is 20 columns by 12 rows, so voxel (i=10, j=6) is flat index 6*20 + 10 = 130 in the frame. trap_frame(probe=False) is the ramp (index * 16) & 0xFFFF, so index 130 holds 2080, and case_series writes slice k as that frame plus k*16, giving a stored value of 2080 + 16k. PS3.3 C.11.1 maps stored to output as stored * RescaleSlope + RescaleIntercept, and ct_common declares slope 1 and intercept -1024, so the value the reference assembles at that voxel is 2080 + 16k - 1024 = 1056 + 16k. The step of exactly 16 per slice is what a volume that dropped, duplicated or reordered a slice cannot produce.",
+        "prescaling": "cornerstone3D 5.8.2 sets preScale.enabled from a numeric RescaleSlope and RescaleIntercept in cache/classes/BaseStreamingImageVolume.js getLoaderImageOptions, so the assembled volume holds the rescaled value and not the stored one. The step of 16 is the same either way, because the slope is 1, and the first value is what tells the two apart."
+      },
+      "referenceDivergence": null
+    },
+    "volume__synthetic__ct_series_nonuniform": {
+      "citation": "PS3.3 C.7.6.2.1.1, and scripts/corpus_synth.py case_series",
+      "why": "The same construction as the uniform subject, with NONUNIFORM_SLICE 7 displaced by NONUNIFORM_OFFSET 1.25, so d_7 is 18.75 rather than 17.5. The gap into slice 7 becomes 3.75 and the gap out of it becomes 1.25, and every other gap is still 2.5. The displacement cancels out of the endpoint difference, so the mean gap is 22.5 / 9 = 2.5 and the median gap is 2.5, the same as the uniform subject. SliceThickness is 2.5 on every slice of both series and SpacingBetweenSlices is absent from both, so ONLY an examination of the individual gaps separates them.",
+      "normal": [
+        -0.6,
+        0.8,
+        0.0
+      ],
+      "projectionsMm": [
+        0,
+        2.5,
+        5,
+        7.5,
+        10,
+        12.5,
+        15,
+        18.75,
+        20,
+        22.5
+      ],
+      "gapsMm": [
+        2.5,
+        2.5,
+        2.5,
+        2.5,
+        2.5,
+        2.5,
+        3.75,
+        1.25,
+        2.5
+      ],
+      "uniform": false,
+      "zProfile": {
+        "voxel": [
+          10,
+          6
+        ],
+        "expectedFirstValue": 1056,
+        "expectedStepPerSlice": 16,
+        "citation": "PS3.3 C.11.1 Modality LUT, and scripts/corpus_synth.py trap_frame and ct_common",
+        "why": "case_series writes the same pixel content in both series, so the z profile is the same ramp. That is what makes the two subjects differ ONLY in slice 7's ImagePositionPatient, which is what the framePairs claim below rests on.",
+        "prescaling": "As above."
+      },
+      "referenceDivergence": {
+        "field": "spacing[2]",
+        "reference": 2.5,
+        "truth": null,
+        "attributedTo": "reference",
+        "why": "cornerstone3D 5.8.2 computes the through-plane spacing as Math.abs(d_last - d_first) / (numImages - 1) from the ENDPOINTS ONLY, in utilities/calculateSpacingBetweenImageIds.js. It projects ImagePositionPatient onto the cross product of the two direction cosines correctly, which is what PS3.3 C.7.6.2.1.1 implies, and then discards every interior gap. There is no tolerance, no warning and no error: the only spacing-related throw in the file is for absent metadata, and the three console.debug calls are gated behind strictZSpacingForVolumeViewport, which init.js defaults to true. So the reference answers 2.5 and builds a uniform grid, and slice 7 is RELABELLED into slot 7 by its ordinal position rather than interpolated into place. The truth is null and not a number because no single through-plane spacing describes this series. Attributed to the reference: PS3.3 defines no spacing between two instances other than their projected position difference, so a single averaged number is the reference's claim and not the standard's."
+      }
+    },
+    "volume__real__ct_cmb_mml": {
+      "citation": "PS3.3 C.7.6.2.1.1, measured on the files with pydicom",
+      "why": "**This series is not one spatial volume, and the harness refuses it by name rather than assembling one anyway.** Its twenty-seven instances occupy only NINE distinct positions on the slice normal, four instances deep at six of them and one at the other three, across three values of AcquisitionNumber (0020,0012). PS3.3 C.7.6.2.1.1 defines no spacing between two instances other than their projected position difference, and between two instances at the SAME position that difference is zero, which is not a gap. cornerstone3D 5.8.2 builds a volume from it without complaint: it takes |d_last - d_first| / 26, which spreads nine real positions over twenty-six imaginary ones, and relabels each instance into the frame slot of its ordinal position. The result is a plausible reformat of a geometry that does not exist. Recorded here rather than worked around, because the row is a real TCIA series and this is what real multi-acquisition data looks like.",
+      "uniform": null,
+      "referenceDivergence": null,
+      "expectedRefusal": {
+        "boundary": "volume-geometry",
+        "errorContains": "project to the same position on the slice normal",
+        "why": "The harness refuses two members at one position. Declared here so the refusal is a recorded fact rather than a red run, and strict in both directions: if this series ever stops having repeated positions, or is refused for some other reason, the run goes red and says so. F-011 gets no volume reference for this directory and the reason is in run.json under volumes, not in somebody's memory."
+      }
+    },
+    "volume__real__mr_eay131": {
+      "citation": "none, and that is the point",
+      "why": "A real MR series from TCIA, recorded for the same reason and judged by the same nothing. It is here so F-011 has a volume reference at a second modality and a second in-plane resolution.",
+      "uniform": null,
+      "referenceDivergence": null
+    }
+  },
+  "framePairs": [
+    {
+      "left": "volume__synthetic__ct_series_uniform",
+      "right": "volume__synthetic__ct_series_nonuniform",
+      "expect": "identical",
+      "why": "The sharpest form the recorded divergence can take. cornerstone3D 5.8.2 resolves the same origin, the same direction, the same dimensions [20, 12, 10] and the same spacing [0.25, 0.5, 2.5] for both series, and case_series writes byte-identical pixel content per slice index into both, so the reference is PREDICTED to render the two to bit-identical reformats in all three orientations. The two series differ only in slice 7's ImagePositionPatient, and a renderer that honoured that difference could not produce the same pixels. Recording the divergence as three pairs of equal digests is a stronger and cheaper claim than recording it as a sentence, and if cornerstone3D ever stops averaging this assertion goes red and names the reason."
+    }
+  ]
+}

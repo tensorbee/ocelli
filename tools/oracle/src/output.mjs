@@ -13,7 +13,8 @@ import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import { rowId } from "./manifest.mjs";
-import { assertFrameIntegrity, buildSidecar } from "./sidecar.mjs";
+import { assertFrameIntegrity, buildSidecar, buildVolumeSidecar } from "./sidecar.mjs";
+import { frameIdFor } from "./volume.mjs";
 
 /** What marks a directory as this harness's own output. */
 export const RUN_RECORD = "run.json";
@@ -121,6 +122,39 @@ export async function writeRow(outDir, entry, environment, installed) {
   await writeFile(
     join(outDir, `${id}.json`),
     `${JSON.stringify(buildSidecar({ row, params, result, environment, installed }), null, 2)}\n`,
+  );
+  return digest;
+}
+
+/**
+ * Write one volume reformat's frame, PNG and sidecar. Returns its digest.
+ *
+ * Into the SAME flat directory as the stack frames, under a `volume__` id.
+ * `src/manifest.mjs` reserves that prefix so a corpus row cannot collide with
+ * one, and the sidecar's `kind` is what tells F-011 which shape it is holding
+ * rather than the file name.
+ */
+export async function writeVolumeFrame(outDir, entry, frame, extras) {
+  const { subject, params, result } = entry;
+  const id = frameIdFor(subject.id, frame.orientation);
+  const raw = Buffer.from(frame.rawBase64, "base64");
+  const digest = assertFrameIntegrity(id, raw, frame);
+
+  await writeFile(join(outDir, `${id}.raw`), raw);
+  await writeFile(
+    join(outDir, `${id}.png`),
+    Buffer.from(frame.pngBase64, "base64"),
+  );
+  const sidecar = buildVolumeSidecar({
+    subject,
+    record: result,
+    frame,
+    renderParams: params,
+    ...extras,
+  });
+  await writeFile(
+    join(outDir, `${id}.json`),
+    `${JSON.stringify(sidecar, null, 2)}\n`,
   );
   return digest;
 }
