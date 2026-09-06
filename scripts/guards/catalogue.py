@@ -8446,6 +8446,9 @@ GUARDS: tuple[Guard, ...] = (
         claims=("*",),
         covered_by=("tools/oracle/check_sidecars.py --self-test, run by "
                     "tools/oracle/run.mjs under both interpreters",),
+        limit="The self-test drives both new F-013 truth-projection refusals: "
+              "a malformed source binding raises, and unequal source scopes "
+              "remain unequal before the main checker reports them.",
     ),
     Guard(
         id="oracle.faults-declaration",

@@ -1,6 +1,6 @@
 # The golden corpus
 
-**F-IDs that contributed:** F-009, F-X006, F-X007, F-X012, F-X013
+**F-IDs that contributed:** F-009, F-013, F-X006, F-X007, F-X012, F-X013
 **Last updated:** 2026-09-06
 
 The corpus is the input every later correctness claim is measured on. It lives
@@ -96,6 +96,12 @@ evaluated once at import and then agrees with itself for the rest of the run.
 Two processes at two wall-clock moments is the cheapest thing that catches that
 class. A separate test asserts no case carries a clock reading and that every
 instance UID sits in the `2.25.` arc.
+
+F-013 gives `synthetic/ct_unsigned_16.dcm` a positive Presentation LUT Shape
+of `INVERSE`. The generated series spell a zero coordinate as positive zero.
+This matters because dicom-parser serializes JavaScript negative zero as zero,
+while pydicom preserves the Decimal String sign and the metadata checker
+deliberately compares their IEEE-754 values exactly.
 
 ## Which encoders leave a version, and which do not
 

@@ -18,6 +18,7 @@ import {
   buildSidecar,
   buildVolumeSidecar,
 } from "../src/sidecar.mjs";
+import { metadataSourcesFor } from "../src/metadata-sources.mjs";
 
 const ROW = {
   path: "synthetic/ct_unsigned_16.dcm",
@@ -52,6 +53,11 @@ const RESULT = {
   camera: { parallelScale: 16 },
   attributes: { rescaleSlope: 1, rescaleIntercept: -1024 },
   attributesError: null,
+  metadataSources: {
+    cornerstoneMetadata: {
+      modalityLutModule: { rescaleSlope: "top-level", rescaleIntercept: "top-level" },
+    },
+  },
   cornerstoneMetadata: {
     modalityLutModule: { rescaleSlope: 1 },
     // docs/lld/oracle.md's worked case: 64 by 96 at spacing [0.5, 0.25] with
@@ -136,7 +142,68 @@ test("both readings of the file's metadata travel with the frame", () => {
   const sidecar = build();
   assert.deepEqual(sidecar.attributes, RESULT.attributes);
   assert.equal(sidecar.attributesError, null);
+  assert.deepEqual(sidecar.metadataSources, RESULT.metadataSources);
   assert.deepEqual(sidecar.cornerstoneMetadata, RESULT.cornerstoneMetadata);
+});
+
+test("a present Presentation LUT Shape travels as an inversion declaration", () => {
+  const sidecar = buildSidecar({
+    row: ROW,
+    params: PARAMS,
+    result: { ...RESULT, attributes: { ...RESULT.attributes, presentationLutShape: "INVERSE" } },
+    environment: ENVIRONMENT,
+    installed: INSTALLED,
+  });
+  assert.equal(sidecar.attributes.presentationLutShape, "INVERSE");
+});
+
+function sequence(dataSet) {
+  return { items: [{ dataSet }] };
+}
+
+test("per-frame provenance wins over shared and top-level declarations", () => {
+  const perFrameMacro = { elements: { x00281052: {} } };
+  const sharedMacro = { elements: { x00281052: {}, x00280030: {} } };
+  const dataSet = {
+    elements: {
+      x00281052: {},
+      x00280101: {},
+      x52009230: sequence({ elements: { x00289145: sequence(perFrameMacro) } }),
+      x52009229: sequence({
+        elements: {
+          x00289145: sequence(sharedMacro),
+          x00289110: sequence(sharedMacro),
+        },
+      }),
+    },
+  };
+  const sources = metadataSourcesFor(dataSet).cornerstoneMetadata;
+  assert.equal(sources.modalityLutModule.rescaleIntercept, "per-frame");
+  assert.equal(sources.imagePlaneModule.pixelSpacing, "shared-functional-group");
+  assert.equal(sources.imagePixelModule.bitsStored, "top-level");
+});
+
+test("per-frame and shared functional-group values travel with the frame", () => {
+  const cornerstoneMetadata = {
+    ...RESULT.cornerstoneMetadata,
+    modalityLutModule: { rescaleSlope: 1, rescaleIntercept: -1024, rescaleType: "HU" },
+    voiLutModule: { windowCenter: [40], windowWidth: [400], voiLUTFunction: "LINEAR" },
+    imagePlaneModule: {
+      ...RESULT.cornerstoneMetadata.imagePlaneModule,
+      pixelSpacing: [0.5, 0.25],
+      sliceThickness: 2.5,
+    },
+  };
+  const sidecar = buildSidecar({
+    row: { ...ROW, path: "synthetic/ct_multiframe_perframe.dcm" },
+    params: PARAMS,
+    result: { ...RESULT, cornerstoneMetadata },
+    environment: ENVIRONMENT,
+    installed: INSTALLED,
+  });
+  assert.equal(sidecar.cornerstoneMetadata.modalityLutModule.rescaleIntercept, -1024);
+  assert.deepEqual(sidecar.cornerstoneMetadata.voiLutModule.windowCenter, [40]);
+  assert.deepEqual(sidecar.cornerstoneMetadata.imagePlaneModule.pixelSpacing, [0.5, 0.25]);
 });
 
 // A row the page could not parse independently records why, and

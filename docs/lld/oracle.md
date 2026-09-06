@@ -1,7 +1,7 @@
 # The oracle, reference half
 
-**F-IDs that contributed:** F-010, F-X006, F-X007, F-X008, F-X009, F-X012,
-F-X013
+**F-IDs that contributed:** F-010, F-013, F-X006, F-X007, F-X008, F-X009,
+F-X012, F-X013
 **Last updated:** 2026-09-06
 
 HLD section 11 names cornerstone3D as the reference the differential harness
@@ -58,6 +58,7 @@ is not evidence of anything on its own.
 | `tools/oracle/unsupported.json` | committed, what 5.8.2 cannot render |
 | `tools/oracle/volume-params.json` | committed, the volume subjects and the volume pass's own parameters |
 | `tools/oracle/volume-truth.json` | committed, what is TRUE of each subject, and where 5.8.2 disagrees |
+| `tools/oracle/metadata-truth.json` | committed PS3.3 truth for named synthetic metadata, display values and geometry fixtures |
 | `tools/oracle/out/` | ignored, and refused by the pre-commit hook |
 
 `tools/oracle/Cargo.toml` and `src/lib.rs` are the Rust side, and F-011 made
@@ -660,22 +661,41 @@ reading could not show the reference reading a file wrong, which is exactly
 what happened with YBR_FULL_422 and with `voiLUTFunction`.
 
 `attributes` is then cross-read a third time by `check_sidecars.py` under
-pydicom, over every sidecar, plus a hand-written expectation table for nine
-named synthetic rows whose values are known by construction from
-`scripts/corpus_synth.py` and PS3.3. The table is required to ASSERT every
+pydicom, over every sidecar, plus `metadata-truth.json` for eleven named
+synthetic and syntax rows whose values are known by construction from
+`scripts/corpus_synth.py` and PS3.3. The truth file is required to ASSERT every
 photometric interpretation and both values of Pixel Representation that the
 corpus's sidecars carry, and the checker fails if that stops being true.
-Asserting, not merely naming: a row can sit in the table with five assertions,
+Asserting, not merely naming: a row can sit in the file with five assertions,
 none of them about photometric interpretation, and a check that only asked
 which rows were named would call that value covered.
 
-`cornerstoneMetadata` is checked too, on two rows, and one of them is the whole
-point. `synthetic/ct_multiframe_perframe.dcm` carries its rescale and its
+The same file is the Rust comparator's metadata and display truth. The existing
+`volume-truth.json` remains the sole owner of series geometry. Each resolved
+field binds its declared scope to an exact pointer in the sidecar's
+`metadataSources` block. That block is derived from dicom-parser's raw sequence
+structure with per-frame values taking precedence over shared values, then
+top-level values. Arrays retain order. Missing differs from explicit null,
+null differs from an empty array, signed zero remains distinct, and non-finite
+JSON numbers are refused. The file also carries four literal PS3.3 C.11
+display values and oblique non-square geometry samples. No second LUT evaluator
+exists in the harness.
+
+`cornerstoneMetadata` is checked too, from that same truth file on two rows,
+and one of them is the whole point. `synthetic/ct_multiframe_perframe.dcm`
+carries its rescale and its
 window only in the per-frame functional groups (PS3.3 C.7.6.16), so the
 independent top-level read correctly reports absent, both readers agree on
 absent, and the values that actually drove the render would be verified by
 nothing. Slope 1 and intercept -1024 for frame 0 are asserted against the
 generator's own constants instead.
+
+`attributes.presentationLutShape` is read independently with the other pixel
+attributes. `synthetic/ct_unsigned_16.dcm` positively declares `INVERSE`, and a
+standing mutation changes it to `IDENTITY`. The per-frame modality and VOI
+modules and the shared pixel measures are copied into the sidecar without
+flattening their array shapes, so the browser fixture proves that the values
+which drove the frame crossed the boundary intact.
 
 Real corpus rows report a mismatched attribute by name only and never by value,
 following `corpus_check.py`'s convention.

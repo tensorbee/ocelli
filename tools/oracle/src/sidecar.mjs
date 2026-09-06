@@ -77,6 +77,7 @@ export function buildSidecar({ row, params, result, environment, installed }) {
     camera: result.camera,
     attributes: result.attributes,
     attributesError: result.attributesError,
+    metadataSources: result.metadataSources,
     cornerstoneMetadata: result.cornerstoneMetadata,
     image: result.image,
     frame: {

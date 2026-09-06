@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -56,6 +57,7 @@ MANIFEST = ROOT / "corpus" / "manifest.tsv"
 UNSUPPORTED = ROOT / "tools" / "oracle" / "unsupported.json"
 VOLUME_PARAMS = ROOT / "tools" / "oracle" / "volume-params.json"
 VOLUME_TRUTH = ROOT / "tools" / "oracle" / "volume-truth.json"
+METADATA_TRUTH = ROOT / "tools" / "oracle" / "metadata-truth.json"
 
 try:
     import pydicom
@@ -84,6 +86,7 @@ SCALARS = {
     "rescaleIntercept": "RescaleIntercept",
     "rescaleType": "RescaleType",
     "voiLutFunction": "VOILUTFunction",
+    "presentationLutShape": "PresentationLUTShape",
     "sliceThickness": "SliceThickness",
     "lossyImageCompression": "LossyImageCompression",
     "lossyImageCompressionMethod": "LossyImageCompressionMethod",
@@ -97,176 +100,51 @@ SEQUENCES = {
     "imageOrientationPatient": "ImageOrientationPatient",
 }
 
-# Hand-written, from PS3.3 and from scripts/corpus_synth.py's own constants.
-# Chosen to cover every photometric interpretation and both values of Pixel
-# Representation that the corpus's sidecars carry. `_coverage` below refuses to
-# pass if that stops being true.
-EXPECTED = {
-    # PS3.3 C.7.6.3.1.2 MONOCHROME2, and BitsStored equal to BitsAllocated.
-    "synthetic/ct_unsigned_16.dcm": {
-        "photometricInterpretation": "MONOCHROME2",
-        "samplesPerPixel": 1,
-        "bitsAllocated": 16,
-        "bitsStored": 16,
-        "highBit": 15,
-        "pixelRepresentation": 0,
-        "rows": 12,
-        "columns": 20,
-        "rescaleSlope": 1.0,
-        "rescaleIntercept": 0.0,
-        "windowCenter": [40.0],
-        "windowWidth": [400.0],
-        "voiLutFunction": "LINEAR",
-        "pixelSpacing": [0.5, 0.25],
-    },
-    # PS3.5 8.1.1, which defines the Pixel Cell and says High Bit (0028,0102)
-    # is where the high order bit of Bits Stored sits within Bits Allocated.
-    # High Bit itself is in PS3.3 C.7.6.3, Table C.7-11c. Signed twelve bits in
-    # a sixteen bit container, LEFT aligned: HighBit 15 with BitsStored 12 is
-    # the alignment a reader that ignores (0028,0102) gets wrong while still
-    # producing plausible numbers. The current edition of PS3.5 8.1.1 requires
-    # High Bit to be one less than Bits Stored, so this encoding is one it
-    # retired, which is exactly why the corpus carries it.
-    "synthetic/ct_signed_12in16_left.dcm": {
-        "photometricInterpretation": "MONOCHROME2",
-        "bitsAllocated": 16,
-        "bitsStored": 12,
-        "highBit": 15,
-        "pixelRepresentation": 1,
-        "rescaleSlope": 1.0,
-        "rescaleIntercept": -1024.0,
-        "windowCenter": [40.0],
-        "windowWidth": [400.0],
-    },
-    # The same trap, right aligned.
-    "synthetic/ct_signed_12in16_right.dcm": {
-        "bitsStored": 12,
-        "highBit": 11,
-        "pixelRepresentation": 1,
-        "rescaleIntercept": -1024.0,
-    },
-    # PS3.3 C.7.6.3.1.2 MONOCHROME1: the minimum value is white. The generator
-    # gives this one a window of its own and no Modality LUT at all.
-    "synthetic/cr_monochrome1.dcm": {
-        "modality": "CR",
-        "photometricInterpretation": "MONOCHROME1",
-        "bitsStored": 12,
-        "highBit": 11,
-        "pixelRepresentation": 0,
-        "rescaleSlope": None,
-        "rescaleIntercept": None,
-        "windowCenter": [2048.0],
-        "windowWidth": [4096.0],
-    },
-    # PS3.3 C.7.6.3.1.3, PlanarConfiguration 0, colour by pixel.
-    "synthetic/sc_rgb_interleaved.dcm": {
-        "photometricInterpretation": "RGB",
-        "samplesPerPixel": 3,
-        "planarConfiguration": 0,
-        "bitsAllocated": 8,
-        "bitsStored": 8,
-        "highBit": 7,
-        "pixelRepresentation": 0,
-    },
-    # The same image, PlanarConfiguration 1, colour by plane.
-    "synthetic/sc_rgb_planar.dcm": {
-        "photometricInterpretation": "RGB",
-        "planarConfiguration": 1,
-    },
-    # PS3.3 C.7.6.2.1.1: PixelSpacing[0] is the spacing BETWEEN ROWS. Both the
-    # frame and the spacing are non-square, and in opposite senses: 40 columns
-    # by 12 rows with row spacing 0.5 and column spacing 0.25, so a transposed
-    # index and a transposed spacing are separately visible.
-    "synthetic/mr_nonsquare_spacing.dcm": {
-        "modality": "MR",
-        "rows": 12,
-        "columns": 40,
-        "pixelSpacing": [0.5, 0.25],
-        "sliceThickness": 3.0,
-        "windowCenter": [1024.0],
-        "windowWidth": [2048.0],
-    },
-    # PS3.5 8.2.1 permits YBR_FULL_422 or RGB for JPEG Baseline at three
-    # samples per pixel, and the encoder chose YBR_FULL_422, so it rewrote
-    # (0028,0004) and the row is no longer RGB. A reader that kept RGB would
-    # render this as colour noise, which is why it is asserted.
-    # Lossy Image Compression and its Method are both Type 3 in PS3.3 Table
-    # C.7-9, so the standard does not require them. `corpus_synth.py` writes
-    # them, and that is the claim the last two lines check.
-    "syntax/jpeg_baseline_rgb8.dcm": {
-        "transferSyntaxUID": "1.2.840.10008.1.2.4.50",
-        "photometricInterpretation": "YBR_FULL_422",
-        "samplesPerPixel": 3,
-        "planarConfiguration": 0,
-        "bitsAllocated": 8,
-        "bitsStored": 8,
-        "highBit": 7,
-        "pixelRepresentation": 0,
-        "rows": 64,
-        "columns": 96,
-        "lossyImageCompression": "01",
-        "lossyImageCompressionMethod": "ISO_10918_1",
-    },
-    # The uncompressed reference the transfer-syntax cases are encoded from.
-    "syntax/reference_mono12.dcm": {
-        "transferSyntaxUID": "1.2.840.10008.1.2.1",
-        "bitsAllocated": 16,
-        "bitsStored": 12,
-        "highBit": 11,
-        "pixelRepresentation": 0,
-        "rows": 64,
-        "columns": 96,
-        "rescaleIntercept": 0.0,
-    },
-}
+
+MISSING = object()
 
 
-# The other half of the sidecar: what cornerstone3D itself resolved and used.
-#
-# The `attributes` block above is read from the top-level data set, and for one
-# corpus row that is deliberately not where the answer lives.
-# `synthetic/ct_multiframe_perframe.dcm` carries its rescale and its window
-# only in the per-frame functional groups (PS3.3 C.7.6.16), so `attributes`
-# correctly reports absent for both, both readers then agree on "absent", and
-# the values that ACTUALLY DROVE THE RENDER are checked by nothing.
-#
-# That is exactly HLD section 11's "a wrong rescale slope can still produce a
-# plausible image", on the one row the corpus wrote to trap it. So the
-# reference's own resolved modules are checked too, against values known by
-# construction from `scripts/corpus_synth.py`.
-#
-# Keys are `<module>.<field>`. The value is written in the shape the pinned
-# reference returns it, a list where the module carries a list, because a shape
-# that moved would mean the pin moved and that is worth going red for too.
-EXPECTED_CORNERSTONE = {
-    # Frame 0 of three. corpus_synth.py's `case_multiframe` writes
-    # slopes ["1", "2", "0.5"], intercepts ["-1024", "-2048", "0"],
-    # centres ["40", "300", "-600"] and widths ["400", "1500", "1600"], and
-    # this story renders frame 0 only.
-    "synthetic/ct_multiframe_perframe.dcm": {
-        "modalityLutModule.rescaleSlope": 1.0,
-        "modalityLutModule.rescaleIntercept": -1024.0,
-        "modalityLutModule.rescaleType": "HU",
-        "voiLutModule.windowCenter": [40.0],
-        "voiLutModule.windowWidth": [400.0],
-        "voiLutModule.voiLUTFunction": "LINEAR",
-        # SharedFunctionalGroupsSequence, PixelMeasuresSequence.
-        "imagePlaneModule.pixelSpacing": [0.5, 0.25],
-        "imagePlaneModule.sliceThickness": 2.5,
-    },
-    # A single-frame row, where the two readings must AGREE rather than
-    # complement each other. This is what makes the row above a trap rather
-    # than the normal case.
-    "synthetic/ct_signed_12in16_left.dcm": {
-        "modalityLutModule.rescaleSlope": 1.0,
-        "modalityLutModule.rescaleIntercept": -1024.0,
-        "voiLutModule.windowCenter": [40.0],
-        "voiLutModule.windowWidth": [400.0],
-        "imagePixelModule.bitsStored": 12,
-        "imagePixelModule.highBit": 15,
-        "imagePixelModule.pixelRepresentation": 1,
-    },
-}
+def _project_metadata_truth(
+        document: dict, volume_document: dict) -> tuple[dict, dict, dict, dict]:
+    """Project the two domain-owned truth documents into checker views."""
+    attributes: dict[str, dict] = {}
+    resolved: dict[str, dict] = {}
+    sources: dict[str, dict] = {}
+    for row_path, entry in document["entries"].items():
+        for pointer, field in entry["fields"].items():
+            prefix = "/attributes/"
+            if pointer.startswith(prefix):
+                attributes.setdefault(row_path, {})[pointer[len(prefix):]] = field["value"]
+                continue
+            prefix = "/cornerstoneMetadata/"
+            if pointer.startswith(prefix):
+                module, name = pointer[len(prefix):].split("/", 1)
+                resolved.setdefault(row_path, {})[f"{module}.{name}"] = field["value"]
+                source_pointer = field.get("sourcePointer")
+                expected_pointer = f"/metadataSources/cornerstoneMetadata/{module}/{name}"
+                if source_pointer != expected_pointer:
+                    raise ValueError(
+                        f"{row_path}: {pointer} must bind {expected_pointer}")
+                sources.setdefault(row_path, {})[f"{module}.{name}"] = field["scope"]
+    volume_series = {}
+    for subject_id, subject in volume_document["subjects"].items():
+        series = subject.get("seriesDirectory")
+        if series is not None:
+            volume_series[series] = subject
+    return attributes, resolved, sources, volume_series
+
+
+def _load_metadata_truth() -> tuple[dict, dict, dict, dict]:
+    """Load and project the two tracked truth documents."""
+    return _project_metadata_truth(
+        json.loads(METADATA_TRUTH.read_text()),
+        json.loads(VOLUME_TRUTH.read_text()))
+
+
+# F-013 replaces both in-source expected-value tables. Keeping the projections
+# here would let Python and Rust silently validate different truths.
+EXPECTED, EXPECTED_CORNERSTONE, EXPECTED_SOURCES, METADATA_VOLUME_SERIES = (
+    _load_metadata_truth())
 
 
 # Hand-written, from PS3.3 C.7.6.2.1.1 and scripts/corpus_synth.py's own
@@ -283,12 +161,9 @@ EXPECTED_CORNERSTONE = {
 #
 # case_series writes ImagePositionPatient as f"{d_k * axis:.6f}" for each axis
 # of the normal, so the projection of slice k onto the normal is d_k.
-SERIES_NORMAL = (-0.6, 0.8, 0.0)
+SERIES_NORMAL = tuple(METADATA_VOLUME_SERIES["synthetic/ct_series_uniform"]["normal"])
 SERIES_TRUTH = {
-    "synthetic/ct_series_uniform": [
-        0.0, 2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 22.5],
-    "synthetic/ct_series_nonuniform": [
-        0.0, 2.5, 5.0, 7.5, 10.0, 12.5, 15.0, 18.75, 20.0, 22.5],
+    path: entry["projectionsMm"] for path, entry in METADATA_VOLUME_SERIES.items()
 }
 
 # HLD 25.1, "Geometry: world coordinates within 1e-6 mm". The same tolerance
@@ -300,7 +175,8 @@ GEOMETRY_TOLERANCE_MM = 1e-6
 # (0018,0088) is absent from every member of both series and SliceThickness
 # (0018,0050) is 2.5 on every member of both, so a reader that took either tag
 # would answer 2.5 for a series whose gaps are 2.5, 3.75 and 1.25.
-SERIES_SLICE_THICKNESS = 2.5
+SERIES_SLICE_THICKNESS = METADATA_VOLUME_SERIES[
+    "synthetic/ct_series_uniform"]["sliceThickness"]
 
 
 def _numeric(value):
@@ -339,6 +215,8 @@ def _read(path: Path) -> dict:
 
 
 def _equal(left, right) -> bool:
+    if left is MISSING or right is MISSING:
+        return left is MISSING and right is MISSING
     if left is None or right is None:
         return left is None and right is None
     if isinstance(left, list) or isinstance(right, list):
@@ -347,7 +225,7 @@ def _equal(left, right) -> bool:
         return len(left) == len(right) and all(
             _equal(a, b) for a, b in zip(left, right))
     if isinstance(left, (int, float)) and isinstance(right, (int, float)):
-        return float(left) == float(right)
+        return struct.pack(">d", float(left)) == struct.pack(">d", float(right))
     return str(left) == str(right)
 
 
@@ -355,7 +233,25 @@ def _show(row_path: str, value) -> str:
     """A value, unless the row is real, in which case only its shape."""
     if row_path.startswith("real/"):
         return "<withheld, real corpus row>"
+    if value is MISSING:
+        return "<missing JSON member>"
     return json.dumps(value)
+
+
+def _compare_metadata_sources(
+        row_path: str, expected: dict, sidecar: dict,
+        problems: list[str]) -> None:
+    """Append resolved-source mismatches for one sidecar."""
+    sources = sidecar.get("metadataSources") or {}
+    for key, value in expected.items():
+        module_name, _, field = key.partition(".")
+        module = (sources.get("cornerstoneMetadata") or {}).get(module_name)
+        actual = module.get(field, MISSING) if isinstance(module, dict) else MISSING
+        if not _equal(value, actual):
+            problems.append(
+                f"{row_path}: resolved {key} source is "
+                f"{_show(row_path, actual)} and metadata truth says "
+                f"{_show(row_path, value)}")
 
 
 def _coverage(sidecars: dict) -> list[str]:
@@ -578,11 +474,48 @@ def _self_test() -> int:
     check(not _equal(None, 0), "None compared equal to 0")
     check(not _equal(0, None), "0 compared equal to None")
     check(_equal(1, 1.0), "1 does not equal 1.0")
+    check(not _equal(0.0, -0.0), "signed zero compared equal")
+    check(not _equal(MISSING, None), "a missing member compared equal to null")
     check(_equal([0.5, 0.25], [0.5, 0.25]), "equal lists compared unequal")
     check(not _equal([0.5], [0.5, 0.25]), "a shorter list compared equal")
     check(not _equal([0.25, 0.5], [0.5, 0.25]), "order was ignored")
     check(not _equal(40, [40]), "a scalar compared equal to a one-element list")
     check(not _equal("MONOCHROME1", "MONOCHROME2"), "two strings compared equal")
+
+    # A resolved field must bind the exact raw-DICOM provenance pointer. This
+    # is a parser refusal, so exercise it without changing either tracked truth
+    # document.
+    malformed = {
+        "entries": {
+            "synthetic/case.dcm": {
+                "fields": {
+                    "/cornerstoneMetadata/module/field": {
+                        "scope": "top-level",
+                        "sourcePointer": "/wrong",
+                        "value": 1,
+                    }
+                }
+            }
+        }
+    }
+    try:
+        _project_metadata_truth(malformed, {"subjects": {}})
+    except ValueError as error:
+        check("must bind" in str(error),
+              "a malformed source binding failed for the wrong reason")
+    else:
+        check(False, "a malformed source binding was accepted")
+
+    # The source scope comparison is independent of the field value. Its
+    # mismatch branch is reached only on a damaged sidecar, so watch it here.
+    source_problems: list[str] = []
+    _compare_metadata_sources(
+        "synthetic/case.dcm", {"module.field": "per-frame"},
+        {"metadataSources": {
+            "cornerstoneMetadata": {"module": {"field": "top-level"}}
+        }}, source_problems)
+    check(len(source_problems) == 1 and "resolved module.field source" in source_problems[0],
+          "a changed metadata source scope was not reported")
 
     if problems:
         print("FAIL: check_sidecars self test")
@@ -685,7 +618,7 @@ def main() -> int:
             continue
 
         for field, expected in truth.items():
-            actual = attributes.get(field, "<absent from the sidecar>")
+            actual = attributes.get(field, MISSING)
             if not _equal(expected, actual):
                 problems.append(
                     f"{row_path}: {field} is {_show(row_path, actual)} in the "
@@ -703,7 +636,7 @@ def main() -> int:
             continue
         attributes = sidecar.get("attributes") or {}
         for field, value in expected.items():
-            actual = attributes.get(field, "<absent from the sidecar>")
+            actual = attributes.get(field, MISSING)
             if not _equal(value, actual):
                 problems.append(
                     f"{row_path}: {field} is {_show(row_path, actual)} and "
@@ -730,13 +663,19 @@ def main() -> int:
                     f"the reference, so the values that drove the render are "
                     f"recorded by nothing")
                 continue
-            actual = module.get(field, "<absent from the module>")
+            actual = module.get(field, MISSING)
             if not _equal(value, actual):
                 problems.append(
                     f"{row_path}: the reference resolved {key} as "
                     f"{_show(row_path, actual)} and scripts/corpus_synth.py "
                     f"writes {_show(row_path, value)}")
         resolved += 1
+
+    for row_path, expected in sorted(EXPECTED_SOURCES.items()):
+        sidecar = sidecars.get(row_path)
+        if sidecar is None:
+            continue
+        _compare_metadata_sources(row_path, expected, sidecar, problems)
 
     # `_coverage` is a claim about the expectation table against THE WHOLE
     # CORPUS, so it is one of the three completeness checks a partial run
