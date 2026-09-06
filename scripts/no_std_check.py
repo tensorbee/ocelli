@@ -11,11 +11,9 @@ Nothing checked it. This does.
 **Four crates do not declare it, and each absence is deliberate.**
 `ocelli-wasm` and `ocelli-native` are the two entry points. `ocelli-render` and
 `ocelli-compute` link wgpu, which needs `std`, and that is part of deviation
-D-10 rather than an oversight. This script does not carry a list of exempt
-crates: it reads the attribute from each crate's source and checks the ones
-that declare it, so a crate that drops `no_std` leaves the check by construction
-and a crate that adds it joins by construction. A hand-maintained exemption
-list would be a second place to update and a place to hide.
+D-10 rather than an oversight. The expected set below is explicit, because a
+crate that silently enters or leaves a self-selected set makes the check agree
+with the defect. Any posture change therefore moves a named value in review.
 
 ## Why the obvious check does not work
 
@@ -64,6 +62,18 @@ CRATES = ROOT / "crates"
 
 NO_STD = re.compile(r"^\s*#!\[cfg_attr\(not\(test\),\s*no_std\)\]", re.M)
 
+EXPECTED_NO_STD_CRATES = frozenset({
+    "ocelli-cache",
+    "ocelli-codec",
+    "ocelli-core",
+    "ocelli-dicom",
+    "ocelli-geom",
+    "ocelli-pixel",
+    "ocelli-seg",
+    "ocelli-viewport",
+    "ocelli-volume",
+})
+
 # `cargo tree` prefixes every line below the root with box-drawing characters:
 #
 #     ocelli-core v0.1.0 (/path)
@@ -107,9 +117,9 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
-    crates = sorted(c for c in CRATES.iterdir()
-                    if c.is_dir() and declares_no_std(c))
-    if not crates:
+    declared = {c.name for c in CRATES.iterdir()
+                if c.is_dir() and declares_no_std(c)}
+    if not declared:
         print("FAIL: no crate under crates/ declares no_std.")
         print("Either the posture was abandoned, in which case delete this")
         print("check deliberately, or lib.rs stopped matching the attribute")
@@ -117,6 +127,19 @@ def main() -> int:
         return 1
 
     problems: list[str] = []
+    for name in sorted(EXPECTED_NO_STD_CRATES - declared):
+        problems.append(f"{name}: stopped declaring no_std")
+    for name in sorted(declared - EXPECTED_NO_STD_CRATES):
+        problems.append(f"{name}: unexpectedly declares no_std")
+    if problems:
+        print("FAIL: the declared no_std crate set changed")
+        for problem in problems:
+            print(f"  {problem}")
+        print("Change EXPECTED_NO_STD_CRATES in the same reviewed posture "
+              "change if this is deliberate.")
+        return 1
+
+    crates = [CRATES / name for name in sorted(EXPECTED_NO_STD_CRATES)]
     for crate in crates:
         name = crate.name
         out, error = feature_tree(name)

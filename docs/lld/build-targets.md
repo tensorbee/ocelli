@@ -1,6 +1,6 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-X008
 **Last updated:** 2026-09-06
 
 The wasm build pipeline, the size budget, and the invariants that keep the
@@ -50,6 +50,23 @@ dev-profile size measurement is not a smaller version of the same number. It
 is a different number.
 
 `crates/ocelli-wasm/pkg/` is generated and gitignored.
+
+### The generated package carries both licence grants
+
+`crates/ocelli-wasm/` has three tracked relative symlinks to the repository
+licence files: `LICENSE`, `LICENSE-MIT` and `LICENSE-APACHE`. Keeping the links
+relative makes the crate self-contained in a clone and gives wasm-pack the
+package-local inputs it expects without copying legal text into a second
+tracked location. The generated `pkg/` contains regular copies.
+
+The workspace declares `MIT OR Apache-2.0`, so a release package needs both
+grants. `scripts/pin_and_size_check.py --with-size` requires generated
+`LICENSE-MIT` and `LICENSE-APACHE` to be regular files and to be byte-identical
+to the repository originals. A symlink is refused even when following it finds
+the right bytes, because the publish directory must contain the grant itself.
+`bin/ocelli.sh gate wasm` runs that check after the release build and runs its
+focused unit suite. The guard catalogue separately probes an absent Apache
+grant, so a package can no longer pass because its wasm size alone is healthy.
 
 ### wasm-opt runs, and is not disabled
 
@@ -331,10 +348,6 @@ because the alternative is shipping an override nobody can observe. See
 
 ## Known gaps
 
-- **wasm-pack warns that `crates/ocelli-wasm/` carries no LICENSE file.** The
-  licences are at the repository root. The generated `pkg/` is not published
-  by anything today, and whether it is published at all is F-101's and
-  `/release`'s question, not this one.
 - **Step 4 starts vacuous.** It compares the dependencies this workspace
   declares directly, not the workspace's own crates, and today not one of them
   resolves a different feature set on the two targets, so `allowed` in

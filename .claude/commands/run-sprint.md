@@ -155,8 +155,17 @@ is still pending in S02, the absent oracle is a named skip because S01 builds
 the corpus the oracle consumes and contains no port code. `--all` remains
 strict, and every later sprint must run the oracle.
 
-Record it: `python3 scripts/verify_ledger.py record --profile sprint --gates
-<what ran> --corpus <result>`.
+Record a passing run in both evidence stores:
+
+```bash
+python3 scripts/verify_ledger.py record --profile sprint \
+  --gates <what-ran> --corpus <result>
+python3 scripts/sprint_workflow.py record-verification --profile sprint \
+  --result pass --gates <what-ran> --corpus <result>
+```
+
+The ledger supplies commit provenance. The sprint run state supplies closure
+ordering. Both records use the current staged tree.
 
 ## 6. The review loop
 
@@ -165,7 +174,24 @@ Record it: `python3 scripts/verify_ledger.py record --profile sprint --gates
 prose churn out of it: a remediation that corrects one sentence and adds three
 explaining it ships three new claims for the next pass to falsify.
 
+Record every whole-sprint pass against the staged tree it reviewed:
+
+```bash
+python3 scripts/sprint_workflow.py record-sprint-review \
+  --pass N --defects D --smells S --nitpicks P
+```
+
+If a pass causes any remediation, stage the remediation, run consolidated
+verification again, record that verification, and review the new tree. A clean
+review for one tree and a passing verification for another are not closure
+evidence.
+
 ## 7. Finish
+
+For each story the operator explicitly parks, record a non-empty reason under
+`## Carried forward from SNN` in `CURRENT_SPRINT.md`, then mark it with
+`python3 scripts/sprint_workflow.py mark-feature F-XXX --state carried`.
+Carrying a story does not claim implementation or require a feature review.
 
 Push the sprint branch once, when verification and the review loop are clean.
 Report the sprint state, every story's status, the gate results and the review

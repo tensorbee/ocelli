@@ -137,10 +137,12 @@ jobs:
       - run: python3 scripts/staged_content_check.py --tracked
       - run: python3 scripts/prose_check.py
       - run: python3 scripts/deviation_check.py
-      - run: python3 scripts/backlog_check.py
-      - run: python3 scripts/gen_sprint_plan.py --check
-      # One workflow, two hosts. A stale adapter serves Codex old instructions.
-      - run: python3 scripts/sync_agent_skills.py --check
+      # Both checks are one gate arm. Naming it preserves their declared order
+      # and `&&` failure semantics instead of reconstructing the arm as steps.
+      - run: bin/ocelli.sh gate backlog
+      # One workflow, two hosts. Check adapters and run marked examples through
+      # the named gate so CI preserves the arm's order and failure semantics.
+      - run: bin/ocelli.sh gate skills
       # `gate --floor` calls itself "what CI runs". This is what makes that
       # true. S02 added three gates to the floor and each needed a hand-written
       # step here, and nothing would have noticed a missed one.
@@ -294,7 +296,7 @@ jobs:
       - run: npm ci
       # Includes the cached-wasm-view ban of HLD 17.2, which is a silent
       # failure mode and therefore a lint rather than a convention.
-      - run: npm run lint
+      - run: bin/ocelli.sh gate lint
       - run: npm run typecheck
       # Story E1.3. tsc proves the TypeScript compiles. This proves what a
       # CONSUMER receives: the tarball carries every path the exports map

@@ -11,7 +11,7 @@
 //!
 //! An identity comparison of the reference against itself proves the loader,
 //! the identifier mapping, the class resolution, the sidecar contract and the
-//! report shape over all ninety-eight views. **It proves nothing about
+//! report shape over all ninety-nine views. **It proves nothing about
 //! detection**, which is why it is never allowed to be the only corpus-scale
 //! exercise. This file is the other half.
 //!
@@ -52,6 +52,9 @@ pub enum MutatedSide {
 /// known rather than on whichever identifier sorts first.
 #[derive(Clone, Copy, Debug)]
 pub enum Target {
+    /// One exact declared view. Metadata truth mutations use named synthetic
+    /// fixtures because their expected values are committed independently.
+    View(&'static str),
     /// The first class-one stack view that passes cleanly, so the mutation's
     /// effect on the outcome is unambiguous.
     ///
@@ -213,9 +216,28 @@ pub enum Effect {
         pointer: &'static str,
         value: &'static str,
     },
+    /// Change committed metadata and make either frame reader fail if the
+    /// comparator reaches it. This watches metadata-before-frame precedence
+    /// at the production `compare_runs` call site.
+    SidecarStringAndFrameRefusal {
+        pointer: &'static str,
+        value: &'static str,
+        message: &'static str,
+    },
     /// Add a delta to a numeric sidecar field, for the geometry boundary
     /// cases where the interesting quantity is the SIZE of the change.
     SidecarDelta { pointer: &'static str, delta: f64 },
+    /// Swap two entries in an array-valued sidecar field.
+    SidecarArraySwap {
+        pointer: &'static str,
+        first: usize,
+        second: usize,
+    },
+    /// Exchange the row and column direction triples of an IOP value.
+    SidecarDirectionSwap { pointer: &'static str },
+    /// Replace a resolved field with JSON null. Used to model a reader taking
+    /// an absent top-level value instead of the per-frame functional group.
+    SidecarNull { pointer: &'static str },
     /// Replace the sidecar's declared frame digest, leaving the pixels alone.
     CorruptDeclaredDigest,
     /// Drop the view from one side entirely.
@@ -263,6 +285,126 @@ pub struct Mutation {
 /// The catalogue. Order is the order they run in and is not otherwise
 /// meaningful.
 pub const CATALOGUE: &[Mutation] = &[
+    Mutation {
+        name: "metadata-pixel-spacing-transposed",
+        why: "PS3.3 C.7.6.2.1.1 stores row spacing before column spacing. The committed non-square truth makes reversing them attributable to the candidate before pixels are compared.",
+        side: MutatedSide::Candidate,
+        target: Target::View("synthetic__mr_nonsquare_spacing"),
+        effect: Effect::SidecarArraySwap {
+            pointer: "/attributes/pixelSpacing",
+            first: 0,
+            second: 1,
+        },
+        expect: Expectation::View {
+            outcome: Outcome::Fail,
+            qualifiers: &[Qualifier::MetadataTruth],
+            side: Side::Ours,
+        },
+    },
+    Mutation {
+        name: "metadata-iop-vectors-reversed",
+        why: "PS3.3 C.7.6.2.1.1 gives the row direction before the column direction. The oblique geometry fixture makes exchanging those triples visible.",
+        side: MutatedSide::Candidate,
+        target: Target::View("synthetic__mr_nonsquare_spacing"),
+        effect: Effect::SidecarDirectionSwap {
+            pointer: "/attributes/imageOrientationPatient",
+        },
+        expect: Expectation::View {
+            outcome: Outcome::Fail,
+            qualifiers: &[Qualifier::MetadataTruth],
+            side: Side::Ours,
+        },
+    },
+    Mutation {
+        name: "metadata-rescale-intercept-wrong",
+        why: "HLD section 11 names a wrong rescale value as metadata damage that can still produce a plausible image. The committed C.11 truth attributes it without consulting pixels.",
+        side: MutatedSide::Candidate,
+        target: Target::View("synthetic__ct_unsigned_16"),
+        effect: Effect::SidecarNumber {
+            pointer: "/attributes/rescaleIntercept",
+            value: -1024.0,
+        },
+        expect: Expectation::View {
+            outcome: Outcome::Fail,
+            qualifiers: &[Qualifier::MetadataTruth],
+            side: Side::Ours,
+        },
+    },
+    Mutation {
+        name: "metadata-window-function-wrong",
+        why: "PS3.3 C.11.2 gives LINEAR, LINEAR_EXACT and SIGMOID different arithmetic. A changed declaration is a truth failure before any pixel tolerance applies.",
+        side: MutatedSide::Candidate,
+        target: Target::View("synthetic__ct_unsigned_16"),
+        effect: Effect::SidecarString {
+            pointer: "/attributes/voiLutFunction",
+            value: "LINEAR_EXACT",
+        },
+        expect: Expectation::View {
+            outcome: Outcome::Fail,
+            qualifiers: &[Qualifier::MetadataTruth],
+            side: Side::Ours,
+        },
+    },
+    Mutation {
+        name: "metadata-top-level-used-instead-of-per-frame",
+        why: "PS3.3 C.7.6.16 resolves the per-frame functional group before shared or top-level values. Replacing the resolved intercept with the absent top-level value must fail the committed per-frame truth.",
+        side: MutatedSide::Candidate,
+        target: Target::View("synthetic__ct_multiframe_perframe"),
+        effect: Effect::SidecarNull {
+            pointer: "/cornerstoneMetadata/modalityLutModule/rescaleIntercept",
+        },
+        expect: Expectation::View {
+            outcome: Outcome::Fail,
+            qualifiers: &[Qualifier::MetadataTruth],
+            side: Side::Ours,
+        },
+    },
+    Mutation {
+        name: "metadata-per-frame-scope-labelled-top-level",
+        why: "PS3.3 C.7.6.16.2.2.1 gives per-frame values precedence. The scope label is compared with provenance derived from the raw functional-group sequence and cannot be descriptive text only.",
+        side: MutatedSide::Candidate,
+        target: Target::View("synthetic__ct_multiframe_perframe"),
+        effect: Effect::SidecarString {
+            pointer: "/metadataSources/cornerstoneMetadata/modalityLutModule/rescaleIntercept",
+            value: "top-level",
+        },
+        expect: Expectation::View {
+            outcome: Outcome::Fail,
+            qualifiers: &[Qualifier::MetadataTruth],
+            side: Side::Ours,
+        },
+    },
+    Mutation {
+        name: "metadata-presentation-inversion-wrong",
+        why: "PS3.3 C.11.6 gives INVERSE different presentation semantics from IDENTITY. The generated positive declaration must survive the independent parser and metadata truth comparison.",
+        side: MutatedSide::Candidate,
+        target: Target::View("synthetic__ct_unsigned_16"),
+        effect: Effect::SidecarString {
+            pointer: "/attributes/presentationLutShape",
+            value: "IDENTITY",
+        },
+        expect: Expectation::View {
+            outcome: Outcome::Fail,
+            qualifiers: &[Qualifier::MetadataTruth],
+            side: Side::Ours,
+        },
+    },
+    Mutation {
+        name: "metadata-failure-precedes-frame-refusal",
+        why: "A committed metadata failure must remain reportable when either input frame is malformed. The combined mutation fails the production comparator if reference or candidate frame I/O moves ahead of metadata truth.",
+        side: MutatedSide::Candidate,
+        target: Target::View("synthetic__ct_unsigned_16"),
+        effect: Effect::SidecarStringAndFrameRefusal {
+            pointer: "/attributes/presentationLutShape",
+            value: "IDENTITY",
+            message: "the combined metadata mutation reached malformed frame I/O",
+        },
+        expect: Expectation::View {
+            outcome: Outcome::Fail,
+            qualifiers: &[Qualifier::MetadataTruth],
+            side: Side::Ours,
+        },
+    },
     Mutation {
         name: "plus-one-on-a-twentieth-of-a-percent",
         why: "A difference of one display code on a small fraction of the image \
@@ -394,7 +536,7 @@ pub const CATALOGUE: &[Mutation] = &[
         name: "plus-three-on-one-pixel-of-a-reformat",
         why: "The same damage on a volume reformat. It is here because \
               run.json's rows[] is stack-only, so a comparator that read that \
-              list alone would compare eighty-nine of ninety-eight views and \
+              list alone would compare ninety of ninety-nine views and \
               report success, and a catalogue that only ever damaged a stack \
               row would not notice.",
         side: MutatedSide::Candidate,
@@ -627,6 +769,7 @@ pub fn resolve_target(
     records: &[ViewRecord],
 ) -> Result<String, MutationError> {
     let found = records.iter().find(|record| match mutation.target {
+        Target::View(id) => record.id == id,
         Target::MeasuredStack => {
             record.kind == ViewKind::Stack
                 && record.class == ToleranceClass::MonochromeSixteenBit
@@ -668,6 +811,19 @@ pub fn touches_the_frame(mutation: &Mutation) -> bool {
     )
 }
 
+/// A declared frame-read refusal carried by a combined metadata mutation.
+///
+/// The comparator asks this before opening the real frame. A metadata failure
+/// never gets here. Moving production frame I/O above metadata truth does,
+/// which makes the standing mutation fail at the original defect boundary.
+#[must_use]
+pub fn frame_read_refusal(mutation: &Mutation) -> Option<&'static str> {
+    match mutation.effect {
+        Effect::SidecarStringAndFrameRefusal { message, .. } => Some(message),
+        _ => None,
+    }
+}
+
 /// Apply the run-record half of a mutation, in memory.
 ///
 /// # Errors
@@ -679,6 +835,9 @@ pub fn apply_to_run(mutation: &Mutation, run: &mut Run, target: &str) -> Result<
             set_sidecar(run, target, pointer, Value::from(value), mutation.name)
         }
         Effect::SidecarString { pointer, value } => {
+            set_sidecar(run, target, pointer, Value::from(value), mutation.name)
+        }
+        Effect::SidecarStringAndFrameRefusal { pointer, value, .. } => {
             set_sidecar(run, target, pointer, Value::from(value), mutation.name)
         }
         Effect::SidecarDelta { pointer, delta } => {
@@ -700,6 +859,59 @@ pub fn apply_to_run(mutation: &Mutation, run: &mut Run, target: &str) -> Result<
                 Value::from(current + delta),
                 mutation.name,
             )
+        }
+        Effect::SidecarArraySwap {
+            pointer,
+            first,
+            second,
+        } => {
+            let mut value = run
+                .sidecars
+                .get(target)
+                .and_then(|sidecar| sidecar.json.pointer(pointer))
+                .and_then(Value::as_array)
+                .cloned()
+                .ok_or_else(|| {
+                    MutationError::Apply(
+                        mutation.name,
+                        format!("{target} carries no array at {pointer}"),
+                    )
+                })?;
+            if first >= value.len() || second >= value.len() {
+                return Err(MutationError::Apply(
+                    mutation.name,
+                    format!("{target} array at {pointer} is too short"),
+                ));
+            }
+            value.swap(first, second);
+            set_sidecar(run, target, pointer, Value::Array(value), mutation.name)
+        }
+        Effect::SidecarDirectionSwap { pointer } => {
+            let mut value = run
+                .sidecars
+                .get(target)
+                .and_then(|sidecar| sidecar.json.pointer(pointer))
+                .and_then(Value::as_array)
+                .cloned()
+                .ok_or_else(|| {
+                    MutationError::Apply(
+                        mutation.name,
+                        format!("{target} carries no direction array at {pointer}"),
+                    )
+                })?;
+            if value.len() != 6 {
+                return Err(MutationError::Apply(
+                    mutation.name,
+                    format!("{target} direction at {pointer} does not have six values"),
+                ));
+            }
+            for axis in 0..3 {
+                value.swap(axis, axis + 3);
+            }
+            set_sidecar(run, target, pointer, Value::Array(value), mutation.name)
+        }
+        Effect::SidecarNull { pointer } => {
+            set_sidecar(run, target, pointer, Value::Null, mutation.name)
         }
         Effect::CorruptDeclaredDigest => set_sidecar(
             run,
@@ -1143,7 +1355,11 @@ pub fn apply_to_frame(
         }
         Effect::SidecarNumber { .. }
         | Effect::SidecarString { .. }
+        | Effect::SidecarStringAndFrameRefusal { .. }
         | Effect::SidecarDelta { .. }
+        | Effect::SidecarArraySwap { .. }
+        | Effect::SidecarDirectionSwap { .. }
+        | Effect::SidecarNull { .. }
         | Effect::CorruptDeclaredDigest
         | Effect::RemoveView
         | Effect::OrphanRaw
@@ -1395,8 +1611,11 @@ mod tests {
             rung: "pixels",
             notes: Vec::new(),
             parameter_divergences: Vec::new(),
+            parameter_values_withheld: false,
             geometry_divergences: Vec::new(),
             register_entry: None,
+            reference_render_hash: "reference-hash".to_owned(),
+            candidate_render_hash: "candidate-hash".to_owned(),
             statistics: None,
             monochrome_frame: true,
             photometric_interpretation: photometric.map(str::to_owned),
@@ -1543,7 +1762,7 @@ mod tests {
         // entries were declared, so the three newest were pinned by nothing
         // and one could have been deleted in silence. Change this number
         // deliberately when the catalogue changes, which is the point of it.
-        assert_eq!(total, 21, "the declared catalogue is {total} entries");
+        assert_eq!(total, 29, "the declared catalogue is {total} entries");
     }
 
     /// Every entry says why it exists. A mutation with no rationale is a

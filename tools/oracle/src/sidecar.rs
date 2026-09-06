@@ -11,8 +11,8 @@
 //! list names fails the run.** `run.json`'s `rows[]` stays stack-only on
 //! purpose, because the accounting identity `readBack + unsupported ==
 //! applicable` is asserted over it, so F-X007 put its reformats in
-//! `volumes[].frames[]`. A comparator reading `rows[]` alone would compare 89
-//! of 98 views and report success. The orphan refusal is what turns that into
+//! `volumes[].frames[]`. A comparator reading `rows[]` alone would compare 90
+//! of 99 views and report success. The orphan refusal is what turns that into
 //! a failure, and it keeps working when a later story adds a third list.
 //!
 //! **Each sidecar's `kind` is switched on and an unknown value is refused.**

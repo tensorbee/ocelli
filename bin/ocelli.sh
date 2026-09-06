@@ -70,7 +70,7 @@ GATES=(
   "content|no|no DICOM and no build artefacts tracked"
   "backlog|no|BACKLOG, SPRINT_PLAN, tracker and as-built agree"
   "deviations|no|every HLD deviation declared and still true"
-  "skills|no|Codex adapters match their canonical command and skill files"
+  "skills|no|Codex adapters match canonical sources and marked examples run"
   "lint|no|eslint, including the cached-wasm-view ban (HLD 17.2)"
   "types|no|tsc --build across the TypeScript workspaces"
   "wasm|no|wasm-pack build and the size budget (E1.2, gate A4)"
@@ -152,6 +152,7 @@ run_gate() {
                    tools/bench/tests/paths_test.mjs \
                    tools/bench/tests/record_test.mjs \
                    tools/bench/tests/registry_test.mjs \
+                   tools/bench/tests/run_test.mjs \
                    tools/bench/tests/state_test.mjs \
                    tools/bench/tests/cold_start_test.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py ;;
@@ -163,9 +164,13 @@ run_gate() {
     backlog)     python3 scripts/backlog_check.py &&
                  python3 scripts/gen_sprint_plan.py --check ;;
     deviations)  python3 scripts/deviation_check.py ;;
-    skills)      python3 scripts/sync_agent_skills.py --check ;;
+    skills)      python3 scripts/sync_agent_skills.py --check &&
+                 python3 scripts/skill_examples_check.py &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_skill_examples_check.py ;;
     lint)        [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
-                 npm run lint ;;
+                 npm run lint &&
+                 node --test scripts/tests/test_eslint_wasm_memory_view.mjs ;;
     types)       [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
                  npm run typecheck ;;
     # No skip. F-002 (E1.2) declared wasm-bindgen in ocelli-wasm, so wasm-pack
@@ -175,7 +180,10 @@ run_gate() {
     # before the boundary does, because wasm-pack refuses a crate without one.
     #
     # Chained on `&&` for the reason the backlog arm gives.
-    wasm)        "$0" wasm && python3 scripts/pin_and_size_check.py --with-size ;;
+    wasm)        "$0" wasm &&
+                 python3 scripts/pin_and_size_check.py --with-size &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_pin_and_size_check.py ;;
     native)      "$0" native ;;
     device)      ci/check-device-ownership.sh ;;
     ci)          python3 scripts/ci_floor_check.py ;;
@@ -208,6 +216,17 @@ run_gate() {
                  python3 scripts/guard_probe.py --profile floor &&
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_guard_catalogue.py &&
+                 # F-X014. The integration-handoff grammar is part of the
+                 # guard contract, including forms the catalogue samples do
+                 # not repeat. Keep this suite named so it cannot silently
+                 # leave the required gate.
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_sprint_workflow.py &&
+                 # F-X020. The sprint-plan writer protects hand-curated prose,
+                 # and these tests cover its bootstrap, refusal, forced
+                 # replacement and read-only check modes.
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_gen_sprint_plan.py &&
                  # The two readers that stopped being regexes in the S03
                  # review's eleventh pass, checked against bash and against
                  # TOML rather than against themselves. Named rather than
@@ -340,9 +359,7 @@ gates_cmd() {
         case "$name" in oracle|corpus|guards-deep) continue ;; esac
         selected+=("$name")
       done ;;
-    --sprint)
-      for entry in "${GATES[@]}"; do selected+=("${entry%%|*}"); done ;;
-    --all)
+    --sprint|--all)
       for entry in "${GATES[@]}"; do selected+=("${entry%%|*}"); done ;;
     "")  usage; return 2 ;;
     *)   selected=("$@") ;;
@@ -518,7 +535,7 @@ case "$command" in
     # gives.
     #
     # RELEASE, and not for speed alone. A debug build of a comparison over
-    # ninety-eight frames plus twenty-one mutation replays is minutes rather
+    # ninety-nine frames plus twenty-one mutation replays is minutes rather
     # than seconds, and a check nobody wants to wait for is a check that stops
     # being run.
     #

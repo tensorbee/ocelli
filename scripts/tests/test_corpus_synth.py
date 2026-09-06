@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import math
 import os
 import re
 import struct
@@ -112,6 +113,22 @@ RIGHT_ALIGNED = (-2048, 2047, -1, -2047, 0, -16, -16, 15)
 # stored field and must be discarded, so it reads the same as 0x8000.
 LEFT_ALIGNED = (-128, 127, 255, 128, -2048, 2047, -1, -2048)
 
+# PS3.3 C.11.2.1.3.1, with c = 40, w = 0.5, ymin = 0, ymax = 255:
+#
+#     y = 255 / (1 + exp(-4 * (x - 40) / 0.5))
+#
+# The modality inputs below are the five central stored values after the
+# fixture's slope of 0.25. The expected display values are written out rather
+# than imported from the generator or read from cornerstone3D.
+SIGMOID_MODALITY_VALUES = (39.5, 39.75, 40.0, 40.25, 40.5)
+SIGMOID_DISPLAY_VALUES = (
+    4.586483540333347,
+    30.396745115639977,
+    127.5,
+    224.60325488436,
+    250.41351645966665,
+)
+
 
 def stored_value(raw: int, bits_stored: int, high_bit: int,
                  pixel_representation: int) -> int:
@@ -121,6 +138,11 @@ def stored_value(raw: int, bits_stored: int, high_bit: int,
     if pixel_representation == 1 and value & (1 << (bits_stored - 1)):
         value -= 1 << bits_stored
     return value
+
+
+def sigmoid_display(value: float, centre: float, width: float) -> float:
+    """PS3.3 C.11.2.1.3.1, transcribed independently of the generator."""
+    return 255.0 / (1.0 + math.exp(-4.0 * (value - centre) / width))
 
 
 def digest(path: Path) -> str:
@@ -194,6 +216,42 @@ class StoredValueFixture(unittest.TestCase):
         left = bytes(pydicom.dcmread(
             str(CORPUS / "synthetic" / "ct_signed_12in16_left.dcm")).PixelData)
         self.assertEqual(right[:16], left[:16])
+
+
+class SigmoidFixture(unittest.TestCase):
+    """The width below one that SIGMOID permits, from PS3.3 C.11.2.1.3.1."""
+
+    def case(self) -> pydicom.Dataset:
+        return pydicom.dcmread(
+            str(CORPUS / "synthetic" / "ct_sigmoid_width_half.dcm")
+        )
+
+    def test_width_half_is_declared_as_sigmoid(self) -> None:
+        ds = self.case()
+        self.assertEqual(ds.VOILUTFunction, "SIGMOID")
+        self.assertEqual(float(ds.WindowCenter), 40.0)
+        self.assertEqual(float(ds.WindowWidth), 0.5)
+
+    def test_stored_values_cross_the_window_centre(self) -> None:
+        ds = self.case()
+        first_row = tuple(int(value) for value in ds.pixel_array[0])
+        self.assertEqual(first_row, tuple(range(151, 171)))
+        modality = tuple(
+            value * float(ds.RescaleSlope) + float(ds.RescaleIntercept)
+            for value in first_row
+        )
+        self.assertLess(modality[0], float(ds.WindowCenter))
+        self.assertIn(float(ds.WindowCenter), modality)
+        self.assertGreater(modality[-1], float(ds.WindowCenter))
+
+    def test_selected_display_values_follow_the_sigmoid_formula(self) -> None:
+        ds = self.case()
+        got = tuple(
+            sigmoid_display(value, float(ds.WindowCenter), float(ds.WindowWidth))
+            for value in SIGMOID_MODALITY_VALUES
+        )
+        for actual, expected in zip(got, SIGMOID_DISPLAY_VALUES, strict=True):
+            self.assertAlmostEqual(actual, expected, places=12)
 
 
 # Worst-pixel bounds for the lossy sanity check, as a fraction of full scale,
@@ -759,6 +817,11 @@ class SyntheticTraps(unittest.TestCase):
     def test_monochrome1_case_is_monochrome1(self) -> None:
         ds = self.read("cr_monochrome1.dcm")
         self.assertEqual(ds.PhotometricInterpretation, "MONOCHROME1")
+
+    def test_unsigned_ct_declares_presentation_inversion(self) -> None:
+        """PS3.3 C.11.6.1.2.2, INVERSE reverses the presentation output."""
+        ds = self.read("ct_unsigned_16.dcm")
+        self.assertEqual(ds.PresentationLUTShape, "INVERSE")
 
     def test_pixel_spacing_is_non_square_where_it_should_be(self) -> None:
         ds = self.read("mr_nonsquare_spacing.dcm")

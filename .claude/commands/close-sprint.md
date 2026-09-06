@@ -15,8 +15,13 @@ not a sprint. See `docs/RELEASE.md`.
 Refuse if any fails:
 
 1. Every story in the sprint is `done`, or is explicitly carried forward with a
-   recorded reason in `CURRENT_SPRINT.md`.
-2. `python3 scripts/sprint_workflow.py close-preflight SNN` passes.
+   recorded reason under `## Carried forward from SNN` in
+   `CURRENT_SPRINT.md`. Record the latter in run state with
+   `python3 scripts/sprint_workflow.py mark-feature F-XXX --state carried`.
+2. `python3 scripts/sprint_workflow.py close-preflight SNN` passes. It requires
+   the latest sprint-scope review to be clean at the current HEAD tree, the
+   latest sprint-profile verification to pass at that same tree, and a clean
+   working tree.
 3. `bin/ocelli.sh gate --sprint` is green at the current HEAD. It runs the
    same gates as `--all`. The S01 pre-oracle skip that used to be the one
    difference was removed by F-010, which built the oracle.

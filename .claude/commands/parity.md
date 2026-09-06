@@ -4,9 +4,10 @@ description: Report progress against the cornerstone3D parity surface, from the 
 
 # /parity [--epic E12] [--surface "Tool classes"]
 
-Phase 1's definition of done is feature parity with cornerstone3D v5.8.9, and
-`docs/hld/B-parity-surface.md` is the enumeration. This command reports against
-it.
+Phase 1's effective target is feature parity with cornerstone3D 5.8.2, the
+nearest installable 5.8.x selected by deviation D-11 because the HLD's v5.8.9
+does not exist. `docs/hld/B-parity-surface.md` is the enumeration. This command
+reports against it.
 
 ## The surface
 

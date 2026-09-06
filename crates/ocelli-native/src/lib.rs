@@ -281,7 +281,8 @@ mod tests {
     #[test]
     fn the_report_names_the_tier_the_decision_and_every_signal() {
         use ocelli_render::{
-            AdapterFacts, FillRateBands, SimdSupport, TierRequest, TierSignals, classify,
+            AdapterFacts, FillRateBands, ProbeOutcome, SimdSupport, TierRequest, TierSignals,
+            classify,
         };
 
         let adapter = AdapterFacts {
@@ -296,9 +297,12 @@ mod tests {
             max_buffer: 268_435_456,
         };
         let signals = TierSignals {
-            adapters: vec![adapter],
-            fill_rate: None,
-            device_created: true,
+            probe: ProbeOutcome::Opened {
+                adapters_seen: 1,
+                failed: Vec::new(),
+                adapter,
+                fill_rate: None,
+            },
             simd: SimdSupport::NotApplicable,
             bands: FillRateBands::RECORDED,
         };

@@ -1542,3 +1542,344 @@ looking as though it had always been right.
   missing CHANGELOG bullet, and the `**CHANGELOG.**` field that F-006 used to
   record a deliberate omission is a convention rather than a check. Two of this
   sprint's seven stories shipped without either.
+
+## F-X017, Type-aware wasm linear-memory view ban, completed 2026-09-06
+
+**What was built.** The TypeScript lint path now identifies a typed-array or
+`DataView` construction from TypeScript types rather than identifier spelling.
+It refuses direct and computed wasm-memory buffers reached through parameters,
+assignments, call results, getters, renamed fields, for-of bindings, and
+renamed constructors.
+
+**HLD sections implemented.** `docs/hld/14-the-boundary-in-code.md` section
+17.2 and `docs/hld/24-agent-code-standards.md` section 27.2 R2.
+**Deviations.** None.
+**Crates / packages modified.** No crate or package source changed. The root
+ESLint configuration, gate runner, CI workflow, guard catalogue and LLD changed.
+**Tests added.** Four unit groups in
+`scripts/tests/test_eslint_wasm_memory_view.mjs`: twelve standard view
+constructors, eight measured alias routes, ordinary-buffer controls, and the
+two production allowance files.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** The feature profile ran all floor gates and the corpus gate
+on 2026-09-06. The commit's hook-generated `Ocelli-Verify` trailer names the
+exact staged tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A (WebGPU): n/a. B (WebGL2 downlevel): n/a. C (CPU): n/a.
+This is a compile-time repository rule.
+**LLD updated.** `docs/lld/errors.md` and
+`docs/lld/typescript-packaging.md`, with both indexed in `docs/lld/README.md`.
+**Deviations from the design plan.** Semantic probes run in the `lint` gate
+because the disposable guard sandbox deliberately lacks ignored
+`node_modules`. CI now invokes the named gate so the semantic command cannot
+be skipped. The corrected write set records both changes.
+**Notes for future sessions.** A buffer already stored in a binding has lost
+its wasm provenance in TypeScript. The retained syntax rule guards that route.
+The two production allowances remain `bulk.ts` and `panic.ts`. A third file
+requires its own reviewed design decision.
+
+## F-X018, Tree-bound sprint closure evidence, completed 2026-09-06
+
+**What was built.** Sprint run state now records whole-sprint review counts and
+verification results with the staged Git tree identity. Close-preflight
+requires the latest review to be clean, the latest sprint verification to
+pass, both records to name the current HEAD tree, and the working tree to be
+clean.
+
+**HLD sections implemented.** `docs/hld/24-agent-code-standards.md` section 27
+and section 27.2 R6, with the exact-tree compensating control for D-04.
+**Deviations.** D-04 retained and strengthened. No new deviation.
+**Crates / packages modified.** No crate or package source changed. The sprint
+workflow, its canonical commands, generated adapters and guard harness changed.
+**Tests added.** Six refusal probes cover legacy state, dirty review counts,
+stale review and verification trees, a failed latest verification, and a tree
+changed after evidence was recorded. One accept control covers clean evidence
+for the current tree.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** The feature profile ran all floor gates and the corpus gate
+on 2026-09-06. The commit's hook-generated `Ocelli-Verify` trailer names the
+exact staged tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A (WebGPU): n/a. B (WebGL2 downlevel): n/a. C (CPU): n/a.
+This is a repository workflow control.
+**LLD updated.** `docs/lld/guards.md`, indexed in `docs/lld/README.md`.
+**Deviations from the design plan.** The write set was corrected to include
+the authoritative workflow, generated guard runbook and LLD index. Review pass
+1 also added the missing sprint-state verification command to `/run-sprint`.
+**Notes for future sessions.** A successful verification or clean review is
+not closure evidence after the index changes. Stage first, then record both
+forms of evidence for the same tree.
+
+## F-X019, Guaranteed CI execution through AND-lists, completed 2026-09-06
+
+**What was built.** The CI floor reader now discredits a gate on the right of
+`&&` when a failed prefix can skip it and a later successful statement can
+leave the step green. A terminal AND-list still counts because failure to reach
+the gate makes the step fail.
+
+**HLD sections implemented.** `docs/hld/08-validation-architecture.md` section
+11, `docs/hld/12-workspace-and-build.md` section 15.3, and
+`docs/hld/24-agent-code-standards.md` section 27.2 R6.
+**Deviations.** D-04 retained. No new deviation.
+**Crates / packages modified.** No crate or package source changed. The CI
+floor reader, its bash differential tests and guard catalogue changed.
+**Tests added.** The accepted flat-shape oracle now exhausts every success and
+failure assignment of the other commands for each target. Focused tests cover
+the swallowed non-final right side and the terminal `cd x && gate` control. A
+standing mutation requires the CI guard to reject the swallowed form.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** The feature profile ran all floor gates and the corpus gate
+on 2026-09-06. The commit's hook-generated `Ocelli-Verify` trailer names the
+exact staged tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A (WebGPU): n/a. B (WebGL2 downlevel): n/a. C (CPU): n/a.
+This is a repository CI control.
+**LLD updated.** `docs/lld/guards.md`, indexed in `docs/lld/README.md`.
+**Deviations from the design plan.** The write set was corrected to include
+the LLD index and generated guard runbook required by their own maintenance
+rules.
+**Notes for future sessions.** A visible gate command is not sufficient. For
+every possible result before it, either the gate must run or the step must be
+red.
+
+## F-013, Metadata truth beside pixel comparison, completed 2026-09-06
+
+**What was built.** The oracle compares independently sourced LUT parameters,
+image geometry, spacing and volume truth beside its pixel verdict. Sidecars
+carry the expanded reference metadata and attribution distinguishes candidate,
+reference and shared truth failures.
+**HLD sections implemented.** Sections 6, 11, 18, 18.1, 18.2, 25 and 25.1.
+**Deviations.** D-13 supplies the corrected hand-computed fixture value.
+**Crates / packages modified.** `ocelli-oracle`, oracle tooling and corpus
+truth metadata.
+**Tests added.** Hand-computed metadata fixtures, sidecar schema tests,
+attribution tests and mutation cases for every compared field.
+**Fixture provenance.** Synthetic metadata truth cites PS3.3. No patient data.
+**Verification.** All repository gates, the 92-row corpus and the full oracle
+passed on the reviewed integration tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A (WebGPU): oracle reference path. B (WebGL2 downlevel):
+n/a. C (CPU): comparator logic is tier-independent.
+**LLD updated.** `docs/lld/corpus.md`, `comparator.md` and `oracle.md`.
+**Deviations from the design plan.** The reviewed replay reconciled concurrent
+guard and corpus changes without changing metadata semantics.
+**Notes for future sessions.** Metadata truth remains independent of Ocelli
+output and must not be generated from the comparator under test.
+
+## F-015, Stable render hashes, completed 2026-09-06
+
+**What was built.** The comparator emits canonical per-view and aggregate
+render hashes over explicit dimensions, format, byte length and exact RGBA8
+bytes. Pixel mutations change the hash.
+**HLD sections implemented.** Section 11, section 25, section 38 and decision
+D14.
+**Deviations.** None.
+**Crates / packages modified.** `ocelli-oracle` comparator and report output.
+**Tests added.** Hand-written hash fixtures and mutations for pixels, shape,
+format, ordering and aggregate membership.
+**Fixture provenance.** Synthetic RGBA bytes. No patient data.
+**Verification.** Focused comparator tests and the sprint completion gates
+passed on 2026-09-06.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Hashing is post-render.
+**LLD updated.** `docs/lld/comparator.md`.
+**Deviations from the design plan.** None.
+**Notes for future sessions.** Keep exact identity separate from measured
+visual divergence.
+
+## F-X001, Feature availability and tier C contract, completed 2026-09-06
+
+**What was built.** A three-state availability contract distinguishes
+available, unavailable and failed features across resolved tiers, including
+software-adapter detection and the CPU tier. Unavailable work reports its
+required and resolved tier.
+**HLD sections implemented.** Sections 7, 18, 23 and 31.
+**Deviations.** D-07 retained.
+**Crates / packages modified.** Architecture contracts and living LLD. No
+second LUT implementation was added.
+**Tests added.** Contract examples and total tier classification checks.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Focused contract review and the sprint completion gates
+passed on 2026-09-06.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: declared. B: declared. C: declared.
+**LLD updated.** `feature-availability.md`, `tier-resolution.md`, `errors.md`
+and `gpu-ownership.md`.
+**Deviations from the design plan.** None.
+**Notes for future sessions.** Unavailable is not a successful fallback with a
+different result.
+
+## F-X008, Parity pin and published wasm licences, completed 2026-09-06
+
+**What was built.** One parity target now drives the reference version checks,
+and the published wasm package includes its required licence files. Pin and
+package guards reject drift, missing files and symlink escapes.
+**HLD sections implemented.** Sections 1, 11 and 15.2.
+**Deviations.** D-11 retained.
+**Crates / packages modified.** wasm package metadata, parity command and
+repository guards.
+**Tests added.** Pin-table, package-licence and sandbox mutation cases.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Wasm, package and guard gates plus sprint completion gates
+passed on 2026-09-06.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a.
+**LLD updated.** `build-targets.md`, `corpus.md`, `guards.md` and `oracle.md`.
+**Deviations from the design plan.** None.
+**Notes for future sessions.** The parity version has one authoritative
+spelling and package licences must resolve inside the package.
+
+## F-X010, Structural CI floor equivalence, completed 2026-09-06
+
+**What was built.** CI coverage is derived from the runner's declared gates
+and arm commands. The `--sprint` and `--all` profiles share one implementation,
+and the guard rejects event gaps, missing commands and reordered multi-command
+arms.
+**HLD sections implemented.** Sections 11 and 15.3.
+**Deviations.** D-04 retained.
+**Crates / packages modified.** CI workflow, gate runner and guard harness.
+**Tests added.** Workflow event, command reachability, profile identity and
+mutation probes.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** CI and guard gates plus sprint completion gates passed on
+2026-09-06.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a.
+**LLD updated.** `docs/lld/guards.md`.
+**Deviations from the design plan.** The write set was expanded during review
+to cover the structural command reader and its generated runbook.
+**Notes for future sessions.** A command visible in YAML is not proof it runs
+on every required event.
+
+## F-X012, Recorded SIGMOID reference divergence, completed 2026-09-06
+
+**What was built.** The corpus reaches SIGMOID, the reference's width formula
+divergence is measured and attributed, and the declared divergence remains
+separate from comparator tolerance.
+**HLD sections implemented.** Section 18.2, section 25.1 and decisions D7 and
+D14.
+**Deviations.** D-11 retained. No tolerance changed.
+**Crates / packages modified.** Oracle parameters, attribution, report and
+synthetic corpus generation.
+**Tests added.** SIGMOID parameter, display-value, attribution and corpus
+mutation cases.
+**Fixture provenance.** Synthetic SIGMOID case computed from PS3.3 C.11.2.
+No patient data.
+**Verification.** Focused oracle tests, the full oracle and the 92-row corpus
+passed on the reviewed tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: reference renderer. B: n/a. C: comparator independent.
+**LLD updated.** `corpus.md`, `oracle.md` and `comparator.md`.
+**Deviations from the design plan.** None.
+**Notes for future sessions.** A declared reference defect does not excuse an
+unrelated candidate pixel difference.
+
+## F-X013, Priced HTJ2K decoder route, completed 2026-09-06
+
+**What was built.** A reproducible spike measures the openjph-core route and a
+decision record prices the production options after the openjp2 wasm failure.
+The route remains evidence, not an activated codec.
+**HLD sections implemented.** Appendix A gate A1, section 21 and decisions D2,
+D3, D7 and D14.
+**Deviations.** None. A production route may require a later deviation from
+the section 15.2 decoder choice.
+**Crates / packages modified.** Isolated spike tooling and source policy only.
+**Tests added.** Native and wasm spike checks for decode correctness, size and
+licence provenance.
+**Fixture provenance.** Synthetic HTJ2K corpus cases. No patient data.
+**Verification.** The reviewed spike evidence and sprint completion gates
+passed on 2026-09-06.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. This is decoder-route evidence.
+**LLD updated.** `oracle.md` and `corpus.md`.
+**Deviations from the design plan.** The operator approved the openjph-core
+provenance route.
+**Notes for future sessions.** Do not treat a successful spike as production
+codec activation.
+
+## F-X014, Closed declared guard holes, completed 2026-09-06
+
+**What was built.** The no-std source set and benchmark path checks are now
+executable controls, and previously uncovered guard refusals have standing
+probes or named suites.
+**HLD sections implemented.** Section 27 and section 27.3.
+**Deviations.** None.
+**Crates / packages modified.** Guard harness, sprint handoff grammar and
+benchmark tests.
+**Tests added.** Cargo-aware no-std probes, benchmark path mutations, handoff
+grammar tests and catalogue connection checks.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Guard, deep-guard, benchmark, skills and no-std gates passed,
+followed by sprint completion gates.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a.
+**LLD updated.** `guards.md` and `benchmarks.md`.
+**Deviations from the design plan.** Review expanded the write set to close
+measured connection and grammar gaps.
+**Notes for future sessions.** A declared guard is incomplete until its
+refusal is observed red through a reached path.
+
+## F-X015, Executable marked skill examples, completed 2026-09-06
+
+**What was built.** Marked DICOM skill examples execute through a dedicated
+checker, with canonical source and generated adapter consistency enforced in
+the named skills gate.
+**HLD sections implemented.** Section 18.2 and section 27.2 R2.
+**Deviations.** D-13 consumed by the corrected expected value.
+**Crates / packages modified.** Agent skills, adapter generation and guard
+tooling.
+**Tests added.** Thirty-two checker tests plus mutations of every marked
+formula and expected value.
+**Fixture provenance.** Hand-computed examples cite their DICOM sections. No
+patient data.
+**Verification.** All floor gates and the corpus gate passed on the final
+feature tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a.
+**LLD updated.** `docs/lld/guards.md`.
+**Deviations from the design plan.** Review tightened the example grammar and
+generated-adapter connection.
+**Notes for future sessions.** A worked number is executable evidence only
+when the gate reaches it and a mutation makes it red.
+
+## F-X016, Adapter fallback after device-open failure, completed 2026-09-06
+
+**What was built.** Runtime tier resolution tries ranked adapters in order,
+records every attempt, and continues after a device-open failure before
+resolving to the CPU tier when no GPU adapter succeeds.
+**HLD sections implemented.** Sections 7, 22 and 23, with decisions D5 and D6.
+**Deviations.** D-07 retained.
+**Crates / packages modified.** `ocelli-render` capability probing and the
+native runtime report.
+**Tests added.** Ranked adapter attempts, device-open fallback, attempt records
+and total tier classification.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Render and native focused tests plus sprint completion gates
+passed on 2026-09-06.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: attempted and recorded. B: attempted and recorded. C:
+resolved after GPU exhaustion.
+**LLD updated.** `docs/lld/tier-resolution.md`.
+**Deviations from the design plan.** None.
+**Notes for future sessions.** Adapter discovery success is not device-open
+success. Preserve both outcomes in the attempt record.
+
+## F-X020, Protected hand-curated sprint plans, completed 2026-09-06
+
+**What was built.** The sprint-plan generator's bare write mode now refuses to
+overwrite an existing plan. Verification uses `--check`, and deliberate full
+replacement requires `--force`.
+**HLD sections implemented.** Section 27 and section 27.2 R2.
+**Deviations.** None.
+**Crates / packages modified.** Sprint-plan generator and guard harness.
+**Tests added.** Existing-plan refusal, forced regeneration, read-only check
+and guard mutation cases.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Generator, backlog, prose and guard gates plus sprint
+completion gates passed on 2026-09-06.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a.
+**LLD updated.** `docs/lld/guards.md`.
+**Deviations from the design plan.** None.
+**Notes for future sessions.** The allocation cannot reconstruct hand-curated
+goals and summaries, so bare generation is bootstrap-only.

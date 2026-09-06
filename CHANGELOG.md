@@ -63,14 +63,13 @@ Repository bootstrap. Nothing is published.
 - The differential oracle's reference half. `bin/ocelli.sh oracle` renders
   every applicable corpus row through cornerstone3D 5.8.2 in headless Chromium
   on SwiftShader and writes reference pixels plus a metadata sidecar, or a
-  precise failure at one of four named boundaries. 89 of 91 rows render
+  precise failure at one of four named boundaries. 90 of 92 rows render
   deterministically, and the two that do not are recorded with their reason in
   `tools/oracle/unsupported.json`.
 - The oracle's volume and reformat pass. Four series directories declared in
-  `tools/oracle/volume-params.json` are attempted, three are assembled into
-  cornerstone3D volumes and rendered as three orthogonal reformats each, and the
-  fourth, `real/ct_cmb_mml`, is refused as declared because two of its members
-  project to the same position on the slice normal. Twelve reformats are
+  `tools/oracle/volume-params.json` are attempted. Three are assembled into
+  cornerstone3D volumes and rendered as three orthogonal reformats each. The
+  fourth is refused at its declared geometry boundary. Twelve reformats are
   declared and nine are written, which `tools/oracle/out/run.json` records in
   its run-level `boundaries` object. Its `volumes` key is the four per-subject
   records, whose reformat counters are attempted rather than achieved. They
@@ -128,11 +127,13 @@ Repository bootstrap. Nothing is published.
   is fixed now from the specification and a later story adds a runner into a
   slot with no latitude to redefine the measurement into something easier.
 - Answers to Appendix A gates A1 and A2, in `docs/spikes/`. **JPEG-LS resolves
-  to a single pure-Rust decoder on every target.** **HTJ2K does not resolve**:
+  to a single pure-Rust decoder on every target.** **HTJ2K is not registered**:
   `openjp2` does not link for `wasm32-unknown-unknown` and traps on every
-  codestream when forced to, so HTJ2K reports unavailable until F-X013 prices a
-  route. HLD section 15.2 names `openjp2` as the wasm choice, and that is
-  measured not to work.
+  codestream when forced to. The priced replacement is an exact pin of
+  `openjph-core` 0.1.0, subject to its recorded provenance and activation
+  gates. It reproduces both lossless rows on native and wasm. Its irreversible
+  row agrees across those targets and differs from OpenJPH 0.31.0 by one at 41
+  of 6,144 samples. No Ocelli decoder is activated yet.
 - A standing probe harness for the repository's guards, and **not for every
   guard**, which is what this line claimed for four sentences before qualifying
   itself until the S03 review's seventh pass. `python3 scripts/guard_census.py`
@@ -151,6 +152,32 @@ Repository bootstrap. Nothing is published.
   refusals driven red, which the census says on the line that prints them. Holes
   in existing guards are declared rather than hidden, and a declared hole whose
   probe starts passing also fails, so the record cannot go stale in either
-  direction. Two of the four declared in S03 were closed inside the same sprint
-  and their declarations went with them, which is that ratchet working.
+  direction. Two of the four declared in S03 were closed there. S04 closed the
+  remaining two and removed their declarations, which is that ratchet working.
   `docs/lld/guards.md` is the design.
+- Metadata and geometry comparison beside the pixel diff. The comparator now
+  checks resolved LUT inputs, functional-group scope, presentation inversion,
+  pixel spacing, image orientation, projected positions and volume geometry
+  against independently generated truth. A stable aggregate render hash binds
+  every view identifier, kind, dimensions and RGBA byte. The oracle gate
+  verifies the reference and candidate aggregates agree, and mutations prove
+  that metadata-only and hash-only corruption make the run red.
+- Recorded reference divergences for SIGMOID and volume spacing. The SIGMOID
+  case preserves cornerstone3D 5.8.2's use of LINEAR's half-width term and
+  shows exactly where it differs from PS3.3. The volume truth distinguishes
+  the reference's averaged spacing from the individual projected gaps without
+  inventing a uniformity threshold for real data.
+- A complete tier-C feature-availability contract. Adapter candidates are
+  ranked once, every device-open attempt is recorded, and failure of the best
+  candidate falls through to the next compatible adapter before resolving to
+  CPU. Package metadata uses one cornerstone3D parity target, and the published
+  wasm package carries the required licence material.
+- Stronger repository workflow guards. CI coverage now rejects gates hidden in
+  tolerated shell conditions, the wasm linear-memory-view lint follows aliases
+  and destructuring, marked skill examples execute under the skills gate, and
+  the sprint-plan writer refuses to overwrite its hand-curated output without
+  an explicit force flag.
+- Sprint closure evidence bound to one Git tree. Whole-sprint review and
+  verification records must both name the clean HEAD tree. Explicitly carried
+  stories remain distinct from completed work and need a tracked reason in
+  `CURRENT_SPRINT.md` before close preflight accepts them.

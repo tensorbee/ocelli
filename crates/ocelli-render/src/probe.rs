@@ -16,12 +16,13 @@
 //! readback would put them on a path they have no business being on. It would
 //! also measure transfer rather than shading.
 
+use core::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::caps::{
-    AdapterFacts, FillRate, FillRateBands, Resolution, SimdSupport, Tier, TierRequest, TierSignals,
-    choose_candidate, classify,
+    AdapterFacts, FailedAdapter, FillRate, FillRateBands, ProbeOutcome, Resolution, SimdSupport,
+    Tier, TierRequest, TierSignals, candidate_order, classify,
 };
 
 /// The format the workload renders into. Mandatorily renderable on every
@@ -113,13 +114,10 @@ pub async fn resolve(request: TierRequest, clock: &mut dyn FnMut() -> u64) -> Re
 
     let adapters = enumerate(&instance).await;
     let facts: Vec<AdapterFacts> = adapters.iter().map(facts_of).collect();
-    let chosen = choose_candidate(&facts);
-    let (device_created, fill_rate) = measure_chosen(&adapters, chosen, clock).await;
+    let probe = measure_candidates(&adapters, &facts, clock).await;
 
     let signals = TierSignals {
-        adapters: facts,
-        fill_rate,
-        device_created,
+        probe,
         simd: SimdSupport::build_target(),
         bands: FillRateBands::RECORDED,
     };
@@ -169,65 +167,125 @@ fn facts_of(adapter: &wgpu::Adapter) -> AdapterFacts {
     }
 }
 
-/// Create a device on the chosen adapter and measure on it.
+/// Try candidates in preference order, stopping after the first device opens.
 ///
-/// Returns whether a device was created, and the measurement if one could be
-/// taken. The device and queue are dropped at the end of this function, before
-/// the caller sees the answer.
+/// Every failed request is retained with the adapter facts and wgpu's unstable
+/// diagnostic text. `NoDevice` therefore means every candidate was tried. A
+/// failed A candidate followed by a working B candidate produces `Opened` for
+/// B, so classification and override clamping cannot mistake the failed A
+/// adapter for a constructible tier.
+enum AttemptOutcome<T> {
+    NoAdapter {
+        adapters_seen: usize,
+    },
+    NoDevice {
+        adapters_seen: usize,
+        failed: Vec<FailedAdapter>,
+    },
+    Opened {
+        adapters_seen: usize,
+        failed: Vec<FailedAdapter>,
+        adapter: AdapterFacts,
+        value: T,
+    },
+}
+
+/// Run the production candidate-order and continuation control around one
+/// supplied device attempt.
 ///
-/// **Exactly one adapter is tried, and no other is attempted after it fails.**
-/// `choose_candidate` returns the single best candidate and this function asks
-/// that one for a device. Natively `enumerate_adapters(Backends::all())`
-/// commonly returns several, so on a host with a broken Vulkan ICD beside a
-/// working GL driver the best candidate is the Vulkan A-candidate,
-/// `request_device` fails, and the session resolves tier C while a tier-B path
-/// exists and was never attempted. Tier C renders nothing until F-X001 to
-/// F-X004, so the outcome is "renders nothing" rather than "renders on tier
-/// B". Trying the next adapter is a behaviour change with its own ranking and
-/// evidence questions, so it belongs to a story rather than to this comment.
-async fn measure_chosen(
+/// The concrete wgpu caller and deterministic tests are today's distinct
+/// instantiations. Keeping the asynchronous operation at this boundary lets
+/// the tests exercise the same loop without adding a mock trait.
+async fn attempt_candidates<T, Attempt, AttemptFuture>(
+    facts: &[AdapterFacts],
+    mut attempt: Attempt,
+) -> AttemptOutcome<T>
+where
+    Attempt: FnMut(usize) -> AttemptFuture,
+    AttemptFuture: Future<Output = Result<T, String>>,
+{
+    let adapters_seen = facts.len();
+    let mut failed = Vec::new();
+    for index in candidate_order(facts) {
+        let Some(adapter_facts) = facts.get(index) else {
+            continue;
+        };
+        match attempt(index).await {
+            Ok(value) => {
+                return AttemptOutcome::Opened {
+                    adapters_seen,
+                    failed,
+                    adapter: adapter_facts.clone(),
+                    value,
+                };
+            }
+            Err(reason) => failed.push(FailedAdapter {
+                adapter: adapter_facts.clone(),
+                reason,
+            }),
+        }
+    }
+    if failed.is_empty() {
+        AttemptOutcome::NoAdapter { adapters_seen }
+    } else {
+        AttemptOutcome::NoDevice {
+            adapters_seen,
+            failed,
+        }
+    }
+}
+
+async fn measure_candidates(
     adapters: &[wgpu::Adapter],
-    chosen: Option<usize>,
+    facts: &[AdapterFacts],
     clock: &mut dyn FnMut() -> u64,
-) -> (bool, Option<FillRate>) {
-    let Some(index) = chosen else {
-        return (false, None);
-    };
-    let Some(adapter) = adapters.get(index) else {
-        return (false, None);
-    };
-    let descriptor = wgpu::DeviceDescriptor {
-        label: Some("ocelli tier probe"),
-        required_features: wgpu::Features::empty(),
-        // The adapter's OWN limits, never `Limits::default()`. A downlevel GL
-        // adapter does not meet the WebGPU defaults, which is the whole reason
-        // tier B exists.
-        //
-        // **The pinned wgpu documents two different answers to asking for more
-        // than the adapter has, and this code depends on the second.** The doc
-        // comment on `Adapter::request_device` (`src/api/adapter.rs:49` to
-        // `:56` in 30.0.1) lists "Limits requested exceed the values provided
-        // by the adapter" under `# Panics`, while the same function's
-        // signature returns `Result<(Device, Queue), RequestDeviceError>` and
-        // the wgpu-core backend converts the core error into `Err` rather than
-        // panicking (`src/backend/wgpu_core.rs:943` to `:948`, over
-        // `wgpu_core::instance::RequestDeviceError::LimitsExceeded` raised at
-        // `wgpu-core-30.0.1/src/instance.rs:941`). The browser backend maps a
-        // rejected promise the same way. So the `Err` arm below is reachable
-        // and the `NoDevice` path is not dead. Asking for the adapter's own
-        // limits means neither answer is exercised here.
-        //
-        // `RequestDeviceError` is an opaque struct over a private
-        // `RequestDeviceErrorKind` (`src/api/device.rs:790` and `:805`), and
-        // `wgpu` does not re-export `wgpu_core`, so the reason is reachable
-        // from here only through `Display`.
-        required_limits: adapter.limits(),
-        ..Default::default()
-    };
-    let Ok((device, queue)) = adapter.request_device(&descriptor).await else {
-        return (false, None);
-    };
-    (true, measure(&device, &queue, clock))
+) -> ProbeOutcome {
+    let attempted = attempt_candidates(facts, |index| {
+        let adapter = adapters.get(index);
+        async move {
+            let Some(adapter) = adapter else {
+                return Err("candidate index was absent from the adapter list".to_owned());
+            };
+            let descriptor = wgpu::DeviceDescriptor {
+                label: Some("ocelli tier probe"),
+                required_features: wgpu::Features::empty(),
+                // The adapter's OWN limits, never `Limits::default()`. A
+                // downlevel GL adapter does not meet the WebGPU defaults,
+                // which is the whole reason tier B exists.
+                required_limits: adapter.limits(),
+                ..Default::default()
+            };
+            adapter
+                .request_device(&descriptor)
+                .await
+                // `RequestDeviceError` exposes its reason only through
+                // `Display`. This text is diagnostic and explicitly unstable.
+                .map_err(|error| error.to_string())
+        }
+    })
+    .await;
+
+    match attempted {
+        AttemptOutcome::NoAdapter { adapters_seen } => ProbeOutcome::NoAdapter { adapters_seen },
+        AttemptOutcome::NoDevice {
+            adapters_seen,
+            failed,
+        } => ProbeOutcome::NoDevice {
+            adapters_seen,
+            failed,
+        },
+        AttemptOutcome::Opened {
+            adapters_seen,
+            failed,
+            adapter,
+            value: (device, queue),
+        } => ProbeOutcome::Opened {
+            adapters_seen,
+            failed,
+            adapter,
+            fill_rate: measure(&device, &queue, clock),
+        },
+    }
 }
 
 /// The fragments one timed run shades: every texel of an `edge` by `edge`
@@ -461,10 +519,106 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::{
-        CALIBRATION_BUDGET_NANOS, CALIBRATION_EDGE, CALIBRATION_PASSES, FULL_EDGE, FULL_PASSES,
-        RUN_PLAN, WORKLOAD_WGSL, fragments, full_pass_is_affordable, measure_with,
+        AttemptOutcome, CALIBRATION_BUDGET_NANOS, CALIBRATION_EDGE, CALIBRATION_PASSES, FULL_EDGE,
+        FULL_PASSES, RUN_PLAN, WORKLOAD_WGSL, attempt_candidates, fragments,
+        full_pass_is_affordable, measure_with,
     };
-    use crate::caps::FillRate;
+    use crate::caps::{AdapterFacts, FillRate};
+
+    fn fallback_facts() -> Vec<AdapterFacts> {
+        vec![
+            AdapterFacts {
+                backend: wgpu::Backend::Vulkan,
+                device_type: wgpu::DeviceType::DiscreteGpu,
+                name: "preferred".into(),
+                driver: String::new(),
+                driver_info: String::new(),
+                compute_shaders: true,
+                webgpu_compliant: true,
+                max_tex_3d: 4096,
+                max_buffer: 1 << 30,
+            },
+            AdapterFacts {
+                backend: wgpu::Backend::Gl,
+                device_type: wgpu::DeviceType::IntegratedGpu,
+                name: "fallback".into(),
+                driver: String::new(),
+                driver_info: String::new(),
+                compute_shaders: false,
+                webgpu_compliant: false,
+                max_tex_3d: 2048,
+                max_buffer: 1 << 29,
+            },
+        ]
+    }
+
+    #[test]
+    fn a_failed_first_attempt_continues_to_the_successful_second_candidate() {
+        let facts = fallback_facts();
+        let mut attempted = Vec::new();
+        let outcome = pollster::block_on(attempt_candidates(&facts, |index| {
+            attempted.push(index);
+            std::future::ready(if index == 0 {
+                Err("preferred failed".to_owned())
+            } else {
+                Ok(())
+            })
+        }));
+
+        assert_eq!(attempted, vec![0, 1]);
+        let opened = match outcome {
+            AttemptOutcome::Opened {
+                failed,
+                adapter,
+                value: (),
+                ..
+            } => Some((failed, adapter)),
+            AttemptOutcome::NoAdapter { .. } | AttemptOutcome::NoDevice { .. } => None,
+        };
+        assert_eq!(
+            opened.as_ref().map(|(_, adapter)| adapter.name.as_str()),
+            Some("fallback")
+        );
+        assert_eq!(opened.as_ref().map(|(failed, _)| failed.len()), Some(1));
+        assert_eq!(
+            opened
+                .as_ref()
+                .and_then(|(failed, _)| failed.first())
+                .map(|item| item.reason.as_str()),
+            Some("preferred failed")
+        );
+    }
+
+    #[test]
+    fn exhausting_the_attempt_loop_retains_every_failure() {
+        let facts = fallback_facts();
+        let mut attempted = Vec::new();
+        let outcome = pollster::block_on(attempt_candidates(&facts, |index| {
+            attempted.push(index);
+            std::future::ready(Err::<(), _>(format!("failure {index}")))
+        }));
+
+        assert_eq!(attempted, vec![0, 1]);
+        let failed = match outcome {
+            AttemptOutcome::NoDevice { failed, .. } => Some(failed),
+            AttemptOutcome::NoAdapter { .. } | AttemptOutcome::Opened { .. } => None,
+        };
+        assert_eq!(failed.as_ref().map(Vec::len), Some(2));
+        assert_eq!(
+            failed
+                .as_ref()
+                .and_then(|items| items.first())
+                .map(|item| item.reason.as_str()),
+            Some("failure 0")
+        );
+        assert_eq!(
+            failed
+                .as_ref()
+                .and_then(|items| items.get(1))
+                .map(|item| item.reason.as_str()),
+            Some("failure 1")
+        );
+    }
 
     /// Issue [`RUN_PLAN`] against a stand-in for [`super::run`] that records
     /// what it was asked for and reports `elapsed_nanos` for every run.

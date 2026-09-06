@@ -12,12 +12,14 @@
 //! new entry is a reviewed change with a rationale, exactly like a tolerance
 //! change**, and it gets that handling for exactly that reason.
 //!
-//! Strict in the direction that can be true today: **an entry marked
-//! `reachable: false` that fires is a run failure**, because the claim was
-//! wrong. The opposite direction, an entry no row exercises failing the run,
-//! is `unsupported.json`'s other half and cannot be applied while the only
-//! entry is unreachable by the corpus, since it would fail every run from the
-//! first one. That asymmetry is decision 12 of F-011's design round.
+//! **An entry marked `reachable: false` that fires is a run failure**, because
+//! the claim was wrong. The opposite direction, an entry no row exercises
+//! failing the run, is `unsupported.json`'s other half and is not applied here.
+//! Reachable means a corpus sidecar reaches the declared helper condition. A
+//! matching condition changes a verdict only when the compared sides actually
+//! differ, so a reachable helper defect cannot turn identical presented pixels
+//! into unmeasured output. That asymmetry is decision 12 of F-011's design
+//! round, refined by F-X012's observed evidence.
 //!
 //! # The ladder, in order
 //!
@@ -27,8 +29,9 @@
 //!    INDEPENDENT reading of the bytes, which the sidecar already carries:
 //!    `attributes` is read straight from the file by `dicom-parser` in the
 //!    page, independently of the render path.
-//! 3. A register entry matches, or F-X007's own per-subject
-//!    `referenceDivergence` is set. Attributed to the reference.
+//! 3. A register entry matches and proves its declared pixel effect while
+//!    geometry agrees, or F-X007's own per-subject `referenceDivergence` is
+//!    set. Attributed to the reference.
 //! 4. Geometry is outside 25.1's bound, or the difference is confined to the
 //!    letterbox. Attributed to the fit rather than to the LUT chain.
 //! 5. Pixels diverge with parameters and geometry agreeing. **Attributed to
@@ -46,6 +49,7 @@ use crate::frame::{ChannelSet, Frame, FrameError, Rect, difference};
 use crate::geometry::{
     Divergence, canvas_divergences, reformat_scale_divergences, stack_extent, world_divergences,
 };
+use crate::render_hash::render_hash;
 use crate::report::{
     ChannelReport, Outcome, ParameterDivergence, Qualifier, Side, ViewRecord, ViewStatistics,
 };
@@ -210,13 +214,57 @@ pub enum CompareError {
 pub struct Entry {
     pub id: String,
     pub raised_by: String,
+    pub resolved_by: Option<String>,
     pub reachable: bool,
     pub reachable_why: String,
     pub citation: String,
     pub reference_does: String,
     pub standard_requires: String,
     pub pixel_effect: String,
+    effect: Effect,
     pub conditions: Vec<Condition>,
+}
+
+#[derive(Clone, Debug)]
+enum Effect {
+    MonochromeInversion,
+}
+
+impl Effect {
+    fn holds(&self, reference: &Frame, candidate: &Frame, rect: &Rect) -> Result<bool, FrameError> {
+        match self {
+            Self::MonochromeInversion => {
+                let mut minimum = u8::MAX;
+                let mut maximum = u8::MIN;
+                for y in rect.y0..rect.y0.saturating_add(rect.height) {
+                    for x in rect.x0..rect.x0.saturating_add(rect.width) {
+                        let reference_code = reference.pixel(x, y)?[0];
+                        let candidate_code = candidate.pixel(x, y)?[0];
+                        if candidate_code != u8::MAX.saturating_sub(reference_code) {
+                            return Ok(false);
+                        }
+                        minimum = minimum.min(reference_code);
+                        maximum = maximum.max(reference_code);
+                    }
+                }
+                Ok(minimum < maximum)
+            }
+        }
+    }
+}
+
+fn valid_f_id(value: &str) -> bool {
+    let Some(suffix) = value.strip_prefix("F-") else {
+        return false;
+    };
+    let digits = suffix.strip_prefix('X').unwrap_or(suffix);
+    match digits.as_bytes() {
+        [a, b, c] => [a, b, c].iter().all(|byte| byte.is_ascii_digit()),
+        [a, b, c, trailing] => {
+            [a, b, c].iter().all(|byte| byte.is_ascii_digit()) && trailing.is_ascii_lowercase()
+        }
+        _ => false,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -350,15 +398,60 @@ impl Register {
                 });
             }
         }
+        let resolved_by = raw
+            .pointer("/resolvedBy")
+            .map(|value| {
+                value.as_str().map(str::to_owned).ok_or_else(|| {
+                    CompareError::Register(
+                        "a register entry's `resolvedBy` is not a string".to_owned(),
+                    )
+                })
+            })
+            .transpose()?;
+        if reachable && resolved_by.is_none() {
+            return Err(CompareError::Register(
+                "a reachable register entry has no `resolvedBy`. The story that made the claim reachable is part of its provenance"
+                    .to_owned(),
+            ));
+        }
+        if !reachable && resolved_by.is_some() {
+            return Err(CompareError::Register(
+                "an unreachable register entry carries `resolvedBy`. It cannot be resolved before a corpus row reaches it"
+                    .to_owned(),
+            ));
+        }
+        let raised_by = text("/raisedBy")?;
+        if !valid_f_id(&raised_by) {
+            return Err(CompareError::Register(format!(
+                "a register entry's `raisedBy` {raised_by:?} is not an F-ID"
+            )));
+        }
+        if let Some(story) = &resolved_by
+            && !valid_f_id(story)
+        {
+            return Err(CompareError::Register(format!(
+                "a register entry's `resolvedBy` {story:?} is not an F-ID"
+            )));
+        }
+        let effect = match text("/effect")?.as_str() {
+            "monochrome-inversion" => Effect::MonochromeInversion,
+            other => {
+                return Err(CompareError::Register(format!(
+                    "a register entry's effect {other:?} is not one this comparator can prove"
+                )));
+            }
+        };
         Ok(Entry {
             id: text("/id")?,
-            raised_by: text("/raisedBy")?,
+            raised_by,
+            resolved_by,
             reachable,
             reachable_why: text("/reachableWhy")?,
             citation: text("/citation")?,
             reference_does: text("/referenceDoes")?,
             standard_requires: text("/standardRequires")?,
             pixel_effect: text("/pixelEffect")?,
+            effect,
             conditions,
         })
     }
@@ -449,24 +542,22 @@ fn parameter_divergences(
 
     let mut found = Vec::new();
     for pointer in fields {
-        let left = reference
-            .json
-            .pointer(pointer)
-            .cloned()
-            .unwrap_or(Value::Null);
-        let right = candidate
-            .json
-            .pointer(pointer)
-            .cloned()
-            .unwrap_or(Value::Null);
-        if json_equal(&left, &right) {
+        let left = reference.json.pointer(pointer);
+        let right = candidate.json.pointer(pointer);
+        if matches!((left, right), (None, None))
+            || left.zip(right).is_some_and(|(a, b)| json_equal(a, b))
+        {
             continue;
         }
         let (side, why) = attribute_parameter(pointer, reference, candidate);
         found.push(ParameterDivergence {
             pointer: (*pointer).to_owned(),
-            reference: left,
-            candidate: right,
+            reference: left
+                .cloned()
+                .unwrap_or_else(|| Value::String("<missing JSON member>".to_owned())),
+            candidate: right
+                .cloned()
+                .unwrap_or_else(|| Value::String("<missing JSON member>".to_owned())),
             side,
             why,
         });
@@ -606,6 +697,15 @@ fn rectangles(
 /// On a refusal: a frame that is not opaque, a `mono16` token over a frame
 /// that is not monochrome, a `NaN` in a declared parameter, or a tolerance
 /// class the two sides resolve differently.
+fn parameter_values_are_sensitive(sidecar: &Sidecar) -> bool {
+    sidecar
+        .json
+        .pointer("/row/path")
+        .or_else(|| sidecar.json.pointer("/volume/seriesDirectory"))
+        .and_then(Value::as_str)
+        .is_some_and(|path| path.starts_with("real/"))
+}
+
 pub fn compare_view(
     context: &Context<'_>,
     id: &str,
@@ -623,6 +723,7 @@ pub fn compare_view(
         .get(id)
         .ok_or_else(|| CompareError::Absent(id.to_owned()))?;
     let kind = reference.kind;
+    let parameter_values_withheld = parameter_values_are_sensitive(reference);
 
     let reference_class = class_from_categories(
         context
@@ -709,7 +810,7 @@ pub fn compare_view(
         &candidate.camera()?,
     ));
 
-    let diff = difference(reference_frame, candidate_frame, rect, channels)?;
+    let diff = difference(reference_frame, candidate_frame, rect.clone(), channels)?;
     let statistics = build_statistics(&diff, class, id, context.low_information.contains(id))?;
 
     let register_entries = context.register.matching(&reference.json);
@@ -719,29 +820,30 @@ pub fn compare_view(
     let mut notes: Vec<String> = Vec::new();
     let mut register_entry: Option<String> = None;
     let gate_failed = !statistics.predicate_passes || !statistics.bias_passes;
+    let mut effect_entry = None;
+    if gate_failed && geometry.is_empty() {
+        for entry in &register_entries {
+            if entry
+                .effect
+                .holds(reference_frame, candidate_frame, &rect)?
+            {
+                effect_entry = Some(*entry);
+                break;
+            }
+        }
+    }
 
     // Rung 2, then rung 3, then rung 4, then rung 5. The first that answers
     // owns the outcome.
     let (mut outcome, mut side, mut rung) = if !parameters.is_empty() {
         qualifiers.insert(Qualifier::ParameterDivergence);
-        if let Some(entry) = register_entries.first() {
-            qualifiers.insert(Qualifier::ReferenceDivergence);
-            register_entry = Some(entry.id.clone());
-            notes.push(format!(
-                "the parameter divergence is explained by register entry {} \
-                 ({}): {}",
-                entry.id, entry.citation, entry.reference_does
-            ));
-            (Outcome::Unmeasured, Side::Reference, "register")
-        } else {
-            let attributed = parameters
-                .iter()
-                .map(|divergence| divergence.side)
-                .find(|side| *side != Side::Unattributed)
-                .unwrap_or(Side::Unattributed);
-            (Outcome::Fail, attributed, "parameters")
-        }
-    } else if let Some(entry) = register_entries.first() {
+        let attributed = parameters
+            .iter()
+            .map(|divergence| divergence.side)
+            .find(|side| *side != Side::Unattributed)
+            .unwrap_or(Side::Unattributed);
+        (Outcome::Fail, attributed, "parameters")
+    } else if let Some(entry) = effect_entry {
         qualifiers.insert(Qualifier::ReferenceDivergence);
         register_entry = Some(entry.id.clone());
         notes.push(format!(
@@ -882,8 +984,11 @@ pub fn compare_view(
         rung,
         notes,
         parameter_divergences: parameters,
+        parameter_values_withheld,
         geometry_divergences: geometry,
         register_entry,
+        reference_render_hash: render_hash(kind, id, reference_frame).sha256,
+        candidate_render_hash: render_hash(kind, id, candidate_frame).sha256,
         statistics: Some(statistics),
         monochrome_frame,
         photometric_interpretation,
@@ -1048,6 +1153,7 @@ mod tests {
                 "referenceDoes": "applies LINEAR's (w - 1) / 2 to SAMPLED_SIGMOID",
                 "standardRequires": "SIGMOID divides by w and requires only w > 0",
                 "pixelEffect": "an inverted range",
+                "effect": "monochrome-inversion",
                 "match": {
                     "/voi/voiLutFunction": { "equals": "SIGMOID" },
                     "/voi/windowWidth": { "lessThan": 1 }
@@ -1067,8 +1173,96 @@ mod tests {
         assert_eq!(register.matching(&sidecar).len(), 1);
     }
 
+    /// The two provenance events are distinct. F-010 raised the reference
+    /// defect, while F-X012 added the corpus evidence that made it reachable.
+    #[test]
+    fn a_reachable_entry_retains_both_provenance_events() -> Result<(), CompareError> {
+        let raw = json!({
+            "entries": [{
+                "id": "sigmoid-width-below-one",
+                "raisedBy": "F-010",
+                "resolvedBy": "F-X012",
+                "reachable": true,
+                "reachableWhy": "the synthetic row reaches it",
+                "citation": "PS3.3 C.11.2.1.3.1",
+                "referenceDoes": "derives an inverted range",
+                "standardRequires": "SIGMOID is monotonic for w > 0",
+                "pixelEffect": "the displayed ramp is inverted",
+                "effect": "monochrome-inversion",
+                "match": {
+                    "/voi/voiLutFunction": { "equals": "SIGMOID" },
+                    "/voi/windowWidth": { "lessThan": 1 }
+                }
+            }]
+        });
+        let parsed = Register::from_json(&raw)?;
+        let entry = parsed.entries.first().ok_or_else(|| {
+            CompareError::Register("the valid fixture lost its one entry".to_owned())
+        })?;
+        assert_eq!(entry.raised_by, "F-010");
+        assert_eq!(entry.resolved_by.as_deref(), Some("F-X012"));
+        Ok(())
+    }
+
+    #[test]
+    fn an_empty_or_malformed_resolved_by_is_refused() {
+        for invalid in ["", "not-a-story", "F-X12", "F-001A", "F-001ab"] {
+            let raw = json!({
+                "entries": [{
+                    "id": "sigmoid-width-below-one",
+                    "raisedBy": "F-010",
+                    "resolvedBy": invalid,
+                    "reachable": true,
+                    "reachableWhy": "the synthetic row reaches it",
+                    "citation": "PS3.3 C.11.2.1.3.1",
+                    "referenceDoes": "derives an inverted range",
+                    "standardRequires": "SIGMOID is monotonic for w > 0",
+                    "pixelEffect": "the displayed ramp may be inverted",
+                    "effect": "monochrome-inversion",
+                    "match": {
+                        "/voi/voiLutFunction": { "equals": "SIGMOID" },
+                        "/voi/windowWidth": { "lessThan": 1 }
+                    }
+                }]
+            });
+            assert!(
+                Register::from_json(&raw).is_err(),
+                "resolvedBy {invalid:?} recorded no valid provenance"
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_lowercase_story_suffixes_are_accepted() -> Result<(), CompareError> {
+        let raw = json!({
+            "entries": [{
+                "id": "sigmoid-width-below-one",
+                "raisedBy": "F-001a",
+                "resolvedBy": "F-X001a",
+                "reachable": true,
+                "reachableWhy": "the synthetic row reaches it",
+                "citation": "PS3.3 C.11.2.1.3.1",
+                "referenceDoes": "derives an inverted range",
+                "standardRequires": "SIGMOID is monotonic for w > 0",
+                "pixelEffect": "the displayed ramp may be inverted",
+                "effect": "monochrome-inversion",
+                "match": {
+                    "/voi/voiLutFunction": { "equals": "SIGMOID" },
+                    "/voi/windowWidth": { "lessThan": 1 }
+                }
+            }]
+        });
+        let parsed = Register::from_json(&raw)?;
+        let entry = parsed.entries.first().ok_or_else(|| {
+            CompareError::Register("the suffixed fixture lost its one entry".to_owned())
+        })?;
+        assert_eq!(entry.raised_by, "F-001a");
+        assert_eq!(entry.resolved_by.as_deref(), Some("F-X001a"));
+        Ok(())
+    }
+
     /// A non-matching entry does not. The corpus's own rows resolve LINEAR, so
-    /// this is the case every one of the ninety-eight views takes.
+    /// this is the case every other one of the ninety-nine views takes.
     #[test]
     fn a_non_matching_entry_does_not_fire() {
         let register = register();
@@ -1169,7 +1363,7 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::{CompareError, Context, compare_view};
+    use super::{CompareError, Context, compare_view, parameter_values_are_sensitive};
     use crate::frame::Frame;
     use crate::report::{Outcome, Qualifier, Side};
     use crate::sidecar::{DeclaredView, Run, Sidecar, ViewKind};
@@ -1177,6 +1371,21 @@ mod tests {
     const SUBJECT: &str = "subject-under-test";
     const VIEW: &str = "subject-under-test__AXIAL";
     const SIDE_PIXELS: u32 = 16;
+
+    #[test]
+    fn real_paths_mark_parameter_values_sensitive_without_using_the_identifier() {
+        let sidecar = Sidecar {
+            id: "opaque-id".to_owned(),
+            kind: ViewKind::Stack,
+            json: json!({ "row": { "path": "real/series/instance.dcm" } }),
+        };
+        assert!(parameter_values_are_sensitive(&sidecar));
+        let synthetic = Sidecar {
+            json: json!({ "row": { "path": "synthetic/case.dcm" } }),
+            ..sidecar
+        };
+        assert!(!parameter_values_are_sensitive(&synthetic));
+    }
 
     /// One side of a reformat comparison, built by hand.
     ///
@@ -1386,6 +1595,244 @@ mod tests {
         let greys = [100_u8; 256];
         let frame = Frame::from_monochrome(SIDE_PIXELS, SIDE_PIXELS, &greys)?;
         compare_view(&context, STACK_VIEW, &frame, &frame)
+    }
+
+    fn sigmoid_stack_run() -> Result<Run, CompareError> {
+        let mut run = stack_run(Some("MONOCHROME2"));
+        let sidecar = run.sidecars.get_mut(STACK_VIEW).ok_or_else(|| {
+            CompareError::Register("the built-in stack lost its sidecar".to_owned())
+        })?;
+        let object = sidecar.json.as_object_mut().ok_or_else(|| {
+            CompareError::Register("the built-in sidecar is not an object".to_owned())
+        })?;
+        object.insert(
+            "voi".to_owned(),
+            json!({
+                "source": "file",
+                "windowCenter": 40.0,
+                "windowWidth": 0.5,
+                "voiLutFunction": "SIGMOID",
+                "origin": "dataset"
+            }),
+        );
+        object.insert(
+            "attributes".to_owned(),
+            json!({
+                "photometricInterpretation": "MONOCHROME2",
+                "rescaleSlope": 1.0,
+                "windowCenter": [40.0],
+                "windowWidth": [0.5],
+                "voiLutFunction": "SIGMOID"
+            }),
+        );
+        object
+            .get_mut("image")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| {
+                CompareError::Register("the built-in image is not an object".to_owned())
+            })?
+            .insert("slope".to_owned(), json!(1.0));
+        Ok(run)
+    }
+
+    /// The candidate is a monotonically increasing PS3.3 SIGMOID result. The
+    /// constructed reference is the same ramp reversed, representing the
+    /// helper's inverted low and high range if that defect reaches pixels. The
+    /// reviewed register owns that divergence. Removing the register must put
+    /// the same pixels back on the conservative `ours` rung.
+    #[test]
+    fn an_inverted_sigmoid_reference_is_attributed_only_when_pixels_differ()
+    -> Result<(), CompareError> {
+        let reference_run = sigmoid_stack_run()?;
+        let candidate_run = sigmoid_stack_run()?;
+        let raw = json!({
+            "entries": [{
+                "id": "sigmoid-width-below-one",
+                "raisedBy": "F-010",
+                "resolvedBy": "F-X012",
+                "reachable": true,
+                "reachableWhy": "the synthetic row reaches it",
+                "citation": "PS3.3 C.11.2.1.3.1",
+                "referenceDoes": "derives lower 39.75 and upper 39.25",
+                "standardRequires": "a monotonically increasing SIGMOID for w > 0",
+                "pixelEffect": "the reference ramp is inverted",
+                "effect": "monochrome-inversion",
+                "match": {
+                    "/voi/voiLutFunction": { "equals": "SIGMOID" },
+                    "/voi/windowWidth": { "lessThan": 1 }
+                }
+            }]
+        });
+        let register = Register::from_json(&raw)?;
+        let empty: BTreeSet<String> = BTreeSet::new();
+        let reference_greys: Vec<u8> = (0_u8..=255).rev().collect();
+        let candidate_greys: Vec<u8> = (0_u8..=255).collect();
+        let reference_frame = Frame::from_monochrome(SIDE_PIXELS, SIDE_PIXELS, &reference_greys)?;
+        let candidate_frame = Frame::from_monochrome(SIDE_PIXELS, SIDE_PIXELS, &candidate_greys)?;
+
+        let attributed = compare_view(
+            &Context {
+                reference: &reference_run,
+                candidate: &candidate_run,
+                register: &register,
+                low_information: &empty,
+                downsampled: &empty,
+            },
+            STACK_VIEW,
+            &reference_frame,
+            &candidate_frame,
+        )?;
+        assert_eq!(attributed.outcome, Outcome::Unmeasured);
+        assert_eq!(attributed.side, Side::Reference);
+        assert_eq!(attributed.rung, "register");
+        assert_eq!(
+            attributed.register_entry.as_deref(),
+            Some("sigmoid-width-below-one")
+        );
+        assert!(
+            attributed
+                .qualifiers
+                .contains(&Qualifier::ReferenceDivergence)
+        );
+        assert!(
+            attributed
+                .qualifiers
+                .contains(&Qualifier::DivergentWhileUnmeasured)
+        );
+
+        let disabled = compare_view(
+            &Context {
+                reference: &reference_run,
+                candidate: &candidate_run,
+                register: &Register::default(),
+                low_information: &empty,
+                downsampled: &empty,
+            },
+            STACK_VIEW,
+            &reference_frame,
+            &candidate_frame,
+        )?;
+        assert_eq!(disabled.outcome, Outcome::Fail);
+        assert_eq!(disabled.side, Side::Ours);
+        assert_eq!(disabled.rung, "pixels");
+
+        let mut one_bad_pixel = candidate_frame.clone();
+        one_bad_pixel.set_pixel(0, 0, [3, 3, 3, u8::MAX])?;
+        let unrelated_pixel = compare_view(
+            &Context {
+                reference: &reference_run,
+                candidate: &candidate_run,
+                register: &register,
+                low_information: &empty,
+                downsampled: &empty,
+            },
+            STACK_VIEW,
+            &candidate_frame,
+            &one_bad_pixel,
+        )?;
+        assert_eq!(unrelated_pixel.outcome, Outcome::Fail);
+        assert_eq!(unrelated_pixel.side, Side::Ours);
+        assert_eq!(unrelated_pixel.rung, "pixels");
+        assert_eq!(unrelated_pixel.register_entry, None);
+        assert!(
+            !unrelated_pixel
+                .qualifiers
+                .contains(&Qualifier::ReferenceDivergence),
+            "an arbitrary candidate pixel defect is not the declared inversion"
+        );
+
+        let mut bad_parameters = sigmoid_stack_run()?;
+        let slope = bad_parameters
+            .sidecars
+            .get_mut(STACK_VIEW)
+            .and_then(|sidecar| sidecar.json.pointer_mut("/image/slope"))
+            .ok_or_else(|| {
+                CompareError::Register("the candidate image lost its slope".to_owned())
+            })?;
+        *slope = json!(2.0);
+        let unrelated_parameter = compare_view(
+            &Context {
+                reference: &reference_run,
+                candidate: &bad_parameters,
+                register: &register,
+                low_information: &empty,
+                downsampled: &empty,
+            },
+            STACK_VIEW,
+            &candidate_frame,
+            &candidate_frame,
+        )?;
+        assert_eq!(unrelated_parameter.outcome, Outcome::Fail);
+        assert_eq!(unrelated_parameter.side, Side::Ours);
+        assert_eq!(unrelated_parameter.rung, "parameters");
+        assert_eq!(unrelated_parameter.register_entry, None);
+        assert!(
+            !unrelated_parameter
+                .qualifiers
+                .contains(&Qualifier::ReferenceDivergence),
+            "a rescale mismatch is unrelated to the window helper"
+        );
+
+        let mut bad_geometry = sigmoid_stack_run()?;
+        let parallel_scale = bad_geometry
+            .sidecars
+            .get_mut(STACK_VIEW)
+            .and_then(|sidecar| sidecar.json.pointer_mut("/camera/parallelScale"))
+            .ok_or_else(|| {
+                CompareError::Register("the candidate camera lost its scale".to_owned())
+            })?;
+        *parallel_scale = json!(9.0);
+        let unrelated_geometry = compare_view(
+            &Context {
+                reference: &reference_run,
+                candidate: &bad_geometry,
+                register: &register,
+                low_information: &empty,
+                downsampled: &empty,
+            },
+            STACK_VIEW,
+            &reference_frame,
+            &candidate_frame,
+        )?;
+        assert_eq!(unrelated_geometry.outcome, Outcome::Fail);
+        assert_eq!(unrelated_geometry.side, Side::Fit);
+        assert_eq!(unrelated_geometry.rung, "geometry");
+        assert_eq!(unrelated_geometry.register_entry, None);
+        assert!(
+            unrelated_geometry
+                .qualifiers
+                .contains(&Qualifier::GeometryDivergence)
+        );
+        assert!(
+            !unrelated_geometry
+                .qualifiers
+                .contains(&Qualifier::ReferenceDivergence),
+            "the declared inversion does not explain a camera defect"
+        );
+
+        let identical = compare_view(
+            &Context {
+                reference: &reference_run,
+                candidate: &candidate_run,
+                register: &register,
+                low_information: &empty,
+                downsampled: &empty,
+            },
+            STACK_VIEW,
+            &candidate_frame,
+            &candidate_frame,
+        )?;
+        assert_eq!(identical.outcome, Outcome::Pass);
+        assert_eq!(identical.side, Side::None);
+        assert_eq!(identical.rung, "pixels");
+        assert_eq!(identical.register_entry, None);
+        assert!(
+            !identical
+                .qualifiers
+                .contains(&Qualifier::ReferenceDivergence),
+            "a reachable helper defect cannot absorb identical presented pixels"
+        );
+        Ok(())
     }
 
     /// The record carries the REFERENCE sidecar's declared interpretation,

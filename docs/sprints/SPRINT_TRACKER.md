@@ -64,3 +64,17 @@ that has something to put in it.
 | F-X007 | Oracle volume and MPR reference renders | S03 | 3w | not measured, it ran concurrently with F-006 and its wall clock includes several full oracle runs plus one remediation round after the integrator's review | 2026-09-05 |
 | F-011 | Pixel-diff comparator with per-modality tolerance policy | S03 | 3w | not measured, it ran serial in the canonical worktree and its wall clock includes several full oracle runs | 2026-09-05 |
 | F-X009 | A standing test for every repository guard | S03 | 3w | not measured, it ran concurrently with the sprint review's remediation and its wall clock includes waiting on that | 2026-09-05 |
+| F-X017 | Close the measured escapes from the wasm linear memory view ban | S04 | 2w | not measured, work overlapped F-013 verification and included repeated full floor runs | 2026-09-06 |
+| F-X018 | Bind sprint review and verification evidence to the current tree | S04 | 1w | not measured, work ran serially during a whole-sprint execution with repeated floor probe and gate runs | 2026-09-06 |
+| F-X019 | Require CI gates to run or make their step fail | S04 | 1w | not measured, work ran serially during a whole-sprint execution and included exhaustive bash cross-checks plus full floor runs | 2026-09-06 |
+| F-013 | Metadata diff harness for LUT, geometry and spacing | S04 | 2w | not measured, worker implementation was replayed and followed by repeated oracle and full-gate runs | 2026-09-06 |
+| F-015 | Stable render-hash emission from the comparator | S04 | 2w | not measured, worker ran concurrently with other S04 stories | 2026-09-06 |
+| F-X001 | Tier C and feature-availability contract | S04 | 4w | not measured, worker ran concurrently with other S04 stories | 2026-09-06 |
+| F-X008 | One parity target and published wasm licences | S04 | 1w | not measured, worker ran concurrently with other S04 stories | 2026-09-06 |
+| F-X010 | Structural CI floor equivalence | S04 | 2w | not measured, worker ran concurrently with other S04 stories | 2026-09-06 |
+| F-X012 | Measured SIGMOID reference divergence | S04 | 2w | not measured, worker ran concurrently and used the serial oracle resource | 2026-09-06 |
+| F-X013 | Price the HTJ2K decoder route | S04 | 3w | not measured, worker ran concurrently with other S04 stories | 2026-09-06 |
+| F-X014 | Close declared guard holes | S04 | 2w | not measured, worker ran concurrently and included repeated mutation profiles | 2026-09-06 |
+| F-X015 | Execute marked skill examples | S04 | 1w | not measured, worker ran concurrently and included repeated mutation profiles | 2026-09-06 |
+| F-X016 | Adapter fallback after device-open failure | S04 | 1w | not measured, worker ran concurrently with other S04 stories | 2026-09-06 |
+| F-X020 | Protect the hand-curated sprint plan | S04 | 1w | not measured, worker ran concurrently with other S04 stories | 2026-09-06 |

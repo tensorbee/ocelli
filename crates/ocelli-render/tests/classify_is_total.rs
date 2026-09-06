@@ -18,8 +18,8 @@
 //! 3. Tier C carries no invented figures.
 
 use ocelli_render::caps::{
-    AdapterFacts, DecidedBy, FillRate, FillRateBands, OverrideOutcome, SimdSupport, Tier,
-    TierRequest, TierSignals, classify,
+    AdapterFacts, DecidedBy, FailedAdapter, FillRate, FillRateBands, OverrideOutcome, ProbeOutcome,
+    SimdSupport, Tier, TierRequest, TierSignals, classify,
 };
 use proptest::prelude::*;
 
@@ -92,23 +92,51 @@ fn any_bands() -> impl Strategy<Value = FillRateBands> {
     })
 }
 
+fn any_failed_adapter() -> impl Strategy<Value = FailedAdapter> {
+    any_facts().prop_map(|adapter| FailedAdapter {
+        adapter,
+        reason: "request_device failed".to_owned(),
+    })
+}
+
 fn any_signals() -> impl Strategy<Value = TierSignals> {
-    (
-        prop::collection::vec(any_facts(), 0..4),
-        any::<Option<(u64, u64)>>(),
-        any::<bool>(),
-        any_bands(),
+    let no_adapter =
+        (0_usize..4).prop_map(|adapters_seen| ProbeOutcome::NoAdapter { adapters_seen });
+    let no_device = (
+        prop::collection::vec(any_failed_adapter(), 1..4),
+        0_usize..4,
     )
-        .prop_map(|(adapters, rate, device_created, bands)| TierSignals {
-            adapters,
-            fill_rate: rate.map(|(pixels_shaded, elapsed_nanos)| FillRate {
-                pixels_shaded,
-                elapsed_nanos,
-            }),
-            device_created,
+        .prop_map(|(failed, non_candidates)| ProbeOutcome::NoDevice {
+            adapters_seen: failed.len() + non_candidates,
+            failed,
+        });
+    let opened = (
+        prop::collection::vec(any_failed_adapter(), 0..3),
+        any_facts().prop_filter("an opened adapter is a candidate", |facts| {
+            facts.candidate_tier().is_some()
+        }),
+        any::<Option<(u64, u64)>>(),
+        0_usize..4,
+    )
+        .prop_map(
+            |(failed, adapter, rate, non_candidates)| ProbeOutcome::Opened {
+                adapters_seen: failed.len() + non_candidates + 1,
+                failed,
+                adapter,
+                fill_rate: rate.map(|(pixels_shaded, elapsed_nanos)| FillRate {
+                    pixels_shaded,
+                    elapsed_nanos,
+                }),
+            },
+        );
+
+    (prop_oneof![no_adapter, no_device, opened], any_bands()).prop_map(|(probe, bands)| {
+        TierSignals {
+            probe,
             simd: SimdSupport::NotApplicable,
             bands,
-        })
+        }
+    })
 }
 
 fn any_request() -> impl Strategy<Value = TierRequest> {
@@ -129,22 +157,16 @@ proptest! {
     ) {
         let resolved = classify(&signals, request);
 
-        let a_candidates = signals
-            .adapters
-            .iter()
-            .filter(|facts| facts.candidate_tier() == Some(Tier::A))
-            .count();
-        let candidates = signals
-            .adapters
-            .iter()
-            .filter(|facts| facts.candidate_tier().is_some())
-            .count();
+        let opened_tier = match &signals.probe {
+            ProbeOutcome::Opened { adapter, .. } => adapter.candidate_tier(),
+            ProbeOutcome::NoAdapter { .. } | ProbeOutcome::NoDevice { .. } => None,
+        };
 
         match resolved.caps.tier {
             // Property 2. Tier A needs an adapter that could serve it, on
             // every path including the override's.
-            Tier::A => prop_assert!(a_candidates > 0),
-            Tier::B => prop_assert!(candidates > 0),
+            Tier::A => prop_assert_eq!(opened_tier, Some(Tier::A)),
+            Tier::B => prop_assert!(opened_tier.is_some()),
             // Property 3. Tier C has no device, so any other figure would be
             // invented.
             Tier::Cpu => {
@@ -188,8 +210,8 @@ proptest! {
         // same defect arriving through the door marked diagnostic.
         if resolved.caps.tier != Tier::Cpu {
             prop_assert!(
-                signals.device_created,
-                "resolved {:?} with no device created, request {:?}",
+                matches!(signals.probe, ProbeOutcome::Opened { .. }),
+                "resolved {:?} without an opened adapter, request {:?}",
                 resolved.caps.tier,
                 request
             );
@@ -201,6 +223,13 @@ proptest! {
         // recorded.
         if request == TierRequest::Auto && resolved.caps.tier != Tier::Cpu {
             prop_assert_eq!(resolved.evidence.candidate_tier, Some(resolved.caps.tier));
+        }
+
+        if let ProbeOutcome::NoDevice { failed, .. } = &signals.probe {
+            prop_assert!(!failed.is_empty());
+            if request != TierRequest::Requested(Tier::Cpu) {
+                prop_assert_eq!(&resolved.evidence.failed_adapters, failed);
+            }
         }
     }
 }

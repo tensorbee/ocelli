@@ -1,6 +1,6 @@
 # The guard harness
 
-**F-IDs that contributed:** F-X009
+**F-IDs that contributed:** F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020
 **Last updated:** 2026-09-06
 
 A guard is any refusal this repository can produce: a script that exits 1, a
@@ -164,7 +164,7 @@ the declaration is now a lie. The ratchet points in the direction that matters.
 made by construction rather than by cleanup.
 
 1. `tempfile.mkdtemp(prefix="ocelli-guard-")`
-2. copy the WORKING TREE content of every path in `git ls-files`, mode bit kept
+2. copy the WORKING TREE content and shape of every path in `git ls-files`
 3. in the copy, `git init`, `git add -A`, `git commit`
 4. every git call runs with a scrubbed environment
 
@@ -181,9 +181,27 @@ would probe the previous version and report success.
 Using `ls-files` rather than a directory walk also excludes `corpus/data`,
 `node_modules`, `target`, `tools/oracle/out` and `.claude/verify-ledger.json`
 by construction, so no patient data, no rendered reference frame and no local
-evidence file is ever copied anywhere. A tracked path that is not a regular
-file is refused rather than skipped, because a silent divergence between the
-copy and the original is the one thing the control run assumes away.
+evidence file is ever copied anywhere. A tracked relative symlink is recreated
+as the same relative symlink, including the package-local licence links used by
+the wasm gate, only after its target resolves inside both the source repository
+and the destination sandbox. Absolute links and relative links escaping either
+root are refused. Regular files keep their executable bit. Any other tracked
+file shape is refused rather than skipped, because a silent divergence between
+the copy and the original is the one thing the control run assumes away.
+
+F-X008 moves the sandbox catch-all census because the shape check now lives in
+the copy helper, the caller adds path context, and escaping symlinks have their
+own refusals. The focused catalogue suite watches all branches: a contained
+relative symlink must remain a symlink, absolute and escaping relative links
+must be refused, and an unrepresentable shape must raise the refusal. The two
+relative-escape fixtures put their links at different depths under the source
+and destination roots. One escapes only the source and the other escapes only
+the destination, so either containment condition is independently watched.
+The same story moves the pin catch-all for an absent repository grant, an
+absent packaged grant, a packaged symlink and differing bytes. The
+package-licence unit suite watches all four outcomes. Catalogue probes drive
+the packaged-grant absence and a resolving packaged symlink through the real
+`--with-size` command.
 
 ### The safety argument, and where a reviewer checks it
 
@@ -386,6 +404,64 @@ rather than in a refactor nobody reads. A recorded value that no longer parses
 also fails, because a constant the ratchet cannot read is a ratchet that has
 quietly stopped holding.
 
+### The sprint-plan writer is bootstrap-only
+
+`scripts/gen_sprint_plan.py --check` verifies the structured rows, milestone
+summaries and goals in the hand-curated sprint plan. The bare command creates
+that plan only when it is absent. Once the file exists, the command refuses to
+replace it and names the two explicit modes: `--check` for verification and
+`--force` for deliberate full regeneration.
+
+The refusal protects prose the allocation cannot reconstruct. Its standing
+probe inserts a hand-curated paragraph, runs the bare command and requires the
+overwrite refusal. The control runs `--force` and requires success, so a writer
+that refuses every mode cannot satisfy the probe.
+
+### Sprint-close evidence names one tree
+
+`scripts/sprint_workflow.py` records each whole-sprint review and each new
+verification with `git write-tree`. `close-preflight` requires the latest
+sprint review to report no defects or smells and the latest sprint-profile
+verification to pass. Both records must name the current HEAD tree, and the
+working tree must be clean. A later failed verification remains the latest
+result and cannot be hidden behind an earlier pass.
+
+Legacy run state still loads, but missing tree fields are not inferred. The
+close probes exercise legacy state, dirty review counts, stale review and
+verification trees, a failed latest verification, and an index changed after
+evidence was recorded. The accept control supplies clean current evidence in a
+disposable repository. These cases make the review and verification records
+claims about immutable content rather than reusable booleans.
+
+Close also distinguishes completed work from an explicit carry-forward. A
+`carried` story needs a non-empty bullet under `## Carried forward from SNN` in
+`CURRENT_SPRINT.md`. It does not need a feature review, because the state makes
+no implementation claim. A refusal covers an unrecorded carry-forward and an
+accept control covers a carried story whose tracked reason is present.
+
+### Explicit sets and handoff grammar
+
+`scripts/no_std_check.py` owns an explicit `EXPECTED_NO_STD_CRATES` set. It
+compares source declarations in both directions before resolving any dependency
+graph, so a crate leaving the set and a deliberately `std` crate entering it
+are separate refusals that name the crate. The expected set is also a declared
+constant, which makes a deliberate posture change visible in the recorded
+budget rather than letting the check redefine its own population.
+
+`scripts/sprint_workflow.py` owns one `HANDOFF_FIELDS` tuple containing the six
+fields documented by `.claude/commands/complete-feature.md`. Each field appears
+exactly once. Its value is either non-empty backtick-free plain text or exactly
+one complete non-empty Markdown code span. Embedded, unmatched or multiple
+spans and content forged outside a closing span are refused. The branch value
+is unwrapped before the exact `work/<fid>-` prefix check, so repository house
+style does not change the value being validated. The tuple is a declared
+constant. Probes watch both valid branch forms, the wrong branch, every
+malformed span shape, duplicate fields and the required `Files touched` field.
+The `guards` arm also runs `scripts/tests/test_sprint_workflow.py` as a named,
+chained suite because the catalogue samples do not repeat every parser
+condition. The already-running catalogue suite asserts the arm's exact ordered
+Python suite list, so removing that registration is an independent failure.
+
 **A regex reads a Python literal out of a Python file, and one entry is not
 that.** `Cargo.toml:workspace.lints` records HLD 27.1's lint table, which is
 TOML, and a regex over it is a second reader of a foreign grammar. The
@@ -417,7 +493,8 @@ level-1 probe of its own.
 **e. The uncovered ratchet.** The count of refusals belonging to a `guard`
 entry with neither a probe nor a `covered_by` may only decrease. A new
 uncovered refusal fails the floor, and once the sweep is recorded complete any
-non-zero count fails `--profile deep`.
+non-zero count fails `--profile deep`. The sweep is recorded complete. Run
+`python3 scripts/guard_census.py` for the current measured buckets.
 
 **f. `covered_by` names a FILE that reaches the file.** Each named path must
 resolve to a file, and at least one must reach the guarded file: by naming it,
@@ -693,6 +770,44 @@ manifest with an unguarded `read_text`, so a file that is not UTF-8 arrived as
 a traceback rather than under the `FAIL:` header, which probe
 `lint-policy.manifest-not-utf8` now watches.
 
+### What it means for CI to run one gate
+
+The floor retains per-area CI jobs because their names locate a failure, but a
+job does not get to reconstruct a gate arm freely. A floor gate with one
+visible executable command may be represented by that command's exact argument
+vector. The existing declared additions remain limited to cases that are
+strictly stronger than the arm. A narrowed command, a prefix match or an
+unlisted addition is not equivalent.
+
+A floor gate with several visible executable commands must be invoked as
+`bin/ocelli.sh gate NAME`. The same exact commands split into YAML steps do not
+preserve the arm's `&&` exit semantics. Reversing those steps keeps the command
+set and loses the order. Moving them into separate jobs loses both order and a
+shared failure boundary. The named invocation delegates all three properties
+to `bin/ocelli.sh`, while the step remains in the useful per-area job.
+
+The older named-only rule for an arm containing work the extractor cannot see
+still applies independently. Its probe first reduces the synthetic arm to one
+visible command, so deleting that rule cannot be hidden by the newer
+multi-command rule. D-04's exclusions remain a separate set comparison:
+`corpus`, `guards-deep` and `oracle` do not become floor gates through this
+equivalence rule.
+
+The per-event reader reports an unreachable gate before it asks how a reachable
+arm is spelled. That keeps condition-reading probes attached to the missing
+event they test. Parser probes that deliberately add a second visible command
+expect the named-invocation refusal, because a broken parser drops that command
+and makes the refusal disappear. Probes for invisible work instead reduce the
+arm to one visible command first, which keeps the extractor-vocabulary rule
+independently load-bearing.
+
+`--sprint` and `--all` retain two public spellings and share one selector arm.
+Both select every declared gate in `GATES` order. A structural reader test
+requires the single `--sprint|--all)` implementation path, and a runtime test
+stubs `run_gate` under bash and proves both spellings select the declared list.
+The public names communicate sprint and release intent without maintaining two
+copies of the complete set.
+
 ### The workflow is YAML, and the CI floor now has one dependency
 
 `scripts/ci_floor_check.py` reads `.github/workflows/ci.yml` with
@@ -873,7 +988,13 @@ because the short circuit means the command after the final `&&` never runs, so
 nothing fires errexit and the list's status is discarded. The same statement
 alone in a body exits 1, because the last list decides the script's status. Ten
 such measurements are a table in the suite and the reader is asserted against
-that table row by row.
+that table row by row. The flat-shape oracle also exhausts every success and
+failure assignment for the other commands in each accepted AND-list. A gate on
+the right of `&&` does not count when a failed prefix can skip it and a later
+successful statement can leave the step green. A terminal `cd x && gate`
+continues to count, because failure to reach the gate makes the step itself
+fail. The standing mutation plants the swallowed non-final form and requires
+the CI guard to reject it.
 
 `scripts/lint_policy_check.py` is in the `guards` gate rather than in `clippy`
 because it is check c's class of problem rather than clippy's. The `clippy`
@@ -993,6 +1114,46 @@ plus thirty seconds. It catches a change that made the harness ten times slower
 and not a shared runner having a bad afternoon, because a timing gate tuned
 tight is a timing gate that gets disabled.
 
+## Executable skill examples
+
+`scripts/skill_examples_check.py` executes only examples enclosed by its exact
+column-zero HTML markers in canonical `.claude/skills/*/SKILL.md` files. The
+marker fixes the interpreter to `python3` and selects either exact stdout or a
+self-asserting block. The command accepts no selector, so CI always checks the
+complete marked set. Marker-shaped text inside a top-level, blockquoted or
+list-nested unmarked fence remains documentation. Leaving a quote or list
+container returns to the live column-zero grammar immediately. An active list
+container takes precedence over the zero-to-three-space top-level fence form,
+so two-space, three-space and four-space continuations all return to the live
+grammar on dedent. A backtick fence is valid only when its info string contains
+no backtick. Tilde fences use their separate CommonMark rule.
+
+The checker parses every canonical skill and rejects malformed markers,
+duplicate ids, empty declarations and unmatched fences before it starts a
+process. The canonical root is the lexical `.claude/skills` path under the
+repository that contains the checker. A symlink at that root is refused before
+resolution, and every child must resolve beneath it. The checker then runs each
+example as an argument vector without a shell, in a fresh temporary working
+directory with a minimal deterministic environment. Every run has a timeout,
+and failure diagnostics are bounded.
+
+Pass-1 remediation moves the `skill-examples` discovery count from 11 to 15
+refusal sites. The four additions reject a noncanonical root argument, a root
+symlink, an unresolvable root and a root moved outside the repository by a
+symlinked parent. Separate adversarial cases watch all four, and the existing
+child-symlink case watches a skill path escaping an otherwise valid root.
+
+The `skills` gate runs adapter drift detection, the marked examples and their
+adversarial unit suite in that order. CI invokes the named gate rather than
+reconstructing those commands. The already gate-reached catalogue suite
+asserts the complete arm exactly, so either executable check disappearing is a
+failure. The catalogue also mutates one expected VOI digit and requires the
+checker to report the stdout mismatch, applying HLD 27.3 to the documentation
+fixture itself. Two more mutations reverse the PS3.3 SIGMOID exponent and its
+positive-width predicate. The marked output evaluates an input whose exponent
+is exactly `+1`, and also exercises the zero-width refusal, so both mutations
+must turn the checker red.
+
 ## What this harness does not cover
 
 - **Refusals under `crates/` and in files that are not `.py`, `.mjs`, `.js` or
@@ -1000,7 +1161,9 @@ tight is a timing gate that gets disabled.
 - **Whether a `covered_by` test drives its refusal red.** Check f proves the
   test and the file are connected. Nothing more is claimed.
 - **The declared limits and the open defects**, which
-  `python3 scripts/guard_census.py` names in full with an owner.
+  `python3 scripts/guard_census.py` names in full. A limit names the external
+  browser, install, private input or dependency graph that prevents a sandbox
+  probe. It is not relabelled as coverage.
 - **That the hooks are enabled at all.** Every hook under `.githooks/` is inert
   until a clone runs `git config core.hooksPath .githooks`, which is per clone
   and untracked. `README.md`, `CONTRIBUTING.md` and `docs/DEVELOPER_SETUP.md`

@@ -7,7 +7,7 @@ description: "Close a sprint. Validates readiness, merges to main, creates the s
 
 Canonical source: `.claude/commands/close-sprint.md`.
 
-Source SHA-256: `a25250d877e0b5569b68ea57d9a98260ab798e357f1fa6af6132edfc80042e6c`.
+Source SHA-256: `2f480ff4a06e2e027ff8c939c2d3a3b38ae715cabd360ea0c23d3ec32e105d47`.
 
 Before acting, read the canonical source completely and follow it using this
 host's available tools. Treat invocation arguments as arguments to that

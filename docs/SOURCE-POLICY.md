@@ -99,6 +99,33 @@ form as the table above, with the date it was decided.
 | TCIA collection VAREPOP-APOLLO | CC BY 4.0 | yes | yes | 2026-09-04 |
 | TCIA collection CMB-CRC | CC BY 4.0 | yes | yes | 2026-09-04 |
 | pydicom bundled test files | not stated | yes | **NO** | 2026-09-04 |
+| openjph-core 0.1.0 | BSD-2-Clause in registry metadata | yes | yes | 2026-09-06 |
+
+### openjph-core 0.1.0, and the missing packaged licence text
+
+F-X013 checked the crates.io package before reading its implementation. The
+archive checksum is
+`c8b96ed12b3d41623a771af4af8131abf353bc822b7a567c6ef3b35ab967a36d`,
+which matches the crates.io API. Packaged VCS metadata names commit
+`7ed6d6d110d994ec740aacaa90a78b2e807c4c24` under path `openjph-core`.
+
+1. **Is there a licence file?** No. The published archive has no `LICENSE`,
+   `LICENCE`, `COPYING` or `NOTICE`, and crates.io reports no repository URL
+   where a root file could be checked.
+2. **Does the platform metadata report a licence?** Yes. Both the normalized
+   packaged manifest and crates.io report the SPDX expression
+   `BSD-2-Clause`. The crates.io publisher is Michael Knopke, login `knopkem`,
+   whose crates.io identity matches GitHub. The package says it is a pure Rust
+   port of OpenJPH v0.26.3, which is already in the policy's permitted table.
+3. **Does the licence permit the use?** Yes. BSD-2-Clause permits use,
+   modification and redistribution with its notice conditions retained.
+
+Question 2 is present, so the policy's rule for two absent provenance sources
+does not refuse the package. The missing packaged licence and copyright notice
+are still a production distribution risk. E2.6 must obtain the complete notice
+material before shipping the dependency or maintaining a fork. F-X013 uses it
+only in a throwaway measurement crate and records that limitation beside its
+recommendation.
 
 ### The four TCIA collections, against the three questions
 

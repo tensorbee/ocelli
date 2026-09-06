@@ -1,6 +1,6 @@
 # The comparator, the oracle's judging half
 
-**F-IDs that contributed:** F-011
+**F-IDs that contributed:** F-011, F-013, F-015, F-X012
 **Last updated:** 2026-09-06
 
 HLD section 11 says the harness "pushes the same study through both stacks and
@@ -36,7 +36,7 @@ directories are filled by three things, none of which is a renderer.
    real strengthening of what CI covers.
 2. **Identity over the real reference output**, `ocelli-compare identity`. It
    proves the loader, the identifier mapping, the tolerance-class resolution,
-   the sidecar contract and the report shape over all ninety-eight views. **It
+   the sidecar contract and the report shape over all ninety-nine views. **It
    proves nothing whatever about detection**, which is why it is never allowed
    to be the only corpus-scale exercise.
 3. **A declared mutation catalogue**, `tools/oracle/src/mutations.rs`, applied
@@ -69,8 +69,8 @@ its LAST command, so an unchained render could fail and be reported green by a
 passing comparison. **No new gate name was added.** The comparator is part of
 what `oracle` means.
 
-The binary is built in release. A debug comparison over ninety-eight frames
-plus twenty-one mutation replays is minutes rather than seconds, and a check
+The binary is built in release. A debug comparison over ninety-nine frames
+plus twenty-nine mutation replays is minutes rather than seconds, and a check
 nobody wants to wait for is a check that stops being run.
 
 The corpus-scale exercises are subcommands of a binary and **not** `#[ignore]`
@@ -105,8 +105,8 @@ place a later story could otherwise break the comparator silently.
   declared list names fails the run.** `run.json`'s `rows[]` stays stack-only on
   purpose, so that the accounting identity `readBack + unsupported ==
   applicable` means something exact, and F-X007 put its reformats in
-  `volumes[].frames[]`. A comparator reading `rows[]` alone would compare 89 of
-  98 views and report success. The orphan refusal is what turns that into a
+  `volumes[].frames[]`. A comparator reading `rows[]` alone would compare 90 of
+  99 views and report success. The orphan refusal is what turns that into a
   failure, and it keeps working when a later story adds a third list.
 - **Each sidecar carries a top-level `kind` and the comparator switches on it.**
   An unknown value is refused and never defaulted to `stack`, because defaulting
@@ -154,7 +154,7 @@ assumed it would. A reformat's class is resolved from its members' own stack
 sidecars instead, through `volume.members[].stackSidecar`. The class token is a
 property of the pixel data and every member of a series carries the same one.
 
-Measured on the current corpus: 84 class one and 5 class two among the stack
+Measured on the current corpus: 85 class one and 5 class two among the stack
 views, and all 9 volume reformats class one.
 
 ## The per-view record, and what gates
@@ -196,10 +196,42 @@ EQUAL, because a representation difference between two writers of the same
 number is not a divergence in what the file declared. Positive and negative zero
 compare UNEQUAL, because a sign flip on a rescale intercept is a finding.
 
-**This is not the full metadata harness. That is F-013, E2.5, S04.** F-011 diffs
-only what decides the compared pixels and the compared camera, and says so.
+F-013 adds committed truth for named synthetic cases around this side-to-side
+comparison. Real rows retain the independent-reader comparison without
+committing or printing their values.
 
-### Component 3, geometry
+### Component 3, committed metadata truth
+
+`tools/oracle/metadata-truth.json` is the one hand-authored metadata and
+display-value source used by both Rust and the pydicom checker. The existing
+`volume-truth.json` is the sole owner of series geometry. It contains only
+named synthetic and syntax rows. Each resolved field cites PS3.3 and binds its
+scope to the exact `metadataSources` JSON pointer derived from the raw DICOM.
+It covers pixel and photometric fields, modality and VOI parameters,
+presentation inversion, IPP, IOP, Pixel Spacing, slice thickness and resolved
+reference modules. It also carries literal PS3.3 C.11 display values, oblique
+geometry samples. Volume dimensions, origin, direction, slice thickness and
+projected gaps come only from `volume-truth.json`.
+
+Declared numbers compare by `f64::to_bits` in Rust and packed IEEE-754 bytes in
+Python. Arrays retain their order. A missing JSON member differs from explicit
+null, null differs from an empty array, positive and negative zero differ, and
+non-finite JSON numbers are refused. Derived geometry alone uses HLD
+25.1's existing 1e-6 mm bound. The harness does not evaluate the LUT chain.
+The four display values are literal fixture evidence, so LUT arithmetic still
+has one implementation when `ocelli-pixel` lands.
+
+Both sidecars are checked before either frame is opened. A metadata failure is
+therefore reportable even when frame bytes are absent or malformed. If exactly
+one side differs from truth, that side is named. Opposite one-sided findings,
+mixed findings and any shared problem are unattributed. If both agree with each
+other on a wrong value, the view still fails at the `metadata-truth` rung.
+
+Real-row reports derive sensitivity from the sidecar path or volume series
+directory, never from a mutable identifier. Parameter values are replaced by
+`<withheld, real corpus row>` before JSON serialization.
+
+### Component 4, geometry
 
 25.1's third bullet. `position`, `focalPoint`, `viewUp` and `parallelScale` are
 compared within 1e-6 mm, and `viewPlaneNormal` too where a reformat carries one.
@@ -240,7 +272,7 @@ written through `toFixed(6)`, which discarded up to 5e-7 mm before the
 comparator could see it. Determinism is measured on the frame digest and not on
 this field, so the rounding was protecting nothing.
 
-### Component 4, pixels
+### Component 5, pixels
 
 Alpha is asserted to be 255 on every pixel of both sides and is never included
 in a difference, because a difference in alpha is a difference in the canvas and
@@ -383,8 +415,8 @@ predicate and does not say what a comparator reports, so this vocabulary is
 F-011's construction.
 
 **`unmeasured` is a third outcome and not a synonym for `pass`.** A run that
-reports "70 pass, 0 fail, 28 unmeasured" over 98 views is saying something a run
-that reported "98 compared" would not. The number is uncomfortable on purpose:
+reports "71 pass, 0 fail, 28 unmeasured" over 99 views is saying something a run
+that reported "99 compared" would not. The number is uncomfortable on purpose:
 better than a quarter of the corpus is covered and not measured, and that was
 true before F-011 and invisible.
 
@@ -421,7 +453,10 @@ builds exactly that bypass and asserts the run is red.
 
 1. **Inputs disagree**, by digest. Attributed to the inputs, not to either
    renderer.
-2. **Parameters disagree.** Attributed to the side that disagrees with the
+2. **Committed metadata truth disagrees.** The side that differs from truth is
+   named. If both sides agree with each other and differ from truth, the run
+   fails as an unattributed instrument or shared-reference problem.
+3. **Parameters disagree.** Attributed to the side that disagrees with the
    INDEPENDENT reading of the bytes. That third reading exists already: the
    sidecar's `attributes` block is read straight from the file by
    `dicom-parser` in the page, independently of the render path, and
@@ -431,14 +466,14 @@ builds exactly that bypass and asserts the run is red.
    why. Where a field has no independent counterpart, or where neither side
    agrees with its own, the divergence is reported unattributed rather than
    assigned by default.
-3. **A register entry matches, or F-X007's own `referenceDivergence` is set** on
+4. **A register entry matches, or F-X007's own `referenceDivergence` is set** on
    the subject and the pixels diverge with parameters agreeing. Attributed to
    the reference, with a PS3.3 citation where the register supplies one. The
    `referenceDivergence` half additionally requires the geometry to have
    diverged, for the reason stated under the list.
-4. **Geometry is outside 25.1's bound, or the difference is confined to the
+5. **Geometry is outside 25.1's bound, or the difference is confined to the
    letterbox.** Attributed to the fit rather than to the LUT chain.
-5. **Pixels diverge with parameters and geometry agreeing.** **Attributed to
+6. **Pixels diverge with parameters and geometry agreeing.** **Attributed to
    ours**, by default. HLD section 11 makes cornerstone3D the reference and
    deviation D-11 makes the pin the definition of correct until an entry in the
    register says otherwise. That default direction is the conservative one, and
@@ -449,7 +484,7 @@ builds exactly that bypass and asserts the run is red.
 pixel difference on its own.** Every divergence a subject may declare names a
 spacing component, and a wrong spacing shows up as a geometry difference.
 Letting one absorb a pixel difference on a view whose geometry agrees would be
-the comparator excusing our own defect with somebody else's, so rung 3 carries
+the comparator excusing our own defect with somebody else's, so rung 4 carries
 `!geometry.is_empty()`.
 
 The S03 sprint review found that narrowing watched by an accident.
@@ -812,7 +847,7 @@ rung compares.
 
 ## The low-information views
 
-Twenty-two of the ninety-eight, sixteen stack and six volume reformats. The
+Twenty-two of the ninety-nine, sixteen stack and six volume reformats. The
 comparator reads `run.json`'s `lowInformation.rows` rather than rederiving
 saturation from the frames, because the reference half already computes it
 against a declared threshold in `render-params.json` and a second derivation
@@ -926,29 +961,44 @@ reported as a defect.
 Each entry carries an identifier, a match condition over the reference
 sidecar's fields, a PS3.3 citation, what 5.8.2 does, what the standard requires,
 the expected shape of the pixel effect, a `reachable` flag with its reason, and
-the F-ID that raised it. When a view's divergence is explained by a matching
-entry, the outcome is `unmeasured` with the qualifier `reference-divergence` and
-the record names the entry, rather than `fail`.
+the F-ID that raised it. A reachable entry also carries the valid F-ID that
+resolved the evidence gap, and an `effect` naming the pixel relationship the
+comparator can prove. F-IDs use the repository's canonical form: `F-` or
+`F-X`, three digits, and an optional lowercase suffix. The current
+`monochrome-inversion` effect requires geometry agreement, every
+image-rectangle code to be the pointwise complement of the other side, and the
+image to contain more than one code. Only then is the outcome `unmeasured` with
+the qualifier `reference-divergence` and the record names the entry, rather
+than `fail`. Matching sidecar conditions alone never change an identical view,
+an arbitrary pixel defect, an unrelated parameter mismatch or an unrelated
+geometry mismatch from its normal verdict.
 
 The match language is deliberately small: an RFC 6901 pointer mapped to exactly
 one of `equals`, `lessThan` or `greaterThan`, and every condition must hold. **A
-test the comparator cannot evaluate is refused at load rather than read as
-unsatisfied**, because a condition nobody evaluates is an entry that never fires
-and nobody notices.
+test or effect the comparator cannot evaluate is refused at load rather than
+read as unsatisfied**, because a declaration nobody evaluates is an entry that
+never fires and nobody notices.
 
 **The strictness is asymmetric, and that is deliberate.** An entry marked
 `reachable: false` that FIRES is a run failure, because the claim was wrong.
 The opposite direction, an entry no row exercises failing the run, is
-`unsupported.json`'s other half and is not applied while the only entry is
-unreachable by today's corpus, since it would fail every run from the first one.
+`unsupported.json`'s other half and is not applied here.
 
 **A new entry is a reviewed change with a rationale, exactly like a tolerance
 change.** The register is the one mechanism in this design that can turn a
 failure into a non-failure, so it gets the same handling as the other one.
 
-Its only entry on day one is the SIGMOID width case F-010 recorded, carrying
-`reachable: false` with the reason that all eighty-five windowed corpus rows
-resolve LINEAR. Resolving the case itself is F-X012, S04.
+Its only entry is the SIGMOID width case F-010 recorded. F-X012 preserves that
+`raisedBy`, adds `resolvedBy: F-X012`, and makes it reachable with
+`synthetic/ct_sigmoid_width_half.dcm`. The pinned helper returns lower 39.75 and
+upper 39.25, but the observed presented pixels remain standard-correct and
+monotonic. The register therefore acts only if a future candidate comparison
+contains the declared pointwise monochrome inversion while geometry agrees. An
+unrelated candidate pixel, rescale parameter or camera geometry change stays
+attributed by its ordinary rung. This preserves D-11's attribution rule
+without manufacturing a pixel divergence. D14's Ocelli bound remains against
+the standard-correct presented output. The helper's separately measured
+inverted range is not widened into that bound.
 
 ### Two mechanisms for "the reference is wrong", and why both
 
@@ -960,7 +1010,7 @@ declared EXPECTATION with a match condition and a PS3.3 citation, committed, and
 it is the thing that converts a pixel divergence into an attributed
 non-failure. An observation and a policy.
 
-Both are kept and they are connected: rung 3 reads F-X007's field, so a volume
+Both are kept and they are connected: rung 4 reads F-X007's field, so a volume
 view whose geometry the reference got wrong is attributed to the reference
 without a hand-written register entry. **Do not unify them by accident.**
 
@@ -996,22 +1046,22 @@ not emit is refused at load, so a stale census cannot read as an empty set.
 
 ## Today's numbers
 
-`bin/ocelli.sh compare` over `tools/oracle/out/`, all ninety-eight views:
+`bin/ocelli.sh compare` over `tools/oracle/out/`, all ninety-nine views:
 
 ```text
-98 views: 70 pass, 0 fail, 28 unmeasured, 0 absent
+99 views: 71 pass, 0 fail, 28 unmeasured, 0 absent
   decimated: 2
   unstated-threshold: 5
   weak: 22
-compare: 21 mutations, 0 not detected
+compare: 29 mutations, 0 not detected
 ```
 
 Twenty-eight and not twenty-nine, because `real/us_cmb_crc/00000001.dcm` is
 class two and decimated and is counted once with both qualifiers.
 
-The seventy pass numbers mean nothing on their own. **The identity run compares
+The seventy-one pass numbers mean nothing on their own. **The identity run compares
 the reference against itself**, so a comparator that always answered zero would
-produce the same seventy passes. The mutation line is what makes the seventy
+produce the same seventy-one passes. The mutation line is what makes the seventy-one
 worth reading.
 
 ## Output
@@ -1020,7 +1070,8 @@ worth reading.
 
 - `compare.json`, the whole report: every view's outcome, qualifiers, attributed
   side, ladder rung, parameter and geometry divergences, and all four regions of
-  statistics per lane.
+  statistics per lane. It also carries the versioned reference and candidate
+  render hash for every view, plus one aggregate render hash per side.
 - `<id>.diff.raw` for every view carrying a difference, in the same RGBA8 shape
   as the frames it came from, beside the reference's own `<id>.png` pair. It is
   the per-lane ABSOLUTE difference, **unamplified**: a scale factor is a number
@@ -1036,13 +1087,21 @@ because `git add -f` exists, so `COMPARE_OUTPUT_PREFIXES` in
 
 ## The mutation catalogue
 
-Twenty-one entries in `tools/oracle/src/mutations.rs`, every one replayed on every
+Twenty-nine entries in `tools/oracle/src/mutations.rs`, every one replayed on every
 oracle gate. Each declares a target, an effect and the verdict it must produce,
 and the runner fails the gate when an entry is not detected.
 
 The catalogue reaches all four kinds of answer the comparator can give: a
 structural refusal, a comparison refusal, a run-level problem, and a per-view
-outcome. Six entries are worth naming.
+outcome. The first eight are F-013's metadata-truth probes. They transpose
+Pixel Spacing, reverse the IOP vectors, change Rescale Intercept, change VOI
+LUT Function and substitute a top-level value where the per-frame functional
+group wins. The other three change only the claimed scope, replace the
+positive `INVERSE` declaration with `IDENTITY`, and combine that mismatch with
+refusals on either input frame. The combined entry exercises the production
+`compare_runs` path and turns red if frame I/O moves ahead of metadata truth.
+Each must fail at `metadata-truth` and attribute the candidate side. Six
+further entries are worth naming.
 
 - `plus-one-on-two-fifths-of-the-image` is the LINEAR against LINEAR_EXACT
   signature at corpus scale, and the bias bound is the only thing that fails it.
@@ -1053,7 +1112,7 @@ outcome. Six entries are worth naming.
   is computed rather than written down beside a canvas size a later story could
   change.
 - `candidate-image-slope-changed` and `reference-image-slope-changed` are the
-  same damage on the two sides, and the pair is what proves rung 2's attribution
+  same damage on the two sides, and the pair is what proves rung 3's attribution
   is a measurement rather than a constant. Without the second one, "attributed
   to ours" would be indistinguishable from a default.
 - `an-undeclared-raw-in-the-directory` is the guard that stops a partial
@@ -1086,6 +1145,64 @@ fifty-two, fifty of them on the first pixel. Restoring the single subtraction
 per pixel turns exactly those two red and leaves the four above green, which is
 what says the mutation is the narrow-window defect and not something else.
 
+## Stable render hashes
+
+F-015 gives the exact RGBA8 output a versioned identity before F-151 builds an
+attestation over presentation state plus that identity. The algorithm token is
+`sha256-rgba8-v1`.
+
+The comparator hashes the `Frame` it already loaded and validated. It never
+opens the raw file a second time. The frame constructor has already required
+the byte length to equal `width * height * 4`, so allocation padding cannot
+enter the digest. PNG bytes, difference statistics, report key order, elapsed
+time, environment identity and presentation parameters do not enter either.
+
+### Per-view byte contract
+
+The SHA-256 input starts with the fixed bytes `sha256-rgba8-v1\0`. Each field
+after that is framed by an unsigned 64-bit little-endian byte length followed
+by those bytes, in this order:
+
+1. the view kind token
+2. the opaque view identifier
+3. width as unsigned 32-bit little-endian bytes
+4. height as unsigned 32-bit little-endian bytes
+5. the literal format token `RGBA8`
+6. the exact tightly packed frame bytes
+
+Binding the kind, identifier and dimensions means one byte buffer cannot be
+silently reinterpreted as a different view or shape. The literal fixture is a
+2 by 1 frame with bytes `[0, 0, 0, 255, 1, 2, 3, 255]`. Its independently
+computed digest is:
+
+```text
+7ce1f3d20a7aa3652620049f76d3b99123acc1ccf35cd59649bef6a87c1785e0
+```
+
+`tools/oracle/tests/render_hash_fixture.rs` pins that value and proves that a
+pixel byte, dimension, kind or identifier change moves it.
+
+### Run byte contract
+
+The run hash starts with `sha256-rgba8-run-v1\0`, followed by the number of
+views as an unsigned 64-bit little-endian value. Per-view entries are sorted by
+kind, identifier and digest. Each entry frames the kind, identifier and ASCII
+per-view digest with the same length convention. Sorting makes report or input
+iteration order irrelevant. The view count and framed entries mean an omitted
+or duplicate view cannot have the same aggregate identity.
+
+The comparator writes both levels under `renderHashes` in `compare.json` and
+prints the two aggregate hashes on stdout. The identity run has equal reference
+and candidate hashes. A candidate mutation changes its per-view and run hash.
+Every catalogue effect that changes frame bytes must now move the damaged
+side's hash as well as produce its declared comparator result, or the mutation
+is reported as not detected.
+
+An equal hash means exact equality under this byte contract. It is not a
+tolerance and it is not a claim of cross-machine reproducibility. D14's
+measured divergence remains the claim an attestation may make when hashes are
+unequal.
+
 ## What F-011 did not build
 
 Named, because each is somebody's story.
@@ -1093,11 +1210,7 @@ Named, because each is somebody's story.
 - Any Ocelli renderer, decoder, LUT chain or port code. Decision D7.
 - A perceptual colour metric, and any CIEDE2000 implementation. Metric and
   threshold are one decision and belong together.
-- The full three-way metadata diff harness. F-013, E2.5, S04.
 - Re-rendering the saturated rows at a wider window, or a magnified render for
   the two decimated rows. Both change `render-params.json` and therefore every
   reference frame.
-- Resolving the reference's SIGMOID divergence. F-X012, S04. F-011 built the
-  register that holds it.
-- Stable render-hash emission, F-015, E2.7, S04, and the CI gate that renders
-  the corpus per pull request, F-012, E2.4, S04.
+- The CI gate that renders the corpus per pull request, F-012, E2.4, S04.

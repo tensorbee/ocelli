@@ -15,6 +15,7 @@ Usage:
   python3 scripts/sprint_workflow.py set-phase implementation
   python3 scripts/sprint_workflow.py mark-feature F-001 --state completed
   python3 scripts/sprint_workflow.py record-review F-001 --pass 2 --defects 0 --smells 0
+  python3 scripts/sprint_workflow.py record-sprint-review --pass 2 --defects 0 --smells 0
   python3 scripts/sprint_workflow.py record-verification --profile sprint --result pass
   python3 scripts/sprint_workflow.py validate-handoff F-001
   python3 scripts/sprint_workflow.py close-preflight S01
@@ -40,10 +41,41 @@ CHANGELOG = ROOT / "CHANGELOG.md"
 PHASES = ["design", "implementation", "integration", "verification",
           "review", "ready_to_close", "blocked"]
 STATES = ["pending", "claimed", "in-progress", "reviewed", "prepared",
-          "integrated", "completed", "blocked"]
+          "integrated", "completed", "carried", "blocked"]
 
 FID = re.compile(r"^F-X?\d{3}[a-z]?$")
 TAG = re.compile(r"^v\d+\.\d+\.\d+$")
+HANDOFF_FIELDS = (
+    "Branch",
+    "Base",
+    "Head",
+    "Files touched",
+    "Review",
+    "Verify tree",
+)
+
+
+def handoff_field(text: str, field: str) -> str | None:
+    """Read one unique field in plain text or one Markdown code span."""
+    matches = list(re.finditer(
+        rf"^\*\*{re.escape(field)}\*\*:[ \t]*(.*?)[ \t]*$",
+        text,
+        re.M,
+    ))
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise ValueError(f"handoff has duplicate **{field}** fields")
+    value = matches[0].group(1)
+    if value and "`" not in value:
+        return value
+    if (len(value) > 2 and value.startswith("`") and value.endswith("`")
+            and "`" not in value[1:-1]):
+        return value[1:-1]
+    raise ValueError(
+        f"handoff **{field}** value must be non-empty plain text or exactly "
+        "one Markdown code span"
+    )
 
 
 def state_path(sprint: str) -> Path:
@@ -59,13 +91,35 @@ def active_sprint() -> str:
     return match.group(1)
 
 
+def carried_forward_reasons(text: str, sprint: str) -> dict[str, str]:
+    """Return same-line reasons from this sprint's carry-forward section."""
+    section = re.search(
+        rf"^## Carried forward from {re.escape(sprint)}\s*$\n(.*?)(?=^## |\Z)",
+        text,
+        re.M | re.S,
+    )
+    if section is None:
+        return {}
+    return {
+        match.group(1): match.group(2).strip()
+        for match in re.finditer(
+            r"^- \*\*(F-X?\d{3}[a-z]?)\*\*\s+(\S.*)$",
+            section.group(1),
+            re.M,
+        )
+    }
+
+
 def load(sprint: str | None = None) -> dict:
     sprint = sprint or active_sprint()
     path = state_path(sprint)
     if not path.exists():
         sys.exit(f"no run state for {sprint}. Run: "
                  f"python3 scripts/sprint_workflow.py init --sprint {sprint}")
-    return json.loads(path.read_text())
+    data = json.loads(path.read_text())
+    data.setdefault("sprint_reviews", [])
+    data.setdefault("verifications", [])
+    return data
 
 
 def save(data: dict) -> None:
@@ -116,6 +170,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             }
             for s in stories
         },
+        "sprint_reviews": [],
         "verifications": [],
     }
     save(data)
@@ -139,7 +194,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print("  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
 
     remaining = [fid for fid, f in data["features"].items()
-                 if f["state"] != "completed"]
+                 if f["state"] not in {"completed", "carried"}]
     if remaining and data["phase"] != "blocked":
         print(f"\n{len(remaining)} stories are not complete. The run is not "
               f"finished: {', '.join(sorted(remaining))}")
@@ -207,6 +262,35 @@ def cmd_record_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def staged_tree() -> str:
+    """Return the same staged-tree identity used by verify_ledger.py."""
+    return subprocess.run(
+        ["git", "write-tree"], cwd=ROOT, capture_output=True, text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def cmd_record_sprint_review(args: argparse.Namespace) -> int:
+    data = load()
+    review = {
+        "pass": args.pass_number,
+        "defects": args.defects,
+        "smells": args.smells,
+        "nitpicks": args.nitpicks,
+        "tree": staged_tree(),
+    }
+    data.setdefault("sprint_reviews", []).append(review)
+    save(data)
+    print(
+        f"sprint pass {args.pass_number}: {args.defects} defects, "
+        f"{args.smells} smells, {args.nitpicks} nitpicks, "
+        f"tree {review['tree'][:12]}"
+    )
+    if args.defects or args.smells:
+        print("  not clean. The loop continues. Zero defects AND zero smells.")
+    return 0
+
+
 def cmd_record_verification(args: argparse.Namespace) -> int:
     data = load()
     data["verifications"].append({
@@ -214,6 +298,7 @@ def cmd_record_verification(args: argparse.Namespace) -> int:
         "result": args.result,
         "gates": args.gates,
         "corpus": args.corpus,
+        "tree": staged_tree(),
     })
     save(data)
     print(f"recorded {args.profile} verification: {args.result}")
@@ -233,16 +318,25 @@ def cmd_validate_handoff(args: argparse.Namespace) -> int:
         problems.append(f"{path.relative_to(ROOT)} does not exist")
     else:
         text = path.read_text()
-        for field in ("Branch", "Base", "Head", "Review", "Verify tree"):
-            if f"**{field}**" not in text:
+        fields = {}
+        malformed = set()
+        for field in HANDOFF_FIELDS:
+            try:
+                fields[field] = handoff_field(text, field)
+            except ValueError as error:
+                fields[field] = None
+                malformed.add(field)
+                problems.append(f"handoff field is malformed: {error}")
+        for field, value in fields.items():
+            if value is None and field not in malformed:
                 problems.append(f"handoff has no **{field}** field")
 
-        branch = re.search(r"\*\*Branch\*\*:\s*(\S+)", text)
-        if branch:
+        branch = fields["Branch"]
+        if branch is not None:
             expected = f"work/{fid.lower()}-"
-            if not branch.group(1).startswith(expected):
+            if not branch.startswith(expected):
                 problems.append(
-                    f"branch {branch.group(1)} does not start with "
+                    f"branch {branch} does not start with "
                     f"{expected}. The F-ID is hyphenated exactly as written, "
                     f"so {fid} is {expected}<agent>.")
 
@@ -264,12 +358,24 @@ def cmd_close_preflight(args: argparse.Namespace) -> int:
     data = load(sprint)
     problems = []
 
+    closure_states = {"completed", "carried"}
     incomplete = sorted(fid for fid, f in data["features"].items()
-                        if f["state"] != "completed")
+                        if f["state"] not in closure_states)
     if incomplete:
-        problems.append(f"not completed: {', '.join(incomplete)}")
+        problems.append(f"neither completed nor carried: {', '.join(incomplete)}")
+
+    current_sprint_text = (SPRINTS / "CURRENT_SPRINT.md").read_text()
+    carry_reasons = carried_forward_reasons(current_sprint_text, sprint)
+    for fid, feature in sorted(data["features"].items()):
+        if feature["state"] == "carried" and fid not in carry_reasons:
+            problems.append(
+                f"{fid} is carried but has no recorded carry-forward reason "
+                f"under 'Carried forward from {sprint}' in CURRENT_SPRINT.md"
+            )
 
     for fid, feature in sorted(data["features"].items()):
+        if feature["state"] == "carried":
+            continue
         if not feature["reviews"]:
             problems.append(f"{fid} has no recorded review pass")
             continue
@@ -279,10 +385,56 @@ def cmd_close_preflight(args: argparse.Namespace) -> int:
                 f"{fid} last review pass {last['pass']} reports "
                 f"{last['defects']} defects and {last['smells']} smells")
 
-    sprint_verified = [v for v in data["verifications"]
-                       if v["profile"] == "sprint" and v["result"] == "pass"]
-    if not sprint_verified:
-        problems.append("no passing sprint-profile verification recorded")
+    current_tree = staged_tree()
+    sprint_reviews = data.get("sprint_reviews", [])
+    if not sprint_reviews:
+        problems.append("no sprint-scope review recorded")
+    else:
+        review = sprint_reviews[-1]
+        if review.get("defects") or review.get("smells"):
+            problems.append(
+                f"latest sprint review pass {review.get('pass')} reports "
+                f"{review.get('defects')} defects and "
+                f"{review.get('smells')} smells")
+        review_tree = review.get("tree")
+        if review_tree is None:
+            problems.append("latest sprint review records no tree")
+        elif review_tree != current_tree:
+            problems.append(
+                f"latest sprint review tree {review_tree[:12]} is stale for "
+                f"current tree {current_tree[:12]}")
+
+    sprint_verifications = [v for v in data["verifications"]
+                            if v.get("profile") == "sprint"]
+    if not sprint_verifications:
+        problems.append("no sprint-profile verification recorded")
+    else:
+        verification = sprint_verifications[-1]
+        if verification.get("result") != "pass":
+            problems.append("latest sprint-profile verification did not pass")
+        verification_tree = verification.get("tree")
+        if verification_tree is None:
+            problems.append("latest sprint-profile verification records no tree")
+        elif verification_tree != current_tree:
+            problems.append(
+                "latest sprint-profile verification tree "
+                f"{verification_tree[:12]} is stale for current tree "
+                f"{current_tree[:12]}")
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"], cwd=ROOT,
+        capture_output=True, text=True, check=True,
+    ).stdout
+    if status:
+        problems.append("working tree is not clean")
+    head_tree = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT, capture_output=True,
+        text=True, check=True,
+    ).stdout.strip()
+    if current_tree != head_tree:
+        problems.append(
+            f"staged tree {current_tree[:12]} is not HEAD tree "
+            f"{head_tree[:12]}")
 
     leftover = sorted(p.name for p in HANDOFFS.glob("*-ready.md")) \
         if HANDOFFS.is_dir() else []
@@ -398,6 +550,13 @@ def main() -> int:
     p.add_argument("--smells", type=int, required=True)
     p.add_argument("--nitpicks", type=int, default=0)
     p.set_defaults(func=cmd_record_review)
+
+    p = sub.add_parser("record-sprint-review")
+    p.add_argument("--pass", dest="pass_number", type=int, required=True)
+    p.add_argument("--defects", type=int, required=True)
+    p.add_argument("--smells", type=int, required=True)
+    p.add_argument("--nitpicks", type=int, default=0)
+    p.set_defaults(func=cmd_record_sprint_review)
 
     p = sub.add_parser("record-verification")
     p.add_argument("--profile", required=True)

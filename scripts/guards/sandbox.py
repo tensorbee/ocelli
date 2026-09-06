@@ -300,8 +300,47 @@ def sweep_stale(now: float | None = None) -> int:
     return removed
 
 
+def _inside(path: Path, root: Path) -> bool:
+    """Whether a resolved path is inside a resolved containment root."""
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def copy_tracked_path(source: Path, destination: Path, *,
+                      source_root: Path, destination_root: Path) -> None:
+    """Copy one tracked path without permitting a symlink to escape."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_symlink():
+        link = source.readlink()
+        if link.is_absolute():
+            raise SandboxError(
+                f"{source} is an absolute symlink. The sandbox accepts only "
+                f"relative links contained by both repositories.")
+        resolved_source_root = source_root.resolve()
+        resolved_destination_root = destination_root.resolve()
+        source_target = (source.parent / link).resolve(strict=False)
+        destination_target = (destination.parent / link).resolve(strict=False)
+        if (not _inside(source_target, resolved_source_root)
+                or not _inside(destination_target,
+                               resolved_destination_root)):
+            raise SandboxError(
+                f"{source} has relative target {link} that escapes its "
+                f"source repository or destination sandbox.")
+        destination.symlink_to(link)
+        return
+    if not source.is_file():
+        raise SandboxError(
+            f"{source} is tracked and is neither a regular file nor a "
+            f"symlink. The sandbox cannot faithfully copy a gitlink or a "
+            f"deleted tracked path.")
+    shutil.copy2(source, destination)
+
+
 def build() -> Sandbox:
-    """Copy the working-tree content of `git ls-files` into a fresh repo."""
+    """Copy the working-tree shape of `git ls-files` into a fresh repo."""
     names = repo_tracked_paths()
     if not names:
         raise SandboxError(
@@ -311,23 +350,18 @@ def build() -> Sandbox:
     target = Path(tempfile.mkdtemp(prefix=SANDBOX_PREFIX))
     for name in names:
         source = REPO_ROOT / name
-        if not source.is_file():
-            # Refused rather than skipped. A tracked path that is a symlink, a
-            # gitlink or a broken link was dropped silently, so the sandbox
-            # differed from the repository and a guard about that path could
-            # not fire. There are none today, every tracked entry being
-            # 100644 or 100755, and a silent divergence between the copy and
-            # the original is the one thing the control run assumes away.
-            raise SandboxError(
-                f"{name} is tracked and is not a regular file in the working "
-                f"tree. The sandbox is a copy of `git ls-files`, so a path it "
-                f"cannot copy makes the copy differ from the repository and "
-                f"every probe over that path prove nothing. Symlink, gitlink "
-                f"or deleted-but-tracked, each needs a decision rather than a "
-                f"skip.")
         destination = target / name
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+        try:
+            copy_tracked_path(
+                source,
+                destination,
+                source_root=REPO_ROOT,
+                destination_root=target,
+            )
+        except SandboxError as error:
+            raise SandboxError(
+                f"{name} cannot be copied faithfully into the sandbox: "
+                f"{error}") from error
     box = Sandbox(path=target)
     box.git("init", "-q", "-b", "main")
     box.git("config", "user.name", HARNESS_NAME)

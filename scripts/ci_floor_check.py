@@ -832,10 +832,12 @@ def _tolerates_failure(value: object) -> bool:
 
 @dataclass(frozen=True)
 class Command:
-    """One statement CI executes, and what decides whether it can fail the run.
+    """One statement CI may execute, and whether it proves a gate runs.
 
-    `tolerated` is the reason this command's FAILURE cannot fail the workflow,
-    and "" when nothing takes it away. **It exists because `continue-on-error`
+    `tolerated` is the reason this command cannot supply that proof. Its failure
+    may be discarded, or an earlier condition may skip it while a later command
+    leaves the step green. It is "" when nothing takes the proof away.
+    **It exists because `continue-on-error`
     was in the parsed tree and nothing read it, which the S03 review's
     thirteenth pass measured three ways**, each valid YAML, each leaving this
     check at exit 0 with the `guards` gate covered: the key on the `gate
@@ -846,7 +848,7 @@ class Command:
     tolerating flakiness.
 
     A tolerated command is kept in the list rather than dropped, so that `main`
-    can say WHICH of the three shapes took the gate away. Every consumer asks
+    can say which shell shape took the gate away. Every consumer asks
     `runs_on` first and a tolerated command answers no on every event.
     """
 
@@ -1194,10 +1196,9 @@ def covers(gate: str, arms: dict[str, list[str]],
     """Do these steps run the WHOLE gate.
 
     A step naming the gate runs every command in its arm by definition. Short
-    of that, every command in the arm has to be run by some step: a gate whose
-    arm is `a && b` is not invoked by a CI step that runs only `a`, and
-    treating it as invoked is how the `backlog` gate's estimate check could be
-    deleted from every pull request in one line.
+    of that, exact command equivalence is available only to an arm with one
+    visible command. Several direct steps do not preserve an arm's order, job
+    boundary or `&&` exit semantics, even if every argv is present.
 
     `bool(arm)` and not a bare `all()`. `native`, `panic` and `oracle` yield no
     extractable command, and `all([])` is true, so without this a gate whose
@@ -1207,7 +1208,7 @@ def covers(gate: str, arms: dict[str, list[str]],
     if gate in invoked_gates(commands):
         return True
     arm = arms.get(gate, [])
-    return bool(arm) and not missing_arm_commands(gate, arms, commands)
+    return len(arm) == 1 and not missing_arm_commands(gate, arms, commands)
 
 
 # The four command prefixes this file can see. Declared as a constant so the
@@ -2199,8 +2200,9 @@ def _tolerated_statements(text: str) -> dict[int, str]:
       AFTER`. errexit is suppressed for a command in an AND-OR list, and the
       short circuit means the command after the final `&&` never runs, so
       nothing fires it and the list's status is discarded. **A failing left
-      side of `&&` is therefore swallowed, which is the opposite of what this
-      function asserted when it was first written.**
+      side of `&&` is therefore swallowed. The right side is skipped, so it
+      cannot prove a gate ran either. Both lose their status when a later list
+      succeeds.**
     - `false && true` ALONE exits 1. The last list in the body decides the
       script's status, so the same statement is not swallowed there.
     - `false || false\\necho AFTER` exits 1 and `true | false\\necho AFTER`
@@ -2254,11 +2256,18 @@ def _tolerated_statements(text: str) -> dict[int, str]:
                 # false` exits 0 because the right side never ran, so `true ||
                 # bin/ocelli.sh gate guards` satisfied `guards` at exit 0 with
                 # the gate never executed. Found by the generated-input bash
-                # oracle. The right side of `&&` is the same shape and is NOT
-                # closed here, which the module docstring declares as a limit.
+                # oracle. The right side of `&&` is handled below because its
+                # skipped status is safe only when the AND-list ends the body.
                 tolerated[index] = ("a `||` before it means it runs only when "
                                     "the left-hand side failed, so nothing "
                                     "here says the shell runs it at all")
+                continue
+            if (not final and any(pairs[i][1] == "&&"
+                                  for i in segment[:position])):
+                tolerated[index] = (
+                    "an earlier `&&` means it runs only when the left-hand "
+                    "side succeeds, and a later statement can leave the step "
+                    "green when it does not run")
                 continue
             if position == len(segment) - 1:
                 continue
@@ -2559,8 +2568,8 @@ def main() -> int:
     for gate in [g for g in declared if g not in NOT_IN_FLOOR]:
         touching = steps_running(gate, arms, commands)
         running = [c for c in touching if not c.tolerated]
-        # The step is IN the file, it names the gate, and its failure cannot
-        # fail the workflow. Without this the refusal below would fire on
+        # The step is in the file and mentions the gate, but does not prove the
+        # gate runs and reports failure. Without this the refusal below fires on
         # `blocked` and quote an empty condition, sending its reader to look
         # for an `if:` that is not there. `Command.tolerated` records why, and
         # the three shapes it distinguishes are the thirteenth pass's three
@@ -2569,11 +2578,12 @@ def main() -> int:
                             if command.tolerated})
         note = ""
         if tolerated:
-            note = (f" A step in {WORKFLOW.relative_to(ROOT)} does run this "
-                    f"gate and is not counted, because its failure cannot "
-                    f"fail the workflow: {'; '.join(tolerated)}. `--floor` "
-                    f"claims to be what CI runs, and a check whose red is "
-                    f"discarded is not a check CI runs.")
+            note = (f" A step in {WORKFLOW.relative_to(ROOT)} mentions this "
+                    f"gate and is not counted, because it is not guaranteed "
+                    f"to run it and report its failure: "
+                    f"{'; '.join(tolerated)}. `--floor` claims to be what CI "
+                    f"runs, and a skipped check or a discarded red is not a "
+                    f"check CI runs.")
         # Per event, not per step. Two steps with complementary conditions
         # cover the floor between them, and asking one step to cover every
         # event refuses that arrangement while naming no missing event, which
@@ -2583,43 +2593,62 @@ def main() -> int:
         # touching the gate reaches at all, `partial` is the events a step
         # reaches while leaving a command in the arm unrun.
         #
-        # `unnamed` is the third: the events on which a gate whose arm holds a
-        # command this file CANNOT see is not invoked by name. `covers` is
-        # blind to those commands by construction, so it can answer yes over a
-        # smaller arm, and a step naming the gate is the only thing that runs
-        # them. Asked per event for the same reason as the other two.
+        # `unnamed` is the third: the events on which a gate that cannot be
+        # reconstructed command by command is not invoked by name. That is an
+        # arm with an unextractable command, or an arm with several visible
+        # commands whose ordering and job boundary direct argv equality does
+        # not prove. Asked per event for the same reason as the other two.
         blocked: list[str] = []
         partial: dict[str, list[str]] = {}
         unnamed: list[str] = []
         for event in sorted(events):
             reachable = [c for c in commands if c.runs_on({event})]
-            if unseen.get(gate) and gate not in invoked_gates(reachable):
-                unnamed.append(event)
-            if covers(gate, arms, reachable):
-                continue
             if not any(c in running for c in reachable):
                 blocked.append(event)
-            else:
-                partial[event] = missing_arm_commands(gate, arms, reachable)
+                continue
+            name_required = (bool(unseen.get(gate))
+                             or len(arms.get(gate, [])) > 1)
+            if name_required and gate not in invoked_gates(reachable):
+                unnamed.append(event)
+                continue
+            if covers(gate, arms, reachable):
+                continue
+            partial[event] = missing_arm_commands(gate, arms, reachable)
         if events and running and not blocked and not partial and not unnamed:
             continue
         if running and events and (blocked or partial or unnamed):
             if unnamed:
-                problems.append(
-                    f"the `{gate}` gate is in the CI floor, its arm in "
-                    f"bin/ocelli.sh runs "
-                    f"{', '.join(repr(c) for c in unseen[gate])}, and no step "
-                    f"in {WORKFLOW.relative_to(ROOT)} invokes "
-                    f"`bin/ocelli.sh gate {gate}` on "
-                    f"{', '.join(unnamed)}. This file's command extractor "
-                    f"recognises {', '.join(repr(p) for p in COMMAND_PREFIXES)}"
-                    f" and nothing else, so it cannot demand those commands "
-                    f"step by step and must not report the arm covered "
-                    f"without them. A step naming the gate runs the arm "
-                    f"entire by definition, and that is the only form this "
-                    f"check can accept here. Either restore the gate-name "
-                    f"step, or exclude the gate from the floor in "
-                    f"bin/ocelli.sh and say why." + note)
+                if len(arms.get(gate, [])) > 1:
+                    message = (
+                        f"the `{gate}` gate is in the CI floor, its arm in "
+                        f"bin/ocelli.sh runs several executable commands, and "
+                        f"no step in {WORKFLOW.relative_to(ROOT)} invokes "
+                        f"`bin/ocelli.sh gate {gate}` on "
+                        f"{', '.join(unnamed)}. Exact direct argv matches can "
+                        f"show that each command exists, but cannot show they "
+                        f"remain in the arm's order, in one job, with its "
+                        f"`&&` exit semantics. A visible multi-command floor "
+                        f"arm must be invoked by name. Either restore that "
+                        f"gate-name step, or exclude the gate from the floor "
+                        f"in bin/ocelli.sh and say why.")
+                else:
+                    message = (
+                        f"the `{gate}` gate is in the CI floor, its arm in "
+                        f"bin/ocelli.sh runs "
+                        f"{', '.join(repr(c) for c in unseen[gate])}, and no "
+                        f"step in {WORKFLOW.relative_to(ROOT)} invokes "
+                        f"`bin/ocelli.sh gate {gate}` on "
+                        f"{', '.join(unnamed)}. This file's command extractor "
+                        f"recognises "
+                        f"{', '.join(repr(p) for p in COMMAND_PREFIXES)} and "
+                        f"nothing else, so it cannot demand those commands "
+                        f"step by step and must not report the arm covered "
+                        f"without them. A step naming the gate runs the arm "
+                        f"entire by definition, and that is the only form "
+                        f"this check can accept here. Either restore the "
+                        f"gate-name step, or exclude the gate from the floor "
+                        f"in bin/ocelli.sh and say why.")
+                problems.append(message + note)
             if partial:
                 absent = sorted({command for gaps in partial.values()
                                  for command in gaps})
@@ -2681,8 +2710,8 @@ def main() -> int:
                             if command.tolerated})
         note = ""
         if tolerated:
-            note = (f" A step does run it and is not counted, because its "
-                    f"failure cannot fail the workflow: "
+            note = (f" A step mentions it and is not counted, because it is "
+                    f"not guaranteed to run and report its failure: "
                     f"{'; '.join(tolerated)}.")
         problems.append(
             f"the `{gate}` gate is excluded from the floor and needs no GPU, "

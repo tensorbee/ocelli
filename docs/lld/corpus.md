@@ -1,6 +1,6 @@
 # The golden corpus
 
-**F-IDs that contributed:** F-009, F-X006, F-X007
+**F-IDs that contributed:** F-009, F-013, F-X006, F-X007, F-X012, F-X013
 **Last updated:** 2026-09-06
 
 The corpus is the input every later correctness claim is measured on. It lives
@@ -41,6 +41,15 @@ that list would be free to drift from the cases themselves.
 cases has never seen a vendor's padding, private blocks or odd-length values.
 One of the four is Implicit VR Little Endian, which no synthetic case would
 have produced by accident.
+
+F-X012 adds `synthetic/ct_sigmoid_width_half.dcm`, a 12 by 20 CT whose stored
+values 151 through 170 become modality values 37.75 through 42.5 under slope
+0.25 and intercept 0. Its file window is centre 40, width 0.5 and function
+SIGMOID. The width is deliberately below LINEAR's minimum while remaining
+legal under PS3.3 C.11.2.1.3.1. The fixture transcribes that section's formula
+independently and pins display values 4.586483540333347, 30.396745115639977,
+127.5, 224.60325488436 and 250.41351645966665 at modality values 39.5 through
+40.5. No renderer supplies those answers.
 
 ## The `category` column is a token list, and a check reads it
 
@@ -87,6 +96,12 @@ evaluated once at import and then agrees with itself for the rest of the run.
 Two processes at two wall-clock moments is the cheapest thing that catches that
 class. A separate test asserts no case carries a clock reading and that every
 instance UID sits in the `2.25.` arc.
+
+F-013 gives `synthetic/ct_unsigned_16.dcm` a positive Presentation LUT Shape
+of `INVERSE`. The generated series spell a zero coordinate as positive zero.
+This matters because dicom-parser serializes JavaScript negative zero as zero,
+while pydicom preserves the Decimal String sign and the metadata checker
+deliberately compares their IEEE-754 values exactly.
 
 ## Which encoders leave a version, and which do not
 
@@ -171,7 +186,12 @@ uniform, which is ordinary for real data and is measured rather than judged.
   `openjp2` 0.6.1 is a C2Rust port of the OpenJPEG that encoded them, so its
   native decode is the same library on both sides, and `j2k_lossy` was compared
   against no other party at all. `docs/spikes/A1-htj2k-openjp2.md` carries
-  those digests.
+  those digests. F-X013 adds a different answer for the three `htj2k_*` rows:
+  `openjph-core` 0.1.0 reproduces the synthetic ramp exactly for `.201` and
+  `.202` on native and wasm. That ramp is the independent anchor. For `.203`,
+  the crate and `ojph_expand` share OpenJPH lineage, so their 41 one-level
+  differences are a measured divergence and not independent confirmation.
+  `docs/spikes/A1-htj2k-route.md` carries the exact digests and limitation.
 - **No encapsulation edge cases.** Every compressed case is one frame in one
   fragment with a populated Basic Offset Table, so multi-fragment frames, a
   multi-frame encapsulated instance and an empty Basic Offset Table are

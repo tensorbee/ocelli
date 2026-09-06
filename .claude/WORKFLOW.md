@@ -41,6 +41,19 @@ Ending a turn with sprint work outstanding and no blocking question is a defect
 in the run, not a checkpoint. An operator typing "keep going" means the rule
 was broken.
 
+Readiness is evidence about one exact tree, not a durable green flag. Each
+whole-sprint review records its counts and `git write-tree`. Each sprint-profile
+verification records the same identity. `close-preflight` accepts only a clean
+latest review and a passing latest verification for the current HEAD tree, with
+no staged, unstaged or untracked changes. Any remediation therefore requires a
+new verification and a new whole-sprint review.
+
+A story that cannot finish for an external or dependency reason is `carried`,
+not `completed`. The close preflight accepts that state only when the story has
+a non-empty reason under `## Carried forward from SNN` in
+`CURRENT_SPRINT.md`. Carried stories do not require a feature review because no
+implementation is being claimed.
+
 ## Atomic feature rhythm
 
 ```text

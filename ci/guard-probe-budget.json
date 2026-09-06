@@ -5,6 +5,11 @@
       "guard": "lint-policy",
       "tunable": false
     },
+    "bin/ocelli.sh:WASM_VIEW_TEST_REGISTRATION": {
+      "digest": "755606ce4c0517c9",
+      "guard": "lint-policy",
+      "tunable": false
+    },
     "ci/check-device-ownership.sh:CREATORS": {
       "digest": "947444bdc1ce1b8c",
       "guard": "device",
@@ -13,11 +18,6 @@
     "ci/check-device-ownership.sh:OWNED_ACCESSORS": {
       "digest": "a8f8c2967de78d46",
       "guard": "device",
-      "tunable": false
-    },
-    "crates/*/src/lib.rs:NO_STD_CRATES": {
-      "digest": "a7d75f8deccc3710",
-      "guard": "nostd",
       "tunable": false
     },
     "eslint.config.js:LINEAR_MEMORY_ALLOWANCE": {
@@ -30,13 +30,18 @@
       "guard": "lint-policy",
       "tunable": false
     },
-    "eslint.config.js:NO_CACHED_WASM_VIEW_DESTRUCTURED": {
-      "digest": "a4095f31e3b24328",
+    "eslint.config.js:TYPED_ARRAY_CONSTRUCTORS": {
+      "digest": "ab6095711f3ed197",
       "guard": "lint-policy",
       "tunable": false
     },
-    "eslint.config.js:NO_CACHED_WASM_VIEW_MEMBER": {
-      "digest": "40eb944c8af3775a",
+    "eslint.config.js:WASM_VIEW_DETECTION": {
+      "digest": "8b9a6a855fdb02d5",
+      "guard": "lint-policy",
+      "tunable": false
+    },
+    "eslint.config.js:WASM_VIEW_SELF_CHECK": {
+      "digest": "33ab26588edf445c",
       "guard": "lint-policy",
       "tunable": false
     },
@@ -75,8 +80,18 @@
       "guard": "lint-policy",
       "tunable": false
     },
+    "scripts/no_std_check.py:EXPECTED_NO_STD_CRATES": {
+      "digest": "171730a323985d65",
+      "guard": "nostd",
+      "tunable": false
+    },
     "scripts/pin_and_size_check.py:EXACT_PINNED": {
       "digest": "b98559eaf372548e",
+      "guard": "pins",
+      "tunable": false
+    },
+    "scripts/pin_and_size_check.py:PACKAGE_LICENCES": {
+      "digest": "bdb887fe9cd6c708",
       "guard": "pins",
       "tunable": false
     },
@@ -111,7 +126,7 @@
       "tunable": false
     },
     "scripts/sprint_workflow.py:HANDOFF_FIELDS": {
-      "digest": "88c23fe498dee282",
+      "digest": "30f747a55bdc5576",
       "guard": "handoff",
       "tunable": false
     },
@@ -161,7 +176,7 @@
       "tunable": false
     }
   },
-  "constants_count": 32,
+  "constants_count": 35,
   "entry_sites": {
     "backlog": 10,
     "bench": 32,
@@ -173,7 +188,7 @@
     "bench.state": 3,
     "bindgen": 3,
     "bootstrap-importer": 5,
-    "catalogue": 71,
+    "catalogue": 72,
     "census": 35,
     "census-runbook": 3,
     "ci-floor": 25,
@@ -189,7 +204,7 @@
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
     "lint-policy": 28,
-    "nostd": 5,
+    "nostd": 8,
     "oracle.faults": 22,
     "oracle.faults-declaration": 2,
     "oracle.geometry": 6,
@@ -200,19 +215,20 @@
     "oracle.params": 3,
     "oracle.pins": 1,
     "oracle.sidecar": 1,
-    "oracle.sidecar-redaction": 29,
+    "oracle.sidecar-redaction": 31,
     "oracle.unsupported": 3,
     "oracle.voi": 5,
     "oracle.volume": 31,
     "packages": 21,
     "panic-probe": 1,
-    "pins": 10,
+    "pins": 14,
     "populate-corpus": 10,
     "probe-runner": 20,
     "prose": 3,
     "provenance": 4,
     "runner": 1,
-    "sandbox": 10,
+    "sandbox": 13,
+    "skill-examples": 15,
     "skills": 10,
     "source-dir": 2,
     "spikes.a1": 3,
@@ -220,8 +236,8 @@
     "spikes.compare": 6,
     "spikes.extract": 5,
     "split-hld": 5,
-    "sprint-lifecycle": 22,
-    "sprint-plan": 14,
+    "sprint-lifecycle": 32,
+    "sprint-plan": 15,
     "target-features": 6,
     "unsafe": 2
   },
@@ -229,11 +245,11 @@
   "note": "Recorded measurements, not guesses. `wall_clock_seconds` is what the harness took on the machine that recorded it. `constants` is the declared-constant ratchet, `constants_count` and `gates_declared` are the counts that catch one of those being removed rather than changed, `entry_sites` is the per-entry refusal count for the catalogue entries claiming their file with `\"*\"`, so a refusal added to an already claimed file moves a number when it takes one of the shapes scripts/guards/discover.py scans, `oracle_faults` is the fault-count ratchet and `uncovered` is the uncovered-refusal ratchet, all written by scripts/guard_census.py --record.",
   "oracle_faults": 23,
   "uncovered": {
-    "sites": 9,
-    "sweep_complete": false
+    "sites": 0,
+    "sweep_complete": true
   },
   "wall_clock_seconds": {
     "deep": 42.0,
-    "floor": 30.1
+    "floor": 33.0
   }
 }

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -30,7 +31,140 @@ from guards.catalogue import (CONSTANTS, DEFECTS, DICOM_FIXTURE,  # noqa: E402
                               GUARDS)
 
 
+class SandboxCopyPreservesTrackedShape(unittest.TestCase):
+    def test_a_relative_symlink_stays_a_relative_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            destination_root = root / "sandbox"
+            repository.mkdir()
+            destination_root.mkdir()
+            (repository / "LICENSE-MIT").write_text("grant\n", encoding="utf-8")
+            source = repository / "crates" / "ocelli-wasm" / "LICENSE-MIT"
+            source.parent.mkdir(parents=True)
+            source.symlink_to("../../LICENSE-MIT")
+            destination = destination_root / "crates" / "ocelli-wasm" / "LICENSE-MIT"
+
+            sandbox.copy_tracked_path(
+                source,
+                destination,
+                source_root=repository,
+                destination_root=destination_root,
+            )
+
+            self.assertTrue(destination.is_symlink())
+            self.assertEqual(destination.readlink(), Path("../../LICENSE-MIT"))
+
+    def test_an_absolute_symlink_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            destination_root = root / "sandbox"
+            source = repository / "absolute-link"
+            repository.mkdir()
+            destination_root.mkdir()
+            source.symlink_to(root / "outside")
+
+            with self.assertRaisesRegex(
+                    sandbox.SandboxError, "absolute symlink"):
+                sandbox.copy_tracked_path(
+                    source,
+                    destination_root / "absolute-link",
+                    source_root=repository,
+                    destination_root=destination_root,
+                )
+
+    def test_a_relative_symlink_escaping_only_the_source_root_is_refused(
+            self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            destination_root = root / "sandbox"
+            destination_root.mkdir()
+            source = repository / "nested" / "escaping-link"
+            source.parent.mkdir(parents=True)
+            source.symlink_to("../../outside")
+
+            with self.assertRaisesRegex(
+                    sandbox.SandboxError, "escapes"):
+                sandbox.copy_tracked_path(
+                    source,
+                    destination_root / "nested" / "deeper" / "escaping-link",
+                    source_root=repository,
+                    destination_root=destination_root,
+                )
+
+    def test_a_relative_symlink_escaping_only_the_destination_root_is_refused(
+            self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            destination_root = root / "sandbox"
+            destination_root.mkdir()
+            source = repository / "nested" / "deeper" / "escaping-link"
+            source.parent.mkdir(parents=True)
+            source.symlink_to("../../outside")
+
+            with self.assertRaisesRegex(
+                    sandbox.SandboxError, "escapes"):
+                sandbox.copy_tracked_path(
+                    source,
+                    destination_root / "nested" / "escaping-link",
+                    source_root=repository,
+                    destination_root=destination_root,
+                )
+
+    def test_an_unrepresentable_shape_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "tracked-directory"
+            source.mkdir()
+
+            with self.assertRaisesRegex(
+                    sandbox.SandboxError,
+                    "neither a regular file nor a symlink"):
+                sandbox.copy_tracked_path(
+                    source,
+                    root / "copy",
+                    source_root=root,
+                    destination_root=root,
+                )
+
+
 class CatalogueIsWellFormed(unittest.TestCase):
+    def test_the_skills_gate_names_its_checker_and_suite_exactly(self) -> None:
+        """The named CI gate must not lose either executable check."""
+        runner = (ROOT / "bin" / "ocelli.sh").read_text(encoding="utf-8")
+        arm = runner[runner.index("    skills)"):
+                     runner.index("    lint)")]
+        self.assertEqual(
+            arm,
+            "    skills)      python3 scripts/sync_agent_skills.py --check &&\n"
+            "                 python3 scripts/skill_examples_check.py &&\n"
+            "                 python3 -B -m unittest discover -s scripts/tests \\\n"
+            "                   -p test_skill_examples_check.py ;;\n",
+        )
+
+    def test_the_guards_gate_names_its_python_suites_exactly(self) -> None:
+        """A focused suite must not exist only as a manual invocation."""
+        runner = (ROOT / "bin" / "ocelli.sh").read_text(encoding="utf-8")
+        arm = runner[runner.index("    guards)"):
+                     runner.index("    guards-deep)")]
+        suites = re.findall(
+            r"python3 -B -m unittest discover -s scripts/tests \\\n"
+            r"\s+-p ([\w.]+)",
+            arm,
+        )
+        self.assertEqual(
+            suites,
+            [
+                "test_guard_catalogue.py",
+                "test_sprint_workflow.py",
+                "test_gen_sprint_plan.py",
+                "test_guard_readers.py",
+            ],
+        )
+
     def test_every_entry_has_a_unique_id(self) -> None:
         ids = [g.id for g in GUARDS]
         self.assertEqual(len(ids), len(set(ids)), sorted(ids))

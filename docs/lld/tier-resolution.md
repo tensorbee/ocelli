@@ -1,6 +1,6 @@
 # Tier resolution
 
-**F-IDs that contributed:** F-004
+**F-IDs that contributed:** F-004, F-X001, F-X016
 **Last updated:** 2026-09-06
 
 How a session decides whether it is tier A, tier B or tier C, and how it
@@ -19,6 +19,11 @@ says that resolving from what the platform reports is precisely the defect:
 
 Everything below exists to make that one misdetection impossible to make
 quietly.
+
+Tier resolution answers what the session can construct. Each feature then
+turns that answer into `Available`, `Degraded` or `Unavailable` under the
+single contract in [feature-availability.md](feature-availability.md). It does
+not probe again or reinterpret the adapter evidence.
 
 ## The two halves, and why they are two files
 
@@ -104,26 +109,18 @@ spike and is deliberately not part of F-004.
 1. **An override of tier C short-circuits everything.** No instance, no
    adapter, no device, no benchmark. `decided_by` records `Override`, and
    `measured_tier` is `None` because nothing was measured.
-2. **Rank the candidates.** An adapter on `BrowserWebGpu`, `Vulkan`, `Metal`
+2. **Rank every candidate.** An adapter on `BrowserWebGpu`, `Vulkan`, `Metal`
    or `Dx12` with `DownlevelFlags::COMPUTE_SHADERS` present is an
    **A-candidate**. An adapter on `Gl`, or one without compute shaders, is a
-   **B-candidate**. `Backend::Noop` is never a candidate. The best A-candidate
-   wins, then the best B-candidate, with the adapter's own device type
-   breaking ties within a class and an earlier adapter winning an exact tie.
+   **B-candidate**. `Backend::Noop` is never a candidate. All A candidates
+   precede all B candidates, with the adapter's own device type breaking ties
+   within a class and an earlier adapter winning an exact tie.
 3. **No candidate resolves tier C**, `decided_by = NoAdapter`.
-4. **No device resolves tier C**, `decided_by = NoDevice`, recorded apart from
-   `NoAdapter` because they are different diagnoses. What it records is
-   narrower than "there is no GPU path to be had", and the narrow statement is
-   the true one: **the best candidate could not open a device, and no other
-   adapter was tried.** `probe.rs` calls `request_device` on the single adapter
-   `choose_candidate` returned and never tries the next, while native
-   `enumerate_adapters(Backends::all())` commonly returns several. So a host
-   with a broken Vulkan ICD beside a working GL driver picks the Vulkan
-   A-candidate, fails, and resolves tier C with a tier-B path present and
-   unattempted. Tier C renders nothing until F-X001 to F-X004, so the outcome
-   is "renders nothing" rather than "renders on tier B". Trying the next
-   adapter is a behaviour change with its own ranking and evidence questions
-   and belongs to a story rather than to this paragraph.
+4. **Try candidates in that order until one device opens.** Each failed
+   request is retained as `FailedAdapter`, with adapter facts and wgpu's
+   unstable diagnostic text. A broken Vulkan ICD therefore does not hide a
+   working GL path. `NoDevice` means every candidate was attempted and every
+   request failed. It is distinct from `NoAdapter`.
 5. **If the benchmark decided, it decides.** A7: "The micro-benchmark is the
    one to trust, and the strings are the hint. A renderer string is a claim. A
    measured fill rate is a fact." The other two verdicts are still computed
@@ -292,21 +289,14 @@ ignore the override exists to prevent.
 | Requested | Constructible when | Otherwise |
 |-----------|--------------------|-----------|
 | `cpu` | always | n/a |
-| `b` | some adapter is a candidate **and a device was created** | refused, recorded, the measured tier stands |
-| `a` | some adapter is an A-candidate **and a device was created** | refused, recorded, the measured tier stands |
+| `b` | the adapter whose device opened is an A or B candidate | refused, recorded, the measured tier stands |
+| `a` | the adapter whose device opened is an A candidate | refused, recorded, the measured tier stands |
 
-**Both halves, and the second one is not decoration.** An adapter appearing in
-the enumeration says a tier-A adapter EXISTS. `signals.device_created` says one
-could actually be opened, and they are different facts. The measured path
-already refuses a GPU tier without a device, at `DecidedBy::NoDevice`, and
-until the S03 sprint review's first pass the override bypassed it:
-`OCELLI_TIER=a` on a host where `request_device` failed returned tier A with
-`Applied(A)`, against this step's own promise that an override is clamped to
-what is constructible. The two `TierRequest::Requested` guard arms in
-`classify` carry the corrected condition, `has_a_candidate &&
-signals.device_created` and `candidate_tier.is_some() &&
-signals.device_created`, and `tests/classify_is_total.rs` asserts it over every
-generated combination rather than only over the override path.
+**Enumeration is not construction.** `ProbeOutcome::Opened` carries the one
+adapter whose request succeeded. A failed A candidate remains diagnostic
+evidence and cannot make tier A constructible after a B adapter opens.
+`tests/classify_is_total.rs` asserts that every GPU result has an opened
+adapter and that tier A has an opened A candidate.
 
 **Forcing tier B onto a rasteriser the evidence called software is
 deliberately allowed.** That is how the misdetection gets diagnosed on the
@@ -369,7 +359,7 @@ other value would be invented.
 
 ## The device is transient
 
-The probe device is created, measured on and dropped before `resolve` returns.
+The first probe device that opens is measured and dropped before `resolve` returns.
 It never becomes a `GpuContext`, so HLD section 31's one-device invariant is
 untouched: there is never a moment when two devices exist. The call sits
 inside `ocelli-render`, which is the only crate permitted to make one, and
@@ -390,12 +380,20 @@ backend converts the core error into `Err` rather than panicking, at
 `src/backend/wgpu_core.rs:943` to `:948`, over the
 `RequestDeviceError::LimitsExceeded` raised in
 `wgpu-core-30.0.1/src/instance.rs:941`. The browser backend maps a rejected
-promise the same way. So the `let Ok((device, queue)) =
-adapter.request_device(...) else` arm in `probe.rs`'s `measure_chosen` is
-reachable and the
-`NoDevice` path is not dead code, which it would have to be if the flat "it
-panics" this paragraph used to carry were the whole story. Asking for the
-adapter's own limits means neither answer is exercised here.
+promise the same way. The `Err` arm records the adapter and
+`error.to_string()`, then tries the next
+candidate. The text is explicitly unstable diagnostic evidence. Tests assert
+the failed outcome and adapter identity rather than matching wgpu's wording.
+Asking for the adapter's own limits means neither documented limit failure is
+exercised here.
+
+`probe.rs` puts candidate ordering, continuation after failure, successful
+termination and exhausted termination in the production-used
+`attempt_candidates` function. Its asynchronous operation is a generic
+parameter with concrete wgpu and deterministic test instantiations today. This
+keeps the device boundary direct and adds no mock trait. The deterministic
+instantiation proves that a failed first candidate reaches the second and that
+an all-failed run retains every attempt.
 
 ## SIMD, and the threads field that deliberately does not exist
 
@@ -497,7 +495,13 @@ red, which is HLD 27.3's third bullet and is recorded per row in
 | Guard | Where | What it refuses |
 |-------|-------|-----------------|
 | `the_recorded_bands_match_the_checked_in_file` | `caps.rs` | `FillRateBands::RECORDED` drifting away from `ci/tier-thresholds.json` |
-| `classify_is_total_and_never_invents_a_tier` | `crates/ocelli-render/tests/classify_is_total.rs` | Tier A without an A-candidate, tier B without any candidate, tier C with a non-zero `Caps`, a panic on any signal combination |
+| `classify_is_total_and_never_invents_a_tier` | `crates/ocelli-render/tests/classify_is_total.rs` | Tier A without an opened A adapter, tier B without any opened candidate, tier C with a non-zero `Caps`, an empty `NoDevice` failure list, or a panic on any generated probe outcome |
+| `candidate_indices_are_ordered_for_fallback` | `caps.rs` | Reversing the attempt order, putting B before A, changing the device-type preference, losing enumeration-order tie breaking, or attempting `Backend::Noop` |
+| `all_failed_candidates_resolve_no_device_with_every_attempt_recorded` | `caps.rs` | Discarding a failed adapter, collapsing all-failed into `NoAdapter`, or losing unstable diagnostic text from the evidence record |
+| `a_failed_a_followed_by_an_opened_b_clamps_overrides_to_the_opened_adapter` | `caps.rs` | Letting a failed A candidate make tier A constructible after a B device opened, or refusing the working B fallback |
+| `a_successful_adapter_classified_as_software_resolves_cpu` | `caps.rs` | Continuing adapter selection after a device opens instead of applying the existing software-evidence rule to that opened adapter |
+| `a_failed_first_attempt_continues_to_the_successful_second_candidate` | `probe.rs` | Stopping the production-used attempt loop after the preferred candidate fails |
+| `exhausting_the_attempt_loop_retains_every_failure` | `probe.rs` | Ending an all-failed production-used attempt loop before every ranked candidate has been attempted and recorded |
 | `each_a7_software_renderer_string_resolves_cpu` | `caps.rs` | **Any single** A7 renderer string being dropped from the list, and an entry added to it with no case of its own. Each row is a whole renderer string paired with the one entry it stands for, the rows are asserted equal to the constant in order, and each row is asserted to match its own entry and no other. Until the fifth review pass the `gallium` row read `"Gallium 0.4 on llvmpipe"`, which matches `llvmpipe` on its own, so the entry-by-entry claim this row makes was not true of `gallium` |
 | `the_a7_list_is_seven_lowercase_entries` | `caps.rs` | An entry added in mixed case, which the lowercase match would never find |
 | `the_renderer_string_match_is_case_insensitive_and_covers_every_field` | `caps.rs` | Any one of `name`, `driver` and `driver_info` leaving the haystack. Each field carries an A7 string on its own with the other two clean. Until the seventh review pass only `driver_info` did, and `driver` is `String::new()` in every fixture, so dropping it was invisible while this row's own name claimed three fields |

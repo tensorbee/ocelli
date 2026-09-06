@@ -299,6 +299,30 @@ def _oversize_wasm(box: Sandbox) -> None:
     box.write("ci/wasm-size-budget.json",
               json.dumps({"bytes": 1000, "tolerance": 0.05}, indent=2) + "\n")
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 4096)
+    _write_packaged_licences(box)
+
+
+def _write_packaged_licences(box: Sandbox, *, omit: str = "") -> None:
+    for name in ("LICENSE-MIT", "LICENSE-APACHE"):
+        if name != omit:
+            box.write(f"crates/ocelli-wasm/pkg/{name}",
+                      (box.path / name).read_bytes())
+
+
+def _missing_packaged_apache_licence(box: Sandbox) -> None:
+    box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
+    _write_packaged_licences(box, omit="LICENSE-APACHE")
+
+
+def _symlinked_packaged_apache_licence(box: Sandbox) -> None:
+    box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
+    _write_packaged_licences(box, omit="LICENSE-APACHE")
+    packaged = box.path / "crates/ocelli-wasm/pkg/LICENSE-APACHE"
+    packaged.symlink_to("../../../LICENSE-APACHE")
+
+
+def _stale_operational_parity_target(box: Sandbox) -> None:
+    box.substitute(".claude/commands/parity.md", "5.8.2", "5.8.9")
 
 
 def _corpus_two_rows(box: Sandbox, digests: tuple[str, str],
@@ -422,6 +446,23 @@ def _drop_no_std_everywhere(box: Sandbox) -> None:
         raise AssertionError("no crate declared no_std to remove")
 
 
+def _add_no_std_to_one_other_crate(box: Sandbox) -> None:
+    attribute = "#![cfg_attr(not(test), no_std)]"
+    lib = box.path / "crates" / "ocelli-compute" / "src" / "lib.rs"
+    box.write(
+        "crates/ocelli-compute/src/lib.rs",
+        f"{attribute}\n{lib.read_text(encoding='utf-8')}",
+    )
+
+
+def _shrink_expected_no_std_set(box: Sandbox) -> None:
+    box.substitute(
+        "scripts/no_std_check.py",
+        '    "ocelli-cache",\n',
+        "",
+    )
+
+
 def _glam_reaches_std(box: Sandbox) -> None:
     box.substitute(
         "Cargo.toml",
@@ -520,6 +561,15 @@ def _prose_commit_message(box: Sandbox) -> None:
 
 def _sprint_plan_absent(box: Sandbox) -> None:
     box.delete("docs/sprints/SPRINT_PLAN.md")
+
+
+def _sprint_plan_hand_curated(box: Sandbox) -> None:
+    """Give the bare writer content it must refuse rather than replace."""
+    box.substitute(
+        "docs/sprints/SPRINT_PLAN.md",
+        "# Sprint Plan\n",
+        "# Sprint Plan\n\nA hand-curated paragraph the generator cannot recover.\n",
+    )
 
 
 def _sprint_plan_wrong_estimate(box: Sandbox) -> None:
@@ -681,6 +731,30 @@ def _stale_codex_adapter(box: Sandbox) -> None:
                "\nA line the adapter has not seen.\n")
 
 
+def _changed_skill_example_digit(box: Sandbox) -> None:
+    box.substitute(
+        ".claude/skills/dicom-tooling/SKILL.md",
+        "    40   127.820   127.500",
+        "    40   127.821   127.500",
+    )
+
+
+def _reverse_skill_sigmoid_exponent(box: Sandbox) -> None:
+    box.substitute(
+        ".claude/skills/dicom-tooling/SKILL.md",
+        "math.exp(-4 * (x - c) / w)",
+        "math.exp(4 * (x - c) / w)",
+    )
+
+
+def _reverse_skill_sigmoid_width_precondition(box: Sandbox) -> None:
+    box.substitute(
+        ".claude/skills/dicom-tooling/SKILL.md",
+        '"""PS3.3 C.11.2.1.3.1. Requires w > 0."""\n    assert w > 0',
+        '"""PS3.3 C.11.2.1.3.1. Requires w > 0."""\n    assert w < 0',
+    )
+
+
 def _renumber_an_error_code(box: Sandbox) -> None:
     registry = json.loads(box.read("ci/error-codes.json"))
     codes = registry["codes"]
@@ -829,6 +903,156 @@ def sprint_state(box: Sandbox) -> str:
     return fids[0]
 
 
+def _write_close_state(
+        box: Sandbox,
+        *,
+        sprint_reviews: list[dict[str, object]] | None = None,
+        verifications: list[dict[str, object]] | None = None,
+        legacy: bool = False,
+) -> None:
+    """Write completed sprint state for close-preflight probes."""
+    sprint = re.search(r"^#\s+Current sprint,\s*(S[\d.]+)",
+                       box.read("docs/sprints/CURRENT_SPRINT.md"), re.M)
+    if sprint is None:
+        raise AssertionError("CURRENT_SPRINT.md names no sprint")
+    name = sprint.group(1)
+    allocation = json.loads(box.read("docs/sprints/allocation.json"))
+    fids = sorted(s["fid"] for s in allocation["stories"]
+                  if s.get("sprint") == name)
+    tree = box.git("write-tree").stdout.strip()
+    data: dict[str, object] = {
+        "sprint": name,
+        "phase": "review",
+        "features": {
+            fid: {
+                "state": "completed",
+                "reviews": [{"pass": 1, "defects": 0, "smells": 0,
+                             "nitpicks": 0}],
+            }
+            for fid in fids
+        },
+        "verifications": verifications if verifications is not None else [{
+            "profile": "sprint",
+            "result": "pass",
+            "gates": "all",
+            "corpus": "pass",
+            "tree": tree,
+        }],
+    }
+    if not legacy:
+        data["sprint_reviews"] = (
+            sprint_reviews if sprint_reviews is not None else [{
+                "pass": 1,
+                "defects": 0,
+                "smells": 0,
+                "nitpicks": 0,
+                "tree": tree,
+            }]
+        )
+    box.write(f".claude/scratch/{name}-run.json",
+              json.dumps(data, indent=1) + "\n")
+
+
+def _close_preflight(box: Sandbox) -> "subprocess.CompletedProcess[str]":
+    sprint = re.search(r"^#\s+Current sprint,\s*(S[\d.]+)",
+                       box.read("docs/sprints/CURRENT_SPRINT.md"), re.M)
+    if sprint is None:
+        raise AssertionError("CURRENT_SPRINT.md names no sprint")
+    state = box.path / ".claude" / "scratch" / f"{sprint.group(1)}-run.json"
+    if not state.exists():
+        _write_close_state(box)
+    return box.run(["python3", "scripts/sprint_workflow.py",
+                    "close-preflight", sprint.group(1)])
+
+
+def _close_legacy_state(box: Sandbox) -> None:
+    _write_close_state(box, legacy=True, verifications=[{
+        "profile": "sprint", "result": "pass", "gates": "all",
+        "corpus": "pass",
+    }])
+
+
+def _close_dirty_sprint_review(box: Sandbox) -> None:
+    tree = box.git("write-tree").stdout.strip()
+    _write_close_state(box, sprint_reviews=[{
+        "pass": 2, "defects": 1, "smells": 0, "nitpicks": 0,
+        "tree": tree,
+    }])
+
+
+def _close_stale_sprint_review(box: Sandbox) -> None:
+    _write_close_state(box, sprint_reviews=[{
+        "pass": 2, "defects": 0, "smells": 0, "nitpicks": 0,
+        "tree": "0" * 40,
+    }])
+
+
+def _close_stale_verification(box: Sandbox) -> None:
+    _write_close_state(box, verifications=[{
+        "profile": "sprint", "result": "pass", "gates": "all",
+        "corpus": "pass", "tree": "0" * 40,
+    }])
+
+
+def _close_failed_latest_verification(box: Sandbox) -> None:
+    tree = box.git("write-tree").stdout.strip()
+    _write_close_state(box, verifications=[
+        {"profile": "sprint", "result": "pass", "gates": "all",
+         "corpus": "pass", "tree": tree},
+        {"profile": "sprint", "result": "fail", "gates": "all",
+         "corpus": "pass", "tree": tree},
+    ])
+
+
+def _close_tree_changed_after_evidence(box: Sandbox) -> None:
+    _write_close_state(box)
+    box.write("probe-close-change.txt", "changes the staged tree\n")
+    box.stage_all()
+
+
+def _close_carried(box: Sandbox, *, recorded: bool) -> None:
+    """Put one story in carried state, with or without a tracked reason."""
+    _write_close_state(box)
+    sprint = re.search(r"^#\s+Current sprint,\s*(S[\d.]+)",
+                       box.read("docs/sprints/CURRENT_SPRINT.md"), re.M)
+    if sprint is None:
+        raise AssertionError("CURRENT_SPRINT.md names no sprint")
+    section = re.search(
+        rf"^## Carried forward from {re.escape(sprint.group(1))}\s*$\n"
+        r"(.*?)(?=^## |\Z)",
+        box.read("docs/sprints/CURRENT_SPRINT.md"),
+        re.M | re.S,
+    )
+    recorded_fids = set() if section is None else set(re.findall(
+        r"^- \*\*(F-X?\d{3}[a-z]?)\*\*\s+\S.*$",
+        section.group(1),
+        re.M,
+    ))
+    state_path = (box.path / ".claude" / "scratch" /
+                  f"{sprint.group(1)}-run.json")
+    data = json.loads(state_path.read_text())
+    candidates = sorted(
+        fid for fid in data["features"]
+        if (fid in recorded_fids) == recorded
+    )
+    if not candidates:
+        kind = "recorded" if recorded else "unrecorded"
+        raise AssertionError(f"sprint has no {kind} carry-forward candidate")
+    data["features"][candidates[0]]["state"] = "carried"
+    box.write(
+        str(state_path.relative_to(box.path)),
+        json.dumps(data, indent=1) + "\n",
+    )
+
+
+def _close_unrecorded_carry(box: Sandbox) -> None:
+    _close_carried(box, recorded=False)
+
+
+def _close_recorded_carry(box: Sandbox) -> None:
+    _close_carried(box, recorded=True)
+
+
 def _handoff(box: Sandbox, branch: str) -> None:
     fid = sprint_state(box)
     box.write(f".claude/handoffs/{fid}-ready.md",
@@ -836,6 +1060,7 @@ def _handoff(box: Sandbox, branch: str) -> None:
               f"**Branch**: {branch.replace('FID', fid.lower())}\n"
               f"**Base**: sprint/s03\n"
               f"**Head**: 0123456789ab\n"
+              f"**Files touched**: scripts/probe.py\n"
               f"**Review**: pass 1, zero defects\n"
               f"**Verify tree**: 0123456789ab\n")
     box.write(".claude/probe-fid", fid)
@@ -847,6 +1072,54 @@ def _handoff_wrong_branch(box: Sandbox) -> None:
 
 def _handoff_backticked_branch(box: Sandbox) -> None:
     _handoff(box, "`work/FID-agent`")
+
+
+def _handoff_without_files_touched(box: Sandbox) -> None:
+    _handoff(box, "work/FID-agent")
+    fid = (box.path / ".claude" / "probe-fid").read_text().strip()
+    box.substitute(
+        f".claude/handoffs/{fid}-ready.md",
+        "**Files touched**: scripts/probe.py\n",
+        "",
+    )
+
+
+def _handoff_field_value(box: Sandbox, field: str, old: str, new: str) -> None:
+    _handoff(box, "work/FID-agent")
+    fid = (box.path / ".claude" / "probe-fid").read_text().strip()
+    box.substitute(
+        f".claude/handoffs/{fid}-ready.md",
+        f"**{field}**: {old}\n",
+        f"**{field}**: {new.replace('FID', fid.lower())}\n",
+    )
+
+
+def _handoff_multiple_code_spans(box: Sandbox) -> None:
+    _handoff(box, "`work/FID-agent` `forged`")
+
+
+def _handoff_unmatched_code_span(box: Sandbox) -> None:
+    _handoff_field_value(box, "Files touched", "scripts/probe.py",
+                         "`scripts/probe.py")
+
+
+def _handoff_embedded_code_span(box: Sandbox) -> None:
+    _handoff_field_value(box, "Head", "0123456789ab", "0123`forged`456")
+
+
+def _handoff_empty_code_span(box: Sandbox) -> None:
+    _handoff_field_value(box, "Review", "pass 1, zero defects", "``")
+
+
+def _handoff_forged_suffix(box: Sandbox) -> None:
+    _handoff_field_value(box, "Base", "sprint/s03", "`sprint/s03`forged")
+
+
+def _handoff_duplicate_head(box: Sandbox) -> None:
+    _handoff(box, "work/FID-agent")
+    fid = (box.path / ".claude" / "probe-fid").read_text().strip()
+    path = f".claude/handoffs/{fid}-ready.md"
+    box.write(path, box.read(path) + "**Head**: forged\n")
 
 
 def _validate_handoff(sandbox: Sandbox) -> "subprocess.CompletedProcess[str]":
@@ -2193,56 +2466,92 @@ def _ci_arm_commands(box: Sandbox, gate: str) -> list[str]:
     return ci_floor_check.gate_commands(box.read("bin/ocelli.sh")).get(gate, [])
 
 
-def _a_floor_gate_run_command_by_command(box: Sandbox) -> tuple[str, list[str]]:
-    """A floor gate CI runs as its separate commands rather than by name.
+def _leave_one_visible_arm_command(box: Sandbox, gate: str,
+                                   keep: str | None = None) -> None:
+    """Reduce an arm to one visible command without removing other work.
 
-    Returns the gate and the `ci.yml` lines running each of its arm commands.
-    Only a gate with two or more such lines can show the defect, because the
-    hole was that running ONE of several counted as running the gate.
+    F-X010 requires a named invocation as soon as an arm has several visible
+    commands. Older probes that expand a named step must keep one visible
+    command or that stronger rule masks the parser boundary they are about.
+    Shell builtins remain real arm statements but are outside the extractor's
+    deliberately small command vocabulary.
     """
+    commands = _ci_arm_commands(box, gate)
+    runner = box.read("bin/ocelli.sh")
+    survivor = (keep if keep is not None else
+                next((command for command in commands
+                      if command not in runner), commands[0]))
+    for command in commands:
+        if command != survivor and command in box.read("bin/ocelli.sh"):
+            box.substitute("bin/ocelli.sh", command, "true")
+
+
+def _named_visible_multi_command_floor_gate(
+        box: Sandbox) -> tuple[str, str, list[str]]:
+    """A named floor gate with several visible and no invisible commands.
+
+    The absence of an invisible command isolates F-X010's rule from the older
+    extractor-vocabulary rule. The returned workflow line is the real named
+    step, so every mutation starts from a control the guard accepts.
+    """
+    import ci_floor_check
+    runner = box.read("bin/ocelli.sh")
     workflow = box.read(".github/workflows/ci.yml")
-    named = set(re.findall(r"bin/ocelli\.sh gate ([a-z-]+)", workflow))
-    for gate in sorted(set(re.findall(r'^\s*"([a-z-]+)\|no\|',
-                                      box.read("bin/ocelli.sh"), re.M))):
-        if gate in named:
+    excluded = _not_in_floor(box)
+    invisible = ci_floor_check.unseen_commands(runner)
+    for line in workflow.splitlines():
+        match = re.search(r"bin/ocelli\.sh gate ([a-z-]+)", line)
+        if match is None or not line.lstrip().startswith("- run:"):
             continue
-        arm = [c.strip() for c in _ci_arm_commands(box, gate)]
-        lines = [line for line in workflow.splitlines()
-                 if any(c and c in line for c in arm)]
-        if len(arm) >= 2 and len(lines) >= 2:
-            return gate, lines
+        gate = match.group(1)
+        commands = _ci_arm_commands(box, gate)
+        if (gate not in excluded and len(commands) >= 2
+                and gate not in invisible):
+            return gate, line, commands
     raise AssertionError(
-        "no floor gate has two or more arm commands that ci.yml runs as "
-        "separate steps, so there is no partial invocation to build and this "
-        "probe would report its guard silent.")
+        "no floor gate with several visible and no invisible arm commands is "
+        "invoked by name, so the F-X010 probes cannot isolate their rule.")
 
 
-def _delete_one_command_of_a_gate(box: Sandbox) -> None:
-    """Delete ONE step of a multi-command gate and leave the rest.
-
-    The reviewer's measurement: with `gen_sprint_plan.py --check` deleted the
-    check exited 0, with `backlog_check.py` deleted instead it exited 0, and
-    only deleting both made it exit 1. So the estimate comparison could be
-    removed from every pull request by deleting one line.
-    """
-    _, lines = _a_floor_gate_run_command_by_command(box)
-    box.substitute(".github/workflows/ci.yml", lines[-1], "")
+def _split_a_multi_command_gate_across_steps(box: Sandbox) -> None:
+    """Replace one named gate step with its exact commands in arm order."""
+    gate, _, _ = _named_visible_multi_command_floor_gate(box)
+    _expand_the_step_for(box, gate)
 
 
-def _one_step_for_the_whole_arm(box: Sandbox) -> None:
-    """Replace a gate's several steps with one `bin/ocelli.sh gate <name>`.
+def _reorder_a_multi_command_gate_across_steps(box: Sandbox) -> None:
+    """Replace one named gate step with its exact commands in reverse order."""
+    _, line, commands = _named_visible_multi_command_floor_gate(box)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(
+        ".github/workflows/ci.yml", line,
+        "\n".join(f"{indent}- run: {command}"
+                  for command in reversed(commands)))
 
-    The accept direction, and it is why the rule is not simply "every command
-    must appear". A step naming the gate runs its whole arm by definition, and
-    a check that demanded the commands as well would refuse the arrangement
-    `ci.yml` already uses for `errors`, `bench`, `packages` and `guards`.
-    """
-    gate, lines = _a_floor_gate_run_command_by_command(box)
-    indent = " " * (len(lines[0]) - len(lines[0].lstrip()))
-    box.substitute(".github/workflows/ci.yml", lines[0],
-                   f"{indent}- run: bin/ocelli.sh gate {gate}")
-    for line in lines[1:]:
-        box.substitute(".github/workflows/ci.yml", line, "")
+
+def _split_a_multi_command_gate_across_jobs(box: Sandbox) -> None:
+    """Put exact arm commands in separate jobs with no ordering edge."""
+    _, line, commands = _named_visible_multi_command_floor_gate(box)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(".github/workflows/ci.yml", line,
+                   f"{indent}- run: {commands[0]}")
+    workflow = box.read(".github/workflows/ci.yml").rstrip()
+    second_job = (
+        "\n\n  f_x010_split:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n" +
+        "".join(f"      - run: {command}\n" for command in commands[1:]))
+    box.write(".github/workflows/ci.yml", workflow + second_job)
+
+
+def _name_a_multi_command_gate_step(box: Sandbox) -> None:
+    """Add a display name while keeping the gate in its existing CI job."""
+    gate, line, _ = _named_visible_multi_command_floor_gate(box)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(
+        ".github/workflows/ci.yml", line,
+        f"{indent}- name: Run the {gate} gate through its arm\n"
+        f"{indent}  run: bin/ocelli.sh gate {gate}")
 
 
 def _a_non_floor_gate_ci_runs(box: Sandbox) -> str:
@@ -2424,8 +2733,18 @@ def _expand_a_gate_step_into_its_visible_commands(box: Sandbox) -> None:
     edit that reads as expanding the step. The docstring's declaration that
     nothing was lost, because these gates "are each invoked by NAME in ci.yml",
     was enforced by nothing.
+    F-X010 gives every visible multi-command arm its own stronger reason to
+    require a name. One visible command is replaced with the shell builtin
+    `true` first, leaving exactly one visible command plus the invisible work,
+    so this probe still discriminates the extractor-vocabulary rule rather
+    than passing for F-X010's new reason.
     """
-    _expand_the_step_for(box, _a_gate_with_an_unextractable_arm_command(box))
+    gate = _a_gate_with_an_unextractable_arm_command(box)
+    runner = box.read("bin/ocelli.sh")
+    commands = _ci_arm_commands(box, gate)
+    removable = next(command for command in commands if command in runner)
+    box.substitute("bin/ocelli.sh", removable, "true")
+    _expand_the_step_for(box, gate)
 
 
 def _expand_the_step_for(box: Sandbox, gate: str) -> None:
@@ -2524,6 +2843,7 @@ def _replace_a_gate_step_with_a_narrowed_arm(box: Sandbox) -> None:
     `runs_command` searches rather than matches, and this exited 0.
     """
     gate, narrowed = _a_gate_whose_arm_names_a_test_suite(box)
+    _leave_one_visible_arm_command(box, gate, narrowed)
     commands = _ci_arm_commands(box, gate)
     suite = narrowed.split(" -p ", 1)[1].strip()
     workflow = box.read(".github/workflows/ci.yml")
@@ -2627,6 +2947,7 @@ def _work_inside_an_if_in_a_gate_arm(box: Sandbox) -> None:
     """
     import ci_floor_check
     gate = _a_gate_with_an_unextractable_arm_command(box)
+    _leave_one_visible_arm_command(box, gate)
     runner = box.read("bin/ocelli.sh")
     region = runner[runner.index("run_gate() {"):runner.index("skip() {")]
     arm = re.search(rf"^[ \t]*{re.escape(gate)}\).*?;;", region, re.M | re.S)
@@ -3196,6 +3517,7 @@ def _work_behind_the_command_builtin(box: Sandbox) -> None:
     """
     import ci_floor_check
     gate = _a_gate_with_an_unextractable_arm_command(box)
+    _leave_one_visible_arm_command(box, gate)
     runner = box.read("bin/ocelli.sh")
     region = runner[runner.index("run_gate() {"):runner.index("skip() {")]
     arm = re.search(rf"^[ \t]*{re.escape(gate)}\).*?;;", region, re.M | re.S)
@@ -3640,6 +3962,7 @@ def _a_background_operator_in_a_gate_arm(box: Sandbox) -> None:
     """
     import ci_floor_check
     gate = _a_gate_with_an_unextractable_arm_command(box)
+    _leave_one_visible_arm_command(box, gate)
     runner = box.read("bin/ocelli.sh")
     head = ci_floor_check.unseen_commands(runner)[gate][0].split(" ", 1)[0]
     label = re.search(rf"^[ \t]*{re.escape(gate)}\)", runner, re.M)
@@ -3775,6 +4098,22 @@ def _a_gate_step_whose_failure_is_swallowed(box: Sandbox) -> None:
     """
     _, line, indent, body = _gate_step_pieces(box)
     box.substitute(WORKFLOW_PATH, line, f"{indent}- {body} || true")
+
+
+def _a_gate_after_a_swallowed_and_condition(box: Sandbox) -> None:
+    """Put the gate on the conditional right side of a non-final AND-list.
+
+    MEASURED under `bash -e`: `false && GATE` followed by a successful command
+    exits 0 without running the gate. The final command is load-bearing. With
+    the AND-list last, the failed left side makes the step fail and the gate
+    need not run for the step to remain a valid CI control.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    command = body.removeprefix("run: ").strip()
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f"{indent}    false && {command}\n"
+                   f'{indent}    echo "later success"')
 
 
 # The `run:` body of the step `_gate_step_pieces` picks, without the YAML key.
@@ -4530,12 +4869,16 @@ GUARDS: tuple[Guard, ...] = (
     Guard(
         id="pins",
         file="scripts/pin_and_size_check.py",
-        gate="pins",
-        spec="HLD 15.2 and 27.2 R4, and story E1.2 for the ceiling",
+        gate="pins wasm",
+        spec="HLD 15.2 and 27.2 R4, story E1.2 for the ceiling, and "
+             "deviation D-11 for the operational parity target",
         refuses="A range where the specification requires an exact `=` pin, "
                 "an `=` in front of a partial version or a second comparator "
                 "after it, a pinned crate that has left the workspace table, "
-                "and a wasm module over its recorded ceiling.",
+                "a wasm module over its recorded ceiling, an operational "
+                "parity consumer naming a target other than 5.8.2, and a "
+                "generated wasm package missing either regular, "
+                "byte-identical dual-licence grant.",
         claims=("*",),
         probes=(
             Probe("pins.range", _relax_wgpu_pin,
@@ -4562,6 +4905,32 @@ GUARDS: tuple[Guard, ...] = (
                   note="Story E1.2's ceiling arithmetic, watched in the floor "
                        "with no wasm-pack. The probe writes a module of a "
                        "known length and a small recorded baseline."),
+            Probe("pins.package-licence-absent",
+                  _missing_packaged_apache_licence,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--with-size"),
+                  "LICENSE-APACHE is absent",
+                  note="F-X008. The workspace's `MIT OR Apache-2.0` choice "
+                       "requires both grants in the package. The probe keeps "
+                       "the wasm under budget and packages the MIT grant, so "
+                       "only the absent Apache grant can satisfy it."),
+            Probe("pins.package-licence-symlink",
+                  _symlinked_packaged_apache_licence,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--with-size"),
+                  "LICENSE-APACHE is a symlink, not a regular file",
+                  note="F-X008. The symlink resolves to the correct "
+                       "repository grant, so only accepting a link in place "
+                       "of package-owned licence bytes can satisfy it."),
+            Probe("pins.stale-operational-parity",
+                  _stale_operational_parity_target,
+                  script("node", "--test", "tools/oracle/tests/pins_test.mjs"),
+                  "does not name the oracle pin",
+                  note="F-X008 and D-11. The executable authority remains "
+                       "the exact 5.8.2 dependency pin. The rejected command "
+                       "claims 5.8.9 while the generator remains correct, so "
+                       "the test must read each operational consumer rather "
+                       "than merely finding 5.8.2 somewhere in the tree."),
             Probe("pins.table-form", _reorder_wgpu_table,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "pinned exactly",
@@ -4606,12 +4975,18 @@ GUARDS: tuple[Guard, ...] = (
                   script("python3", "scripts/no_std_check.py"),
                   "stopped declaring no_std",
                   needs="cargo", profile="deep",
-                  defect="G-02",
                   note="D-09 is a claim about a SET of crates. A crate that "
-                       "deletes the attribute leaves the set, and the guard "
-                       "reports a smaller number rather than a problem. The "
-                       "declared-constant ratchet in scripts/guard_census.py "
-                       "is what catches this today."),
+                       "deletes the attribute must be named by the direct "
+                       "comparison with EXPECTED_NO_STD_CRATES before any "
+                       "dependency graph is resolved."),
+            Probe("nostd.gains-a-crate", _add_no_std_to_one_other_crate,
+                  script("python3", "scripts/no_std_check.py"),
+                  "unexpectedly declares no_std",
+                  needs="cargo", profile="deep",
+                  note="The reverse set comparison. Entry-point and wgpu "
+                       "crates are deliberately outside the no_std set. A "
+                       "new attribute on one must be a reviewed posture "
+                       "change rather than silently joining by construction."),
         ),
     ),
 
@@ -4664,30 +5039,36 @@ GUARDS: tuple[Guard, ...] = (
                   lambda box: _delete_ci_step(box, leave_comment=False),
                   script("python3", "scripts/ci_floor_check.py"),
                   "and nothing in"),
-            Probe("ci-floor.partial-arm",
-                  _delete_one_command_of_a_gate,
+            Probe("ci-floor.multi-command-split-steps",
+                  _split_a_multi_command_gate_across_steps,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "runs only part of it on",
-                  note="A gate is every command in its arm. The `backlog` "
-                       "gate is `backlog_check.py && gen_sprint_plan.py "
-                       "--check`, and the S03 review's fourth pass measured "
-                       "that deleting either step alone left this check at 0 "
-                       "and only deleting both made it 1. So the estimate "
-                       "comparison added in the same pass could be removed "
-                       "from every pull request by deleting one line. The "
-                       "probe deletes ONE step and leaves the other."),
-            Probe("ci-floor.whole-arm-through-the-runner",
-                  _one_step_for_the_whole_arm,
+                  "visible multi-command floor arm must be invoked by name",
+                  note="F-X010. Every exact argv remains in the same job and "
+                       "in arm order, but separate YAML steps do not preserve "
+                       "the arm's `&&` failure semantics. Before this story "
+                       "the guard accepted this expansion."),
+            Probe("ci-floor.multi-command-reordered",
+                  _reorder_a_multi_command_gate_across_steps,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "visible multi-command floor arm must be invoked by name",
+                  note="F-X010. Every exact argv remains present and only "
+                       "their order changes. Per-command set coverage accepted "
+                       "this before the named-invocation rule."),
+            Probe("ci-floor.multi-command-split-jobs",
+                  _split_a_multi_command_gate_across_jobs,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "visible multi-command floor arm must be invoked by name",
+                  note="F-X010. Every exact argv remains in the workflow but "
+                       "lands in a different job with no ordering edge. A "
+                       "workflow-wide command set cannot prove one gate arm."),
+            Probe("ci-floor.multi-command-named-in-area-job",
+                  _name_a_multi_command_gate_step,
                   script("python3", "scripts/ci_floor_check.py"),
                   "floor gate(s) are invoked by CI on",
                   polarity="accept",
-                  note="The other direction, and it is why the rule is not "
-                       "\"every command must appear as its own step\". A step "
-                       "running `bin/ocelli.sh gate <name>` runs the whole arm "
-                       "by definition, which is how ci.yml already invokes "
-                       "`errors`, `bench`, `packages` and `guards`. A check "
-                       "that demanded the commands as well would refuse the "
-                       "arrangement the workflow uses today."),
+                  note="F-X010's accepted direction. The useful area job and "
+                       "a descriptive step name remain, while the run command "
+                       "delegates ordering and exit semantics to the gate."),
             Probe("ci-floor.non-floor-gate-not-run",
                   _delete_the_non_floor_ci_step,
                   script("python3", "scripts/ci_floor_check.py"),
@@ -4788,7 +5169,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.narrowed-arm-command",
                   _replace_a_gate_step_with_a_narrowed_arm,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "runs only part of it on",
+                  "and nothing in",
                   note="Every command of the arm appears as a step and one of "
                        "them discovers zero tests. The extraction class "
                        "stopped at a `\\` continuation, so `-p <suite>` fell "
@@ -4910,7 +5291,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.arm-comment-holding-a-terminator",
                   _arm_comment_holding_a_terminator,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "runs only part of it on",
+                  "visible multi-command floor arm must be invoked by name",
                   note="`SHELL_COMMENT` ran AFTER `ARM` had matched, and `ARM` "
                        "stops at the first `;;`, so a `;;` inside a shell "
                        "comment ended the arm before the comment was "
@@ -4956,7 +5337,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.arm-terminator-inside-a-quote",
                   _arm_terminator_inside_a_quote,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "runs only part of it on",
+                  "visible multi-command floor arm must be invoked by name",
                   note="The eighth pass's comment route one lexer rule along, "
                        "and stripping cannot reach this one. `ARM` stopped at "
                        "the first `;;` and a `;;` inside a quoted string is "
@@ -5047,7 +5428,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.comment-after-a-substitution",
                   _comment_after_a_substitution_in_an_arm,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "runs only part of it on",
+                  "visible multi-command floor arm must be invoked by name",
                   note="A REGRESSION the tenth pass introduced, not a "
                        "survival. That pass made `)` a word start, which is "
                        "right, and the scanner could not tell an operator `)` "
@@ -5119,7 +5500,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.heredoc-delimiter-backslash-quoted",
                   _a_backslash_quoted_heredoc_delimiter,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "--probe-extra",
+                  "visible multi-command floor arm must be invoked by name",
                   note="The twelfth pass's first measured fail-open, and the "
                        "last hand-written production in the tokenizer. "
                        "`HEREDOC` spelled bash's delimiter as a regex with an "
@@ -5133,7 +5514,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.heredoc-delimiter-quoted-with-a-hyphen",
                   _a_quoted_heredoc_delimiter_with_a_hyphen,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "--probe-extra",
+                  "visible multi-command floor arm must be invoked by name",
                   note="The second, and the one that shows the class was the "
                        "wrong SHAPE rather than the wrong class: `\\\\w*` "
                        "stopped at the hyphen and the back-reference to the "
@@ -5171,7 +5552,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.continuation-after-an-arm-comment",
                   _a_continuation_at_the_end_of_an_arm_comment,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "--probe-extra",
+                  "visible multi-command floor arm must be invoked by name",
                   note="A regex pre-pass over shell running BEFORE the "
                        "tokenizer, which is the one thing the tokenizer's own "
                        "header says no pass may do. MEASURED: a comment "
@@ -5484,7 +5865,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.continue-on-error-on-a-gate-step",
                   _continue_on_error_on_a_gate_step,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "because its failure cannot fail the workflow",
+                  "because it is not guaranteed to run it and report its failure",
                   note="`continue-on-error` was in the parsed tree and nothing "
                        "read it. The string occurred nowhere in `scripts/`, in "
                        "`docs/lld/guards.md` or in the runbook. MEASURED as "
@@ -5497,7 +5878,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.continue-on-error-on-the-job",
                   _continue_on_error_on_the_job,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "because its failure cannot fail the workflow",
+                  "because it is not guaranteed to run it and report its failure",
                   note="The same key one level up, where a reader looking at "
                        "the STEP sees nothing at all, and it takes every step "
                        "in the job with it. Both levels are read now, which is "
@@ -5507,7 +5888,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.gate-step-failure-swallowed",
                   _a_gate_step_whose_failure_is_swallowed,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "because its failure cannot fail the workflow",
+                  "because it is not guaranteed to run it and report its failure",
                   note="`|| true` appended to the run, the third route to the "
                        "same end. The step is there, it names the gate, bash "
                        "runs the gate and the step's exit status is `true`'s. "
@@ -5519,6 +5900,15 @@ GUARDS: tuple[Guard, ...] = (
                        "paragraph, because the obvious reading of that "
                        "paragraph is wrong: `false && true` followed by "
                        "another line exits 0."),
+            Probe("ci-floor.gate-after-swallowed-and-condition",
+                  _a_gate_after_a_swallowed_and_condition,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "an earlier `&&` means it runs only when the left-hand side succeeds",
+                  note="The gate is the right side of `false && gate`, with "
+                       "a later successful statement. bash exits 0 without "
+                       "running the gate. The scanner must discredit the "
+                       "invocation without also rejecting a terminal `cd x "
+                       "&& gate`, whose failed prefix makes the step red."),
             Probe("ci-floor.custom-shell-template-on-a-gate-step",
                   _a_custom_shell_template_on_a_gate_step,
                   script("python3", "scripts/ci_floor_check.py"),
@@ -6299,16 +6689,28 @@ GUARDS: tuple[Guard, ...] = (
         id="sprint-plan",
         file="scripts/gen_sprint_plan.py",
         gate="backlog",
-        spec="`.claude/WORKFLOW.md`, the sprint plan is derived and not "
-             "hand-maintained",
+        spec="`.claude/WORKFLOW.md`, the sprint roadmap is hand-curated after "
+             "bootstrap",
         refuses="A sprint plan that disagrees with the backlog about which "
                 "sprint a story is in or how large it is, a story planned "
                 "into two sprint tables at once, a generated milestone "
                 "summary or goal line that has drifted from the allocation it "
                 "is written from or that is absent, duplicated or spurious, "
-                "and an absent plan.",
+                "an absent plan, and a bare write that would replace an "
+                "existing hand-curated plan.",
         claims=("*",),
         probes=(
+            Probe("sprint-plan.existing-refuses-write",
+                  _sprint_plan_hand_curated,
+                  script("python3", "scripts/gen_sprint_plan.py"),
+                  "refuses to overwrite",
+                  control=script("python3", "scripts/gen_sprint_plan.py",
+                                 "--force"),
+                  note="F-X020. The rejected state differs from the control "
+                       "only in authority: the bare command has none to "
+                       "replace a file, while --force is explicit. The "
+                       "marker paragraph cannot be reconstructed from "
+                       "allocation.json, so a writer that runs destroys it."),
             Probe("sprint-plan.two-sprint-tables",
                   _sprint_plan_row_in_two_sprints,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
@@ -6377,13 +6779,57 @@ GUARDS: tuple[Guard, ...] = (
         ),
     ),
     Guard(
+        id="skill-examples",
+        file="scripts/skill_examples_check.py",
+        gate="skills",
+        spec="HLD 27.2 R2 and R3, HLD 27.3, and deviation D-13",
+        refuses="A malformed or duplicate marked skill example, an empty "
+                "example set, a nonzero or timed-out Python example, hidden "
+                "stderr, unexpected assertion output, or stdout that differs "
+                "from the declared result.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "skill-examples.changed-expected-digit",
+                _changed_skill_example_digit,
+                script("python3", "scripts/skill_examples_check.py"),
+                "stdout differs",
+                note="HLD 27.3 requires changing one expected value and "
+                     "watching the check fail. This changes the centre-row "
+                     "digit beside the PS3.3-derived VOI example without "
+                     "changing its calculation.",
+            ),
+            Probe(
+                "skill-examples.reversed-sigmoid-exponent",
+                _reverse_skill_sigmoid_exponent,
+                script("python3", "scripts/skill_examples_check.py"),
+                "stdout differs",
+                note="PS3.3 C.11.2.1.3.1 fixes the exponent sign. The "
+                     "selected input reduces the correct exponent to +1, so "
+                     "reversing the formula changes the declared output.",
+            ),
+            Probe(
+                "skill-examples.reversed-sigmoid-width-precondition",
+                _reverse_skill_sigmoid_width_precondition,
+                script("python3", "scripts/skill_examples_check.py"),
+                "exited 1",
+                note="PS3.3 C.11.2.1.3.1 requires positive width. Reversing "
+                     "that predicate rejects the positive-width arithmetic "
+                     "call before the zero-width refusal is reached.",
+            ),
+        ),
+    ),
+    Guard(
         id="handoff",
         file="scripts/sprint_workflow.py",
         gate="-",
         spec="`.claude/WORKFLOW.md` and `.claude/commands/complete-feature.md`",
-        refuses="A handoff missing a required field, or naming a branch that "
-                "is not this story's.",
+        refuses="A handoff missing or duplicating a required field, carrying "
+                "a malformed field value, or naming a branch that is not "
+                "this story's.",
         claims=(r"handoff has no", r"branch does not start with",
+                r"value must be", r"handoff has duplicate",
+                r"handoff field is malformed",
                 r"FAIL: handoff for", r"does not exist"),
         probes=(
             Probe("handoff.wrong-branch", _handoff_wrong_branch,
@@ -6395,26 +6841,57 @@ GUARDS: tuple[Guard, ...] = (
                          _validate_handoff),
                   "validates",
                   polarity="accept",
-                  defect="G-04",
                   note="This repository writes every path in backticks and "
-                       "the branch is parsed as a bare token, so a correct "
-                       "handoff written in the house style is refused. The "
-                       "contract is documented nowhere. It cost one handoff "
-                       "rewritten at integration this sprint."),
+                       "the validator accepts that house style by unwrapping "
+                       "one matching code-span pair before applying the exact "
+                       "story branch prefix."),
+            Probe("handoff.missing-files-touched",
+                  _handoff_without_files_touched,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "handoff has no **Files touched** field",
+                  note="The completion command requires the file list as one "
+                       "of six handoff fields. The validator must enforce the "
+                       "same contract rather than a five-field subset."),
+            Probe("handoff.multiple-code-spans", _handoff_multiple_code_spans,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "**Branch** value must be non-empty plain text or exactly "
+                  "one Markdown code span"),
+            Probe("handoff.unmatched-code-span", _handoff_unmatched_code_span,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "**Files touched** value must be non-empty plain text or "
+                  "exactly one Markdown code span"),
+            Probe("handoff.embedded-code-span", _handoff_embedded_code_span,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "**Head** value must be non-empty plain text or exactly one "
+                  "Markdown code span"),
+            Probe("handoff.empty-code-span", _handoff_empty_code_span,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "**Review** value must be non-empty plain text or exactly "
+                  "one Markdown code span"),
+            Probe("handoff.forged-suffix", _handoff_forged_suffix,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "**Base** value must be non-empty plain text or exactly one "
+                  "Markdown code span"),
+            Probe("handoff.duplicate-head", _handoff_duplicate_head,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "handoff has duplicate **Head** fields"),
         ),
         limit="The other twenty-two refusals in this file belong to the "
-              "sprint lifecycle commands, and the entry below owns them. The "
-              "field list is a second limit and a sharper one. Both probes "
-              "here are about the BRANCH rule, and reaching it means writing "
-              "a handoff that passes the field check first, so their input "
-              "carries the five `**Field**` markers from the tool's own "
-              "tuple. `.claude/commands/complete-feature.md` names six items "
-              "including the files touched, which the tool does not require, "
-              "so the citation and the code do not agree and no probe can see "
-              "that. `HANDOFF_FIELDS` is in the declared-constant ratchet "
-              "instead, which is what puts a change to the contract in front "
-              "of a reviewer. G-04 is the same undocumented contract seen "
-              "from the branch side.",
+              "sprint lifecycle commands, and the entry below owns them. "
+              "These probes cover the branch grammar, malformed code spans, "
+              "duplicate fields and one absent required field. They do not "
+              "repeat the same shapes independently for all six fields. The "
+              "six-field tuple is "
+              "documented in `.claude/commands/complete-feature.md` and is "
+              "also in the declared-constant ratchet, so adding, removing or "
+              "renaming a field becomes a reviewed change.",
     ),
     Guard(
         id="sprint-lifecycle",
@@ -6432,11 +6909,61 @@ GUARDS: tuple[Guard, ...] = (
                   Invoke("sprint_workflow validate-handoff",
                          _validate_handoff),
                   "is not in sprint"),
+            Probe("sprint-lifecycle.close-legacy-state",
+                  _close_legacy_state,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "no sprint-scope review recorded"),
+            Probe("sprint-lifecycle.close-dirty-review",
+                  _close_dirty_sprint_review,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "latest sprint review pass 2 reports 1 defects and 0 smells"),
+            Probe("sprint-lifecycle.close-stale-review",
+                  _close_stale_sprint_review,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "latest sprint review tree 000000000000 is stale"),
+            Probe("sprint-lifecycle.close-stale-verification",
+                  _close_stale_verification,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "latest sprint-profile verification tree 000000000000 is stale"),
+            Probe("sprint-lifecycle.close-latest-verification-failed",
+                  _close_failed_latest_verification,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "latest sprint-profile verification did not pass"),
+            Probe("sprint-lifecycle.close-tree-changed",
+                  _close_tree_changed_after_evidence,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "latest sprint review tree",
+                  note="The evidence is recorded first, then a tracked file "
+                       "is staged. This proves both records are identities of "
+                       "one tree rather than durable booleans."),
+            Probe("sprint-lifecycle.close-unrecorded-carry",
+                  _close_unrecorded_carry,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "is carried but has no recorded carry-forward reason"),
+            Probe("sprint-lifecycle.close-recorded-carry",
+                  _close_recorded_carry,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "is ready to close", polarity="accept"),
+            Probe("sprint-lifecycle.close-current-evidence",
+                  None,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "is ready to close", polarity="accept"),
         ),
-        limit="One probe over the shape shared by every lifecycle refusal. "
-              "The remaining branches need a sprint mid-flight, which the "
-              "sandbox cannot build without writing sprint state, and "
-              "docs/sprints/ is outside this story's write set.",
+        limit="The remaining lifecycle branches belong to init, feature "
+              "state transitions and release notes. The close probes build "
+              "ignored sprint state from allocation.json and use the "
+              "sandbox's real staged tree, so legacy, missing, dirty, stale, "
+              "failed, carried and current evidence are exercised without "
+              "touching the developer's run state.",
     ),
 
     # -- the error registry, the benchmarks and the corpus -----------------
@@ -6589,9 +7116,10 @@ GUARDS: tuple[Guard, ...] = (
                        "graph and exits 0 is the shape runbook probe 18 "
                        "describes: nothing to check, said by succeeding."),
         ),
-        limit="The per-target divergence branch itself needs a dependency "
-              "whose features differ by target, which cannot be built from "
-              "the locked graph without a network fetch. Owner F-X014.",
+        limit="The per-target divergence branch needs a dependency whose "
+              "features differ by target. The locked graph contains no such "
+              "fixture, and the disposable sandbox has no network authority "
+              "to fetch a new dependency graph, so that branch has no probe.",
     ),
     Guard(
         id="packages",
@@ -6659,11 +7187,11 @@ GUARDS: tuple[Guard, ...] = (
                     "print('\\n'.join(bad));\n"
                     "sys.exit(1 if bad else 0)\n")),
         ),
-        limit="The consumer install, the node import, the two tsc "
-              "resolutions and the publish dry run are level 3 and need an "
-              "npm install the sandbox does not carry. They run for real in "
-              "the `packages` gate on every push, green, and this harness has "
-              "not watched them red. Owner F-X014.",
+        limit="The consumer install, node import, two tsc resolutions and "
+              "publish dry run need an npm install. `node_modules` is ignored "
+              "and therefore absent from the `git ls-files` sandbox, so these "
+              "level-3 refusals have no catalogue probe. The `packages` gate "
+              "runs them against the real install on every push.",
     ),
 
     # -- the runner and the source resolver --------------------------------
@@ -6738,11 +7266,11 @@ GUARDS: tuple[Guard, ...] = (
                        "the probe proves the converter tells the two apart "
                        "rather than refusing everything."),
         ),
-        limit="The redaction map's fail-closed branch, which is runbook probe "
-              "18 itself, sits behind a pandoc conversion of the private "
-              "`.docx`. Neither is in this repository, so a sandbox cannot "
-              "reach it, and the same is true of the drift and "
-              "section-mapping branches. Owner F-X014.",
+        limit="The redaction-map fail-closed branch sits behind pandoc "
+              "conversion of the private source `.docx`. The document and "
+              "conversion input are absent from the tracked repository, so a "
+              "`git ls-files` sandbox cannot reach that branch or the related "
+              "drift and section-mapping refusals.",
     ),
 
     # -- the new guard this story ships ------------------------------------
@@ -7229,7 +7757,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-crate-root-outside-the-member",
                   _clean_crate_root_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "26 cargo target root(s) seeded",
+                  "cargo target root(s) seeded",
                   polarity="accept",
                   note="The other direction. A `[lib] path` outside the "
                        "member is legal cargo and says nothing about lint "
@@ -7238,20 +7766,14 @@ GUARDS: tuple[Guard, ...] = (
                        "own src/lib.rs is left in place and unread by cargo, "
                        "which is the state that would make a guard refusing "
                        "the shape rather than the attribute look correct. "
-                       "**The expect carries the COUNT since the S03 review's "
-                       "eleventh pass**, and until then it was the words "
-                       "`cargo's own target roots seeded`, an unconditional "
-                       "f-string literal the guard printed whether it seeded "
-                       "anything or not: MEASURED, with `for root in roots or "
-                       "[]` changed to `for root in []` this probe stayed "
-                       "GREEN. That is the class pass 10 fixed in the two "
-                       "clauses beside it, `#[path]` and `include!`, and left "
-                       "standing in the third. The number is this "
-                       "repository's target count from `cargo metadata`, so a "
-                       "target added to any member moves it and this probe "
-                       "says so, which is the same bargain `entry_sites` "
-                       "makes and the reason the count is here rather than a "
-                       "sentence that cannot go wrong.",
+                       "The accept status is the assertion: this legal layout "
+                       "must not be refused. The paired "
+                       "`crate-root-outside-the-member` probe puts a group "
+                       "allow in the same moved root and proves it is scanned. "
+                       "The output fragment confirms the production path, but "
+                       "does not couple this property to the workspace-wide "
+                       "target count, which changes when unrelated targets "
+                       "land.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.unreadable-crate-root",
                   _crate_root_the_guard_cannot_open,
@@ -7801,12 +8323,13 @@ GUARDS: tuple[Guard, ...] = (
                   note="The class of weakening no probe can reach. After the "
                        "allow-list is widened the guard is CORRECT about its "
                        "new, weaker rule, so only a recorded value notices."),
-            Probe("census.no-std-set-shrunk", _drop_no_std_from_one_crate,
+            Probe("census.no-std-set-shrunk", _shrink_expected_no_std_set,
                   script("python3", "scripts/guard_census.py"),
                   "changed without its recorded value",
-                  note="The fix shape for defect G-02. `no_std_check.py` "
-                       "loses the crate silently and the recorded set does "
-                       "not."),
+                  note="The explicit expected no_std set is a reviewed "
+                       "posture value. Narrowing that value must move its "
+                       "recorded digest even though the direct guard agrees "
+                       "with the new set."),
             Probe("census.uncovered-grew",
                   lambda box: _budget_edit(box, "uncovered",
                                            {"sites": -1,
@@ -8148,6 +8671,9 @@ GUARDS: tuple[Guard, ...] = (
         claims=("*",),
         covered_by=("tools/oracle/check_sidecars.py --self-test, run by "
                     "tools/oracle/run.mjs under both interpreters",),
+        limit="The self-test drives both new F-013 truth-projection refusals: "
+              "a malformed source binding raises, and unequal source scopes "
+              "remain unequal before the main checker reports them.",
     ),
     Guard(
         id="oracle.faults-declaration",
@@ -8197,20 +8723,10 @@ GUARDS: tuple[Guard, ...] = (
         file="tools/bench/run.mjs",
         gate="bench",
         spec="HLD section 26, and `docs/lld/benchmarks.md`",
-        refuses="An argument the harness does not accept, a subject that does "
-                "not exist, a comparison on a machine that does not own the "
-                "baseline, and a browser that is not installed.",
+        refuses="An argument the harness does not accept, and a runner for a "
+                "subject whose story is not done.",
         claims=("*",),
-        owner="F-X014",
-        reason="Nothing watches these nine refusals. This entry claimed "
-               "`scripts/tests/test_bench_check.py (the 7 argument refusals "
-               "and the 4 run-time refusals)` until the S03 review's second "
-               "pass measured it: that suite never opens `run.mjs`, "
-               "`bench_check.py` carries no mirror of its argument "
-               "validation, and the four node suites the `bench` gate runs do "
-               "not reference it either. Seven plus four is also eleven and "
-               "there are nine. A claim of coverage that is false is worse "
-               "than the gap it hides, so the gap is recorded instead.",
+        covered_by=("tools/bench/tests/run_test.mjs (run by the `bench` gate)",),
     ),
     Guard(
         id="bench.cold-start",
@@ -8221,14 +8737,11 @@ GUARDS: tuple[Guard, ...] = (
                 "artefact copy, and a page that never reported.",
         claims=("*",),
         covered_by=("tools/bench/tests/cold_start_test.mjs",),
-        limit="Six of that suite's seven tests are in the `bench` gate since "
-              "the S03 review's fourth pass, which moved playwright to an "
-              "`await import` inside `run()`. The seventh launches a browser "
-              "and is opted into with OCELLI_BENCH_BROWSER=1, so the "
-              "refusals THIS entry names, a measurement against a stub, an "
-              "incomplete artefact copy and a page that never reported, are "
-              "still watched only when a developer runs the harness. Owner "
-              "F-X014.",
+        limit="The test that reaches a measurement against a stub, an "
+              "incomplete artefact copy and a page that never reports launches "
+              "Chromium. It is opted into with OCELLI_BENCH_BROWSER=1 and "
+              "cannot run in the floor or a disposable sandbox that has no "
+              "browser install. The developer browser suite watches it.",
     ),
     Guard(
         id="bench.page",
@@ -8239,16 +8752,11 @@ GUARDS: tuple[Guard, ...] = (
                 "a mark count that does not match the phase list.",
         claims=("*",),
         covered_by=("tools/bench/tests/cold_start_test.mjs",),
-        limit="TWO refusals, and only the first carries the browser "
-              "dependency bench.cold-start describes. The artefact refusal is "
-              "watched only when a developer runs the harness. The mark-count "
-              "refusal is watched in the floor, by `a mark count that does "
-              "not match the phase list is refused`, which the S03 review's "
-              "seventh pass added beside `phaseTable`: the page's phase "
-              "arithmetic was reachable only through the browser test and "
-              "`PHASES.length === marks.length - 1` was asserted nowhere, so "
-              "a mark added with no phase beside it left the total right and "
-              "misaligned every label. Owner F-X014.",
+        limit="The incomplete-artefact refusal executes in the benchmark page "
+              "and requires the Chromium path, which the floor and disposable "
+              "sandbox do not carry. The mark-count refusal does not share "
+              "that limit and is watched in the floor by the phase-table unit "
+              "test.",
     ),
     Guard(
         id="panic-probe",
@@ -8260,10 +8768,10 @@ GUARDS: tuple[Guard, ...] = (
         covered_by=("bin/ocelli.sh gate panic, which builds a second module "
                     "carrying the panic-probe feature and runs this file on "
                     "every floor gate",),
-        limit="The stub refusal itself has not been watched red. It fires "
-              "only when the module fails to export what the probe imports, "
-              "which needs a broken wasm-pack build to construct. Owner "
-              "F-X014.",
+        limit="The stub refusal fires only when the wasm module fails to "
+              "export what the probe imports. Constructing that state needs a "
+              "broken wasm-pack build and its generated artefact, neither of "
+              "which exists in the tracked disposable sandbox.",
     ),
 
     # -- declared out of scope, with the reason -----------------------------
@@ -8456,6 +8964,10 @@ CONSTANTS: tuple[Constant, ...] = (
                  "repository distrusts."),
     Constant("pins", "scripts/pin_and_size_check.py", "EXACT_PINNED",
              r"^EXACT_PINNED = \{(.*?)^\}"),
+    Constant("pins", "scripts/pin_and_size_check.py", "PACKAGE_LICENCES",
+             r"^PACKAGE_LICENCES = (\(.*?\))$",
+             why="Both grants required by `MIT OR Apache-2.0`. Narrowing the "
+                 "tuple would make a package with only one grant pass."),
     Constant("pins", "scripts/pin_and_size_check.py", "TOLERANCE",
              r"^TOLERANCE = (.*?)$", tunable=True,
              why="Growth tolerated before the size gate fails. A story that "
@@ -8509,16 +9021,14 @@ CONSTANTS: tuple[Constant, ...] = (
              why="The accessor shapes that defeat section 31 without any "
                  "crate calling a creator. Four names, and a probe can only "
                  "ever write one of them."),
-    # `validate-handoff`'s required fields, which are a contract nothing else
-    # documents. `.claude/commands/complete-feature.md` names six items and
-    # this tuple requires five, so the handoff probes have to write the tuple
-    # to reach the branch check they are actually about. Recording it is what
-    # makes a change to the contract land in a diff.
+    # `validate-handoff`'s required fields. The completion command documents
+    # the same six-field template, and recording the tuple makes a change to
+    # that contract land in a diff even if a branch probe still passes.
     Constant("handoff", "scripts/sprint_workflow.py", "HANDOFF_FIELDS",
-             r'for field in (\("Branch".*?\)):',
-             why="G-04's undocumented contract. A field added or removed here "
-                 "changes what every worker must write and is documented "
-                 "nowhere else."),
+             r'^HANDOFF_FIELDS = (\(.*?^\))',
+             why="The documented six-field integration handoff contract. A "
+                 "field added, removed or renamed here changes what every "
+                 "parallel worker must write."),
     # THE WHOLE TABLE, PARSED, and this entry stopped being a regex in the
     # S03 review's ELEVENTH pass. What it recorded before was a text slice of
     # `Cargo.toml` captured by a regex that ran from the
@@ -8595,24 +9105,22 @@ CONSTANTS: tuple[Constant, ...] = (
                  "takes cargo clippy from 101 to 0 on a crate that denies "
                  "cast_possible_truncation. Dropping a name here is the "
                  "widening no probe can see."),
-    # TWO selectors since the S03 sprint review, and the rename is the point.
-    # The single `NO_CACHED_WASM_VIEW` matched only
-    # `new DataView(wasm.memory.buffer)` and missed the destructured shape
-    # `const { memory } = wasm; new DataView(memory.buffer)`, which is what
-    # `packages/core/src/panic.ts` actually writes. So the rule advertised in
-    # `gate --list` as "the cached-wasm-view ban (HLD 17.2)" was one
-    # destructuring away from silent. Both are recorded, because either one
-    # weakening is a weakening of the ban.
-    Constant("lint-policy", "eslint.config.js", "NO_CACHED_WASM_VIEW_MEMBER",
-             r"^const NO_CACHED_WASM_VIEW_MEMBER = \{\n  selector:\n(.*?)\n  message"),
-    Constant("lint-policy", "eslint.config.js", "NO_CACHED_WASM_VIEW_DESTRUCTURED",
-             r"^const NO_CACHED_WASM_VIEW_DESTRUCTURED = \{\n  selector:\n(.*?)\n  message"),
-    # A THIRD selector since the S03 sprint review's second pass. The two
-    # above are keyed on a view built directly over `wasm.memory.buffer` or
-    # over a destructured `memory`, and both miss an alias: `const mem =
-    # wasm.memory` and `const { buffer } = wasm.memory` escaped them. A view
-    # over the alias is the same hazard, so the third selector is recorded on
-    # the same footing as the other two.
+    # F-X017 replaced two spelling-based view selectors with a type-aware
+    # rule. Record both the constructor set and the whole detection path so a
+    # narrowed type test, lost computed-property route, or removed constructor
+    # lands as a strictness change. The executable node suite proves the
+    # positive and negative semantics in the `lint` gate.
+    Constant("lint-policy", "eslint.config.js", "TYPED_ARRAY_CONSTRUCTORS",
+             r"^const TYPED_ARRAY_CONSTRUCTORS = new Set\(\[(.*?)^\]\);"),
+    Constant("lint-policy", "eslint.config.js", "WASM_VIEW_DETECTION",
+             r"^function memberName\(node\) \{(.*?)^const ocelliPlugin = \{\n"
+             r"  rules: \{ \"no-wasm-memory-view\": noWasmMemoryViewRule \},\n"
+             r"\};"),
+    Constant("lint-policy", "eslint.config.js", "WASM_VIEW_SELF_CHECK",
+             r"^function assertTheBanIsIntact\(config\) \{(.*?)^\}\n\n"
+             r"^const config = tseslint\.config\("),
+    # The syntax half remains for a buffer alias, whose ArrayBuffer type no
+    # longer carries its wasm-memory provenance.
     Constant("lint-policy", "eslint.config.js", "NO_CACHED_WASM_MEMORY_ALIAS",
              r"^const NO_CACHED_WASM_MEMORY_ALIAS = \{\n  selector:\n"
              r"(.*?)\n  message"),
@@ -8620,25 +9128,18 @@ CONSTANTS: tuple[Constant, ...] = (
              r'files: (\["packages/core/src/bulk\.ts".*?\])',
              why="HLD 17.2 says two functions. F-005 widened this from one "
                  "file to two, and a third is not granted."),
-    # The fix shape for defect G-02: `no_std_check.py` builds its crate set
-    # from the crates that match the attribute, so a crate deleting it is not
-    # reported, it stops being checked. The set is recorded here instead.
-    Constant("nostd", "crates/*/src/lib.rs", "NO_STD_CRATES",
-             r"#!\[cfg_attr\(not\(test\), no_std\)\]",
-             why="Deviation D-09 is a claim about a SET of crates, and the "
-                 "guard cannot notice the set shrinking. This can."),
+    Constant("lint-policy", "bin/ocelli.sh", "WASM_VIEW_TEST_REGISTRATION",
+             r"^    lint\)(.*?) ;;$",
+             why="The type-aware semantic probes need ignored node_modules "
+                 "and therefore run in the lint gate rather than a disposable "
+                 "catalogue sandbox. Removing their node command must move a "
+                 "recorded strictness value."),
+    Constant("nostd", "scripts/no_std_check.py", "EXPECTED_NO_STD_CRATES",
+             r"^EXPECTED_NO_STD_CRATES = (frozenset\(\{.*?^\}\))",
+             why="Deviation D-09's explicit crate set. Direct comparison "
+                 "catches a source attribute entering or leaving it, and this "
+                 "digest makes a deliberate posture change visible."),
 )
 
 
-DEFECTS = {
-    "G-02": "scripts/no_std_check.py loses a crate rather than failing. Its "
-            "crate set is built from the crates that match the attribute, so "
-            "a crate deleting it is not reported, it stops being checked. The "
-            "only backstop fires when NO crate declares it. The recorded "
-            "NO_STD_CRATES constant is what catches it today.",
-    "G-04": "scripts/sprint_workflow.py validate-handoff has an undocumented "
-            "contract. It needs a literal `**Head**` and parses the branch as "
-            "a bare token, so backticks break it, and this repository writes "
-            "every path in backticks. It cost one handoff rewritten at "
-            "integration in S03.",
-}
+DEFECTS = {}
