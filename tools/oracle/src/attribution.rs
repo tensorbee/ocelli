@@ -542,24 +542,22 @@ fn parameter_divergences(
 
     let mut found = Vec::new();
     for pointer in fields {
-        let left = reference
-            .json
-            .pointer(pointer)
-            .cloned()
-            .unwrap_or(Value::Null);
-        let right = candidate
-            .json
-            .pointer(pointer)
-            .cloned()
-            .unwrap_or(Value::Null);
-        if json_equal(&left, &right) {
+        let left = reference.json.pointer(pointer);
+        let right = candidate.json.pointer(pointer);
+        if matches!((left, right), (None, None))
+            || left.zip(right).is_some_and(|(a, b)| json_equal(a, b))
+        {
             continue;
         }
         let (side, why) = attribute_parameter(pointer, reference, candidate);
         found.push(ParameterDivergence {
             pointer: (*pointer).to_owned(),
-            reference: left,
-            candidate: right,
+            reference: left
+                .cloned()
+                .unwrap_or_else(|| Value::String("<missing JSON member>".to_owned())),
+            candidate: right
+                .cloned()
+                .unwrap_or_else(|| Value::String("<missing JSON member>".to_owned())),
             side,
             why,
         });
@@ -699,6 +697,15 @@ fn rectangles(
 /// On a refusal: a frame that is not opaque, a `mono16` token over a frame
 /// that is not monochrome, a `NaN` in a declared parameter, or a tolerance
 /// class the two sides resolve differently.
+fn parameter_values_are_sensitive(sidecar: &Sidecar) -> bool {
+    sidecar
+        .json
+        .pointer("/row/path")
+        .or_else(|| sidecar.json.pointer("/volume/seriesDirectory"))
+        .and_then(Value::as_str)
+        .is_some_and(|path| path.starts_with("real/"))
+}
+
 pub fn compare_view(
     context: &Context<'_>,
     id: &str,
@@ -716,6 +723,7 @@ pub fn compare_view(
         .get(id)
         .ok_or_else(|| CompareError::Absent(id.to_owned()))?;
     let kind = reference.kind;
+    let parameter_values_withheld = parameter_values_are_sensitive(reference);
 
     let reference_class = class_from_categories(
         context
@@ -976,6 +984,7 @@ pub fn compare_view(
         rung,
         notes,
         parameter_divergences: parameters,
+        parameter_values_withheld,
         geometry_divergences: geometry,
         register_entry,
         reference_render_hash: render_hash(kind, id, reference_frame).sha256,
@@ -1354,7 +1363,7 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::{CompareError, Context, compare_view};
+    use super::{CompareError, Context, compare_view, parameter_values_are_sensitive};
     use crate::frame::Frame;
     use crate::report::{Outcome, Qualifier, Side};
     use crate::sidecar::{DeclaredView, Run, Sidecar, ViewKind};
@@ -1362,6 +1371,21 @@ mod tests {
     const SUBJECT: &str = "subject-under-test";
     const VIEW: &str = "subject-under-test__AXIAL";
     const SIDE_PIXELS: u32 = 16;
+
+    #[test]
+    fn real_paths_mark_parameter_values_sensitive_without_using_the_identifier() {
+        let sidecar = Sidecar {
+            id: "opaque-id".to_owned(),
+            kind: ViewKind::Stack,
+            json: json!({ "row": { "path": "real/series/instance.dcm" } }),
+        };
+        assert!(parameter_values_are_sensitive(&sidecar));
+        let synthetic = Sidecar {
+            json: json!({ "row": { "path": "synthetic/case.dcm" } }),
+            ..sidecar
+        };
+        assert!(!parameter_values_are_sensitive(&synthetic));
+    }
 
     /// One side of a reformat comparison, built by hand.
     ///

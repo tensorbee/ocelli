@@ -1,6 +1,6 @@
 # The comparator, the oracle's judging half
 
-**F-IDs that contributed:** F-011, F-015, F-X012
+**F-IDs that contributed:** F-011, F-013, F-015, F-X012
 **Last updated:** 2026-09-06
 
 HLD section 11 says the harness "pushes the same study through both stacks and
@@ -70,7 +70,7 @@ passing comparison. **No new gate name was added.** The comparator is part of
 what `oracle` means.
 
 The binary is built in release. A debug comparison over ninety-nine frames
-plus twenty-one mutation replays is minutes rather than seconds, and a check
+plus twenty-nine mutation replays is minutes rather than seconds, and a check
 nobody wants to wait for is a check that stops being run.
 
 The corpus-scale exercises are subcommands of a binary and **not** `#[ignore]`
@@ -196,10 +196,42 @@ EQUAL, because a representation difference between two writers of the same
 number is not a divergence in what the file declared. Positive and negative zero
 compare UNEQUAL, because a sign flip on a rescale intercept is a finding.
 
-**This is not the full metadata harness. That is F-013, E2.5, S04.** F-011 diffs
-only what decides the compared pixels and the compared camera, and says so.
+F-013 adds committed truth for named synthetic cases around this side-to-side
+comparison. Real rows retain the independent-reader comparison without
+committing or printing their values.
 
-### Component 3, geometry
+### Component 3, committed metadata truth
+
+`tools/oracle/metadata-truth.json` is the one hand-authored metadata and
+display-value source used by both Rust and the pydicom checker. The existing
+`volume-truth.json` is the sole owner of series geometry. It contains only
+named synthetic and syntax rows. Each resolved field cites PS3.3 and binds its
+scope to the exact `metadataSources` JSON pointer derived from the raw DICOM.
+It covers pixel and photometric fields, modality and VOI parameters,
+presentation inversion, IPP, IOP, Pixel Spacing, slice thickness and resolved
+reference modules. It also carries literal PS3.3 C.11 display values, oblique
+geometry samples. Volume dimensions, origin, direction, slice thickness and
+projected gaps come only from `volume-truth.json`.
+
+Declared numbers compare by `f64::to_bits` in Rust and packed IEEE-754 bytes in
+Python. Arrays retain their order. A missing JSON member differs from explicit
+null, null differs from an empty array, positive and negative zero differ, and
+non-finite JSON numbers are refused. Derived geometry alone uses HLD
+25.1's existing 1e-6 mm bound. The harness does not evaluate the LUT chain.
+The four display values are literal fixture evidence, so LUT arithmetic still
+has one implementation when `ocelli-pixel` lands.
+
+Both sidecars are checked before either frame is opened. A metadata failure is
+therefore reportable even when frame bytes are absent or malformed. If exactly
+one side differs from truth, that side is named. Opposite one-sided findings,
+mixed findings and any shared problem are unattributed. If both agree with each
+other on a wrong value, the view still fails at the `metadata-truth` rung.
+
+Real-row reports derive sensitivity from the sidecar path or volume series
+directory, never from a mutable identifier. Parameter values are replaced by
+`<withheld, real corpus row>` before JSON serialization.
+
+### Component 4, geometry
 
 25.1's third bullet. `position`, `focalPoint`, `viewUp` and `parallelScale` are
 compared within 1e-6 mm, and `viewPlaneNormal` too where a reformat carries one.
@@ -240,7 +272,7 @@ written through `toFixed(6)`, which discarded up to 5e-7 mm before the
 comparator could see it. Determinism is measured on the frame digest and not on
 this field, so the rounding was protecting nothing.
 
-### Component 4, pixels
+### Component 5, pixels
 
 Alpha is asserted to be 255 on every pixel of both sides and is never included
 in a difference, because a difference in alpha is a difference in the canvas and
@@ -421,7 +453,10 @@ builds exactly that bypass and asserts the run is red.
 
 1. **Inputs disagree**, by digest. Attributed to the inputs, not to either
    renderer.
-2. **Parameters disagree.** Attributed to the side that disagrees with the
+2. **Committed metadata truth disagrees.** The side that differs from truth is
+   named. If both sides agree with each other and differ from truth, the run
+   fails as an unattributed instrument or shared-reference problem.
+3. **Parameters disagree.** Attributed to the side that disagrees with the
    INDEPENDENT reading of the bytes. That third reading exists already: the
    sidecar's `attributes` block is read straight from the file by
    `dicom-parser` in the page, independently of the render path, and
@@ -431,14 +466,14 @@ builds exactly that bypass and asserts the run is red.
    why. Where a field has no independent counterpart, or where neither side
    agrees with its own, the divergence is reported unattributed rather than
    assigned by default.
-3. **A register entry matches, or F-X007's own `referenceDivergence` is set** on
+4. **A register entry matches, or F-X007's own `referenceDivergence` is set** on
    the subject and the pixels diverge with parameters agreeing. Attributed to
    the reference, with a PS3.3 citation where the register supplies one. The
    `referenceDivergence` half additionally requires the geometry to have
    diverged, for the reason stated under the list.
-4. **Geometry is outside 25.1's bound, or the difference is confined to the
+5. **Geometry is outside 25.1's bound, or the difference is confined to the
    letterbox.** Attributed to the fit rather than to the LUT chain.
-5. **Pixels diverge with parameters and geometry agreeing.** **Attributed to
+6. **Pixels diverge with parameters and geometry agreeing.** **Attributed to
    ours**, by default. HLD section 11 makes cornerstone3D the reference and
    deviation D-11 makes the pin the definition of correct until an entry in the
    register says otherwise. That default direction is the conservative one, and
@@ -449,7 +484,7 @@ builds exactly that bypass and asserts the run is red.
 pixel difference on its own.** Every divergence a subject may declare names a
 spacing component, and a wrong spacing shows up as a geometry difference.
 Letting one absorb a pixel difference on a view whose geometry agrees would be
-the comparator excusing our own defect with somebody else's, so rung 3 carries
+the comparator excusing our own defect with somebody else's, so rung 4 carries
 `!geometry.is_empty()`.
 
 The S03 sprint review found that narrowing watched by an accident.
@@ -975,7 +1010,7 @@ declared EXPECTATION with a match condition and a PS3.3 citation, committed, and
 it is the thing that converts a pixel divergence into an attributed
 non-failure. An observation and a policy.
 
-Both are kept and they are connected: rung 3 reads F-X007's field, so a volume
+Both are kept and they are connected: rung 4 reads F-X007's field, so a volume
 view whose geometry the reference got wrong is attributed to the reference
 without a hand-written register entry. **Do not unify them by accident.**
 
@@ -1018,7 +1053,7 @@ not emit is refused at load, so a stale census cannot read as an empty set.
   decimated: 2
   unstated-threshold: 5
   weak: 22
-compare: 21 mutations, 0 not detected
+compare: 29 mutations, 0 not detected
 ```
 
 Twenty-eight and not twenty-nine, because `real/us_cmb_crc/00000001.dcm` is
@@ -1052,13 +1087,21 @@ because `git add -f` exists, so `COMPARE_OUTPUT_PREFIXES` in
 
 ## The mutation catalogue
 
-Twenty-one entries in `tools/oracle/src/mutations.rs`, every one replayed on every
+Twenty-nine entries in `tools/oracle/src/mutations.rs`, every one replayed on every
 oracle gate. Each declares a target, an effect and the verdict it must produce,
 and the runner fails the gate when an entry is not detected.
 
 The catalogue reaches all four kinds of answer the comparator can give: a
 structural refusal, a comparison refusal, a run-level problem, and a per-view
-outcome. Six entries are worth naming.
+outcome. The first eight are F-013's metadata-truth probes. They transpose
+Pixel Spacing, reverse the IOP vectors, change Rescale Intercept, change VOI
+LUT Function and substitute a top-level value where the per-frame functional
+group wins. The other three change only the claimed scope, replace the
+positive `INVERSE` declaration with `IDENTITY`, and combine that mismatch with
+refusals on either input frame. The combined entry exercises the production
+`compare_runs` path and turns red if frame I/O moves ahead of metadata truth.
+Each must fail at `metadata-truth` and attribute the candidate side. Six
+further entries are worth naming.
 
 - `plus-one-on-two-fifths-of-the-image` is the LINEAR against LINEAR_EXACT
   signature at corpus scale, and the bias bound is the only thing that fails it.
@@ -1069,7 +1112,7 @@ outcome. Six entries are worth naming.
   is computed rather than written down beside a canvas size a later story could
   change.
 - `candidate-image-slope-changed` and `reference-image-slope-changed` are the
-  same damage on the two sides, and the pair is what proves rung 2's attribution
+  same damage on the two sides, and the pair is what proves rung 3's attribution
   is a measurement rather than a constant. Without the second one, "attributed
   to ours" would be indistinguishable from a default.
 - `an-undeclared-raw-in-the-directory` is the guard that stops a partial
@@ -1167,7 +1210,6 @@ Named, because each is somebody's story.
 - Any Ocelli renderer, decoder, LUT chain or port code. Decision D7.
 - A perceptual colour metric, and any CIEDE2000 implementation. Metric and
   threshold are one decision and belong together.
-- The full three-way metadata diff harness. F-013, E2.5, S04.
 - Re-rendering the saturated rows at a wider window, or a magnified render for
   the two decimated rows. Both change `render-params.json` and therefore every
   reference frame.

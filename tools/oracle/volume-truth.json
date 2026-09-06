@@ -12,6 +12,7 @@
   ],
   "subjects": {
     "volume__synthetic__ct_series_uniform": {
+      "seriesDirectory": "synthetic/ct_series_uniform",
       "citation": "PS3.3 C.7.6.2.1.1, and scripts/corpus_synth.py case_series",
       "why": "SERIES_ORIENTATION is [0.8, 0.6, 0, 0, 0, -1], so row is (0.8, 0.6, 0) and col is (0, 0, -1) and their cross product is (-0.6, 0.8, 0), whose length is sqrt(0.36 + 0.64) and therefore exactly 1. case_series writes ImagePositionPatient as d_k times that normal, so each slice's projection onto it is d_k. SERIES_SPACING is 2.5 and SERIES_SLICES is 10, so d_k is 2.5k and every gap is 2.5.",
       "normal": [
@@ -42,6 +43,13 @@
         2.5,
         2.5
       ],
+      "sliceThickness": 2.5,
+      "spacingBetweenSlices": null,
+      "referenceGeometryTruth": {
+        "dimensions": [20, 12, 10],
+        "origin": [0.0, 0.0, 0.0],
+        "direction": [0.8, 0.6, 0.0, 0.0, 0.0, -1.0, -0.6, 0.8, 0.0]
+      },
       "uniform": true,
       "zProfile": {
         "voxel": [
@@ -57,6 +65,7 @@
       "referenceDivergence": null
     },
     "volume__synthetic__ct_series_nonuniform": {
+      "seriesDirectory": "synthetic/ct_series_nonuniform",
       "citation": "PS3.3 C.7.6.2.1.1, and scripts/corpus_synth.py case_series",
       "why": "The same construction as the uniform subject, with NONUNIFORM_SLICE 7 displaced by NONUNIFORM_OFFSET 1.25, so d_7 is 18.75 rather than 17.5. The gap into slice 7 becomes 3.75 and the gap out of it becomes 1.25, and every other gap is still 2.5. The displacement cancels out of the endpoint difference, so the mean gap is 22.5 / 9 = 2.5 and the median gap is 2.5, the same as the uniform subject. SliceThickness is 2.5 on every slice of both series and SpacingBetweenSlices is absent from both, so ONLY an examination of the individual gaps separates them.",
       "normal": [
@@ -87,6 +96,13 @@
         1.25,
         2.5
       ],
+      "sliceThickness": 2.5,
+      "spacingBetweenSlices": null,
+      "referenceGeometryTruth": {
+        "dimensions": [20, 12, 10],
+        "origin": [0.0, 0.0, 0.0],
+        "direction": [0.8, 0.6, 0.0, 0.0, 0.0, -1.0, -0.6, 0.8, 0.0]
+      },
       "uniform": false,
       "zProfile": {
         "voxel": [

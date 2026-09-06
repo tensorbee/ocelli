@@ -818,6 +818,11 @@ class SyntheticTraps(unittest.TestCase):
         ds = self.read("cr_monochrome1.dcm")
         self.assertEqual(ds.PhotometricInterpretation, "MONOCHROME1")
 
+    def test_unsigned_ct_declares_presentation_inversion(self) -> None:
+        """PS3.3 C.11.6.1.2.2, INVERSE reverses the presentation output."""
+        ds = self.read("ct_unsigned_16.dcm")
+        self.assertEqual(ds.PresentationLUTShape, "INVERSE")
+
     def test_pixel_spacing_is_non_square_where_it_should_be(self) -> None:
         ds = self.read("mr_nonsquare_spacing.dcm")
         self.assertEqual([float(v) for v in ds.PixelSpacing], [0.5, 0.25])

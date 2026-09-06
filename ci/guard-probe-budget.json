@@ -205,7 +205,7 @@
     "oracle.params": 3,
     "oracle.pins": 1,
     "oracle.sidecar": 1,
-    "oracle.sidecar-redaction": 29,
+    "oracle.sidecar-redaction": 31,
     "oracle.unsupported": 3,
     "oracle.voi": 5,
     "oracle.volume": 31,

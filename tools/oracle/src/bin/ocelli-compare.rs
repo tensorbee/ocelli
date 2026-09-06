@@ -36,14 +36,17 @@ use ocelli_oracle::attribution::{
     Context, Register, compare_view, image_rect_for, unreachable_entries_that_fired,
 };
 use ocelli_oracle::frame::{ChannelSet, Frame, difference};
+use ocelli_oracle::metadata::{MetadataTruth, TruthComparison};
 use ocelli_oracle::mutations::{
-    CATALOGUE, Expectation, MutatedSide, Mutation, apply_to_frame, apply_to_run, resolve_target,
-    touches_the_frame,
+    CATALOGUE, Expectation, MutatedSide, Mutation, apply_to_frame, apply_to_run,
+    frame_read_refusal, resolve_target, touches_the_frame,
 };
 use ocelli_oracle::render_hash::ALGORITHM as RENDER_HASH_ALGORITHM;
 use ocelli_oracle::report::{Census, Outcome, RunReport, Side, ViewRecord};
 use ocelli_oracle::sidecar::Run;
-use ocelli_oracle::tolerance::{MONOCHROME_SIGNED_MEAN_BIAS, ToleranceClass};
+use ocelli_oracle::tolerance::{
+    MONOCHROME_SIGNED_MEAN_BIAS, ToleranceClass, class_from_categories,
+};
 use serde_json::Value;
 
 /// Where the comparator writes. **Ignored and refused by
@@ -54,6 +57,8 @@ const DEFAULT_OUT: &str = "tools/oracle/compare-out";
 const DEFAULT_REFERENCE: &str = "tools/oracle/out";
 const REGISTER: &str = "tools/oracle/reference-divergence.json";
 const EXPECTATIONS: &str = "tools/oracle/compare-expectations.json";
+const METADATA_TRUTH: &str = "tools/oracle/metadata-truth.json";
+const VOLUME_TRUTH: &str = "tools/oracle/volume-truth.json";
 
 fn main() -> ExitCode {
     match run() {
@@ -126,14 +131,22 @@ fn run() -> Result<bool, String> {
     let arguments = parse_arguments()?;
     let register = load_register(Path::new(REGISTER))?;
     let census = load_census(Path::new(EXPECTATIONS))?;
+    let metadata_truth = load_metadata_truth(Path::new(METADATA_TRUTH), Path::new(VOLUME_TRUTH))?;
 
     let reference = Run::load(&arguments.reference).map_err(|error| error.to_string())?;
     let candidate = Run::load(&arguments.candidate).map_err(|error| error.to_string())?;
 
     match arguments.command.as_str() {
-        "identity" => identity(&reference, &candidate, &register, &census, &arguments.out),
-        "mutations" => mutations(&reference, &candidate, &register, &census),
-        "census" => detectability(&reference, &candidate, &register, &census),
+        "identity" => identity(
+            &reference,
+            &candidate,
+            &register,
+            &metadata_truth,
+            &census,
+            &arguments.out,
+        ),
+        "mutations" => mutations(&reference, &candidate, &register, &metadata_truth, &census),
+        "census" => detectability(&reference, &candidate, &register, &metadata_truth, &census),
         other => Err(format!(
             "{other} is not a command. `identity`, `mutations` or `census`"
         )),
@@ -156,6 +169,18 @@ fn load_census(path: &Path) -> Result<Census, String> {
     Census::from_json(&json)
 }
 
+fn load_metadata_truth(path: &Path, volume_path: &Path) -> Result<MetadataTruth, String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let json: Value =
+        serde_json::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))?;
+    let volume_text = std::fs::read_to_string(volume_path)
+        .map_err(|error| format!("{}: {error}", volume_path.display()))?;
+    let volume_json: Value = serde_json::from_str(&volume_text)
+        .map_err(|error| format!("{}: {error}", volume_path.display()))?;
+    MetadataTruth::from_json(&json, &volume_json).map_err(|error| error.to_string())
+}
+
 /// One whole comparison of two loaded runs.
 ///
 /// `damage` names a view and a mutation, and is `None` for the identity run.
@@ -166,6 +191,7 @@ fn compare_runs(
     reference: &Run,
     candidate: &Run,
     register: &Register,
+    metadata_truth: &MetadataTruth,
     census: &Census,
     damage: Option<(&str, &Mutation)>,
 ) -> Result<RunReport, String> {
@@ -225,10 +251,50 @@ fn compare_runs(
 
     for id in reference_ids.intersection(&candidate_ids) {
         let identifier = (*id).clone();
-        let reference_frame = read_side(reference, &identifier, damage, MutatedSide::Reference)?;
-        let candidate_frame = read_side(candidate, &identifier, damage, MutatedSide::Candidate)?;
-        let record = compare_view(&context, &identifier, &reference_frame, &candidate_frame)
+        let truth = metadata_truth
+            .compare(
+                &identifier,
+                reference
+                    .sidecars
+                    .get(&identifier)
+                    .ok_or_else(|| format!("{identifier} has no reference sidecar"))?,
+                candidate
+                    .sidecars
+                    .get(&identifier)
+                    .ok_or_else(|| format!("{identifier} has no candidate sidecar"))?,
+            )
             .map_err(|error| error.to_string())?;
+        let reference_sidecar = reference
+            .sidecars
+            .get(&identifier)
+            .ok_or_else(|| format!("{identifier} has no reference sidecar"))?;
+        let candidate_sidecar = candidate
+            .sidecars
+            .get(&identifier)
+            .ok_or_else(|| format!("{identifier} has no candidate sidecar"))?;
+        let class = class_from_categories(
+            reference
+                .categories
+                .get(&identifier)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+        let record = metadata_before_frames(
+            truth,
+            &identifier,
+            reference_sidecar,
+            candidate_sidecar,
+            class,
+            || {
+                let reference_frame =
+                    read_side(reference, &identifier, damage, MutatedSide::Reference)?;
+                let candidate_frame =
+                    read_side(candidate, &identifier, damage, MutatedSide::Candidate)?;
+                compare_view(&context, &identifier, &reference_frame, &candidate_frame)
+                    .map_err(|error| error.to_string())
+            },
+        )?;
         records.push(record);
     }
 
@@ -265,12 +331,38 @@ fn compare_runs(
     })
 }
 
+/// Resolve committed metadata truth before invoking any frame reader.
+///
+/// Keeping frame I/O behind the closure makes the precedence structural. The
+/// metadata-failure branch cannot accidentally inspect a malformed frame.
+fn metadata_before_frames<F>(
+    truth: TruthComparison,
+    id: &str,
+    reference: &ocelli_oracle::sidecar::Sidecar,
+    candidate: &ocelli_oracle::sidecar::Sidecar,
+    class: ToleranceClass,
+    read_and_compare_frames: F,
+) -> Result<ViewRecord, String>
+where
+    F: FnOnce() -> Result<ViewRecord, String>,
+{
+    truth
+        .into_failure_record(id, reference, candidate, class)
+        .map_or_else(read_and_compare_frames, Ok)
+}
+
 fn read_side(
     run: &Run,
     id: &str,
     damage: Option<(&str, &Mutation)>,
     side: MutatedSide,
 ) -> Result<Frame, String> {
+    if let Some((target, mutation)) = damage
+        && target == id
+        && let Some(message) = frame_read_refusal(mutation)
+    {
+        return Err(message.to_owned());
+    }
     let mut frame = run.read_frame(id).map_err(|error| error.to_string())?;
     if let Some((target, mutation)) = damage
         && target == id
@@ -331,10 +423,11 @@ fn identity(
     reference: &Run,
     candidate: &Run,
     register: &Register,
+    metadata_truth: &MetadataTruth,
     census: &Census,
     out: &Path,
 ) -> Result<bool, String> {
-    let report = compare_runs(reference, candidate, register, census, None)?;
+    let report = compare_runs(reference, candidate, register, metadata_truth, census, None)?;
     summarise(&report);
     write_output(&report, reference, candidate, out)?;
     if report.green() {
@@ -410,9 +503,10 @@ fn mutations(
     reference: &Run,
     candidate: &Run,
     register: &Register,
+    metadata_truth: &MetadataTruth,
     census: &Census,
 ) -> Result<bool, String> {
-    let baseline = compare_runs(reference, candidate, register, census, None)?;
+    let baseline = compare_runs(reference, candidate, register, metadata_truth, census, None)?;
     if !baseline.green() {
         println!(
             "compare: the mutation baseline is RED before any mutation is \
@@ -443,6 +537,7 @@ fn mutations(
             &damaged_reference,
             &damaged_candidate,
             register,
+            metadata_truth,
             census,
             Some((&target, mutation)),
         );
@@ -532,9 +627,10 @@ fn detectability(
     reference: &Run,
     candidate: &Run,
     register: &Register,
+    metadata_truth: &MetadataTruth,
     census: &Census,
 ) -> Result<bool, String> {
-    let baseline = compare_runs(reference, candidate, register, census, None)?;
+    let baseline = compare_runs(reference, candidate, register, metadata_truth, census, None)?;
     let swap = CATALOGUE
         .iter()
         .find(|mutation| mutation.name == SWAP)

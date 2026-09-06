@@ -123,9 +123,10 @@ multiplies the row direction cosine.
    configuration, modality LUT parameters, VOI parameters and function,
    presentation inversion, IPP, IOP, pixel spacing, slice thickness, resolved
    volume dimensions, origin, direction and consecutive projected slice gaps.
-3. Keep one canonical truth file. Python cross-reads corpus files and compares
-   their values to it. Rust reads the same truth and compares reference and
-   candidate sidecars to it. No expected value is copied into two languages.
+3. Keep one canonical owner per truth domain. `metadata-truth.json` owns
+   metadata and literal display samples. The existing `volume-truth.json`
+   remains the sole owner of series geometry. Python and Rust read both files,
+   and no expected value is copied into two languages or between the files.
 4. Compare declared DICOM numbers exactly after parsing, including array order.
    Compare derived world geometry within 1e-6 mm. Distinguish absent, empty and
    present values where the DICOM type permits that distinction. Refuse NaN.
@@ -149,6 +150,12 @@ multiplies the row direction cosine.
    wrong rescale intercept, wrong window function, and using a top-level value
    where a per-frame functional group wins. Each mutation has a named expected
    attribution.
+
+Pass 3 showed that a helper-only lazy-reader test did not protect the
+production caller. The standing catalogue therefore also combines a committed
+metadata mismatch with refusals on either input frame of the same view. Its expected
+metadata-truth record can be produced only while `compare_runs` keeps real
+frame I/O behind the metadata verdict.
 
 No tolerance is changed and no DICOM file is added to git.
 
@@ -185,6 +192,42 @@ one.
 D-13 supplies the corrected first value in the section 18.3 fixture. No new
 deviation is anticipated.
 
+## Implementation corrections
+
+The initial implementation exposed seven defects in pass 1 review. Their
+remediation changes the anticipated shape in four ways.
+
+- `volume-truth.json` remains the only series-geometry truth. The duplicate
+  volume values were removed from `metadata-truth.json`, and both independent
+  readers now load the same domain owner.
+- `tools/oracle/src/sidecar.rs` deliberately retains the complete sidecar JSON.
+  `metadata.rs` reads declared JSON pointers from that retained value, so no
+  second typed schema or duplicated field list was added.
+- Metadata truth creates its failure record directly from sidecars before any
+  frame is read. Missing JSON members and explicit null are distinct, and
+  Python uses the same bit-exact numeric comparison as Rust.
+- Resolved-field truth binds mechanically to a raw-DICOM source pointer. The
+  browser-safe `metadata-sources.mjs` derives per-frame, shared or top-level
+  provenance from dicom-parser's data set. A changed label therefore fails.
+- Mixed, opposite and shared failures are unattributed. Reports derived from a
+  real corpus path replace parameter values recursively before serialization.
+
+`tools/oracle/page/app.mjs` is added to the write set because it owns the
+independent dicom-parser attribute read. The generated unsigned CT fixture now
+declares Presentation LUT Shape `INVERSE`, which provides positive inversion
+evidence. Its DICOM digest changes, while its rendered hash is measured rather
+than assumed. The series generator also emits canonical positive zero so exact
+cross-reader equality is possible. `docs/lld/README.md` is added because the
+repository's additive LLD contributor index must change with the LLD headers.
+
+Pass 2 found that the repaired metadata-before-frame ordering had no durable
+regression. `ocelli-compare.rs` now keeps all frame reads behind the lazy
+`metadata_before_frames` boundary. The standing combined mutation supplies a
+genuine metadata-truth divergence and makes either input frame reader refuse
+if invoked. It requires a metadata-truth failure with no statistics. Moving
+either production frame read across that boundary therefore makes the oracle
+mutation gate red.
+
 ## LLD impact
 
 - `docs/lld/comparator.md` records the metadata truth contract, field set and
@@ -198,6 +241,7 @@ deviation is anticipated.
 
 - `tools/oracle/metadata-truth.json`
 - `tools/oracle/src/metadata.rs`
+- `tools/oracle/src/metadata-sources.mjs`
 - `tools/oracle/tests/metadata_fixture.rs`
 
 **Modify**
@@ -209,8 +253,17 @@ deviation is anticipated.
 - `tools/oracle/src/bin/ocelli-compare.rs`
 - `tools/oracle/src/mutations.rs`
 - `tools/oracle/src/sidecar.mjs`
+- `tools/oracle/volume-truth.json`
 - `tools/oracle/check_sidecars.py`
+- `scripts/guards/catalogue.py`
+- `ci/guard-probe-budget.json`
+- `docs/runbooks/guard-verification.md`
 - `tools/oracle/tests/sidecar_test.mjs`
+- `scripts/corpus_synth.py`
+- `scripts/tests/test_corpus_synth.py`
+- `corpus/manifest.tsv`
+- `docs/lld/corpus.md`
+- `docs/lld/README.md`
 - `docs/lld/comparator.md`
 - `docs/lld/oracle.md`
 
@@ -228,5 +281,5 @@ deviation is anticipated.
 
 None. The initial surface is the pixel and geometry-driving fields in approach
 item 2. Palette, ICC, and LUT Sequence contents wait for their render paths.
-`metadata-truth.json` replaces the existing expected-value tables now so one
-truth does not become three.
+`metadata-truth.json` replaces the existing metadata and display tables.
+`volume-truth.json` continues to own series geometry, so no truth becomes two.

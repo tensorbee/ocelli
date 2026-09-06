@@ -27,6 +27,7 @@ import dicomImageLoader from "@cornerstonejs/dicom-image-loader";
 import dicomParser from "dicom-parser";
 
 import { resolveVoi } from "../src/voi.mjs";
+import { metadataSourcesFor } from "../src/metadata-sources.mjs";
 
 const RENDERING_ENGINE_ID = "ocelliOracle";
 const VIEWPORT_ID = "reference";
@@ -135,6 +136,7 @@ function readAttributes(bytes) {
 
   return {
     error: null,
+    metadataSources: metadataSourcesFor(dataSet),
     attributes: {
       // PS3.10 7.1 File Meta, then PS3.3 C.12.1 SOP Common and C.7.3.1
       // General Series.
@@ -161,6 +163,8 @@ function readAttributes(bytes) {
       windowCenter: decimals("x00281050"),
       windowWidth: decimals("x00281051"),
       voiLutFunction: string("x00281056"),
+      // PS3.3 C.11.6, Presentation LUT.
+      presentationLutShape: string("x20500020"),
       // PS3.3 C.7.6.2, Image Plane.
       pixelSpacing: decimals("x00280030"),
       imagePositionPatient: decimals("x00200032"),
@@ -681,6 +685,7 @@ async function renderRow(request) {
     imageId,
     attributes: independent.attributes,
     attributesError: independent.error,
+    metadataSources: independent.metadataSources,
     cornerstoneMetadata,
     voi,
     renderDetail,

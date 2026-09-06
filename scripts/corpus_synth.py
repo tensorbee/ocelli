@@ -390,6 +390,7 @@ def case_unsigned_16(out: Path) -> None:
     ds = new_dataset(name, CT_STORAGE, "CT")
     ct_common(ds)
     ds.RescaleIntercept = "0"
+    ds.PresentationLUTShape = "INVERSE"
     set_monochrome_pixels(
         ds, ramp(TRAP_ROWS, TRAP_COLS, 65535, np.uint16), 16, 16, 15, 0)
     write(ds, out / "synthetic" / f"{name}.dcm")
@@ -460,7 +461,12 @@ def case_series(out: Path, name: str, nonuniform: bool) -> None:
         distance = index * SERIES_SPACING
         if nonuniform and index == NONUNIFORM_SLICE:
             distance += NONUNIFORM_OFFSET
-        position = [f"{distance * axis:.6f}" for axis in SERIES_NORMAL]
+        # Decimal String has a signed spelling, while JavaScript Number JSON
+        # serialization normalises -0 to 0. Emit the canonical zero spelling
+        # so the two independent readers can agree exactly.
+        position = ["0.000000" if distance * axis == 0
+                    else f"{distance * axis:.6f}"
+                    for axis in SERIES_NORMAL]
 
         label = f"{name}/slice_{index:03d}"
         ds = new_dataset(label, CT_STORAGE, "CT", series=name, study=name,

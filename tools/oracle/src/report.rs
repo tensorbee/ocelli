@@ -82,6 +82,9 @@ pub enum Qualifier {
     /// The two sides declare different values for something that decides the
     /// compared pixels.
     ParameterDivergence,
+    /// At least one side disagrees with the committed synthetic metadata
+    /// truth. This rung precedes the pixel and side-to-side parameter rungs.
+    MetadataTruth,
     /// The two sides' cameras or image extents are outside 25.1's geometry
     /// bound.
     GeometryDivergence,
@@ -109,6 +112,7 @@ impl Qualifier {
             Self::Decimated => "decimated",
             Self::UnstatedThreshold => "unstated-threshold",
             Self::ParameterDivergence => "parameter-divergence",
+            Self::MetadataTruth => "metadata-truth",
             Self::GeometryDivergence => "geometry-divergence",
             Self::ReferenceDivergence => "reference-divergence",
             Self::Bias => "bias",
@@ -126,6 +130,7 @@ impl Qualifier {
             Self::Decimated,
             Self::UnstatedThreshold,
             Self::ParameterDivergence,
+            Self::MetadataTruth,
             Self::GeometryDivergence,
             Self::ReferenceDivergence,
             Self::Bias,
@@ -145,7 +150,7 @@ impl Qualifier {
 
 /// Which side a divergence is attributed to.
 ///
-/// Rung 5's default is `Ours`, and that direction is the conservative one:
+/// Rung 6's default is `Ours`, and that direction is the conservative one:
 /// HLD section 11 makes cornerstone3D the reference and deviation D-11 makes
 /// the pin the definition of correct, so the burden is on us to show the
 /// reference is wrong rather than on the reference to show it is right.
@@ -279,6 +284,8 @@ pub struct ViewRecord {
     pub rung: &'static str,
     pub notes: Vec<String>,
     pub parameter_divergences: Vec<ParameterDivergence>,
+    /// Real-row parameter values are compared in memory but never serialized.
+    pub parameter_values_withheld: bool,
     pub geometry_divergences: Vec<Divergence>,
     pub register_entry: Option<String>,
     /// Exact, shape-aware identity of the already validated reference frame.
@@ -347,13 +354,25 @@ impl ViewRecord {
             "parameterDivergences": Value::Array(
                 self.parameter_divergences
                     .iter()
-                    .map(|divergence| json!({
-                        "field": divergence.pointer,
-                        "reference": divergence.reference,
-                        "candidate": divergence.candidate,
-                        "attributedTo": divergence.side.label(),
-                        "why": divergence.why,
-                    }))
+                    .map(|divergence| {
+                        let reference = if self.parameter_values_withheld {
+                            json!("<withheld, real corpus row>")
+                        } else {
+                            divergence.reference.clone()
+                        };
+                        let candidate = if self.parameter_values_withheld {
+                            json!("<withheld, real corpus row>")
+                        } else {
+                            divergence.candidate.clone()
+                        };
+                        json!({
+                            "field": divergence.pointer,
+                            "reference": reference,
+                            "candidate": candidate,
+                            "attributedTo": divergence.side.label(),
+                            "why": divergence.why,
+                        })
+                    })
                     .collect()
             ),
             "geometryDivergences": Value::Array(
@@ -628,6 +647,7 @@ mod tests {
             rung: "pixels",
             notes: Vec::new(),
             parameter_divergences: Vec::new(),
+            parameter_values_withheld: false,
             geometry_divergences: Vec::new(),
             register_entry: None,
             reference_render_hash: "reference-hash".to_owned(),
@@ -636,6 +656,30 @@ mod tests {
             monochrome_frame: true,
             photometric_interpretation: Some("MONOCHROME2".to_owned()),
         }
+    }
+
+    #[test]
+    fn real_parameter_values_do_not_survive_report_serialization() {
+        let secrets = ["PATIENT-VALUE-A", "PATIENT-VALUE-B"];
+        let mut real = record(
+            "opaque-id",
+            Outcome::Fail,
+            &[Qualifier::ParameterDivergence],
+        );
+        real.parameter_values_withheld = true;
+        real.parameter_divergences.push(super::ParameterDivergence {
+            pointer: "/attributes/private".to_owned(),
+            reference: json!({ "nested": [secrets[0], 12.25] }),
+            candidate: json!([secrets[1], -0.0]),
+            side: Side::Unattributed,
+            why: "independent readers disagree".to_owned(),
+        });
+        let serialized = serde_json::to_string(&real.to_json()).unwrap_or_default();
+        for secret in secrets {
+            assert!(!serialized.contains(secret));
+        }
+        assert!(!serialized.contains("12.25"));
+        assert!(serialized.contains("<withheld, real corpus row>"));
     }
 
     fn census(entries: &[(&str, &[&str])]) -> Census {
