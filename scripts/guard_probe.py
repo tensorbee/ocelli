@@ -167,7 +167,57 @@ def _prepare_control(box: sb.Sandbox, probe: Probe) -> None:
     invoke needs nothing prepared, so it has no branch.
     """
     def write_green_comparison_report() -> None:
+        channel = {
+            "pixels": 1,
+            "maxAbsDiff": 0,
+            "countAtZero": 1,
+            "countAtOne": 0,
+            "countAtTwo": 0,
+            "countOverTwo": 0,
+            "fractionWithinOneLsb": 1.0,
+            "differingFraction": 0.0,
+            "signedMeanDiff": 0.0,
+            "percentile999AbsDiff": 0,
+        }
+        record = {
+            "id": "probe-view",
+            "kind": "stack",
+            "toleranceClass": "mono16",
+            "outcome": "pass",
+            "qualifiers": [],
+            "attributedTo": "none",
+            "rung": "pixels",
+            "notes": [],
+            "parameterDivergences": [],
+            "geometryDivergences": [],
+            "referenceDivergenceEntry": None,
+            "renderHashes": {
+                "algorithm": "sha256-rgba8-v1",
+                "reference": "0" * 64,
+                "candidate": "0" * 64,
+            },
+            "monochromeFrame": True,
+            "statistics": {
+                "channels": 1,
+                "full": [dict(channel)],
+                "image": [dict(channel)],
+                "background": [],
+                "informative": [dict(channel)],
+                "rowsTouched": 0,
+                "columnsTouched": 0,
+                "imagePixels": 1,
+                "informativePixels": 1,
+                "informativeFraction": 1.0,
+                "predicatePasses": True,
+                "biasPasses": True,
+                "signedMeanDiff": 0.0,
+            },
+        }
         box.write(".claude/probe-comparison.json", json.dumps({
+            "story": "F-011, F-012, F-015",
+            "reference": "reference",
+            "candidate": "candidate",
+            "views": 1,
             "operation": "gate",
             "pass": 1,
             "fail": 0,
@@ -185,6 +235,13 @@ def _prepare_control(box: sb.Sandbox, probe: Probe) -> None:
             "problems": [],
             "coverageProblems": [],
             "absorbedDivergences": [],
+            "qualifiers": {},
+            "renderHashes": {
+                "algorithm": "sha256-rgba8-v1",
+                "reference": "311c307457058b6cfefff79bdeb407dfb6056185b81937159771e4d998a9de3b",
+                "candidate": "311c307457058b6cfefff79bdeb407dfb6056185b81937159771e4d998a9de3b",
+            },
+            "records": [record],
         }) + "\n")
 
     key = (probe.control or probe.invoke).key

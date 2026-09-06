@@ -858,15 +858,64 @@ def _ledger_absent_corpus(box: Sandbox) -> None:
     _ledger_record(box, "absent")
 
 
-def _comparison_report(box: Sandbox, *, verdict: str = "pass",
-                       claimed: int = 1, green: bool = True) -> None:
-    box.write(".claude/probe-comparison.json", json.dumps({
+def _green_comparison_document() -> dict:
+    channel = {
+        "pixels": 1,
+        "maxAbsDiff": 0,
+        "countAtZero": 1,
+        "countAtOne": 0,
+        "countAtTwo": 0,
+        "countOverTwo": 0,
+        "fractionWithinOneLsb": 1.0,
+        "differingFraction": 0.0,
+        "signedMeanDiff": 0.0,
+        "percentile999AbsDiff": 0,
+    }
+    record = {
+        "id": "probe-view",
+        "kind": "stack",
+        "toleranceClass": "mono16",
+        "outcome": "pass",
+        "qualifiers": [],
+        "attributedTo": "none",
+        "rung": "pixels",
+        "notes": [],
+        "parameterDivergences": [],
+        "geometryDivergences": [],
+        "referenceDivergenceEntry": None,
+        "renderHashes": {
+            "algorithm": "sha256-rgba8-v1",
+            "reference": "0" * 64,
+            "candidate": "0" * 64,
+        },
+        "monochromeFrame": True,
+        "statistics": {
+            "channels": 1,
+            "full": [dict(channel)],
+            "image": [dict(channel)],
+            "background": [],
+            "informative": [dict(channel)],
+            "rowsTouched": 0,
+            "columnsTouched": 0,
+            "imagePixels": 1,
+            "informativePixels": 1,
+            "informativeFraction": 1.0,
+            "predicatePasses": True,
+            "biasPasses": True,
+            "signedMeanDiff": 0.0,
+        },
+    }
+    return {
+        "story": "F-011, F-012, F-015",
+        "reference": "reference",
+        "candidate": "candidate",
+        "views": 1,
         "operation": "gate",
-        "pass": claimed if verdict == "pass" else 0,
-        "fail": 0 if verdict == "pass" else max(claimed, 1),
-        "claimedVerdictViews": claimed,
-        "gateVerdict": verdict,
-        "green": green,
+        "pass": 1,
+        "fail": 0,
+        "claimedVerdictViews": 1,
+        "gateVerdict": "pass",
+        "green": True,
         "coverage": {
             "unmeasured": 0,
             "absent": 0,
@@ -878,7 +927,28 @@ def _comparison_report(box: Sandbox, *, verdict: str = "pass",
         "problems": [],
         "coverageProblems": [],
         "absorbedDivergences": [],
-    }) + "\n")
+        "qualifiers": {},
+        "renderHashes": {
+            "algorithm": "sha256-rgba8-v1",
+            "reference": "311c307457058b6cfefff79bdeb407dfb6056185b81937159771e4d998a9de3b",
+            "candidate": "311c307457058b6cfefff79bdeb407dfb6056185b81937159771e4d998a9de3b",
+        },
+        "records": [record],
+    }
+
+
+def _comparison_report(box: Sandbox, *, verdict: str = "pass",
+                       claimed: int = 1, green: bool = True) -> None:
+    report = _green_comparison_document()
+    report["claimedVerdictViews"] = claimed
+    report["gateVerdict"] = verdict
+    report["green"] = green
+    if verdict == "pass":
+        report["pass"] = claimed
+    else:
+        report["pass"] = 0
+        report["fail"] = max(claimed, 1)
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
 
 def _malformed_comparison_report(box: Sandbox) -> None:
@@ -995,9 +1065,152 @@ def _coverage_count_probes() -> tuple[Probe, ...]:
                 script("python3", "scripts/verify_ledger.py", "record",
                        "--comparison-report",
                        ".claude/probe-comparison.json"),
-                f"comparison report has invalid coverage count for {field}",
+                (f"comparison report coverage has invalid keys, missing=['{field}']"
+                 if variant == "missing"
+                 else f"comparison report has invalid coverage count for {field}"),
             ))
     return tuple(probes)
+
+
+def _report_shape_mutation(box: Sandbox, variant: str) -> None:
+    report = _green_comparison_document()
+    record = report["records"][0]
+    if variant == "records-missing":
+        del report["records"]
+    elif variant == "records-null":
+        report["records"] = None
+    elif variant == "records-empty":
+        report["records"] = []
+    elif variant == "duplicate-record":
+        report["records"].append(record)
+    elif variant == "record-fail":
+        record["outcome"] = "fail"
+    elif variant == "duplicate-record-id":
+        report["records"].append(dict(record))
+    elif variant == "views-missing":
+        del report["views"]
+    elif variant == "views-zero":
+        report["views"] = 0
+    elif variant == "counts-exceed-views":
+        report["pass"] = 1000
+        report["claimedVerdictViews"] = 1000
+    elif variant == "reference-equals-candidate":
+        report["candidate"] = report["reference"]
+    elif variant == "reference-missing":
+        del report["reference"]
+    elif variant == "candidate-missing":
+        del report["candidate"]
+    elif variant == "hashes-missing":
+        del report["renderHashes"]
+    elif variant == "aggregate-hash-invalid":
+        report["renderHashes"]["reference"] = "not-a-hash"
+    elif variant == "aggregate-hash-inconsistent":
+        report["renderHashes"]["reference"] = "f" * 64
+    elif variant == "qualifier-histogram":
+        report["qualifiers"] = {"weak": 1}
+    elif variant == "top-level-unknown":
+        report["invented"] = 0
+    elif variant == "coverage-unknown":
+        report["coverage"]["invented"] = 0
+    elif variant == "record-id-missing":
+        del record["id"]
+    elif variant == "record-id-null":
+        record["id"] = None
+    elif variant == "record-id-empty":
+        record["id"] = ""
+    elif variant == "record-unknown":
+        record["invented"] = 0
+    elif variant == "record-hash-invalid":
+        record["renderHashes"]["candidate"] = "not-a-hash"
+    elif variant == "record-hashes-unknown":
+        record["renderHashes"]["invented"] = "0" * 64
+    elif variant == "statistics-null":
+        record["statistics"] = None
+    elif variant == "statistics-unknown":
+        record["statistics"]["invented"] = 0
+    elif variant == "channel-unknown":
+        record["statistics"]["full"][0]["invented"] = 0
+    elif variant == "parameter-divergence-missing":
+        record["parameterDivergences"] = [{
+            "field": "/voi/windowWidth",
+            "reference": 1,
+            "candidate": 2,
+            "attributedTo": "ours",
+        }]
+    elif variant == "geometry-divergence-unknown":
+        record["geometryDivergences"] = [{
+            "field": "camera.position[0]",
+            "reference": 0.0,
+            "candidate": 1.0,
+            "difference": 1.0,
+            "bound": 0.1,
+            "invented": 0,
+        }]
+    else:
+        raise AssertionError(f"unknown report-shape mutation {variant}")
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _duplicate_report_key(box: Sandbox, fragment: str) -> None:
+    report = json.dumps(_green_comparison_document())
+    box.write(
+        ".claude/probe-comparison.json",
+        report.replace(fragment, f"{fragment}, {fragment}", 1) + "\n",
+    )
+
+
+def _nonfinite_report_number(box: Sandbox) -> None:
+    report = json.dumps(_green_comparison_document())
+    box.write(
+        ".claude/probe-comparison.json",
+        report.replace('"signedMeanDiff": 0.0',
+                       '"signedMeanDiff": NaN', 1) + "\n",
+    )
+
+
+def _report_shape_probes() -> tuple[Probe, ...]:
+    cases = (
+        ("records-missing", "root has invalid keys"),
+        ("records-null", "has no records array"),
+        ("records-empty", "records array is empty"),
+        ("duplicate-record", "duplicate record identifiers"),
+        ("record-fail", "green record 'probe-view' has outcome fail"),
+        ("duplicate-record-id", "duplicate record identifiers"),
+        ("views-missing", "root has invalid keys"),
+        ("views-zero", "views count is not the record count"),
+        ("counts-exceed-views", "pass count contradicts records"),
+        ("reference-equals-candidate", "directories are equal"),
+        ("reference-missing", "root has invalid keys"),
+        ("candidate-missing", "root has invalid keys"),
+        ("hashes-missing", "root has invalid keys"),
+        ("aggregate-hash-invalid", "invalid aggregate reference render hash"),
+        ("aggregate-hash-inconsistent", "aggregate reference render hash contradicts records"),
+        ("qualifier-histogram", "qualifier histogram contradicts records"),
+        ("top-level-unknown", "root has invalid keys"),
+        ("coverage-unknown", "coverage has invalid keys"),
+        ("record-id-missing", "records[0] has invalid keys"),
+        ("record-id-null", "invalid records[0].id"),
+        ("record-id-empty", "invalid records[0].id"),
+        ("record-unknown", "records[0] has invalid keys"),
+        ("record-hash-invalid", "invalid records[0] candidate render hash"),
+        ("record-hashes-unknown", "records[0].renderHashes has invalid keys"),
+        ("statistics-null", "statistics is not an object"),
+        ("statistics-unknown", "statistics has invalid keys"),
+        ("channel-unknown", "statistics.full[0] has invalid keys"),
+        ("parameter-divergence-missing", "parameterDivergences[0] has invalid keys"),
+        ("geometry-divergence-unknown", "geometryDivergences[0] has invalid keys"),
+    )
+    invoke = script("python3", "scripts/verify_ledger.py", "record",
+                    "--comparison-report", ".claude/probe-comparison.json")
+    return tuple(
+        Probe(
+            f"ledger.comparison-shape-{variant}",
+            lambda box, variant=variant: _report_shape_mutation(box, variant),
+            invoke,
+            expected,
+        )
+        for variant, expected in cases
+    )
 
 
 def _top_level_unmeasured_probes() -> tuple[Probe, ...]:
@@ -1009,7 +1222,9 @@ def _top_level_unmeasured_probes() -> tuple[Probe, ...]:
                 _invalid_top_level_unmeasured(box, variant),
             script("python3", "scripts/verify_ledger.py", "record",
                    "--comparison-report", ".claude/probe-comparison.json"),
-            "comparison report has invalid top-level unmeasured count",
+            ("comparison report root has invalid keys, missing=['unmeasured']"
+             if variant == "missing"
+             else "comparison report has invalid unmeasured count"),
         ))
     return tuple(probes)
 
@@ -6691,11 +6906,14 @@ GUARDS: tuple[Guard, ...] = (
                 "with failed views, input problems, coverage problems, "
                 "absorbed divergences or absent views, a report missing one "
                 "of those emitted fields, an invalid coverage count, "
-                "contradictory unmeasured counts, zero judged views, and a "
-                "required comparison record that is absent.",
+                "contradictory unmeasured counts, any object outside the "
+                "serializer's closed schema, duplicate JSON keys or record "
+                "identifiers, a summary or aggregate hash that disagrees "
+                "with the records, zero judged views, and a required "
+                "comparison record that is absent.",
         claims=(r"no verification recorded", r"the corpus is RED",
                 r"corpus is ' ' for tree", r"--corpus must be one of",
-                r"comparison report",
+                r"comparison report", r"non-finite JSON number",
                 r"comparison evidence is required for tree"),
         probes=(
             Probe("ledger.no-record", None,
@@ -6768,7 +6986,7 @@ GUARDS: tuple[Guard, ...] = (
                   script("python3", "scripts/verify_ledger.py", "record",
                          "--comparison-report",
                          ".claude/probe-comparison.json"),
-                  "comparison report has no coverage problems array"),
+                  "comparison report root has invalid keys, missing=['coverageProblems']"),
             Probe("ledger.comparison-top-level-absent",
                   _top_level_absent_in_green_comparison_report,
                   script("python3", "scripts/verify_ledger.py", "record",
@@ -6783,6 +7001,26 @@ GUARDS: tuple[Guard, ...] = (
                          "--comparison-report",
                          ".claude/probe-comparison.json"),
                   "comparison report unmeasured count disagrees with coverage"),
+            *_report_shape_probes(),
+            Probe("ledger.comparison-duplicate-top-level-key",
+                  lambda box: _duplicate_report_key(box, '"fail": 0'),
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "duplicate JSON key 'fail'"),
+            Probe("ledger.comparison-duplicate-nested-key",
+                  lambda box: _duplicate_report_key(
+                      box, '"id": "probe-view"'),
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "duplicate JSON key 'id'"),
+            Probe("ledger.comparison-nonfinite-number",
+                  _nonfinite_report_number,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "non-finite JSON number NaN"),
             Probe("ledger.require-comparison", _ledger_without_comparison,
                   script("python3", "scripts/verify_ledger.py", "assert",
                          "--require-comparison"),
