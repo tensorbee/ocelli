@@ -31,7 +31,7 @@
 //!    corpus. Under deviation D-04 that is a real strengthening.
 //! 2. **Identity over the real reference output.** It proves the loader, the
 //!    identifier mapping, the class resolution, the sidecar contract and the
-//!    report shape over all ninety-eight views, and it proves nothing about
+//!    report shape over all ninety-nine views, and it proves nothing about
 //!    detection, which is why it is never the only corpus-scale exercise.
 //! 3. **A declared mutation catalogue**, `mutations`, applied in memory to
 //!    real reference frames with the verdict each must produce written down

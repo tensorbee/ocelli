@@ -1,6 +1,6 @@
 # The golden corpus
 
-**F-IDs that contributed:** F-009, F-X006, F-X007
+**F-IDs that contributed:** F-009, F-X006, F-X007, F-X012
 **Last updated:** 2026-09-06
 
 The corpus is the input every later correctness claim is measured on. It lives
@@ -41,6 +41,15 @@ that list would be free to drift from the cases themselves.
 cases has never seen a vendor's padding, private blocks or odd-length values.
 One of the four is Implicit VR Little Endian, which no synthetic case would
 have produced by accident.
+
+F-X012 adds `synthetic/ct_sigmoid_width_half.dcm`, a 12 by 20 CT whose stored
+values 151 through 170 become modality values 37.75 through 42.5 under slope
+0.25 and intercept 0. Its file window is centre 40, width 0.5 and function
+SIGMOID. The width is deliberately below LINEAR's minimum while remaining
+legal under PS3.3 C.11.2.1.3.1. The fixture transcribes that section's formula
+independently and pins display values 4.586483540333347, 30.396745115639977,
+127.5, 224.60325488436 and 250.41351645966665 at modality values 39.5 through
+40.5. No renderer supplies those answers.
 
 ## The `category` column is a token list, and a check reads it
 

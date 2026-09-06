@@ -82,8 +82,8 @@ measurement is right. From F-012 onward it is whether a GREEN GATE MEANS
 ANYTHING.**
 
 That is not generic. S03 already produced the exact shape: the comparator
-reports `98 views: 70 pass, 0 fail, 28 unmeasured`. A gate that reads `0 fail`
-as success is claiming a verdict over 98 views when it has one for 70. The 28
+reports `99 views: 71 pass, 0 fail, 28 unmeasured`. A gate that reads `0 fail`
+as success is claiming a verdict over 99 views when it has one for 71. The 28
 are class two, where HLD 25.1 states no threshold, and decision D14 forbids a
 pass against a bound nobody wrote. **F-012 must fail when coverage drops, not
 only when a comparison fails**, or it becomes a gate that passes because it

@@ -737,7 +737,7 @@ async function render(request) {
     // exists to prevent, on the path most likely to need it. One corpus row
     // takes that path today: the YBR one loads and then fails at read back.
     //
-    // The corpus is small, but 91 decoded frames held live is not a property
+    // The corpus is small, but 92 decoded frames held live is not a property
     // anybody asked for, and a growing cache changes eviction order between
     // the two determinism passes.
     cache.purgeCache();

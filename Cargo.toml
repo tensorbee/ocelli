@@ -104,7 +104,7 @@ thiserror = { version = "2", default-features = false }
 pollster = "0.4"
 proptest = "1"
 trybuild = "1"
-# F-011. The comparator in `tools/oracle` reads `run.json` and ninety-eight
+# F-011. The comparator in `tools/oracle` reads `run.json` and ninety-nine
 # sidecars, and re-hashes every `.raw` it reads so a file edited after the run
 # cannot be compared as though somebody had rendered it. None of the three is
 # in HLD section 15.2's list, and none needs a deviation row: `ocelli-oracle`

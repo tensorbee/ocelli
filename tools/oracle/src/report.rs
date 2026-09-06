@@ -7,7 +7,7 @@
 //! specification does not cover`.
 //!
 //! **`unmeasured` is a third outcome and not a synonym for `pass`.** A run of
-//! ninety-eight views that reports "70 pass, 0 fail, 28 unmeasured" is saying
+//! ninety-nine views that reports "71 pass, 0 fail, 28 unmeasured" is saying
 //! something a run that reported "98 compared" would not. The number is
 //! uncomfortable on purpose: better than a quarter of the corpus is covered
 //! and not measured, and that was true before this story and invisible.
