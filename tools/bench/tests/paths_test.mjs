@@ -23,7 +23,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -79,6 +87,26 @@ test("the runner that exists today is found at the path run.mjs asks for", () =>
     true,
     "run.mjs would report the only measurable subject as having no runner",
   );
+});
+
+test("every benchmark node suite is registered in both exact runner lists", () => {
+  const suites = readdirSync(join(BENCH_ROOT, "tests"))
+    .filter((name) => name.endsWith("_test.mjs"))
+    .sort();
+  const manifest = JSON.parse(
+    readFileSync(join(BENCH_ROOT, "package.json"), "utf8"),
+  );
+  const packageSuites = [...manifest.scripts.test.matchAll(
+    /tests\/([a-z_]+_test\.mjs)/g,
+  )].map((match) => match[1]).sort();
+  const gate = readFileSync(join(REPO_ROOT, "bin", "ocelli.sh"), "utf8")
+    .match(/^ {4}bench\)[\s\S]*?;;$/m)?.[0] ?? "";
+  const gateSuites = [...gate.matchAll(
+    /tools\/bench\/tests\/([a-z_]+_test\.mjs)/g,
+  )].map((match) => match[1]).sort();
+
+  assert.deepEqual(packageSuites, suites, "tools/bench/package.json test list");
+  assert.deepEqual(gateSuites, suites, "bin/ocelli.sh bench gate list");
 });
 
 test("the two roots are the harness and the repository, not the caller's cwd", () => {

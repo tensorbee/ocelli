@@ -132,6 +132,26 @@ class SandboxCopyPreservesTrackedShape(unittest.TestCase):
 
 
 class CatalogueIsWellFormed(unittest.TestCase):
+    def test_the_guards_gate_names_its_python_suites_exactly(self) -> None:
+        """A focused suite must not exist only as a manual invocation."""
+        runner = (ROOT / "bin" / "ocelli.sh").read_text(encoding="utf-8")
+        arm = runner[runner.index("    guards)"):
+                     runner.index("    guards-deep)")]
+        suites = re.findall(
+            r"python3 -B -m unittest discover -s scripts/tests \\\n"
+            r"\s+-p ([\w.]+)",
+            arm,
+        )
+        self.assertEqual(
+            suites,
+            [
+                "test_guard_catalogue.py",
+                "test_sprint_workflow.py",
+                "test_gen_sprint_plan.py",
+                "test_guard_readers.py",
+            ],
+        )
+
     def test_every_entry_has_a_unique_id(self) -> None:
         ids = [g.id for g in GUARDS]
         self.assertEqual(len(ids), len(set(ids)), sorted(ids))

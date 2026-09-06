@@ -213,6 +213,7 @@ def _prepare_control(box: sb.Sandbox, probe: Probe) -> None:
                   f"# {fid} ready\n\n"
                   f"**Branch**: work/{fid.lower()}-agent\n"
                   f"**Base**: sprint/s03\n**Head**: 0123456789ab\n"
+                  f"**Files touched**: scripts/probe.py\n"
                   f"**Review**: pass 1\n**Verify tree**: 0123456789ab\n")
     elif key == "bin/ocelli.sh compare":
         box.write("tools/oracle/out/run.json", "{}\n")

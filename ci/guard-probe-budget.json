@@ -15,11 +15,6 @@
       "guard": "device",
       "tunable": false
     },
-    "crates/*/src/lib.rs:NO_STD_CRATES": {
-      "digest": "a7d75f8deccc3710",
-      "guard": "nostd",
-      "tunable": false
-    },
     "eslint.config.js:LINEAR_MEMORY_ALLOWANCE": {
       "digest": "0f511cb2956fefc1",
       "guard": "lint-policy",
@@ -75,6 +70,11 @@
       "guard": "lint-policy",
       "tunable": false
     },
+    "scripts/no_std_check.py:EXPECTED_NO_STD_CRATES": {
+      "digest": "171730a323985d65",
+      "guard": "nostd",
+      "tunable": false
+    },
     "scripts/pin_and_size_check.py:EXACT_PINNED": {
       "digest": "b98559eaf372548e",
       "guard": "pins",
@@ -116,7 +116,7 @@
       "tunable": false
     },
     "scripts/sprint_workflow.py:HANDOFF_FIELDS": {
-      "digest": "88c23fe498dee282",
+      "digest": "30f747a55bdc5576",
       "guard": "handoff",
       "tunable": false
     },
@@ -194,7 +194,7 @@
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
     "lint-policy": 28,
-    "nostd": 5,
+    "nostd": 8,
     "oracle.faults": 22,
     "oracle.faults-declaration": 2,
     "oracle.geometry": 6,
@@ -234,8 +234,8 @@
   "note": "Recorded measurements, not guesses. `wall_clock_seconds` is what the harness took on the machine that recorded it. `constants` is the declared-constant ratchet, `constants_count` and `gates_declared` are the counts that catch one of those being removed rather than changed, `entry_sites` is the per-entry refusal count for the catalogue entries claiming their file with `\"*\"`, so a refusal added to an already claimed file moves a number when it takes one of the shapes scripts/guards/discover.py scans, `oracle_faults` is the fault-count ratchet and `uncovered` is the uncovered-refusal ratchet, all written by scripts/guard_census.py --record.",
   "oracle_faults": 23,
   "uncovered": {
-    "sites": 9,
-    "sweep_complete": false
+    "sites": 0,
+    "sweep_complete": true
   },
   "wall_clock_seconds": {
     "deep": 42.0,

@@ -1,6 +1,6 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006
+**F-IDs that contributed:** F-006, F-X014
 **Last updated:** 2026-09-06
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
@@ -77,7 +77,7 @@ machine that recorded it, and against nothing else.
 | `tools/bench/src/record.mjs` | the run record, the comparison, the re-baseline |
 | `tools/bench/src/runners/` | one file per subject that has a runner. A row whose `subject_story` is `null` must have one. A row whose story has landed may not have one yet, which is `no_runner` |
 | `tools/bench/page/` | the page that times a cold start, `window.__bench` |
-| `tools/bench/tests/` | six suites, and `npm test` in `tools/bench` and the `bench` arm of `bin/ocelli.sh gate` now name the same six. `grep -o 'tools/bench/tests/[a-z_]*\.mjs' bin/ocelli.sh \| sort -u \| wc -l` prints what the arm names and `ls tools/bench/tests/*.mjs \| wc -l` prints what exists. The one browser test inside `cold_start_test.mjs` is opted into with `OCELLI_BENCH_BROWSER=1` |
+| `tools/bench/tests/` | node suites named exactly by both `npm test` in `tools/bench` and the `bench` arm of `bin/ocelli.sh gate`. The already-running path suite compares both lists with the files on disk, so adding an unregistered suite fails. The browser test inside `cold_start_test.mjs` is opted into with `OCELLI_BENCH_BROWSER=1` |
 | `ci/bench-baseline.json` | tracked, the recorded measurement per subject per host class |
 | `scripts/bench_check.py` | the `bench` gate |
 | `tools/bench/out/` | ignored. One run's record and the page it served |
@@ -100,6 +100,12 @@ measure something no user experiences.
 
 Adding a measurement when its story lands is a data edit plus one runner file.
 No part of the driver, the record format or the gate changes.
+
+The driver is also guarded directly. `run_test.mjs` reaches every argument
+refusal in `parseArgs` and the refusal of a runner whose subject story is not
+done. `runSubjects` is the exported production seam used by that test, with no
+test wrapper or duplicate decision path. The exact-list assertion above makes
+the new suite part of both executable definitions of the bench tests.
 
 **Every `subject_story` is resolved against `docs/sprints/allocation.json`
 rather than copied from a comment**, and the gate enforces that. The reason is a

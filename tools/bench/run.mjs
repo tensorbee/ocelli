@@ -174,7 +174,7 @@ function instrument() {
  * different halves of the same rule: the tracked half is about what is
  * committed, this half is about what a number can ever be attached to.
  */
-async function runSubjects(resolved, options) {
+export async function runSubjects(resolved, options) {
   const entries = [];
   const collected = { chromium: null };
   for (const row of resolved) {
