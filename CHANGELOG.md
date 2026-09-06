@@ -10,9 +10,10 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
-- The Cargo workspace and the thirteen crates of HLD section 15.1, with
-  `wasm-bindgen` confined to `ocelli-wasm` and enforced by
-  `ci/check-bindgen-isolation.sh`.
+- The Cargo workspace and the crates of HLD section 4's crate table, which
+  `ls crates | wc -l` counts. Section 15.1's layout block is not that table and
+  omits `ocelli-compute`. `wasm-bindgen` is confined to `ocelli-wasm` and
+  enforced by `ci/check-bindgen-isolation.sh`.
 - The npm workspaces `@ocelli/core` and `@ocelli/react`, and the example
   viewer at `examples/viewer-react`.
 - Strongly typed canvas, world and voxel-index points, composable transforms,
@@ -70,8 +71,10 @@ Repository bootstrap. Nothing is published.
   cornerstone3D volumes and rendered as three orthogonal reformats each, and the
   fourth, `real/ct_cmb_mml`, is refused as declared because two of its members
   project to the same position on the slice normal. Twelve reformats are
-  declared and nine are written, which `tools/oracle/out/run.json` records under
-  `volumes`. They render on their own page opened only
+  declared and nine are written, which `tools/oracle/out/run.json` records in
+  its run-level `boundaries` object. Its `volumes` key is the four per-subject
+  records, whose reformat counters are attempted rather than achieved. They
+  render on their own page opened only
   after the stack page has closed, so the existing stack frames are provably
   untouched. Series geometry is measured from the files themselves through
   PS3.3 C.7.6.2.1.1 rather than from any cornerstone3D module, which is what

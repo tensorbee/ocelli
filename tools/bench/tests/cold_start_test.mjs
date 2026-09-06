@@ -1,4 +1,4 @@
-// Four pure suites over the cold-start runner, and one that needs a browser.
+// Seven tests over the cold-start runner, and only the last needs a browser.
 //
 // **Only the last test needs one**, and until the S03 review's fourth pass the
 // whole file was outside the `bench` gate on the strength of it. The cause was
@@ -8,7 +8,7 @@
 // which is this story's one stated rounding decision, and `resolveServedPath`,
 // which refuses `/..`, `/%2e%2e/`, a malformed escape and a sibling directory
 // sharing a prefix, were watched by nothing. The runner now imports playwright
-// inside `run()`, and the four pure tests are in the floor.
+// inside `run()`, and six of this suite's seven tests are in the `bench` gate.
 //
 // The browser test is opted into with `OCELLI_BENCH_BROWSER=1`, which
 // `npm run test:browser` in tools/bench sets. It builds the release artefact

@@ -398,7 +398,11 @@ except ModuleNotFoundError as _error:  # pragma: no cover, environment
         "PyYAML and PyYAML is not installed. It is pinned in pyproject.toml, "
         "and `python3 -m pip install \"$(grep -om1 'pyyaml==[0-9.]*' "
         "pyproject.toml)\"` is what .github/workflows/ci.yml's `guards` job "
-        "runs. This check reads YAML with a YAML parser since the S03 "
+        "runs. It is `pip` rather than this repository's usual `uv sync "
+        "--locked` on purpose: `bin/ocelli.sh` invokes this gate as a bare "
+        "`python3`, which does not resolve imports from `.venv`, so syncing "
+        "the project environment would install PyYAML where this gate never "
+        "looks. This check reads YAML with a YAML parser since the S03 "
         "review's twelfth pass, which measured four fail-open routes and five "
         "false refusals at the hand-rolled reader it replaced, so there is "
         "deliberately no fallback to that reader here.") from _error
@@ -858,6 +862,59 @@ class Command:
                    for event in events)
 
 
+# The `shell:` values whose semantics this file has MEASURED, and the only
+# ones under which it will read a `run:` body as bash.
+#
+# GitHub's default on Linux with no `shell:` is `bash -e {0}`, which is what
+# `_tolerated_statements` models. `shell: bash` is `bash --noprofile --norc
+# -eo pipefail {0}`, which is STRICTER: it adds pipefail, so this file's
+# pipeline rule over-tolerates under it, and over-tolerating is a refusal.
+# `shell: sh` is `sh -e {0}` and errexit is present.
+#
+# Everything else is refused BY NAME rather than read, which is what makes the
+# set closed against values GitHub adds later. The dangerous value is not
+# `python` or `pwsh`: neither is bash, and a Python program cannot carry the
+# runner at a bash statement head outside a string, so both fail closed. It is
+# a CUSTOM TEMPLATE. `shell: bash {0}` is still bash and has NO `-e`, so every
+# statement in the body is swallowed. MEASURED in the S03 review's fourteenth
+# pass, with the real `bin/ocelli.sh gate guards` step replaced by one under
+# `shell: bash {0}`: this check exited 0. The same template written once at
+# workflow level under `defaults:` took every `run:` in the file with it, also
+# at exit 0. `guards` is the gate that watches every other gate.
+MEASURED_SHELLS = frozenset({"bash", "sh"})
+
+
+def _defaults_shell(node: dict, where: str) -> tuple[str, str]:
+    """A `defaults.run.shell` and where it was written, ("", "") when absent.
+
+    Settable at workflow level and at job level, the job overriding the
+    workflow, and a step's own `shell:` overriding both. All three are read,
+    because the one that matters is the one NO step mentions.
+    """
+    defaults = _shaped(node.get("defaults") or {}, dict,
+                       f"a `defaults:` on {where}")
+    run = _shaped(defaults.get("run") or {}, dict,
+                  f"a `defaults.run:` on {where}")
+    value = str(_shaped(run.get("shell", ""), str,
+                        f"a `defaults.run.shell:` on {where}")).strip()
+    return (value, f"`defaults.run.shell:` on {where}") if value else ("", "")
+
+
+def _measured_shell(shell: str, where: str) -> None:
+    """Refuse a `shell:` whose errexit this file has not measured."""
+    if not shell or shell in MEASURED_SHELLS:
+        return
+    raise RuntimeError(
+        f"{WORKFLOW.relative_to(ROOT)} sets {where} to `{shell}`, and this "
+        f"check reads a `run:` body as `bash -e`, which is what GitHub runs "
+        f"when no `shell:` is set. `{shell}` is refused rather than read "
+        f"under that model, because a custom template such as `bash {{0}}` is "
+        f"still bash with NO `-e`: every command in the body would be "
+        f"swallowed and this file would go on reporting the gates as run. "
+        f"Add it to `MEASURED_SHELLS` only together with the `bash -ec` "
+        f"measurements that show what its errexit actually does.")
+
+
 def run_commands(workflow: str) -> list[Command]:
     """Every line `.github/workflows/ci.yml` executes, and when.
 
@@ -922,9 +979,16 @@ def run_commands(workflow: str) -> list[Command]:
     """
     tree = workflow_tree(workflow)
     commands: list[Command] = []
+    workflow_shell = _defaults_shell(tree, "the workflow")
     jobs = _shaped(tree.get("jobs") or {}, dict, "`jobs:`")
     for job_id, raw_job in jobs.items():
         job = _shaped(raw_job, dict, f"the job `{job_id}`")
+        # NOT `... or workflow_shell`: `("", "")` is a non-empty tuple and is
+        # TRUE, so the workflow-level default would never be reached. The
+        # value is what decides, not the pair.
+        job_shell = _defaults_shell(job, f"the job `{job_id}`")
+        if not job_shell[0]:
+            job_shell = workflow_shell
         job_if = str(_shaped(job.get("if", ""), str,
                              f"an `if:` on the job `{job_id}`")).strip()
         job_tolerates = _tolerates_failure(
@@ -938,6 +1002,10 @@ def run_commands(workflow: str) -> list[Command]:
             if "run" not in step:
                 continue
             body = str(_shaped(step["run"], str, f"a `run:` on {where}"))
+            step_shell = str(_shaped(step.get("shell", ""), str,
+                                     f"a `shell:` on {where}")).strip()
+            _measured_shell(*((step_shell, f"a `shell:` on {where}")
+                              if step_shell else job_shell))
             step_if = str(_shaped(step.get("if", ""), str,
                                   f"an `if:` on {where}")).strip()
             step_tolerates = _tolerates_failure(
@@ -1973,6 +2041,121 @@ def _split_statements(text: str) -> list[str]:
     return [statement for statement, _ in _statement_separators(text)]
 
 
+# The heads of an errexit-EXEMPT context, taken from `SHELL_INTRODUCERS`
+# rather than written out a second time beside it, which is the repair the
+# `case` alternation got in the ninth pass and this file's standing answer to
+# one list with two spellings.
+#
+# MEASURED with `bash -ec <body>`, exit status read from bash. Every row here
+# is a 0 where the obvious reading of the errexit paragraph says 1:
+#
+#   set +e / false / echo AFTER                                       -> 0
+#   set +o errexit / false / echo AFTER                               -> 0
+#   if false; then echo T; fi / echo AFTER                            -> 0
+#   if false; then echo A; elif false; then echo T; fi / echo AFTER   -> 0
+#   if true && false; then echo T; fi / echo AFTER                    -> 0
+#   while false; do echo T; done / echo AFTER                         -> 0
+#   until true; do echo T; done / echo AFTER                          -> 0
+#   ! false / echo AFTER                                              -> 0
+#
+# and these are the CONTROLS, which must stay 1 or this would be over-refusing
+# rather than reading the shell:
+#
+#   false / echo AFTER                                                -> 1
+#   if true; then false; fi / echo AFTER                              -> 1
+#   while [ -z "$X" ]; do false; break; done / echo AFTER             -> 1
+#
+# So a `then`, an `else` and a `do` END the exemption and the BODY after one
+# is not exempt. That is the whole reason this is an extent and not a head
+# test, and the third row above is the other half of it: `if true &&
+# bin/ocelli.sh gate x` puts the runner in the SECOND statement, whose head is
+# the runner rather than `if`.
+_CONDITION_INTRODUCERS = frozenset({"if", "elif", "while", "until"})
+_CONDITION_ENDS = frozenset({"then", "else", "do"})
+_NEGATION = "!"
+assert _CONDITION_INTRODUCERS <= SHELL_INTRODUCERS
+assert _CONDITION_ENDS <= SHELL_INTRODUCERS
+assert _NEGATION in SHELL_INTRODUCERS
+
+
+def _errexit_switch(statement: str) -> bool | None:
+    """True when this `set` turns errexit OFF, False ON, None neither.
+
+    `set +o pipefail` is the row that makes this a reader rather than a
+    substring test: it turns nothing off, and `+e` inside `+eu` does.
+    """
+    words = shell_words(statement)
+    if not words or words[0] != "set":
+        return None
+    answer = None
+    index = 1
+    while index < len(words):
+        word = words[index]
+        if word in ("-o", "+o"):
+            if index + 1 < len(words) and words[index + 1] == "errexit":
+                answer = word == "+o"
+            index += 2
+            continue
+        if word[:1] in "-+" and "e" in word[1:]:
+            answer = word[0] == "+"
+        index += 1
+    return answer
+
+
+def _errexit_exempt(pairs: list[tuple[str, str]],
+                    last: int) -> dict[int, str]:
+    """Statements whose failure `bash -e` discards because of their CONTEXT.
+
+    `_tolerated_statements` reads the SEPARATORS around a statement. This
+    reads the statement's own position inside a compound command, which the
+    separators cannot see, and the two are merged there.
+
+    The S03 review's fourteenth pass measured all four shapes below at exit 0
+    with the real `bin/ocelli.sh gate guards` step replaced, so `guards`, the
+    gate that watches every other gate, read as invoked while its failure
+    could not fail the run.
+
+    Declared limits, and both are fail-CLOSED. Being exempt means the command
+    does not count as CI running the gate, so an error in this direction is a
+    refusal that names the gate rather than a pass:
+
+    - A `set +e` inside a `( )` subshell or a function body is scoped to it.
+      This scanner models neither, so the exemption runs to the end of the
+      body or to the next `set -e`.
+    - A `then`, `else` or `do` ends the exemption wherever it appears, so a
+      body that uses one of those words as a plain argument ends it early.
+    """
+    exempt: dict[int, str] = {}
+    errexit_off = False
+    in_condition = False
+    for index, (statement, _) in enumerate(pairs):
+        head = statement.strip().split(" ", 1)[0]
+        if errexit_off and index != last:
+            # NOT when it is the last command in the body. `set +e` stops
+            # errexit, and errexit is not what makes the FINAL command's
+            # status the script's status. MEASURED: `set +e / false` exits 1
+            # and `set +e / false / echo done` exits 0. The generated-input
+            # bash oracle in `scripts/tests/test_guard_readers.py` found this,
+            # and the hand-written example table did not, which is the whole
+            # argument for generating the input.
+            exempt[index] = ("a `set +e` earlier in the body turned errexit "
+                             "off, so the shell runs on past a failure here")
+        elif head in _CONDITION_ENDS:
+            in_condition = False
+        elif in_condition or head in _CONDITION_INTRODUCERS:
+            in_condition = True
+            exempt[index] = ("it is inside the condition of an `if`, `elif`, "
+                             "`while` or `until`, whose failure the shell "
+                             "tests rather than fires errexit on")
+        elif head == _NEGATION:
+            exempt[index] = ("it is negated with `!`, so the shell reports "
+                             "the opposite of its status")
+        switch = _errexit_switch(statement)
+        if switch is not None:
+            errexit_off = switch
+    return exempt
+
+
 def _tolerated_statements(text: str) -> dict[int, str]:
     """Which statements' FAILURE the shell discards, and why, by index.
 
@@ -2040,6 +2223,18 @@ def _tolerated_statements(text: str) -> dict[int, str]:
                 tolerated[index] = ("it is a non-final member of a pipeline, "
                                     "whose status is its last member's")
                 continue
+            if position > 0 and pairs[segment[position - 1]][1] == "||":
+                # It runs ONLY when the left side FAILED, so its presence is
+                # not evidence that CI runs this gate. MEASURED: `true ||
+                # false` exits 0 because the right side never ran, so `true ||
+                # bin/ocelli.sh gate guards` satisfied `guards` at exit 0 with
+                # the gate never executed. Found by the generated-input bash
+                # oracle. The right side of `&&` is the same shape and is NOT
+                # closed here, which the module docstring declares as a limit.
+                tolerated[index] = ("a `||` before it means it runs only when "
+                                    "the left-hand side failed, so nothing "
+                                    "here says the shell runs it at all")
+                continue
             if position == len(segment) - 1:
                 continue
             after = [pairs[i][1] for i in segment[position:]]
@@ -2051,6 +2246,11 @@ def _tolerated_statements(text: str) -> dict[int, str]:
                 tolerated[index] = ("it is a non-final command of an AND-OR "
                                     "list that is not the last list in the "
                                     "body, and `bash -e` discards that")
+    # Merged LAST and overwriting, because a context reason is the more
+    # specific of the two: a gate inside an `if` condition is discarded for
+    # being a condition whether or not a separator would also have discarded
+    # it, and the reason a refusal prints is the edit a maintainer has to undo.
+    tolerated.update(_errexit_exempt(pairs, last))
     return tolerated
 
 

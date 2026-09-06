@@ -3740,16 +3740,24 @@ def _continue_on_error_on_the_job(box: Sandbox) -> None:
     A job key rather than a step key, so a reader looking at the step sees
     nothing at all. It takes every step in the job with it.
     """
+    _plant_under_the_job_key(box, "    continue-on-error: true\n")
+
+
+# The job key above the gate step, and the block a probe plants under it. TWO
+# builders need it, `continue-on-error` and `defaults.run.shell`, and its one
+# refusal is written once here rather than once in each: a message duplicated
+# per caller is a second refusal site watched by whatever watches the first,
+# which is the shape the census counts and this catalogue argues against
+# everywhere else.
+def _plant_under_the_job_key(box: Sandbox, block: str) -> None:
+    """Insert `block` directly under the job key holding the gate step."""
     gate, line, _, _ = _gate_step_pieces(box)
-    workflow = box.read(WORKFLOW_PATH)
-    lines = workflow.splitlines()
+    lines = box.read(WORKFLOW_PATH).splitlines()
     index = lines.index(line)
     for position in range(index, -1, -1):
-        match = re.fullmatch(r"( {2})([A-Za-z0-9_-]+):", lines[position])
-        if match:
+        if re.fullmatch(r"( {2})([A-Za-z0-9_-]+):", lines[position]):
             box.substitute(WORKFLOW_PATH, lines[position] + "\n",
-                           f"{lines[position]}\n"
-                           f"    continue-on-error: true\n")
+                           f"{lines[position]}\n{block}")
             return
     raise AssertionError(
         f"the step running `{gate}` sits under no job key this probe can find, "
@@ -3767,6 +3775,190 @@ def _a_gate_step_whose_failure_is_swallowed(box: Sandbox) -> None:
     """
     _, line, indent, body = _gate_step_pieces(box)
     box.substitute(WORKFLOW_PATH, line, f"{indent}- {body} || true")
+
+
+# The `run:` body of the step `_gate_step_pieces` picks, without the YAML key.
+# Five builders below rewrite that ONE command into a shape whose failure the
+# shell discards or plainly does not, and each needs the command rather than
+# the key.
+#
+# No refusal of its own, deliberately. `_a_floor_gate_whose_step_is_one_line`
+# has already matched `- run: bin/ocelli.sh gate <name>` whole, so the command
+# is non-empty by construction, and a check here would be a refusal site that
+# no state can reach.
+def _gate_step_command(box: Sandbox) -> tuple[str, str, str]:
+    """The gate step's line, its indentation, and the command it runs."""
+    _, line, indent, body = _gate_step_pieces(box)
+    return line, indent, body.removeprefix("run: ").strip()
+
+
+def _a_custom_shell_template_on_a_gate_step(box: Sandbox) -> None:
+    """`shell: bash {0}` on the step that runs a floor gate.
+
+    The fourteenth pass's first route, and the reason `shell:` is refused by
+    NAME rather than read. `python` and `pwsh` fail closed on their own: neither
+    is bash, so the runner cannot sit at a bash statement head in either. A
+    CUSTOM TEMPLATE is the dangerous value, because it is still bash and the
+    `-e` is gone. MEASURED, exit status read from the shell itself: a file
+    holding `false` then `echo AFTER` run as `bash -e <file>` exits 1 and run as
+    `bash <file>` exits 0. So every statement in the body is swallowed, and the
+    check went on reporting the gates as run at exit 0 with this key planted on
+    the real `bin/ocelli.sh gate guards` step.
+
+    The step, its command and its `if:` are untouched, which is what makes this
+    the `continue-on-error` family again in a key nobody reads as tolerating
+    anything.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- {body}\n{indent}  shell: bash {{0}}")
+
+
+def _a_measured_shell_on_a_gate_step(box: Sandbox) -> None:
+    """`shell: bash` on the same step, which must NOT be refused.
+
+    The other direction, and it is the one a refusal-by-name can get wrong.
+    `shell: bash` is `bash --noprofile --norc -eo pipefail {0}`, which is
+    STRICTER than the default `bash -e {0}` rather than looser: errexit is
+    present and pipefail is added. MEASURED: `false` then `echo AFTER` under
+    that argv exits 1. A check that refused every `shell:` it saw would refuse
+    a workflow written more carefully than the one it accepts.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- {body}\n{indent}  shell: bash")
+
+
+def _a_custom_shell_template_for_the_whole_workflow(box: Sandbox) -> None:
+    """The same template at WORKFLOW level, touching no step at all.
+
+    `defaults.run.shell` is settable on the workflow and on the job, and the
+    one that matters is the one no step mentions: it takes every `run:` in the
+    file with it, so a reader looking at the gate step sees nothing. That is
+    `_continue_on_error_on_the_job`'s argument one level further out, and it is
+    a different node of the parsed tree, so a repair could close the step key
+    and leave this open.
+
+    The block is planted above `jobs:` rather than beside a step, because
+    that is the whole point of the shape. A workflow carrying no top-level
+    `jobs:` key on a line of its own is `Sandbox.substitute`'s own refusal of a
+    no-op rather than a second one written here, which is what that refusal is
+    for: a builder that silently stopped mutating anything would leave the
+    guard green and the run would report a guard that "did not fire".
+    """
+    box.substitute(WORKFLOW_PATH, "\njobs:\n",
+                   "\ndefaults:\n  run:\n    shell: bash {0}\n\njobs:\n")
+
+
+def _a_custom_shell_template_for_the_job(box: Sandbox) -> None:
+    """The same template on the JOB holding the gate step.
+
+    The third and last place `shell:` is settable, and it is a lookup of its
+    own rather than a spelling of either other one: the job's value overrides
+    the workflow's and the step's overrides both, so the three are read at
+    three sites and a repair could close any two. This is the level
+    `_continue_on_error_on_the_job` plants its key at, and it is planted
+    through the same helper.
+    """
+    _plant_under_the_job_key(
+        box, "    defaults:\n      run:\n        shell: bash {0}\n")
+
+
+def _a_set_plus_e_before_a_gate_invocation(box: Sandbox) -> None:
+    """`set +e` on the line above the gate, in the same `run:` body.
+
+    The step is there, it names the gate, bash runs the gate, and the gate's
+    red is discarded. MEASURED: `set +e` then `false` then `echo AFTER` under
+    `bash -ec` exits 0, where `false` then `echo AFTER` exits 1.
+
+    This is the `|| true` route written as a shell OPTION rather than as an
+    operator, so the separator reading in `_tolerated_statements` cannot see it
+    at all: the statement's own separators are newlines and nothing about the
+    statement is unusual. It takes the rest of the body with it.
+
+    The body therefore has to CONTINUE past the gate, which is what the `echo
+    AFTER` in the measurement above is doing and what this plant omitted when
+    it was first written. With the gate last, `set +e` changes nothing.
+    """
+    line, indent, command = _gate_step_command(box)
+    # The trailing command is LOAD-BEARING and is the reason this probe went
+    # HARNESS when it was first written without one. `set +e` stops errexit,
+    # and errexit is not what makes the LAST command's status the script's
+    # status, so with the gate last the failure still reaches the step and the
+    # guard is right to count it. MEASURED, which is the pair the docstring
+    # above cites: `set +e` then `false` exits 1, and `set +e` then `false`
+    # then `echo` exits 0. A plant that does not match the measurement beside
+    # it tests a shape that is not the defect.
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f"{indent}    set +e\n"
+                   f"{indent}    {command}\n"
+                   f'{indent}    echo "gate step done"')
+
+
+def _errexit_restored_before_a_gate_invocation(box: Sandbox) -> None:
+    """`set +e` and then `set -e` before the gate, which must NOT be refused.
+
+    The direction a head test would get wrong. A body that turns errexit off
+    and back on again runs the gate under errexit, so the gate's failure fails
+    the step and CI runs it in the sense `--floor` means. MEASURED: `set +e`
+    then `set -e` then `false` then `echo AFTER` under `bash -ec` exits 1,
+    which is the control for the refuse probe above.
+
+    `_errexit_switch` is what has to read this, and it is a reader rather than
+    a substring test for the row beside it: `set +o pipefail` turns errexit off
+    in neither direction and `+e` inside `+eu` turns it off.
+    """
+    line, indent, command = _gate_step_command(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f"{indent}    set +e\n"
+                   f"{indent}    set -e\n"
+                   f"{indent}    {command}")
+
+
+def _a_gate_invocation_in_an_if_condition(box: Sandbox) -> None:
+    """The gate as the CONDITION of an `if`, whose failure the shell tests.
+
+    MEASURED: `if false; then true; fi` then `echo AFTER` under `bash -ec`
+    exits 0. errexit does not fire on a command whose status is being tested,
+    so the gate runs, its red is read as a branch, and the step is green. The
+    runner is still at a statement head and `invoked_gates` still sees it,
+    which is exactly why the shape reads as an invocation to anyone counting
+    invocations.
+    """
+    line, indent, command = _gate_step_command(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: if {command}; then true; fi")
+
+
+def _a_gate_invocation_in_an_if_body(box: Sandbox) -> None:
+    """The same `if`, with the gate in the `then` BODY, which is a real run.
+
+    The direction that makes the exemption an EXTENT rather than a head test,
+    and the reason `_CONDITION_ENDS` exists. A `then`, an `else` or a `do` ends
+    the condition, and the body after one is under errexit like anything else.
+    MEASURED: `if true; then false; fi` then `echo AFTER` under `bash -ec`
+    exits 1, against the 0 the probe above measures. So this step really does
+    run the gate and really can fail on it, and refusing it would be refusing a
+    workflow that is doing the right thing.
+    """
+    line, indent, command = _gate_step_command(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: if true; then {command}; fi")
+
+
+def _a_negated_gate_invocation(box: Sandbox) -> None:
+    """`! bin/ocelli.sh gate <name>`, whose status the shell inverts.
+
+    The third errexit-exempt context and the smallest edit of the three: one
+    character. MEASURED: `! false` then `echo AFTER` under `bash -ec` exits 0.
+    The gate's red becomes the step's green, and its green becomes the step's
+    red, so the step is not merely tolerant of the gate failing, it is wired
+    backwards. Quoted in the YAML because `!` opens a tag there.
+    """
+    line, indent, command = _gate_step_command(box)
+    box.substitute(WORKFLOW_PATH, line, f"{indent}- run: '! {command}'")
 
 
 def _the_unsafe_gate_named_only_in_a_comment(box: Sandbox) -> None:
@@ -5195,6 +5387,131 @@ GUARDS: tuple[Guard, ...] = (
                        "paragraph, because the obvious reading of that "
                        "paragraph is wrong: `false && true` followed by "
                        "another line exits 0."),
+            Probe("ci-floor.custom-shell-template-on-a-gate-step",
+                  _a_custom_shell_template_on_a_gate_step,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "sets a `shell:` on step",
+                  note="The fourteenth pass's first route, and it is the "
+                       "`continue-on-error` family in a key nobody reads as "
+                       "tolerating anything. The step is untouched, it names "
+                       "the gate, and `bash {0}` is still bash with NO `-e`. "
+                       "MEASURED, status read from the shell: a file holding "
+                       "`false` then `echo AFTER` exits 1 under `bash -e "
+                       "<file>` and 0 under `bash <file>`, so every statement "
+                       "in the body is swallowed, and the check exited 0 with "
+                       "the key planted on the real `bin/ocelli.sh gate "
+                       "guards` step. `python` and `pwsh` fail closed without "
+                       "this rule, neither being bash, which is why the "
+                       "refusal is by NAME against a measured set rather than "
+                       "a list of bad values."),
+            Probe("ci-floor.measured-shell-on-a-gate-step",
+                  _a_measured_shell_on_a_gate_step,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The direction a refusal-by-name can get wrong. "
+                       "`shell: bash` is `bash --noprofile --norc -eo pipefail "
+                       "{0}`, which is STRICTER than the default `bash -e "
+                       "{0}`: errexit is present and pipefail is added. "
+                       "MEASURED at exit 1 for `false` then `echo AFTER` under "
+                       "that argv. A check that refused every `shell:` it saw "
+                       "would refuse a workflow written more carefully than "
+                       "the one it accepts, which is the runbook's own "
+                       "sentence about a guard that fails on everything."),
+            Probe("ci-floor.custom-shell-template-for-the-workflow",
+                  _a_custom_shell_template_for_the_whole_workflow,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "sets `defaults.run.shell:` on the workflow",
+                  note="The same template written ONCE at workflow level, "
+                       "touching no step, and it takes every `run:` in the "
+                       "file with it. That is "
+                       "`ci-floor.continue-on-error-on-the-job`'s argument one "
+                       "level further out: a reader looking at the gate step "
+                       "sees nothing at all, and the key is reached through a "
+                       "different node of the parsed tree, so a repair could "
+                       "close the step key and leave this open. MEASURED at "
+                       "exit 0 before the fix."),
+            Probe("ci-floor.custom-shell-template-for-the-job",
+                  _a_custom_shell_template_for_the_job,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "sets `defaults.run.shell:` on the job",
+                  note="The third and last place `shell:` is settable, and it "
+                       "is a lookup of its own rather than a spelling of "
+                       "either other one: the job's value overrides the "
+                       "workflow's and the step's overrides both, so the three "
+                       "are read at three sites and a repair could close any "
+                       "two. Deleting the line that falls back from the job to "
+                       "the workflow leaves this probe red and takes "
+                       "`ci-floor.custom-shell-template-for-the-workflow` to "
+                       "HARNESS, and reading no job `defaults:` at all does "
+                       "the reverse, which is what says the two are not one "
+                       "probe written twice."),
+            Probe("ci-floor.set-plus-e-before-a-gate-step",
+                  _a_set_plus_e_before_a_gate_invocation,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "a `set +e` earlier in the body turned errexit off",
+                  note="`|| true` written as a shell OPTION rather than as an "
+                       "operator, so the separator reading in "
+                       "`_tolerated_statements` cannot see it: the statement's "
+                       "own separators are newlines and nothing about the "
+                       "statement is unusual. MEASURED under `bash -ec`: `set "
+                       "+e` then `false` then `echo AFTER` exits 0, where "
+                       "`false` then `echo AFTER` exits 1. It takes the rest "
+                       "of the body with it, which is what makes it worse "
+                       "than the `|| true` the thirteenth pass measured."),
+            Probe("ci-floor.errexit-restored-before-a-gate-step",
+                  _errexit_restored_before_a_gate_invocation,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The direction a `set +e` head test would get wrong. A "
+                       "body that turns errexit off and back on runs the gate "
+                       "under errexit, so the gate's red fails the step and CI "
+                       "runs it in the sense `--floor` means. MEASURED under "
+                       "`bash -ec`: `set +e` then `set -e` then `false` then "
+                       "`echo AFTER` exits 1, against the 0 the probe above "
+                       "measures. `_errexit_switch` is a reader rather than a "
+                       "substring test for the row beside it: `set +o "
+                       "pipefail` turns errexit off in neither direction and "
+                       "`+e` inside `+eu` turns it off."),
+            Probe("ci-floor.gate-inside-an-if-condition",
+                  _a_gate_invocation_in_an_if_condition,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "it is inside the condition of an `if`, `elif`, `while` or "
+                  "`until`",
+                  note="The runner is still at a statement head, so "
+                       "`invoked_gates` still sees it and the shape reads as "
+                       "an invocation to anyone counting invocations. errexit "
+                       "does not fire on a command whose status is being "
+                       "tested: MEASURED under `bash -ec`, `if false; then "
+                       "true; fi` then `echo AFTER` exits 0. The gate runs, "
+                       "its red is read as a branch, and the step is green."),
+            Probe("ci-floor.gate-inside-an-if-body",
+                  _a_gate_invocation_in_an_if_body,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The direction that makes the exemption an EXTENT "
+                       "rather than a head test, and the reason "
+                       "`_CONDITION_ENDS` exists. A `then`, an `else` or a "
+                       "`do` ends the condition and the body after one is "
+                       "under errexit like anything else. MEASURED under `bash "
+                       "-ec`: `if true; then false; fi` then `echo AFTER` "
+                       "exits 1, against the 0 the condition probe measures. "
+                       "So this step really does run the gate and really can "
+                       "fail on it, and refusing it would refuse a workflow "
+                       "doing the right thing."),
+            Probe("ci-floor.negated-gate-step",
+                  _a_negated_gate_invocation,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "it is negated with `!`",
+                  note="The third errexit-exempt context and the smallest edit "
+                       "of the three: one character. MEASURED under `bash "
+                       "-ec`: `! false` then `echo AFTER` exits 0. The gate's "
+                       "red becomes the step's green and its green becomes the "
+                       "step's red, so the step is not merely tolerant of the "
+                       "gate failing, it is wired backwards, and a reader of "
+                       "`ci.yml` still sees the gate invoked."),
             Probe("ci-floor.unclosed-quote-in-a-ci-step",
                   _an_unclosed_quote_in_a_ci_step,
                   script("python3", "scripts/ci_floor_check.py"),
@@ -5454,19 +5771,59 @@ GUARDS: tuple[Guard, ...] = (
               "answers the third, MEASURED against `bash -e` rather "
               "than read out of the errexit paragraph, whose obvious "
               "reading is wrong: `false && true` followed by another "
-              "line exits 0. What remains a limit there is the SHELL "
-              "the body runs under. GitHub's default for a Linux "
-              "`run:` is `bash -e {0}` and a step may override it with "
-              "`shell:`, or a job or the workflow with "
-              "`defaults.run.shell`. None is read and no step in "
-              "`.github/workflows/ci.yml` sets one today. `set -o "
-              "pipefail` inside a body is not read either, and that "
-              "direction is fail-CLOSED: pipefail makes a failure this "
-              "file already treats as discarded reach the step, so the "
-              "file counts LESS coverage than exists rather than more. "
-              "A `shell:` that is not a shell at all, `python` being "
-              "the one GitHub offers, would be read as bash, and that "
-              "is the shape to measure the day a step wants one. A "
+              "line exits 0. **The SHELL the body runs under was the "
+              "next limit and the S03 review's fourteenth pass "
+              "measured it open.** It said no step in "
+              "`.github/workflows/ci.yml` set one, which was true, and "
+              "that a `shell:` which is not a shell would be read as "
+              "bash, which named the wrong danger. `python` and `pwsh` "
+              "fail closed on their own, neither being bash. The value "
+              "that does not is a CUSTOM TEMPLATE: `shell: bash {0}` "
+              "is still bash and has no `-e`, MEASURED with a file "
+              "holding `false` then `echo AFTER` at exit 1 under `bash "
+              "-e <file>` and 0 under `bash <file>`, so every statement "
+              "in the body is swallowed and the check exited 0 with the "
+              "key on the real `bin/ocelli.sh gate guards` step. The "
+              "same template written once at workflow level under "
+              "`defaults:` took every `run:` in the file with it, also "
+              "at exit 0. All three levels are read now and the value "
+              "is refused BY NAME unless it is in `MEASURED_SHELLS`, "
+              "which is `bash` and `sh` and is closed against values "
+              "GitHub adds later. `ci-floor.custom-shell-template-on-a-"
+              "gate-step` and `ci-floor.custom-shell-template-for-the-"
+              "workflow` watch the two levels a repair could close "
+              "separately, and `ci-floor.measured-shell-on-a-gate-step` "
+              "watches the direction a refusal by name gets wrong, "
+              "`shell: bash` being `bash --noprofile --norc -eo "
+              "pipefail {0}` and therefore STRICTER than the default. "
+              "The same pass measured the other half of the errexit "
+              "reading, which `_tolerated_statements` could not see "
+              "because it reads the separators AROUND a statement and "
+              "these are properties of the statement's position: a "
+              "`set +e` earlier in the body, an `if`, `elif`, `while` "
+              "or `until` CONDITION, and a `!` negation, each measured "
+              "under `bash -ec` at 0 where the plain command exits 1, "
+              "each leaving the check at 0 with `guards` reported "
+              "covered. `_errexit_exempt` answers all three and "
+              "`ci-floor.set-plus-e-before-a-gate-step`, "
+              "`ci-floor.gate-inside-an-if-condition` and "
+              "`ci-floor.negated-gate-step` watch them one defence "
+              "each, against `ci-floor.errexit-restored-before-a-gate-"
+              "step` and `ci-floor.gate-inside-an-if-body` for the "
+              "shapes that really do run the gate. What remains a limit "
+              "there is stated in `_errexit_exempt` itself and both "
+              "halves are fail-CLOSED, so each costs a refusal naming "
+              "the gate rather than a pass: a `set +e` inside a `( )` "
+              "subshell or a function body is scoped to it and this "
+              "scanner models neither, so the exemption runs to the end "
+              "of the body or to the next `set -e`, and a `then`, "
+              "`else` or `do` ends the exemption wherever it appears, "
+              "so a body using one of those words as a plain argument "
+              "ends it early. `set -o pipefail` inside a body is not "
+              "read, and that direction is fail-CLOSED too: pipefail "
+              "makes a failure this file already treats as discarded "
+              "reach the step, so the file counts LESS coverage than "
+              "exists rather than more. A "
               "`continue-on-error` whose value is a `${{ }}` "
               "expression is treated as tolerating, on `_permits`' own "
               "rule: a value this file cannot read as harmless is not "

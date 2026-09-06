@@ -4,10 +4,12 @@
 **Last updated:** 2026-09-06
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
-mechanism.
+mechanism. The quote below alters that bullet in one place, splitting its
+single semicolon into two sentences, because `docs/hld/` is exempt from this
+repository's no-prose-semicolon rule and `docs/lld/` is not.
 
 > **Shares the renderer's device.** ocelli-compute never creates a
-> wgpu::Device, it borrows the one ocelli-render owns. Two devices cannot share
+> wgpu::Device. It borrows the one ocelli-render owns. Two devices cannot share
 > textures, which would defeat the entire point.
 
 This is the Phase 1 hook of HLD section 38. Its stated alternative is "a

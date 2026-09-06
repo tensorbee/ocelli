@@ -16,8 +16,11 @@ reformats of it. The half that judges is F-011 and it is
 `docs/lld/comparator.md`. Comparing Ocelli's own output against these frames
 still waits on there being an Ocelli output, which is decision D7 holding.
 
-Two passes, in two pages, in that order. The **stack pass** renders one frame of
-one instance, ninety-one times. The **volume pass** assembles four series
+Two passes, in two pages, in that order. The **stack pass** attempts one frame
+of one instance for every applicable corpus row and renders every one the
+reference can render, which is not the same count: `run.json`'s `boundaries`
+carries both, and the difference is declared in `unsupported.json`.
+The **volume pass** assembles four series
 directories into volumes and renders three reformats of each. Twelve are
 declared and nine are reference output, because one of the four directories
 turns out not to be a volume at all.
@@ -45,8 +48,8 @@ is not evidence of anything on its own.
 | `tools/oracle/build-page.mjs` | esbuild, into `page/dist` |
 | `tools/oracle/page/app.mjs` | the stack render page, `window.__oracle` |
 | `tools/oracle/page/volume.mjs` | the volume and MPR render page, `window.__oracleVolume` |
-| `tools/oracle/src/` | paths, manifest, params, voi, geometry, volume, sidecar, output, pins, server, unsupported, faults |
-| `tools/oracle/tests/` | twelve `node:test` suites, and the fault runner |
+| `tools/oracle/src/` | twelve `.mjs` modules, the reference half: paths, manifest, params, voi, geometry, volume, sidecar, output, pins, server, unsupported, faults. The comparator's Rust sits beside them, its binary under `src/bin/` |
+| `tools/oracle/tests/` | twelve `node:test` suites, the fault runner, and the comparator's Rust fixtures |
 | `tools/oracle/check_sidecars.py` | the pydicom cross-read of the sidecars |
 | `tools/oracle/render-params.json` | committed, and it decides every stack frame |
 | `tools/oracle/unsupported.json` | committed, what 5.8.2 cannot render |
@@ -54,9 +57,10 @@ is not evidence of anything on its own.
 | `tools/oracle/volume-truth.json` | committed, what is TRUE of each subject, and where 5.8.2 disagrees |
 | `tools/oracle/out/` | ignored, and refused by the pre-commit hook |
 
-`tools/oracle/Cargo.toml` and `src/lib.rs` are the Rust side that will run
-Ocelli under F-011 onwards. F-010 changed nothing there but the crate's doc
-comment, which now names 5.8.2 and points here.
+`tools/oracle/Cargo.toml` and `src/lib.rs` are the Rust side, and F-011 made
+that crate the COMPARATOR rather than a runner of Ocelli. **The candidate side
+is a directory contract, not a call into a renderer.** `docs/lld/comparator.md`
+is its design.
 
 ## The pins, and deviation D-11
 
@@ -590,9 +594,11 @@ Per row into ignored `tools/oracle/out/`:
 - `<id>.json`, the sidecar.
 
 Once per run, `run.json`: the manifest digest, the digests of
-`render-params.json` and `unsupported.json`, the installed versions of all
-sixteen pinned packages, the page's own environment, the host, the counts at
-each of the four boundaries, the determinism result, and a digest per row.
+`render-params.json`, `unsupported.json`, `volume-params.json` and
+`volume-truth.json`, the installed versions of all sixteen pinned packages, the
+page's own environment, the host, the counts under `boundaries`, covering the
+eight boundaries of both passes rather than the stack pass's four, the
+determinism result, and a digest per row.
 
 It also records **which checks ran**, under `checks`. The `--no-*` flags are
 development aids and the gate passes none of them, but a record that did not

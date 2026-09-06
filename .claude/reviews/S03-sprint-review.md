@@ -129,6 +129,7 @@ and a mutation is an input to a test: it derives from the specification too.
 | 11 | Two reviewers, 6 defects, 2 smells, 5 nitpicks. **The comparator and the crates were both declared done**, at four and two consecutive clean passes. The guard reviewer named the class ten passes had been patching and the remediation replaced two of three hand-rolled grammars with real parsers | remediated |
 | 12 | Two reviewers, 6 defects, 8 smells, 3 nitpicks, aimed at the two grammars pass 11 left. **The prediction pass 11's remediation made against itself came true**: the YAML reader had four fail-open routes, one of them key order, which is not a spelling and cannot be patched. Both readers are replaced | remediated |
 | 13 | Two reviewers, 6 defects, 2 smells, 4 nitpicks. **The verdict was that the class is NOT closed**: pass 12 closed the grammar and left the CONSUMERS of the grammar unguarded, and the bash oracle stopped at the arm's extent. The confirmation sweep declared the sprint able to close | remediated |
+| 14 | Two reviewers. The guard reviewer returned 1 defect, 2 smells, 1 nitpick and answered the convergence question with evidence: **the area IS converging**, the defect sat at exactly the seam pass 13's remediation predicted, and four of the five categories it was told had produced late findings before were empty. The confirmation reviewer returned 11 defects, 7 smells and 5 nitpicks in `docs/lld/` and the root docs, one class, on the only surface thirteen passes never re-read | remediated |
 
 **Three of these tallies are recorded here and nowhere else, not one.** The
 pass-4 row explained pass 3's missing tally and asserted it was the only one,
@@ -199,10 +200,15 @@ records it, which is why no figure for it is written into this file.
 `255 / w` says no window wider than 2550 can reach the bound, which is true and
 nearly useless, because the bound depends on `mean(u) / w`. Measured on this
 corpus, most gating class-one views can fail the bound and a minority cannot,
-the minority being the `real/mr_eay131` family and the wide-window rows, and the
-smallest blind window is 678 rather than 2550. The split itself is deliberately
-not transcribed here, because it is exactly the kind of number this review keeps
-finding stale, and pass 4 found the numerator wrong again. `bin/ocelli.sh
+the minority being the `real/mr_eay131` stack rows, TWO of that subject's three
+reformats, and the wide-window rows, and the smallest blind window is 678 rather
+than 2550. **Not the whole `real/mr_eay131` family**, which is what this sentence
+said until pass 14. That subject's CORONAL reformat is at -0.114 and CAN fail, so
+the blind pair is two of three reformats rather than all of them, and
+`docs/lld/comparator.md` had the distinction written down correctly while this
+file flattened it. The split itself is deliberately not transcribed here, because
+it is exactly the kind of number this review keeps finding stale, and pass 4
+found the numerator wrong again. `bin/ocelli.sh
 compare census` re-derives it from the rendered corpus by applying the
 catalogue's own swap to each view and reading the signed mean back,
 `bin/ocelli.sh gate oracle` prints the run census, and
@@ -437,6 +443,7 @@ Every pass so far has found a NEW CLASS rather than more of the last one:
 | 5 | A fix written against the demonstrated route rather than the rule |
 | 6 | A refusal shape the scanner could not see |
 | 7 | **A test that asserts the implementation is itself** |
+| 14 | A table of examples standing in for an oracle, and a surface no pass had re-read |
 
 Pass 7's class is the sharpest because it is invisible to every gate. Two tests
 recomputed the implementation's own expression in the test body and asserted
@@ -777,6 +784,118 @@ as if it had been. The seam named as next is `_tolerated_statements`' assumption
 that a step body runs under `bash -e`, since a `shell:` key is unread and
 `shell: python` would have the body scanned as shell. That is declared and not
 measured, and declared is what the last three passes found insufficient.
+
+## Pass 14, and the answer to the question this review kept not asking
+
+Thirteen passes had run on the guard harness and each one found the next thing.
+That is a pattern with two readings, a converging one and a non-converging one,
+and this review had never asked which. Pass 14's guard reviewer was asked
+directly, and told to answer with evidence rather than impression, and to say
+what it PLANTED THAT FAILED.
+
+**It converges, and the shape of the finding is why.** Pass 12 found grammar
+defects, where the reader could not parse what GitHub parses and no amount of
+care would have closed it, because key order is not a spelling. Pass 13 found
+CONSUMER defects, where the grammar was right and something built on it asked
+the wrong question. Those are different repairs. And pass 13's remediation
+NAMED ITS OWN NEXT CONSUMER: `_tolerated_statements`, the one production still
+without an oracle of its own. Pass 14 planted at exactly that seam and found
+exactly that class. A prediction verified is not the same event as a search
+that keeps succeeding.
+
+What the reviewer planted that FAILED is the other half of the evidence, and it
+is the half a reviewer looking for a finding would have omitted. Five probe
+mutations, each isolating exactly the defence it names and no probe found that
+does not discriminate. Every recorded value in `ci/guard-probe-budget.json`
+recomputed and none stale. `shell: python` attempted as a fail-open route for
+the invocation count and refused every way it could be written, because a
+Python program cannot put the runner at a bash statement head outside a string.
+
+### The defect, and the two the oracle found that nobody predicted
+
+`_tolerated_statements` modelled three ways `bash -e` discards a failure and
+bash has more. Four shapes put `bin/ocelli.sh gate guards`, the gate that
+watches every other gate, into a step whose failure cannot fail the run, each
+measured at exit 0 with the real step replaced: a `set +e` in the body, an `if`
+condition, a `!` negation, and `shell: bash {0}`, which is still bash and has
+no `-e`. The last one written once at workflow level under `defaults:` takes
+every `run:` in the file with it.
+
+The repair is the one the siblings already had. The three other consumers got
+an oracle in passes 11, 12 and 13, and this one still carried a hand-written
+table of ten measured `bash -ec` exit codes. **The table was correct about
+every row in it.** It was missing four whole contexts, because a table of
+examples can only contain what its author thought of. Replacing it with a
+generated-input oracle over a grammar of body shapes immediately found two more
+that neither the table nor the reviewer named:
+
+- `set +e` does not stop the LAST command's status becoming the script's, so
+  exempting it there was a false refusal. `set +e / false` exits 1 and `set +e
+  / false / echo done` exits 0.
+- the right-hand side of `||` runs only when the left side FAILED, so `true ||
+  bin/ocelli.sh gate guards` never runs `guards` at all, and the check counted
+  it as invoked.
+
+Fifty-five generated shapes now agree with bash in both directions. Five
+mutations of the defences go red on the test that names each, and the three
+controls that must NOT become false refusals stay green, including the one
+reading `if true; then bin/ocelli.sh gate guards; fi`,
+whose body failure does fire errexit. That
+control is what says the reader models the condition's EXTENT rather than its
+head word, which matters because `if true && bin/ocelli.sh gate x` puts the
+runner in the second statement.
+
+### The residue is declared and has an owner
+
+The generated oracle asks whether a failure is discarded when every other
+command succeeds. The stronger question is whether the command is guaranteed to
+run at all, and under it three shapes are still counted as invocations while a
+different status upstream skips them entirely: `a && GATE`, then
+`if COND; then GATE; fi`, then
+`while COND; do GATE; done`. None appears around a gate in
+`.github/workflows/ci.yml` today. Closing them NARROWS what the check accepts
+rather than repairing a reader, and `invoked_gates` documents `cd x &&
+bin/ocelli.sh gate y` as a legitimate invocation, so refusing the right side of
+`&&` contradicts a declared behaviour. That is a decision with an owner and not
+a patch, so it is **F-X019**, and its acceptance test is already written and
+asserts the residue as an EXACT set, so a fourth shape fails the test rather
+than being absorbed by it.
+
+### The other reviewer found the surface nobody had re-read
+
+Eleven defects, seven smells and five nitpicks, and they are one class: prose
+asserting something the tree contradicts. They concentrate in
+`docs/lld/typescript-packaging.md`, `docs/lld/oracle.md` and
+`docs/lld/build-targets.md`, three files carrying current `Last updated` stamps
+while describing a pre-F-004, pre-F-011 tree. `docs/lld/README.md` makes
+present state their contract rather than a courtesy.
+
+Two things about this are worth more than the individual corrections.
+
+**The first is where they were.** Thirteen passes went at the comparator, the
+crates and the guard harness. `docs/lld/` outside `guards.md` is the surface
+nobody re-read after the stories that invalidated it landed, and the class this
+review has been finding since pass 1 was sitting there the whole time.
+
+**The second is how one of them hid.** The reviewer's own cross-check on
+`docs/lld/README.md` reported the index consistent with the file headers, and
+it was, and both were wrong about the tree. `typescript-packaging.md` omitted
+`capabilities.ts` and omitted F-004 from its F-ID line, and the index row
+omitted F-004 too, so the two documents agreed with each other. **A consistency
+check verified consistency and was read as having verified correctness.** That
+is this sprint's signature defect one level up, and the rule it produces is the
+one the remediation followed: measure against the tree, never make two
+documents agree.
+
+Where a correct sentence already existed elsewhere in the repository it was
+COPIED rather than recomposed, which is the review's standing answer to a
+remediation shipping new claims. Eight of the corrections had one:
+`docs/lld/errors.md` for the eslint allowance, `tools/oracle/src/lib.rs` for
+what the Rust half is, `docs/lld/oracle.md`'s own line 520 for the difference
+between covering 89 rows and reporting 91, `docs/SOURCE-POLICY.md`'s own table
+row recording that Grok is out of bounds and must not be read or depended on,
+and `docs/lld/comparator.md` for the blind reformat pair that
+THIS FILE flattened at its own line 204.
 
 ## What is still open, and it is declared rather than hidden
 

@@ -165,7 +165,7 @@
       "layer": "Build",
       "weeks": 2,
       "depends_eids": [],
-      "notes": "Core crates must not depend on wasm-bindgen \u2014 see HLD \u00a74",
+      "notes": "Core crates must not depend on wasm-bindgen — see HLD §4",
       "milestone": "M1",
       "sprint": "S01",
       "depends_fids": []
@@ -634,7 +634,7 @@
       "depends_eids": [
         "E4.1"
       ],
-      "notes": "openjp2 is a machine-translated port \u2014 validate hard",
+      "notes": "openjp2 is a machine-translated port — validate hard",
       "milestone": "M2",
       "sprint": "S08",
       "depends_fids": [
@@ -653,7 +653,7 @@
       "depends_eids": [
         "E4.4"
       ],
-      "notes": "P0 KILL CRITERION \u2014 unverified in Rust today",
+      "notes": "P0 KILL CRITERION — unverified in Rust today",
       "milestone": "M2",
       "sprint": "S09",
       "depends_fids": [
@@ -672,7 +672,7 @@
       "depends_eids": [
         "E4.1"
       ],
-      "notes": "P0 KILL CRITERION \u2014 no credible pure-Rust path",
+      "notes": "P0 KILL CRITERION — no credible pure-Rust path",
       "milestone": "M2",
       "sprint": "S09",
       "depends_fids": [
@@ -805,7 +805,7 @@
       "depends_eids": [
         "E5.3"
       ],
-      "notes": "Uint8Array views detach on memory growth \u2014 see HLD \u00a75",
+      "notes": "Uint8Array views detach on memory growth — see HLD §5",
       "milestone": "M3",
       "sprint": "S13",
       "depends_fids": [
@@ -881,7 +881,7 @@
       "depends_eids": [
         "E6.1"
       ],
-      "notes": "One GPUDevice serves N viewports \u2014 no context pool",
+      "notes": "One GPUDevice serves N viewports — no context pool",
       "milestone": "M3",
       "sprint": "S13",
       "depends_fids": [
@@ -900,7 +900,7 @@
       "depends_eids": [
         "E6.1"
       ],
-      "notes": "The architectural win \u2014 pixels never become JS objects",
+      "notes": "The architectural win — pixels never become JS objects",
       "milestone": "M3",
       "sprint": "S13",
       "depends_fids": [
@@ -1432,7 +1432,7 @@
       "depends_eids": [
         "E16.1"
       ],
-      "notes": "TS \u2014 this is interaction state, not pixels",
+      "notes": "TS — this is interaction state, not pixels",
       "milestone": "M7",
       "sprint": "S25",
       "depends_fids": [
@@ -1451,7 +1451,7 @@
       "depends_eids": [
         "E11.1"
       ],
-      "notes": "TS \u2014 531 listener sites in cornerstone live here",
+      "notes": "TS — 531 listener sites in cornerstone live here",
       "milestone": "M7",
       "sprint": "S26",
       "depends_fids": [
@@ -1470,7 +1470,7 @@
       "depends_eids": [
         "E7.4"
       ],
-      "notes": "Rust \u2014 the part worth moving",
+      "notes": "Rust — the part worth moving",
       "milestone": "M7",
       "sprint": "S25",
       "depends_fids": [
@@ -1489,7 +1489,7 @@
       "depends_eids": [
         "E11.2"
       ],
-      "notes": "TS \u2014 DOM-native, stays out of wasm",
+      "notes": "TS — DOM-native, stays out of wasm",
       "milestone": "M7",
       "sprint": "S27",
       "depends_fids": [
@@ -1983,7 +1983,7 @@
       "depends_eids": [
         "E15.2"
       ],
-      "notes": "Keep the dcmjs bridge \u2014 rewriting buys nothing",
+      "notes": "Keep the dcmjs bridge — rewriting buys nothing",
       "milestone": "M11",
       "sprint": "S36",
       "depends_fids": [
@@ -2038,7 +2038,7 @@
       "layer": "TS",
       "weeks": 4,
       "depends_eids": [],
-      "notes": "New API by decision \u2014 see HLD \u00a72",
+      "notes": "New API by decision — see HLD §2",
       "milestone": "M4",
       "sprint": "S15",
       "depends_fids": []
@@ -2226,7 +2226,7 @@
       "depends_eids": [
         "E6.6"
       ],
-      "notes": "Naga dominates the profile \u2014 biggest single lever",
+      "notes": "Naga dominates the profile — biggest single lever",
       "milestone": "M13",
       "sprint": "S40",
       "depends_fids": [
@@ -4112,6 +4112,27 @@
         "F-X009"
       ],
       "notes": "python3 scripts/sprint_workflow.py close-preflight prints OK: S03 is ready to close on a tree that had just taken nine sprint-level review passes and eight remediation commits, the last of which found HLD 17.2's central architectural rule guarded by nothing. THE GREEN IS NOT WRONG, IT IS ABOUT A DIFFERENT QUESTION. cmd_close_preflight reads the last entry of each feature's reviews list, which /complete-feature writes per F-ID at completion. Every S03 row in .claude/scratch/S03-run.json records pass 1 with zero defects, F-X007 records pass 2, and the sprint-level review loop that WORKFLOW.md step 5 describes writes nothing into that structure at all. So the preflight is structurally blind to the review that actually found this sprint's defects, and it says so in the language of success, which is the exact shape AGENTS.md already names about git add -N: the guard answered a question about an empty set. SECOND AND SEPARATELY, sprint_verified accepts any recorded profile=sprint entry with result=pass and the entries carry no tree hash, so a verification taken eight commits ago still satisfies it. The mechanism to fix that already exists and is not used: .claude/verify-ledger.json keys on git write-tree and scripts/verify_ledger.py check-commit asserts the trailer's tree matches the commit's. THE COST IS THE STATE SHAPE AND NOT THE CHECK. S03-run.json has no place to record a sprint-scope review, so the schema gains one, /microscope at sprint scope has to write it, and the preflight then requires the LATEST sprint-level pass to be zero-defect and zero-smell rather than the per-feature ones. The verification half should record the tree hash beside each entry and refuse one whose tree is not the current index, which is the rule CI already applies to the Ocelli-Verify trailer. Note the interaction with F-X009's census, which will want a catalogue entry for the new refusal, and note that .claude/scratch/ is gitignored so nothing here is a tracked-file change. MITIGATION, STATED SO THE STORY IS NOT OVER-SOLD: /close-sprint runs gate --sprint itself and no defect reached main because of this, so the failure is in the evidence rather than in an outcome. That is why it is one week and not a blocker.",
+      "milestone": "M1",
+      "sprint": "S04",
+      "added": true,
+      "depends_fids": [
+        "F-X009"
+      ]
+    },
+    {
+      "fid": "F-X019",
+      "eid": "Y1.14",
+      "phase": "P1",
+      "epic": "EY Sprint follow-ups",
+      "epic_key": "EY",
+      "story": "Decide whether a CI step that is not guaranteed to run counts as CI running the gate",
+      "layer": "Build",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids_declared": [
+        "F-X009"
+      ],
+      "notes": "The S03 review's fourteenth pass replaced `_tolerated_statements`' hand-written example table with a generated-input bash oracle, in `scripts/tests/test_guard_readers.py`. That oracle asks whether a statement's FAILURE reaches the step when every other command succeeds, and the scanner agrees with bash on all 55 generated shapes. The STRONGER question is whether the command is guaranteed to run at all, and under it three shapes are still counted as CI running a gate while a different status upstream skips them entirely: `a && GATE`, `if COND; then GATE; fi`, and `while COND; do GATE; done`. Measured witnesses, each exiting 0 with the gate never executed: `false && false`, `if false; then false; fi`, `while false; do false; break; done`. None appears around a gate in `.github/workflows/ci.yml` today, which is why this is a story and not a defect fix. Closing it NARROWS what the check accepts rather than repairing a reader, and `invoked_gates`' own docstring documents `cd x && bin/ocelli.sh gate y` as two statements of which the second is an invocation, so refusing the right-hand side of `&&` contradicts a declared behaviour and is a decision rather than a patch. Acceptance test already written and asserting the residue as an EXACT set: `test_the_shapes_not_guaranteed_to_run_are_exactly_these_three`. A fourth shape appearing there fails that test rather than being absorbed by it, so the hole cannot grow silently while this story waits.",
       "milestone": "M1",
       "sprint": "S04",
       "added": true,

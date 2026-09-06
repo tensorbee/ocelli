@@ -1466,8 +1466,9 @@ right, which is what makes it the clearest case in this sprint: a true
 correction applied by the forbidden method leaves the entry looking as though
 it had always been true, and nothing tells the next reader the claim was ever
 re-measured. `git show 828037e -- docs/sprints/AS_BUILT.md` is the whole of that
-edit and it is one hunk, two insertions and two deletions. It read six lines here until the S03 review's thirteenth pass ran the command. F-006's entry now reads as it did at completion, and
-the correction is here:
+edit and it is one hunk, two insertions and two deletions. It read six lines
+here until the S03 review's thirteenth pass ran the command. F-006's entry now
+reads as it did at completion, and the correction is here:
 
 | F-006's entry as written | What the command says |
 |--------------------------|-----------------------|
@@ -1485,7 +1486,7 @@ the crate today, and the entry already says the crate total is not transcribed
 for exactly this reason. Treat the 64 and the breakdown as one unrecoverable
 figure rather than as two claims one of which is right.
 
-**F-011's "the oracle's twelve suites to 210 in total" is point-in-time and is
+**F-X007's "the oracle's twelve suites to 210 in total" is point-in-time and is
 read as current.** It was true when written. `node --test
 tools/oracle/tests/*_test.mjs` prints what the twelve suites hold now, and
 `ls tools/oracle/tests/*_test.mjs | wc -l` prints that there are still twelve.
@@ -1493,6 +1494,32 @@ The figure is left in the entry because it is what was believed at completion,
 which is the whole property of this file, and it is named here so that a reader
 who needs today's number has the command rather than the sentence. Smell 7
 above is the evidence that this file is not in fact read as point-in-time.
+
+### Pass 14, recorded 2026-09-06
+
+**This subsection carries its own date rather than moving the heading's.** The
+section heading says 2026-09-05, which is when the passes it opened with were
+recorded, and the later passes landed after it. Dating each late subsection
+leaves that heading true for the contents it was written for, where moving the
+date would make it wrong for them.
+
+**F-X007's `**What was built.**` field states the volume pass as achieved where
+the run records it as attempted.** The entry itself is not edited, per the
+fourth line of this file.
+
+| F-X007's entry as written | What the command says |
+|---------------------------|-----------------------|
+| Four series directories "are assembled into cornerstone3D volumes and rendered as three orthogonal reformats each" | Four are attempted, three are assembled, and the fourth, `real/ct_cmb_mml`, is refused as declared. Fewer reformats are written than are declared. `python3 -c "import json;print(json.load(open('tools/oracle/out/run.json'))['boundaries'])"` prints `volumesApplicable`, `volumesBuilt`, `volumesRefused`, `volumesRefusedAsDeclared`, `reformatsDeclared` and `reformatsWritten`, and none of those figures is transcribed here |
+
+**Measure the run-level `boundaries` object and not a per-subject record.** The
+refused subject's own entry under `volumes` in the same file carries
+`reformatsPresented` and `reformatsReadBack` of three, and those are ATTEMPTED
+counters. F-X007's own note "The volume boundaries do not run in the order they
+are listed" says why: `volume-geometry` is the driver's boundary and runs last,
+so a subject can be refused having already presented every orientation. A
+reader who measures the per-subject record will conclude the sentence above was
+right and re-correct this back. `CHANGELOG.md` has carried the correct form
+since pass 5.
 
 **Notes for future sessions.**
 - **A count and the mechanism it describes must be edited by the same hand or

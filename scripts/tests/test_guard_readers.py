@@ -680,6 +680,14 @@ class WhatCiRunsInAStepBody(unittest.TestCase):
         a failing left side of `&&` fails the step, and rows two and three say
         it does not: the short circuit means the command after the final `&&`
         never runs, so nothing fires errexit and the list status is discarded.
+
+        The two `true || false` rows are the S03 review's fourteenth pass and
+        they are about the OTHER side of that operator. A right-hand side runs
+        only when the left one FAILED, so with a succeeding left side it never
+        runs at all, and `true || bin/ocelli.sh gate guards` satisfied the
+        `guards` gate at exit 0 with the runner never called. That is a gate
+        counted as invoked rather than a failure discarded, and it reaches the
+        same place.
         """
         for script, status in (("false\necho AFTER", 1),
                                ("false && true\necho AFTER", 0),
@@ -688,6 +696,8 @@ class WhatCiRunsInAStepBody(unittest.TestCase):
                                ("true && false\necho AFTER", 1),
                                ("false || false\necho AFTER", 1),
                                ("false || true\necho AFTER", 0),
+                               ("true || false\necho AFTER", 0),
+                               ("true || false", 0),
                                ("true | false\necho AFTER", 1),
                                ("false | cat\necho AFTER", 0),
                                ("false &\necho AFTER\nwait", 0)):
@@ -701,16 +711,21 @@ class WhatCiRunsInAStepBody(unittest.TestCase):
 
         The set is the statement indices whose failure the shell discards, read
         straight off the measurements above.
+
+        The three `||` rows gained a member in the fourteenth pass, from the
+        two `true || false` measurements added above rather than to make
+        anything pass: index 1 of `x || y` runs only if `x` failed, so with
+        `x` succeeding its own status never reaches the step.
         """
         for body, tolerated in (("x\ny", set()),
                                 ("x && y\nz", {0}),
                                 ("x && y", set()),
-                                ("x || y\nz", {0}),
-                                ("x || y", {0}),
+                                ("x || y\nz", {0, 1}),
+                                ("x || y", {0, 1}),
                                 ("x | y\nz", {0}),
                                 ("x | y", {0}),
                                 ("x &\ny", {0}),
-                                ("x && y || z", {0, 1}),
+                                ("x && y || z", {0, 1, 2}),
                                 ("x && y && z", set())):
             with self.subTest(body):
                 self.assertEqual(
@@ -738,6 +753,219 @@ class WhatCiRunsInAStepBody(unittest.TestCase):
                 "          echo 'never closed\n"
                 "          bin/ocelli.sh gate guards\n"))
         self.assertIn("opened and never closed", str(caught.exception))
+
+
+# One `run:` body shape per row, with `{0}` and `{1}` where a command goes.
+#
+# The GRAMMAR the oracle below generates from. The point of generating rather
+# than listing is that `_tolerated_statements` carried a hand-written table of
+# ten measured examples and passed it, while four whole CONTEXTS were missing
+# from the enumeration and each one put `bin/ocelli.sh gate guards`, the gate
+# that watches every other gate, into a step whose failure could not fail the
+# run. A table of examples can only contain what its author thought of.
+STEP_BODY_SHAPES = (
+    "{0}\n", "{0}\necho tail\n",
+    "{0} && {1}\n", "{0} && {1}\necho tail\n",
+    "{0} || {1}\n", "{0} || {1}\necho tail\n",
+    "{0} | {1}\n", "{0} | {1}\necho tail\n",
+    "{0} &\nwait\n", "{0} &\necho tail\nwait\n",
+    "{0}; {1}\n", "{0}\n{1}\n",
+    "if {0}; then echo T; fi\n", "if {0}; then echo T; fi\necho tail\n",
+    "if {0} && {1}; then echo T; fi\n",
+    "if {0} || {1}; then echo T; fi\n",
+    "if true; then {0}; fi\n", "if true; then {0}; fi\necho tail\n",
+    "if false; then echo A; else {0}; fi\n",
+    "if false; then echo A; elif {0}; then echo T; fi\n",
+    "while {0}; do break; done\n", "while {0}; do break; done\necho tail\n",
+    "until {0}; do break; done\n",
+    "while true; do {0}; break; done\n",
+    "for x in a; do {0}; done\n",
+    "! {0}\n", "! {0}\necho tail\n", "! {0} && {1}\n",
+    "set +e\n{0}\necho done\n", "set +e\n{0}\n",
+    "set +o errexit\n{0}\necho done\n", "set +o errexit\n{0}\n",
+    "set +e\nset -e\n{0}\n", "set +e\nset -e\n{0}\necho tail\n",
+    "set +eu\n{0}\necho done\n", "set +o pipefail\n{0}\necho done\n",
+    "{0} && {1} || echo fallback\n",
+    "if {0}; then {1}; fi\n",
+    "while {0}; do {1}; break; done\n",
+    "set +e\nif {0}; then echo T; fi\n{1}\n",
+)
+
+
+def bash_fails(body: str) -> bool | None:
+    """Does `body` exit non-zero under `bash -ec`, or None if bash refuses it.
+
+    This is the whole oracle. GitHub runs a step body as `bash -e {0}`, so a
+    command's failure reaches the step exactly when the script exits non-zero,
+    and a command that never RUNS cannot make it do so. Both halves of what
+    `_tolerated_statements` decides are therefore one measurement.
+    """
+    if subprocess.run([BASH, "-n"], input=body, text=True,
+                      capture_output=True).returncode != 0:
+        return None
+    try:
+        done = subprocess.run([BASH, "-ec", body], capture_output=True,
+                              text=True, timeout=10)
+    except subprocess.TimeoutExpired:  # pragma: no cover, a runaway shape
+        return None
+    return done.returncode != 0
+
+
+def _slot_count(shape: str) -> int:
+    return len(set(re.findall(r"\{(\d)\}", shape)))
+
+
+def _body_and_index(shape: str, target: int, others_succeed: bool
+                    ) -> tuple[str, int] | None:
+    """`shape` with `target` failing, and which statement index it became."""
+    count = _slot_count(shape)
+    words = [("false" if i == target or not others_succeed else "true")
+             + f" M{i}" for i in range(count)]
+    body = shape.format(*words)
+    pairs = ci_floor_check._statement_separators(
+        ci_floor_check.shell_source(body))
+    found = [i for i, (statement, _) in enumerate(pairs)
+             if f"M{target}" in statement]
+    return (body, found[0]) if len(found) == 1 else None
+
+
+class WhoseFailureBashDiscards(unittest.TestCase):
+    """`_tolerated_statements` against bash over GENERATED bodies.
+
+    The fourth and last consumer of the tokenizer to get an oracle. The other
+    three got one in the eleventh, twelfth and thirteenth passes of the S03
+    review, and this one still carried a hand-written table of ten measured
+    `bash -ec` exit codes. The table was correct about every row in it. It was
+    missing four whole contexts, and the fourteenth pass planted all four at
+    exit 0 with the real `gate guards` step replaced: a `set +e` in the body,
+    an `if` condition, a `!` negation, and a custom `shell:` template.
+
+    Generating the input found two more that neither the table nor that pass
+    named, and both are fixed rather than recorded:
+
+    - `set +e` does not stop the LAST command's status becoming the script's,
+      so exempting it there was a false refusal.
+    - the right-hand side of `||` runs only when the left side FAILED, so
+      `true || bin/ocelli.sh gate guards` never runs `guards` at all and the
+      check counted it as invoked.
+    """
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_the_scanner_agrees_with_bash_on_every_generated_shape(
+            self) -> None:
+        """No fail-open and no false refusal, over the whole grammar.
+
+        A statement is tolerated exactly when bash discards its failure. Any
+        disagreement is reported with the body that produced it, because a
+        count alone would say a shape broke and not which one.
+        """
+        checked = 0
+        for shape in STEP_BODY_SHAPES:
+            for target in range(_slot_count(shape)):
+                made = _body_and_index(shape, target, others_succeed=True)
+                self.assertIsNotNone(made, f"ambiguous marker in {shape!r}")
+                body, index = made
+                reaches = bash_fails(body)
+                self.assertIsNotNone(reaches, f"bash refused {body!r}")
+                tolerated = index in ci_floor_check._tolerated_statements(
+                    ci_floor_check.shell_source(body))
+                checked += 1
+                self.assertEqual(
+                    tolerated, not reaches,
+                    f"bash and the scanner disagree about statement {index} "
+                    f"of {body!r}: bash "
+                    f"{'fails' if reaches else 'exits 0'} and the scanner "
+                    f"says it is {'discarded' if tolerated else 'reported'}")
+        self.assertGreaterEqual(checked, 55)
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_the_shapes_not_guaranteed_to_run_are_exactly_these_three(
+            self) -> None:
+        """The DECLARED residue, asserted so a change to it is visible.
+
+        The test above asks whether a failure is discarded when every other
+        command succeeds. The stronger question is whether the command is
+        guaranteed to run AT ALL, and under that question three shapes are
+        still counted as invocations while a different status upstream skips
+        them entirely. None of the three appears around a gate in
+        `.github/workflows/ci.yml` today, and closing them narrows what the
+        check ACCEPTS rather than fixing a reader, which is a decision with an
+        owner rather than a patch. F-X019.
+
+        Asserted as an exact set. A fourth shape appearing here is a new hole
+        and must fail this test rather than be absorbed by it.
+        """
+        open_shapes = set()
+        for shape in STEP_BODY_SHAPES:
+            for target in range(_slot_count(shape)):
+                made = _body_and_index(shape, target, others_succeed=True)
+                body, index = made
+                if index in ci_floor_check._tolerated_statements(
+                        ci_floor_check.shell_source(body)):
+                    continue
+                skipped = _body_and_index(shape, target, others_succeed=False)
+                if skipped is None:
+                    continue
+                if bash_fails(skipped[0]) is False:
+                    open_shapes.add(skipped[0])
+        self.assertEqual(open_shapes, {
+            "false M0 && false M1\necho tail\n",
+            "if false M0; then false M1; fi\n",
+            "while false M0; do false M1; break; done\n",
+        })
+
+
+class WhichShellTheStepRunsUnder(unittest.TestCase):
+    """A `run:` body is read as `bash -e`, so any other shell is refused.
+
+    GitHub's default on Linux with no `shell:` is `bash -e {0}`. A custom
+    template is the dangerous value and it is named nowhere in the workflow
+    syntax as a hazard: `shell: bash {0}` is still bash and has NO `-e`.
+    """
+
+    def test_a_custom_template_on_a_step_is_refused_by_name(self) -> None:
+        with self.assertRaises(RuntimeError) as raised:
+            ci_floor_check.run_commands(workflow_with(
+                "      - shell: bash {0}\n"
+                "        run: bin/ocelli.sh gate guards\n"))
+        self.assertIn("shell:", str(raised.exception))
+        self.assertIn("bash {0}", str(raised.exception))
+
+    def test_a_workflow_level_default_is_read_too(self) -> None:
+        """The spelling that touches no step and takes every `run:` with it."""
+        with self.assertRaises(RuntimeError) as raised:
+            ci_floor_check.run_commands(
+                "on: [push]\ndefaults:\n  run:\n    shell: bash {0}\n"
+                "jobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n"
+                "      - run: bin/ocelli.sh gate guards\n")
+        self.assertIn("defaults.run.shell:", str(raised.exception))
+
+    def test_a_job_level_default_overrides_the_workflow_one(self) -> None:
+        """A job saying `bash` is measured, even under a workflow that is not.
+
+        This is the case that makes the resolution ORDER load-bearing rather
+        than decorative, and reading only the workflow level would refuse it.
+        """
+        commands = ci_floor_check.run_commands(
+            "on: [push]\ndefaults:\n  run:\n    shell: bash {0}\n"
+            "jobs:\n  j:\n    runs-on: ubuntu-latest\n"
+            "    defaults:\n      run:\n        shell: bash\n"
+            "    steps:\n      - run: bin/ocelli.sh gate guards\n")
+        self.assertIn("guards", ci_floor_check.invoked_gates(commands))
+
+    def test_the_measured_shells_are_accepted(self) -> None:
+        for shell in sorted(ci_floor_check.MEASURED_SHELLS):
+            with self.subTest(shell):
+                commands = ci_floor_check.run_commands(workflow_with(
+                    f"      - shell: {shell}\n"
+                    f"        run: bin/ocelli.sh gate guards\n"))
+                self.assertIn("guards",
+                              ci_floor_check.invoked_gates(commands))
+
+    def test_a_step_with_no_shell_is_still_read(self) -> None:
+        commands = ci_floor_check.run_commands(workflow_with(
+            "      - run: bin/ocelli.sh gate guards\n"))
+        self.assertIn("guards", ci_floor_check.invoked_gates(commands))
 
 
 class TheGatesArrayHasOneReader(unittest.TestCase):

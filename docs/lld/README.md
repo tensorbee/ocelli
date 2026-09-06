@@ -25,7 +25,7 @@ row here in the same hand.
 | [gpu-ownership.md](gpu-ownership.md) | One device, one queue, one owner. The section 31 contract | F-004, F-005, F-008 |
 | [tier-resolution.md](tier-resolution.md) | How a session resolves tier A, B or C, the fill-rate probe and the operator override | F-004 |
 | [errors.md](errors.md) | The error model, the code registry, the panic record and structured logging | F-005 |
-| [typescript-packaging.md](typescript-packaging.md) | What the npm packages publish, and what proves it | F-003, F-005 |
+| [typescript-packaging.md](typescript-packaging.md) | What the npm packages publish, and what proves it | F-003, F-004, F-005 |
 | [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010, F-X006, F-X007, F-X009 |
 | [comparator.md](comparator.md) | The harness's judging half: the tolerance predicate, the verdict vocabulary, the attribution ladder and the census | F-011 |
 | [benchmarks.md](benchmarks.md) | The benchmark harness of HLD section 26, its subject registry, the host class and the `bench` gate | F-006 |

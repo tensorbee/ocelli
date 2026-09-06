@@ -1,7 +1,7 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-005
-**Last updated:** 2026-09-05
+**F-IDs that contributed:** F-003, F-004, F-005
+**Last updated:** 2026-09-06
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
@@ -18,7 +18,8 @@ built in F-101.
 ### What is in the `@ocelli/core` tarball today
 
 Everything under `packages/core/src` compiles into `dist` and is re-exported
-from `index.ts`. F-005 added three modules to the five files that were there.
+from `index.ts`. F-005 added three modules to the four files that were there,
+and F-004 then added `capabilities.ts`.
 
 | Module | Holds |
 |--------|-------|
@@ -27,16 +28,22 @@ from `index.ts`. F-005 added three modules to the five files that were there.
 | `errors.ts` | The error-code mirror, the message table, `decodeRecord` |
 | `panic.ts` | `readPanicRecord`, and the panic record's layout |
 | `fatal.ts` | `CoreStatus` and the never-returns-to-ok latch |
+| `capabilities.ts` | The shell-side probes `wasmSimd128Supported` and `sharedMemoryAvailable`, and the committed SIMD module they validate |
 
-`docs/lld/errors.md` specifies the last three. What belongs to this file is
-that they ship, that they add no runtime dependency, and that `errors.ts` is
-where the human text for an error code lives, which is HLD section 23's "the
-message is for humans and may change" taken literally.
+`docs/lld/errors.md` specifies `errors.ts`, `panic.ts` and `fatal.ts`, and
+`docs/lld/tier-resolution.md` specifies `capabilities.ts`. What belongs to
+this file is that they ship, that they add no runtime dependency, and that
+`errors.ts` is where the human text for an error code lives, which is HLD
+section 23's "the message is for humans and may change" taken literally.
 
 ## `panic.ts` is the second file permitted a view over linear memory
 
 `eslint.config.js` bans building any typed array or `DataView` over anything
-ending `.memory.buffer`, and turns that off for exactly two files.
+ending `.memory.buffer`, and `ALLOWED_TO_DISABLE` turns that off through three
+path patterns and not two. The first list is the production allowance,
+`bulk.ts` and `panic.ts`. The second is `packages/core/src/*.test.ts`, kept as
+a separate list precisely so the production allowance does not read as more
+files than the two it grants.
 
 HLD section 17.2 says "outside the two functions that are allowed to do it".
 ESLint scopes overrides by file rather than by function, so the allowance is
@@ -51,9 +58,9 @@ its last use. The discipline is kept anyway. The view is built inside the
 function, used immediately, and neither stored nor returned.
 
 **Widening the list is a design-plan decision** and `.claude/plans/
-F-005-design.md` item F is the one that added the second entry. **A third is
-not granted.** `packages/core/src/ring.ts` will need one when F-101 gives it a
-real ring to drain, and that is F-101's plan to argue.
+F-005-design.md` item F is the one that added the second entry. **A third
+production file is not granted.** `packages/core/src/ring.ts` will need one
+when F-101 gives it a real ring to drain, and that is F-101's plan to argue.
 
 ## There is no bundler, and that is a decision rather than an omission
 

@@ -1,7 +1,8 @@
 # A7, is tier C worth building, and where does its value come from?
 
 **Gate**: `docs/spikes/GATES.md`, A7.
-**Gates stories**: F-X001 to F-X004. **Created by**: deviation D-07.
+**Gates stories**: F-X003 and F-X004, within epic X1's F-X001 to F-X005.
+**Created by**: deviation D-07.
 **Status**: **RESOLVED. Outcome `Pass`.** Every sub-question is decided.
 The two remaining figures are measurements, and they are acceptance criteria
 on F-X002 and F-X003 rather than open gate questions. The gate's job was to

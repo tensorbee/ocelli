@@ -77,10 +77,12 @@ that no code yet expresses.** `crates/ocelli-core/src/error.rs` says so in
 terms and this table used to say the opposite: there is no `From<ComputeError>`
 anywhere, and `ocelli-compute` does not depend on `ocelli-core` at all, its
 dependencies being `ocelli-render`, `wgpu` and `thiserror`. Check both rather
-than trusting this paragraph:
+than trusting this paragraph. The first prints `0`, counting the matches
+outside doc comments, because `error.rs` states the absence in a comment that a
+bare grep hands back as a hit:
 
 ```bash
-grep -rn "From<ComputeError>" crates/
+grep -rn "From<ComputeError>" crates/ --include='*.rs' | grep -vc '\.rs:[0-9]*:///'
 sed -n '/^\[dependencies\]/,/^$/p' crates/ocelli-compute/Cargo.toml
 ```
 

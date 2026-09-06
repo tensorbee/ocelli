@@ -83,9 +83,10 @@ Tier C reuses `ocelli-pixel` rather than reimplementing the LUT chain. §18
 requires that arithmetic to exist exactly once, and a second copy behind a tier
 check is the same defect as a second copy anywhere else, except that it only
 runs on hardware nobody develops on. Spike gate **A7** (`docs/spikes/GATES.md`)
-decides whether tier C is worth building at all, and F-X001 to F-X005 are the
-stories. `grep -n '| X1\.' docs/sprints/BACKLOG.md` lists exactly those five,
-because X1 is the epic and the epic column is what identifies them. **Do not
+asked whether tier C is worth building at all and is resolved, outcome `Pass`,
+so it is built. F-X001 to F-X005 are the stories, and
+`grep -n '| X1\.' docs/sprints/BACKLOG.md` lists exactly those five, because X1
+is the epic and the epic column is what identifies them. **Do not
 grep the F-IDs.** `grep -c 'F-X00[0-9]' docs/sprints/BACKLOG.md` prints 13, not
 5: F-X006 to F-X009 are Y1 stories that match the same pattern, and four
 further rows match through their `Depends on` cell. A range that reads
@@ -100,10 +101,11 @@ rendering.
   `corpus/data`
   behind `corpus/manifest.tsv`. The pre-commit hook refuses staged DICOM by
   magic bytes as well as by suffix. No allowlist.
-- **dwv and Horos must not be opened**, by a person or an agent. GPL-3 and
-  LGPL-3-plus-AGPL-3 respectively, and translating source into Rust is a
-  translation. Take their ideas from DICOM PS3.3 and PS3.16 instead. Grok must
-  not be depended on. `scripts/source_provenance_check.py` enforces this.
+- **dwv, Horos and Grok must not be opened**, by a person or an agent. GPL-3,
+  LGPL-3-plus-AGPL-3 and AGPL-3 respectively, and translating source into Rust
+  is a translation. Take their ideas from DICOM PS3.3 and PS3.16 instead. Grok
+  must not be depended on either, and
+  `scripts/source_provenance_check.py` enforces all three.
 - **No `unsafe`** outside `ocelli-wasm/src/ring.rs` and
   `ocelli-core/src/cast.rs`.
 - **wgpu is pinned exactly.** Treat GPU code that compiles first try with
@@ -166,9 +168,11 @@ What exists, in the order it matters:
   so it now returns a per-view verdict against section 25.1's tolerances and
   can attribute a divergence to a side. There is still no Ocelli renderer to
   compare against, so detection is proved by a declared mutation catalogue
-  applied to real reference frames. `bin/ocelli.sh oracle` runs both halves.
+  applied to real reference frames. `bin/ocelli.sh gate oracle` runs both
+  halves, and the bare `bin/ocelli.sh oracle` is the reference half alone.
 - **The corpus**, 91 rows behind `corpus/manifest.tsv`, covering all sixteen
-  transfer syntaxes the codec registry claims.
+  transfer syntaxes the codec registry will claim, which are listed in
+  `scripts/corpus_check.py` because the crate is still a scaffold.
 - **`ocelli-core`**, the coordinate and value spaces, entries 1 and 2 of the
   first-ten-files list.
 - **Every build target.** wasm through `wasm-pack` with a recorded size

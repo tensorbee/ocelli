@@ -335,9 +335,13 @@ because the alternative is shipping an override nobody can observe. See
   licences are at the repository root. The generated `pkg/` is not published
   by anything today, and whether it is published at all is F-101's and
   `/release`'s question, not this one.
-- **Step 4 starts vacuous.** Eleven crates that are currently scaffolds with
-  one dependency between them show no feature difference at all, so the guard
-  proves a negative over a small graph. It was built anyway, and proved red by
+- **Step 4 starts vacuous.** It compares the dependencies this workspace
+  declares directly, not the workspace's own crates, and today not one of them
+  resolves a different feature set on the two targets, so `allowed` in
+  `ci/target-feature-baseline.json` is empty. That file's
+  `checked_dependencies` is the list being watched and
+  `python3 -c "import json;print(len(json.load(open('ci/target-feature-baseline.json'))['checked_dependencies']))"`
+  prints how long it is. It was built anyway, and proved red by
   construction, because its value is entirely in the moment a dependency is
   added and nobody is looking, which is precisely the moment nobody would
   build it.
