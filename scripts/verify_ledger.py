@@ -115,9 +115,23 @@ def comparison_evidence(path: str) -> dict:
     if failed != 0:
         sys.exit("comparison report is green but has failed views")
 
-    coverage_problems = report.get("coverageProblems")
-    if coverage_problems not in (None, []):
-        sys.exit("comparison report is green but has coverage problems")
+    empty_arrays = {
+        "problems": "problems",
+        "coverageProblems": "coverage problems",
+        "absorbedDivergences": "absorbed divergences",
+    }
+    for field, label in empty_arrays.items():
+        value = report.get(field)
+        if not isinstance(value, list):
+            sys.exit(f"comparison report has no {label} array")
+        if value:
+            sys.exit(f"comparison report is green but has {label}")
+
+    top_level_absent = report.get("absent")
+    if (isinstance(top_level_absent, bool)
+            or not isinstance(top_level_absent, int)
+            or top_level_absent != 0):
+        sys.exit("comparison report has absent views")
 
     coverage = report.get("coverage")
     if not isinstance(coverage, dict):

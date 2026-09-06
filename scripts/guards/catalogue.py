@@ -868,7 +868,10 @@ def _comparison_report(box: Sandbox, *, verdict: str = "pass",
         "gateVerdict": verdict,
         "green": green,
         "coverage": {"absent": 0},
+        "absent": 0,
+        "problems": [],
         "coverageProblems": [],
+        "absorbedDivergences": [],
     }) + "\n")
 
 
@@ -903,6 +906,34 @@ def _coverage_problem_in_green_comparison_report(box: Sandbox) -> None:
     _comparison_report(box)
     report = json.loads(box.read(".claude/probe-comparison.json"))
     report["coverageProblems"] = ["a controlled coverage problem"]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _problem_in_green_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["problems"] = ["a controlled input problem"]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _absorbed_divergence_in_green_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["absorbedDivergences"] = ["a controlled absorbed divergence"]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _missing_coverage_problems_in_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    del report["coverageProblems"]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _top_level_absent_in_green_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["absent"] = 1
     box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
 
@@ -6580,8 +6611,10 @@ GUARDS: tuple[Guard, ...] = (
         refuses="A staged tree with no recorded gate run, a tree whose "
                 "recorded corpus is red, a corpus state outside the declared "
                 "set, malformed or red comparison evidence, a green report "
-                "with failed views or coverage problems, zero judged views, "
-                "and a required comparison record that is absent.",
+                "with failed views, input problems, coverage problems, "
+                "absorbed divergences or absent views, a report missing one "
+                "of those emitted fields, zero judged views, and a required "
+                "comparison record that is absent.",
         claims=(r"no verification recorded", r"the corpus is RED",
                 r"corpus is ' ' for tree", r"--corpus must be one of",
                 r"comparison report",
@@ -6638,8 +6671,32 @@ GUARDS: tuple[Guard, ...] = (
                   _coverage_problem_in_green_comparison_report,
                   script("python3", "scripts/verify_ledger.py", "record",
                          "--comparison-report",
-                         ".claude/probe-comparison.json"),
+                  ".claude/probe-comparison.json"),
                   "comparison report is green but has coverage problems"),
+            Probe("ledger.comparison-input-problem",
+                  _problem_in_green_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report is green but has problems"),
+            Probe("ledger.comparison-absorbed-divergence",
+                  _absorbed_divergence_in_green_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report is green but has absorbed divergences"),
+            Probe("ledger.comparison-missing-coverage-problems",
+                  _missing_coverage_problems_in_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report has no coverage problems array"),
+            Probe("ledger.comparison-top-level-absent",
+                  _top_level_absent_in_green_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report has absent views"),
             Probe("ledger.require-comparison", _ledger_without_comparison,
                   script("python3", "scripts/verify_ledger.py", "assert",
                          "--require-comparison"),
@@ -7202,7 +7259,9 @@ GUARDS: tuple[Guard, ...] = (
         refuses="A field quirk without independent expectation provenance, "
                 "a callable synthetic recipe, one matching generator-owned "
                 "manifest row, active mutation evidence, or with a generated "
-                "DICOM tracked in git.",
+                "DICOM tracked in git, plus an unknown property at any "
+                "declared schema object. The 26-case checker suite mutates "
+                "every object vocabulary and watches the added refusal.",
         claims=("*",),
         probes=(
             Probe("quirks.missing-authority", _quirk_without_authority,
@@ -7237,7 +7296,7 @@ GUARDS: tuple[Guard, ...] = (
                   script("python3", "scripts/quirk_check.py"),
                   "generated path is a tracked DICOM"),
         ),
-        covered_by=("scripts/tests/test_quirk_check.py (25 cases, run by the "
+        covered_by=("scripts/tests/test_quirk_check.py (26 cases, run by the "
                     "`quirks` gate)",),
     ),
     Guard(

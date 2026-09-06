@@ -91,6 +91,18 @@ def objects(value: object) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)]
 
 
+def unknown_fields(
+    value: object, allowed: set[str], prefix: str
+) -> list[str]:
+    """Name every property outside one declared object vocabulary."""
+    if not isinstance(value, dict):
+        return []
+    return [
+        f"{prefix}: unknown field {field!r}"
+        for field in sorted(set(value) - allowed)
+    ]
+
+
 def source_symbols(path: Path) -> tuple[set[str], set[str]]:
     """Return top-level functions and dotted unittest method names."""
     try:
@@ -263,6 +275,9 @@ def validate_authority(authority: object, prefix: str) -> list[str]:
         ]
     errors: list[str] = []
     if kind == "dicom-standard":
+        errors.extend(unknown_fields(
+            authority, {"kind", "part", "section", "edition"}, prefix
+        ))
         if not nonempty(authority.get("part")) or not PART.fullmatch(
                 str(authority.get("part", ""))):
             errors.append(f"{prefix}: DICOM authority needs a PS3.x part")
@@ -270,6 +285,9 @@ def validate_authority(authority: object, prefix: str) -> list[str]:
             if not nonempty(authority.get(field)):
                 errors.append(f"{prefix}: DICOM authority needs {field}")
     else:
+        errors.extend(unknown_fields(
+            authority, {"kind", "inputs", "steps"}, prefix
+        ))
         if not isinstance(authority.get("inputs"), dict) or not authority["inputs"]:
             errors.append(f"{prefix}: hand calculation needs named inputs")
         steps = authority.get("steps")
@@ -289,7 +307,7 @@ def validate_document(
     """Return every refusal in a registry without executing registry data."""
     if not isinstance(document, dict):
         return ["registry: top level must be an object"]
-    errors: list[str] = []
+    errors = unknown_fields(document, {"schemaVersion", "quirks"}, "registry")
     if document.get("schemaVersion") != 1:
         errors.append("registry: schemaVersion must be 1")
     quirks_value = document.get("quirks")
@@ -313,6 +331,12 @@ def validate_document(
         quirk_id = quirk.get("id")
         label = quirk_id if nonempty(quirk_id) else f"quirks[{index}]"
         prefix = f"quirk {label}"
+        errors.extend(unknown_fields(
+            quirk,
+            {"id", "symptom", "intake", "generator", "expectation",
+             "regression", "mutations"},
+            prefix,
+        ))
         if not nonempty(quirk_id) or not ID.fullmatch(str(quirk_id)):
             errors.append(f"{prefix}: id must be lowercase words joined by hyphens")
         elif quirk_id in seen:
@@ -326,6 +350,9 @@ def validate_document(
         if not isinstance(intake, dict):
             errors.append(f"{prefix}: synthetic intake record is required")
         else:
+            errors.extend(unknown_fields(
+                intake, {"kind", "patientDataRetained"}, f"{prefix} intake"
+            ))
             if intake.get("kind") != "synthetic-reconstruction":
                 errors.append(f"{prefix}: intake must be a synthetic reconstruction")
             if intake.get("patientDataRetained") is not False:
@@ -336,6 +363,9 @@ def validate_document(
         if not isinstance(generator, dict):
             errors.append(f"{prefix}: generator record is required")
         else:
+            errors.extend(unknown_fields(
+                generator, {"script", "case", "paths"}, f"{prefix} generator"
+            ))
             if generator.get("script") != GENERATOR_SCRIPT:
                 errors.append(f"{prefix}: generator script must be {GENERATOR_SCRIPT}")
             case = generator.get("case")
@@ -392,11 +422,21 @@ def validate_document(
         if not isinstance(expectation, dict):
             errors.append(f"{prefix}: expectation record is required")
         else:
+            errors.extend(unknown_fields(
+                expectation,
+                {"authority", "fixture", "inputs", "expectedDisplayValues"},
+                f"{prefix} expectation",
+            ))
             errors.extend(validate_authority(expectation.get("authority"), prefix))
             fixture = expectation.get("fixture")
             if not isinstance(fixture, dict):
                 errors.append(f"{prefix}: expectation fixture is required")
             else:
+                errors.extend(unknown_fields(
+                    fixture,
+                    {"path", "test", "boundary", "symbols"},
+                    f"{prefix} fixture",
+                ))
                 fixture_path = fixture.get("path")
                 fixture_test = fixture.get("test")
                 if fixture_path != FIXTURE_SCRIPT:

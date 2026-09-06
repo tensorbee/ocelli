@@ -119,6 +119,29 @@ class QuirkDocumentValidation(unittest.TestCase):
             tracked_paths=set(),
         )
 
+    def test_unknown_fields_are_refused_at_every_schema_object(self) -> None:
+        paths = (
+            (),
+            ("quirks", 0),
+            ("quirks", 0, "intake"),
+            ("quirks", 0, "generator"),
+            ("quirks", 0, "expectation"),
+            ("quirks", 0, "expectation", "authority"),
+            ("quirks", 0, "expectation", "fixture"),
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                document = valid_record()
+                target: object = document
+                for component in path:
+                    target = target[component]  # type: ignore[index]
+                self.assertIsInstance(target, dict)
+                target["unexpected"] = "not in the schema"  # type: ignore[index]
+                self.assertTrue(
+                    any("unknown field 'unexpected'" in error
+                        for error in self.errors(document))
+                )
+
     def test_a_complete_capture_record_passes(self) -> None:
         self.assertEqual(self.errors(valid_record()), [])
 
