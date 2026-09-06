@@ -798,6 +798,31 @@ STEP_BODY_SHAPES = (
     'case "$X" in Windows) {0} ;; esac\necho tail\n',
     "exit 0\n{0}\n",
     "{{ {0}; }}\necho tail\n",
+    # NESTED shapes, added by the sixteenth pass. Every one of these walks
+    # past a reader that tests only a statement's FIRST WORD, and two of them
+    # measured a defect in the reader the fifteenth pass added: `do case ...`
+    # hides the `case` behind the `do`, and an `elif` chain has two `then` and
+    # one `fi`.
+    'for i in 1; do case "$X" in z) {0} ;; esac; done\necho tail\n',
+    "if true; then if false; then {0}; fi; fi\necho tail\n",
+    'case "$X" in a) case "$Y" in b) {0} ;; esac ;; esac\necho tail\n',
+    "for i in 1; do for j in 2; do {0}; done; done\necho tail\n",
+    'while true; do case x in x) {0} ;; esac; break; done\necho tail\n',
+    "if true; then echo a; elif false; then echo b; fi\n{0}\n",
+    "if true; then echo a; elif false; then echo b; else echo c; fi\n{0}\n",
+    "if false; then echo a; elif false; then echo b; else {0}; fi\n"
+    "echo tail\n",
+    'case "$X" in a|b) {0} ;; *) : ;; esac\necho tail\n',
+    'case "$X" in (a) {0} ;; esac\necho tail\n',
+    'case "$X" in *) echo "arm ) paren" ;; esac\n{0}\n',
+    'echo "case x in )"\n{0}\n',
+    "cat <<EOF\ncase x in\nEOF\n{0}\n",
+    "( exit 0 )\n{0}\n",
+    "f() {{ exit 0; }}\n{0}\n",
+    "f() {{ if true; then {0}; fi; }}\necho tail\n",
+    "( {{ {0}; }} )\necho tail\n",
+    "x=$(echo hi)\n{0}\n",
+    "if [ \"$X\" = \"y\" ]; then :; fi\n{0}\n",
 )
 
 
@@ -887,7 +912,7 @@ class WhoseFailureBashDiscards(unittest.TestCase):
                         f"FAIL-OPEN: bash exits 0 for statement {index} of "
                         f"{body!r}, so its failure cannot fail the step, and "
                         f"this file counts it as CI running the gate")
-        self.assertGreaterEqual(checked, 64)
+        self.assertGreaterEqual(checked, 83)
 
     @unittest.skipUnless(BASH, "no bash on this machine")
     def test_the_shapes_refused_more_strictly_than_bash_are_declared(
@@ -916,12 +941,18 @@ class WhoseFailureBashDiscards(unittest.TestCase):
                         ci_floor_check.shell_source(body)):
                     conservative.add(body)
         self.assertEqual(conservative, {
+            "( { false M0; } )\necho tail\n",
+            "for i in 1; do for j in 2; do false M0; done; done\necho tail\n",
             "for x in a; do false M0; done\n",
             "if false; then echo A; else false M0; fi\n",
+            "if false; then echo a; elif false; then echo b; else false M0; "
+            "fi\necho tail\n",
             "if true M0; then false M1; fi\n",
             "if true; then false M0; fi\n",
             "if true; then false M0; fi\necho tail\n",
             "while true M0; do false M1; break; done\n",
+            "while true; do case x in x) false M0 ;; esac; break; done\n"
+            "echo tail\n",
             "while true; do false M0; break; done\n",
             "{ false M0; }\necho tail\n",
         })

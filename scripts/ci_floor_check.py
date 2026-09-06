@@ -2085,6 +2085,39 @@ _CONDITION_ENDS = frozenset({"then", "else", "do"})
 # for the rest of the script.
 _BODY_OPENERS = frozenset({"then", "do", "case"})
 _BODY_CLOSERS = frozenset({"fi", "done", "esac"})
+# `elif` and `else` END the branch they follow. `elif` returns to a condition,
+# so it is a net close. `else` closes one branch and opens the next, so it is
+# net zero and the body after it stays inside the construct.
+_BODY_CONTINUERS = frozenset({"elif", "else"})
+_COMPOUND_WORD = re.compile(
+    r"(?<![\w-])(" + "|".join(sorted(
+        _BODY_OPENERS | _BODY_CLOSERS | _BODY_CONTINUERS)) + r")(?![\w-])")
+
+
+def _compound_tokens(statement: str) -> list[str]:
+    """The compound keywords in `statement`, in order, ignoring spans.
+
+    **Reading only the statement's FIRST WORD was a fail-open, and this
+    function exists because of it.** The S03 review's sixteenth pass measured
+    two shapes past a head test, both from the same root:
+
+    - `for i in 1; do case "$X" in z) GATE ;; esac; done`. The statement is
+      `do case "$X" in z`, whose head is `do`, so the `case` was never seen,
+      the `)` that follows read as a subshell close rather than an arm opener,
+      and the gate came out at depth zero and was COUNTED.
+    - `if true; then echo a; elif false; then echo b; fi`. Two `then` heads
+      incremented and one `fi` decremented, so the depth never returned to
+      zero and every statement after the `fi` was refused.
+
+    A quoted keyword is not a keyword, so the scan runs over the text OUTSIDE
+    every span, which is what `shell_pieces` already separates. `echo "case x
+    in )"` therefore contributes nothing, and that is measured.
+    """
+    pieces, _ = shell_pieces(statement)
+    outside = "".join(
+        statement[start:end] if kind == TEXT else " " * (end - start)
+        for start, end, kind in pieces)
+    return _COMPOUND_WORD.findall(outside)
 _NEGATION = "!"
 assert _CONDITION_INTRODUCERS <= SHELL_INTRODUCERS
 assert _CONDITION_ENDS <= SHELL_INTRODUCERS
@@ -2160,14 +2193,19 @@ def _errexit_exempt(pairs: list[tuple[str, str]],
     after_exit = False
     for index, (statement, separator) in enumerate(pairs):
         head = statement.strip().split(" ", 1)[0]
-        if head in _BODY_CLOSERS:
-            nest = max(0, nest - 1)
-            if head == "esac":
-                cases = max(0, cases - 1)
-        if head in _BODY_OPENERS:
-            nest += 1
-            if head == "case":
-                cases += 1
+        for token in _compound_tokens(statement):
+            if token in _BODY_CLOSERS:
+                nest = max(0, nest - 1)
+                if token == "esac":
+                    cases = max(0, cases - 1)
+            elif token == "elif":
+                nest = max(0, nest - 1)
+            elif token in _BODY_OPENERS:
+                nest += 1
+                if token == "case":
+                    cases += 1
+            # `else` is net zero: it closes the previous branch and opens its
+            # own, so the depth is unchanged and its body stays inside.
         if nest > 0:
             exempt[index] = ("it is inside a compound body, and nothing here "
                              "says the shell reaches that body at all")

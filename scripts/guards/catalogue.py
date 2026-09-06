@@ -4054,6 +4054,45 @@ def _a_scoped_set_e_that_does_not_restore(box: Sandbox) -> None:
                    f'{indent}    echo "gate step done"')
 
 
+def _a_gate_in_a_case_arm_inside_a_loop(box: Sandbox) -> None:
+    """A `case` arm inside a `for` body, which a HEAD test cannot see.
+
+    The statement is `do case "$X" in z`, whose first word is `do`, so a
+    reader that tests only the head never sees the `case`, and the `)` that
+    follows then reads as a subshell CLOSE rather than an arm opener. The
+    depth returns to zero and the gate is counted. MEASURED in the S03
+    review's sixteenth pass at exit 0, with bash never running the runner.
+
+    This is the shape that says `_compound_tokens` has to scan a whole
+    statement rather than its first word.
+    """
+    line, indent, command = _gate_step_command(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f'{indent}    for i in 1; do case "$RUNNER_OS" in z) '
+                   f"{command} ;; esac; done\n"
+                   f'{indent}    echo "gate step done"')
+
+
+def _a_gate_after_an_elif_chain(box: Sandbox) -> None:
+    """A real top-level invocation AFTER an `elif` chain, which must PASS.
+
+    The false-refusal direction of the same defect, and the reason `elif` is a
+    net close rather than another opener. An `if`/`elif`/`fi` carries TWO
+    `then` heads and ONE `fi`, so a reader that increments on each `then` and
+    decrements once never returns to depth zero, and every statement after the
+    `fi` is refused. The gate here is genuinely at the top level and genuinely
+    fails the step, so refusing it would refuse a workflow doing the right
+    thing.
+    """
+    line, indent, command = _gate_step_command(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f"{indent}    if true; then echo a; elif false; then echo "
+                   f"b; fi\n"
+                   f"{indent}    {command}")
+
+
 def _the_unsafe_gate_named_only_in_a_comment(box: Sandbox) -> None:
     """The `unsafe` arm running something else, with the real command in a
     trailing comment, and the CI step deleted.
@@ -5645,6 +5684,28 @@ GUARDS: tuple[Guard, ...] = (
                        "counted the gate. The declared half does hold and is "
                        "measured: a `set +e` inside an uncalled function "
                        "still refuses."),
+            Probe("ci-floor.gate-in-a-case-arm-inside-a-loop",
+                  _a_gate_in_a_case_arm_inside_a_loop,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "it is inside a compound body",
+                  note="The shape that measured the FIFTEENTH pass's own "
+                       "nesting rule as a head test. `do case ... in z` hides "
+                       "the `case` behind the `do`, so the `)` read as a "
+                       "subshell close and the depth returned to zero. Found "
+                       "by fuzzing the rule rather than by reading it, which "
+                       "is how the class this repository keeps finding gets "
+                       "found."),
+            Probe("ci-floor.gate-after-an-elif-chain",
+                  _a_gate_after_an_elif_chain,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The false-refusal direction of the same defect and "
+                       "the reason `elif` is a net CLOSE. Two `then` and one "
+                       "`fi` left the depth above zero for the rest of the "
+                       "body, so a genuine top-level invocation after the "
+                       "`fi` was refused. A guard that refuses a legitimate "
+                       "state is as useless as one that refuses nothing."),
             Probe("ci-floor.negated-gate-step",
                   _a_negated_gate_invocation,
                   script("python3", "scripts/ci_floor_check.py"),
