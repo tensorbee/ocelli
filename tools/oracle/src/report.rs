@@ -234,6 +234,18 @@ impl GreenUnmeasuredState {
             rung: Rung::ClassTwo,
         },
     ];
+
+    fn permits(record: &ViewRecord) -> bool {
+        Self::ALL.iter().any(|state| {
+            state.class == record.class
+                && state.rung == record.rung
+                && state.qualifiers.len() == record.qualifiers.len()
+                && state
+                    .qualifiers
+                    .iter()
+                    .all(|qualifier| record.qualifiers.contains(qualifier))
+        })
+    }
 }
 
 /// Which side a divergence is attributed to.
@@ -657,7 +669,12 @@ impl RunReport {
     pub fn gate_verdict(&self) -> GateVerdict {
         if !self.problems.is_empty() {
             GateVerdict::Refusal
-        } else if self.count(Outcome::Fail) > 0 || !self.absorbed_divergences().is_empty() {
+        } else if self.count(Outcome::Fail) > 0
+            || !self.absorbed_divergences().is_empty()
+            || self.records.iter().any(|record| {
+                record.outcome == Outcome::Unmeasured && !GreenUnmeasuredState::permits(record)
+            })
+        {
             GateVerdict::ComparisonFailure
         } else if self.claimed_verdict_views() == 0
             || self.absent_count() > 0
@@ -1332,11 +1349,10 @@ mod tests {
     /// below about the qualifier rather than about the constructor.
     #[test]
     fn a_clean_run_is_green() {
+        let mut unmeasured = record("a", Outcome::Unmeasured, &[Qualifier::Weak]);
+        unmeasured.rung = Rung::Weak;
         let clean = report(
-            vec![
-                record("judged", Outcome::Pass, &[]),
-                record("a", Outcome::Unmeasured, &[Qualifier::Weak]),
-            ],
+            vec![record("judged", Outcome::Pass, &[]), unmeasured],
             Vec::new(),
         );
         assert!(clean.green());
@@ -1350,6 +1366,28 @@ mod tests {
             json.pointer("/records/0/renderHashes/reference"),
             Some(&json!("reference-hash"))
         );
+    }
+
+    #[test]
+    fn every_declared_green_unmeasured_state_reaches_the_gate_verdict() {
+        for state in GreenUnmeasuredState::ALL {
+            let mut unmeasured = record("unmeasured", Outcome::Unmeasured, state.qualifiers);
+            unmeasured.class = state.class;
+            unmeasured.rung = state.rung;
+            let run = report(
+                vec![record("judged", Outcome::Pass, &[]), unmeasured],
+                Vec::new(),
+            );
+            assert!(run.green(), "declared state {state:?} was not green");
+        }
+
+        let mut undeclared = record("unmeasured", Outcome::Unmeasured, &[Qualifier::Weak]);
+        undeclared.rung = Rung::Decimated;
+        let run = report(
+            vec![record("judged", Outcome::Pass, &[]), undeclared],
+            Vec::new(),
+        );
+        assert!(!run.green(), "an undeclared state reached a green verdict");
     }
 
     /// `divergent-while-unmeasured` fails the run BY ITSELF. Zero fails, zero

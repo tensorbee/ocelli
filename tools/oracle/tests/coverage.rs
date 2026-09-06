@@ -1,18 +1,23 @@
 use std::collections::BTreeSet;
 
-use ocelli_oracle::report::{GateVerdict, Outcome, RunReport, Rung, Side, ViewRecord};
+use ocelli_oracle::report::{GateVerdict, Outcome, Qualifier, RunReport, Rung, Side, ViewRecord};
 use ocelli_oracle::sidecar::ViewKind;
 use ocelli_oracle::tolerance::ToleranceClass;
 
 fn record(id: &str, outcome: Outcome) -> ViewRecord {
+    let (qualifiers, rung) = if outcome == Outcome::Unmeasured {
+        ([Qualifier::Weak].into_iter().collect(), Rung::Weak)
+    } else {
+        (BTreeSet::new(), Rung::Pixels)
+    };
     ViewRecord {
         id: id.to_owned(),
         kind: ViewKind::Stack,
         class: ToleranceClass::MonochromeSixteenBit,
         outcome,
-        qualifiers: BTreeSet::new(),
+        qualifiers,
         side: Side::None,
-        rung: Rung::Pixels,
+        rung,
         notes: Vec::new(),
         parameter_divergences: Vec::new(),
         parameter_values_withheld: false,

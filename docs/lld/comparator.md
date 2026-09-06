@@ -1105,7 +1105,9 @@ root. The ledger rejects a contract with unknown or duplicate declarations and
 rejects statistics whose fractions, signed sums, percentiles, regions or
 informative state cannot be emitted by the comparator. Standing guard probes
 exercise each refusal and also prove that a genuine relative-path report is
-accepted when the ledger is launched from another directory.
+accepted when the ledger is launched from another directory. The production
+run verdict consults the same green unmeasured state table, so a new emitted
+class, qualifier and rung combination is red until the contract records it.
 
 **Nothing under `tools/oracle/compare-out/` is ever committed.** A difference
 image of a real corpus row is derived from that row exactly as a reference frame

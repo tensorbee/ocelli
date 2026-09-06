@@ -330,6 +330,116 @@ def _hash(value: object, label: str) -> str:
     return value
 
 
+def _small_bucket_sum_is_attainable(
+        signed_sum: int, count_at_one: int, count_at_two: int) -> bool:
+    if count_at_one > 0:
+        bound = count_at_one + 2 * count_at_two
+        return abs(signed_sum) <= bound and signed_sum % 2 == count_at_one % 2
+    return (
+        abs(signed_sum) <= 2 * count_at_two
+        and signed_sum % 4 == (-2 * count_at_two) % 4
+    )
+
+
+def _interval_combines_with_small_buckets(
+        signed_sum: int, lower: int, upper: int,
+        count_at_one: int, count_at_two: int) -> bool:
+    bound = count_at_one + 2 * count_at_two
+    lower = max(lower, signed_sum - bound)
+    upper = min(upper, signed_sum + bound)
+    if lower > upper:
+        return False
+    if count_at_one > 0:
+        modulus = 2
+        residue = (signed_sum - count_at_one) % modulus
+    else:
+        modulus = 4
+        residue = (signed_sum + 2 * count_at_two) % modulus
+    first = lower + (residue - lower) % modulus
+    return first <= upper
+
+
+def _tail_family_is_attainable(
+        signed_sum: int, count_at_one: int, count_at_two: int,
+        count_over_two: int, maximum: int, first_k: int, last_k: int,
+        lower_offset: int, upper_offset: int) -> bool:
+    if first_k > last_k:
+        return False
+    step = maximum + 3
+    interval_width = (maximum - 3) * (count_over_two - 1)
+    if interval_width >= step - 1:
+        return _interval_combines_with_small_buckets(
+            signed_sum,
+            step * first_k + lower_offset,
+            step * last_k + upper_offset,
+            count_at_one,
+            count_at_two,
+        )
+    return any(
+        _interval_combines_with_small_buckets(
+            signed_sum,
+            step * positive_count + lower_offset,
+            step * positive_count + upper_offset,
+            count_at_one,
+            count_at_two,
+        )
+        for positive_count in range(first_k, last_k + 1)
+    )
+
+
+def _signed_sum_is_attainable(
+        signed_sum: int, count_at_one: int, count_at_two: int,
+        count_over_two: int, maximum: int) -> bool:
+    if count_over_two == 0:
+        return _small_bucket_sum_is_attainable(
+            signed_sum, count_at_one, count_at_two
+        )
+    if maximum == 3:
+        small_bound = count_at_one + 2 * count_at_two
+        lower = max(
+            0,
+            -((-(signed_sum - small_bound + 3 * count_over_two)) // 6),
+        )
+        upper = min(
+            count_over_two,
+            (signed_sum + small_bound + 3 * count_over_two) // 6,
+        )
+        if lower > upper:
+            return False
+        if count_at_one > 0:
+            return signed_sum % 2 == (count_at_one + count_over_two) % 2
+        residue = signed_sum + 3 * count_over_two + 2 * count_at_two
+        if residue % 2 != 0:
+            return False
+        required_parity = (residue // 2) % 2
+        if lower % 2 != required_parity:
+            lower += 1
+        return lower <= upper
+    positive_maximum = _tail_family_is_attainable(
+        signed_sum,
+        count_at_one,
+        count_at_two,
+        count_over_two,
+        maximum,
+        1,
+        count_over_two,
+        -maximum * count_over_two + maximum - 3,
+        -3 * count_over_two,
+    )
+    negative_maximum = _tail_family_is_attainable(
+        signed_sum,
+        count_at_one,
+        count_at_two,
+        count_over_two,
+        maximum,
+        0,
+        count_over_two - 1,
+        -maximum * count_over_two,
+        -3 * count_over_two - maximum + 3,
+    )
+    return positive_maximum or negative_maximum
+
+
 def _channel_report(value: object, label: str) -> dict:
     channel = _schema(value, label, CHANNEL_KEYS)
     pixels = _integer(channel["pixels"], f"{label}.pixels", maximum=U32_MAX)
@@ -377,7 +487,8 @@ def _channel_report(value: object, label: str) -> dict:
             break
     if expected_percentile is not None:
         percentile_is_consistent = percentile == expected_percentile
-    elif counts[3] == 1:
+    elif ((pixels - 1) / pixels
+          < MONOCHROME_WITHIN_ONE_LSB_FRACTION):
         percentile_is_consistent = percentile == maximum
     else:
         percentile_is_consistent = 3 <= percentile <= maximum
@@ -390,21 +501,9 @@ def _channel_report(value: object, label: str) -> dict:
             or not math.isclose(signed_sum, round(signed_sum), abs_tol=1e-6)):
         sys.exit(f"comparison report {label} signed mean is not pixel-derived")
     signed_sum_integer = round(signed_sum)
-    if counts[3] == 0:
-        count_at_one = counts[1]
-        count_at_two = counts[2]
-        lower = max(-count_at_two, -((-signed_sum_integer + count_at_one) // 2))
-        upper = min(count_at_two, (signed_sum_integer + count_at_one) // 2)
-        if lower % 2 != count_at_two % 2:
-            lower += 1
-        attainable = (
-            signed_sum_integer % 2 == count_at_one % 2 and lower <= upper
-        )
-    else:
-        attainable = abs(signed_sum_integer) <= (
-            counts[1] + 2 * counts[2] + maximum * counts[3]
-        )
-    if not attainable:
+    if not _signed_sum_is_attainable(
+        signed_sum_integer, counts[1], counts[2], counts[3], maximum
+    ):
         sys.exit(f"comparison report {label} signed mean contradicts buckets")
     return channel
 
@@ -493,6 +592,12 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
             ):
                 sys.exit(
                     f"comparison report {label} full mean is not image plus background"
+                )
+            if full["maxAbsDiff"] != max(
+                image["maxAbsDiff"], background["maxAbsDiff"]
+            ):
+                sys.exit(
+                    f"comparison report {label} full maximum is not image plus background"
                 )
     else:
         for channel_index in range(channels):

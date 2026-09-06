@@ -439,7 +439,10 @@ class WhatBashRunsInAnArm(unittest.TestCase):
         The extent test could not see it. `M2` is inside the arm either way,
         which is why `scanner_runs_in_the_arm` exists.
         """
-        self.assertEqual(bash_says("echo M1 & echo M2\nwait"), "M2\nM1\n")
+        self.assertEqual(
+            set(bash_says("echo M1 & echo M2\nwait").splitlines()),
+            {"M1", "M2"},
+        )
         self.check("echo M1 & echo M2", {"M1", "M2"})
         self.assertEqual(ci_floor_check._split_statements("echo M1 & echo M2"),
                          ["echo M1 ", " echo M2"])

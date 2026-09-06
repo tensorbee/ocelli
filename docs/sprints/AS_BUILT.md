@@ -1929,6 +1929,13 @@ directory. Derived zero values, signed sums, tail percentiles and informative
 denominators must now be values the comparator can emit. Exact green
 unmeasured states and the production rung vocabulary are part of the same
 closed contract, and each semantic refusal has a targeted standing probe.
+The seventh review extended signed-sum feasibility through the over-two bucket,
+made percentile-at-maximum checks follow the producer's exact rank rule and
+restored maximum composition across image and background regions. The allowed
+green unmeasured states now participate in the production run verdict, so an
+undeclared class, qualifier and rung combination makes the comparator red.
+Verification also removed a scheduler-dependent output-order assertion from
+the shell grammar test while retaining its requirement that both commands run.
 
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 

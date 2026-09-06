@@ -1220,6 +1220,33 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["predicatePasses"] = False
         statistics["biasPasses"] = False
         statistics["signedMeanDiff"] = 255.0
+    elif variant == "single-tail-unattainable-sum":
+        for region in regions:
+            _set_tail_difference(statistics[region][0], 3)
+            statistics[region][0]["signedMeanDiff"] = 0.0
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["predicatePasses"] = False
+    elif variant == "rank-at-end-percentile":
+        for region in regions:
+            channel = statistics[region][0]
+            channel.update({
+                "pixels": 2,
+                "maxAbsDiff": 255,
+                "countAtZero": 0,
+                "countOverTwo": 2,
+                "fractionWithinOneLsb": 0.0,
+                "differingFraction": 1.0,
+                "signedMeanDiff": 129.0,
+                "percentile999AbsDiff": 3,
+            })
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 2
+        statistics["predicatePasses"] = False
+        statistics["biasPasses"] = False
+        statistics["signedMeanDiff"] = 129.0
     elif variant == "mono-pass-no-informative":
         statistics["informative"] = []
         statistics["informativePixels"] = 0
@@ -1238,6 +1265,29 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
     elif variant == "full-mean-composition":
         _add_opposed_background(statistics)
         statistics["full"][0]["signedMeanDiff"] = 1.0
+    elif variant == "full-maximum-composition":
+        image = statistics["image"][0]
+        _set_tail_difference(image, 3)
+        statistics["informative"][0] = dict(image)
+        background = dict(image)
+        _set_tail_difference(background, 255)
+        statistics["background"] = [background]
+        full = statistics["full"][0]
+        full.update({
+            "pixels": 2,
+            "maxAbsDiff": 129,
+            "countAtZero": 0,
+            "countOverTwo": 2,
+            "fractionWithinOneLsb": 0.0,
+            "differingFraction": 1.0,
+            "signedMeanDiff": 129.0,
+            "percentile999AbsDiff": 129,
+        })
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 2
+        statistics["predicatePasses"] = False
+        statistics["biasPasses"] = False
+        statistics["signedMeanDiff"] = 3.0
     elif variant == "full-without-background":
         for region, signed_mean in (("full", 1.0), ("image", -1.0),
                                     ("informative", -1.0)):
@@ -1521,9 +1571,12 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("signed-mean-contradicts-buckets", "signed mean contradicts buckets"),
         ("negative-zero", "signedMeanDiff is negative zero"),
         ("single-tail-percentile", "percentile contradicts counts"),
+        ("single-tail-unattainable-sum", "signed mean contradicts buckets"),
+        ("rank-at-end-percentile", "percentile contradicts counts"),
         ("mono-pass-no-informative", "pass record 'probe-view' is inconsistent"),
         ("full-histogram-composition", "full histogram is not image plus background"),
         ("full-mean-composition", "full mean is not image plus background"),
+        ("full-maximum-composition", "full maximum is not image plus background"),
         ("full-without-background", "full region is not the whole image"),
         ("informative-histogram-exceeds-image", "informative histogram exceeds image"),
         ("informative-maximum-exceeds-image", "informative maximum exceeds image"),
