@@ -1194,10 +1194,9 @@ def covers(gate: str, arms: dict[str, list[str]],
     """Do these steps run the WHOLE gate.
 
     A step naming the gate runs every command in its arm by definition. Short
-    of that, every command in the arm has to be run by some step: a gate whose
-    arm is `a && b` is not invoked by a CI step that runs only `a`, and
-    treating it as invoked is how the `backlog` gate's estimate check could be
-    deleted from every pull request in one line.
+    of that, exact command equivalence is available only to an arm with one
+    visible command. Several direct steps do not preserve an arm's order, job
+    boundary or `&&` exit semantics, even if every argv is present.
 
     `bool(arm)` and not a bare `all()`. `native`, `panic` and `oracle` yield no
     extractable command, and `all([])` is true, so without this a gate whose
@@ -1207,7 +1206,7 @@ def covers(gate: str, arms: dict[str, list[str]],
     if gate in invoked_gates(commands):
         return True
     arm = arms.get(gate, [])
-    return bool(arm) and not missing_arm_commands(gate, arms, commands)
+    return len(arm) == 1 and not missing_arm_commands(gate, arms, commands)
 
 
 # The four command prefixes this file can see. Declared as a constant so the
@@ -2583,43 +2582,62 @@ def main() -> int:
         # touching the gate reaches at all, `partial` is the events a step
         # reaches while leaving a command in the arm unrun.
         #
-        # `unnamed` is the third: the events on which a gate whose arm holds a
-        # command this file CANNOT see is not invoked by name. `covers` is
-        # blind to those commands by construction, so it can answer yes over a
-        # smaller arm, and a step naming the gate is the only thing that runs
-        # them. Asked per event for the same reason as the other two.
+        # `unnamed` is the third: the events on which a gate that cannot be
+        # reconstructed command by command is not invoked by name. That is an
+        # arm with an unextractable command, or an arm with several visible
+        # commands whose ordering and job boundary direct argv equality does
+        # not prove. Asked per event for the same reason as the other two.
         blocked: list[str] = []
         partial: dict[str, list[str]] = {}
         unnamed: list[str] = []
         for event in sorted(events):
             reachable = [c for c in commands if c.runs_on({event})]
-            if unseen.get(gate) and gate not in invoked_gates(reachable):
-                unnamed.append(event)
-            if covers(gate, arms, reachable):
-                continue
             if not any(c in running for c in reachable):
                 blocked.append(event)
-            else:
-                partial[event] = missing_arm_commands(gate, arms, reachable)
+                continue
+            name_required = (bool(unseen.get(gate))
+                             or len(arms.get(gate, [])) > 1)
+            if name_required and gate not in invoked_gates(reachable):
+                unnamed.append(event)
+                continue
+            if covers(gate, arms, reachable):
+                continue
+            partial[event] = missing_arm_commands(gate, arms, reachable)
         if events and running and not blocked and not partial and not unnamed:
             continue
         if running and events and (blocked or partial or unnamed):
             if unnamed:
-                problems.append(
-                    f"the `{gate}` gate is in the CI floor, its arm in "
-                    f"bin/ocelli.sh runs "
-                    f"{', '.join(repr(c) for c in unseen[gate])}, and no step "
-                    f"in {WORKFLOW.relative_to(ROOT)} invokes "
-                    f"`bin/ocelli.sh gate {gate}` on "
-                    f"{', '.join(unnamed)}. This file's command extractor "
-                    f"recognises {', '.join(repr(p) for p in COMMAND_PREFIXES)}"
-                    f" and nothing else, so it cannot demand those commands "
-                    f"step by step and must not report the arm covered "
-                    f"without them. A step naming the gate runs the arm "
-                    f"entire by definition, and that is the only form this "
-                    f"check can accept here. Either restore the gate-name "
-                    f"step, or exclude the gate from the floor in "
-                    f"bin/ocelli.sh and say why." + note)
+                if len(arms.get(gate, [])) > 1:
+                    message = (
+                        f"the `{gate}` gate is in the CI floor, its arm in "
+                        f"bin/ocelli.sh runs several executable commands, and "
+                        f"no step in {WORKFLOW.relative_to(ROOT)} invokes "
+                        f"`bin/ocelli.sh gate {gate}` on "
+                        f"{', '.join(unnamed)}. Exact direct argv matches can "
+                        f"show that each command exists, but cannot show they "
+                        f"remain in the arm's order, in one job, with its "
+                        f"`&&` exit semantics. A visible multi-command floor "
+                        f"arm must be invoked by name. Either restore that "
+                        f"gate-name step, or exclude the gate from the floor "
+                        f"in bin/ocelli.sh and say why.")
+                else:
+                    message = (
+                        f"the `{gate}` gate is in the CI floor, its arm in "
+                        f"bin/ocelli.sh runs "
+                        f"{', '.join(repr(c) for c in unseen[gate])}, and no "
+                        f"step in {WORKFLOW.relative_to(ROOT)} invokes "
+                        f"`bin/ocelli.sh gate {gate}` on "
+                        f"{', '.join(unnamed)}. This file's command extractor "
+                        f"recognises "
+                        f"{', '.join(repr(p) for p in COMMAND_PREFIXES)} and "
+                        f"nothing else, so it cannot demand those commands "
+                        f"step by step and must not report the arm covered "
+                        f"without them. A step naming the gate runs the arm "
+                        f"entire by definition, and that is the only form "
+                        f"this check can accept here. Either restore the "
+                        f"gate-name step, or exclude the gate from the floor "
+                        f"in bin/ocelli.sh and say why.")
+                problems.append(message + note)
             if partial:
                 absent = sorted({command for gaps in partial.values()
                                  for command in gaps})

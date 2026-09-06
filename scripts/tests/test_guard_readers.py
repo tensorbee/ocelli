@@ -634,6 +634,33 @@ class WhatCiRunsInAStepBody(unittest.TestCase):
         self.assertTrue(ci_floor_check.runs_command("python3 scripts/b.py",
                                                     commands))
 
+    def test_a_visible_multi_command_arm_requires_its_gate_name(self) -> None:
+        """Exact direct commands do not preserve the arm's ordering.
+
+        Two steps can be reordered or moved into different jobs while still
+        satisfying argument-vector equality one command at a time. A named
+        gate invocation is the only CI spelling that delegates the arm's
+        `&&` order and exit semantics to `bin/ocelli.sh`.
+        """
+        arms = {"combined": ["python3 scripts/a.py",
+                             "python3 scripts/b.py"]}
+        direct = ci_floor_check.run_commands(workflow_with(
+            "      - run: python3 scripts/a.py\n"
+            "      - run: python3 scripts/b.py\n"))
+        named = ci_floor_check.run_commands(workflow_with(
+            "      - run: bin/ocelli.sh gate combined\n"))
+        self.assertFalse(ci_floor_check.covers("combined", arms, direct))
+        self.assertTrue(ci_floor_check.covers("combined", arms, named))
+
+    def test_a_single_command_arm_keeps_exact_argv_equivalence(self) -> None:
+        arms = {"single": ["python3 scripts/a.py --all"]}
+        exact = ci_floor_check.run_commands(workflow_with(
+            "      - run: python3 scripts/a.py --all\n"))
+        narrowed = ci_floor_check.run_commands(workflow_with(
+            "      - run: python3 scripts/a.py --all --only one\n"))
+        self.assertTrue(ci_floor_check.covers("single", arms, exact))
+        self.assertFalse(ci_floor_check.covers("single", arms, narrowed))
+
     def test_continue_on_error_takes_the_step_away(self) -> None:
         """`continue-on-error` was in the parsed tree and nothing read it.
 
@@ -1098,6 +1125,29 @@ class TheGatesArrayHasOneReader(unittest.TestCase):
         self.assertEqual(
             ci_floor_check.declared_gates(self.RUNNER.read_text()),
             listed.split())
+
+    def test_complete_profiles_share_one_selector_arm(self) -> None:
+        runner = self.RUNNER.read_text()
+        shared = re.findall(r"^\s*--sprint\|--all\)", runner, re.M)
+        self.assertEqual(len(shared), 1, shared)
+        self.assertIsNone(re.search(r"^\s*--(?:sprint|all)\)", runner, re.M))
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_complete_profiles_select_the_same_declared_gates(self) -> None:
+        def selected(profile: str) -> list[str]:
+            output = bash_says(
+                f"set --; source {self.RUNNER} >/dev/null; "
+                "run_gate() { printf 'SELECT:%s\\n' \"$1\"; }; "
+                f"gates_cmd {profile}")
+            return [line.removeprefix("SELECT:")
+                    for line in output.splitlines()
+                    if line.startswith("SELECT:")]
+
+        sprint = selected("--sprint")
+        all_gates = selected("--all")
+        self.assertEqual(sprint, all_gates)
+        self.assertEqual(sprint, ci_floor_check.declared_gates(
+            self.RUNNER.read_text()))
 
     def test_an_entry_outside_the_name_class_is_refused(self) -> None:
         """Refused, and not dropped. Dropping it was the defect.

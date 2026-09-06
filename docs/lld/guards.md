@@ -1,6 +1,6 @@
 # The guard harness
 
-**F-IDs that contributed:** F-X008, F-X009, F-X020
+**F-IDs that contributed:** F-X008, F-X009, F-X010, F-X020
 **Last updated:** 2026-09-06
 
 A guard is any refusal this repository can produce: a script that exits 1, a
@@ -723,6 +723,44 @@ so there is no regex over TOML left in that file. Its `main` also read the
 manifest with an unguarded `read_text`, so a file that is not UTF-8 arrived as
 a traceback rather than under the `FAIL:` header, which probe
 `lint-policy.manifest-not-utf8` now watches.
+
+### What it means for CI to run one gate
+
+The floor retains per-area CI jobs because their names locate a failure, but a
+job does not get to reconstruct a gate arm freely. A floor gate with one
+visible executable command may be represented by that command's exact argument
+vector. The existing declared additions remain limited to cases that are
+strictly stronger than the arm. A narrowed command, a prefix match or an
+unlisted addition is not equivalent.
+
+A floor gate with several visible executable commands must be invoked as
+`bin/ocelli.sh gate NAME`. The same exact commands split into YAML steps do not
+preserve the arm's `&&` exit semantics. Reversing those steps keeps the command
+set and loses the order. Moving them into separate jobs loses both order and a
+shared failure boundary. The named invocation delegates all three properties
+to `bin/ocelli.sh`, while the step remains in the useful per-area job.
+
+The older named-only rule for an arm containing work the extractor cannot see
+still applies independently. Its probe first reduces the synthetic arm to one
+visible command, so deleting that rule cannot be hidden by the newer
+multi-command rule. D-04's exclusions remain a separate set comparison:
+`corpus`, `guards-deep` and `oracle` do not become floor gates through this
+equivalence rule.
+
+The per-event reader reports an unreachable gate before it asks how a reachable
+arm is spelled. That keeps condition-reading probes attached to the missing
+event they test. Parser probes that deliberately add a second visible command
+expect the named-invocation refusal, because a broken parser drops that command
+and makes the refusal disappear. Probes for invisible work instead reduce the
+arm to one visible command first, which keeps the extractor-vocabulary rule
+independently load-bearing.
+
+`--sprint` and `--all` retain two public spellings and share one selector arm.
+Both select every declared gate in `GATES` order. A structural reader test
+requires the single `--sprint|--all)` implementation path, and a runtime test
+stubs `run_gate` under bash and proves both spellings select the declared list.
+The public names communicate sprint and release intent without maintaining two
+copies of the complete set.
 
 ### The workflow is YAML, and the CI floor now has one dependency
 

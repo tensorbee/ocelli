@@ -2226,56 +2226,92 @@ def _ci_arm_commands(box: Sandbox, gate: str) -> list[str]:
     return ci_floor_check.gate_commands(box.read("bin/ocelli.sh")).get(gate, [])
 
 
-def _a_floor_gate_run_command_by_command(box: Sandbox) -> tuple[str, list[str]]:
-    """A floor gate CI runs as its separate commands rather than by name.
+def _leave_one_visible_arm_command(box: Sandbox, gate: str,
+                                   keep: str | None = None) -> None:
+    """Reduce an arm to one visible command without removing other work.
 
-    Returns the gate and the `ci.yml` lines running each of its arm commands.
-    Only a gate with two or more such lines can show the defect, because the
-    hole was that running ONE of several counted as running the gate.
+    F-X010 requires a named invocation as soon as an arm has several visible
+    commands. Older probes that expand a named step must keep one visible
+    command or that stronger rule masks the parser boundary they are about.
+    Shell builtins remain real arm statements but are outside the extractor's
+    deliberately small command vocabulary.
     """
+    commands = _ci_arm_commands(box, gate)
+    runner = box.read("bin/ocelli.sh")
+    survivor = (keep if keep is not None else
+                next((command for command in commands
+                      if command not in runner), commands[0]))
+    for command in commands:
+        if command != survivor and command in box.read("bin/ocelli.sh"):
+            box.substitute("bin/ocelli.sh", command, "true")
+
+
+def _named_visible_multi_command_floor_gate(
+        box: Sandbox) -> tuple[str, str, list[str]]:
+    """A named floor gate with several visible and no invisible commands.
+
+    The absence of an invisible command isolates F-X010's rule from the older
+    extractor-vocabulary rule. The returned workflow line is the real named
+    step, so every mutation starts from a control the guard accepts.
+    """
+    import ci_floor_check
+    runner = box.read("bin/ocelli.sh")
     workflow = box.read(".github/workflows/ci.yml")
-    named = set(re.findall(r"bin/ocelli\.sh gate ([a-z-]+)", workflow))
-    for gate in sorted(set(re.findall(r'^\s*"([a-z-]+)\|no\|',
-                                      box.read("bin/ocelli.sh"), re.M))):
-        if gate in named:
+    excluded = _not_in_floor(box)
+    invisible = ci_floor_check.unseen_commands(runner)
+    for line in workflow.splitlines():
+        match = re.search(r"bin/ocelli\.sh gate ([a-z-]+)", line)
+        if match is None or not line.lstrip().startswith("- run:"):
             continue
-        arm = [c.strip() for c in _ci_arm_commands(box, gate)]
-        lines = [line for line in workflow.splitlines()
-                 if any(c and c in line for c in arm)]
-        if len(arm) >= 2 and len(lines) >= 2:
-            return gate, lines
+        gate = match.group(1)
+        commands = _ci_arm_commands(box, gate)
+        if (gate not in excluded and len(commands) >= 2
+                and gate not in invisible):
+            return gate, line, commands
     raise AssertionError(
-        "no floor gate has two or more arm commands that ci.yml runs as "
-        "separate steps, so there is no partial invocation to build and this "
-        "probe would report its guard silent.")
+        "no floor gate with several visible and no invisible arm commands is "
+        "invoked by name, so the F-X010 probes cannot isolate their rule.")
 
 
-def _delete_one_command_of_a_gate(box: Sandbox) -> None:
-    """Delete ONE step of a multi-command gate and leave the rest.
-
-    The reviewer's measurement: with `gen_sprint_plan.py --check` deleted the
-    check exited 0, with `backlog_check.py` deleted instead it exited 0, and
-    only deleting both made it exit 1. So the estimate comparison could be
-    removed from every pull request by deleting one line.
-    """
-    _, lines = _a_floor_gate_run_command_by_command(box)
-    box.substitute(".github/workflows/ci.yml", lines[-1], "")
+def _split_a_multi_command_gate_across_steps(box: Sandbox) -> None:
+    """Replace one named gate step with its exact commands in arm order."""
+    gate, _, _ = _named_visible_multi_command_floor_gate(box)
+    _expand_the_step_for(box, gate)
 
 
-def _one_step_for_the_whole_arm(box: Sandbox) -> None:
-    """Replace a gate's several steps with one `bin/ocelli.sh gate <name>`.
+def _reorder_a_multi_command_gate_across_steps(box: Sandbox) -> None:
+    """Replace one named gate step with its exact commands in reverse order."""
+    _, line, commands = _named_visible_multi_command_floor_gate(box)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(
+        ".github/workflows/ci.yml", line,
+        "\n".join(f"{indent}- run: {command}"
+                  for command in reversed(commands)))
 
-    The accept direction, and it is why the rule is not simply "every command
-    must appear". A step naming the gate runs its whole arm by definition, and
-    a check that demanded the commands as well would refuse the arrangement
-    `ci.yml` already uses for `errors`, `bench`, `packages` and `guards`.
-    """
-    gate, lines = _a_floor_gate_run_command_by_command(box)
-    indent = " " * (len(lines[0]) - len(lines[0].lstrip()))
-    box.substitute(".github/workflows/ci.yml", lines[0],
-                   f"{indent}- run: bin/ocelli.sh gate {gate}")
-    for line in lines[1:]:
-        box.substitute(".github/workflows/ci.yml", line, "")
+
+def _split_a_multi_command_gate_across_jobs(box: Sandbox) -> None:
+    """Put exact arm commands in separate jobs with no ordering edge."""
+    _, line, commands = _named_visible_multi_command_floor_gate(box)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(".github/workflows/ci.yml", line,
+                   f"{indent}- run: {commands[0]}")
+    workflow = box.read(".github/workflows/ci.yml").rstrip()
+    second_job = (
+        "\n\n  f_x010_split:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n" +
+        "".join(f"      - run: {command}\n" for command in commands[1:]))
+    box.write(".github/workflows/ci.yml", workflow + second_job)
+
+
+def _name_a_multi_command_gate_step(box: Sandbox) -> None:
+    """Add a display name while keeping the gate in its existing CI job."""
+    gate, line, _ = _named_visible_multi_command_floor_gate(box)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(
+        ".github/workflows/ci.yml", line,
+        f"{indent}- name: Run the {gate} gate through its arm\n"
+        f"{indent}  run: bin/ocelli.sh gate {gate}")
 
 
 def _a_non_floor_gate_ci_runs(box: Sandbox) -> str:
@@ -2457,8 +2493,18 @@ def _expand_a_gate_step_into_its_visible_commands(box: Sandbox) -> None:
     edit that reads as expanding the step. The docstring's declaration that
     nothing was lost, because these gates "are each invoked by NAME in ci.yml",
     was enforced by nothing.
+    F-X010 gives every visible multi-command arm its own stronger reason to
+    require a name. One visible command is replaced with the shell builtin
+    `true` first, leaving exactly one visible command plus the invisible work,
+    so this probe still discriminates the extractor-vocabulary rule rather
+    than passing for F-X010's new reason.
     """
-    _expand_the_step_for(box, _a_gate_with_an_unextractable_arm_command(box))
+    gate = _a_gate_with_an_unextractable_arm_command(box)
+    runner = box.read("bin/ocelli.sh")
+    commands = _ci_arm_commands(box, gate)
+    removable = next(command for command in commands if command in runner)
+    box.substitute("bin/ocelli.sh", removable, "true")
+    _expand_the_step_for(box, gate)
 
 
 def _expand_the_step_for(box: Sandbox, gate: str) -> None:
@@ -2557,6 +2603,7 @@ def _replace_a_gate_step_with_a_narrowed_arm(box: Sandbox) -> None:
     `runs_command` searches rather than matches, and this exited 0.
     """
     gate, narrowed = _a_gate_whose_arm_names_a_test_suite(box)
+    _leave_one_visible_arm_command(box, gate, narrowed)
     commands = _ci_arm_commands(box, gate)
     suite = narrowed.split(" -p ", 1)[1].strip()
     workflow = box.read(".github/workflows/ci.yml")
@@ -2660,6 +2707,7 @@ def _work_inside_an_if_in_a_gate_arm(box: Sandbox) -> None:
     """
     import ci_floor_check
     gate = _a_gate_with_an_unextractable_arm_command(box)
+    _leave_one_visible_arm_command(box, gate)
     runner = box.read("bin/ocelli.sh")
     region = runner[runner.index("run_gate() {"):runner.index("skip() {")]
     arm = re.search(rf"^[ \t]*{re.escape(gate)}\).*?;;", region, re.M | re.S)
@@ -3229,6 +3277,7 @@ def _work_behind_the_command_builtin(box: Sandbox) -> None:
     """
     import ci_floor_check
     gate = _a_gate_with_an_unextractable_arm_command(box)
+    _leave_one_visible_arm_command(box, gate)
     runner = box.read("bin/ocelli.sh")
     region = runner[runner.index("run_gate() {"):runner.index("skip() {")]
     arm = re.search(rf"^[ \t]*{re.escape(gate)}\).*?;;", region, re.M | re.S)
@@ -3673,6 +3722,7 @@ def _a_background_operator_in_a_gate_arm(box: Sandbox) -> None:
     """
     import ci_floor_check
     gate = _a_gate_with_an_unextractable_arm_command(box)
+    _leave_one_visible_arm_command(box, gate)
     runner = box.read("bin/ocelli.sh")
     head = ci_floor_check.unseen_commands(runner)[gate][0].split(" ", 1)[0]
     label = re.search(rf"^[ \t]*{re.escape(gate)}\)", runner, re.M)
@@ -4727,30 +4777,36 @@ GUARDS: tuple[Guard, ...] = (
                   lambda box: _delete_ci_step(box, leave_comment=False),
                   script("python3", "scripts/ci_floor_check.py"),
                   "and nothing in"),
-            Probe("ci-floor.partial-arm",
-                  _delete_one_command_of_a_gate,
+            Probe("ci-floor.multi-command-split-steps",
+                  _split_a_multi_command_gate_across_steps,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "runs only part of it on",
-                  note="A gate is every command in its arm. The `backlog` "
-                       "gate is `backlog_check.py && gen_sprint_plan.py "
-                       "--check`, and the S03 review's fourth pass measured "
-                       "that deleting either step alone left this check at 0 "
-                       "and only deleting both made it 1. So the estimate "
-                       "comparison added in the same pass could be removed "
-                       "from every pull request by deleting one line. The "
-                       "probe deletes ONE step and leaves the other."),
-            Probe("ci-floor.whole-arm-through-the-runner",
-                  _one_step_for_the_whole_arm,
+                  "visible multi-command floor arm must be invoked by name",
+                  note="F-X010. Every exact argv remains in the same job and "
+                       "in arm order, but separate YAML steps do not preserve "
+                       "the arm's `&&` failure semantics. Before this story "
+                       "the guard accepted this expansion."),
+            Probe("ci-floor.multi-command-reordered",
+                  _reorder_a_multi_command_gate_across_steps,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "visible multi-command floor arm must be invoked by name",
+                  note="F-X010. Every exact argv remains present and only "
+                       "their order changes. Per-command set coverage accepted "
+                       "this before the named-invocation rule."),
+            Probe("ci-floor.multi-command-split-jobs",
+                  _split_a_multi_command_gate_across_jobs,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "visible multi-command floor arm must be invoked by name",
+                  note="F-X010. Every exact argv remains in the workflow but "
+                       "lands in a different job with no ordering edge. A "
+                       "workflow-wide command set cannot prove one gate arm."),
+            Probe("ci-floor.multi-command-named-in-area-job",
+                  _name_a_multi_command_gate_step,
                   script("python3", "scripts/ci_floor_check.py"),
                   "floor gate(s) are invoked by CI on",
                   polarity="accept",
-                  note="The other direction, and it is why the rule is not "
-                       "\"every command must appear as its own step\". A step "
-                       "running `bin/ocelli.sh gate <name>` runs the whole arm "
-                       "by definition, which is how ci.yml already invokes "
-                       "`errors`, `bench`, `packages` and `guards`. A check "
-                       "that demanded the commands as well would refuse the "
-                       "arrangement the workflow uses today."),
+                  note="F-X010's accepted direction. The useful area job and "
+                       "a descriptive step name remain, while the run command "
+                       "delegates ordering and exit semantics to the gate."),
             Probe("ci-floor.non-floor-gate-not-run",
                   _delete_the_non_floor_ci_step,
                   script("python3", "scripts/ci_floor_check.py"),
@@ -4851,7 +4907,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.narrowed-arm-command",
                   _replace_a_gate_step_with_a_narrowed_arm,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "runs only part of it on",
+                  "and nothing in",
                   note="Every command of the arm appears as a step and one of "
                        "them discovers zero tests. The extraction class "
                        "stopped at a `\\` continuation, so `-p <suite>` fell "
@@ -4973,7 +5029,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.arm-comment-holding-a-terminator",
                   _arm_comment_holding_a_terminator,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "runs only part of it on",
+                  "visible multi-command floor arm must be invoked by name",
                   note="`SHELL_COMMENT` ran AFTER `ARM` had matched, and `ARM` "
                        "stops at the first `;;`, so a `;;` inside a shell "
                        "comment ended the arm before the comment was "
@@ -5019,7 +5075,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.arm-terminator-inside-a-quote",
                   _arm_terminator_inside_a_quote,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "runs only part of it on",
+                  "visible multi-command floor arm must be invoked by name",
                   note="The eighth pass's comment route one lexer rule along, "
                        "and stripping cannot reach this one. `ARM` stopped at "
                        "the first `;;` and a `;;` inside a quoted string is "
@@ -5110,7 +5166,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.comment-after-a-substitution",
                   _comment_after_a_substitution_in_an_arm,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "runs only part of it on",
+                  "visible multi-command floor arm must be invoked by name",
                   note="A REGRESSION the tenth pass introduced, not a "
                        "survival. That pass made `)` a word start, which is "
                        "right, and the scanner could not tell an operator `)` "
@@ -5182,7 +5238,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.heredoc-delimiter-backslash-quoted",
                   _a_backslash_quoted_heredoc_delimiter,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "--probe-extra",
+                  "visible multi-command floor arm must be invoked by name",
                   note="The twelfth pass's first measured fail-open, and the "
                        "last hand-written production in the tokenizer. "
                        "`HEREDOC` spelled bash's delimiter as a regex with an "
@@ -5196,7 +5252,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.heredoc-delimiter-quoted-with-a-hyphen",
                   _a_quoted_heredoc_delimiter_with_a_hyphen,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "--probe-extra",
+                  "visible multi-command floor arm must be invoked by name",
                   note="The second, and the one that shows the class was the "
                        "wrong SHAPE rather than the wrong class: `\\\\w*` "
                        "stopped at the hyphen and the back-reference to the "
@@ -5234,7 +5290,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.continuation-after-an-arm-comment",
                   _a_continuation_at_the_end_of_an_arm_comment,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "--probe-extra",
+                  "visible multi-command floor arm must be invoked by name",
                   note="A regex pre-pass over shell running BEFORE the "
                        "tokenizer, which is the one thing the tokenizer's own "
                        "header says no pass may do. MEASURED: a comment "
