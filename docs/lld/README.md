@@ -30,4 +30,4 @@ row here in the same hand.
 | [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010, F-X006, F-X007, F-X008, F-X009, F-X013 |
 | [comparator.md](comparator.md) | The harness's judging half: the tolerance predicate, the verdict vocabulary, the attribution ladder and the census | F-011, F-015 |
 | [benchmarks.md](benchmarks.md) | The benchmark harness of HLD section 26, its subject registry, the host class and the `bench` gate | F-006 |
-| [guards.md](guards.md) | The guard harness: discovery, the catalogue, the sandbox, the probe runner and the census | F-X008, F-X009, F-X020 |
+| [guards.md](guards.md) | The guard harness: discovery, the catalogue, the sandbox, the probe runner and the census | F-X008, F-X009, F-X010, F-X020 |

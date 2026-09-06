@@ -348,9 +348,7 @@ gates_cmd() {
         case "$name" in oracle|corpus|guards-deep) continue ;; esac
         selected+=("$name")
       done ;;
-    --sprint)
-      for entry in "${GATES[@]}"; do selected+=("${entry%%|*}"); done ;;
-    --all)
+    --sprint|--all)
       for entry in "${GATES[@]}"; do selected+=("${entry%%|*}"); done ;;
     "")  usage; return 2 ;;
     *)   selected=("$@") ;;

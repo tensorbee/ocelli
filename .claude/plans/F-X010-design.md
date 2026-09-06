@@ -68,6 +68,15 @@ Anticipated write set: `scripts/ci_floor_check.py`,
 `scripts/guards/catalogue.py`, `ci/guard-probe-budget.json`, and
 `docs/lld/guards.md`.
 
+Two measured corrections joined that set during implementation:
+
+- `.github/workflows/ci.yml` must replace the direct backlog commands with a
+  named gate invocation. The guard cannot adopt the new rule while its real
+  control tree still uses the state that rule refuses.
+- `docs/runbooks/guard-verification.md` is generated from the catalogue. The
+  split-step probe was reshaped and reorder plus split-job probes were added,
+  so the runbook table must be rendered in the same change.
+
 ## Boundary and tier
 
 - wasm-bindgen: not touched
