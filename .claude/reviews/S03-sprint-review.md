@@ -897,6 +897,32 @@ row recording that Grok is out of bounds and must not be read or depended on,
 and `docs/lld/comparator.md` for the blind reformat pair that
 THIS FILE flattened at its own line 204.
 
+### The remediation committed one of its own, and this is the record of it
+
+Adding F-X019 to the backlog made `python3 scripts/gen_sprint_plan.py --check`
+fail with three disagreements, and the obvious repair was to run the generator
+without `--check`. That rewrote `docs/sprints/SPRINT_PLAN.md` from
+`allocation.json` and **deleted eight paragraphs earlier passes had written**,
+among them the sentence recording that the parity target is 5.8.2 rather than
+the HLD's v5.8.9, which does not exist. That sentence is deviation **D-11**, so
+the regeneration silently reinstated the version string this repository exists
+to correct. It also deleted pass 4's paragraph explaining that this file drifts
+and what holds it, which is the paragraph that says the file is hand-curated
+after bootstrap and that nothing rewrites a row when the allocation moves.
+
+Measured: the write mode produced 8 insertions and 20 deletions where the three
+required edits are 3 insertions and 2 deletions. It was caught by diffing the
+regenerated file against the commit before it rather than by any check.
+**`--check` passed on the damaged file**, because it reads F-IDs, sprints,
+estimates, goal lines and milestone summary lines and not the prose around
+them, so the guard standing next to the loss cannot see it.
+
+The file was restored from `09c4fcb` and the three edits were made by hand.
+That is worth stating rather than quietly fixing, because it is this sprint's
+own class committed by the remediation for this sprint's own class, at the pass
+that concluded the area converges. It is **F-X020**, and that story was filed
+by hand in all three planning files for the same reason.
+
 ## What is still open, and it is declared rather than hidden
 
 - **G-02 and G-04**, the two remaining declared guard holes. F-X014.

@@ -4139,6 +4139,27 @@
       "depends_fids": [
         "F-X009"
       ]
+    },
+    {
+      "fid": "F-X020",
+      "eid": "Y1.15",
+      "phase": "P1",
+      "epic": "EY Sprint follow-ups",
+      "epic_key": "EY",
+      "story": "Stop gen_sprint_plan.py's write mode silently overwriting a hand-curated SPRINT_PLAN.md",
+      "layer": "Build",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids_declared": [
+        "F-X009"
+      ],
+      "notes": "`python3 scripts/gen_sprint_plan.py` with no argument REWRITES `docs/sprints/SPRINT_PLAN.md` from `allocation.json`, and that file is hand-curated after bootstrap, which its own prose says: 'The generator runs once at bootstrap and after that this file is hand-curated, so nothing rewrites a row when the allocation moves.' The S03 review's fourteenth pass ran it to add one story row and destroyed eight paragraphs of corrections earlier passes had written, including the sentence recording that the parity target is 5.8.2 rather than the HLD's v5.8.9, which does not exist. That sentence IS deviation D-11, so the regeneration silently reinstated a version string this repository exists to correct. Measured: the write mode produced 8 insertions and 20 deletions where the three required edits are 3 insertions and 2 deletions. `--check` passed on the damaged file, because it reads F-IDs, sprints, estimates, goal lines and milestone summary lines and NOT the surrounding prose, so the guard that exists here cannot see the loss it is standing next to. The repair is for the write mode to refuse a file that already exists unless it is explicitly forced, and to arrive with its own probe, because a refusal added to a scanned file without one moves the census count. Note the acceptance test cannot be 'the prose survives', since nothing can assert that generally. It is that the bare invocation refuses.",
+      "milestone": "M1",
+      "sprint": "S04",
+      "added": true,
+      "depends_fids": [
+        "F-X009"
+      ]
     }
   ]
 }

@@ -124,6 +124,7 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-X017 | Y1.12 | S04 | Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting | Build | 2w | F-005 | pending |
 | F-X018 | Y1.13 | S04 | Make close-preflight see the sprint review, and key its verification on the tree it is about | Build | 1w | F-X009 | pending |
 | F-X019 | Y1.14 | S04 | Decide whether a CI step that is not guaranteed to run counts as CI running the gate | Build | 1w | F-X009 | pending |
+| F-X020 | Y1.15 | S04 | Stop gen_sprint_plan.py's write mode silently overwriting a hand-curated SPRINT_PLAN.md | Build | 1w | F-X009 | pending |
 
 ### M2, DICOM ingest and the pixel pipeline
 
