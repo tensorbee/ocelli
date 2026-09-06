@@ -40,6 +40,7 @@
 //! indexed, and why a fixture that indexed it could transpose silently.
 
 use std::error::Error;
+use std::path::Path;
 
 use ocelli_oracle::frame::Rect;
 use ocelli_oracle::geometry::{Camera, CanvasExtent, canvas_divergences, world_divergences};
@@ -62,9 +63,24 @@ const CANVAS: u32 = 512;
 /// 64 rows at 8 canvas pixels each is 512, so the image fills the height. 96
 /// columns at 4 each is 384, so 128 columns of the 512 are letterbox, 64 on
 /// each side. 512 * 128 = 65536 background pixels out of 262144, which is
-/// 0.25 exactly. The reference measured 65536 black pixels on that frame and
-/// recorded `blackFraction: 0.25`, so this fixture is checked against a number
-/// the instrument produced rather than against itself.
+/// 0.25 exactly.
+///
+/// **The first half of this test is arithmetic and asserts nothing about the
+/// instrument.** It says the rectangle this crate derives from the published
+/// scale has a letterbox of a quarter of the frame, and it computes both sides
+/// of that itself. Until the eighth review pass this comment claimed the
+/// fixture was "checked against a number the instrument produced", and it read
+/// no instrument output at all.
+///
+/// **The second half reads the number, where there is one to read.**
+/// `tools/oracle/out/` is gitignored, so it exists on a machine that has run
+/// the reference half and not in CI, and `run.mjs` writes `run.json` LAST:
+/// "this directory holds the output of one complete run that passed every
+/// boundary, or it holds nothing". So `run.json` present is the condition, and
+/// under it the worked row's sidecar must exist and must carry
+/// `black: 65536` and `blackFraction: 0.25`. A missing sidecar under a
+/// complete run means the worked case named in `docs/lld/oracle.md` no longer
+/// renders, which is a finding rather than a reason to skip.
 #[test]
 fn the_worked_case_rectangle_reproduces_the_reference_black_fraction() -> Outcome {
     let extent = CanvasExtent::centred(
@@ -88,8 +104,50 @@ fn the_worked_case_rectangle_reproduces_the_reference_black_fraction() -> Outcom
     assert_eq!(
         background * 4,
         frame_pixels,
-        "the letterbox is a quarter of the frame, which is the reference's own \
-         recorded blackFraction of 0.25"
+        "the letterbox is a quarter of the frame, and the two sides of this \
+         are both computed here"
+    );
+
+    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("out");
+    if !out.join("run.json").exists() {
+        // No complete reference render on this machine, so there is no
+        // instrument number to read. The arithmetic above ran regardless.
+        return Ok(());
+    }
+    let sidecar = out.join("syntax__reference_mono12.json");
+    let text = std::fs::read_to_string(&sidecar).map_err(|error| {
+        format!(
+            "{} holds a complete run and not the worked case docs/lld/oracle.md \
+             names: {error}",
+            out.display()
+        )
+    })?;
+    let measured: Value = serde_json::from_str(&text)?;
+    let black = measured
+        .pointer("/frame/statistics/black")
+        .and_then(Value::as_u64)
+        .ok_or("the worked case's sidecar records no /frame/statistics/black")?;
+    assert_eq!(
+        black, background,
+        "the reference counted {black} black pixels on that frame and this \
+         rectangle leaves {background} outside the image"
+    );
+    let fraction = measured
+        .pointer("/frame/statistics/blackFraction")
+        .and_then(Value::as_f64)
+        .ok_or("the worked case's sidecar records no blackFraction")?;
+    assert_eq!(
+        fraction.to_bits(),
+        0.25_f64.to_bits(),
+        "the reference recorded a blackFraction of {fraction}"
+    );
+    let pixels = measured
+        .pointer("/frame/statistics/pixels")
+        .and_then(Value::as_u64)
+        .ok_or("the worked case's sidecar records no pixel count")?;
+    assert_eq!(
+        pixels, frame_pixels,
+        "and it is the declared 512 by 512 canvas"
     );
     Ok(())
 }
@@ -214,10 +272,19 @@ fn the_rectangle_is_clamped_to_the_canvas() -> Outcome {
     Ok(())
 }
 
-/// HLD 25.1's geometry bullet, verbatim:
+/// HLD 25.1's geometry bullet, verbatim, semicolon included:
 ///
-/// > **Geometry:** world coordinates within 1e-6 mm, canvas coordinates within
+/// > **Geometry:** world coordinates within 1e-6 mm; canvas coordinates within
 /// > a quarter pixel.
+///
+/// The semicolon is 25.1's own. It was a comma here until the eighth review
+/// pass, which is the substitution `SECTION_25_1_MONOCHROME` in
+/// `tools/oracle/src/tolerance.rs` spends a paragraph establishing that no
+/// lint requires: `scripts/prose_check.py` covers no Rust source at all.
+/// Reproduce with `python3 -c "import sys; sys.path.insert(0, 'scripts');
+/// import prose_check; print(prose_check.in_scope('tools/oracle/tests/
+/// geometry_fixture.rs'))"`, which prints `False`. A quotation labelled
+/// verbatim that is not verbatim costs the label its meaning.
 ///
 /// The world half, at its boundary. 5e-7 mm is inside, 1e-6 mm is AT the bound
 /// and "within" includes it, 2e-6 mm is outside. 2e-6 is the same perturbation

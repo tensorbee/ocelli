@@ -1,7 +1,7 @@
 # Tier resolution
 
 **F-IDs that contributed:** F-004
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-06
 
 How a session decides whether it is tier A, tier B or tier C, and how it
 records why. This describes what the code does today.
@@ -160,6 +160,15 @@ shading.
 | Warm-up | 65,536 fragments | no, the figure is discarded |
 | Calibration | 65,536 fragments | yes |
 | Full | 16,777,216 fragments | yes, and only if the calibration did not EXCEED 2 ms |
+
+**The three stages are a value, `probe::RUN_PLAN`, and not three call sites.**
+`measure` builds the pipeline and hands `measure_with` a way to issue one run,
+and `measure_with` walks the plan. That split is what makes the stages
+assertable on a machine with no adapter, which deviation D-04 leaves the CI
+floor as. The same figures are `ci/tier-thresholds.json`'s `warm_up_pixels`,
+`calibration_pixels` and `full_pixels`, and
+`the_recorded_workload_matches_the_checked_in_file` reads the file against the
+plan so neither can move alone.
 
 **The warm-up is not tidiness.** The first submission on a fresh device pays
 for lazy pipeline compilation, driver initialisation and command-buffer setup.
@@ -493,6 +502,11 @@ red, which is HLD 27.3's third bullet and is recorded per row in
 | `an_override_of_cpu_short_circuits_every_other_signal` | `caps.rs` | The tier C short circuit measuring anything, and separately the record simply never carrying a measurement. It classifies the SAME signals under `Auto` as well, so `fill_rate == None` here means short-circuited rather than never recorded |
 | `the_fragment_count_is_every_texel_once_per_pass` | `probe.rs` | The `passes` factor leaving `pixels_shaded`. Asserted against figures computed by hand from what the workload draws, through the production `fragments`, and three of the rows have a `passes` above one. Dropping the factor divides a real adapter's measured rate by sixteen, which pushes hardware under `hardware_floor_pps` into a silent tier C demotion |
 | `the_full_pass_runs_at_the_budget_and_not_past_it` | `probe.rs` | The calibration budget's comparison moving off the boundary. The rule is "took longer than this", so a calibration exactly at the budget still affords the full pass. Driven through `full_pass_is_affordable`, because `measure` needs an adapter that deviation D-04 leaves the floor without |
+| `a_slow_first_submission_does_not_stop_the_full_pass` | `probe.rs` | The warm-up run being removed. It issues `RUN_PLAN` against a stand-in that reports 6.1 ms for the first submission and 0.36 ms afterwards, which are the two medians of the twenty recorded runs, so without the discard the calibration inherits a figure over the budget, the full pass never runs, and the recorded rate is startup latency about seventeen times too low. That demotes a hardware adapter to tier C, which renders nothing and presents as a slow viewer. Three statements said the warm-up was load bearing and none of them was an assertion |
+| `a_measurement_issues_the_warm_up_the_calibration_and_the_full_pass` | `probe.rs` | The full pass running at the calibration's size, and any stage leaving the sequence. The three fragment counts are asserted as `ci/tier-thresholds.json`'s literals rather than rebuilt from the constants |
+| `an_unaffordable_calibration_stops_before_the_full_pass` | `probe.rs` | The budget ceasing to gate the full pass, and the warm-up being gated by it. The warm-up is a discard rather than a stage the budget decides |
+| `a_calibration_that_reports_nothing_yields_no_measurement` | `probe.rs` | A calibration that could not be taken being papered over. Two runs are issued and no figure comes out, so the combination rule falls through to the two hints |
+| `the_recorded_workload_matches_the_checked_in_file` | `caps.rs` | `RUN_PLAN` and `ci/tier-thresholds.json`'s `warm_up_pixels`, `calibration_pixels` and `full_pixels` drifting apart. That file says a figure taken with a different workload is a different measurement, so the workload is part of the 400,000,000 floor's provenance |
 | `a_real_mesa_gpu_that_both_hints_abstain_on_is_demoted` | `caps.rs` | The `gallium` narrowing being restated as complete. It asserts the demotion that survives it as well as the containment it provides |
 | `a_gl_adapter_reporting_compute_shaders_is_still_a_b_candidate` | `caps.rs` | The boundary between the two GPU tiers being read off the downlevel flags rather than off the backend. HLD section 7 names tier B by its API, so a native GLES adapter reporting `COMPUTE_SHADERS` is still tier B. The proptest cannot cover this and must not be asked to: its `a_candidates` count calls `candidate_tier`, so on that branch the property is a tautology |
 | `the_adapter_type_signal_speaks_only_where_a7_licenses_it` | `caps.rs` | `VirtualGpu` or `Other` being read as a claim in either direction. A7 licenses the signal "where a fallback adapter identifies itself as one", and `SOFTWARE_RENDERER_STRINGS`'s stated residue leans on `VirtualGpu` abstaining |

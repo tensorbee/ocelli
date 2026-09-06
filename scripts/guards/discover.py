@@ -262,8 +262,13 @@ def mask_python_prose(text: str) -> str:
     refusal shapes, of which eight are detectable when the table is scanned
     unmasked: `raise SystemExit(` is followed by a backtick where the shape
     wants a quote, and a bare `exit 1` inside a table cell is not at the start
-    of its line. So the census's headline counted eight refusals of prose and
-    deleting a documentation row turned the gate red. Both numbers are
+    of its line. So THE TABLE contributed eight refusals of prose to the
+    census's headline and deleting a documentation row turned the gate red.
+    Eight is the table's own share and not this module's, which the sentence
+    here read as until the S03 review's eighth pass: scanned unmasked the whole
+    file yields SEVENTEEN raw matches and fourteen sites after collapsing,
+    because every paragraph below that quotes a refusal shape is counted too.
+    Masked it yields none, which is the number that matters. All of them are
     measured rather than read off the table, because this sentence said five
     rows and five sites when there were seven and five, and was corrected once
     already to seven and five while the sixth pass was adding the three list

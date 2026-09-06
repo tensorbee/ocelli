@@ -543,6 +543,38 @@ mod tests {
         0xFF, 0xFF,
     ];
 
+    /// The same table for the arity neither fixture above carries.
+    ///
+    /// `code = 701`, `severity = Recoverable = 1`, `arity = 2`, `reserved = 0`,
+    /// operands `512` and `256`, and the third slot unused.
+    ///
+    /// - offset 0, `u16` 701 is `0x02BD`, little-endian `BD 02`
+    /// - offset 2, `Severity::Recoverable`, is `01`
+    /// - offset 3, two meaningful operands, is `02`
+    /// - offset 4, `reserved` 0, is `00 00 00 00`
+    /// - offset 8, `u64` 512 is `0x0000_0000_0000_0200`, little-endian
+    ///   `00 02 00 00 00 00 00 00`
+    /// - offset 16, `u64` 256 is `0x0000_0000_0000_0100`, little-endian
+    ///   `00 01 00 00 00 00 00 00`
+    /// - offset 24, the unused slot, is eight `00` bytes
+    ///
+    /// **Two operands, and the count is the test.** [`Record::build`] maps a
+    /// slice length onto byte 3 through a `match` written out one row per
+    /// number. Until the S03 review's eighth pass every fixture in this module
+    /// carried one operand or three, so the middle row could return `1` and
+    /// this crate stayed green: an `error(code, sev, &[a, b])` would then write
+    /// byte 3 as `1`, and a consumer reading the arity would drop `b`. That is
+    /// the quiet loss [`Record::error`]'s own documentation says it refuses to
+    /// perform, arriving from inside the same `match` that refuses a fourth.
+    ///
+    /// `Recoverable` and not `Fatal`, so bytes 2 and 3 differ, for the reason
+    /// [`LOG_BYTES`] gives.
+    const TWO_OPERAND_BYTES: [u8; 32] = [
+        0xBD, 0x02, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+
     /// One byte changed, without indexing. The workspace runs clippy with
     /// `-D warnings` and `indexing_slicing` is a warning, so a test that
     /// indexes is a test that fails the gate.
@@ -676,6 +708,73 @@ mod tests {
         assert_eq!(
             decoded.map(Record::operands),
             Ok([0x0102_0304_0506_0708, 0, 0])
+        );
+    }
+
+    /// **Two operands write arity two, and both reach the wire.**
+    ///
+    /// The middle row of [`Record::build`]'s arity table. Every other fixture
+    /// in this module carries one operand or three, so `2 => 1` sat inside that
+    /// `match` and this crate stayed green while `3 => 2`, `_ => 3` and the
+    /// `arity > 4` refusal were all caught.
+    ///
+    /// The consequence is not a wrong byte, it is a lost operand: the record
+    /// would say one slot is meaningful, and a consumer honouring the arity
+    /// would drop `256`. The two numbers are HLD section 31's shape, a
+    /// workgroup a kernel asked for and the size the device allows, which is a
+    /// message nobody can act on with half of it missing.
+    #[test]
+    fn two_operands_encode_to_the_hand_written_layout() {
+        assert_eq!(
+            Record::error(ErrorCode::Workgroup, Severity::Recoverable, &[512, 256])
+                .map(Record::encode),
+            Ok(TWO_OPERAND_BYTES)
+        );
+    }
+
+    #[test]
+    fn two_operands_decode_from_the_hand_written_layout() {
+        let decoded = Record::decode(&TWO_OPERAND_BYTES);
+        assert_eq!(decoded.map(Record::code), Ok(701));
+        assert_eq!(
+            decoded.map(Record::error_code),
+            Ok(Some(ErrorCode::Workgroup))
+        );
+        assert_eq!(
+            decoded.map(Record::severity_or_level),
+            Ok(Severity::Recoverable.number())
+        );
+        assert_eq!(decoded.map(Record::arity), Ok(2));
+        assert_eq!(decoded.map(Record::operands), Ok([512, 256, 0]));
+    }
+
+    /// Byte 3 counts the operands offered, at every count the layout holds.
+    ///
+    /// The table is four rows and a refusal, and asserting only its ends left
+    /// the middle unwatched. Driven through the constructor rather than through
+    /// the literal, so it is the table that is being read and not the fixtures.
+    #[test]
+    fn the_arity_byte_counts_the_operands_offered() {
+        let arity_of = |operands: &[u64]| {
+            Record::error(ErrorCode::Panicked, Severity::Fatal, operands).map(Record::arity)
+        };
+        assert_eq!(arity_of(&[]), Ok(0));
+        assert_eq!(arity_of(&[7]), Ok(1));
+        assert_eq!(arity_of(&[7, 8]), Ok(2));
+        assert_eq!(arity_of(&[7, 8, 9]), Ok(3));
+    }
+
+    /// An unused slot is zero, and a used one is not dropped.
+    ///
+    /// The other half of the same defect: an arity that undercounts would be
+    /// invisible to a test that only read the slots, and a slot that was never
+    /// written would be invisible to a test that only read the arity.
+    #[test]
+    fn two_operands_fill_the_first_two_slots_and_leave_the_third_zero() {
+        assert_eq!(
+            Record::error(ErrorCode::Workgroup, Severity::Recoverable, &[512, 256])
+                .map(Record::operands),
+            Ok([512, 256, 0])
         );
     }
 

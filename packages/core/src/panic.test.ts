@@ -1,5 +1,6 @@
 import { describe as group, expect, it } from "vitest";
 
+import { describeError, ERROR_CODE } from "./errors.js";
 import {
   PANIC_HEADER_BYTES,
   PANIC_MAGIC,
@@ -171,6 +172,59 @@ group("readPanicRecord", () => {
     const record = readPanicRecord(wasm, PTR, PANIC_RECORD_BYTES);
     expect(record?.unknownVersion).toBe(true);
     expect(record?.version).toBe(99);
+  });
+
+  /**
+   * **The version is at offset 4 and the code is at offset 8, and each record
+   * here carries a different number in the two words.**
+   *
+   * Every other case in this file leaves both at 1, because `writeRecord`
+   * defaults `version` to `PANIC_RECORD_VERSION` and `code` to `1`, and the one
+   * case that varies the version asserts `version` and `unknownVersion` and
+   * never `code`. So the reader could take the code out of the VERSION word and
+   * this suite stayed green.
+   *
+   * It is latent only while the two numbers agree.
+   * `crates/ocelli-wasm/src/panic.rs` says the version is "Bumped when the
+   * field order below changes", so the first bump makes every panic report code
+   * 2, `describeError(2)` misses the table, and the user is told the build does
+   * not recognise error code 2 instead of getting HLD section 23's sentence,
+   * at the one moment that sentence is load bearing.
+   *
+   * `ERROR_CODE.Workgroup` rather than an invented number, because the field
+   * holds an `ErrorCode` and 701 is a registered one.
+   */
+  it("reads the code from its own word and not from the version's", () => {
+    const wasm = memoryWith(PTR, (view, bytes) => {
+      writeRecord(view, bytes, {
+        version: PANIC_RECORD_VERSION,
+        code: ERROR_CODE.Workgroup,
+        message: "a code that is not the version",
+      });
+    });
+    const record = readPanicRecord(wasm, PTR, PANIC_RECORD_BYTES);
+    expect(record?.code).toBe(ERROR_CODE.Workgroup);
+    expect(record?.version).toBe(PANIC_RECORD_VERSION);
+    expect(record?.unknownVersion).toBe(false);
+  });
+
+  /**
+   * The bump itself, written out. A core with layout version 2 that panicked
+   * still reports `Panicked`, and the shell still has the sentence for it.
+   */
+  it("keeps the code when a newer core bumps the layout version", () => {
+    const wasm = memoryWith(PTR, (view, bytes) => {
+      writeRecord(view, bytes, {
+        version: PANIC_RECORD_VERSION + 1,
+        code: ERROR_CODE.Panicked,
+        message: "written by a core one version ahead",
+      });
+    });
+    const record = readPanicRecord(wasm, PTR, PANIC_RECORD_BYTES);
+    expect(record?.code).toBe(ERROR_CODE.Panicked);
+    expect(record?.version).toBe(PANIC_RECORD_VERSION + 1);
+    expect(record?.unknownVersion).toBe(true);
+    expect(describeError(record?.code ?? 0)).not.toContain("does not recognise");
   });
 
   /**

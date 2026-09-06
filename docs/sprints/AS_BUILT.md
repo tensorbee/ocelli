@@ -930,8 +930,8 @@ author, and one was re-run independently at integration with its control green.
 pure suites and 5 in a browser suite, and both statements have moved: the
 review's fourth pass took the module-scope `playwright` import out of
 `wasm_cold_start.mjs`, so `cold_start_test.mjs` is in the floor and only ONE of
-its five cases needs a browser, and the four pure suites have grown since. The
-`bench` arm of `bin/ocelli.sh gate` names the five files and `node --test`
+its seven cases needs a browser, and the pure suites have grown since. The
+`bench` arm of `bin/ocelli.sh gate` names the files and `node --test`
 prints the totals, reporting the browser case as skipped unless
 `OCELLI_BENCH_BROWSER=1` is set.
 **Fixture provenance.** No DICOM arithmetic. The one recorded figure states its

@@ -487,6 +487,31 @@ stronger for what R5 asks, because a per-file `#![allow(unsafe_code)]` would
 silence the lint and would not silence the script. The check requires one of
 the two and names which it found.
 
+**Where that check gets its file list from, and it took three passes to
+settle.** The member set comes from `cargo metadata --no-deps`, because
+`[workspace] members` is not the member set. The SOURCE list under each member
+comes from `targets[].src_path`, seeded into the walk, plus a glob of the
+member directory, plus every `#[path]` module either of those declares. Each
+of the three exists because the previous shape was measured open: `crates/*`
+missed `tools/oracle` in the fifth pass, the globs missed a path dependency in
+the seventh, and the member directory missed a `[lib] path` in the eighth,
+where a crate root outside the member carrying `#![allow(clippy::pedantic)]`
+took cargo clippy from 101 to 0 while the guard read the file that is no
+longer compiled and exited 0. The glob is kept beside cargo's answer because a
+module reached by a plain `mod x;` is compiled and is named by no target.
+
+`.cargo/config.toml` is read by the same check, and it refuses the FLAG rather
+than the file: a cargo config is the ordinary home for an alias, a linker
+choice and a target runner. Five lint-naming flags are refused, `-A`,
+`--allow`, `-W`, `--warn` and `--force-warn`, and that list is a declared
+constant since the eighth pass because a probe can only ever write one of
+them. `--cap-lints` is refused separately at any level but `deny` or `forbid`,
+because it names no lint and caps all of them, and both weakening levels have
+a probe rather than a ratchet, there being only four levels in total.
+`--force-warn` is in the first list against expectation: measured under the
+pinned 1.97.1 toolchain it outranks the `-D warnings` the `clippy` gate
+passes, so it silences a denied lint exactly as `-A` does.
+
 ## What is recorded, and where
 
 `ci/guard-probe-budget.json` holds these keys, all measurements rather than
@@ -504,7 +529,17 @@ guesses, plus a `note` restating that:
 - `uncovered`, the uncovered-refusal ceiling and whether the sweep is complete,
   the second derived from the first rather than remembered
 - `oracle_faults`, the fault count the adoption check ratchets against
-- `wall_clock_seconds`, per profile
+- `wall_clock_seconds`, per profile, and the pair has to be POSSIBLE. Deep
+  selects every probe and the floor's are a subset of them, so deep cannot be
+  the faster of the two, and nothing compared the two until the S03 review's
+  eighth pass found `deep: 17.2` recorded beside `floor: 18.1`. The seventh
+  pass re-recorded floor while moving seventeen probes into deep and left deep
+  at its pre-move value, which left the ceiling for the profile that now
+  carries every `lint-policy` probe standing for a run that did not contain
+  them. The gate was never red, because a ceiling that is too generous never
+  is. `wall_clock_problems` in `scripts/guards/census.py` is what refuses it,
+  it derives the superset relation from the catalogue rather than asserting
+  it, and `census.impossible-wall-clock-pair` watches it
 
 `python3 scripts/guard_census.py --record` writes every one of those except the
 last, which `python3 scripts/guard_probe.py --record-budget` writes. Neither is

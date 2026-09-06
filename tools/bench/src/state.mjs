@@ -18,6 +18,8 @@
 // plausible number, and that number sits in a tracked file describing nothing.
 // `unavailable` is the correct output here and it is a useful one.
 
+import { runnerBasename } from "./paths.mjs";
+
 /** A number, and either no comparison was asked for or it was comparable. */
 export const MEASURED = "measured";
 
@@ -89,9 +91,16 @@ export function subjectState(resolved, outcome) {
       reason: NO_RUNNER,
       blocking_story: subject.subject_story,
       blocking_story_status: storyStatus,
+      // `runnerBasename` and not a second `replaceAll(".", "_")` here. This
+      // note tells a reader where to put a runner and `runnerPath` is what
+      // decides whether the harness can see one, so two spellings of the
+      // convention would let this file name a path the gate does not look at.
+      // That is the failure `paths.mjs` describes and it was spelled twice
+      // until the S03 review's eighth pass, in the module whose header says a
+      // rule living on one side only is a defect.
       note:
         "the subject exists and no runner has been written for it. Add " +
-        `tools/bench/src/runners/${subject.id.replaceAll(".", "_")}.mjs.`,
+        `tools/bench/src/runners/${runnerBasename(subject.id)}.mjs.`,
     };
   }
   if (error !== null) {

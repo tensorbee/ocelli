@@ -14,19 +14,39 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { isEntryPoint, oraclePath, ORACLE_ROOT, REPO_ROOT, repoPath } from "../src/paths.mjs";
 
 const HERE = fileURLToPath(import.meta.url);
 
+// `oraclePath` and `repoPath` are `join` over their own constants, so
+// comparing either to `join(<its constant>, ...)` restates the body and holds
+// whatever the roots are. Until the eighth review pass that was this test, and
+// `REPO_ROOT` was pinned nowhere in the suite: resolve it one level too far and
+// nothing here went red.
+//
+// What can be wrong is which directories the two constants name, so this
+// derives `ORACLE_ROOT` a second way, from THIS FILE's own location rather than
+// from `paths.mjs`, ties `REPO_ROOT` to it through the layout the repository
+// actually has, and requires a committed file under each.
 test("the roots are the directories they claim to be", () => {
-  assert.equal(oraclePath("run.mjs"), join(ORACLE_ROOT, "run.mjs"));
-  assert.equal(repoPath("corpus", "manifest.tsv"), join(REPO_ROOT, "corpus", "manifest.tsv"));
+  assert.equal(dirname(dirname(HERE)), ORACLE_ROOT, "this file is <oracle>/tests/");
+  assert.equal(repoPath("tools", "oracle"), ORACLE_ROOT, "the oracle is tools/oracle");
   assert.ok(ORACLE_ROOT.endsWith(join("tools", "oracle")));
+  for (const path of [
+    oraclePath("run.mjs"),
+    oraclePath("package.json"),
+    join(REPO_ROOT, "CLAUDE.md"),
+    join(REPO_ROOT, "corpus", "manifest.tsv"),
+    repoPath("corpus", "manifest.tsv"),
+  ]) {
+    assert.ok(existsSync(path), `${path} does not exist, so a root is wrong`);
+  }
 });
 
 // `node --test <file>` sets argv[1] to the file, so this module IS the entry

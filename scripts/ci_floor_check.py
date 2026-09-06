@@ -252,10 +252,19 @@ MANUAL_EVENTS = {"workflow_dispatch", "repository_dispatch", "schedule"}
 
 # Gates the floor deliberately excludes. `bin/ocelli.sh` excludes these by
 # name in its --floor arm, and the reason is deviation D-04: CI has no GPU and
-# no corpus. `guards-deep` is excluded for a different reason, cost: its probes
-# each need cargo, npm or wasm-pack, so it runs on a push to `main` and on
-# workflow_dispatch rather than on every pull request. Kept here so this script
-# fails if the runner's exclusion list changes without anyone thinking about CI.
+# no corpus. `guards-deep` is excluded for a different reason, a TOOLCHAIN
+# dependency: every probe in it declares `needs="cargo"` and none needs npm or
+# wasm-pack, so it runs on a push to `main` and on workflow_dispatch rather
+# than on every pull request. This comment said "cargo, npm or wasm-pack" and
+# "minutes rather than seconds" until the S03 review's eighth pass, which is
+# the sentence `.github/workflows/ci.yml` itself calls "an earlier version of
+# this comment claimed". MEASURED over four runs on this machine: deep took
+# 27.4s to 28.9s and the floor 19.6s to 20.6s, so the cost is a toolchain a
+# runner has to install
+# rather than a duration. `python3 scripts/guard_probe.py --list` prints each
+# probe's profile and what it needs, and reading that beats reading this.
+# Kept here so this script fails if the runner's exclusion list changes without
+# anyone thinking about CI.
 NOT_IN_FLOOR = {"oracle", "corpus", "guards-deep"}
 
 
@@ -700,8 +709,19 @@ ARM = re.compile(r"^[ \t]*([a-z-]+)\)(.*?);;", re.M | re.S)
 # because a word boundary sits inside `--lower-case` too and an option is not
 # a nested statement. `case` must also be FOLLOWED by whitespace, which the
 # keyword always is and an option ending in `-case` is not.
+#
+# The `\b` in front of the alternation was a fail-open of the same shape one
+# member further along, and the S03 review's eighth pass measured it. `\b`
+# needs a WORD character immediately before the token it precedes, and `!` is
+# not one, so `&& ! case ...` matched nothing while `ARM` went on truncating
+# the body at the inner `;;`. MEASURED on a synthetic `prose` arm reading
+# `python3 scripts/prose_check.py && ! case "$OSTYPE" in *) : ;; esac &&
+# python3 scripts/prose_check.py --extra`: `arms['prose']` held one command,
+# `unseen['prose']` was `None`, no refusal fired and the real trailing command
+# was dropped at exit 0. The `\b` is gone and the keywords carry their own
+# boundary, which they need and `!` does not: `!` cannot be the tail of a word.
 NESTED_CASE = re.compile(
-    r"(?:^|[\n;{}()&|]|\b(?:then|do|else|elif|!)[ \t])[ \t]*case[ \t]")
+    r"(?:^|[\n;{}()&|]|(?:\b(?:then|do|else|elif)|!)[ \t])[ \t]*case[ \t]")
 
 # Where one shell statement ends and the next begins, for the unseen-command
 # scan. `{` and `}` are separators here and never statement heads.
@@ -735,11 +755,53 @@ SHELL_INTRODUCERS = frozenset({
 #
 # `for` is here rather than above for the same reason: what follows it is a
 # variable and a word list, and the command lives after the `do`.
+#
+# `command` is NOT here since the S03 review's eighth pass, and it was here for
+# exactly the reason `eval` was: `command foo args` runs foo. It has its own
+# reader below rather than a place in either set, because its options decide
+# which of the two it is.
 SHELL_NOISE = frozenset({
-    "[", "[[", "test", "command", "echo", "printf", "return", "exit", "skip",
+    "[", "[[", "test", "echo", "printf", "return", "exit", "skip",
     "local", "fi", "for", "done", "case", "esac", "true", "false", ":", "set",
     "shift", "read", "cd", "export", "unset",
 })
+
+# `command -v x` and `command -V x` LOOK a command up and run nothing, which is
+# what `bin/ocelli.sh`'s `panic` arm uses. `command -p x` and a bare
+# `command x` RUN it, which is the property that moved `eval` into
+# `SHELL_INTRODUCERS`, and this file's own declared limit named `command`
+# beside `eval` as the residue. MEASURED in the S03 review's eighth pass:
+# rewriting the `bench` arm's `node --test` line as `command node --test ...`
+# gave `unseen['bench'] == None` and exit 0 with the `gate bench` step replaced
+# by its two extractable commands, so the five node suites stopped being
+# demanded of CI. That is byte for byte the outcome the sixth and seventh
+# passes each measured and made a rule.
+COMMAND_LOOKUP_OPTIONS = frozenset({"-v", "-V", "-pv", "-pV", "-vp", "-Vp"})
+COMMAND_PATH_OPTIONS = frozenset({"-p", "--"})
+
+
+def command_builtin_runs(statement: str) -> str:
+    """What `command ...` actually runs, or "" when it only looks one up.
+
+    Fails CLOSED on an option this function does not model: the remainder is
+    returned unchanged and the caller then reports it as a command it cannot
+    see, which refuses. An option is not a command and the refusal will name a
+    leading `-`, which is a message a maintainer can act on, and the
+    alternative is a statement dropped in silence.
+    """
+    while statement.split(" ", 1)[0] == "command":
+        rest = statement.partition(" ")[2].strip()
+        while True:
+            head = rest.split(" ", 1)[0]
+            if head in COMMAND_LOOKUP_OPTIONS:
+                return ""
+            if head not in COMMAND_PATH_OPTIONS:
+                break
+            rest = rest.partition(" ")[2].strip()
+        statement = rest
+        if not statement:
+            return ""
+    return statement
 
 
 def arm_bodies(runner: str) -> dict[str, str]:
@@ -747,9 +809,21 @@ def arm_bodies(runner: str) -> dict[str, str]:
 
     An arm ends at its `;;`. Nothing here can read a command out of prose. See
     the docstring's "Where an arm ENDS" section for what that cost.
+
+    **The stripping happens BEFORE `ARM` runs, and doing it after was a
+    fail-open the S03 review's eighth pass measured.** `ARM` stops at the first
+    `;;`, and a `;;` inside a shell comment is not the end of an arm, so the
+    body was truncated at the comment and only then were comments removed from
+    what survived. MEASURED on a synthetic `prose` arm whose comment line read
+    `# the voice rules, then the second pass ;; see the LLD` with a real
+    `python3 scripts/prose_check.py --extra` after it: `arms['prose']` held one
+    command, `unseen['prose']` was `None`, no refusal fired and the trailing
+    command was dropped at exit 0. Over the whole region the comment is gone
+    before any `;;` is looked for, and the comment blocks BETWEEN arms go with
+    it, which the previous order also had to handle one arm at a time.
     """
     try:
-        body = runner[runner.index("run_gate() {"):runner.index("skip() {")]
+        region = runner[runner.index("run_gate() {"):runner.index("skip() {")]
     except ValueError as error:
         raise RuntimeError(
             "bin/ocelli.sh carries no `run_gate() {` ... `skip() {` region "
@@ -757,9 +831,10 @@ def arm_bodies(runner: str) -> dict[str, str]:
             "restructured, in which case this parser has to be restructured "
             "with it, or the arms are gone. Both need a person, and neither "
             "may be read as agreement.") from error
+    body = SHELL_COMMENT.sub("", CONTINUATION.sub(" ", region))
     bodies: dict[str, str] = {}
     for match in ARM.finditer(body):
-        text = SHELL_COMMENT.sub("", CONTINUATION.sub(" ", match.group(2)))
+        text = match.group(2)
         if NESTED_CASE.search(text):
             raise RuntimeError(
                 f"the `{match.group(1)}` arm in bin/ocelli.sh's `run_gate` "
@@ -821,6 +896,12 @@ def unseen_commands(runner: str) -> dict[str, list[str]]:
                 statement = rest.strip()
                 if not statement:
                     break
+            if not statement:
+                continue
+            # `command x` runs x. Re-scanned rather than dropped, which is the
+            # same rule `SHELL_INTRODUCERS` carries one line up.
+            if statement.split(" ", 1)[0] == "command":
+                statement = command_builtin_runs(statement)
             if not statement:
                 continue
             if statement.startswith(COMMAND_PREFIXES):

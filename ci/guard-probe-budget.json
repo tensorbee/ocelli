@@ -60,6 +60,16 @@
       "guard": "ci-floor",
       "tunable": false
     },
+    "scripts/ci_floor_check.py:PERMITTED_ADDITIONS": {
+      "digest": "e210a600de2e31dd",
+      "guard": "ci-floor",
+      "tunable": false
+    },
+    "scripts/lint_policy_check.py:ALLOWING_FLAGS": {
+      "digest": "529fc165b0d97d7a",
+      "guard": "lint-policy",
+      "tunable": false
+    },
     "scripts/lint_policy_check.py:REFUSED_GROUPS": {
       "digest": "e4ef8e3eb53413b7",
       "guard": "lint-policy",
@@ -151,7 +161,7 @@
       "tunable": false
     }
   },
-  "constants_count": 30,
+  "constants_count": 32,
   "entry_sites": {
     "backlog": 10,
     "bench": 32,
@@ -163,8 +173,8 @@
     "bench.state": 3,
     "bindgen": 3,
     "bootstrap-importer": 5,
-    "catalogue": 54,
-    "census": 34,
+    "catalogue": 59,
+    "census": 35,
     "census-runbook": 3,
     "ci-floor": 13,
     "content": 7,
@@ -178,7 +188,7 @@
     "hooks.commit-msg": 3,
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
-    "lint-policy": 17,
+    "lint-policy": 20,
     "nostd": 5,
     "oracle.faults": 22,
     "oracle.faults-declaration": 2,
@@ -223,7 +233,7 @@
     "sweep_complete": false
   },
   "wall_clock_seconds": {
-    "deep": 17.2,
-    "floor": 18.1
+    "deep": 27.0,
+    "floor": 19.0
   }
 }

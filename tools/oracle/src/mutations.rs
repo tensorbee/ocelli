@@ -52,10 +52,22 @@ pub enum MutatedSide {
 /// known rather than on whichever identifier sorts first.
 #[derive(Clone, Copy, Debug)]
 pub enum Target {
-    /// The first class-one `MONOCHROME2` stack view that passes cleanly, so
-    /// the mutation's effect on the outcome is unambiguous.
+    /// The first class-one stack view that passes cleanly, so the mutation's
+    /// effect on the outcome is unambiguous.
     ///
-    /// **The photometric interpretation is part of the target and not a
+    /// **Deliberately not narrowed by ramp direction.** The seventeen entries
+    /// that land here move a declared number of codes, or a sidecar field, or
+    /// the frame's position on the canvas, and none of those means anything
+    /// different on an inverted frame. The eighteenth stack entry is the one
+    /// whose arithmetic does depend on the ramp, and it takes
+    /// `MeasuredMonochrome2Stack` below instead.
+    /// The eighth review pass caught this the right way round: while the
+    /// photometric predicate sat here, an unrelated `AddDelta` entry was the
+    /// first thing to refuse when the sidecar pointer it reads was mutated.
+    MeasuredStack,
+    /// The same, and positively `MONOCHROME2`.
+    ///
+    /// **The photometric interpretation is part of THIS target and not a
     /// description of what today's corpus happens to hold.**
     /// `Effect::VoiLinearExactSwap` only ever DARKENS, and `apply_to_frame`'s
     /// derivation says why that is the LINEAR to LINEAR_EXACT divergence:
@@ -71,9 +83,10 @@ pub enum Target {
     /// `mono16` stack view that passes. That is the same accident smell S4
     /// named on `MeasuredReformat`, and here it guarded arithmetic rather than
     /// a ladder rung, so it is closed by the predicate rather than described.
-    /// `ColourClassTwo` below is the precedent: a target narrowed by the frame
-    /// property the mutation's meaning depends on.
-    MeasuredStack,
+    /// `ColourClassTwo` below is the precedent this follows exactly: a
+    /// SEPARATE target narrowed by the frame property one mutation's meaning
+    /// depends on, leaving the shared one unnarrowed.
+    MeasuredMonochrome2Stack,
     /// The first volume reformat that passes cleanly. Present so the
     /// catalogue reaches the nine views `rows[]` does not name.
     ///
@@ -293,7 +306,7 @@ pub const CATALOGUE: &[Mutation] = &[
               pixels, which an 8-bit frame gives no way to tell apart from the \
               255s PS3.3 C.11.2.1.2 and C.11.2.1.3.2 hold still.",
         side: MutatedSide::Candidate,
-        target: Target::MeasuredStack,
+        target: Target::MeasuredMonochrome2Stack,
         effect: Effect::VoiLinearExactSwap,
         expect: Expectation::View {
             outcome: Outcome::Fail,
@@ -618,6 +631,11 @@ pub fn resolve_target(
             record.kind == ViewKind::Stack
                 && record.class == ToleranceClass::MonochromeSixteenBit
                 && record.outcome == Outcome::Pass
+        }
+        Target::MeasuredMonochrome2Stack => {
+            record.kind == ViewKind::Stack
+                && record.class == ToleranceClass::MonochromeSixteenBit
+                && record.outcome == Outcome::Pass
                 // Positively `MONOCHROME2`, not merely "not `MONOCHROME1`". A
                 // stack sidecar that carries no photometric interpretation is
                 // one whose ramp direction is unknown, and the swap's
@@ -833,8 +851,11 @@ pub fn apply_to_frame(
             // repudiated once: a mutation that is detected but is not the
             // thing it says it is.
             //
-            // `Target::MeasuredStack` is narrowed to a `MONOCHROME2` view so
-            // the catalogue cannot reach an inverted one. `ocelli-compare
+            // This entry's own `Target::MeasuredMonochrome2Stack` is narrowed
+            // to a `MONOCHROME2` view so the swap cannot reach an inverted
+            // one. The shared `Target::MeasuredStack` the other seventeen
+            // stack entries use is NOT narrowed, because a delta of a display
+            // code means the same thing on either ramp. `ocelli-compare
             // census` is NOT narrowed, because its argument is about the whole
             // gating population, and today that population carries exactly one
             // inverted row, `synthetic__cr_monochrome1`. Its reported
@@ -927,8 +948,20 @@ pub fn apply_to_frame(
             // treated as boundaries: `w = 400` gives 1, `w = 510` gives 0, and
             // 512, 600, 1000, 2048 and 4096 each give 1. The other five rows
             // are 100, 255, 256, 509 and 511, and 255 is the second and last
-            // width in the table with no mover. The 0 at 510 is where the
-            // integers happen to fall and not a property.
+            // width in the table with no mover.
+            //
+            // **The two zeroes, at 255 and at 510, are where a half rounds up
+            // and not where the integers happen to fall**, which is what this
+            // comment said until the eighth pass. The movable interval below
+            // is `509/510` of an input unit wide, so it holds no integer
+            // exactly when its open endpoint `u_end = 254w/510` IS one, which
+            // is exactly when 255 divides `w`. At those two widths the sole
+            // candidate stored value sits ON `u_end`, where `y_E` is exactly
+            // 254.5 and `y_L` is exactly 255, and the fixture's declared
+            // rounding rule takes 254.5 up. Truncate instead and both rows
+            // carry a mover. That is a property of the width and of the
+            // rounding rule together, and 510 still sorts nothing: 255 is
+            // below it and 510 is not.
             //
             // **In stored-value units the movable set is ONE contiguous
             // interval at every width, with no case split at all.** Write
@@ -996,7 +1029,9 @@ pub fn apply_to_frame(
             // **The per-pixel drop cannot take a pixel below zero.** The
             // accumulator is under `w` before the add, so
             // `drops <= floor((w - 1 + u) / w) = floor(1 + (u - 1) / w)`,
-            // which for `w >= 1` is at most `1 + (u - 1) = u`. A participating
+            // which at the `w >= 2` the first statement of this arm enforces
+            // is at most `1 + (u - 1) = u`. It said `w >= 1` until the eighth
+            // review pass, one bound looser than the code. A participating
             // `u` is at least 1, so `grey - drops` is never negative and the
             // `saturating_sub` below never saturates.
             //
@@ -1121,7 +1156,9 @@ mod tests {
     use std::collections::BTreeSet;
     use std::error::Error;
 
-    use super::{CATALOGUE, Mutation, PixelCount, apply_to_frame, fraction_budget, resolve_target};
+    use super::{
+        CATALOGUE, Mutation, PixelCount, Target, apply_to_frame, fraction_budget, resolve_target,
+    };
     use crate::frame::{Frame, Rect};
     use crate::report::{Outcome as ViewOutcome, Side, ViewRecord};
     use crate::sidecar::ViewKind;
@@ -1366,8 +1403,18 @@ mod tests {
         }
     }
 
-    /// **`Target::MeasuredStack` must skip an inverted view, and the order of
-    /// the records must not be what decides it.**
+    /// The catalogue's `plus-one-on-a-twentieth-of-a-percent`, which is an
+    /// `AddDelta` on the SHARED stack target, so these tests exercise a
+    /// shipped entry of each kind rather than a second copy.
+    fn a_delta_entry() -> Result<&'static Mutation, Box<dyn Error>> {
+        CATALOGUE
+            .iter()
+            .find(|entry| entry.name == "plus-one-on-a-twentieth-of-a-percent")
+            .ok_or_else(|| "plus-one-on-a-twentieth-of-a-percent is not in the catalogue".into())
+    }
+
+    /// **`Target::MeasuredMonochrome2Stack` must skip an inverted view, and the
+    /// order of the records must not be what decides it.**
     ///
     /// `synthetic__cr_monochrome1` is a `mono16` stack view that passes, so
     /// before the target carried a photometric interpretation the only thing
@@ -1379,7 +1426,7 @@ mod tests {
     /// so the swap's drop direction reverses. The mutation would still be
     /// detected there and would still not be the divergence it declares.
     #[test]
-    fn the_measured_stack_target_skips_an_inverted_view() -> Outcome {
+    fn the_monochrome2_target_skips_an_inverted_view() -> Outcome {
         let swap = the_swap()?;
         let records = vec![
             stack_record("synthetic__cr_monochrome1", Some("MONOCHROME1")),
@@ -1391,14 +1438,14 @@ mod tests {
     }
 
     /// A stack whose sidecar declares no photometric interpretation is not a
-    /// target either, and a run holding nothing but those refuses.
+    /// target for the SWAP either, and a run holding nothing but those refuses.
     ///
     /// Refusing is the right answer rather than falling back to the first
     /// passing stack: `MutationError::NoTarget` says the corpus changed shape
     /// under the catalogue, which is a thing to look at, and a silent fallback
     /// would put the swap back on a frame whose ramp direction is unknown.
     #[test]
-    fn a_stack_with_no_declared_ramp_is_not_a_measured_stack() -> Outcome {
+    fn a_stack_with_no_declared_ramp_is_not_a_monochrome2_stack() -> Outcome {
         let swap = the_swap()?;
         let records = vec![
             stack_record("synthetic__cr_monochrome1", Some("MONOCHROME1")),
@@ -1409,6 +1456,53 @@ mod tests {
             "an inverted view and a view with no declared ramp are not targets"
         );
         Ok(())
+    }
+
+    /// **The two targets are separate, and this is what says so.** The shared
+    /// `MeasuredStack` takes the same two records the swap refuses and lands
+    /// on the FIRST of them, inverted ramp and all, because a delta of one
+    /// display code means the same thing on an inverted frame.
+    ///
+    /// Put the photometric predicate back on `MeasuredStack` and this test
+    /// fails on the first record and then on `NoTarget` for the second, which
+    /// is the coupling the eighth review pass named: eighteen entries narrowed
+    /// by a property one of them depends on. `ColourClassTwo` is the precedent
+    /// and it was created as a separate target for exactly this reason.
+    #[test]
+    fn the_shared_stack_target_is_not_narrowed_by_ramp_direction() -> Outcome {
+        let delta = a_delta_entry()?;
+        let inverted_first = vec![
+            stack_record("synthetic__cr_monochrome1", Some("MONOCHROME1")),
+            stack_record("real__ct_cmb_mml__00000001", Some("MONOCHROME2")),
+        ];
+        assert_eq!(
+            resolve_target(delta, &inverted_first).map_err(|error| error.to_string())?,
+            "synthetic__cr_monochrome1"
+        );
+        let undeclared_only = vec![stack_record("a__view__with__no__attributes", None)];
+        assert_eq!(
+            resolve_target(delta, &undeclared_only).map_err(|error| error.to_string())?,
+            "a__view__with__no__attributes",
+            "a stack whose ramp direction is undeclared still carries a delta"
+        );
+        Ok(())
+    }
+
+    /// And exactly one catalogue entry takes the narrowed target, so the
+    /// narrowing cannot spread back over the catalogue without this going red.
+    #[test]
+    fn one_entry_takes_the_monochrome2_target_and_the_rest_share_the_stack() {
+        let narrowed: Vec<&str> = CATALOGUE
+            .iter()
+            .filter(|entry| matches!(entry.target, Target::MeasuredMonochrome2Stack))
+            .map(|entry| entry.name)
+            .collect();
+        assert_eq!(narrowed, vec!["the-actual-linear-exact-swap"]);
+        let shared = CATALOGUE
+            .iter()
+            .filter(|entry| matches!(entry.target, Target::MeasuredStack))
+            .count();
+        assert_eq!(shared, 17, "the other seventeen stack entries");
     }
 
     /// **A window of 1 is refused, because LINEAR has no value at it.**
@@ -1445,7 +1539,11 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), total);
-        assert!(total >= 18, "the declared catalogue is {total} entries");
+        // The exact count, not a floor. It stood at `>= 18` while twenty-one
+        // entries were declared, so the three newest were pinned by nothing
+        // and one could have been deleted in silence. Change this number
+        // deliberately when the catalogue changes, which is the point of it.
+        assert_eq!(total, 21, "the declared catalogue is {total} entries");
     }
 
     /// Every entry says why it exists. A mutation with no rationale is a

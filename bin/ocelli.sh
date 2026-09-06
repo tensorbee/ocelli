@@ -79,7 +79,7 @@ GATES=(
   "packages|no|npm tarball contents, exports and a consumer install (E1.3)"
   "ci|no|every floor gate is actually invoked by .github/workflows/ci.yml"
   "guards|no|every declared guard still refuses what it is for (F-X009)"
-  "guards-deep|no|the guard probes needing cargo, npm or wasm-pack (F-X009)"
+  "guards-deep|no|the guard probes needing a cargo toolchain (F-X009)"
   "corpus-tests|no|the corpus generator and coverage suites, a skip fails it"
   "corpus|no|corpus coverage over the codec registry, then presence and digests"
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
@@ -149,6 +149,7 @@ run_gate() {
                  python3 -m unittest discover -s scripts/tests \
                    -p test_bench_check.py &&
                  node --test tools/bench/tests/hostclass_test.mjs \
+                   tools/bench/tests/paths_test.mjs \
                    tools/bench/tests/record_test.mjs \
                    tools/bench/tests/registry_test.mjs \
                    tools/bench/tests/state_test.mjs \
@@ -284,8 +285,16 @@ gates_cmd() {
         IFS='|' read -r name gpu desc <<<"$entry"
         # The CI floor. `oracle` needs a GPU and a browser. `corpus` needs the
         # corpus, which is not in git and so is not in CI. `guards-deep` needs
-        # cargo, npm and wasm-pack per probe and is minutes rather than
-        # seconds, so it runs on a push to main and on dispatch instead.
+        # a TOOLCHAIN: every probe in it declares `needs="cargo"` and none
+        # needs npm or wasm-pack, which this comment claimed until the S03
+        # review's eighth pass and which is the sentence .github/workflows/
+        # ci.yml already calls "an earlier version of this comment claimed".
+        # It is not minutes either: over four runs on this machine deep took
+        # 27.4s to 28.9s and the floor 19.6s to 20.6s. It runs on a push to
+        # main and on dispatch because a runner
+        # has to install the toolchain, not because of the clock.
+        # `python3 scripts/guard_probe.py --list` prints each probe's profile
+        # and what it needs, and reading that beats reading this.
         # Everything else runs, INCLUDING `wasm`: story E1.2's note is "CI
         # fails if the module exceeds the agreed budget", and a wasm-pack
         # build costs no GPU.

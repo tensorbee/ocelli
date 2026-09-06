@@ -44,12 +44,24 @@
 //! `(2n + d) / (2d)` under Rust's truncating division, stated once in
 //! `Exact::code` and used everywhere.
 //!
-//! This file asserts forty display values: sixteen inputs through each
+//! **The tables** assert forty display values: sixteen inputs through each
 //! function in the tables below, and HLD 18.3's four rows through each. Of
 //! those forty, **exactly one lands on a half**, `LINEAR_EXACT(40) = 255/2`,
 //! and it is asserted separately for that reason. The other thirty-nine are
 //! independent of which of the three common rounding rules is used, which is
-//! checked rather than claimed by `exactly_one_asserted_value_lands_on_a_half`.
+//! checked rather than claimed by `exactly_one_asserted_value_lands_on_a_half`,
+//! and that test scans those forty and nothing else.
+//!
+//! **The white-exclusion section at the foot of the file is not
+//! rounding-independent, and that is the whole of its two empty rows.** It
+//! evaluates both functions at 21606 stored values across twelve widths, and
+//! exactly two of those 43212 display values land on 254.5: `w = 255, x = 167`
+//! and `w = 510, x = 294`, where `y_L` is exactly 255 and `y_E` is exactly
+//! `509/2`. The declared rule takes `y_E` up to 255 at both, so neither stored
+//! value moves, and those two widths are exactly the two empty rows in
+//! `WHITE_BANDS`. Under truncation both would move and this file would go red.
+//! `the_two_empty_rows_are_empty_because_a_half_rounds_up` scans for that and
+//! says so, and the counts above are its own assertions rather than prose.
 
 use std::error::Error;
 
@@ -625,12 +637,18 @@ fn the_divergence_matches_the_closed_form_wherever_neither_function_clamps() {
     assert!(2 * centre.numerator < centre.denominator);
 }
 
-/// The window centre is the one place in this file where the rounding rule
+/// The window centre is the one place in the TABLES where the rounding rule
 /// decides, and that is checked rather than asserted from memory: of the forty
-/// display values the file asserts, `LINEAR_EXACT(40) = 255/2` is the only one
-/// that lands on a half. Half away from zero and half to even both give 128
-/// there while truncation gives 127, and half away from zero is the declared
-/// rule.
+/// display values they assert, `LINEAR_EXACT(40) = 255/2` is the only one that
+/// lands on a half. Half away from zero and half to even both give 128 there
+/// while truncation gives 127, and half away from zero is the declared rule.
+///
+/// **This test scans the two sixteen-row tables and HLD 18.3's four rows, and
+/// nothing else.** The white-exclusion section at the foot of the file
+/// evaluates both formulas 43212 times more, two of those land on 254.5, and
+/// the rule decides both. `the_two_empty_rows_are_empty_because_a_half_rounds_up`
+/// is the sibling that scans them, and the two together are the file's whole
+/// rounding audit.
 #[test]
 fn exactly_one_asserted_value_lands_on_a_half() {
     let mut halves: Vec<String> = Vec::new();
@@ -761,9 +779,19 @@ struct WhiteBand {
 /// review passes said a 255 "cannot move for any stored value whatever", and a
 /// stored value moves there.
 ///
-/// The two empty rows, 255 and 510, are where the integers happen to fall and
-/// not a property of either width. They sit on opposite sides of 510, which is
-/// the shortest statement that 510 is not a threshold separating two regimes.
+/// **The two empty rows, 255 and 510, are empty because a half rounds up.**
+/// Not because the integers happen to fall there, which is what this comment
+/// said until the eighth pass. The movable band `[u_start, u_end)` at the foot
+/// of this file is `509/510` of an input unit wide at every width, so it holds
+/// no integer exactly when `u_end = 254w/510` IS one, and that is exactly when
+/// 255 divides `w`. At those two widths the sole candidate stored value sits
+/// ON `u_end`, where `y_E` is exactly `509/2` and `y_L` is exactly 255, and
+/// the rounding rule this file declares takes `y_E` up to 255, so the pixel
+/// does not move. Truncate instead and both rows carry a mover.
+/// `the_two_empty_rows_are_empty_because_a_half_rounds_up` asserts all of it.
+///
+/// They still sit on opposite sides of 510, which is the shortest statement
+/// that 510 is not a threshold separating two regimes.
 const WHITE_BANDS: [WhiteBand; 12] = [
     WhiteBand {
         width: 100,
@@ -895,14 +923,13 @@ fn the_white_exclusion_is_conservative_at_every_width_and_exact_at_none() {
             "at w = {w} the stored values LINEAR renders 255 and LINEAR_EXACT \
              does not are not the hand-computed ones"
         );
-        for x in band.movers {
-            assert_eq!(linear_at(*x, w).code(), 255);
-            assert!(
-                linear_exact_at(*x, w).code() < 255,
-                "the swap can only ever DARKEN a pixel, so excluding this one \
-                 under-damages the frame and cannot over-damage it"
-            );
-        }
+        // No per-mover loop follows, deliberately. `movers_at_255` filters on
+        // `linear_at(x, w).code() == 255` and on `linear_exact_at` not being
+        // 255, and both functions clamp at `Y_MAX`, so re-asserting either
+        // over `band.movers` restates the filter and cannot fail. The
+        // direction the exclusion depends on, `y_E <= y_L`, is asserted
+        // exhaustively over every scanned input at every width by
+        // `the_black_exclusion_is_exact_at_every_width` below.
     }
     // 510 is not a threshold, and this is the assertion that says so. Every
     // width above it carries a mover, and one width below it carries none, so
@@ -1110,9 +1137,18 @@ fn the_movable_band_is_non_empty_at_every_width() {
 
         // And the integers inside that interval are the table's movers, which
         // is what ties the closed form to the twelve hand-computed rows. The
-        // half-open bracket is load-bearing here: at `w = 255` the only
-        // candidate stored value sits exactly ON `u_end`, which is why that
-        // row is empty.
+        // half-open bracket is load-bearing here: at `w = 255` AND at
+        // `w = 510` the only candidate stored value sits exactly ON `u_end`,
+        // which is why those two rows are empty and the only reason they are.
+        // Those are the two widths in the table that 255 divides, which is
+        // exactly when `u_end = 254w/510` is an integer, and a band `509/510`
+        // wide ending open at an integer holds none.
+        assert_eq!(
+            band.movers.is_empty(),
+            (254 * w) % 510 == 0,
+            "at w = {w} a row is empty exactly when u_end is an integer, and \
+             u_end is {u_end:?}"
+        );
         let inside: Vec<i128> = scanned(w)
             .filter(|x| {
                 let u = Exact::whole(*x - CENTRE);
@@ -1123,6 +1159,81 @@ fn the_movable_band_is_non_empty_at_every_width() {
             inside, band.movers,
             "at w = {w} the integers in [u_start, u_end) are not the stored \
              values the two formulas move"
+        );
+    }
+}
+
+/// **The white section's own rounding audit, and the sibling
+/// `exactly_one_asserted_value_lands_on_a_half` needs.**
+///
+/// That test scans the two sixteen-row tables and HLD 18.3's four rows, forty
+/// display values in all, and it is structurally blind to this section, which
+/// evaluates both formulas at 21606 stored values across the twelve widths.
+/// The file's header claimed rounding independence on the strength of the
+/// forty until the eighth pass, and this section is not rounding independent:
+/// its two empty rows exist because a half rounds up.
+///
+/// 254.5 is the only half the mover predicate turns on, since
+/// `code(y_L) == 255 && code(y_E) != 255` compares nothing else with a
+/// boundary. Exactly two of the 43212 display values here are exactly 254.5,
+/// and both are a `y_E` at the stored value sitting on `u_end`:
+///
+/// ```text
+/// w = 255   x = 167   u_end = 254 * 255 / 510 = 127, so u = 127 is on it
+///   LINEAR       2x = 334 > 79 + 254, so ymax                    255
+///   LINEAR_EXACT ((167 - 40)/255 + 1/2) * 255 = 127 + 127.5    509/2
+///
+/// w = 510   x = 294   u_end = 254 * 510 / 510 = 254, so u = 254 is on it
+///   LINEAR       ((294 - 39.5)/509 + 1/2) * 255 = (1/2 + 1/2) * 255  255
+///   LINEAR_EXACT ((294 - 40)/510 + 1/2) * 255 = 127 + 127.5       509/2
+/// ```
+///
+/// Half away from zero takes `509/2` to 255 at both, so neither stored value
+/// moves and both rows are empty. Truncation takes it to 254 at both, both
+/// rows gain a mover, and this file goes red in several places at once.
+#[test]
+fn the_two_empty_rows_are_empty_because_a_half_rounds_up() {
+    let mut scanned_values = 0_u32;
+    let mut on_the_half: Vec<(i128, i128)> = Vec::new();
+    for band in &WHITE_BANDS {
+        let w = band.width;
+        for x in scanned(w) {
+            for value in [linear_at(x, w), linear_exact_at(x, w)] {
+                scanned_values += 1;
+                if value.equals(HALF_ABOVE_254) {
+                    on_the_half.push((w, x));
+                }
+            }
+        }
+    }
+    // The counts the file header quotes, asserted rather than written down.
+    assert_eq!(
+        scanned_values, 43_212,
+        "twelve widths, 2w + 1 values at each"
+    );
+    assert_eq!(
+        on_the_half,
+        vec![(255_i128, 167_i128), (510, 294)],
+        "the only display values in this section that land on 254.5"
+    );
+
+    for (w, x) in on_the_half {
+        // `y_L` is exactly 255 and `y_E` is exactly 254.5, so the pixel is a
+        // 255 in the reference frame and its divergence lands on the boundary.
+        assert!(linear_at(x, w).equals(Exact::whole(255)));
+        assert!(linear_exact_at(x, w).equals(HALF_ABOVE_254));
+        // The declared rule takes it up, so the stored value does NOT move.
+        assert_eq!(linear_exact_at(x, w).code(), 255);
+        assert!(!movers_at_255(w).contains(&x));
+        // And truncation would take it down, which is the mutation this test
+        // exists to fail under. `n / d` on a non-negative rational IS
+        // truncation, so this is the other rule evaluated rather than named.
+        let y_e = linear_exact_at(x, w);
+        assert_eq!(
+            y_e.numerator / y_e.denominator,
+            254,
+            "truncating 254.5 gives 254, which would make {x} a mover at \
+             w = {w} and this row non-empty"
         );
     }
 }

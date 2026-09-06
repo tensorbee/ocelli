@@ -8,10 +8,21 @@
 //! out from the quoted rule, and the frame size is chosen so that 0.1% of the
 //! frame is an integer.
 //!
-//! The rule, verbatim from 25.1:
+//! The rule, verbatim from 25.1, the `≤` and the semicolon included:
 //!
-//! > **Monochrome 16-bit (CT, MR, CR, DR):** maximum absolute difference <= 1
-//! > LSB on at least 99.9% of pixels, zero pixels differing by more than 2.
+//! > **Monochrome 16-bit (CT, MR, CR, DR):** maximum absolute difference ≤ 1
+//! > LSB on at least 99.9% of pixels; zero pixels differing by more than 2.
+//!
+//! Both were written as `<=` and `,` here until the eighth review pass, which
+//! is the substitution `SECTION_25_1_MONOCHROME` in
+//! `tools/oracle/src/tolerance.rs` spends a paragraph establishing that no
+//! lint requires: `scripts/prose_check.py` covers no Rust source at all.
+//! Reproduce with `python3 -c "import sys; sys.path.insert(0, 'scripts');
+//! import prose_check; print(prose_check.in_scope('tools/oracle/tests/
+//! tolerance_fixture.rs'))"`, which prints `False`. A quotation labelled
+//! verbatim that is not verbatim costs the label its meaning, and the
+//! constant this file's own tests compare against carries the real
+//! characters.
 //!
 //! and the bullet the operator added through this story's design plan:
 //!

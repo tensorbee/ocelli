@@ -5,7 +5,7 @@
 **Normative source**: `docs/hld/20-errors-and-panics.md` section 23, with
 `docs/hld/14-the-boundary-in-code.md` sections 17.2, 17.3 and 17.4
 **F-IDs that contributed:** F-005
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-06
 
 Living current-state document. It describes what the code does today.
 
@@ -95,6 +95,18 @@ run on the resolved tier reports unavailable and never silently produces a
 different answer, and a tier C session says so in exactly the encoding a tier A
 session would use, so the shell needs one path and not two.
 
+**Both `ComputeError` variants have their `Display` executed by a test, and
+each assertion binds an operand to the role it plays.** `Unavailable` names two
+tiers, and asserting that its message contains "tier A" and "tier Cpu" holds
+just as well when the two are printed the wrong way round, which turns D-07's
+honest report into its inverse: a tier C session refusing a tier A kernel would
+say the kernel requires tier Cpu and the session resolved tier A. So the
+assertions carry the noun, "requires tier A" and "resolved tier Cpu", and a
+second case swaps the two fields and asserts the two messages differ.
+`Workgroup` has to name the size it refused, because HLD section 31 makes the
+workgroup the number that must never be hardcoded and a refusal without it is a
+message nobody can act on.
+
 ### The reserved ranges
 
 Declared now because a range is cheap to declare and expensive to retrofit once
@@ -158,6 +170,30 @@ for a log line and both reserve `0`. One byte, one rule, one decoder.
 | | 4 `Debug` |
 | | 5 `Trace` |
 
+### The three hand-written vectors, and the two properties they carry
+
+`crates/ocelli-core/src/error.rs` and `packages/core/src/errors.test.ts` each
+hold `ERROR_BYTES`, `LOG_BYTES` and `TWO_OPERAND_BYTES`, written out by hand
+from the table above and byte-for-byte identical across the two files. Neither
+side is produced by running the other and neither is produced by running its own
+encoder, which is what makes them two implementations that have to agree rather
+than one implementation checked twice.
+
+Two properties decide the contents, and both were learned from a mutation that
+survived.
+
+- **No vector has byte 2 equal to byte 3.** They are adjacent single bytes
+  carrying different meanings, so a record whose level and arity are the same
+  number is symmetric under a swap of the two offsets and cannot detect one.
+  The three carry 2 and 1, 5 and 3, and 1 and 2.
+- **Between them the vectors carry every arity the layout holds.**
+  `ERROR_BYTES` carries one operand, `LOG_BYTES` three and `TWO_OPERAND_BYTES`
+  two. `Record::build` maps a slice length onto byte 3 through a `match` with a
+  row per number, and until an arity of two was fixtured its middle row could
+  return `1` with both suites green. A consumer honouring that arity would drop
+  the second operand, which is the quiet loss `Record::error`'s own
+  documentation says it refuses to perform.
+
 ## Where the message lives, and why it is TypeScript
 
 Section 23: "The shell switches on the code, the message is for humans and may
@@ -199,6 +235,16 @@ offset  size  field
 **One struct and not five statics.** Rust gives no layout guarantee across
 separate statics, so five of them could sit anywhere relative to each other and
 the single cached pointer the shell holds would address only the first.
+
+**`version` and `code` hold the same number today, so the shell's tests give
+them different ones.** `panic.rs` says the version is bumped when the field
+order changes, and while both words read `1` a reader taking the code out of
+the version's word is indistinguishable from a correct one. The first bump
+makes every panic report code `2`, `describeError(2)` misses the message table,
+and the user is told the build does not recognise error code 2 instead of
+getting section 23's sentence, at the one moment that sentence is load bearing.
+`packages/core/src/panic.test.ts` therefore carries a record with version 1 and
+code 701, and a record with version 2 and code 1.
 
 **Atomics, and that is what makes this need no `unsafe`.** A `static` written
 through `AtomicU8::store` needs only a shared reference, so the hook mutates a

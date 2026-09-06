@@ -58,6 +58,24 @@ const CALIBRATION_BUDGET_NANOS: u64 = 2_000_000;
 /// hints, which is exactly what it is for.
 const COMPLETION_TIMEOUT_NANOS: u64 = 5_000_000_000;
 
+/// The three runs [`measure`] issues, in order, as `(edge, passes)` pairs: the
+/// warm-up whose figure is discarded, the calibration, and the full pass.
+///
+/// **A value rather than three call sites, so the workload is assertable.**
+/// `ci/tier-thresholds.json` records this plan as `warm_up_pixels`,
+/// `calibration_pixels` and `full_pixels`, because a fill rate without its
+/// workload is not a measurement and the 400,000,000 floor in that file was
+/// derived from a figure taken with exactly these three runs.
+/// `caps::detection_tests::the_recorded_workload_matches_the_checked_in_file`
+/// is what stops the plan and the file from drifting apart, and
+/// `probe::tests::a_slow_first_submission_does_not_stop_the_full_pass` is what
+/// stops the plan from being a statement [`measure`] does not follow.
+pub(crate) const RUN_PLAN: [(u32, u32); 3] = [
+    (CALIBRATION_EDGE, CALIBRATION_PASSES),
+    (CALIBRATION_EDGE, CALIBRATION_PASSES),
+    (FULL_EDGE, FULL_PASSES),
+];
+
 const WORKLOAD_WGSL: &str = include_str!("fill_rate.wgsl");
 
 /// Resolve the session's tier.
@@ -229,7 +247,7 @@ async fn measure_chosen(
 /// const function on stable, and the alternative is `as`, which HLD section
 /// 27.3 makes a human review item and the workspace denies for truncation.
 /// The constant-ness buys nothing here and the cast would cost a review.
-fn fragments(edge: u32, passes: u32) -> u64 {
+pub(crate) fn fragments(edge: u32, passes: u32) -> u64 {
     u64::from(edge) * u64::from(edge) * u64::from(passes)
 }
 
@@ -245,11 +263,15 @@ const fn full_pass_is_affordable(calibration_nanos: u64) -> bool {
     calibration_nanos <= CALIBRATION_BUDGET_NANOS
 }
 
-/// The two-stage measurement.
+/// The two-stage measurement, on a real device.
 ///
 /// A small calibration pass first, so a slow rasteriser does not hang startup.
 /// The full pass runs only if the calibration was fast enough to make it
 /// affordable, and if it was not, the calibration figure is itself the answer.
+///
+/// This half builds the pipeline and hands [`measure_with`] a way to issue one
+/// run. Everything that decides anything is in that function, which needs no
+/// adapter, for the reason the module header gives about `caps` and `probe`.
 fn measure(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -264,41 +286,50 @@ fn measure(
     // measurement that would otherwise be timing a shader compile.
     let pipeline = build_pipeline(device, &shader);
 
-    // A warm-up whose figure is thrown away. The FIRST submission on a fresh
-    // device pays for lazy pipeline compilation, driver initialisation and
-    // command-buffer setup, and timing it measures startup latency rather than
-    // fill rate. Measured on the machine in `ci/tier-thresholds.json`, twenty
-    // release runs of this exact pair in fresh processes: the first 65,536
-    // fragments took 5.4 to 9.3 ms, median 6.1, and the same work immediately
-    // afterwards took 0.32 to 0.70 ms, median 0.36. The ratio ranged from 8.8
-    // to 20.7 and is one machine's noise rather than a bound.
-    //
-    // The only figure this code depends on is the low end. Without the
-    // discard, the calibration measures that first-run cost as the machine's
-    // fill rate, and the first submission was over
-    // `CALIBRATION_BUDGET_NANOS` on all twenty runs, so the full pass never
-    // runs and the startup latency is the figure that gets recorded.
-    let _warm_up = run(
-        device,
-        queue,
-        &pipeline,
-        CALIBRATION_EDGE,
-        CALIBRATION_PASSES,
-        clock,
-    );
+    measure_with(&mut |edge, passes| run(device, queue, &pipeline, edge, passes, clock))
+}
 
-    let calibration = run(
-        device,
-        queue,
-        &pipeline,
-        CALIBRATION_EDGE,
-        CALIBRATION_PASSES,
-        clock,
-    )?;
+/// [`RUN_PLAN`], issued in order, and the figure that comes out of it.
+///
+/// `issue` is [`run`] in the resolver and a recording stand-in in the tests,
+/// which deviation D-04 leaves without an adapter. It is a `&mut dyn FnMut` for
+/// the same reason `clock` is one on [`resolve`]: the alternative is a generic
+/// parameter with one instantiation, and `AGENTS.md` refuses that shape.
+///
+/// **The first run's figure is thrown away, and that discard is the whole
+/// reason this function is separately testable.** The FIRST submission on a
+/// fresh device pays for lazy pipeline compilation, driver initialisation and
+/// command-buffer setup, and timing it measures startup latency rather than
+/// fill rate. Measured on the machine in `ci/tier-thresholds.json`, twenty
+/// release runs of this exact pair in fresh processes: the first 65,536
+/// fragments took 5.4 to 9.3 ms, median 6.1, and the same work immediately
+/// afterwards took 0.32 to 0.70 ms, median 0.36. The ratio ranged from 8.8 to
+/// 20.7 and is one machine's noise rather than a bound.
+///
+/// The only figure this code depends on is the low end. Without the discard,
+/// the calibration measures that first-run cost as the machine's fill rate, and
+/// the first submission was over [`CALIBRATION_BUDGET_NANOS`] on all twenty
+/// runs, so the full pass never runs and the startup latency is the figure that
+/// gets recorded. Divided by the 256 the full pass would have brought, a
+/// hardware adapter falls under
+/// [`crate::caps::FillRateBands::hardware_floor_pps`] and is demoted to tier C,
+/// which renders nothing and presents as a slow viewer. That is deviation
+/// D-07's misdetection arriving from the direction the resolver exists to
+/// catch.
+fn measure_with(issue: &mut dyn FnMut(u32, u32) -> Option<FillRate>) -> Option<FillRate> {
+    let [
+        (warm_up_edge, warm_up_passes),
+        (calibration_edge, calibration_passes),
+        (full_edge, full_passes),
+    ] = RUN_PLAN;
+
+    let _warm_up = issue(warm_up_edge, warm_up_passes);
+
+    let calibration = issue(calibration_edge, calibration_passes)?;
     if !full_pass_is_affordable(calibration.elapsed_nanos) {
         return Some(calibration);
     }
-    run(device, queue, &pipeline, FULL_EDGE, FULL_PASSES, clock).or(Some(calibration))
+    issue(full_edge, full_passes).or(Some(calibration))
 }
 
 fn build_pipeline(device: &wgpu::Device, shader: &wgpu::ShaderModule) -> wgpu::RenderPipeline {
@@ -412,8 +443,28 @@ fn run(
 mod tests {
     use super::{
         CALIBRATION_BUDGET_NANOS, CALIBRATION_EDGE, CALIBRATION_PASSES, FULL_EDGE, FULL_PASSES,
-        WORKLOAD_WGSL, fragments, full_pass_is_affordable,
+        RUN_PLAN, WORKLOAD_WGSL, fragments, full_pass_is_affordable, measure_with,
     };
+    use crate::caps::FillRate;
+
+    /// Issue [`RUN_PLAN`] against a stand-in for [`super::run`] that records
+    /// what it was asked for and reports `elapsed_nanos` for every run.
+    ///
+    /// The fragment count it hands back is the production [`fragments`] of the
+    /// pair it was given, so a run issued at the wrong size reports the wrong
+    /// numerator here exactly as it would on a device.
+    fn issued(elapsed_nanos: u64) -> (Vec<u64>, Option<FillRate>) {
+        let mut counts = Vec::new();
+        let result = measure_with(&mut |edge, passes| {
+            let pixels_shaded = fragments(edge, passes);
+            counts.push(pixels_shaded);
+            Some(FillRate {
+                pixels_shaded,
+                elapsed_nanos,
+            })
+        });
+        (counts, result)
+    }
 
     /// **The fragment count, against figures computed by hand from what the
     /// workload does, and not against the expression that produces it.**
@@ -499,6 +550,109 @@ mod tests {
         );
         assert!(!full_pass_is_affordable(2_000_001));
         assert!(!full_pass_is_affordable(u64::MAX));
+    }
+
+    /// **Three runs, in the order and at the sizes `ci/tier-thresholds.json`
+    /// records the workload as.**
+    ///
+    /// The figures are that file's `warm_up_pixels`, `calibration_pixels` and
+    /// `full_pixels`, written as literals rather than rebuilt from the
+    /// constants, so this asserts the workload the 400,000,000 floor was
+    /// derived from rather than asserting the code against itself.
+    /// `caps::detection_tests::the_recorded_workload_matches_the_checked_in_file`
+    /// is what ties those literals to the file.
+    #[test]
+    fn a_measurement_issues_the_warm_up_the_calibration_and_the_full_pass() {
+        let (counts, result) = issued(1);
+        assert_eq!(
+            counts,
+            vec![65_536, 65_536, 16_777_216],
+            "the runs issued are not the recorded workload"
+        );
+        assert_eq!(result.map(|rate| rate.pixels_shaded), Some(16_777_216));
+    }
+
+    /// **The measured case, and the reason the first run's figure is
+    /// discarded.**
+    ///
+    /// A first submission of 6.1 ms and 0.36 ms afterwards, the two medians of
+    /// the twenty release runs recorded on [`super::measure_with`] and in
+    /// `docs/lld/tier-resolution.md`. 6.1 ms is over
+    /// [`CALIBRATION_BUDGET_NANOS`], so without the discard the calibration
+    /// inherits it, [`super::full_pass_is_affordable`] says no, and the figure
+    /// this function returns is 65,536 fragments of startup latency instead of
+    /// 16,777,216 fragments of shading. That is a rate roughly seventeen times
+    /// too low on the machine `ci/tier-thresholds.json` was recorded on, which
+    /// puts a real adapter under
+    /// [`crate::caps::FillRateBands::hardware_floor_pps`] and demotes it to
+    /// tier C.
+    ///
+    /// Three statements said the warm-up was load bearing, in the comment
+    /// beside it, in `ci/tier-thresholds.json` and in the LLD, and deleting it
+    /// left this crate green until the S03 review's eighth pass.
+    #[test]
+    fn a_slow_first_submission_does_not_stop_the_full_pass() {
+        let mut counts = Vec::new();
+        let result = measure_with(&mut |edge, passes| {
+            let pixels_shaded = fragments(edge, passes);
+            counts.push(pixels_shaded);
+            Some(FillRate {
+                pixels_shaded,
+                elapsed_nanos: if counts.len() == 1 {
+                    6_100_000
+                } else {
+                    360_000
+                },
+            })
+        });
+        assert_eq!(
+            counts.len(),
+            3,
+            "the first submission's cost was not discarded, so the full pass never ran"
+        );
+        assert_eq!(
+            result.map(|rate| rate.pixels_shaded),
+            Some(16_777_216),
+            "the recorded figure is the calibration's, which carries startup latency"
+        );
+    }
+
+    /// A calibration over the budget is itself the answer, and the full pass is
+    /// not issued. The warm-up still is: it is a discard, not a stage the
+    /// budget gates.
+    #[test]
+    fn an_unaffordable_calibration_stops_before_the_full_pass() {
+        let (counts, result) = issued(CALIBRATION_BUDGET_NANOS + 1);
+        assert_eq!(counts, vec![65_536, 65_536]);
+        assert_eq!(result.map(|rate| rate.pixels_shaded), Some(65_536));
+    }
+
+    /// A calibration that could not be taken is no measurement at all, and the
+    /// combination rule then falls through to the two hints. The warm-up's
+    /// failure is not that, because its figure was never going to be used.
+    #[test]
+    fn a_calibration_that_reports_nothing_yields_no_measurement() {
+        let mut issues = 0_u32;
+        let result = measure_with(&mut |_edge, _passes| {
+            issues += 1;
+            None
+        });
+        assert_eq!(result, None);
+        assert_eq!(issues, 2, "the calibration's failure did not stop the plan");
+    }
+
+    /// [`RUN_PLAN`] is what [`super::measure_with`] issues, and the three pairs
+    /// are the two workload sizes this module declares.
+    #[test]
+    fn the_run_plan_is_the_calibration_twice_and_then_the_full_pass() {
+        assert_eq!(
+            RUN_PLAN,
+            [
+                (CALIBRATION_EDGE, CALIBRATION_PASSES),
+                (CALIBRATION_EDGE, CALIBRATION_PASSES),
+                (FULL_EDGE, FULL_PASSES),
+            ]
+        );
     }
 
     /// The shader is the workload, so its entry points and its ALU step count

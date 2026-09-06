@@ -21,7 +21,17 @@ import { isInside, sameDirectory } from "../src/output.mjs";
 
 test("with no arguments, every check is on and the output is canonical", () => {
   const options = parseArgs([]);
-  assert.equal(options.out, DEFAULT_OUT);
+  // Not `assert.equal(options.out, DEFAULT_OUT)`. That is the constant
+  // `parseArgs` initialises from compared with itself, and it holds whatever
+  // the constant is. What matters about the default is that it IS the
+  // directory this whole file exists to protect, so it is asserted through the
+  // guard: `--rows` into the default output is refused.
+  assert.throws(
+    () => parseArgs(["--rows", "syntax/", "--out", options.out]),
+    /must name a directory outside/,
+    "the default output is not the directory the guard protects",
+  );
+  assert.ok(options.out.endsWith(join("tools", "oracle", "out")));
   assert.equal(options.rows, null);
   assert.equal(options.inject, null);
   assert.equal(options.once, false);
@@ -112,10 +122,15 @@ function namesTheSameDirectory(left, right) {
   }
 }
 
-test("--rows into the canonical output is refused, case-only variant", () => {
+test("--rows into the canonical output is refused, case-only variant", (t) => {
   const shouted = `${DEFAULT_OUT.slice(0, -3)}OUT`;
   if (!namesTheSameDirectory(DEFAULT_OUT, shouted)) {
-    // A case-sensitive filesystem, where the two really are two directories.
+    // A case-sensitive filesystem, or no canonical output to ask about. Both
+    // are honest boundaries and neither is a pass, so this reports as SKIPPED
+    // rather than returning green. Until the eighth review pass it returned,
+    // and the gate runs this suite after `prepareOutput` has been near that
+    // directory, so a skip and a pass were the same observation.
+    t.skip(`${shouted} is not the same directory as ${DEFAULT_OUT}`);
     return;
   }
   assert.throws(
@@ -141,10 +156,11 @@ test("--rows into a subdirectory of the canonical output is refused", () => {
 // PARENT. These are the same case-only and symlink spellings the whole-
 // directory tests cover, one level up, and they were accepted until the
 // containment test started asking `sameDirectory` about every ancestor.
-test("--rows into a subdirectory of a case-only spelling is refused", () => {
+test("--rows into a subdirectory of a case-only spelling is refused", (t) => {
   const shouted = `${DEFAULT_OUT.slice(0, -3)}OUT`;
   if (!namesTheSameDirectory(DEFAULT_OUT, shouted)) {
-    // A case-sensitive filesystem, where the two really are two directories.
+    // Skipped, not passed, for the reason given on the whole-directory case.
+    t.skip(`${shouted} is not the same directory as ${DEFAULT_OUT}`);
     return;
   }
   assert.throws(
@@ -153,8 +169,9 @@ test("--rows into a subdirectory of a case-only spelling is refused", () => {
   );
 });
 
-test("--rows into a subdirectory of a symlink is refused", async () => {
+test("--rows into a subdirectory of a symlink is refused", async (t) => {
   if (!existsSync(DEFAULT_OUT)) {
+    t.skip("a symlink needs a target, and there is no canonical output here");
     return;
   }
   const base = await mkdtemp(join(tmpdir(), "ocelli-args-test-"));
@@ -195,8 +212,9 @@ test("--rows into a directory of its own is allowed", () => {
 // `prepareOutput` has emptied the directory, so on a gate run this returns
 // early, which is why the boundary is written down here and in
 // `sameDirectory`'s own comment rather than discovered later.
-test("--rows into a symlink to the canonical output is refused", async () => {
+test("--rows into a symlink to the canonical output is refused", async (t) => {
   if (!existsSync(DEFAULT_OUT)) {
+    t.skip("a symlink needs a target, and there is no canonical output here");
     return;
   }
   const base = await mkdtemp(join(tmpdir(), "ocelli-args-test-"));

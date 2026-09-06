@@ -338,8 +338,17 @@ Two other things break instead:
 and 4 horizontal gives a 384 by 512 rectangle at offset 64, so the letterbox is
 512 rows by 128 columns, which is 65536 pixels, which is 0.25 of the frame
 exactly. The reference measured 65536 black pixels on that frame and recorded
-`blackFraction: 0.25`, so the derivation is checked against a number the
-instrument produced.
+`blackFraction: 0.25`.
+
+The fixture computes the rectangle and then READS those two numbers, from
+`tools/oracle/out/syntax__reference_mono12.json`, where a complete run has left
+one. It asserted only its own arithmetic until the eighth pass while this
+paragraph and its own comment both said it was checked against the instrument.
+`tools/oracle/out/` is gitignored, so the read is conditional, and the
+condition is `run.json` present rather than the sidecar present, because
+`run.mjs` writes `run.json` last and the directory therefore holds a complete
+run or holds nothing. Under a complete run a missing worked case is a failure
+and not a skip.
 
 **For a volume reformat the image rectangle is the whole frame**, and that
 narrowing is stated rather than left to be noticed. A reformat plane is a cut
@@ -592,8 +601,9 @@ carries, `w = 400, x = 239` being the row the table hand-works. This paragraph
 wrote the top as `min(255, 254.5 * w / (w - 1))` with an open bracket, which
 excluded it, and the clamped interval `(c + w/2 - 1, c + w/2]` named in the
 next paragraph is open at its left, so that stored value fell into neither
-stated region while the fixture's own table moved it. `254.5 / (w - 1)` capped at `0.5` is the band's **measure**, and the
-cap is the only thing the `min` ever meant.
+stated region while the fixture's own table moved it. `254.5 / (w - 1)` capped
+at `0.5` is the band's **measure**, and the cap is the only thing the `min`
+ever meant.
 
 **What `w >= 510` buys is only that a clamped pixel cannot move.**
 `254.5 * w / (w - 1) >= 255` exactly when `w <= 510`, which is the only place
@@ -607,7 +617,23 @@ tabulates twelve widths and these are seven of them, named because they bracket
 the two numbers the old derivation treated as boundaries: `w = 400` gives 1,
 `w = 510` gives 0, and 512, 600, 1000, 2048 and 4096 each give 1. The other
 five rows are 100, 255, 256, 509 and 511, and 255 is the second and last width
-in the table with no mover. The 0 at 510 is where the integers happen to fall.
+in the table with no mover.
+
+**The two zeroes, at 255 and at 510, are where a half rounds up, and not where
+the integers happen to fall.** This paragraph said the second of those until
+the eighth pass. The movable interval below is `509/510` of an input unit
+wide, so it holds no integer exactly when its open endpoint `u_end = 254w/510`
+IS one, which is exactly when 255 divides `w`. At both widths the sole
+candidate stored value sits ON `u_end`, at `w = 255, x = 167` and at
+`w = 510, x = 294`, where `y_L` is exactly 255 and `y_E` is exactly `509/2`.
+The fixture's declared rounding rule, half away from zero, takes `y_E` up to
+255, so neither pixel moves. Truncate instead and both rows carry a mover and
+seven of the fixture's fourteen tests go red.
+`the_two_empty_rows_are_empty_because_a_half_rounds_up` asserts every step of
+that, including that those two are the ONLY display values in the section's
+43212 that land on 254.5. So the emptiness is a property of the width and the
+rounding rule together, and 510 still sorts nothing: 255 is below it and 510
+is not.
 
 **In stored-value units the movable set is one contiguous interval at every
 width, with no case split at all.** Write `u = x - c`. `y_L` reaches 254.5 at
@@ -622,10 +648,11 @@ to 255 together, so 510 sorts nothing here either: it moves the clamp point
 band, the counts and the clamped-pixel case, and which now evaluates both
 transcribed formulas AT both endpoints rather than asserting a literal derived
 from neither. Until the seventh pass this section's `509/510` was checked
-entirely in closed form: mutating the C.11.2.1.2 transcription took six of the
-file's twelve other tests red and left the band test green. It now takes seven
-of thirteen red, the band test among them, and mutating C.11.2.1.3.2 instead
-fails the band test on its `254w/510` endpoint.
+entirely in closed form: mutating the C.11.2.1.2 transcription left the band
+test green. Measured again after the eighth pass, on a file of fourteen tests.
+Writing `w` where C.11.2.1.2 says `w - 1` takes eight of the fourteen red, the
+band test among them. Writing `w - 1` where C.11.2.1.3.2 says `w` takes nine,
+the band test failing on its `254w/510` endpoint.
 
 An 8-bit frame does not carry the stored value behind a 255, so there is no way
 to tell a pixel inside the band from one outside it, and excluding the whole
@@ -646,15 +673,40 @@ still produces a one-sided difference the bound detects, so nothing goes red,
 which is the same failure shape as `round(u - u/w)` below: detected, and not
 the thing it claims to be.
 
-`Target::MeasuredStack` is therefore narrowed to a `MONOCHROME2` view and the
-predicate is positive rather than "not `MONOCHROME1`", so a stack whose ramp
-direction is undeclared is not a target either. Before that narrowing the only
-thing keeping the swap off `synthetic__cr_monochrome1`, a `mono16` stack view
-that passes, was `real` sorting before `synthetic` in the `BTreeSet` the runner
-iterates, which is the accident smell S4 named on `MeasuredReformat` and here
-it was guarding arithmetic rather than a ladder rung.
-`the_measured_stack_target_skips_an_inverted_view` in `mutations.rs` puts the
+So the swap takes a target of its own, `Target::MeasuredMonochrome2Stack`,
+narrowed to a `MONOCHROME2` view by a positive predicate rather than by "not
+`MONOCHROME1`", so a stack whose ramp direction is undeclared is not a target
+either. Before that narrowing the only thing keeping the swap off
+`synthetic__cr_monochrome1`, a `mono16` stack view that passes, was `real`
+sorting before `synthetic` in the `BTreeSet` the runner iterates, which is the
+accident smell S4 named on `MeasuredReformat` and here it was guarding
+arithmetic rather than a ladder rung.
+`the_monochrome2_target_skips_an_inverted_view` in `mutations.rs` puts the
 inverted record first, which is the order the accident does not survive.
+
+**A separate target and not a narrowing of the shared one, which is what the
+eighth pass corrected.** The predicate sat on `MeasuredStack` itself for one
+pass, where eighteen of the twenty-one catalogue entries resolve, so seventeen
+entries that have nothing to do with ramp direction were narrowed by it. The
+coupling showed the way couplings do: under an unrelated mutation of the
+sidecar pointer that feeds it, the first entry to refuse was
+`plus-one-on-a-twentieth-of-a-percent`, an `AddDelta`. `ColourClassTwo` is the
+precedent and it was created as a separate target for exactly this reason.
+`the_shared_stack_target_is_not_narrowed_by_ramp_direction` holds the shared
+target open and
+`one_entry_takes_the_monochrome2_target_and_the_rest_share_the_stack` holds the
+split at one entry against seventeen.
+
+**And the interpretation itself is now read by a unit test.** Nothing in
+`cargo test -p ocelli-oracle` touched `/attributes/photometricInterpretation`
+until the eighth pass: mutating that pointer string in `compare_view` left the
+whole suite green and was caught only by `ocelli-compare mutations`, which
+needs the rendered corpus, so it was `gate oracle` and never the floor. That is
+the same shape as the bias region's DEFECT 2 and as `apply_to_frame` before the
+fourth pass. `the_record_carries_the_declared_photometric_interpretation` and
+`the_interpretation_is_the_references_and_a_disagreement_is_a_divergence` in
+`attribution.rs` build a stack sidecar on each side and pin the value, the
+absent case, and which side it is read from.
 
 It said `round(u - u/w)` here and in the variant's own doc comment until the
 sprint review's fourth pass, and `apply_to_frame`'s comment 600 lines below it

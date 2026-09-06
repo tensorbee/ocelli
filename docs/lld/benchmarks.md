@@ -1,7 +1,7 @@
 # The benchmark harness
 
 **F-IDs that contributed:** F-006
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-06
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -70,13 +70,14 @@ machine that recorded it, and against nothing else.
 |------|-----------|
 | `tools/bench/subjects.json` | tracked, the subject registry. One row per thing this project will ever measure |
 | `tools/bench/run.mjs` | the driver, and `--help` says what each flag does |
+| `tools/bench/src/paths.mjs` | every path the harness resolves, and whether it is the script node was asked to run |
 | `tools/bench/src/registry.mjs` | parse, and resolve each row's blocking story |
 | `tools/bench/src/state.mjs` | the four states, and the one that throws |
 | `tools/bench/src/hostclass.mjs` | the fingerprint and the comparability rule |
 | `tools/bench/src/record.mjs` | the run record, the comparison, the re-baseline |
 | `tools/bench/src/runners/` | one file per subject that has a runner. A row whose `subject_story` is `null` must have one. A row whose story has landed may not have one yet, which is `no_runner` |
 | `tools/bench/page/` | the page that times a cold start, `window.__bench` |
-| `tools/bench/tests/` | five suites. All five are in the `bench` gate, and the one browser test inside `cold_start_test.mjs` is opted into with `OCELLI_BENCH_BROWSER=1` |
+| `tools/bench/tests/` | six suites. `npm test` in `tools/bench` names all six and the `bench` arm of `bin/ocelli.sh gate` names five, `paths_test.mjs` being the one it does not yet run. The one browser test inside `cold_start_test.mjs` is opted into with `OCELLI_BENCH_BROWSER=1` |
 | `ci/bench-baseline.json` | tracked, the recorded measurement per subject per host class |
 | `scripts/bench_check.py` | the `bench` gate |
 | `tools/bench/out/` | ignored. One run's record and the page it served |
@@ -372,6 +373,25 @@ not. The other direction is the one that happens, because the baseline is the
 older record, so a baseline naming a tool this run never captured would have
 compared as identical and been given a verdict. The parallel guard on
 `sameHostClass` was already covered both ways.
+
+**The path rules decide whether the harness measures anything, and nothing
+executed them until the S03 review's eighth pass.** `run.mjs` asks
+`existsSync(runnerPath(id))` for every subject, so a `runnerBasename` that
+stopped replacing dots with underscores makes that false for the one subject
+that has a runner. Every subject then reports `unavailable / no_runner`,
+`failedRunners` is empty, `main` returns 0, and `bin/ocelli.sh bench` reports
+success having measured nothing. `isEntryPoint` produces the same outcome one
+level up, which is what its own comment describes. Both rules, and the two
+shapes that break the obvious `import.meta.url === argv[1]` idiom, a path
+needing percent-encoding and a path reached through a symlink, are asserted in
+`tools/bench/tests/paths_test.mjs`.
+
+The convention itself is the registry's. `subjects.json` states it in the `id`
+field's documentation and `scripts/bench_check.py` applies the same rule from
+Python, so it must be spelled once on the JavaScript side: `state.mjs` builds
+its `no_runner` note from `runnerBasename` rather than from a second
+`replaceAll(".", "_")`, because a note naming a path the gate does not look at
+is the unseen runner the anti-fabrication rule is about.
 
 **Five and not four, since the S03 review's fourth pass.**
 `tools/bench/tests/cold_start_test.mjs` holds seven tests and only the last

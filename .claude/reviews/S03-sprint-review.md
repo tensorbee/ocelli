@@ -122,6 +122,8 @@ and a mutation is an input to a test: it derives from the specification too.
 | 4 | Four independent reviewers on disjoint areas returned 34 defects and 27 smells, which `8fbfc88`'s message carries in the same form passes 1 and 2 carry theirs, so pass 3's is the only tally this tree does not record. Pass 3's replacement mutation was still not the divergence. A group `#![allow]` switched off four of HLD 27.1's five denied lints with both gates green. The `covered_by` directory route was satisfied by the catalogue itself. This record stated a caught defect that never existed | remediated |
 | 5 | Four reviewers again, on the same areas, with the pass-4 remediation as the primary target. A floor gate could be deleted from CI while the check said all 25 ran. `#![allow(clippy :: pedantic)]` with spaces defeated the fix for `#![allow(clippy::pedantic)]`. Four of the five refusals pass 4 added to the census were watched by nothing. The mutation's residue invariant was false below `w = 255` | remediated |
 | 6 | Three reviewers. Six defects, against twenty-one and thirty-four before. The comparator's white-pixel exclusion carried a wrong consequence of PS3.3 for the fourth consecutive pass. A TOML trailing comment was the fifth route past the lint policy. Eight refusals in scanned guard files, including gate A4's wasm size ceiling, were invisible to the scanner | remediated |
+| 7 | Three reviewers. Seventeen defects, and the count rose because the sweep widened. Six mutations left the suite green, two of them on paths whose rationale is written out at length in the source. The harness's own inverted-success refusal was watched by nothing. The lint policy took a sixth and a seventh route | remediated |
+| 8 | Three reviewers. **The comparator returned zero defects**, the first clean area of the sprint, and reproduced all five of pass 7's claims independently. Six defects elsewhere: the eighth and ninth routes past the lint policy, a declared exception nothing ratcheted, and a 68-mutation sweep finding seven tests that cannot fail | remediated |
 
 ### Pass 1's three blocking defects, which this record used to omit
 
@@ -391,6 +393,92 @@ the movement.
 **The shape of the remaining work is now clear.** Six passes have not exhausted
 the guard harness or the comparator, and each pass costs less than the one
 before it. What has converged is everything else.
+
+## What seven passes have actually shown
+
+**The defect count is not converging, and that is not the same as the tree
+getting worse.** Pass 6 found six, pass 7 found seventeen, and the difference is
+that pass 7's reviewers mutation-tested code nobody had mutation-tested before.
+Every pass so far has found a NEW CLASS rather than more of the last one:
+
+| Pass | The class it found |
+|------|--------------------|
+| 1 | Records asserting things the tree did not do |
+| 2 | A bound that detected none of what it was added for |
+| 3 | A mutation that was not the divergence it claimed |
+| 4 | A one-line attribute disabling four of five denied lints |
+| 5 | A fix written against the demonstrated route rather than the rule |
+| 6 | A refusal shape the scanner could not see |
+| 7 | **A test that asserts the implementation is itself** |
+
+Pass 7's class is the sharpest because it is invisible to every gate. Two tests
+recomputed the implementation's own expression in the test body and asserted
+the result: `fill` then `seal` written by the test rather than driven through
+`record`, and `edge * edge * passes` rebuilt from the same constants. Both
+passed under a mutation that inverts the behaviour they exist to protect. HLD
+27.2 R2 warns about a test written from reading the implementation, and this is
+its sharper form: a test written from reading the implementation and then
+*restating* it.
+
+**What has converged.** The record and the planning data now carry almost no
+transcribed numbers, because every count that could be replaced by the command
+that prints it has been. That policy paid three times inside single sessions:
+`grep -c 'limit='` read 13, then 14, then 15 while the passes ran, and the
+escape count in one story title moved from four to five to at least eight.
+
+**What has not.** The guard harness and the comparator's arithmetic are
+adversarial surfaces, and a reviewer who invents a new input will keep finding
+something. That is a property of the surface rather than a defect in the work,
+and the honest statement is that these two areas are not finished, not that
+they are broken. What is true of them today is that every bypass anyone has
+demonstrated is closed, every closure has a probe that has been watched to
+report `HARNESS` against its own broken guard, and every limit that could not
+be closed is declared and printed on a green run.
+
+## Pass 8, and the first clean area
+
+**The comparator returned zero defects.** Its reviewer re-derived the movable
+band from PS3.3 in exact rationals before reading the code, reproduced all
+twelve mover rows and both new assertions, confirmed the rational refactor left
+the four HLD 18.3 rows unchanged, and confirmed the MONOCHROME2 narrowing fails
+loudly rather than selecting nothing. It said so plainly rather than
+manufacturing a finding, which is the first time an area has been able to.
+
+Its smells then produced a result stronger than the finding that prompted them.
+The two empty rows in the mover table were said to be empty because "the
+integers happen to fall" there. They are empty because **255 divides the
+window**, which is exactly when the band's open upper endpoint is an integer,
+and a band `509/510` of a unit wide ending open at an integer holds none. That
+is now the assertion, over 43212 display values, and it is the sharpest form
+the four-pass argument about 510 has taken.
+
+**The lint policy took an eighth and a ninth route.** `--cap-lints allow` in
+`rustflags` caps every lint including all five of HLD 27.1's, and was in
+neither the refused set nor the declared out-of-scope list, so the OK line
+positively asserted the false thing. And `[lib] path` in a member manifest puts
+the crate ROOT anywhere, so the guard scanned a now-unused `src/lib.rs` and
+never opened the real one, which is pass 5's defect through a third key. That
+second fix is the first structural one in this sequence: the member's source
+set now comes from `cargo metadata`'s own `targets[].src_path` rather than from
+assuming `src/`, so the class closes rather than the route.
+
+A tenth was found while fixing the eighth. The remediation was told to leave
+`--force-warn` permitted "since it raises", measured it, and found it forces
+the level to warn and outranks the `clippy` gate's own `-D warnings`. It
+refused it and said so. That is the discipline working in the direction it is
+hardest to work: against the instruction.
+
+**Seven tests that cannot fail**, from a 68-mutation sweep across the crates
+and the shell. The TypeScript fixture claimed to be copied from the Rust one
+"character for character" and differed at the one byte that matters, giving it
+the same level-equals-arity symmetry pass 4 had already fixed on the Rust side.
+The panic code could be read out of the version word, latent only because both
+are 1 today and live at the first version bump the layout is documented to
+take. Deleting the GPU warm-up left the crate green, where its own comment
+carries twenty measured runs showing the calibration then times first-submission
+cost and the recorded fill rate collapses about seventeen times, which is
+deviation D-07's misdetection arriving from the direction the resolver exists to
+catch.
 
 ## What is still open, and it is declared rather than hidden
 

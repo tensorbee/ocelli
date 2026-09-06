@@ -1299,6 +1299,160 @@ mod tests {
         compare_view(&context, VIEW, &reference_frame, &candidate_frame)
     }
 
+    // ---- The photometric interpretation, watched --------------------------
+    //
+    // **This is smell 2 of the S03 sprint review's eighth pass.** Nothing in
+    // `cargo test -p ocelli-oracle` read
+    // `/attributes/photometricInterpretation`: mutating that pointer string in
+    // `compare_view` left the whole suite green, and the only thing that
+    // caught it was `ocelli-compare mutations`, which needs the rendered
+    // corpus, so it is `gate oracle` and never the floor. That is the same
+    // shape as DEFECT 2 above and as the fourth pass's `apply_to_frame`, named
+    // in this file twice already.
+    //
+    // The value decides which view `Target::MeasuredMonochrome2Stack` lands
+    // on, and `mutations.rs` says why the LINEAR to LINEAR_EXACT swap is only
+    // the divergence on a `MONOCHROME2` ramp. A `None` read from a mistyped
+    // pointer takes the swap off every view and refuses with `NoTarget`, which
+    // reads as a corpus problem rather than as a typo.
+
+    const STACK_VIEW: &str = "subject-under-test__00000001";
+
+    /// One side of a stack comparison, built by hand, carrying a declared
+    /// photometric interpretation or none.
+    fn stack_run(photometric: Option<&str>) -> Run {
+        let attributes = match photometric {
+            Some(value) => json!({ "photometricInterpretation": value }),
+            None => json!({}),
+        };
+        let sidecar = Sidecar {
+            id: STACK_VIEW.to_owned(),
+            kind: ViewKind::Stack,
+            json: json!({
+                "kind": "stack",
+                "camera": {
+                    "position": [0.0, 0.0, 100.0],
+                    "focalPoint": [0.0, 0.0, 0.0],
+                    "viewUp": [0.0, 1.0, 0.0],
+                    "parallelScale": 8.0
+                },
+                "image": { "rows": SIDE_PIXELS, "columns": SIDE_PIXELS },
+                "canvasPixelsPerSourcePixel": { "vertical": 1.0, "horizontal": 1.0 },
+                "attributes": attributes
+            }),
+        };
+        let mut views = BTreeMap::new();
+        views.insert(
+            STACK_VIEW.to_owned(),
+            DeclaredView {
+                id: STACK_VIEW.to_owned(),
+                kind: ViewKind::Stack,
+                path: Some("synthetic/built-in-memory.dcm".to_owned()),
+                subject: None,
+            },
+        );
+        let mut sidecars = BTreeMap::new();
+        sidecars.insert(STACK_VIEW.to_owned(), sidecar);
+        let mut categories = BTreeMap::new();
+        categories.insert(STACK_VIEW.to_owned(), vec!["mono16".to_owned()]);
+        Run {
+            directory: PathBuf::from("built-in-memory"),
+            json: json!({ "volumes": [] }),
+            views,
+            sidecars,
+            raw_present: BTreeSet::new(),
+            by_path: BTreeMap::new(),
+            categories,
+        }
+    }
+
+    /// Two identical 16 by 16 monochrome frames, so nothing but the sidecars
+    /// can decide anything the record says.
+    fn compare_stack(
+        reference_photometric: Option<&str>,
+        candidate_photometric: Option<&str>,
+    ) -> Result<crate::report::ViewRecord, CompareError> {
+        let reference_run = stack_run(reference_photometric);
+        let candidate_run = stack_run(candidate_photometric);
+        let register = Register::default();
+        let empty: BTreeSet<String> = BTreeSet::new();
+        let context = Context {
+            reference: &reference_run,
+            candidate: &candidate_run,
+            register: &register,
+            low_information: &empty,
+            downsampled: &empty,
+        };
+        let greys = [100_u8; 256];
+        let frame = Frame::from_monochrome(SIDE_PIXELS, SIDE_PIXELS, &greys)?;
+        compare_view(&context, STACK_VIEW, &frame, &frame)
+    }
+
+    /// The record carries the REFERENCE sidecar's declared interpretation,
+    /// read from `/attributes/photometricInterpretation`.
+    ///
+    /// Mutate that pointer string in `compare_view` and the first assertion
+    /// gets `None`. Both halves are needed: without the `None` case the read
+    /// would be satisfied by a constant, and without the value case a mistyped
+    /// pointer would look like a sidecar that declares nothing.
+    #[test]
+    fn the_record_carries_the_declared_photometric_interpretation() -> Result<(), CompareError> {
+        let declared = compare_stack(Some("MONOCHROME2"), Some("MONOCHROME2"))?;
+        assert_eq!(
+            declared.photometric_interpretation.as_deref(),
+            Some("MONOCHROME2"),
+            "the value is read from the reference sidecar's \
+             /attributes/photometricInterpretation and nothing else reads it"
+        );
+        assert_eq!(declared.outcome, Outcome::Pass);
+
+        let inverted = compare_stack(Some("MONOCHROME1"), Some("MONOCHROME1"))?;
+        assert_eq!(
+            inverted.photometric_interpretation.as_deref(),
+            Some("MONOCHROME1"),
+            "and it is the declared value rather than a constant"
+        );
+
+        let undeclared = compare_stack(None, None)?;
+        assert_eq!(
+            undeclared.photometric_interpretation, None,
+            "a sidecar carrying no interpretation declares none, which is what \
+             keeps `MeasuredMonochrome2Stack` off a view whose ramp direction \
+             is unknown"
+        );
+        Ok(())
+    }
+
+    /// It is the REFERENCE's reading, not the candidate's, and the two sides
+    /// disagreeing is itself a rung 2 parameter divergence because the pointer
+    /// is in `STACK_PARAMETER_FIELDS`.
+    ///
+    /// Read the candidate sidecar instead in `compare_view` and the first
+    /// assertion gets `MONOCHROME1`. The mutation catalogue resolves its
+    /// targets against the reference run, so the side is not incidental.
+    #[test]
+    fn the_interpretation_is_the_references_and_a_disagreement_is_a_divergence()
+    -> Result<(), CompareError> {
+        let record = compare_stack(Some("MONOCHROME2"), Some("MONOCHROME1"))?;
+        assert_eq!(
+            record.photometric_interpretation.as_deref(),
+            Some("MONOCHROME2")
+        );
+        assert_eq!(record.rung, "parameters");
+        assert_eq!(record.outcome, Outcome::Fail);
+        assert!(record.qualifiers.contains(&Qualifier::ParameterDivergence));
+        assert!(
+            record
+                .parameter_divergences
+                .iter()
+                .any(|divergence| divergence.pointer == "/attributes/photometricInterpretation"),
+            "the pointer is in STACK_PARAMETER_FIELDS, so the two sides \
+             disagreeing about it is measured: {:?}",
+            record.parameter_divergences
+        );
+        Ok(())
+    }
+
     // ---- The bias bullet's region, watched --------------------------------
     //
     // **This is DEFECT 2 of the S03 sprint review's fifth pass.** Changing

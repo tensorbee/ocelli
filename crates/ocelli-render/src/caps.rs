@@ -1916,6 +1916,34 @@ mod detection_tests {
         );
     }
 
+    /// **The workload the bands above were taken with, against the same
+    /// file.**
+    ///
+    /// `ci/tier-thresholds.json` says in terms that "a figure taken with a
+    /// different workload is a different measurement and does not belong in
+    /// this file", so the three `workload.*_pixels` figures are part of the
+    /// 400,000,000 floor's provenance rather than decoration beside it. They
+    /// are read here against `probe::RUN_PLAN`, which is what `probe::measure`
+    /// actually issues, so the file and the code cannot drift in either
+    /// direction.
+    ///
+    /// `warm_up_pixels` is the one that had no assertion anywhere until the S03
+    /// review's eighth pass. It is a discard, so no figure it produces reaches
+    /// the resolver, which is exactly why nothing was watching it and why
+    /// removing the run left the crate green.
+    #[test]
+    fn the_recorded_workload_matches_the_checked_in_file() {
+        const FILE: &str = include_str!("../../../ci/tier-thresholds.json");
+        let [warm_up, calibration, full] = crate::probe::RUN_PLAN;
+        let count = |(edge, passes)| crate::probe::fragments(edge, passes);
+        assert_eq!(json_u64(FILE, "warm_up_pixels"), Some(count(warm_up)));
+        assert_eq!(
+            json_u64(FILE, "calibration_pixels"),
+            Some(count(calibration))
+        );
+        assert_eq!(json_u64(FILE, "full_pixels"), Some(count(full)));
+    }
+
     /// A deliberately small reader, so the test needs no serde and no
     /// dependency. It finds the key, steps past the colon and reads the digits
     /// that follow, which yields `None` for `null`.

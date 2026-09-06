@@ -479,6 +479,49 @@ def catch_all_problems(matches: list[Match],
     return problems
 
 
+def wall_clock_problems(recorded: dict[str, float] | None) -> list[str]:
+    """The recorded profile timings have to be a possible pair.
+
+    Every other key in `ci/guard-probe-budget.json` is checked here and
+    `wall_clock_seconds` was checked by nothing, which is how the S03 review's
+    eighth pass found `deep: 17.2` sitting beside `floor: 18.1`.
+    `scripts/guard_probe.py`'s `selected()` returns EVERY probe for the deep
+    profile and only the `profile == "floor"` ones for the floor, so deep runs
+    a superset of floor's work and cannot be the faster of the two. That pair
+    is not two measurements of one tree: the seventh pass re-recorded floor
+    while moving seventeen probes into deep and left deep at its pre-move
+    value, so the `5x + 30` ceiling for the profile that now carries every
+    `lint-policy` probe was set from a run that did not contain them. The gate
+    was not red, because a stale ceiling that is too GENEROUS never is.
+
+    The superset relation is derived from the catalogue rather than asserted,
+    so this stays true if the profile rule is ever rewritten: with the floor's
+    probe ids not a subset of the deep set, the comparison says nothing and is
+    not made.
+    """
+    if not recorded:
+        return []
+    floor = {p.id for g in GUARDS for p in g.probes if p.profile == "floor"}
+    deep = {p.id for g in GUARDS for p in g.probes}
+    if not floor or not floor <= deep:
+        return []
+    if "floor" not in recorded or "deep" not in recorded:
+        return []
+    if recorded["deep"] >= recorded["floor"]:
+        return []
+    return [
+        f"ci/guard-probe-budget.json records the deep profile at "
+        f"{recorded['deep']}s and the floor profile at {recorded['floor']}s. "
+        f"The deep profile runs all {len(deep)} probe(s) and the floor runs "
+        f"{len(floor)} of them, a strict superset, so deep cannot be the "
+        f"faster of the two and the pair is not two measurements of one tree. "
+        f"One of them was recorded before a change that moved work between the "
+        f"profiles, which leaves that profile's `5x + 30` ceiling standing for "
+        f"a run it never contained. Re-record both with "
+        f"`python3 scripts/guard_probe.py --profile floor --record-budget` and "
+        f"the same for `deep`, on one machine, in this diff."]
+
+
 def oracle_adoption(recorded: int | None) -> tuple[int, list[str]]:
     """Verify the adoption of the oracle's fault catalogue, do not copy it.
 
@@ -672,6 +715,9 @@ def run(profile: str = "floor") -> tuple[int, list[str]]:
             f"guard being widened rather than broken. If a constant was "
             f"retired deliberately, re-record in this diff and say which one "
             f"and why.")
+
+    # c2. The recorded wall clocks have to be POSSIBLE.
+    problems += wall_clock_problems(budget.get("wall_clock_seconds"))
 
     # a2. The per-entry site count for the catch-all entries, which is what
     # makes a refusal added to an already-claimed file visible in a diff.

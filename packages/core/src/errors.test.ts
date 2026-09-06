@@ -10,12 +10,18 @@ import {
 } from "./errors.js";
 
 /**
- * **These byte arrays are copied from the Rust test, character for
- * character.** `crates/ocelli-core/src/error.rs` writes them out by hand from
- * the layout table, which is derived from HLD section 17.3's
- * `Event::payload`, and the two sides are the two implementations that have to
- * agree. Neither is produced by running the other, and neither is produced by
- * running its own encoder.
+ * **These three byte arrays are copied from the Rust test, character for
+ * character**, and the claim is checkable: `ERROR_BYTES`, `LOG_BYTES` and
+ * `TWO_OPERAND_BYTES` below are byte-for-byte the constants of the same names
+ * in `crates/ocelli-core/src/error.rs`. That file writes them out by hand from
+ * the layout table, which is derived from HLD section 17.3's `Event::payload`,
+ * and the two sides are the two implementations that have to agree. Neither is
+ * produced by running the other, and neither is produced by running its own
+ * encoder.
+ *
+ * The claim was false between the S03 review's fourth pass and its eighth:
+ * `LOG_BYTES` held `0x03` at offset 2 here and `0x05` there. See that constant
+ * for what the difference cost.
  *
  * `ERROR_BYTES`: code 1, severity Fatal (2), arity 1, reserved 0,
  * a0 = 0x0102030405060708.
@@ -26,11 +32,43 @@ const ERROR_BYTES = new Uint8Array([
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ]);
 
-/** `LOG_BYTES`: code 700, level Info (3), arity 3, operands 1, 2, u64::MAX. */
+/**
+ * `LOG_BYTES`: code 700, level Trace (5), arity 3, operands 1, 2, u64::MAX.
+ *
+ * **`Trace` and not `Info`, and the choice is the test.** Bytes 2 and 3 are
+ * adjacent single bytes carrying different meanings, so a fixture whose level
+ * and arity are the SAME number is symmetric under a swap of them and cannot
+ * detect one. This array carried level 3 and arity 3 until the S03 review's
+ * eighth pass, while the Rust fixture it claims to copy carried `05` at offset
+ * 2 from the fourth pass onward. Reading `severityOrLevel` from byte 3 and
+ * `arity` from byte 2 left this test green, so the shell's half of the wire
+ * contract was guarded by `ERROR_BYTES` alone, whose severity is 2 and whose
+ * arity is 1.
+ */
 const LOG_BYTES = new Uint8Array([
-  0xbc, 0x02, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+  0xbc, 0x02, 0x05, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff,
   0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+]);
+
+/**
+ * `TWO_OPERAND_BYTES`: code 701, severity Recoverable (1), arity 2, operands
+ * 512 and 256.
+ *
+ * The arity the other two fixtures do not carry. `ERROR_BYTES` carries one
+ * operand and `LOG_BYTES` carries three, so byte 3 was never observed holding
+ * `2` on either side of the boundary, and the middle row of the Rust
+ * constructor's arity table could return `1` with both suites green. A
+ * consumer would then drop the second operand, which is the quiet loss the
+ * constructor's own documentation says it refuses to perform.
+ *
+ * Severity `Recoverable` and not `Fatal`, so byte 2 and byte 3 differ here
+ * too, for `LOG_BYTES`' reason.
+ */
+const TWO_OPERAND_BYTES = new Uint8Array([
+  0xbd, 0x02, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ]);
 
 function withByte(bytes: Uint8Array, offset: number, value: number): Uint8Array {
@@ -53,10 +91,42 @@ group("decodeRecord", () => {
   it("reads the same fields the Rust test asserts, for a log line", () => {
     expect(decodeRecord(LOG_BYTES)).toEqual({
       code: 700,
-      severityOrLevel: LOG_LEVEL.Info,
+      severityOrLevel: LOG_LEVEL.Trace,
       arity: 3,
       reserved: 0,
       operands: [1n, 2n, 18446744073709551615n],
+    });
+  });
+
+  /**
+   * Byte 2 is the level and byte 3 is the arity, and neither fixture above can
+   * be read the other way round: `ERROR_BYTES` holds 2 then 1, `LOG_BYTES`
+   * holds 5 then 3, and `TWO_OPERAND_BYTES` holds 1 then 2. Asserted as one
+   * test as well, because the property is about the pair of offsets rather
+   * than about any single record.
+   */
+  it("takes the level from byte 2 and the arity from byte 3", () => {
+    expect(decodeRecord(ERROR_BYTES)?.severityOrLevel).toBe(SEVERITY.Fatal);
+    expect(decodeRecord(ERROR_BYTES)?.arity).toBe(1);
+    expect(decodeRecord(LOG_BYTES)?.severityOrLevel).toBe(LOG_LEVEL.Trace);
+    expect(decodeRecord(LOG_BYTES)?.arity).toBe(3);
+    expect(decodeRecord(TWO_OPERAND_BYTES)?.severityOrLevel).toBe(
+      SEVERITY.Recoverable,
+    );
+    expect(decodeRecord(TWO_OPERAND_BYTES)?.arity).toBe(2);
+  });
+
+  /**
+   * Two meaningful operands. The arity no other fixture carries, and the one
+   * the Rust constructor's table could get wrong without either suite noticing.
+   */
+  it("reads the same fields the Rust test asserts, for two operands", () => {
+    expect(decodeRecord(TWO_OPERAND_BYTES)).toEqual({
+      code: 701,
+      severityOrLevel: SEVERITY.Recoverable,
+      arity: 2,
+      reserved: 0,
+      operands: [512n, 256n, 0n],
     });
   });
 
