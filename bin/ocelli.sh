@@ -539,9 +539,10 @@ case "$command" in
     # than seconds, and a check nobody wants to wait for is a check that stops
     # being run.
     #
-    # An argument is passed straight through, so
-    # `bin/ocelli.sh compare identity --candidate DIR` is the form the port
-    # will use when there is a second side to compare.
+    # An argument is passed straight through. F-012's candidate-evidence form
+    # is `bin/ocelli.sh compare gate --reference REF --candidate CANDIDATE`.
+    # It requires two distinct resolved directories and never defaults the
+    # candidate to the reference. F-X021 connects it to Ocelli output.
     if [ ! -d tools/oracle/out ]; then
       echo "There is no oracle output to compare." >&2
       echo "Run: bin/ocelli.sh oracle" >&2

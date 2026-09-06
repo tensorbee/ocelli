@@ -1,11 +1,12 @@
 //! `ocelli-compare`, the comparator's runner.
 //!
-//! Three commands, and none of them is a `cargo test`. All three need a
+//! Four commands, and none of them is a `cargo test`. All four need a
 //! rendered run under `tools/oracle/out/`, and an `#[ignore]` test that needs
 //! a directory reads as a pass on the day it did not run, which is a shape
 //! this repository refuses.
 //!
 //! ```text
+//! ocelli-compare gate      --reference DIR --candidate DIR [--out DIR]
 //! ocelli-compare identity  [--reference DIR] [--candidate DIR] [--out DIR]
 //! ocelli-compare mutations [--reference DIR] [--candidate DIR]
 //! ocelli-compare census    [--reference DIR] [--candidate DIR]
@@ -20,6 +21,10 @@
 //! each entry to produce the verdict written beside it, which is what proves
 //! detection. `bin/ocelli.sh compare` runs those two.
 //!
+//! `gate` is the production candidate contract. Both directories are explicit
+//! and must resolve to different locations. It never turns identity evidence
+//! into a candidate claim.
+//!
 //! `census` reports nothing about correctness and gates nothing. It exists
 //! because four tracked files carry counts of which corpus views the bias
 //! bound can and cannot detect the LINEAR to LINEAR_EXACT divergence on, and
@@ -29,6 +34,7 @@
 //! provenance.
 
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -76,22 +82,35 @@ struct Arguments {
     reference: PathBuf,
     candidate: PathBuf,
     out: PathBuf,
+    reference_explicit: bool,
+    candidate_explicit: bool,
 }
 
 fn parse_arguments() -> Result<Arguments, String> {
+    parse_arguments_from(std::env::args_os().skip(1))
+}
+
+fn parse_arguments_from<I, S>(input: I) -> Result<Arguments, String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
     let mut command = String::new();
     let mut reference = PathBuf::from(DEFAULT_REFERENCE);
+    let mut reference_explicit = false;
     let mut candidate: Option<PathBuf> = None;
+    let mut candidate_explicit = false;
     let mut out = PathBuf::from(DEFAULT_OUT);
-    let mut arguments = std::env::args().skip(1);
+    let mut arguments = input.into_iter().map(Into::into);
     while let Some(argument) = arguments.next() {
-        match argument.as_str() {
+        match argument.to_string_lossy().as_ref() {
             "--reference" => {
                 reference = PathBuf::from(
                     arguments
                         .next()
                         .ok_or_else(|| "--reference wants a directory".to_owned())?,
                 );
+                reference_explicit = true;
             }
             "--candidate" => {
                 candidate = Some(PathBuf::from(
@@ -99,6 +118,7 @@ fn parse_arguments() -> Result<Arguments, String> {
                         .next()
                         .ok_or_else(|| "--candidate wants a directory".to_owned())?,
                 ));
+                candidate_explicit = true;
             }
             "--out" => {
                 out = PathBuf::from(
@@ -115,7 +135,7 @@ fn parse_arguments() -> Result<Arguments, String> {
         }
     }
     if command.is_empty() {
-        return Err("a command is required: `identity`, `mutations` or \
+        return Err("a command is required: `gate`, `identity`, `mutations` or \
              `census`. See docs/lld/comparator.md"
             .to_owned());
     }
@@ -124,11 +144,43 @@ fn parse_arguments() -> Result<Arguments, String> {
         command,
         reference,
         out,
+        reference_explicit,
+        candidate_explicit,
     })
+}
+
+fn validate_gate_directories(arguments: &Arguments) -> Result<(), String> {
+    if !arguments.reference_explicit {
+        return Err("`gate` requires an explicit --reference directory".to_owned());
+    }
+    if !arguments.candidate_explicit {
+        return Err("`gate` requires an explicit --candidate directory".to_owned());
+    }
+    let reference = arguments.reference.canonicalize().map_err(|error| {
+        format!(
+            "{}: cannot resolve reference directory: {error}",
+            arguments.reference.display()
+        )
+    })?;
+    let candidate = arguments.candidate.canonicalize().map_err(|error| {
+        format!(
+            "{}: cannot resolve candidate directory: {error}",
+            arguments.candidate.display()
+        )
+    })?;
+    if reference == candidate {
+        return Err(
+            "`gate` reference and candidate must resolve to different directories".to_owned(),
+        );
+    }
+    Ok(())
 }
 
 fn run() -> Result<bool, String> {
     let arguments = parse_arguments()?;
+    if arguments.command == "gate" {
+        validate_gate_directories(&arguments)?;
+    }
     let register = load_register(Path::new(REGISTER))?;
     let census = load_census(Path::new(EXPECTATIONS))?;
     let metadata_truth = load_metadata_truth(Path::new(METADATA_TRUTH), Path::new(VOLUME_TRUTH))?;
@@ -137,6 +189,14 @@ fn run() -> Result<bool, String> {
     let candidate = Run::load(&arguments.candidate).map_err(|error| error.to_string())?;
 
     match arguments.command.as_str() {
+        "gate" => gate(
+            &reference,
+            &candidate,
+            &register,
+            &metadata_truth,
+            &census,
+            &arguments.out,
+        ),
         "identity" => identity(
             &reference,
             &candidate,
@@ -148,7 +208,7 @@ fn run() -> Result<bool, String> {
         "mutations" => mutations(&reference, &candidate, &register, &metadata_truth, &census),
         "census" => detectability(&reference, &candidate, &register, &metadata_truth, &census),
         other => Err(format!(
-            "{other} is not a command. `identity`, `mutations` or `census`"
+            "{other} is not a command. `gate`, `identity`, `mutations` or `census`"
         )),
     }
 }
@@ -232,10 +292,29 @@ fn compare_runs(
     let reference_ids: BTreeSet<&String> = reference.views.keys().collect();
     let candidate_ids: BTreeSet<&String> = candidate.views.keys().collect();
     let mut records: Vec<ViewRecord> = Vec::new();
+    let mut coverage_problems = Vec::new();
+    let absent_views = reference_ids.symmetric_difference(&candidate_ids).count();
     for id in reference_ids.symmetric_difference(&candidate_ids) {
-        problems.push(format!(
+        coverage_problems.push(format!(
             "{id} is declared on one side and not the other. An identifier on \
              one side only is `absent` and a run failure, never a skip"
+        ));
+    }
+
+    let unsupported_source_rows = reference.unsupported_source_rows();
+    let candidate_unsupported_source_rows = candidate.unsupported_source_rows();
+    if unsupported_source_rows != candidate_unsupported_source_rows {
+        coverage_problems.push(format!(
+            "the reference declares {unsupported_source_rows} unsupported source rows and the \
+             candidate declares {candidate_unsupported_source_rows}"
+        ));
+    }
+    let declared_volume_refusals = reference.declared_volume_refusals();
+    let candidate_volume_refusals = candidate.declared_volume_refusals();
+    if declared_volume_refusals != candidate_volume_refusals {
+        coverage_problems.push(format!(
+            "the reference declares {declared_volume_refusals} volume refusals and the candidate \
+             declares {candidate_volume_refusals}"
         ));
     }
 
@@ -298,7 +377,7 @@ fn compare_runs(
         records.push(record);
     }
 
-    problems.extend(census.differences(&records));
+    coverage_problems.extend(census.differences(&records));
 
     for (entry, views) in unreachable_entries_that_fired(register, reference) {
         problems.push(format!(
@@ -326,6 +405,10 @@ fn compare_runs(
     Ok(RunReport {
         records,
         problems,
+        coverage_problems,
+        absent_views,
+        unsupported_source_rows,
+        declared_volume_refusals,
         reference_directory: reference.directory.display().to_string(),
         candidate_directory: candidate.directory.display().to_string(),
     })
@@ -398,13 +481,22 @@ fn summarise(report: &RunReport) {
         report.count(Outcome::Pass),
         report.count(Outcome::Fail),
         report.count(Outcome::Unmeasured),
-        report.count(Outcome::Absent)
+        report.absent_count()
+    );
+    println!(
+        "  claimed verdict views: {}, unsupported source rows: {}, declared volume refusals: {}",
+        report.claimed_verdict_views(),
+        report.unsupported_source_rows,
+        report.declared_volume_refusals
     );
     for (qualifier, count) in report.qualifier_counts() {
         println!("  {qualifier}: {count}");
     }
     for problem in &report.problems {
         println!("  PROBLEM {problem}");
+    }
+    for problem in &report.coverage_problems {
+        println!("  COVERAGE {problem}");
     }
     // Printed from the records rather than from `problems`, because that is
     // where `green()` reads it and a summary that read a different source
@@ -417,6 +509,33 @@ fn summarise(report: &RunReport) {
         report.reference_render_hash(),
         report.candidate_render_hash()
     );
+    println!("gate verdict: {}", report.gate_verdict().label());
+}
+
+fn gate(
+    reference: &Run,
+    candidate: &Run,
+    register: &Register,
+    metadata_truth: &MetadataTruth,
+    census: &Census,
+    out: &Path,
+) -> Result<bool, String> {
+    let report = compare_runs(reference, candidate, register, metadata_truth, census, None)?;
+    summarise(&report);
+    write_output(&report, reference, candidate, out, "gate")?;
+    if report.green() {
+        println!(
+            "compare: candidate gate over {} judged views is green",
+            report.claimed_verdict_views()
+        );
+        Ok(true)
+    } else {
+        println!(
+            "compare: candidate gate is RED ({})",
+            report.gate_verdict().label()
+        );
+        Ok(false)
+    }
 }
 
 fn identity(
@@ -429,7 +548,7 @@ fn identity(
 ) -> Result<bool, String> {
     let report = compare_runs(reference, candidate, register, metadata_truth, census, None)?;
     summarise(&report);
-    write_output(&report, reference, candidate, out)?;
+    write_output(&report, reference, candidate, out, "identity")?;
     if report.green() {
         println!(
             "compare: identity over {} views is green",
@@ -454,12 +573,18 @@ fn write_output(
     reference: &Run,
     candidate: &Run,
     out: &Path,
+    operation: &str,
 ) -> Result<(), String> {
     if out.exists() {
         std::fs::remove_dir_all(out).map_err(|error| format!("{}: {error}", out.display()))?;
     }
     std::fs::create_dir_all(out).map_err(|error| format!("{}: {error}", out.display()))?;
-    let text = serde_json::to_string_pretty(&report.to_json())
+    let mut report_json = report.to_json();
+    let object = report_json
+        .as_object_mut()
+        .ok_or_else(|| "compare.json: run report is not an object".to_owned())?;
+    object.insert("operation".to_owned(), Value::String(operation.to_owned()));
+    let text = serde_json::to_string_pretty(&report_json)
         .map_err(|error| format!("compare.json: {error}"))?;
     std::fs::write(out.join("compare.json"), text)
         .map_err(|error| format!("compare.json: {error}"))?;
@@ -860,5 +985,86 @@ fn check(
                 ))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod argument_tests {
+    use std::path::PathBuf;
+
+    use super::{parse_arguments_from, validate_gate_directories};
+
+    fn parsed<const N: usize>(arguments: [&str; N]) -> Result<super::Arguments, String> {
+        parse_arguments_from(arguments)
+    }
+
+    #[test]
+    fn gate_requires_an_explicit_reference() -> Result<(), String> {
+        let arguments = parsed(["gate", "--candidate", "candidate"])?;
+        let Err(error) = validate_gate_directories(&arguments) else {
+            return Err("an implicit reference was accepted".to_owned());
+        };
+        assert!(error.contains("explicit --reference"));
+        Ok(())
+    }
+
+    #[test]
+    fn gate_requires_an_explicit_candidate() -> Result<(), String> {
+        let arguments = parsed(["gate", "--reference", "reference"])?;
+        let Err(error) = validate_gate_directories(&arguments) else {
+            return Err("an implicit candidate was accepted".to_owned());
+        };
+        assert!(error.contains("explicit --candidate"));
+        Ok(())
+    }
+
+    #[test]
+    fn gate_refuses_two_spellings_of_the_same_directory() -> Result<(), String> {
+        let root = std::env::temp_dir().join(format!("ocelli-f012-gate-{}", std::process::id()));
+        std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        let dotted = root.join(".");
+        let arguments = parse_arguments_from([
+            "gate".into(),
+            "--reference".into(),
+            root.as_os_str().to_owned(),
+            "--candidate".into(),
+            dotted.as_os_str().to_owned(),
+        ])?;
+        let Err(error) = validate_gate_directories(&arguments) else {
+            return Err("two spellings of one directory were accepted".to_owned());
+        };
+        assert!(error.contains("resolve to different directories"));
+        std::fs::remove_dir(&root).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn gate_accepts_two_distinct_existing_directories() -> Result<(), String> {
+        let root =
+            std::env::temp_dir().join(format!("ocelli-f012-gate-distinct-{}", std::process::id()));
+        let reference = root.join("reference");
+        let candidate = root.join("candidate");
+        std::fs::create_dir_all(&reference).map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(&candidate).map_err(|error| error.to_string())?;
+        let arguments = parse_arguments_from([
+            "gate".into(),
+            "--reference".into(),
+            reference.as_os_str().to_owned(),
+            "--candidate".into(),
+            candidate.as_os_str().to_owned(),
+        ])?;
+        validate_gate_directories(&arguments)?;
+        std::fs::remove_dir(&reference).map_err(|error| error.to_string())?;
+        std::fs::remove_dir(&candidate).map_err(|error| error.to_string())?;
+        std::fs::remove_dir(&root).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_non_gate_command_keeps_the_identity_default() -> Result<(), String> {
+        let arguments = parsed(["identity", "--reference", "reference"])?;
+        assert_eq!(arguments.reference, PathBuf::from("reference"));
+        assert_eq!(arguments.candidate, PathBuf::from("reference"));
+        Ok(())
     }
 }

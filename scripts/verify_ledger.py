@@ -45,8 +45,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -83,17 +85,75 @@ def save(data: dict) -> None:
     LEDGER.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
 
 
+def comparison_evidence(path: str) -> dict:
+    report_path = Path(path)
+    try:
+        encoded = report_path.read_bytes()
+    except OSError as error:
+        sys.exit(f"comparison report cannot be read: {report_path}: {error}")
+    try:
+        report = json.loads(encoded)
+    except json.JSONDecodeError as error:
+        sys.exit(f"comparison report is not valid JSON: {report_path}: {error}")
+    if not isinstance(report, dict):
+        sys.exit("comparison report is not a JSON object")
+    if report.get("operation") != "gate":
+        sys.exit("comparison report was not produced by the explicit candidate gate")
+    if report.get("gateVerdict") != "pass" or report.get("green") is not True:
+        sys.exit("comparison report is not green")
+
+    claimed = report.get("claimedVerdictViews")
+    if isinstance(claimed, bool) or not isinstance(claimed, int) or claimed <= 0:
+        sys.exit("comparison report judged zero views or has an invalid count")
+    passed = report.get("pass")
+    failed = report.get("fail")
+    if any(isinstance(value, bool) or not isinstance(value, int)
+           or value < 0 for value in (passed, failed)):
+        sys.exit("comparison report has invalid pass or fail counts")
+    if passed + failed != claimed:
+        sys.exit("comparison report claimed count is not pass plus fail")
+
+    coverage = report.get("coverage")
+    if not isinstance(coverage, dict):
+        sys.exit("comparison report has no coverage object")
+    absent = coverage.get("absent")
+    if isinstance(absent, bool) or not isinstance(absent, int) or absent != 0:
+        sys.exit("comparison report has absent views")
+
+    return {
+        "reportSha256": hashlib.sha256(encoded).hexdigest(),
+        "claimedVerdictViews": claimed,
+        "verdict": "pass",
+    }
+
+
+def valid_comparison(entry: dict) -> bool:
+    comparison = entry.get("comparison")
+    if not isinstance(comparison, dict):
+        return False
+    digest = comparison.get("reportSha256")
+    claimed = comparison.get("claimedVerdictViews")
+    return (isinstance(digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+            and isinstance(claimed, int) and not isinstance(claimed, bool)
+            and claimed > 0
+            and comparison.get("verdict") == "pass")
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     if args.corpus not in CORPUS_STATES:
         sys.exit(f"--corpus must be one of {sorted(CORPUS_STATES)}")
     tree = args.tree or staged_tree()
     data = load()
-    data[tree] = {
+    entry = {
         "gates": sorted(set(filter(None, args.gates.split(",")))),
         "corpus": args.corpus,
         "profile": args.profile,
         "agent": args.agent or os.environ.get("OCELLI_AGENT", "unknown"),
     }
+    if args.comparison_report:
+        entry["comparison"] = comparison_evidence(args.comparison_report)
+    data[tree] = entry
     save(data)
     print(f"recorded tree {tree[:12]} corpus={args.corpus} "
           f"profile={args.profile}")
@@ -124,6 +184,10 @@ def cmd_assert(args: argparse.Namespace) -> int:
         print("merge at volume (HLD decision D7). Acquire it, see")
         print("corpus/README.md.")
         return 1
+    if args.require_comparison and not valid_comparison(entry):
+        print(f"FAIL: comparison evidence is required for tree {tree[:12]}.")
+        print("Run the explicit candidate gate and record its compare.json.")
+        return 1
     print(f"OK: tree {tree[:12]} verified, corpus={entry['corpus']}")
     return 0
 
@@ -133,9 +197,15 @@ def cmd_trailer(args: argparse.Namespace) -> int:
     entry = entry_for(tree)
     if entry is None:
         return 1
+    comparison = entry.get("comparison")
+    suffix = ""
+    if valid_comparison(entry):
+        suffix = (f" comparison={comparison['reportSha256']}"
+                  f" comparison-views={comparison['claimedVerdictViews']}"
+                  f" comparison-verdict={comparison['verdict']}")
     print(f"{TRAILER_VERIFY}: profile={entry['profile']} "
           f"gates={','.join(entry['gates'])} corpus={entry['corpus']} "
-          f"tree={tree[:12]}")
+          f"tree={tree[:12]}{suffix}")
     print(f"{TRAILER_AGENT}: {entry['agent']}")
     return 0
 
@@ -174,6 +244,27 @@ def cmd_check_commit(args: argparse.Namespace) -> int:
         print(f"FAIL: {args.rev} records corpus={corpus}, 'pass' required.")
         return 1
 
+    comparison_fields = {
+        key: fields.get(key)
+        for key in ("comparison", "comparison-views", "comparison-verdict")
+    }
+    has_comparison_field = any(value is not None
+                               for value in comparison_fields.values())
+    comparison_valid = (
+        re.fullmatch(r"[0-9a-f]{64}", comparison_fields["comparison"] or "")
+        is not None
+        and re.fullmatch(r"[1-9][0-9]*",
+                         comparison_fields["comparison-views"] or "")
+        is not None
+        and comparison_fields["comparison-verdict"] == "pass"
+    )
+    if has_comparison_field and not comparison_valid:
+        print(f"FAIL: {args.rev} carries malformed comparison evidence.")
+        return 1
+    if args.require_comparison and not comparison_valid:
+        print(f"FAIL: {args.rev} comparison evidence is required.")
+        return 1
+
     print(f"OK: {args.rev} verified, corpus={corpus}, tree matches")
     return 0
 
@@ -188,11 +279,13 @@ def main() -> int:
     p.add_argument("--corpus", default="absent")
     p.add_argument("--profile", default="feature")
     p.add_argument("--agent", default="")
+    p.add_argument("--comparison-report", default="")
     p.set_defaults(func=cmd_record)
 
     p = sub.add_parser("assert")
     p.add_argument("--tree")
     p.add_argument("--require-corpus", action="store_true")
+    p.add_argument("--require-comparison", action="store_true")
     p.set_defaults(func=cmd_assert)
 
     p = sub.add_parser("trailer")
@@ -202,6 +295,7 @@ def main() -> int:
     p = sub.add_parser("check-commit")
     p.add_argument("rev", nargs="?", default="HEAD")
     p.add_argument("--require-corpus", action="store_true")
+    p.add_argument("--require-comparison", action="store_true")
     p.set_defaults(func=cmd_check_commit)
 
     args = parser.parse_args()

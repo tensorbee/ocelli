@@ -1,6 +1,6 @@
 # The oracle, reference half
 
-**F-IDs that contributed:** F-010, F-013, F-X006, F-X007, F-X008, F-X009,
+**F-IDs that contributed:** F-010, F-012, F-013, F-X006, F-X007, F-X008, F-X009,
 F-X012, F-X013
 **Last updated:** 2026-09-06
 
@@ -65,6 +65,12 @@ is not evidence of anything on its own.
 that crate the COMPARATOR rather than a runner of Ocelli. **The candidate side
 is a directory contract, not a call into a renderer.** `docs/lld/comparator.md`
 is its design.
+
+F-012 makes that directory contract explicit through `ocelli-compare gate`.
+It requires two distinct resolved directories and reports judged views,
+unmeasured views, absent views, unsupported source rows and declared volume
+refusals as separate counts. It does not add an Ocelli producer. F-X021 owns
+that activation after F-052.
 
 ## The pins, and deviation D-11
 

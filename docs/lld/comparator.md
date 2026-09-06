@@ -1,6 +1,6 @@
 # The comparator, the oracle's judging half
 
-**F-IDs that contributed:** F-011, F-013, F-015, F-X012
+**F-IDs that contributed:** F-011, F-012, F-013, F-015, F-X012
 **Last updated:** 2026-09-06
 
 HLD section 11 says the harness "pushes the same study through both stacks and
@@ -46,6 +46,13 @@ directories are filled by three things, none of which is a renderer.
    `src/`, the runner is separate, and every entry is replayed on every oracle
    gate rather than trusted from a note saying somebody once watched it fail.
 
+F-012 adds a fourth operation without claiming a fourth producer. `gate`
+requires both `--reference` and `--candidate`, resolves both paths, and refuses
+when they name the same directory. It writes the same report as `identity` but
+is the only command whose invocation is suitable for candidate evidence. A
+copied reference directory is useful as controlled contract evidence. It is
+not Ocelli evidence and is not made binding by this story.
+
 **The candidate side is a directory contract and not a call into a renderer.**
 When the port lands, the Ocelli half writes `<id>.raw` and `<id>.json` in the
 shape `docs/lld/oracle.md` already specifies, points the comparator at it with
@@ -58,6 +65,7 @@ additional cost and with no code change when F-X001 to F-X004 land.
 
 ```bash
 bin/ocelli.sh compare                       # identity, then the catalogue
+bin/ocelli.sh compare gate --reference REF --candidate CANDIDATE --out OUT
 bin/ocelli.sh compare identity --candidate DIR
 bin/ocelli.sh gate oracle                   # renders, then compares
 ./target/release/ocelli-compare census      # a measurement, not a gate
@@ -1028,11 +1036,12 @@ register entry marked unreachable fired, and the census of `unmeasured` views
 and their qualifiers matches `tools/oracle/compare-expectations.json` exactly,
 **in both directions**.
 
-Three of those five reach `green()` as run problems the caller collects. The
-other two, the outcome counts and `divergent-while-unmeasured`, are read off the
-records inside `green()` itself, so the rule holds whatever a caller does or
-forgets. That split is not tidiness. The qualifier spent this sprint being
-described as failing a run on its own while nothing pushed a problem for it.
+Structural and input refusals are `problems`. Census changes are
+`coverageProblems`. Outcome counts and `divergent-while-unmeasured` are read
+from the records inside `gate_verdict()` itself, so one category cannot be
+reported as another. That split is not tidiness. The qualifier spent an earlier
+sprint being described as failing a run on its own while nothing pushed a
+problem for it.
 
 A view that JOINS the census is a coverage loss that has to be explained. A view
 that LEAVES it is a coverage gain that has to be recorded in the same change.
@@ -1043,6 +1052,13 @@ The census is committed and hand-maintained. It was seeded from the first
 identity run, which is the only honest way to start one, and from here a change
 to it is reviewed like a tolerance change. A qualifier label the comparator does
 not emit is refused at load, so a stale census cannot read as an empty set.
+
+F-012 gives that rule a machine-readable run verdict. `claimedVerdictViews` is
+exactly `pass + fail`. The `coverage` object names `unmeasured`, `absent`,
+`unsupportedSourceRows` and `declaredVolumeRefusals` separately. A comparison
+failure reports `comparison-failure`. A missing or newly unmeasured view
+reports `coverage-loss`. An input or structural problem reports `refusal`.
+Zero judged views is coverage loss, never a green empty claim.
 
 ## Today's numbers
 
@@ -1072,6 +1088,9 @@ worth reading.
   side, ladder rung, parameter and geometry divergences, and all four regions of
   statistics per lane. It also carries the versioned reference and candidate
   render hash for every view, plus one aggregate render hash per side.
+  `operation`, `gateVerdict`, `claimedVerdictViews` and the named `coverage`
+  counts are the run-level candidate-evidence contract. Only `operation: gate`
+  is accepted by the verification ledger.
 - `<id>.diff.raw` for every view carrying a difference, in the same RGBA8 shape
   as the frames it came from, beside the reference's own `<id>.png` pair. It is
   the per-lane ABSOLUTE difference, **unamplified**: a scale factor is a number
@@ -1203,7 +1222,7 @@ tolerance and it is not a claim of cross-machine reproducibility. D14's
 measured divergence remains the claim an attestation may make when hashes are
 unequal.
 
-## What F-011 did not build
+## What the comparator still does not build
 
 Named, because each is somebody's story.
 
@@ -1213,4 +1232,18 @@ Named, because each is somebody's story.
 - Re-rendering the saturated rows at a wider window, or a magnified render for
   the two decimated rows. Both change `render-params.json` and therefore every
   reference frame.
-- The CI gate that renders the corpus per pull request, F-012, E2.4, S04.
+- The Ocelli producer for all current views. F-X021 activates the required
+  candidate record after F-052 supplies the orthographic viewport. Under D-04,
+  CI validates that local record and does not render the ignored corpus.
+
+## Verification-ledger evidence
+
+`scripts/verify_ledger.py record --comparison-report OUT/compare.json` accepts
+only a green `gate` report with a positive judged-view count, zero absent views
+and internally consistent pass and fail counts. It records the report's exact
+SHA-256 digest, judged count and verdict. The commit hook carries those values
+in `Ocelli-Verify` when present.
+
+`assert --require-comparison` and `check-commit --require-comparison` are the
+local and CI readers. F-012 deliberately leaves them dormant in the ordinary
+profiles because no Ocelli producer exists. F-X021 activates the requirement.

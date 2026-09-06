@@ -483,11 +483,36 @@ fn labels(set: &BTreeSet<Qualifier>) -> String {
         .join(", ")
 }
 
+/// Machine-readable classification of a whole comparison run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GateVerdict {
+    Pass,
+    ComparisonFailure,
+    CoverageLoss,
+    Refusal,
+}
+
+impl GateVerdict {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::ComparisonFailure => "comparison-failure",
+            Self::CoverageLoss => "coverage-loss",
+            Self::Refusal => "refusal",
+        }
+    }
+}
+
 /// The whole run's result.
 #[derive(Clone, Debug)]
 pub struct RunReport {
     pub records: Vec<ViewRecord>,
     pub problems: Vec<String>,
+    pub coverage_problems: Vec<String>,
+    pub absent_views: usize,
+    pub unsupported_source_rows: usize,
+    pub declared_volume_refusals: usize,
     pub reference_directory: String,
     pub candidate_directory: String,
 }
@@ -526,6 +551,34 @@ impl RunReport {
             .iter()
             .filter(|record| record.outcome == outcome)
             .count()
+    }
+
+    /// Views for which the written pixel predicate produced a verdict.
+    /// `unmeasured`, `absent` and source-level refusals are named separately.
+    #[must_use]
+    pub fn claimed_verdict_views(&self) -> usize {
+        self.count(Outcome::Pass) + self.count(Outcome::Fail)
+    }
+
+    #[must_use]
+    pub fn absent_count(&self) -> usize {
+        self.absent_views + self.count(Outcome::Absent)
+    }
+
+    #[must_use]
+    pub fn gate_verdict(&self) -> GateVerdict {
+        if self.count(Outcome::Fail) > 0 || !self.absorbed_divergences().is_empty() {
+            GateVerdict::ComparisonFailure
+        } else if self.claimed_verdict_views() == 0
+            || self.absent_count() > 0
+            || !self.coverage_problems.is_empty()
+        {
+            GateVerdict::CoverageLoss
+        } else if !self.problems.is_empty() {
+            GateVerdict::Refusal
+        } else {
+            GateVerdict::Pass
+        }
     }
 
     /// The qualifier histogram over EVERY record, which is the number the
@@ -585,28 +638,33 @@ impl RunReport {
     /// `divergent-while-unmeasured`, the census matches exactly in both
     /// directions, and no register entry marked unreachable fired.
     ///
-    /// Three of those five are `problems`, which the caller collects. The
-    /// other two are counted and read here, so the whole rule holds whatever a
-    /// caller does or forgets.
+    /// Structural and input refusals are `problems`. Census changes are
+    /// `coverage_problems`. Outcomes and absorbed divergences are read from
+    /// the records here, so one category cannot be reported as another.
     #[must_use]
     pub fn green(&self) -> bool {
-        self.problems.is_empty()
-            && self.absorbed_divergences().is_empty()
-            && self.count(Outcome::Fail) == 0
-            && self.count(Outcome::Absent) == 0
+        self.gate_verdict() == GateVerdict::Pass
     }
 
     #[must_use]
     pub fn to_json(&self) -> Value {
         json!({
-            "story": "F-011, F-015",
+            "story": "F-011, F-012, F-015",
             "reference": self.reference_directory,
             "candidate": self.candidate_directory,
             "views": self.records.len(),
             "pass": self.count(Outcome::Pass),
             "fail": self.count(Outcome::Fail),
             "unmeasured": self.count(Outcome::Unmeasured),
-            "absent": self.count(Outcome::Absent),
+            "absent": self.absent_count(),
+            "claimedVerdictViews": self.claimed_verdict_views(),
+            "coverage": {
+                "unmeasured": self.count(Outcome::Unmeasured),
+                "absent": self.absent_count(),
+                "unsupportedSourceRows": self.unsupported_source_rows,
+                "declaredVolumeRefusals": self.declared_volume_refusals,
+            },
+            "gateVerdict": self.gate_verdict().label(),
             "qualifiers": Value::Object(
                 self.qualifier_counts()
                     .into_iter()
@@ -614,6 +672,7 @@ impl RunReport {
                     .collect()
             ),
             "problems": self.problems,
+            "coverageProblems": self.coverage_problems,
             "absorbedDivergences": self.absorbed_divergences(),
             "green": self.green(),
             "renderHashes": {
@@ -754,6 +813,10 @@ mod tests {
         RunReport {
             records,
             problems,
+            coverage_problems: Vec::new(),
+            absent_views: 0,
+            unsupported_source_rows: 0,
+            declared_volume_refusals: 0,
             reference_directory: "reference".to_owned(),
             candidate_directory: "candidate".to_owned(),
         }
@@ -764,7 +827,10 @@ mod tests {
     #[test]
     fn a_clean_run_is_green() {
         let clean = report(
-            vec![record("a", Outcome::Unmeasured, &[Qualifier::Weak])],
+            vec![
+                record("judged", Outcome::Pass, &[]),
+                record("a", Outcome::Unmeasured, &[Qualifier::Weak]),
+            ],
             Vec::new(),
         );
         assert!(clean.green());

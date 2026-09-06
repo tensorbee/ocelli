@@ -807,6 +807,50 @@ def _ledger_absent_corpus(box: Sandbox) -> None:
     _ledger_record(box, "absent")
 
 
+def _comparison_report(box: Sandbox, *, verdict: str = "pass",
+                       claimed: int = 1, green: bool = True) -> None:
+    box.write(".claude/probe-comparison.json", json.dumps({
+        "operation": "gate",
+        "pass": claimed if verdict == "pass" else 0,
+        "fail": 0 if verdict == "pass" else max(claimed, 1),
+        "claimedVerdictViews": claimed,
+        "gateVerdict": verdict,
+        "green": green,
+        "coverage": {"absent": 0},
+    }) + "\n")
+
+
+def _malformed_comparison_report(box: Sandbox) -> None:
+    box.write(".claude/probe-comparison.json", "{not json\n")
+
+
+def _identity_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["operation"] = "identity"
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _red_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box, verdict="comparison-failure", green=False)
+
+
+def _zero_judgement_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box, claimed=0)
+
+
+def _ledger_without_comparison(box: Sandbox) -> None:
+    _ledger_record(box, "pass")
+
+
+def _commit_without_comparison(box: Sandbox) -> None:
+    box.enable_hooks()
+    box.write("probe-note.txt", "one\n")
+    box.stage_all()
+    _ledger_record(box, "pass")
+    box.git("commit", "-m", "F-000, a probe")
+
+
 def commit_with(message: str) -> Invoke:
     """A real `git commit`, so the hooks run when the sandbox has enabled them.
 
@@ -6467,10 +6511,13 @@ GUARDS: tuple[Guard, ...] = (
         gate="-",
         spec="deviation D-04 mechanism 1, and HLD 27.2 R6",
         refuses="A staged tree with no recorded gate run, a tree whose "
-                "recorded corpus is red, and a corpus state outside the "
-                "declared set.",
+                "recorded corpus is red, a corpus state outside the declared "
+                "set, malformed or red comparison evidence, zero judged "
+                "views, and a required comparison record that is absent.",
         claims=(r"no verification recorded", r"the corpus is RED",
-                r"corpus is ' ' for tree", r"--corpus must be one of"),
+                r"corpus is ' ' for tree", r"--corpus must be one of",
+                r"comparison report",
+                r"comparison evidence is required for tree"),
         probes=(
             Probe("ledger.no-record", None,
                   script("python3", "scripts/verify_ledger.py", "assert"),
@@ -6493,6 +6540,30 @@ GUARDS: tuple[Guard, ...] = (
                   "--corpus must be one of",
                   control=script("python3", "scripts/verify_ledger.py",
                                  "record", "--corpus", "absent")),
+            Probe("ledger.comparison-malformed", _malformed_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report is not valid JSON"),
+            Probe("ledger.comparison-identity", _identity_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "not produced by the explicit candidate gate"),
+            Probe("ledger.comparison-red", _red_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report is not green"),
+            Probe("ledger.comparison-zero", _zero_judgement_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report judged zero views"),
+            Probe("ledger.require-comparison", _ledger_without_comparison,
+                  script("python3", "scripts/verify_ledger.py", "assert",
+                         "--require-comparison"),
+                  "comparison evidence is required"),
         ),
         limit="`assert` with a real record cannot be controlled green in the "
               "sandbox without recording one first, so the control for this "
@@ -6524,10 +6595,13 @@ GUARDS: tuple[Guard, ...] = (
         gate="-",
         spec="deviation D-04 mechanism 2, the CI side",
         refuses="A head with no provenance trailer, a trailer naming a tree "
-                "that is not the commit's, and a trailer recording a red or "
-                "unrun corpus.",
+                "that is not the commit's, a trailer recording a red or "
+                "unrun corpus, and a required comparison field that is "
+                "missing or malformed.",
         claims=(r"carries no trailer", r"trailer names tree",
-                r"records a RED corpus", r"records corpus="),
+                r"records a RED corpus", r"records corpus=",
+                r"carries malformed comparison evidence",
+                r"comparison evidence is required\."),
         probes=(
             Probe("ledger.no-trailer", None,
                   script("python3", "scripts/verify_ledger.py",
@@ -6542,6 +6616,10 @@ GUARDS: tuple[Guard, ...] = (
                        "entry is written against one tree, the commit is then "
                        "amended so its tree differs, and the trailer becomes "
                        "evidence about content that is not in the commit."),
+            Probe("ledger.commit-require-comparison", _commit_without_comparison,
+                  script("python3", "scripts/verify_ledger.py",
+                         "check-commit", "HEAD", "--require-comparison"),
+                  "comparison evidence is required"),
         ),
         limit="The `records a RED corpus` and `records corpus=` branches of "
               "check-commit need a commit carrying a trailer this harness "

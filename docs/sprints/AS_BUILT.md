@@ -1883,3 +1883,34 @@ completion gates passed on 2026-09-06.
 **Deviations from the design plan.** None.
 **Notes for future sessions.** The allocation cannot reconstruct hand-curated
 goals and summaries, so bare generation is bootstrap-only.
+
+## F-012, Candidate comparison gate contract, completed 2026-09-06
+
+**What was built.** `ocelli-compare gate` requires explicit reference and
+candidate directories and refuses when they resolve to the same location. Its
+report separates judged, unmeasured, absent, unsupported-source and declared
+volume-refusal counts. The verification ledger can attest a green gate report
+by exact digest and positive judged count.
+**HLD sections implemented.** Sections 11, 25.1 and 27.2 R6 under deviation
+D-04.
+**Deviations.** D-04 retained. Real Ocelli renderer activation is F-X021 after
+F-052, rather than an identity comparison presented as candidate evidence.
+**Crates / packages modified.** Oracle comparator, verification ledger, guard
+harness and sprint allocation.
+**Tests added.** Candidate argument refusals, verdict and coverage accounting,
+zero-judgement refusal and six standing ledger probes.
+**Fixture provenance.** No new DICOM fixture or pixel expectation. The
+corpus-scale contract run used two controlled copies of existing ignored
+oracle output and made no Ocelli-renderer claim.
+**Verification.** All 25 floor gates and the corpus gate passed on the exact
+staged feature tree. A controlled 99-view gate judged 71 views and separately
+reported 28 unmeasured, 0 absent, 2 unsupported source rows and 1 declared
+volume refusal.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. No renderer is part of this story.
+**LLD updated.** `docs/lld/comparator.md` and `docs/lld/oracle.md`.
+**Deviations from the design plan.** The plan was narrowed before
+implementation and F-X021 records the deferred activation. Review added the
+explicit operation field so identity output cannot satisfy ledger evidence.
+**Notes for future sessions.** Enable `--require-comparison` only when F-X021
+connects every current oracle view to real Ocelli output.

@@ -488,6 +488,36 @@ impl Run {
         found
     }
 
+    /// Source rows the producer refused before any frame was available.
+    #[must_use]
+    pub fn unsupported_source_rows(&self) -> usize {
+        self.json
+            .pointer("/rows")
+            .and_then(Value::as_array)
+            .map_or(0, |rows| {
+                rows.iter()
+                    .filter(|row| row.pointer("/ok").and_then(Value::as_bool) == Some(false))
+                    .count()
+            })
+    }
+
+    /// Volume subjects refused at their declared boundary.
+    #[must_use]
+    pub fn declared_volume_refusals(&self) -> usize {
+        self.json
+            .pointer("/volumes")
+            .and_then(Value::as_array)
+            .map_or(0, |volumes| {
+                volumes
+                    .iter()
+                    .filter(|volume| {
+                        volume.pointer("/outcome").and_then(Value::as_str)
+                            == Some("refused-as-declared")
+                    })
+                    .count()
+            })
+    }
+
     /// Read one view's frame, checking its length and its declared digest.
     ///
     /// # Errors

@@ -1,8 +1,8 @@
-# F-012, CI gate: every PR renders the full corpus
+# F-012, Candidate comparison gate contract and verification plumbing
 
 **Status**: approved
 **Epic ref**: E2.4
-**Sprint**: S04
+**Sprint**: S05
 **Estimate**: 3w
 
 ## Normative source, transcribed
@@ -73,9 +73,7 @@ The mechanical replacement transcribed from the same deviation is:
 
 1. Section 11 requires the render in pull-request CI. D-04 expressly forbids
    that path and substitutes local verification plus ledger validation. The
-   operator retained D-04 in the S04 design round. The story title and backlog
-   text will be corrected to describe the binding local verdict rather than
-   claiming CI rendered a corpus it did not possess.
+   operator retained D-04 in the S04 design round.
 2. The HLD does not define coverage loss. The current comparator has four
    outcomes and the current corpus reports measured and unmeasured views.
    `CURRENT_SPRINT.md` supplies the missing acceptance rule: a failure and a
@@ -84,19 +82,24 @@ The mechanical replacement transcribed from the same deviation is:
    or class-two views with no written threshold belong in the verdict count.
 4. The HLD does not define a machine-readable gate report or exit-code
    vocabulary.
+5. No Ocelli candidate renderer exists yet. The S05 design round split the
+   original story rather than comparing the reference with itself and calling
+   that a candidate verdict. F-012 lands the explicit directory contract,
+   coverage result and ledger fields. F-X021 activates them as a required
+   local gate after F-052 supplies the last view kind in the current oracle.
 
 ## Approach
 
-Under the retained D-04 arrangement, F-012 makes the local corpus verdict
-binding and makes CI prove that exact verdict belonged to the submitted tree.
-It does not claim that CI rendered a corpus it did not possess. Update the
-story title in the shared sprint records as part of this story so those records
-state the narrower claim truthfully.
+Under the retained D-04 arrangement, F-012 makes a real candidate verdict
+representable and attestable without pretending one exists today. F-X021 makes
+that verdict mandatory after the Ocelli renderer can emit every current oracle
+view. Neither story claims that CI rendered a corpus it did not possess.
 
 1. Add an explicit comparator `gate` command over one reference directory and
-   one candidate directory. It runs the existing structural, input, parameter,
-   geometry and pixel checks once. It writes the existing per-view report plus
-   a run-level coverage block.
+   one candidate directory. Both flags are required and the two resolved paths
+   must differ. It runs the existing structural, input, parameter, geometry and
+   pixel checks once. It writes the existing per-view report plus a run-level
+   coverage block.
 2. Define `claimedVerdictViews` as views whose written predicate was evaluated,
    which means `pass + fail`. Keep `unmeasured`, `absent`, unsupported source
    rows and declared volume refusals in separate named counts. Never report
@@ -108,12 +111,17 @@ state the narrower claim truthfully.
 4. Keep the existing identity and declared mutation catalogue as instrument
    self-tests. The gate path compares the supplied directories and does not
    silently default a missing candidate to the reference.
-5. Extend the verification record with the comparator report digest and the
-   claimed verdict count. The pre-push and CI checks require a green corpus
-   record for the exact tree and refuse a record that lacks the F-012 fields.
-6. Add standing probes for a one-pixel comparison failure, a missing view, a
-   new unmeasured view, a stale tree record and a record that says zero failures
-   after judging zero views.
+5. Extend the verification record with the comparator report digest, verdict
+   and claimed verdict count when `--comparison-report` is supplied. Refuse a
+   report that is red, malformed or claims zero judged views. Emit those fields
+   in the commit trailer so CI can validate them without the local report.
+6. Add `--require-comparison` to the ledger assertion and commit check. It is
+   not enabled by the ordinary feature or sprint profiles until F-X021 lands,
+   because requiring output no renderer can produce would disable every push.
+7. Add standing probes for a missing explicit candidate, a candidate resolving
+   to the reference directory, a one-pixel comparison failure, a missing view,
+   a new unmeasured view, a malformed report and a record that says zero
+   failures after judging zero views.
 
 No tolerance changes are part of this story.
 
@@ -133,9 +141,10 @@ No tolerance changes are part of this story.
 |----------|----------------|-------|
 | unit | Run-level accounting distinguishes judged, unmeasured, absent and unsupported views | `tools/oracle/src/report.rs` |
 | unit | Comparison failure and coverage loss produce distinct nonzero results | `tools/oracle/src/bin/ocelli-compare.rs` |
-| golden | A full reference and candidate run judges the declared view set and preserves the exact unmeasured census | `bin/ocelli.sh gate oracle` |
-| browser | The required render path reaches, decodes, presents and reads back every applicable row or records a declared refusal | `tools/oracle/run.mjs` and the oracle gate |
+| golden | An explicit candidate directory is judged against a full reference run and preserves the exact unmeasured census | `ocelli-compare gate` against controlled output directories |
+| browser | The existing reference path still reaches, decodes, presents and reads back every applicable row or records a declared refusal | `tools/oracle/run.mjs` and the oracle gate |
 | property | Removing any declared view, or moving any view into `unmeasured`, cannot leave the run green | `tools/oracle/tests/coverage.rs` |
+| unit | A green comparison report records its digest and positive claimed-verdict count, while malformed, red and zero-judgement reports are refused | `scripts/verify_ledger.py` guard probes |
 | conformance | The corpus still covers each transfer syntax the registry claims | existing `corpus` gate |
 
 No new pixel or geometry arithmetic is introduced, so this story needs no new
@@ -150,8 +159,7 @@ representation, event or adapter.
 
 ## Deviations
 
-D-04 is load-bearing. Open question 1 decides whether it remains as written or
-is amended or retired. No other deviation is anticipated.
+D-04 is load-bearing. No other deviation is anticipated.
 
 ## LLD impact
 
@@ -170,12 +178,13 @@ Under the standing D-04 arrangement:
 - `tools/oracle/tests/coverage.rs`, new
 - `bin/ocelli.sh`
 - `scripts/verify_ledger.py`
-- `.githooks/pre-push`
-- `.github/workflows/ci.yml`
 - `scripts/guards/catalogue.py`
-- `scripts/tests/test_guard_catalogue.py`
+- `scripts/guard_probe.py`
+- `docs/runbooks/guard-verification.md`
 - `docs/lld/comparator.md`
 - `docs/lld/oracle.md`
+- `docs/sprints/allocation.json`
+- `docs/sprints/SPRINT_PLAN.md`
 
 If D-04 is retired, also `docs/hld/DEVIATIONS.md`. The required workflow runner
 and corpus provisioning paths are deliberately not claimed as exact until the
@@ -184,14 +193,13 @@ operator chooses that execution model.
 ## Dependency and conflict notes
 
 - F-011 is done and supplies the comparator, census and mutation catalogue.
-- F-012 overlaps F-013 and F-015 in `tools/oracle/src/bin/ocelli-compare.rs`,
-  `report.rs` and `docs/lld/comparator.md`. Run these stories serially.
-- F-X010 and F-X019 both touch CI gate equivalence and workflow semantics.
-  Resolve their designs before editing `.github/workflows/ci.yml` or
-  `scripts/verify_ledger.py`.
+- F-013 and F-015 have landed. Their current report and hash contracts are the
+  base F-012 extends.
+- F-X010 and F-X019 have landed. F-012 extends their existing ledger and guard
+  contracts without changing the CI workflow or pre-push requirement.
 - The oracle is a serial runtime resource.
 
 ## Open questions
 
-None. The operator retained D-04. The story makes local evidence binding and
-corrects its shared-record title to state that narrower claim.
+None. The operator retained D-04 and approved the split in the S05 design
+round. F-X021 preserves activation of the original full-corpus candidate claim.

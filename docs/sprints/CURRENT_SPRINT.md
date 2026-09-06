@@ -3,12 +3,14 @@
 **Milestone**: M1, foundations and the differential oracle.
 **Branch**: `sprint/s05`
 **Opened**: 2026-09-06
-**Goal**: Build the quirk-capture workflow that turns each field bug into a
-permanent, independently checkable corpus fixture.
+**Goal**: Land the candidate-comparison evidence contract, then build the
+quirk-capture workflow that turns each field bug into a permanent,
+independently checkable corpus fixture.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-014 | E2.6 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | pending, blocked by F-012 |
+| F-012 | E2.4 | Candidate comparison gate contract and verification plumbing | Test | 3w | done |
+| F-014 | E2.6 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:
@@ -21,21 +23,24 @@ grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S05 / {print $2, $9}'
 ## What this sprint is
 
 S04 made the oracle's pixel, metadata and geometry claims mechanically
-checkable. S05 gives a newly discovered field bug one path into that evidence
-base. F-014 must capture the triggering shape as a reproducible corpus recipe,
-record the independent expected result, and make the relevant gate fail when
-the bug returns. The fixture is evidence for development and for a future
-regulatory submission. It is not a copy of production data.
+checkable. S05 first makes a real candidate comparison representable and
+attestable without claiming a renderer exists today. It then gives a newly
+discovered field bug one path into that evidence base. F-014 must capture the
+triggering shape as a reproducible corpus recipe, record the independent
+expected result, and make the relevant gate fail when the bug returns. The
+fixture is evidence for development and for a future regulatory submission.
+It is not a copy of production data.
 
 This is the final planned sprint in M1, but opening it does not complete the
-milestone. F-012 remains unfinished and is a declared dependency of F-014.
+milestone. F-012 landed first and F-014 is ready to start.
 
 ## What is carried in
 
-- **F-012** remains pending because Ocelli does not yet have the candidate
-  renderer that the per-pull-request differential gate would execute. A gate
-  around only the reference would compare nothing. F-014 declares F-012 as a
-  dependency, so F-014 must not start while this remains unresolved.
+- **F-012** landed as the explicit candidate-directory contract, coverage
+  result and verification-ledger plumbing that can be claimed truthfully. The
+  renderer activation is preserved as F-X021 after F-052 supplies the final
+  current oracle view kind. A gate around only the reference still proves no
+  candidate result and is explicitly refused.
 - **F-X011** remains pending because its acceptance evidence requires a second
   physical machine and none is available. It does not block F-014, but its
   cross-machine determinism claim remains unmade.
@@ -78,10 +83,9 @@ the declared reason.
 
 ## Dependency order
 
-F-014 depends on F-012. F-012 is not done, so F-014 is blocked at sprint open.
-The dependency is not bypassed by the existing local oracle runs because F-012
-specifically owns the per-pull-request candidate-render gate. Resume F-014 only
-after F-012 lands, or after an approved plan changes the declared dependency.
+F-014 depends on F-012, which is done. F-014 is ready to start. F-X021 depends
+on F-012 and F-052, and later makes real Ocelli full-corpus candidate evidence
+binding under the retained D-04 local-verification model.
 
 F-X011 is also carried from S04 but is not a dependency of F-014.
 

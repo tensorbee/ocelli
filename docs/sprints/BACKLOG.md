@@ -105,7 +105,7 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-009 | E2.1 | S01 | Golden corpus ingest and de-identified fixture store | Test | 3w | - | done |
 | F-010 | E2.2 | S02 | Headless cornerstone3D reference renderer | Test | 4w | F-009 | done |
 | F-011 | E2.3 | S03 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w | F-010 | done |
-| F-012 | E2.4 | S04 | CI gate: every PR renders the full corpus | Test | 3w | F-011 | pending |
+| F-012 | E2.4 | S05 | Candidate comparison gate contract and verification plumbing | Test | 3w | F-011 | done |
 | F-013 | E2.5 | S04 | Metadata diff harness (LUT values, geometry, spacing) | Test | 2w | F-011 | done |
 | F-014 | E2.6 | S05 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | F-012 | pending |
 | F-015 | E2.7 | S04 | Stable render-hash emission from the comparator | Test | 2w | F-011 | done |
@@ -209,6 +209,7 @@ Volumes assemble progressively, reslice obliquely and ray-cast on both tiers.
 | F-062 | E9.4 | S21 | Cropping planes and volume clipping | Rust | 4w | F-059 | pending |
 | F-X004 | X1.4 | S21 | CPU MPR and oblique reslicing, with SIMD inner loops | Rust | 5w | F-052, F-X003 | pending |
 | F-X005 | X1.5 | S21 | The CPU volume-rendering decision, and honest unavailability | Rust+TS | 2w | F-059, F-X003 | pending |
+| F-X021 | Y1.16 | S20 | Activate the full-corpus candidate-render gate against Ocelli output | Test | 3w | F-012, F-052 | pending |
 
 ### M6, Segmentation rendering
 
