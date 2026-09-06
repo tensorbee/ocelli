@@ -58,7 +58,7 @@ current evidence.
    Do not infer a tree for legacy entries.
 3. Change `close-preflight` to require the latest sprint-scope review to have
    zero defects and zero smells and to name the current staged tree. Require
-   the latest passing sprint-profile verification to name that same tree.
+   the latest sprint-profile verification to pass and name that same tree.
    Per-feature reviews remain required independently.
 4. Update `/run-sprint` so each whole-sprint microscope pass is recorded at
    sprint scope, and so remediation is followed by another consolidated
@@ -68,9 +68,12 @@ current evidence.
    tree, a stale verification tree, and current clean evidence. The probes use
    disposable run state and a staged tree, never the real scratch file.
 
-Anticipated implementation write set, exactly:
+Anticipated implementation write set, exactly. The authoritative workflow,
+generated runbook and LLD index are included because the implementation changes
+the close process, probe inventory and `guards.md` contributor line:
 
 - `scripts/sprint_workflow.py`
+- `.claude/WORKFLOW.md`
 - `.claude/commands/run-sprint.md`
 - `.claude/commands/microscope.md`
 - `.claude/commands/close-sprint.md`
@@ -80,6 +83,8 @@ Anticipated implementation write set, exactly:
 - `scripts/guards/catalogue.py`
 - `ci/guard-probe-budget.json`
 - `docs/lld/guards.md`
+- `docs/lld/README.md`
+- `docs/runbooks/guard-verification.md`
 
 The live `.claude/scratch/S04-run.json` is gitignored state and is not an
 implementation write. The first new review or verification record upgrades it.

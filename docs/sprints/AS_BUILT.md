@@ -1577,3 +1577,35 @@ be skipped. The corrected write set records both changes.
 its wasm provenance in TypeScript. The retained syntax rule guards that route.
 The two production allowances remain `bulk.ts` and `panic.ts`. A third file
 requires its own reviewed design decision.
+
+## F-X018, Tree-bound sprint closure evidence, completed 2026-09-06
+
+**What was built.** Sprint run state now records whole-sprint review counts and
+verification results with the staged Git tree identity. Close-preflight
+requires the latest review to be clean, the latest sprint verification to
+pass, both records to name the current HEAD tree, and the working tree to be
+clean.
+
+**HLD sections implemented.** `docs/hld/24-agent-code-standards.md` section 27
+and section 27.2 R6, with the exact-tree compensating control for D-04.
+**Deviations.** D-04 retained and strengthened. No new deviation.
+**Crates / packages modified.** No crate or package source changed. The sprint
+workflow, its canonical commands, generated adapters and guard harness changed.
+**Tests added.** Six refusal probes cover legacy state, dirty review counts,
+stale review and verification trees, a failed latest verification, and a tree
+changed after evidence was recorded. One accept control covers clean evidence
+for the current tree.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** The feature profile ran all floor gates and the corpus gate
+on 2026-09-06. The commit's hook-generated `Ocelli-Verify` trailer names the
+exact staged tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A (WebGPU): n/a. B (WebGL2 downlevel): n/a. C (CPU): n/a.
+This is a repository workflow control.
+**LLD updated.** `docs/lld/guards.md`, indexed in `docs/lld/README.md`.
+**Deviations from the design plan.** The write set was corrected to include
+the authoritative workflow, generated guard runbook and LLD index. Review pass
+1 also added the missing sprint-state verification command to `/run-sprint`.
+**Notes for future sessions.** A successful verification or clean review is
+not closure evidence after the index changes. Stage first, then record both
+forms of evidence for the same tree.

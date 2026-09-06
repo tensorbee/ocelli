@@ -903,6 +903,113 @@ def sprint_state(box: Sandbox) -> str:
     return fids[0]
 
 
+def _write_close_state(
+        box: Sandbox,
+        *,
+        sprint_reviews: list[dict[str, object]] | None = None,
+        verifications: list[dict[str, object]] | None = None,
+        legacy: bool = False,
+) -> None:
+    """Write completed sprint state for close-preflight probes."""
+    sprint = re.search(r"^#\s+Current sprint,\s*(S[\d.]+)",
+                       box.read("docs/sprints/CURRENT_SPRINT.md"), re.M)
+    if sprint is None:
+        raise AssertionError("CURRENT_SPRINT.md names no sprint")
+    name = sprint.group(1)
+    allocation = json.loads(box.read("docs/sprints/allocation.json"))
+    fids = sorted(s["fid"] for s in allocation["stories"]
+                  if s.get("sprint") == name)
+    tree = box.git("write-tree").stdout.strip()
+    data: dict[str, object] = {
+        "sprint": name,
+        "phase": "review",
+        "features": {
+            fid: {
+                "state": "completed",
+                "reviews": [{"pass": 1, "defects": 0, "smells": 0,
+                             "nitpicks": 0}],
+            }
+            for fid in fids
+        },
+        "verifications": verifications if verifications is not None else [{
+            "profile": "sprint",
+            "result": "pass",
+            "gates": "all",
+            "corpus": "pass",
+            "tree": tree,
+        }],
+    }
+    if not legacy:
+        data["sprint_reviews"] = (
+            sprint_reviews if sprint_reviews is not None else [{
+                "pass": 1,
+                "defects": 0,
+                "smells": 0,
+                "nitpicks": 0,
+                "tree": tree,
+            }]
+        )
+    box.write(f".claude/scratch/{name}-run.json",
+              json.dumps(data, indent=1) + "\n")
+
+
+def _close_preflight(box: Sandbox) -> "subprocess.CompletedProcess[str]":
+    sprint = re.search(r"^#\s+Current sprint,\s*(S[\d.]+)",
+                       box.read("docs/sprints/CURRENT_SPRINT.md"), re.M)
+    if sprint is None:
+        raise AssertionError("CURRENT_SPRINT.md names no sprint")
+    state = box.path / ".claude" / "scratch" / f"{sprint.group(1)}-run.json"
+    if not state.exists():
+        _write_close_state(box)
+    return box.run(["python3", "scripts/sprint_workflow.py",
+                    "close-preflight", sprint.group(1)])
+
+
+def _close_legacy_state(box: Sandbox) -> None:
+    _write_close_state(box, legacy=True, verifications=[{
+        "profile": "sprint", "result": "pass", "gates": "all",
+        "corpus": "pass",
+    }])
+
+
+def _close_dirty_sprint_review(box: Sandbox) -> None:
+    tree = box.git("write-tree").stdout.strip()
+    _write_close_state(box, sprint_reviews=[{
+        "pass": 2, "defects": 1, "smells": 0, "nitpicks": 0,
+        "tree": tree,
+    }])
+
+
+def _close_stale_sprint_review(box: Sandbox) -> None:
+    _write_close_state(box, sprint_reviews=[{
+        "pass": 2, "defects": 0, "smells": 0, "nitpicks": 0,
+        "tree": "0" * 40,
+    }])
+
+
+def _close_stale_verification(box: Sandbox) -> None:
+    _write_close_state(box, verifications=[{
+        "profile": "sprint", "result": "pass", "gates": "all",
+        "corpus": "pass", "tree": "0" * 40,
+    }])
+
+
+def _close_failed_latest_verification(box: Sandbox) -> None:
+    tree = box.git("write-tree").stdout.strip()
+    _write_close_state(box, verifications=[
+        {"profile": "sprint", "result": "pass", "gates": "all",
+         "corpus": "pass", "tree": tree},
+        {"profile": "sprint", "result": "fail", "gates": "all",
+         "corpus": "pass", "tree": tree},
+    ])
+
+
+def _close_tree_changed_after_evidence(box: Sandbox) -> None:
+    _write_close_state(box)
+    box.write("probe-close-change.txt", "changes the staged tree\n")
+    box.stage_all()
+
+
 def _handoff(box: Sandbox, branch: str) -> None:
     fid = sprint_state(box)
     box.write(f".claude/handoffs/{fid}-ready.md",
@@ -6734,11 +6841,51 @@ GUARDS: tuple[Guard, ...] = (
                   Invoke("sprint_workflow validate-handoff",
                          _validate_handoff),
                   "is not in sprint"),
+            Probe("sprint-lifecycle.close-legacy-state",
+                  _close_legacy_state,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "no sprint-scope review recorded"),
+            Probe("sprint-lifecycle.close-dirty-review",
+                  _close_dirty_sprint_review,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "latest sprint review pass 2 reports 1 defects and 0 smells"),
+            Probe("sprint-lifecycle.close-stale-review",
+                  _close_stale_sprint_review,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "latest sprint review tree 000000000000 is stale"),
+            Probe("sprint-lifecycle.close-stale-verification",
+                  _close_stale_verification,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "latest sprint-profile verification tree 000000000000 is stale"),
+            Probe("sprint-lifecycle.close-latest-verification-failed",
+                  _close_failed_latest_verification,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "latest sprint-profile verification did not pass"),
+            Probe("sprint-lifecycle.close-tree-changed",
+                  _close_tree_changed_after_evidence,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "latest sprint review tree",
+                  note="The evidence is recorded first, then a tracked file "
+                       "is staged. This proves both records are identities of "
+                       "one tree rather than durable booleans."),
+            Probe("sprint-lifecycle.close-current-evidence",
+                  None,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "is ready to close", polarity="accept"),
         ),
-        limit="One probe over the shape shared by every lifecycle refusal. "
-              "The remaining branches need a sprint mid-flight, which the "
-              "sandbox cannot build without writing sprint state, and "
-              "docs/sprints/ is outside this story's write set.",
+        limit="The remaining lifecycle branches belong to init, feature "
+              "state transitions and release notes. The close probes build "
+              "ignored sprint state from allocation.json and use the "
+              "sandbox's real staged tree, so legacy, missing, dirty, stale, "
+              "failed and current evidence are exercised without touching "
+              "the developer's run state.",
     ),
 
     # -- the error registry, the benchmarks and the corpus -----------------

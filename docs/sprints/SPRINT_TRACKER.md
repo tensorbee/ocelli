@@ -65,3 +65,4 @@ that has something to put in it.
 | F-011 | Pixel-diff comparator with per-modality tolerance policy | S03 | 3w | not measured, it ran serial in the canonical worktree and its wall clock includes several full oracle runs | 2026-09-05 |
 | F-X009 | A standing test for every repository guard | S03 | 3w | not measured, it ran concurrently with the sprint review's remediation and its wall clock includes waiting on that | 2026-09-05 |
 | F-X017 | Close the measured escapes from the wasm linear memory view ban | S04 | 2w | not measured, work overlapped F-013 verification and included repeated full floor runs | 2026-09-06 |
+| F-X018 | Bind sprint review and verification evidence to the current tree | S04 | 1w | not measured, work ran serially during a whole-sprint execution with repeated floor probe and gate runs | 2026-09-06 |

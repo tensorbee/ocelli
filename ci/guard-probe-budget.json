@@ -236,7 +236,7 @@
     "spikes.compare": 6,
     "spikes.extract": 5,
     "split-hld": 5,
-    "sprint-lifecycle": 22,
+    "sprint-lifecycle": 31,
     "sprint-plan": 15,
     "target-features": 6,
     "unsafe": 2
@@ -250,6 +250,6 @@
   },
   "wall_clock_seconds": {
     "deep": 42.0,
-    "floor": 30.1
+    "floor": 37.0
   }
 }

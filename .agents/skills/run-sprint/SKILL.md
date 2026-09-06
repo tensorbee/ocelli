@@ -7,7 +7,7 @@ description: "Run an entire sprint autonomously, design through consolidated ver
 
 Canonical source: `.claude/commands/run-sprint.md`.
 
-Source SHA-256: `08cf60abef407819f579a8af01a8528ceeeb7fd14cfa07f40e3e4f4662d61691`.
+Source SHA-256: `792915243e9a47c820e2b5b3a8c2d7f110c52d2957523f08a9af1025bcc5f084`.
 
 Before acting, read the canonical source completely and follow it using this
 host's available tools. Treat invocation arguments as arguments to that

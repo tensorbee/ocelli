@@ -1,6 +1,6 @@
 # The guard harness
 
-**F-IDs that contributed:** F-X008, F-X009, F-X010, F-X014, F-X015, F-X020
+**F-IDs that contributed:** F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X020
 **Last updated:** 2026-09-06
 
 A guard is any refusal this repository can produce: a script that exits 1, a
@@ -416,6 +416,22 @@ The refusal protects prose the allocation cannot reconstruct. Its standing
 probe inserts a hand-curated paragraph, runs the bare command and requires the
 overwrite refusal. The control runs `--force` and requires success, so a writer
 that refuses every mode cannot satisfy the probe.
+
+### Sprint-close evidence names one tree
+
+`scripts/sprint_workflow.py` records each whole-sprint review and each new
+verification with `git write-tree`. `close-preflight` requires the latest
+sprint review to report no defects or smells and the latest sprint-profile
+verification to pass. Both records must name the current HEAD tree, and the
+working tree must be clean. A later failed verification remains the latest
+result and cannot be hidden behind an earlier pass.
+
+Legacy run state still loads, but missing tree fields are not inferred. The
+close probes exercise legacy state, dirty review counts, stale review and
+verification trees, a failed latest verification, and an index changed after
+evidence was recorded. The accept control supplies clean current evidence in a
+disposable repository. These cases make the review and verification records
+claims about immutable content rather than reusable booleans.
 
 ### Explicit sets and handoff grammar
 

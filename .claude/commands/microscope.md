@@ -25,6 +25,11 @@ naming the F-ID, pass number, and defect, smell and nitpick counts. A rising
 pass count with changing findings is progress. The same finding surviving three
 passes is not, and is worth telling the operator without stopping the loop.
 
+For a whole-sprint pass, stage the reviewed tree and record the pass with
+`python3 scripts/sprint_workflow.py record-sprint-review`. The record includes
+`git write-tree`. A later remediation makes that clean pass stale and requires
+another pass after verification of the new tree.
+
 ## Severity
 
 | Level | Meaning |
