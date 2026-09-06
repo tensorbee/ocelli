@@ -1,6 +1,6 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005
+**F-IDs that contributed:** F-003, F-004, F-005, F-X017
 **Last updated:** 2026-09-06
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
@@ -38,12 +38,17 @@ section 23's "the message is for humans and may change" taken literally.
 
 ## `panic.ts` is the second file permitted a view over linear memory
 
-`eslint.config.js` bans building any typed array or `DataView` over anything
-ending `.memory.buffer`, and `ALLOWED_TO_DISABLE` turns that off through three
-path patterns and not two. The first list is the production allowance,
-`bulk.ts` and `panic.ts`. The second is `packages/core/src/*.test.ts`, kept as
-a separate list precisely so the production allowance does not read as more
-files than the two it grants.
+`eslint.config.js` bans building any standard typed array or `DataView` over a
+receiver whose TypeScript type is `WebAssembly.Memory`. The type-aware rule
+follows parameters, assignments, call results, getters, fields, for-of
+bindings and computed `buffer` access without guessing from identifier names.
+It leaves caller-owned and ordinary `ArrayBuffer` views legal.
+
+`ALLOWED_TO_DISABLE` turns both the typed rule and the remaining buffer-alias
+syntax rule off through three path patterns and not two. The first list is the
+production allowance, `bulk.ts` and `panic.ts`. The second is
+`packages/core/src/*.test.ts`, kept separate so the production allowance does
+not read as more files than the two it grants.
 
 HLD section 17.2 says "outside the two functions that are allowed to do it".
 ESLint scopes overrides by file rather than by function, so the allowance is

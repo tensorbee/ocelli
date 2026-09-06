@@ -8880,24 +8880,22 @@ CONSTANTS: tuple[Constant, ...] = (
                  "takes cargo clippy from 101 to 0 on a crate that denies "
                  "cast_possible_truncation. Dropping a name here is the "
                  "widening no probe can see."),
-    # TWO selectors since the S03 sprint review, and the rename is the point.
-    # The single `NO_CACHED_WASM_VIEW` matched only
-    # `new DataView(wasm.memory.buffer)` and missed the destructured shape
-    # `const { memory } = wasm; new DataView(memory.buffer)`, which is what
-    # `packages/core/src/panic.ts` actually writes. So the rule advertised in
-    # `gate --list` as "the cached-wasm-view ban (HLD 17.2)" was one
-    # destructuring away from silent. Both are recorded, because either one
-    # weakening is a weakening of the ban.
-    Constant("lint-policy", "eslint.config.js", "NO_CACHED_WASM_VIEW_MEMBER",
-             r"^const NO_CACHED_WASM_VIEW_MEMBER = \{\n  selector:\n(.*?)\n  message"),
-    Constant("lint-policy", "eslint.config.js", "NO_CACHED_WASM_VIEW_DESTRUCTURED",
-             r"^const NO_CACHED_WASM_VIEW_DESTRUCTURED = \{\n  selector:\n(.*?)\n  message"),
-    # A THIRD selector since the S03 sprint review's second pass. The two
-    # above are keyed on a view built directly over `wasm.memory.buffer` or
-    # over a destructured `memory`, and both miss an alias: `const mem =
-    # wasm.memory` and `const { buffer } = wasm.memory` escaped them. A view
-    # over the alias is the same hazard, so the third selector is recorded on
-    # the same footing as the other two.
+    # F-X017 replaced two spelling-based view selectors with a type-aware
+    # rule. Record both the constructor set and the whole detection path so a
+    # narrowed type test, lost computed-property route, or removed constructor
+    # lands as a strictness change. The executable node suite proves the
+    # positive and negative semantics in the `lint` gate.
+    Constant("lint-policy", "eslint.config.js", "TYPED_ARRAY_CONSTRUCTORS",
+             r"^const TYPED_ARRAY_CONSTRUCTORS = new Set\(\[(.*?)^\]\);"),
+    Constant("lint-policy", "eslint.config.js", "WASM_VIEW_DETECTION",
+             r"^function memberName\(node\) \{(.*?)^const ocelliPlugin = \{\n"
+             r"  rules: \{ \"no-wasm-memory-view\": noWasmMemoryViewRule \},\n"
+             r"\};"),
+    Constant("lint-policy", "eslint.config.js", "WASM_VIEW_SELF_CHECK",
+             r"^function assertTheBanIsIntact\(config\) \{(.*?)^\}\n\n"
+             r"^const config = tseslint\.config\("),
+    # The syntax half remains for a buffer alias, whose ArrayBuffer type no
+    # longer carries its wasm-memory provenance.
     Constant("lint-policy", "eslint.config.js", "NO_CACHED_WASM_MEMORY_ALIAS",
              r"^const NO_CACHED_WASM_MEMORY_ALIAS = \{\n  selector:\n"
              r"(.*?)\n  message"),
@@ -8905,6 +8903,12 @@ CONSTANTS: tuple[Constant, ...] = (
              r'files: (\["packages/core/src/bulk\.ts".*?\])',
              why="HLD 17.2 says two functions. F-005 widened this from one "
                  "file to two, and a third is not granted."),
+    Constant("lint-policy", "bin/ocelli.sh", "WASM_VIEW_TEST_REGISTRATION",
+             r"^    lint\)(.*?) ;;$",
+             why="The type-aware semantic probes need ignored node_modules "
+                 "and therefore run in the lint gate rather than a disposable "
+                 "catalogue sandbox. Removing their node command must move a "
+                 "recorded strictness value."),
     Constant("nostd", "scripts/no_std_check.py", "EXPECTED_NO_STD_CRATES",
              r"^EXPECTED_NO_STD_CRATES = (frozenset\(\{.*?^\}\))",
              why="Deviation D-09's explicit crate set. Direct comparison "

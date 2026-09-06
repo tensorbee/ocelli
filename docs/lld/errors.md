@@ -4,7 +4,7 @@
 `packages/core/src/{errors,panic,fatal,bulk,ring}.ts`, `ci/error-codes.json`
 **Normative source**: `docs/hld/20-errors-and-panics.md` section 23, with
 `docs/hld/14-the-boundary-in-code.md` sections 17.2, 17.3 and 17.4
-**F-IDs that contributed:** F-005, F-X001
+**F-IDs that contributed:** F-005, F-X001, F-X017
 **Last updated:** 2026-09-06
 
 Living current-state document. It describes what the code does today.
@@ -417,22 +417,22 @@ these numbers to the producer. What is now checked is the arithmetic against
 the layout HLD 17.3 specifies. F-101 lands the Rust side, and a fixture
 generated from it is what closes the other half.
 
-The comment above `RESTRICTED` and `BAN` in `eslint.config.js` carries a
-MEASURED list of shapes that escape the ban, taken with a probe file and
-`npx eslint` rather than reasoned about, along with a fourth selector and the
-one site in `packages/` and `examples/` it would cost. **It is that comment and
-not the one above `NO_CACHED_WASM_VIEW_MEMBER`**, which this paragraph named
-until the seventh review pass. The comment above the first selector carries the
-alias shapes and the third selector and nothing else, so a reader sent there
-finds neither the escape list nor the fourth selector, and a cross-reference
-that lands on the wrong comment in the right file is harder to notice than one
-that lands on the wrong file. **That list is a sample and not the
-set**, and the fourth selector does not close all of it: the S03 review's fifth
-pass measured three further routes and the sixth confirmed that
-`new DataView(wasm.memory["buffer"])` escapes the fourth selector too, because
-it keys on a property name and a computed member's property is a `Literal` with
-none. F-X017 is the story, its answer is type-aware linting rather than a
-config line, and its acceptance test is the computed route.
+F-X017 closes the spelling-based rule's measured escapes with a local
+type-aware ESLint rule. For a typed-array or `DataView` construction it asks
+TypeScript for the type of the receiver whose `buffer` is read and refuses the
+construction when that symbol is `WebAssembly.Memory`. Parameters,
+assignments, call results, getters, renamed fields, for-of bindings and
+computed `memory["buffer"]` access therefore share one path. The rule does not
+ban a `DataView` over `Uint8Array.buffer` or an ordinary `ArrayBuffer`.
+
+The syntax refusal remains for taking wasm memory or its buffer into a
+variable binding. A bare buffer alias has already become `ArrayBuffer`, so its
+wasm provenance is no longer present in the type checker. The constructor
+set, detection path, syntax rule and allowances are recorded strictness
+constants. `scripts/tests/test_eslint_wasm_memory_view.mjs` drives every
+standard view constructor and every measured alias route red, then proves the
+ordinary-buffer and two production-file controls green. The `lint` gate runs
+that suite after `eslint .`.
 
 ## The shell side
 

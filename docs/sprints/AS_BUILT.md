@@ -1542,3 +1542,38 @@ looking as though it had always been right.
   missing CHANGELOG bullet, and the `**CHANGELOG.**` field that F-006 used to
   record a deliberate omission is a convention rather than a check. Two of this
   sprint's seven stories shipped without either.
+
+## F-X017, Type-aware wasm linear-memory view ban, completed 2026-09-06
+
+**What was built.** The TypeScript lint path now identifies a typed-array or
+`DataView` construction from TypeScript types rather than identifier spelling.
+It refuses direct and computed wasm-memory buffers reached through parameters,
+assignments, call results, getters, renamed fields, for-of bindings, and
+renamed constructors.
+
+**HLD sections implemented.** `docs/hld/14-the-boundary-in-code.md` section
+17.2 and `docs/hld/24-agent-code-standards.md` section 27.2 R2.
+**Deviations.** None.
+**Crates / packages modified.** No crate or package source changed. The root
+ESLint configuration, gate runner, CI workflow, guard catalogue and LLD changed.
+**Tests added.** Four unit groups in
+`scripts/tests/test_eslint_wasm_memory_view.mjs`: twelve standard view
+constructors, eight measured alias routes, ordinary-buffer controls, and the
+two production allowance files.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** The feature profile ran all floor gates and the corpus gate
+on 2026-09-06. The commit's hook-generated `Ocelli-Verify` trailer names the
+exact staged tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A (WebGPU): n/a. B (WebGL2 downlevel): n/a. C (CPU): n/a.
+This is a compile-time repository rule.
+**LLD updated.** `docs/lld/errors.md` and
+`docs/lld/typescript-packaging.md`, with both indexed in `docs/lld/README.md`.
+**Deviations from the design plan.** Semantic probes run in the `lint` gate
+because the disposable guard sandbox deliberately lacks ignored
+`node_modules`. CI now invokes the named gate so the semantic command cannot
+be skipped. The corrected write set records both changes.
+**Notes for future sessions.** A buffer already stored in a binding has lost
+its wasm provenance in TypeScript. The retained syntax rule guards that route.
+The two production allowances remain `bulk.ts` and `panic.ts`. A third file
+requires its own reviewed design decision.

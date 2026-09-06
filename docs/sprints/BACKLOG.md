@@ -121,7 +121,7 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-X014 | Y1.9 | S04 | Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing | Build | 2w | F-X009 | pending |
 | F-X015 | Y1.10 | S04 | Execute the skills' worked examples, because the skills gate asserts nothing about their numbers | Build | 1w | F-X009 | pending |
 | F-X016 | Y1.11 | S04 | Try the next adapter when the best candidate cannot open a device, and record what was attempted | Rust | 1w | F-004 | in-progress |
-| F-X017 | Y1.12 | S04 | Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting | Build | 2w | F-005 | pending |
+| F-X017 | Y1.12 | S04 | Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting | Build | 2w | F-005 | done |
 | F-X018 | Y1.13 | S04 | Make close-preflight see the sprint review, and key its verification on the tree it is about | Build | 1w | F-X009 | pending |
 | F-X019 | Y1.14 | S04 | Decide whether a CI step that is not guaranteed to run counts as CI running the gate | Build | 1w | F-X009 | pending |
 | F-X020 | Y1.15 | S04 | Stop gen_sprint_plan.py's write mode silently overwriting a hand-curated SPRINT_PLAN.md | Build | 1w | F-X009 | in-progress |

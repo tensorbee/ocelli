@@ -296,7 +296,7 @@ jobs:
       - run: npm ci
       # Includes the cached-wasm-view ban of HLD 17.2, which is a silent
       # failure mode and therefore a lint rather than a convention.
-      - run: npm run lint
+      - run: bin/ocelli.sh gate lint
       - run: npm run typecheck
       # Story E1.3. tsc proves the TypeScript compiles. This proves what a
       # CONSUMER receives: the tarball carries every path the exports map

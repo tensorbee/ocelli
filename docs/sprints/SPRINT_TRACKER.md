@@ -64,3 +64,4 @@ that has something to put in it.
 | F-X007 | Oracle volume and MPR reference renders | S03 | 3w | not measured, it ran concurrently with F-006 and its wall clock includes several full oracle runs plus one remediation round after the integrator's review | 2026-09-05 |
 | F-011 | Pixel-diff comparator with per-modality tolerance policy | S03 | 3w | not measured, it ran serial in the canonical worktree and its wall clock includes several full oracle runs | 2026-09-05 |
 | F-X009 | A standing test for every repository guard | S03 | 3w | not measured, it ran concurrently with the sprint review's remediation and its wall clock includes waiting on that | 2026-09-05 |
+| F-X017 | Close the measured escapes from the wasm linear memory view ban | S04 | 2w | not measured, work overlapped F-013 verification and included repeated full floor runs | 2026-09-06 |

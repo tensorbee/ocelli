@@ -66,7 +66,7 @@ buffer itself, whose static type has already lost its wasm-memory provenance.
    retaining the buffer-alias syntax refusal. Keep the two production-file and
    test-file allowances exact. Update the self-check so a missing rule,
    weakened severity, surplus allowance, or second enforcement block refuses.
-4. Add guard probes for every measured escape, with the computed
+4. Add executable lint probes for every measured escape, with the computed
    `wasm.memory["buffer"]` route as the acceptance-defining case. Add accept
    controls for `decodeRecord`'s caller-owned `Uint8Array.buffer`, ordinary
    `ArrayBuffer`, and both permitted production functions.
@@ -74,11 +74,15 @@ buffer itself, whose static type has already lost its wasm-memory provenance.
    rule. Run lint and typecheck together so type-information setup cannot pass
    by silently dropping files.
 
-Anticipated implementation write set, exactly:
+Corrected implementation write set:
 
 - `eslint.config.js`
+- `bin/ocelli.sh`
+- `.github/workflows/ci.yml`
 - `scripts/guards/catalogue.py`
+- `scripts/tests/test_eslint_wasm_memory_view.mjs`
 - `ci/guard-probe-budget.json`
+- `docs/lld/README.md`
 - `docs/lld/errors.md`
 - `docs/lld/typescript-packaging.md`
 
@@ -99,12 +103,28 @@ No package or lockfile change is needed. The installed `typescript-eslint` and
 
 | Category | What it proves | Where |
 |----------|----------------|-------|
-| unit | Parameters, computed properties, assignments, call results, getters, renamed fields and `for-of` bindings cannot hide a `WebAssembly.Memory.buffer` view | `scripts/guards/catalogue.py` lint probes |
-| unit | Caller-owned `Uint8Array.buffer` and ordinary buffers remain accepted | guard accept controls and `packages/core/src/errors.ts` under `npm run lint` |
+| unit | Parameters, computed properties, assignments, call results, getters, renamed fields and `for-of` bindings cannot hide a `WebAssembly.Memory.buffer` view | `scripts/tests/test_eslint_wasm_memory_view.mjs` |
+| unit | Caller-owned `Uint8Array.buffer` and ordinary buffers remain accepted | `scripts/tests/test_eslint_wasm_memory_view.mjs` and `packages/core/src/errors.ts` under `npm run lint` |
 | conformance | Every TypeScript workspace file receives type information and the existing type build stays green | `npm run lint` and `npm run typecheck` |
 | mutation | The computed-property escape passes before the rule and fails at the new rule afterwards | guard probe observed on both revisions |
 
 No pixel or geometry arithmetic is added, so no DICOM fixture applies.
+
+## Implementation correction
+
+The executable semantic probes live in the `lint` gate rather than in the
+disposable guard-probe catalogue. Catalogue sandboxes are built from
+`git ls-files`, so they do not contain ignored `node_modules` and cannot load
+ESLint or TypeScript. Treating that prerequisite refusal as a semantic result
+would test an empty set. The catalogue instead ratchets the constructor set,
+the complete type-aware detection path, the remaining syntax rule, and the
+two allowance lists. The `lint` arm runs both `eslint .` and the four
+executable semantic probe groups in sequence.
+
+The first full floor run then refused CI because its frontend job invoked
+`npm run lint` directly and therefore skipped the new second command. CI now
+invokes `bin/ocelli.sh gate lint`, which is the only form that promises to run
+the entire arm as it evolves.
 
 ## Parity surface covered
 

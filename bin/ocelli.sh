@@ -169,7 +169,8 @@ run_gate() {
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_skill_examples_check.py ;;
     lint)        [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
-                 npm run lint ;;
+                 npm run lint &&
+                 node --test scripts/tests/test_eslint_wasm_memory_view.mjs ;;
     types)       [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
                  npm run typecheck ;;
     # No skip. F-002 (E1.2) declared wasm-bindgen in ocelli-wasm, so wasm-pack

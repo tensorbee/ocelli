@@ -5,6 +5,11 @@
       "guard": "lint-policy",
       "tunable": false
     },
+    "bin/ocelli.sh:WASM_VIEW_TEST_REGISTRATION": {
+      "digest": "755606ce4c0517c9",
+      "guard": "lint-policy",
+      "tunable": false
+    },
     "ci/check-device-ownership.sh:CREATORS": {
       "digest": "947444bdc1ce1b8c",
       "guard": "device",
@@ -25,13 +30,18 @@
       "guard": "lint-policy",
       "tunable": false
     },
-    "eslint.config.js:NO_CACHED_WASM_VIEW_DESTRUCTURED": {
-      "digest": "a4095f31e3b24328",
+    "eslint.config.js:TYPED_ARRAY_CONSTRUCTORS": {
+      "digest": "ab6095711f3ed197",
       "guard": "lint-policy",
       "tunable": false
     },
-    "eslint.config.js:NO_CACHED_WASM_VIEW_MEMBER": {
-      "digest": "40eb944c8af3775a",
+    "eslint.config.js:WASM_VIEW_DETECTION": {
+      "digest": "8b9a6a855fdb02d5",
+      "guard": "lint-policy",
+      "tunable": false
+    },
+    "eslint.config.js:WASM_VIEW_SELF_CHECK": {
+      "digest": "33ab26588edf445c",
       "guard": "lint-policy",
       "tunable": false
     },
@@ -166,7 +176,7 @@
       "tunable": false
     }
   },
-  "constants_count": 33,
+  "constants_count": 35,
   "entry_sites": {
     "backlog": 10,
     "bench": 32,
