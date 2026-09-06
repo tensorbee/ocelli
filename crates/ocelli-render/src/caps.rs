@@ -360,26 +360,31 @@ fn device_type_rank(device_type: wgpu::DeviceType) -> u8 {
     }
 }
 
-/// The index of the adapter to resolve against, or `None` if none of them is a
-/// candidate.
+/// Every candidate index in the order device creation must be attempted.
 ///
 /// An A-candidate beats every B-candidate. Within a class the adapter's own
-/// device type breaks the tie, and an earlier adapter wins an exact tie so the
-/// answer does not depend on enumeration order changing under us.
+/// device type breaks the tie, and an earlier adapter wins an exact tie. The
+/// complete order matters because F-X016 tries the next candidate after a
+/// preferred adapter cannot open a device.
 #[must_use]
-pub fn choose_candidate(adapters: &[AdapterFacts]) -> Option<usize> {
-    adapters
+pub fn candidate_order(adapters: &[AdapterFacts]) -> Vec<usize> {
+    let mut ranked: Vec<(usize, Tier, wgpu::DeviceType)> = adapters
         .iter()
         .enumerate()
-        .filter_map(|(index, facts)| facts.candidate_tier().map(|tier| (index, tier, facts)))
-        .max_by_key(|&(index, tier, facts)| {
-            (
-                u8::from(tier == Tier::A),
-                device_type_rank(facts.device_type),
-                core::cmp::Reverse(index),
-            )
+        .filter_map(|(index, facts)| {
+            facts
+                .candidate_tier()
+                .map(|tier| (index, tier, facts.device_type))
         })
-        .map(|(index, _, _)| index)
+        .collect();
+    ranked.sort_by_key(|&(index, tier, device_type)| {
+        (
+            core::cmp::Reverse(u8::from(tier == Tier::A)),
+            core::cmp::Reverse(device_type_rank(device_type)),
+            index,
+        )
+    });
+    ranked.into_iter().map(|(index, _, _)| index).collect()
 }
 
 /// Whether the module can use wasm SIMD128.
@@ -434,14 +439,51 @@ impl SimdSupport {
 /// there is no such line. `sharedMemoryAvailable()` in
 /// `packages/core/src/capabilities.ts` reports it as a diagnostic for the
 /// support surface, which is the only place it belongs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailedAdapter {
+    /// The adapter on which `request_device` failed.
+    pub adapter: AdapterFacts,
+    /// Unstable diagnostic text from wgpu's opaque `RequestDeviceError`.
+    pub reason: String,
+}
+
+/// What startup probing established about device creation.
+///
+/// The opened adapter is carried in the successful variant, so classification
+/// cannot accidentally use an enumerated adapter whose device never opened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProbeOutcome {
+    /// Enumeration produced no candidate adapter.
+    NoAdapter {
+        /// Every adapter the instance offered, candidates or otherwise.
+        adapters_seen: usize,
+    },
+    /// Every candidate was attempted and every request failed.
+    NoDevice {
+        /// Every adapter the instance offered, candidates or otherwise.
+        adapters_seen: usize,
+        /// Failed attempts in candidate preference order.
+        failed: Vec<FailedAdapter>,
+    },
+    /// A device opened and probing stopped on this adapter.
+    Opened {
+        /// Every adapter the instance offered, candidates or otherwise.
+        adapters_seen: usize,
+        /// Failures before the successful attempt, in attempt order.
+        failed: Vec<FailedAdapter>,
+        /// The adapter whose device opened.
+        adapter: AdapterFacts,
+        /// The startup fill-rate measurement, if one could be taken.
+        fill_rate: Option<FillRate>,
+    },
+}
+
+/// Everything the platform told us, gathered by `probe.rs` and read by
+/// [`classify`].
 #[derive(Debug, Clone)]
 pub struct TierSignals {
-    /// Every adapter the instance offered.
-    pub adapters: Vec<AdapterFacts>,
-    /// The startup fill-rate measurement, if one could be taken.
-    pub fill_rate: Option<FillRate>,
-    /// Whether a device was created on the chosen adapter.
-    pub device_created: bool,
+    /// The device-opening state and its per-adapter evidence.
+    pub probe: ProbeOutcome,
     /// What this build can do about SIMD.
     pub simd: SimdSupport,
     /// The recorded bands the measurement is judged against.
@@ -457,9 +499,7 @@ impl TierSignals {
     #[must_use]
     pub fn unprobed() -> Self {
         Self {
-            adapters: Vec::new(),
-            fill_rate: None,
-            device_created: false,
+            probe: ProbeOutcome::NoAdapter { adapters_seen: 0 },
             simd: SimdSupport::build_target(),
             bands: FillRateBands::RECORDED,
         }
@@ -570,6 +610,8 @@ pub struct TierEvidence {
     pub bands: FillRateBands,
     /// Whether a device was created.
     pub device_created: bool,
+    /// Every failed device request before the answer, in attempt order.
+    pub failed_adapters: Vec<FailedAdapter>,
     /// How many adapters the instance offered.
     pub adapters_seen: usize,
     /// What this build can do about SIMD.
@@ -604,17 +646,11 @@ fn cpu_caps() -> Caps {
 ///
 /// 1. **An override of tier C short-circuits everything.** No adapter, no
 ///    device, no benchmark.
-/// 2. **Rank the candidates** and take the best, preferring A over B.
+/// 2. **Rank every candidate**, preferring A over B.
 /// 3. **No candidate resolves tier C**, recorded as `NoAdapter`.
-/// 4. **No device resolves tier C**, recorded as `NoDevice`. What that
-///    records is narrower than "there is no GPU path to be had", and the
-///    narrower statement is the true one: the BEST candidate could not open a
-///    device, and no other adapter was tried. `probe.rs` calls
-///    `request_device` on the single adapter `choose_candidate` returned, so
-///    on a host whose best candidate is a broken Vulkan ICD beside a working
-///    GL driver the answer is tier C while a tier-B path exists and was never
-///    attempted. Trying the next adapter is a design decision for a story
-///    rather than something to add here.
+/// 4. **Try candidates in order until one device opens.** Each failure is
+///    retained with the adapter facts and unstable request error text.
+///    Exhausting all candidates resolves tier C as `NoDevice`.
 /// 5. **The benchmark decides if it decided.** A7: a renderer string is a
 ///    claim, a measured fill rate is a fact. The two hints are recorded and
 ///    not consulted.
@@ -649,6 +685,7 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
                 fill_rate: None,
                 bands: signals.bands,
                 device_created: false,
+                failed_adapters: Vec::new(),
                 adapters_seen: 0,
                 simd: signals.simd,
                 override_outcome: OverrideOutcome::Applied(Tier::Cpu),
@@ -656,16 +693,49 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
         };
     }
 
-    // Step 2.
-    let candidate = choose_candidate(&signals.adapters)
-        .and_then(|index| signals.adapters.get(index))
-        .cloned();
+    // Steps 2 to 4. `probe.rs` owns ranking and device creation. Classification
+    // reads only the adapter whose device actually opened.
+    let (candidate, fill_rate, device_created, adapters_seen, failed_adapters, absence_by) =
+        match &signals.probe {
+            ProbeOutcome::NoAdapter { adapters_seen } => (
+                None,
+                None,
+                false,
+                *adapters_seen,
+                Vec::new(),
+                DecidedBy::NoAdapter,
+            ),
+            ProbeOutcome::NoDevice {
+                adapters_seen,
+                failed,
+            } => (
+                None,
+                None,
+                false,
+                *adapters_seen,
+                failed.clone(),
+                DecidedBy::NoDevice,
+            ),
+            ProbeOutcome::Opened {
+                adapters_seen,
+                failed,
+                adapter,
+                fill_rate,
+            } => (
+                Some(adapter.clone()),
+                *fill_rate,
+                true,
+                *adapters_seen,
+                failed.clone(),
+                DecidedBy::NoAdapter,
+            ),
+        };
     let candidate_tier = candidate.as_ref().and_then(AdapterFacts::candidate_tier);
 
     // Steps 5 and 6's three verdicts, all computed, all recorded, whichever
     // ends up being consulted. The benchmark is step 5 in the procedure above,
     // and step 4 is the device check below.
-    let benchmark = signals.fill_rate.map_or(SoftwareVerdict::Unknown, |rate| {
+    let benchmark = fill_rate.map_or(SoftwareVerdict::Unknown, |rate| {
         rate.verdict(&signals.bands)
     });
     let adapter_type = candidate
@@ -682,8 +752,7 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
 
     // Steps 3 to 7.
     let (measured_tier, measured_by) = match candidate_tier {
-        None => (Tier::Cpu, DecidedBy::NoAdapter),
-        Some(_) if !signals.device_created => (Tier::Cpu, DecidedBy::NoDevice),
+        None => (Tier::Cpu, absence_by),
         Some(tier) => match (benchmark, adapter_type, renderer_string) {
             (SoftwareVerdict::Hardware, _, _) => (tier, DecidedBy::Benchmark),
             (SoftwareVerdict::Software, _, _) => (Tier::Cpu, DecidedBy::Benchmark),
@@ -702,12 +771,9 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
         },
     };
 
-    // Step 8. Tier A needs an A-candidate anywhere in the list, and ranking
-    // already guarantees that the chosen candidate is that A-candidate.
-    let has_a_candidate = signals
-        .adapters
-        .iter()
-        .any(|facts| facts.candidate_tier() == Some(Tier::A));
+    // Step 8. Constructibility is a property of the adapter whose device
+    // opened. A failed A candidate cannot make tier A constructible after a B
+    // adapter opens.
     let (tier, decided_by, override_outcome) = match request {
         TierRequest::Auto => (measured_tier, measured_by, OverrideOutcome::NotRequested),
         TierRequest::Unrecognised => (
@@ -723,17 +789,10 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
             DecidedBy::Override,
             OverrideOutcome::Applied(Tier::Cpu),
         ),
-        // `has_a_candidate` alone is NOT enough, and the S03 sprint review
-        // found that it was being used alone. An adapter appearing in the
-        // enumeration says a tier-A adapter EXISTS, and `device_created` says
-        // one could actually be opened. The measured path already refuses a
-        // GPU tier without a device, at `DecidedBy::NoDevice`, and the
-        // override bypassed that: `OCELLI_TIER=a` on a host where no device
-        // could be created returned tier A with `Applied(A)`, against this
-        // step's own promise that an override is clamped to what is
-        // constructible. `RefusedUnconstructible` already existed for exactly
-        // this and was unreachable on this path.
-        TierRequest::Requested(Tier::A) if has_a_candidate && signals.device_created => (
+        // Only the adapter whose device opened establishes constructibility.
+        // A failed A candidate retained in the diagnostic evidence cannot
+        // make tier A constructible after a B adapter opens.
+        TierRequest::Requested(Tier::A) if candidate_tier == Some(Tier::A) && device_created => (
             Tier::A,
             DecidedBy::Override,
             OverrideOutcome::Applied(Tier::A),
@@ -746,10 +805,9 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
         // Same clamp, same reason. Forcing tier B onto an adapter the evidence
         // called software stays allowed, because that is how a misdetection
         // gets diagnosed on the estate it happens on. Forcing it where no
-        // device could be created is a different thing and is refused, because
-        // there is nothing to run it on: the one adapter that was tried could
-        // not open a device.
-        TierRequest::Requested(Tier::B) if candidate_tier.is_some() && signals.device_created => (
+        // device could be created is a different thing and is refused because
+        // there is nothing to run it on.
+        TierRequest::Requested(Tier::B) if candidate_tier.is_some() && device_created => (
             Tier::B,
             DecidedBy::Override,
             OverrideOutcome::Applied(Tier::B),
@@ -785,16 +843,17 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
         evidence: TierEvidence {
             decided_by,
             measured_tier: Some(measured_tier),
-            adapters_seen: signals.adapters.len(),
+            adapters_seen,
             candidate,
             candidate_tier,
             benchmark,
             adapter_type,
             renderer_string,
             matched_renderer_string,
-            fill_rate: signals.fill_rate,
+            fill_rate,
             bands: signals.bands,
-            device_created: signals.device_created,
+            device_created,
+            failed_adapters,
             simd: signals.simd,
             override_outcome,
         },
@@ -899,9 +958,9 @@ mod tests {
 #[cfg(test)]
 mod detection_tests {
     use super::{
-        AdapterFacts, Caps, DecidedBy, FillRate, FillRateBands, OverrideOutcome,
-        SOFTWARE_RENDERER_STRINGS, SimdSupport, SoftwareVerdict, Tier, TierRequest, TierSignals,
-        choose_candidate, classify,
+        AdapterFacts, Caps, DecidedBy, FailedAdapter, FillRate, FillRateBands, OverrideOutcome,
+        ProbeOutcome, SOFTWARE_RENDERER_STRINGS, SimdSupport, SoftwareVerdict, Tier, TierRequest,
+        TierSignals, candidate_order, classify,
     };
 
     /// The bands the arithmetic tests use, and deliberately NOT the recorded
@@ -955,12 +1014,24 @@ mod detection_tests {
         )
     }
 
+    fn first_candidate(adapters: &[AdapterFacts]) -> Option<usize> {
+        candidate_order(adapters).into_iter().next()
+    }
+
     fn signals(adapters: Vec<AdapterFacts>, fill_rate: Option<FillRate>) -> TierSignals {
-        let device_created = !adapters.is_empty();
+        let adapters_seen = adapters.len();
+        let probe = first_candidate(&adapters)
+            .and_then(|index| adapters.get(index))
+            .map_or(ProbeOutcome::NoAdapter { adapters_seen }, |adapter| {
+                ProbeOutcome::Opened {
+                    adapters_seen,
+                    failed: Vec::new(),
+                    adapter: adapter.clone(),
+                    fill_rate,
+                }
+            });
         TierSignals {
-            adapters,
-            fill_rate,
-            device_created,
+            probe,
             simd: SimdSupport::NotApplicable,
             bands: TEST_BANDS,
         }
@@ -1111,7 +1182,148 @@ mod detection_tests {
     #[test]
     fn an_a_candidate_is_preferred_to_a_b_candidate() {
         let adapters = vec![integrated_gl(), discrete_webgpu()];
-        assert_eq!(choose_candidate(&adapters), Some(1));
+        assert_eq!(first_candidate(&adapters), Some(1));
+    }
+
+    /// F-X016's full fallback order, not only its first element.
+    ///
+    /// The A candidates come first even when the B candidate reports a more
+    /// preferable device type. Within the A class, discrete beats integrated.
+    /// The two exact B ties retain enumeration order. `Backend::Noop` is not
+    /// present in the result at all.
+    #[test]
+    fn candidate_indices_are_ordered_for_fallback() {
+        let mut a_integrated = discrete_webgpu();
+        a_integrated.device_type = wgpu::DeviceType::IntegratedGpu;
+        let mut b_discrete = integrated_gl();
+        b_discrete.device_type = wgpu::DeviceType::DiscreteGpu;
+        let b_first = integrated_gl();
+        let b_second = integrated_gl();
+        let noop = facts(
+            wgpu::Backend::Noop,
+            wgpu::DeviceType::DiscreteGpu,
+            "noop",
+            true,
+        );
+        let adapters = vec![
+            b_first,
+            a_integrated,
+            noop,
+            discrete_webgpu(),
+            b_discrete,
+            b_second,
+        ];
+
+        assert_eq!(candidate_order(&adapters), vec![3, 1, 4, 0, 5]);
+    }
+
+    fn opened_after_failure(opened: AdapterFacts, fill_rate: Option<FillRate>) -> TierSignals {
+        TierSignals {
+            probe: ProbeOutcome::Opened {
+                adapters_seen: 2,
+                failed: vec![FailedAdapter {
+                    adapter: discrete_webgpu(),
+                    reason: "Vulkan device creation failed".to_owned(),
+                }],
+                adapter: opened,
+                fill_rate,
+            },
+            simd: SimdSupport::NotApplicable,
+            bands: TEST_BANDS,
+        }
+    }
+
+    /// A failed A candidate is evidence, not a constructible tier. The device
+    /// that actually opened is B, so auto resolves B, an A override is
+    /// refused, and a B override is applied.
+    #[test]
+    fn a_failed_a_followed_by_an_opened_b_clamps_overrides_to_the_opened_adapter() {
+        let signals = opened_after_failure(integrated_gl(), None);
+
+        let automatic = classify(&signals, TierRequest::Auto);
+        assert_eq!(automatic.caps.tier, Tier::B);
+        assert_eq!(automatic.evidence.failed_adapters.len(), 1);
+        assert_eq!(
+            automatic
+                .evidence
+                .failed_adapters
+                .first()
+                .map(|failed| failed.adapter.backend),
+            Some(wgpu::Backend::Vulkan)
+        );
+
+        let forced_a = classify(&signals, TierRequest::Requested(Tier::A));
+        assert_eq!(forced_a.caps.tier, Tier::B);
+        assert_eq!(
+            forced_a.evidence.override_outcome,
+            super::OverrideOutcome::RefusedUnconstructible(Tier::A)
+        );
+
+        let forced_b = classify(&signals, TierRequest::Requested(Tier::B));
+        assert_eq!(forced_b.caps.tier, Tier::B);
+        assert_eq!(
+            forced_b.evidence.override_outcome,
+            super::OverrideOutcome::Applied(Tier::B)
+        );
+    }
+
+    /// `NoDevice` now means every ranked candidate was attempted. Both failed
+    /// adapter identities and their diagnostic reasons survive into evidence.
+    #[test]
+    fn all_failed_candidates_resolve_no_device_with_every_attempt_recorded() {
+        let signals = TierSignals {
+            probe: ProbeOutcome::NoDevice {
+                adapters_seen: 3,
+                failed: vec![
+                    FailedAdapter {
+                        adapter: discrete_webgpu(),
+                        reason: "first failure".to_owned(),
+                    },
+                    FailedAdapter {
+                        adapter: integrated_gl(),
+                        reason: "second failure".to_owned(),
+                    },
+                ],
+            },
+            simd: SimdSupport::NotApplicable,
+            bands: TEST_BANDS,
+        };
+
+        let resolved = classify(&signals, TierRequest::Auto);
+        assert_eq!(resolved.caps.tier, Tier::Cpu);
+        assert_eq!(resolved.evidence.decided_by, super::DecidedBy::NoDevice);
+        assert_eq!(resolved.evidence.adapters_seen, 3);
+        assert_eq!(resolved.evidence.failed_adapters.len(), 2);
+        assert_eq!(
+            resolved
+                .evidence
+                .failed_adapters
+                .first()
+                .map(|failed| failed.reason.as_str()),
+            Some("first failure")
+        );
+        assert_eq!(
+            resolved
+                .evidence
+                .failed_adapters
+                .get(1)
+                .map(|failed| failed.reason.as_str()),
+            Some("second failure")
+        );
+    }
+
+    /// Device creation ends the fallback loop. The existing A7 evidence rule
+    /// then decides whether that opened adapter is software.
+    #[test]
+    fn a_successful_adapter_classified_as_software_resolves_cpu() {
+        let resolved = classify(
+            &opened_after_failure(integrated_gl(), Some(at_software_ceiling())),
+            TierRequest::Auto,
+        );
+        assert_eq!(resolved.caps.tier, Tier::Cpu);
+        assert_eq!(resolved.evidence.decided_by, super::DecidedBy::Benchmark);
+        assert_eq!(resolved.evidence.failed_adapters.len(), 1);
+        assert!(resolved.evidence.device_created);
     }
 
     /// Within a class, a discrete GPU beats an integrated one.
@@ -1126,7 +1338,7 @@ mod detection_tests {
             ),
             discrete_webgpu(),
         ];
-        assert_eq!(choose_candidate(&adapters), Some(1));
+        assert_eq!(first_candidate(&adapters), Some(1));
     }
 
     /// The device-type preference order, best first.
@@ -1165,12 +1377,12 @@ mod detection_tests {
                 let good = facts(wgpu::Backend::Vulkan, better, "better", false);
                 let bad = facts(wgpu::Backend::Vulkan, worse, "worse", false);
                 assert_eq!(
-                    choose_candidate(&[good.clone(), bad.clone()]),
+                    first_candidate(&[good.clone(), bad.clone()]),
                     Some(0),
                     "{better:?} listed first lost to {worse:?}"
                 );
                 assert_eq!(
-                    choose_candidate(&[bad, good]),
+                    first_candidate(&[bad, good]),
                     Some(1),
                     "{better:?} listed second lost to {worse:?}"
                 );
@@ -1236,7 +1448,7 @@ mod detection_tests {
         second.name = "Second Adapter".to_owned();
         second.max_tex_3d = 8192;
 
-        assert_eq!(choose_candidate(&[first.clone(), second.clone()]), Some(0));
+        assert_eq!(first_candidate(&[first.clone(), second.clone()]), Some(0));
         let resolved = classify(&signals(vec![first, second], None), TierRequest::Auto);
         assert_eq!(resolved.caps.max_tex_3d, 4096);
         assert_eq!(
@@ -1255,7 +1467,7 @@ mod detection_tests {
             "noop",
             true,
         )];
-        assert_eq!(choose_candidate(&adapters), None);
+        assert_eq!(first_candidate(&adapters), None);
     }
 
     /// A backend that could serve tier A, without compute shaders, is a
@@ -1386,17 +1598,25 @@ mod detection_tests {
         assert_eq!(resolved.evidence.decided_by, DecidedBy::NoAdapter);
     }
 
-    /// An adapter was found and no device could be created on it. `probe.rs`
-    /// tries exactly one adapter, the best candidate, so the answer is tier C
-    /// and it is recorded as `NoDevice` rather than as `NoAdapter`, because
-    /// the two are different diagnoses.
+    /// Every candidate was tried and no device could be created. The answer is
+    /// tier C and is recorded as `NoDevice`, with the failed attempt retained.
     #[test]
     fn a_device_that_could_not_be_created_resolves_cpu() {
-        let mut signals = signals(vec![discrete_webgpu()], None);
-        signals.device_created = false;
+        let signals = TierSignals {
+            probe: ProbeOutcome::NoDevice {
+                adapters_seen: 1,
+                failed: vec![FailedAdapter {
+                    adapter: discrete_webgpu(),
+                    reason: "device request failed".to_owned(),
+                }],
+            },
+            simd: SimdSupport::NotApplicable,
+            bands: TEST_BANDS,
+        };
         let resolved = classify(&signals, TierRequest::Auto);
         assert_eq!(resolved.caps.tier, Tier::Cpu);
         assert_eq!(resolved.evidence.decided_by, DecidedBy::NoDevice);
+        assert_eq!(resolved.evidence.failed_adapters.len(), 1);
     }
 
     /// `DeviceType::Cpu` is the adapter saying so itself. No benchmark ran, so
