@@ -299,6 +299,30 @@ def _oversize_wasm(box: Sandbox) -> None:
     box.write("ci/wasm-size-budget.json",
               json.dumps({"bytes": 1000, "tolerance": 0.05}, indent=2) + "\n")
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 4096)
+    _write_packaged_licences(box)
+
+
+def _write_packaged_licences(box: Sandbox, *, omit: str = "") -> None:
+    for name in ("LICENSE-MIT", "LICENSE-APACHE"):
+        if name != omit:
+            box.write(f"crates/ocelli-wasm/pkg/{name}",
+                      (box.path / name).read_bytes())
+
+
+def _missing_packaged_apache_licence(box: Sandbox) -> None:
+    box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
+    _write_packaged_licences(box, omit="LICENSE-APACHE")
+
+
+def _symlinked_packaged_apache_licence(box: Sandbox) -> None:
+    box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
+    _write_packaged_licences(box, omit="LICENSE-APACHE")
+    packaged = box.path / "crates/ocelli-wasm/pkg/LICENSE-APACHE"
+    packaged.symlink_to("../../../LICENSE-APACHE")
+
+
+def _stale_operational_parity_target(box: Sandbox) -> None:
+    box.substitute(".claude/commands/parity.md", "5.8.2", "5.8.9")
 
 
 def _corpus_two_rows(box: Sandbox, digests: tuple[str, str],
@@ -4539,12 +4563,16 @@ GUARDS: tuple[Guard, ...] = (
     Guard(
         id="pins",
         file="scripts/pin_and_size_check.py",
-        gate="pins",
-        spec="HLD 15.2 and 27.2 R4, and story E1.2 for the ceiling",
+        gate="pins wasm",
+        spec="HLD 15.2 and 27.2 R4, story E1.2 for the ceiling, and "
+             "deviation D-11 for the operational parity target",
         refuses="A range where the specification requires an exact `=` pin, "
                 "an `=` in front of a partial version or a second comparator "
                 "after it, a pinned crate that has left the workspace table, "
-                "and a wasm module over its recorded ceiling.",
+                "a wasm module over its recorded ceiling, an operational "
+                "parity consumer naming a target other than 5.8.2, and a "
+                "generated wasm package missing either regular, "
+                "byte-identical dual-licence grant.",
         claims=("*",),
         probes=(
             Probe("pins.range", _relax_wgpu_pin,
@@ -4571,6 +4599,32 @@ GUARDS: tuple[Guard, ...] = (
                   note="Story E1.2's ceiling arithmetic, watched in the floor "
                        "with no wasm-pack. The probe writes a module of a "
                        "known length and a small recorded baseline."),
+            Probe("pins.package-licence-absent",
+                  _missing_packaged_apache_licence,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--with-size"),
+                  "LICENSE-APACHE is absent",
+                  note="F-X008. The workspace's `MIT OR Apache-2.0` choice "
+                       "requires both grants in the package. The probe keeps "
+                       "the wasm under budget and packages the MIT grant, so "
+                       "only the absent Apache grant can satisfy it."),
+            Probe("pins.package-licence-symlink",
+                  _symlinked_packaged_apache_licence,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--with-size"),
+                  "LICENSE-APACHE is a symlink, not a regular file",
+                  note="F-X008. The symlink resolves to the correct "
+                       "repository grant, so only accepting a link in place "
+                       "of package-owned licence bytes can satisfy it."),
+            Probe("pins.stale-operational-parity",
+                  _stale_operational_parity_target,
+                  script("node", "--test", "tools/oracle/tests/pins_test.mjs"),
+                  "does not name the oracle pin",
+                  note="F-X008 and D-11. The executable authority remains "
+                       "the exact 5.8.2 dependency pin. The rejected command "
+                       "claims 5.8.9 while the generator remains correct, so "
+                       "the test must read each operational consumer rather "
+                       "than merely finding 5.8.2 somewhere in the tree."),
             Probe("pins.table-form", _reorder_wgpu_table,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "pinned exactly",
@@ -8477,6 +8531,10 @@ CONSTANTS: tuple[Constant, ...] = (
                  "repository distrusts."),
     Constant("pins", "scripts/pin_and_size_check.py", "EXACT_PINNED",
              r"^EXACT_PINNED = \{(.*?)^\}"),
+    Constant("pins", "scripts/pin_and_size_check.py", "PACKAGE_LICENCES",
+             r"^PACKAGE_LICENCES = (\(.*?\))$",
+             why="Both grants required by `MIT OR Apache-2.0`. Narrowing the "
+                 "tuple would make a package with only one grant pass."),
     Constant("pins", "scripts/pin_and_size_check.py", "TOLERANCE",
              r"^TOLERANCE = (.*?)$", tunable=True,
              why="Growth tolerated before the size gate fails. A story that "

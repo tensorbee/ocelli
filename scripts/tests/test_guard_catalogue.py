@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -28,6 +29,106 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from guards import census, discover, sandbox  # noqa: E402
 from guards.catalogue import (CONSTANTS, DEFECTS, DICOM_FIXTURE,  # noqa: E402
                               GUARDS)
+
+
+class SandboxCopyPreservesTrackedShape(unittest.TestCase):
+    def test_a_relative_symlink_stays_a_relative_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            destination_root = root / "sandbox"
+            repository.mkdir()
+            destination_root.mkdir()
+            (repository / "LICENSE-MIT").write_text("grant\n", encoding="utf-8")
+            source = repository / "crates" / "ocelli-wasm" / "LICENSE-MIT"
+            source.parent.mkdir(parents=True)
+            source.symlink_to("../../LICENSE-MIT")
+            destination = destination_root / "crates" / "ocelli-wasm" / "LICENSE-MIT"
+
+            sandbox.copy_tracked_path(
+                source,
+                destination,
+                source_root=repository,
+                destination_root=destination_root,
+            )
+
+            self.assertTrue(destination.is_symlink())
+            self.assertEqual(destination.readlink(), Path("../../LICENSE-MIT"))
+
+    def test_an_absolute_symlink_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            destination_root = root / "sandbox"
+            source = repository / "absolute-link"
+            repository.mkdir()
+            destination_root.mkdir()
+            source.symlink_to(root / "outside")
+
+            with self.assertRaisesRegex(
+                    sandbox.SandboxError, "absolute symlink"):
+                sandbox.copy_tracked_path(
+                    source,
+                    destination_root / "absolute-link",
+                    source_root=repository,
+                    destination_root=destination_root,
+                )
+
+    def test_a_relative_symlink_escaping_only_the_source_root_is_refused(
+            self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            destination_root = root / "sandbox"
+            destination_root.mkdir()
+            source = repository / "nested" / "escaping-link"
+            source.parent.mkdir(parents=True)
+            source.symlink_to("../../outside")
+
+            with self.assertRaisesRegex(
+                    sandbox.SandboxError, "escapes"):
+                sandbox.copy_tracked_path(
+                    source,
+                    destination_root / "nested" / "deeper" / "escaping-link",
+                    source_root=repository,
+                    destination_root=destination_root,
+                )
+
+    def test_a_relative_symlink_escaping_only_the_destination_root_is_refused(
+            self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = root / "repository"
+            destination_root = root / "sandbox"
+            destination_root.mkdir()
+            source = repository / "nested" / "deeper" / "escaping-link"
+            source.parent.mkdir(parents=True)
+            source.symlink_to("../../outside")
+
+            with self.assertRaisesRegex(
+                    sandbox.SandboxError, "escapes"):
+                sandbox.copy_tracked_path(
+                    source,
+                    destination_root / "nested" / "escaping-link",
+                    source_root=repository,
+                    destination_root=destination_root,
+                )
+
+    def test_an_unrepresentable_shape_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "tracked-directory"
+            source.mkdir()
+
+            with self.assertRaisesRegex(
+                    sandbox.SandboxError,
+                    "neither a regular file nor a symlink"):
+                sandbox.copy_tracked_path(
+                    source,
+                    root / "copy",
+                    source_root=root,
+                    destination_root=root,
+                )
 
 
 class CatalogueIsWellFormed(unittest.TestCase):

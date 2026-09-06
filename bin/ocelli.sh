@@ -175,7 +175,10 @@ run_gate() {
     # before the boundary does, because wasm-pack refuses a crate without one.
     #
     # Chained on `&&` for the reason the backlog arm gives.
-    wasm)        "$0" wasm && python3 scripts/pin_and_size_check.py --with-size ;;
+    wasm)        "$0" wasm &&
+                 python3 scripts/pin_and_size_check.py --with-size &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_pin_and_size_check.py ;;
     native)      "$0" native ;;
     device)      ci/check-device-ownership.sh ;;
     ci)          python3 scripts/ci_floor_check.py ;;

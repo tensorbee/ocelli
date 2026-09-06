@@ -80,6 +80,11 @@
       "guard": "pins",
       "tunable": false
     },
+    "scripts/pin_and_size_check.py:PACKAGE_LICENCES": {
+      "digest": "bdb887fe9cd6c708",
+      "guard": "pins",
+      "tunable": false
+    },
     "scripts/pin_and_size_check.py:TOLERANCE": {
       "digest": "0602d7c813c1f6e7",
       "guard": "pins",
@@ -161,7 +166,7 @@
       "tunable": false
     }
   },
-  "constants_count": 32,
+  "constants_count": 33,
   "entry_sites": {
     "backlog": 10,
     "bench": 32,
@@ -206,13 +211,13 @@
     "oracle.volume": 31,
     "packages": 21,
     "panic-probe": 1,
-    "pins": 10,
+    "pins": 14,
     "populate-corpus": 10,
     "probe-runner": 20,
     "prose": 3,
     "provenance": 4,
     "runner": 1,
-    "sandbox": 10,
+    "sandbox": 13,
     "skills": 10,
     "source-dir": 2,
     "spikes.a1": 3,

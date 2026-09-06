@@ -1,6 +1,6 @@
 # The oracle, reference half
 
-**F-IDs that contributed:** F-010, F-X006, F-X007, F-X009
+**F-IDs that contributed:** F-010, F-X006, F-X007, F-X008, F-X009
 **Last updated:** 2026-09-06
 
 HLD section 11 names cornerstone3D as the reference the differential harness
@@ -74,6 +74,17 @@ that drifts is not an oracle.**
 
 The pin is 5.8.2 and not Appendix B's v5.8.9, which does not exist. That is
 deviation **D-11** and the reasoning is there, not repeated here.
+
+The executable authority for that effective target is the exact dependency
+set in `tools/oracle/package.json`. Three operational consumers repeat it.
+`.claude/commands/parity.md` tells contributors what parity means. The
+PREAMBLE in `scripts/gen_sprint_plan.py` supplies the target when bootstrapping
+a sprint plan. `docs/sprints/SPRINT_PLAN.md` is the live, hand-curated plan and
+has an independent lifecycle after F-X020. `tools/oracle/tests/pins_test.mjs`
+reads all three files and requires both the exact `5.8.2` claim and the D-11
+explanation. Historical HLD, deviation and release-diagnostic prose may still
+name v5.8.9 while explaining why it is unavailable. It is not an operational
+target.
 
 `metadata` and `utils` are peer dependencies of `core`, so leaving them to
 resolve themselves would leave part of the reference unpinned. The stack page's
