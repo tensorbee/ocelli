@@ -106,25 +106,25 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-010 | E2.2 | S02 | Headless cornerstone3D reference renderer | Test | 4w | F-009 | done |
 | F-011 | E2.3 | S03 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w | F-010 | done |
 | F-012 | E2.4 | S04 | CI gate: every PR renders the full corpus | Test | 3w | F-011 | pending |
-| F-013 | E2.5 | S04 | Metadata diff harness (LUT values, geometry, spacing) | Test | 2w | F-011 | pending |
+| F-013 | E2.5 | S04 | Metadata diff harness (LUT values, geometry, spacing) | Test | 2w | F-011 | done |
 | F-014 | E2.6 | S05 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | F-012 | pending |
-| F-015 | E2.7 | S04 | Stable render-hash emission from the comparator | Test | 2w | F-011 | in-progress |
-| F-X001 | X1.1 | S04 | Tier C, software-adapter detection, and the feature-availability contract | Rust | 4w | F-004 | in-progress |
+| F-015 | E2.7 | S04 | Stable render-hash emission from the comparator | Test | 2w | F-011 | done |
+| F-X001 | X1.1 | S04 | Tier C, software-adapter detection, and the feature-availability contract | Rust | 4w | F-004 | done |
 | F-X006 | Y1.1 | S03 | Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders | Test | 3w | F-009 | done |
 | F-X007 | Y1.2 | S03 | Oracle volume and MPR reference renders, so the spacing rows are asked something | Test | 3w | F-010 | done |
-| F-X008 | Y1.3 | S04 | One parity-target version string, and a licence in the published wasm package | Build | 1w | F-010 | in-progress |
+| F-X008 | Y1.3 | S04 | One parity-target version string, and a licence in the published wasm package | Build | 1w | F-010 | done |
 | F-X009 | Y1.4 | S03 | A standing test for every repository guard, not a mutation run once at authoring time | Build | 3w | F-010 | done |
-| F-X010 | Y1.5 | S04 | CI floor equivalence, and the identical --sprint and --all gate profiles | Build | 2w | F-010 | pending |
+| F-X010 | Y1.5 | S04 | CI floor equivalence, and the identical --sprint and --all gate profiles | Build | 2w | F-010 | done |
 | F-X011 | Y1.6 | S04 | Cross-machine reference determinism, and what the oracle claims about it | Test | 2w | F-010 | pending |
-| F-X012 | Y1.7 | S04 | The reference's own SIGMOID width divergence, and what D14's bound says about it | Test | 2w | F-010 | in-progress |
-| F-X013 | Y1.8 | S04 | Price the HTJ2K decoder route after gate A1 failed | Test | 3w | F-X006 | in-progress |
-| F-X014 | Y1.9 | S04 | Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing | Build | 2w | F-X009 | pending |
-| F-X015 | Y1.10 | S04 | Execute the skills' worked examples, because the skills gate asserts nothing about their numbers | Build | 1w | F-X009 | pending |
-| F-X016 | Y1.11 | S04 | Try the next adapter when the best candidate cannot open a device, and record what was attempted | Rust | 1w | F-004 | in-progress |
+| F-X012 | Y1.7 | S04 | The reference's own SIGMOID width divergence, and what D14's bound says about it | Test | 2w | F-010 | done |
+| F-X013 | Y1.8 | S04 | Price the HTJ2K decoder route after gate A1 failed | Test | 3w | F-X006 | done |
+| F-X014 | Y1.9 | S04 | Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing | Build | 2w | F-X009 | done |
+| F-X015 | Y1.10 | S04 | Execute the skills' worked examples, because the skills gate asserts nothing about their numbers | Build | 1w | F-X009 | done |
+| F-X016 | Y1.11 | S04 | Try the next adapter when the best candidate cannot open a device, and record what was attempted | Rust | 1w | F-004 | done |
 | F-X017 | Y1.12 | S04 | Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting | Build | 2w | F-005 | done |
 | F-X018 | Y1.13 | S04 | Make close-preflight see the sprint review, and key its verification on the tree it is about | Build | 1w | F-X009 | done |
 | F-X019 | Y1.14 | S04 | Decide whether a CI step that is not guaranteed to run counts as CI running the gate | Build | 1w | F-X009 | done |
-| F-X020 | Y1.15 | S04 | Stop gen_sprint_plan.py's write mode silently overwriting a hand-curated SPRINT_PLAN.md | Build | 1w | F-X009 | in-progress |
+| F-X020 | Y1.15 | S04 | Stop gen_sprint_plan.py's write mode silently overwriting a hand-curated SPRINT_PLAN.md | Build | 1w | F-X009 | done |
 
 ### M2, DICOM ingest and the pixel pipeline
 

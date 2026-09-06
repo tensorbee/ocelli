@@ -107,6 +107,19 @@ Three more, each specific:
   is stable and says nothing. It must change when the pixels change, and the
   proof of that is a mutation observed red, not an argument.
 
+## Carried forward from S04
+
+- **F-012** remains pending because Ocelli does not yet have the candidate
+  renderer that the per-pull-request differential gate would execute. Building
+  a gate around only the reference would claim comparison coverage while
+  comparing nothing. Resume it when the candidate render path exists.
+- **F-X011** remains pending because its acceptance evidence requires a second
+  physical machine and none is available. Resume it when that independent host
+  can run the recorded determinism procedure.
+
+These are explicit carry-forwards, not completed stories. Their backlog rows
+remain pending.
+
 ## What done means
 
 - **F-012** fails a pull request when a comparison fails AND when coverage
@@ -126,9 +139,8 @@ Three more, each specific:
 - **F-X014** closes G-02 and G-04 by making their declared-defect probes start
   passing, and the census's uncovered count goes DOWN. The ratchet fails until
   each declaration is removed in the same change that closes it.
-- **F-X019** decides one question: whether the right-hand side of `&&` counts
-  as CI running a gate. Its acceptance test is already written and asserts the
-  hole is still open, so it goes red when the story closes.
+- **F-X019** requires a gate on the right-hand side of `&&` either to run or to
+  leave the step red when an earlier command prevents it from running.
 
 ## Dependency order
 
