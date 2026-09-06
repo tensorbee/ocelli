@@ -522,6 +522,15 @@ def _sprint_plan_absent(box: Sandbox) -> None:
     box.delete("docs/sprints/SPRINT_PLAN.md")
 
 
+def _sprint_plan_hand_curated(box: Sandbox) -> None:
+    """Give the bare writer content it must refuse rather than replace."""
+    box.substitute(
+        "docs/sprints/SPRINT_PLAN.md",
+        "# Sprint Plan\n",
+        "# Sprint Plan\n\nA hand-curated paragraph the generator cannot recover.\n",
+    )
+
+
 def _sprint_plan_wrong_estimate(box: Sandbox) -> None:
     """Change one sprint-table row's estimate and leave the backlog alone.
 
@@ -6299,16 +6308,28 @@ GUARDS: tuple[Guard, ...] = (
         id="sprint-plan",
         file="scripts/gen_sprint_plan.py",
         gate="backlog",
-        spec="`.claude/WORKFLOW.md`, the sprint plan is derived and not "
-             "hand-maintained",
+        spec="`.claude/WORKFLOW.md`, the sprint roadmap is hand-curated after "
+             "bootstrap",
         refuses="A sprint plan that disagrees with the backlog about which "
                 "sprint a story is in or how large it is, a story planned "
                 "into two sprint tables at once, a generated milestone "
                 "summary or goal line that has drifted from the allocation it "
                 "is written from or that is absent, duplicated or spurious, "
-                "and an absent plan.",
+                "an absent plan, and a bare write that would replace an "
+                "existing hand-curated plan.",
         claims=("*",),
         probes=(
+            Probe("sprint-plan.existing-refuses-write",
+                  _sprint_plan_hand_curated,
+                  script("python3", "scripts/gen_sprint_plan.py"),
+                  "refuses to overwrite",
+                  control=script("python3", "scripts/gen_sprint_plan.py",
+                                 "--force"),
+                  note="F-X020. The rejected state differs from the control "
+                       "only in authority: the bare command has none to "
+                       "replace a file, while --force is explicit. The "
+                       "marker paragraph cannot be reconstructed from "
+                       "allocation.json, so a writer that runs destroys it."),
             Probe("sprint-plan.two-sprint-tables",
                   _sprint_plan_row_in_two_sprints,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),

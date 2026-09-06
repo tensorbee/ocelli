@@ -1,6 +1,6 @@
 # The guard harness
 
-**F-IDs that contributed:** F-X009
+**F-IDs that contributed:** F-X009, F-X020
 **Last updated:** 2026-09-06
 
 A guard is any refusal this repository can produce: a script that exits 1, a
@@ -385,6 +385,19 @@ the same change. That puts the widening in the diff and in front of a reviewer
 rather than in a refactor nobody reads. A recorded value that no longer parses
 also fails, because a constant the ratchet cannot read is a ratchet that has
 quietly stopped holding.
+
+### The sprint-plan writer is bootstrap-only
+
+`scripts/gen_sprint_plan.py --check` verifies the structured rows, milestone
+summaries and goals in the hand-curated sprint plan. The bare command creates
+that plan only when it is absent. Once the file exists, the command refuses to
+replace it and names the two explicit modes: `--check` for verification and
+`--force` for deliberate full regeneration.
+
+The refusal protects prose the allocation cannot reconstruct. Its standing
+probe inserts a hand-curated paragraph, runs the bare command and requires the
+overwrite refusal. The control runs `--force` and requires success, so a writer
+that refuses every mode cannot satisfy the probe.
 
 **A regex reads a Python literal out of a Python file, and one entry is not
 that.** `Cargo.toml:workspace.lints` records HLD 27.1's lint table, which is
