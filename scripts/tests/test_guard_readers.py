@@ -763,66 +763,51 @@ class WhatCiRunsInAStepBody(unittest.TestCase):
 # from the enumeration and each one put `bin/ocelli.sh gate guards`, the gate
 # that watches every other gate, into a step whose failure could not fail the
 # run. A table of examples can only contain what its author thought of.
-STEP_BODY_SHAPES = (
+# Bodies with NO construct this file refuses. These are the only shapes the
+# check now accepts, and `_tolerated_statements` must agree with bash on every
+# one of them.
+FLAT_SHAPES = (
     "{0}\n", "{0}\necho tail\n",
     "{0} && {1}\n", "{0} && {1}\necho tail\n",
     "{0} || {1}\n", "{0} || {1}\necho tail\n",
     "{0} | {1}\n", "{0} | {1}\necho tail\n",
     "{0} &\nwait\n", "{0} &\necho tail\nwait\n",
     "{0}; {1}\n", "{0}\n{1}\n",
-    "if {0}; then echo T; fi\n", "if {0}; then echo T; fi\necho tail\n",
-    "if {0} && {1}; then echo T; fi\n",
-    "if {0} || {1}; then echo T; fi\n",
-    "if true; then {0}; fi\n", "if true; then {0}; fi\necho tail\n",
-    "if false; then echo A; else {0}; fi\n",
-    "if true; then echo A; else {0}; fi\necho tail\n",
-    "if false; then echo A; elif {0}; then echo T; fi\n",
-    "while {0}; do break; done\n", "while {0}; do break; done\necho tail\n",
-    "until {0}; do break; done\n",
-    "while true; do {0}; break; done\n",
-    "until true; do {0}; done\necho tail\n",
-    "for x in a; do {0}; done\n",
-    "for f in $NOTHING; do {0}; done\necho tail\n",
-    "! {0}\n", "! {0}\necho tail\n", "! {0} && {1}\n",
-    "set +e\n{0}\necho done\n", "set +e\n{0}\n",
-    "set +o errexit\n{0}\necho done\n", "set +o errexit\n{0}\n",
-    "set +e\nset -e\n{0}\n", "set +e\nset -e\n{0}\necho tail\n",
-    "set +eu\n{0}\necho done\n", "set +o pipefail\n{0}\necho done\n",
-    "shopt -uo errexit\n{0}\necho done\n",
-    "set +e\n( set -e )\n{0}\necho done\n",
     "{0} && {1} || echo fallback\n",
-    "if {0}; then {1}; fi\n",
-    "while {0}; do {1}; break; done\n",
-    "set +e\nif {0}; then echo T; fi\n{1}\n",
-    "guards_step() {{ {0}; }}\necho tail\n",
-    'case "$X" in Windows) {0} ;; esac\necho tail\n',
-    "exit 0\n{0}\n",
-    "{{ {0}; }}\necho tail\n",
-    # NESTED shapes, added by the sixteenth pass. Every one of these walks
-    # past a reader that tests only a statement's FIRST WORD, and two of them
-    # measured a defect in the reader the fifteenth pass added: `do case ...`
-    # hides the `case` behind the `do`, and an `elif` chain has two `then` and
-    # one `fi`.
-    'for i in 1; do case "$X" in z) {0} ;; esac; done\necho tail\n',
-    "if true; then if false; then {0}; fi; fi\necho tail\n",
-    'case "$X" in a) case "$Y" in b) {0} ;; esac ;; esac\necho tail\n',
-    "for i in 1; do for j in 2; do {0}; done; done\necho tail\n",
-    'while true; do case x in x) {0} ;; esac; break; done\necho tail\n',
-    "if true; then echo a; elif false; then echo b; fi\n{0}\n",
-    "if true; then echo a; elif false; then echo b; else echo c; fi\n{0}\n",
-    "if false; then echo a; elif false; then echo b; else {0}; fi\n"
-    "echo tail\n",
-    'case "$X" in a|b) {0} ;; *) : ;; esac\necho tail\n',
-    'case "$X" in (a) {0} ;; esac\necho tail\n',
-    'case "$X" in *) echo "arm ) paren" ;; esac\n{0}\n',
-    'echo "case x in )"\n{0}\n',
-    "cat <<EOF\ncase x in\nEOF\n{0}\n",
-    "( exit 0 )\n{0}\n",
-    "f() {{ exit 0; }}\n{0}\n",
-    "f() {{ if true; then {0}; fi; }}\necho tail\n",
-    "( {{ {0}; }} )\necho tail\n",
-    "x=$(echo hi)\n{0}\n",
-    "if [ \"$X\" = \"y\" ]; then :; fi\n{0}\n",
+    "echo hello\n{0}\npython3 x.py\n",
+    "cd tools && {0}\n",
+)
+
+# Bodies carrying a construct this file REFUSES BY NAME, each with the word the
+# refusal must print. **Every one of these was a measured FAIL-OPEN in the S03
+# review**, at exit 0, with the real `bin/ocelli.sh gate guards` step replaced,
+# on the gate that watches every other gate. The right-hand column is what
+# makes the refusals distinguishable, so a probe can watch one construct rather
+# than the whole whitelist.
+REFUSED_SHAPES = (
+    ("set +e\n{0}\necho ok\n", "`set`"),
+    ("shopt -uo errexit\n{0}\necho ok\n", "`shopt`"),
+    ("shopt -o -u errexit\n{0}\necho ok\n", "`shopt`"),
+    ("shopt -uo pipefail errexit\n{0}\necho ok\n", "`shopt`"),
+    ("exit 0\n{0}\n", "`exit`"),
+    ("exec echo replaced\n{0}\n", "`exec`"),
+    ("! {0}\n", "`!` negation"),
+    ("if {0}; then true; fi\n", "keyword `if`"),
+    ("if true; then {0}; fi\n", "keyword `if`"),
+    ("if false; then echo ok; {0}; fi\n", "keyword `if`"),
+    ("while true; do {0}; break; done\n", "keyword `while`"),
+    ("until true; do {0}; done\n", "keyword `until`"),
+    ("for f in $NOTHING; do {0}; done\n", "keyword `for`"),
+    ('case "$X" in Windows) {0} ;; esac\n', "keyword `case`"),
+    ('for i in 1; do case "$X" in z) {0} ;; esac; done\n', "keyword `for`"),
+    # A function DEFINITION is caught by its `(`, not by the `function`
+    # keyword, because bash accepts `name() {}` without one.
+    ("guards_step() {{ {0}; }}\necho ok\n", "`(`"),
+    ("{{ {0}; }}\necho ok\n", "`{`"),
+    ("( {0} )\necho ok\n", "`(`"),
+    ("{{ set +e; }}\n{0}\necho ok\n", "`{`"),
+    ("{{ exit 0; }}\n{0}\n", "`{`"),
+    ("set +e\n( set -e )\n{0}\necho ok\n", "`set`"),
 )
 
 
@@ -831,8 +816,7 @@ def bash_fails(body: str) -> bool | None:
 
     GitHub runs a step body as `bash -e {0}`, so a command's failure reaches
     the step exactly when the script exits non-zero, and a command that never
-    RUNS cannot make it do so. Both halves of what this file has to decide are
-    therefore one measurement.
+    RUNS cannot make it do so.
     """
     if subprocess.run([BASH, "-n"], input=body, text=True,
                       capture_output=True).returncode != 0:
@@ -862,41 +846,104 @@ def _body_and_index(shape: str, target: int) -> tuple[str, int] | None:
     return (body, found[0]) if len(found) == 1 else None
 
 
-class WhoseFailureBashDiscards(unittest.TestCase):
-    """`_tolerated_statements` against bash over GENERATED bodies.
+class WhatThisFileRefusesToModel(unittest.TestCase):
+    """The whitelist that replaced three successive readers of bash.
 
-    The fourth and last consumer of the tokenizer to get an oracle. It carried
-    a hand-written table of ten measured `bash -ec` exit codes until the S03
-    review's fourteenth pass. The table was correct about every row in it and
-    was missing four whole contexts, because a table of examples can only
-    contain what its author thought of.
+    The S03 review spent passes 14, 15 and 16 on one question and got a
+    different wrong answer each time. Pass 14 replaced a table of ten measured
+    examples with a generated oracle. Pass 15 found the oracle's GRAMMAR was
+    missing six productions, three of them shapes where bash never runs the
+    gate at all, and added a nesting rule. Pass 16 found the nesting rule was a
+    HEAD test, and the repair for that was a keyword regex, and the regex did
+    not know that a reserved word is reserved only in command-word position, so
+    `echo done` matched it and one ordinary line of output turned a correct
+    refusal into a pass.
 
-    Generating the input has now found six more that no reviewer named, in two
-    rounds. The fifteenth pass added `case`, a function definition, `exit`, a
-    never-taken `else`, an empty `for` word list and an `until true` body, and
-    the first three are TOTAL BYPASSES: bash never runs the command at all,
-    and the check reported every floor gate invoked. Each was measured at exit
-    0 with the real `bin/ocelli.sh gate guards` step replaced.
-
-    **So the question this file asks is not "does the failure reach the step".
-    It is "is the shell GUARANTEED to run this command and report its
-    failure".** The first is what `bash -e` decides. The second is what "CI
-    runs the floor" means, and it is strictly stronger. The two tests below
-    are the two halves of that: no shape may be counted when bash discards it,
-    and the shapes counted MORE strictly than bash are declared exactly.
+    Three readers, three passes, each closing the previous spelling and
+    opening a new one at the same layer. So the file stopped modelling. A
+    construct it does not model is REFUSED BY NAME, which turns the next
+    construct nobody thought of into a named refusal rather than a silent pass.
     """
 
-    @unittest.skipUnless(BASH, "no bash on this machine")
-    def test_no_generated_shape_is_a_fail_open(self) -> None:
-        """If bash exits 0, the statement must NOT count as an invocation.
+    def test_every_refused_construct_is_named(self) -> None:
+        """Each was a measured fail-open, and each now refuses by its own name.
 
-        This is the direction that matters and it is asserted with no
-        exceptions. A shape bash exits 0 on either discarded the failure or
-        never ran the command, and in both cases nothing here says CI runs the
-        gate.
+        The name matters as much as the refusal. A single message for the
+        whole whitelist would leave nine probes watching one indistinguishable
+        defence, and would tell a maintainer that a gate went missing rather
+        than which word to remove.
         """
+        for shape, expected in REFUSED_SHAPES:
+            with self.subTest(shape):
+                body = shape.format(*["bin/ocelli.sh gate guards"]
+                                    * max(1, _slot_count(shape)))
+                with self.assertRaises(RuntimeError) as raised:
+                    ci_floor_check.run_commands(workflow_with(
+                        "      - run: |\n" + "".join(
+                            f"          {line}\n"
+                            for line in body.splitlines())))
+                self.assertIn(expected, str(raised.exception))
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_the_refusals_that_would_have_worked_are_declared(self) -> None:
+        """The COST of the whitelist, asserted as an exact set.
+
+        Most refused shapes are ones bash genuinely does not guarantee: it
+        never runs the gate, or it discards the failure. Four are not. Written
+        with a condition that happens to hold, `if true`, `while true`, a
+        brace group and a subshell all run the gate and report its failure, so
+        refusing them refuses a workflow that would have worked.
+
+        They are refused anyway, because the CONSTRUCT cannot be trusted from
+        its text: the same `if` with `if false` never runs the gate, and
+        deciding which is which is the modelling that failed three times.
+        Naming the four here is the honest accounting, and a fifth appearing
+        means the whitelist grew a cost nobody chose.
+        """
+        would_have_worked = set()
+        for shape, _ in REFUSED_SHAPES:
+            slots = max(1, _slot_count(shape))
+            ran = subprocess.run(
+                [BASH, "-ec", shape.format(*["echo RANGATE"] * slots)],
+                capture_output=True, text=True, timeout=10)
+            failing = shape.format(*["false MG"] * slots)
+            if "RANGATE" in ran.stdout and bash_fails(failing):
+                would_have_worked.add(shape)
+        self.assertEqual(would_have_worked, {
+            "if true; then {0}; fi\n",
+            "while true; do {0}; break; done\n",
+            "{{ {0}; }}\necho ok\n",
+            "( {0} )\necho ok\n",
+        })
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_every_other_refusal_is_one_bash_does_not_guarantee(self) -> None:
+        """The other seventeen really are shapes the shell does not promise.
+
+        Without this the whitelist would be a list of words somebody disliked
+        rather than a set of measured hazards.
+        """
+        for shape, _ in REFUSED_SHAPES:
+            if shape in {"if true; then {0}; fi\n",
+                         "while true; do {0}; break; done\n",
+                         "{{ {0}; }}\necho ok\n",
+                         "( {0} )\necho ok\n"}:
+                continue
+            with self.subTest(shape):
+                slots = max(1, _slot_count(shape))
+                ran = subprocess.run(
+                    [BASH, "-ec", shape.format(*["echo RANGATE"] * slots)],
+                    capture_output=True, text=True, timeout=10)
+                reaches = bash_fails(shape.format(*["false MG"] * slots))
+                self.assertTrue(
+                    "RANGATE" not in ran.stdout or not reaches,
+                    f"{shape!r} both runs the gate and reports its failure")
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_no_flat_shape_is_a_fail_open(self) -> None:
+        """On the shapes it DOES accept, it must agree with bash exactly."""
         checked = 0
-        for shape in STEP_BODY_SHAPES:
+        for shape in FLAT_SHAPES:
             for target in range(_slot_count(shape)):
                 made = _body_and_index(shape, target)
                 self.assertIsNotNone(made, f"ambiguous marker in {shape!r}")
@@ -906,82 +953,65 @@ class WhoseFailureBashDiscards(unittest.TestCase):
                 tolerated = index in ci_floor_check._tolerated_statements(
                     ci_floor_check.shell_source(body))
                 checked += 1
-                if not reaches:
-                    self.assertTrue(
-                        tolerated,
-                        f"FAIL-OPEN: bash exits 0 for statement {index} of "
-                        f"{body!r}, so its failure cannot fail the step, and "
-                        f"this file counts it as CI running the gate")
-        self.assertGreaterEqual(checked, 83)
+                self.assertEqual(
+                    tolerated, not reaches,
+                    f"bash and the scanner disagree about statement {index} "
+                    f"of {body!r}")
+        self.assertGreaterEqual(checked, 20)
 
-    @unittest.skipUnless(BASH, "no bash on this machine")
-    def test_the_shapes_refused_more_strictly_than_bash_are_declared(
-            self) -> None:
-        """The DECLARED cost, asserted as an exact set.
+    def test_a_reserved_word_in_argument_position_is_refused(self) -> None:
+        """The DECLARED cost, asserted so it stays deliberate.
 
-        Every member is a compound BODY that does run, so bash reports its
-        failure and this file declines to count it anyway, because whether the
-        body is reached depends on a condition, a word list or a caller that
-        this scanner cannot evaluate. Each therefore costs a REFUSAL naming
-        the gate rather than a pass, which is the safe direction.
-
-        None of these appears around a gate in `.github/workflows/ci.yml`, and
-        `python3 scripts/ci_floor_check.py` measures 0 compound statements in
-        its `run:` bodies, so the cost today is zero. A shape LEAVING this set
-        is a fail-open and the test above catches it. A shape joining it is a
-        new false refusal and this test catches that.
+        `echo done` is two ordinary words to bash and this file refuses it,
+        because deciding whether a word sits in command-word position is the
+        judgement three readers got wrong. Quoting fixes it, and the quoted
+        form is asserted below so the documented remedy is a test rather than
+        a claim.
         """
-        conservative = set()
-        for shape in STEP_BODY_SHAPES:
-            for target in range(_slot_count(shape)):
-                body, index = _body_and_index(shape, target)
-                if not bash_fails(body):
-                    continue
-                if index in ci_floor_check._tolerated_statements(
-                        ci_floor_check.shell_source(body)):
-                    conservative.add(body)
-        self.assertEqual(conservative, {
-            "( { false M0; } )\necho tail\n",
-            "for i in 1; do for j in 2; do false M0; done; done\necho tail\n",
-            "for x in a; do false M0; done\n",
-            "if false; then echo A; else false M0; fi\n",
-            "if false; then echo a; elif false; then echo b; else false M0; "
-            "fi\necho tail\n",
-            "if true M0; then false M1; fi\n",
-            "if true; then false M0; fi\n",
-            "if true; then false M0; fi\necho tail\n",
-            "while true M0; do false M1; break; done\n",
-            "while true; do case x in x) false M0 ;; esac; break; done\n"
-            "echo tail\n",
-            "while true; do false M0; break; done\n",
-            "{ false M0; }\necho tail\n",
-        })
+        with self.assertRaises(RuntimeError) as raised:
+            ci_floor_check.run_commands(workflow_with(
+                "      - run: |\n"
+                "          bin/ocelli.sh gate guards\n"
+                "          echo done\n"))
+        self.assertIn("keyword `done`", str(raised.exception))
+        commands = ci_floor_check.run_commands(workflow_with(
+            "      - run: |\n"
+            "          bin/ocelli.sh gate guards\n"
+            '          echo "done"\n'))
+        self.assertIn("guards", ci_floor_check.invoked_gates(commands))
 
     @unittest.skipUnless(BASH, "no bash on this machine")
     def test_the_right_hand_side_of_and_is_the_remaining_residue(self) -> None:
-        """F-X019, reduced to one shape by the fifteenth pass.
+        """F-X019, the one hole the whitelist does not close.
 
-        `a && GATE` runs the gate only when `a` SUCCEEDS, so it is not a
-        guaranteed invocation either, and this asserts that it is STILL
-        COUNTED, which is a fail-open held open on purpose. It is not closed
-        here because `invoked_gates`' own docstring documents `cd x &&
-        bin/ocelli.sh gate y` as a legitimate invocation, so refusing it
-        contradicts a declared behaviour rather than repairing a reader. That
-        is a decision with an owner.
+        `&&` is a SEPARATOR rather than a compound construct, so a body of
+        `a && GATE` carries nothing `_refuse_unmodelled_shell` refuses, and
+        the gate runs only when `a` succeeds. `false && GATE` therefore exits
+        0 with the gate never run and this file still counts it.
 
-        The test above cannot see this shape: it fails ONE slot and succeeds
-        every other, so it never constructs the failing left side that makes
-        the right side unreachable. **This test is the record that the hole is
-        known**, and it goes red when F-X019 closes it, which is the signal to
-        delete it rather than a regression.
+        It is left open because `invoked_gates`' own docstring documents
+        `cd x && bin/ocelli.sh gate y` as a legitimate invocation, so refusing
+        it contradicts a declared behaviour rather than repairing a reader.
+        That is a decision with an owner.
+
+        **This test asserts the hole is still OPEN.** It goes red when F-X019
+        closes it, which is the signal to delete it rather than a regression.
+        It exists because the review's fifteenth pass wrote exactly this test,
+        the sixteenth pass rewrote the class around it and lost it, and a hole
+        nothing records is a hole the next pass finds again from scratch.
         """
         body = "false M0 && false M1\necho tail\n"
         self.assertFalse(bash_fails(body), "bash must exit 0 for this body")
         source = ci_floor_check.shell_source(body)
+        ci_floor_check._refuse_unmodelled_shell(source, "this body")
         pairs = ci_floor_check._statement_separators(source)
         index = next(i for i, (s, _) in enumerate(pairs) if "M1" in s)
         self.assertNotIn(index, ci_floor_check._tolerated_statements(source),
                          "F-X019 appears to be closed. Delete this test.")
+
+    def test_the_real_workflow_carries_none_of_this(self) -> None:
+        """The measurement that makes the whitelist affordable."""
+        ci_floor_check.run_commands(ci_floor_check.WORKFLOW.read_text())
 
 
 class WhichShellTheStepRunsUnder(unittest.TestCase):

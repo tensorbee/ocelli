@@ -101,9 +101,11 @@ would show a core that is not the one the source builds.
 
 ## Troubleshooting
 
-**`cargo` wants the network and you have none.** The skeleton has no external
-dependencies on purpose, so `cargo check --workspace --offline` works from a
-clean clone. Once real dependencies land, `cargo fetch` once.
+**`cargo` wants the network and you have none.** The workspace pins real
+dependencies now, and `grep -c '^\[\[package\]\]' Cargo.lock` counts what the
+lockfile resolves to, so `--offline` only works from a warm cache. Run `cargo
+fetch` once with a network, after which `cargo check --workspace --offline`
+works.
 
 **The oracle says it is not installed.** It is built by F-010. Nothing else in
 the port should start before it works (`docs/hld/25-first-ten-files.md`).

@@ -122,9 +122,9 @@ Increasing places to look is not:
 - No feature flag without a named user.
 
 Two deliberate exceptions, both from the HLD: the `Decoder` trait
-(section 21) and the `SeriesSource` and render-target traits (section 13) exist
-with one implementer each, because they are the declared extension points that
-make Phases 2 and 3 entry points rather than rewrites.
+(section 21) and the `SeriesSource` and render-target traits (section 13) may
+land with one implementer each, because they are the declared extension points
+that make Phases 2 and 3 entry points rather than rewrites.
 
 ## Performance rules
 
@@ -148,6 +148,7 @@ this project's hot path.
 
 ## Skills
 
-Skills under `.agents/skills/` are generated from `.claude/commands/` by
-`scripts/sync_agent_skills.py`. Do not edit a generated adapter. Change the
-canonical command file and re-run the sync, then `--check`.
+One workflow, two hosts. `.claude/commands/*.md` and `.claude/skills/*/SKILL.md`
+stay canonical, and `scripts/sync_agent_skills.py` generates the adapters Codex
+discovers under `.agents/skills/`. Do not edit a generated adapter. Change the
+canonical file and re-run the sync, then `--check`.

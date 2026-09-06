@@ -308,18 +308,18 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 95 | `scripts/ci_floor_check.py` | `ci-floor.measured-shell-on-a-gate-step`, level 3 | must ACCEPT, output carries `floor gate(s) are invoked by CI on` | floor | `bin/ocelli.sh gate guards` |
 | 96 | `scripts/ci_floor_check.py` | `ci-floor.custom-shell-template-for-the-workflow`, level 3 | must refuse, output carries `sets `defaults.run.shell:` on the workflow` | floor | `bin/ocelli.sh gate guards` |
 | 97 | `scripts/ci_floor_check.py` | `ci-floor.custom-shell-template-for-the-job`, level 3 | must refuse, output carries `sets `defaults.run.shell:` on the job` | floor | `bin/ocelli.sh gate guards` |
-| 98 | `scripts/ci_floor_check.py` | `ci-floor.set-plus-e-before-a-gate-step`, level 3 | must refuse, output carries `a `set +e` earlier in the body turned errexit off` | floor | `bin/ocelli.sh gate guards` |
-| 99 | `scripts/ci_floor_check.py` | `ci-floor.errexit-restored-before-a-gate-step`, level 3 | must ACCEPT, output carries `floor gate(s) are invoked by CI on` | floor | `bin/ocelli.sh gate guards` |
-| 100 | `scripts/ci_floor_check.py` | `ci-floor.gate-inside-an-if-condition`, level 3 | must refuse, output carries `it is inside the condition of an `if`, `elif`, `while` or `until`` | floor | `bin/ocelli.sh gate guards` |
-| 101 | `scripts/ci_floor_check.py` | `ci-floor.gate-inside-an-if-body`, level 3 | must refuse, output carries `it is inside a compound body` | floor | `bin/ocelli.sh gate guards` |
-| 102 | `scripts/ci_floor_check.py` | `ci-floor.gate-in-a-function-body`, level 3 | must refuse, output carries `it is inside a compound body` | floor | `bin/ocelli.sh gate guards` |
-| 103 | `scripts/ci_floor_check.py` | `ci-floor.gate-in-an-unmatched-case-arm`, level 3 | must refuse, output carries `it is inside a compound body` | floor | `bin/ocelli.sh gate guards` |
-| 104 | `scripts/ci_floor_check.py` | `ci-floor.gate-after-a-top-level-exit`, level 3 | must refuse, output carries `the shell never reaches this statement` | floor | `bin/ocelli.sh gate guards` |
-| 105 | `scripts/ci_floor_check.py` | `ci-floor.shopt-unsets-errexit`, level 3 | must refuse, output carries `turned errexit off` | floor | `bin/ocelli.sh gate guards` |
-| 106 | `scripts/ci_floor_check.py` | `ci-floor.scoped-set-e-does-not-restore`, level 3 | must refuse, output carries `turned errexit off` | floor | `bin/ocelli.sh gate guards` |
-| 107 | `scripts/ci_floor_check.py` | `ci-floor.gate-in-a-case-arm-inside-a-loop`, level 3 | must refuse, output carries `it is inside a compound body` | floor | `bin/ocelli.sh gate guards` |
-| 108 | `scripts/ci_floor_check.py` | `ci-floor.gate-after-an-elif-chain`, level 3 | must ACCEPT, output carries `floor gate(s) are invoked by CI on` | floor | `bin/ocelli.sh gate guards` |
-| 109 | `scripts/ci_floor_check.py` | `ci-floor.negated-gate-step`, level 3 | must refuse, output carries `it is negated with `!`` | floor | `bin/ocelli.sh gate guards` |
+| 98 | `scripts/ci_floor_check.py` | `ci-floor.set-plus-e-before-a-gate-step`, level 3 | must refuse, output carries `a `set`` | floor | `bin/ocelli.sh gate guards` |
+| 99 | `scripts/ci_floor_check.py` | `ci-floor.errexit-restored-before-a-gate-step`, level 3 | must refuse, output carries `a `set`` | floor | `bin/ocelli.sh gate guards` |
+| 100 | `scripts/ci_floor_check.py` | `ci-floor.gate-inside-an-if-condition`, level 3 | must refuse, output carries `the shell keyword `if`` | floor | `bin/ocelli.sh gate guards` |
+| 101 | `scripts/ci_floor_check.py` | `ci-floor.gate-inside-an-if-body`, level 3 | must refuse, output carries `the shell keyword `if`` | floor | `bin/ocelli.sh gate guards` |
+| 102 | `scripts/ci_floor_check.py` | `ci-floor.gate-in-a-function-body`, level 3 | must refuse, output carries `carries a `(`` | floor | `bin/ocelli.sh gate guards` |
+| 103 | `scripts/ci_floor_check.py` | `ci-floor.gate-in-an-unmatched-case-arm`, level 3 | must refuse, output carries `the shell keyword `case`` | floor | `bin/ocelli.sh gate guards` |
+| 104 | `scripts/ci_floor_check.py` | `ci-floor.gate-after-a-top-level-exit`, level 3 | must refuse, output carries `a `exit`` | floor | `bin/ocelli.sh gate guards` |
+| 105 | `scripts/ci_floor_check.py` | `ci-floor.shopt-unsets-errexit`, level 3 | must refuse, output carries `a `shopt`` | floor | `bin/ocelli.sh gate guards` |
+| 106 | `scripts/ci_floor_check.py` | `ci-floor.scoped-set-e-does-not-restore`, level 3 | must refuse, output carries `a `set`` | floor | `bin/ocelli.sh gate guards` |
+| 107 | `scripts/ci_floor_check.py` | `ci-floor.gate-in-a-case-arm-inside-a-loop`, level 3 | must refuse, output carries `the shell keyword `for`` | floor | `bin/ocelli.sh gate guards` |
+| 108 | `scripts/ci_floor_check.py` | `ci-floor.gate-after-an-elif-chain`, level 3 | must refuse, output carries `the shell keyword `if`` | floor | `bin/ocelli.sh gate guards` |
+| 109 | `scripts/ci_floor_check.py` | `ci-floor.negated-gate-step`, level 3 | must refuse, output carries `a `!` negation` | floor | `bin/ocelli.sh gate guards` |
 | 110 | `scripts/ci_floor_check.py` | `ci-floor.unclosed-quote-in-a-ci-step`, level 3 | must refuse, output carries `opened and never closed` | floor | `bin/ocelli.sh gate guards` |
 | 111 | `scripts/ci_floor_check.py` | `ci-floor.pyyaml-absent`, level 3 | must refuse, output carries `PyYAML is not installed` | floor | `bin/ocelli.sh gate guards` |
 | 112 | `scripts/verify_ledger.py` | `ledger.no-record`, level 3 | must refuse, output carries `no verification recorded for the staged tree` | floor | `bin/ocelli.sh gate guards` |

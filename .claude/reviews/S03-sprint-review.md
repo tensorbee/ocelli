@@ -129,6 +129,7 @@ and a mutation is an input to a test: it derives from the specification too.
 | 11 | Two reviewers, 6 defects, 2 smells, 5 nitpicks. **The comparator and the crates were both declared done**, at four and two consecutive clean passes. The guard reviewer named the class ten passes had been patching and the remediation replaced two of three hand-rolled grammars with real parsers | remediated |
 | 12 | Two reviewers, 6 defects, 8 smells, 3 nitpicks, aimed at the two grammars pass 11 left. **The prediction pass 11's remediation made against itself came true**: the YAML reader had four fail-open routes, one of them key order, which is not a spelling and cannot be patched. Both readers are replaced | remediated |
 | 13 | Two reviewers, 6 defects, 2 smells, 4 nitpicks. **The verdict was that the class is NOT closed**: pass 12 closed the grammar and left the CONSUMERS of the grammar unguarded, and the bash oracle stopped at the arm's extent. The confirmation sweep declared the sprint able to close | remediated |
+| 16 | Two reviewers, and the guard reviewer answered the question with the answer nobody wanted: **it is another hand-rolled reader**, and it found the next spelling, `echo done`, because a reserved word is reserved only in command-word position. Four further constructs survived both previous passes untouched. **So the modelling was deleted** and replaced by a whitelist that refuses by name. The confirmation reviewer found 15 defects across the repository, including `docs/RELEASE.md` claiming a `publish = false` that did not exist | remediated |
 | 15 | Two reviewers on the pass-14 remediation itself. The guard reviewer **contradicted pass 14's convergence answer on a new axis**: six errexit contexts absent from the generated oracle's GRAMMAR, three of them total bypasses where bash never runs the gate at all, plus a probe that could not flip on the defence it named. The prose reviewer found 3 defects, 5 smells and 2 nitpicks in the remediation, one of them a count that went stale twice inside the pass that wrote it | remediated |
 | 14 | Two reviewers. The guard reviewer returned 1 defect, 2 smells, 1 nitpick and answered the convergence question with evidence: **the area IS converging**, the defect sat at exactly the seam pass 13's remediation predicted, and four of the five categories it was told had produced late findings before were empty. The confirmation reviewer returned 11 defects, 7 smells and 5 nitpicks in `docs/lld/` and the root docs, one class, on the only surface thirteen passes never re-read | remediated |
 
@@ -446,6 +447,7 @@ Every pass so far has found a NEW CLASS rather than more of the last one:
 | 7 | **A test that asserts the implementation is itself** |
 | 14 | A table of examples standing in for an oracle, and a surface no pass had re-read |
 | 15 | **A grammar that only generates what its author thought of**, which is the same defect as the table it replaced |
+| 16 | **Modelling a foreign grammar at all.** The answer was to stop, and refuse what is not modelled |
 
 Pass 7's class is the sharpest because it is invisible to every gate. Two tests
 recomputed the implementation's own expression in the test body and asserted
@@ -995,6 +997,76 @@ itself, the enforcement script the corrected files cite as their authority.
 `.claude/WORKFLOW.md`, which `CLAUDE.md` says wins on process, still told a
 reader that Grok may be read. The mechanism was right the whole time. Every
 document describing it was not.
+
+## Pass 16, and the decision to stop modelling bash
+
+Three passes asked one question and got a different wrong answer each time.
+
+- **Pass 14** replaced a hand-written table of ten measured `bash -ec` exit
+  codes with a generated oracle. The table was correct about every row in it
+  and was missing four whole contexts.
+- **Pass 15** found the oracle's GRAMMAR was missing six productions, three of
+  them shapes where bash never runs the gate at all, and added a nesting rule.
+- **Pass 16** found the nesting rule was a HEAD test, and the repair for that
+  was a keyword regex, and the regex did not know the most basic fact about
+  bash's grammar: **a reserved word is reserved only in command-word
+  position.** `echo done` matched it. One ordinary line of output turned a
+  correct refusal into a pass, on `guards`, the gate that watches every other
+  gate.
+
+Two of pass 16's findings were mine, from fuzzing my own fix rather than
+reading it: a `case` hidden behind a `do`, and an `elif` chain with two `then`
+and one `fi`. The reviewer found those independently and then found `echo
+done`, plus four constructs that survived every pass untouched because they sat
+under the same guard clause nobody was aiming at: `set +e` inside a brace group
+or a `then` body, `exit` inside either, two `shopt` spellings, and `exec`.
+
+**So the file stopped modelling.** `_errexit_exempt`, `_errexit_switch`,
+`_compound_tokens` and the nesting counters are deleted.
+`_refuse_unmodelled_shell` refuses any `run:` body carrying a shell keyword, a
+`{` or `(`, a `!`, or a `set`, `shopt`, `exit` or `exec` head, and it names the
+construct, so a maintainer is told which word to remove rather than which gate
+went missing. It is a whitelist, which is the whole point: the next construct
+nobody thought of fails CLOSED instead of being counted.
+
+The cost is measured rather than assumed. `.github/workflows/ci.yml` carries 0
+compound statements, 0 banned heads, 0 grouping separators and 0 bare reserved
+words in its `run:` bodies, so the whitelist refuses nothing that exists today.
+Four constructs would have worked if written with a condition that happens to
+hold, and they are asserted as an exact set rather than waved away. And the
+mirror of the defect it replaces is declared: a reserved word is matched
+ANYWHERE, so `echo done` is refused and `echo "done"` is not, because deciding
+command-word position is exactly the judgement three readers got wrong and a
+whitelist that guessed it would be the fourth.
+
+Twelve probes now discriminate on the CONSTRUCT NAME rather than on twelve
+separate defences, so dropping one word from `_RESERVED_WORDS` flips exactly
+the probes whose plants carry that word. Two accept probes became refusals,
+which is the honest record of the contract moving for the second pass running.
+
+### The confirmation reviewer went where no pass had been
+
+Fifteen defects, none of them in code, all of them prose asserting what the
+tree contradicts, and the sharpest was a release-safety claim.
+`docs/RELEASE.md` said `ocelli-wasm` is `publish = false`. It was not, and
+neither was `ocelli-native`, which the document did not mention at all, so the
+preflight's `cargo publish --workspace --dry-run` would have offered both to
+crates.io. The tree was changed to match the stated policy rather than the
+policy softened to match the tree.
+
+`v5.8.9` was still in the tree as well, in the document that states the 1.0
+parity gate, one commit after a whole commit was spent removing it from
+`SPRINT_PLAN.md` and describing that as the last occurrence. That is this
+sprint's class exactly: a repair written as though it were complete.
+
+### What this pass says about the review itself
+
+The finder changed. Passes 1 to 13 found defects by reading. Pass 16's two
+sharpest findings came from GENERATING input, one by the reviewer and two by
+me fuzzing my own remediation an hour after writing it. **A reviewer reading a
+hand-rolled parser cannot reliably find the spelling its author did not think
+of, because the reviewer is doing the same thing the author did.** Generating
+the input, or refusing to model at all, is what actually closed this.
 
 ## What is still open, and it is declared rather than hidden
 

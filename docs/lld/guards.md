@@ -19,10 +19,18 @@ guards that bullet is now a gate rather than a habit. Section 27.3's other
 bullets, and its application to LUT and geometry arithmetic, remain a human's
 exactly as written.
 
-**No count of a quantity this harness measures appears in this file.** A number
-written into prose about the size of the harness goes stale inside a single
-sprint, because the harness moves and the sentence beside it does not. Every
-such quantity is named by the command that prints it instead. Counts of things
+**No count of a quantity this harness measures appears in this file as a
+statement about the harness TODAY.** A number written into prose about the
+size of the harness goes stale inside a single sprint, because the harness
+moves and the sentence beside it does not. Every such quantity is named by the
+command that prints it instead.
+
+**A number recording what a MEASUREMENT SAW, at the moment it was taken, is a
+different thing and is kept**, because it is the evidence that a mutation was
+actually run rather than described. Those are written as "at the time", and
+they are not claims about the current harness. The S03 review's sixteenth pass
+found two of them read as present tense, which made this rule look broken when
+what was broken was the tense. Counts of things
 this harness does NOT measure are fine and there are about twenty of them
 below, four cleanup layers and five tripwire reads among them. The earlier
 wording said "no count appears in this file" and about twenty followed it, all
@@ -329,9 +337,11 @@ requirement that its argument be a literal, so `scripts/guard_probe.py:260` and
 that each took its IDENTITY from the variable's name, which made the two
 inverted-success refusals in `guard_probe.py` ONE site: deleting the first of
 them, the refusal that makes "a probe whose guard exits 0 is a FAILURE OF THE
-HARNESS" true, and returning `"pass"` instead, left `entry_sites` at 19, the
+HARNESS" true, and returning `"pass"` instead, left `entry_sites` at 19 AT THE TIME, the
 census at exit 0, `--self-test` at 10 properties, the floor profile at 106
-probes red and the unit suite at 49, with the whole `guards` gate ALL GREEN and
+probes red and the unit suite at 49, every one of those a reading taken during
+that experiment and not a description of the harness now, with the whole
+`guards` gate ALL GREEN and
 the mechanism that gives every probe result its meaning removed. A message
 carrying no string literal of its own now falls back to the enclosing function
 plus an ordinal, and `discover.py` declares the remaining limits where the scan
@@ -664,8 +674,8 @@ second grammar, and the point of one tokenizer is that there is not one.
 nothing**, and the unit test carrying its name asserted the opposite. That test
 planted `prose2`, which is INSIDE the class, and asserted the problem list was
 empty, under a docstring reading "Refused, and not dropped". MEASURED with the
-branch disabled: the census, all 54 `ci-floor` probes and both unit suites
-stayed at their unmutated status. It is probed now with a dotted name, which is
+branch disabled: the census, every `ci-floor` probe there was at the time,
+which was 54 of them, and both unit suites stayed at their unmutated status. It is probed now with a dotted name, which is
 the shape the refusal's own sentence is about, because a gate name reaches
 `re.escape`-free patterns in three files and a dot is a wildcard in every one
 of them. The digit case keeps its probe and its note now says what it actually

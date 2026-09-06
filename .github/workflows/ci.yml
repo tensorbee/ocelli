@@ -83,7 +83,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # The `bench` gate runs four node:test suites beside its Python guard. The
+      # The `bench` gate runs the node:test suites that `ls tools/bench/tests/*.mjs`
+      # lists, beside its Python guard. That count has gone stale twice, so the
+      # command that prints it is named here rather than a number. The
       # runner image ships a node, and pinning it means this job does not depend
       # on that staying true. Same reason python is pinned above.
       - uses: actions/setup-node@v4
@@ -265,9 +267,10 @@ jobs:
       # proof and the conformance assertions.
       #
       # NOT `bin/ocelli.sh gate corpus-tests`, deliberately. The gate runner
-      # returns 0 when a gate skips, which is right for `docs` and `wasm`
-      # whose skips are permanent, and wrong here: the three steps above exist
-      # precisely to remove every reason to skip, so a skip in this job means
+      # returns 0 when a gate skips, which is right for `lint`, `types` and
+      # `packages` whose only skip is an absent `node_modules`, and wrong here:
+      # the three steps above exist precisely to remove every reason to skip,
+      # so a skip in this job means
       # an install half-succeeded and the fixture did not run. That must be
       # red, not a green tick. `--require-prerequisites` says so, and it is
       # the same runner a developer gets through the gate.

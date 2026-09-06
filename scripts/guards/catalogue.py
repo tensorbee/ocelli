@@ -5581,7 +5581,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.set-plus-e-before-a-gate-step",
                   _a_set_plus_e_before_a_gate_invocation,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "a `set +e` earlier in the body turned errexit off",
+                  "a `set`",
                   note="`|| true` written as a shell OPTION rather than as an "
                        "operator, so the separator reading in "
                        "`_tolerated_statements` cannot see it: the statement's "
@@ -5594,8 +5594,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.errexit-restored-before-a-gate-step",
                   _errexit_restored_before_a_gate_invocation,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "floor gate(s) are invoked by CI on",
-                  polarity="accept",
+                  "a `set`",
                   note="The direction a `set +e` head test would get wrong. A "
                        "body that turns errexit off and back on runs the gate "
                        "under errexit, so the gate's red fails the step and CI "
@@ -5609,8 +5608,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.gate-inside-an-if-condition",
                   _a_gate_invocation_in_an_if_condition,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "it is inside the condition of an `if`, `elif`, `while` or "
-                  "`until`",
+                  "the shell keyword `if`",
                   note="The runner is still at a statement head, so "
                        "`invoked_gates` still sees it and the shape reads as "
                        "an invocation to anyone counting invocations. errexit "
@@ -5621,7 +5619,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.gate-inside-an-if-body",
                   _a_gate_invocation_in_an_if_body,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "it is inside a compound body",
+                  "the shell keyword `if`",
                   note="An ACCEPT probe until the S03 review's fifteenth "
                        "pass, on the argument that a `then` body runs under "
                        "errexit. It does, WHEN IT RUNS, and that answers the "
@@ -5639,7 +5637,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.gate-in-a-function-body",
                   _a_gate_invocation_in_a_function_body,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "it is inside a compound body",
+                  "carries a `(`",
                   note="A TOTAL bypass rather than a discarded failure. The "
                        "runner is never executed at all, and the check "
                        "reported every floor gate invoked at exit 0. Found by "
@@ -5650,7 +5648,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.gate-in-an-unmatched-case-arm",
                   _a_gate_invocation_in_a_case_arm,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "it is inside a compound body",
+                  "the shell keyword `case`",
                   note="The `case` arm is the shape a real workflow would "
                        "plausibly carry, since gating a step on `$RUNNER_OS` "
                        "is ordinary. On every runner but the named one the "
@@ -5658,14 +5656,14 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.gate-after-a-top-level-exit",
                   _a_gate_invocation_after_exit,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "the shell never reaches this statement",
+                  "a `exit`",
                   note="Unreachable code, which is the one shape where no "
                        "condition and no status is involved at all: the "
                        "statement simply cannot execute. It was counted."),
             Probe("ci-floor.shopt-unsets-errexit",
                   _shopt_unsets_errexit_before_a_gate,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "turned errexit off",
+                  "a `shopt`",
                   note="`shopt -o` writes the `set -o` option set, so this is "
                        "`set +o errexit` in a spelling `_errexit_switch` did "
                        "not read. The `set` family was measured exhaustively "
@@ -5675,7 +5673,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.scoped-set-e-does-not-restore",
                   _a_scoped_set_e_that_does_not_restore,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "turned errexit off",
+                  "a `set`",
                   note="The fail-OPEN half of the subshell limit, which "
                        "`_errexit_exempt` and this catalogue both declared as "
                        "though both halves were fail-closed. A `set -e` "
@@ -5687,7 +5685,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.gate-in-a-case-arm-inside-a-loop",
                   _a_gate_in_a_case_arm_inside_a_loop,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "it is inside a compound body",
+                  "the shell keyword `for`",
                   note="The shape that measured the FIFTEENTH pass's own "
                        "nesting rule as a head test. `do case ... in z` hides "
                        "the `case` behind the `do`, so the `)` read as a "
@@ -5698,8 +5696,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.gate-after-an-elif-chain",
                   _a_gate_after_an_elif_chain,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "floor gate(s) are invoked by CI on",
-                  polarity="accept",
+                  "the shell keyword `if`",
                   note="The false-refusal direction of the same defect and "
                        "the reason `elif` is a net CLOSE. Two `then` and one "
                        "`fi` left the depth above zero for the rest of the "
@@ -5709,7 +5706,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.negated-gate-step",
                   _a_negated_gate_invocation,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "it is negated with `!`",
+                  "a `!` negation",
                   note="The third errexit-exempt context and the smallest edit "
                        "of the three: one character. MEASURED under `bash "
                        "-ec`: `! false` then `echo AFTER` exits 0. The gate's "

@@ -289,9 +289,10 @@ CI is such a caller:
 uv run scripts/corpus_tests.py --require-prerequisites   # a skip is a failure
 ```
 
-`bin/ocelli.sh` returns 0 for a skipped gate, which is right for `docs` and
-`wasm` whose skips are permanent, and wrong for the `corpus-tooling` CI job
-whose earlier steps exist precisely to remove every reason to skip. So that job
+`bin/ocelli.sh` returns 0 for a skipped gate, which is right for `lint`, `types`
+and `packages` whose only skip is an absent `node_modules`, and wrong for the
+`corpus-tooling` CI job whose earlier steps exist precisely to remove every
+reason to skip. So that job
 calls the runner directly with this flag. Without it, an OpenJPH build that
 installed outside `PATH` would give the job a green tick having run only the
 coverage suite.

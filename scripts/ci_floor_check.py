@@ -1031,6 +1031,7 @@ def run_commands(workflow: str) -> list[Command]:
                     f"the swallowed text can only HIDE commands from this "
                     f"file, so the message you would otherwise get names a "
                     f"gate rather than the quote.")
+            _refuse_unmodelled_shell(source, where)
             tolerated = _tolerated_statements(source)
             for position, statement in enumerate(_split_statements(source)):
                 text = statement.strip()
@@ -2077,183 +2078,107 @@ def _split_statements(text: str) -> list[str]:
 # test, and the third row above is the other half of it: `if true &&
 # bin/ocelli.sh gate x` puts the runner in the SECOND statement, whose head is
 # the runner rather than `if`.
-_CONDITION_INTRODUCERS = frozenset({"if", "elif", "while", "until"})
-_CONDITION_ENDS = frozenset({"then", "else", "do"})
-# Heads that OPEN a compound body, and heads that close one. `else` and `elif`
-# are deliberately absent from the openers: they continue a body that `then`
-# already opened, and counting them would leave the nesting level above zero
-# for the rest of the script.
-_BODY_OPENERS = frozenset({"then", "do", "case"})
-_BODY_CLOSERS = frozenset({"fi", "done", "esac"})
-# `elif` and `else` END the branch they follow. `elif` returns to a condition,
-# so it is a net close. `else` closes one branch and opens the next, so it is
-# net zero and the body after it stays inside the construct.
-_BODY_CONTINUERS = frozenset({"elif", "else"})
-_COMPOUND_WORD = re.compile(
-    r"(?<![\w-])(" + "|".join(sorted(
-        _BODY_OPENERS | _BODY_CLOSERS | _BODY_CONTINUERS)) + r")(?![\w-])")
+# The shell this file MODELS, stated as what it refuses rather than as what it
+# handles.
+#
+# **This block replaced a model of bash's compound-command grammar, and the
+# reason is four review passes long.** Pass 14 replaced a table of ten measured
+# examples with a generated oracle. Pass 15 found the oracle's GRAMMAR was
+# missing six productions, three of them total bypasses where bash never runs
+# the gate, and added a nesting rule. Pass 16 found the nesting rule was a HEAD
+# test, and the repair for that was a keyword regex, and the regex was missing
+# the most basic fact about bash's grammar: **a reserved word is reserved only
+# in command-word position.** `echo done` matched it. One ordinary line of
+# output turned a correct refusal into a pass, on `guards`, the gate that
+# watches every other gate.
+#
+# Three readers, three passes, each closing the previous spelling and opening a
+# new one at the same layer. So this file stopped modelling. A `run:` body that
+# carries a construct below is REFUSED BY NAME, which makes an unmodelled
+# construct a named refusal a maintainer can act on rather than a silent pass.
+# It is a whitelist, so the next construct nobody thought of fails CLOSED
+# instead of being counted.
+#
+# MEASURED cost, which is why this is affordable: `.github/workflows/ci.yml`
+# carries 0 compound statements, 0 banned heads and 0 grouping separators in
+# its `run:` bodies today. The `run_gate` arms in `bin/ocelli.sh` are NOT
+# affected, since `unseen_commands` reads those and is a different consumer.
+#
+# `in` is deliberately absent: every construct that uses it is already refused
+# through `for`, `case` or `select`, so listing it would add false refusals on
+# an extremely common English word and no coverage. `time` is absent for the
+# same reason, `time <compound>` being refused through the compound itself,
+# and `time <command>` running the command normally.
+#
+# **The declared cost, which is the mirror of the defect this replaced.** A
+# reserved word is matched ANYWHERE outside a span, including in argument
+# position, so `echo done` is refused even though bash reads it as two
+# ordinary words. That is deliberate. Deciding whether a word sits in
+# command-word position is precisely the judgement three successive readers
+# got wrong, and a whitelist that guesses it would be the fourth. Over
+# refusing is a named refusal a maintainer fixes by quoting the word, and
+# `echo "done"` passes, because a span is masked before the scan. Under
+# refusing is a gate reported as run that never ran. MEASURED: the real
+# `.github/workflows/ci.yml` carries 0 bare reserved words in its `run:`
+# bodies.
+_RESERVED_WORDS = (
+    "case", "coproc", "do", "done", "elif", "else", "esac", "fi", "for",
+    "function", "if", "select", "then", "until", "while",
+)
+_RESERVED_WORD = re.compile(
+    r"(?<![\w-])(" + "|".join(_RESERVED_WORDS) + r")(?![\w-])")
+
+# Heads whose effect on the rest of the body this file does not model. `set`
+# and `shopt` both write the `set -o` option set, so both can turn errexit off,
+# and their SCOPE depends on whether a subshell or a function frame lies
+# between. `exit` and `exec` end the script. Each was a measured fail-open.
+_UNMODELLED_HEADS = frozenset({"exec", "exit", "set", "shopt"})
+
+# Grouping separators. A `(` subshell or a `{` group is a compound command,
+# and `f() {` is a function definition, which is how a gate hides in a body
+# that never calls it.
+_GROUPING = frozenset({"{", "}", "(", ")"})
 
 
-def _compound_tokens(statement: str) -> list[str]:
-    """The compound keywords in `statement`, in order, ignoring spans.
+def _refuse_unmodelled_shell(source: str, where: str) -> None:
+    """Refuse a `run:` body carrying shell this file does not model.
 
-    **Reading only the statement's FIRST WORD was a fail-open, and this
-    function exists because of it.** The S03 review's sixteenth pass measured
-    two shapes past a head test, both from the same root:
-
-    - `for i in 1; do case "$X" in z) GATE ;; esac; done`. The statement is
-      `do case "$X" in z`, whose head is `do`, so the `case` was never seen,
-      the `)` that follows read as a subshell close rather than an arm opener,
-      and the gate came out at depth zero and was COUNTED.
-    - `if true; then echo a; elif false; then echo b; fi`. Two `then` heads
-      incremented and one `fi` decremented, so the depth never returned to
-      zero and every statement after the `fi` was refused.
-
-    A quoted keyword is not a keyword, so the scan runs over the text OUTSIDE
-    every span, which is what `shell_pieces` already separates. `echo "case x
-    in )"` therefore contributes nothing, and that is measured.
+    Named by construct, so a probe can tell one refusal from another and a
+    maintainer is told which word to remove rather than which gate went
+    missing.
     """
-    pieces, _ = shell_pieces(statement)
+    pieces, _ = shell_pieces(source)
     outside = "".join(
-        statement[start:end] if kind == TEXT else " " * (end - start)
+        source[start:end] if kind == TEXT else " " * (end - start)
         for start, end, kind in pieces)
-    return _COMPOUND_WORD.findall(outside)
-_NEGATION = "!"
-assert _CONDITION_INTRODUCERS <= SHELL_INTRODUCERS
-assert _CONDITION_ENDS <= SHELL_INTRODUCERS
-assert _NEGATION in SHELL_INTRODUCERS
-
-
-def _errexit_switch(statement: str) -> bool | None:
-    """True when this `set` turns errexit OFF, False ON, None neither.
-
-    `set +o pipefail` is the row that makes this a reader rather than a
-    substring test: it turns nothing off, and `+e` inside `+eu` does.
-    """
-    words = shell_words(statement)
-    # `shopt -o` operates on the `set -o` option set, so `shopt -uo errexit` IS
-    # `set +o errexit` and `shopt -so errexit` is `set -o errexit`. MEASURED:
-    # a body of `shopt -uo errexit` then the runner then a trailing echo exits
-    # 0 with the gate's red discarded, and this function returned None for it
-    # until the S03 review's fifteenth pass. `-u` unsets and `-s` sets, which
-    # is the opposite sense to `set`, where `+` unsets.
-    if words and words[0] == "shopt":
-        answer = None
-        for index, word in enumerate(words[1:], start=1):
-            if word.startswith("-") and "o" in word[1:]:
-                target = words[index + 1] if index + 1 < len(words) else ""
-                if target == "errexit":
-                    answer = "u" in word[1:]
-        return answer
-    if not words or words[0] != "set":
-        return None
-    answer = None
-    index = 1
-    while index < len(words):
-        word = words[index]
-        if word in ("-o", "+o"):
-            if index + 1 < len(words) and words[index + 1] == "errexit":
-                answer = word == "+o"
-            index += 2
-            continue
-        if word[:1] in "-+" and "e" in word[1:]:
-            answer = word[0] == "+"
-        index += 1
-    return answer
-
-
-def _errexit_exempt(pairs: list[tuple[str, str]],
-                    last: int) -> dict[int, str]:
-    """Statements whose failure `bash -e` discards because of their CONTEXT.
-
-    `_tolerated_statements` reads the SEPARATORS around a statement. This
-    reads the statement's own position inside a compound command, which the
-    separators cannot see, and the two are merged there.
-
-    The S03 review's fourteenth pass measured all four shapes below at exit 0
-    with the real `bin/ocelli.sh gate guards` step replaced, so `guards`, the
-    gate that watches every other gate, read as invoked while its failure
-    could not fail the run.
-
-    Declared limits, and both are fail-CLOSED. Being exempt means the command
-    does not count as CI running the gate, so an error in this direction is a
-    refusal that names the gate rather than a pass:
-
-    - A `set +e` inside a `( )` subshell or a function body is scoped to it.
-      This scanner models neither, so the exemption runs to the end of the
-      body or to the next `set -e`.
-    - A `then`, `else` or `do` ends the exemption wherever it appears, so a
-      body that uses one of those words as a plain argument ends it early.
-    """
-    exempt: dict[int, str] = {}
-    errexit_off = False
-    in_condition = False
-    nest = 0
-    cases = 0
-    after_exit = False
-    for index, (statement, separator) in enumerate(pairs):
-        head = statement.strip().split(" ", 1)[0]
-        for token in _compound_tokens(statement):
-            if token in _BODY_CLOSERS:
-                nest = max(0, nest - 1)
-                if token == "esac":
-                    cases = max(0, cases - 1)
-            elif token == "elif":
-                nest = max(0, nest - 1)
-            elif token in _BODY_OPENERS:
-                nest += 1
-                if token == "case":
-                    cases += 1
-            # `else` is net zero: it closes the previous branch and opens its
-            # own, so the depth is unchanged and its body stays inside.
-        if nest > 0:
-            exempt[index] = ("it is inside a compound body, and nothing here "
-                             "says the shell reaches that body at all")
-        elif after_exit:
-            exempt[index] = ("a top-level `exit` earlier in the body means "
-                             "the shell never reaches this statement")
-        if errexit_off and index != last:
-            # NOT when it is the last command in the body. `set +e` stops
-            # errexit, and errexit is not what makes the FINAL command's
-            # status the script's status. MEASURED: `set +e / false` exits 1
-            # and `set +e / false / echo done` exits 0. The generated-input
-            # bash oracle in `scripts/tests/test_guard_readers.py` found this,
-            # and the hand-written example table did not, which is the whole
-            # argument for generating the input.
-            exempt[index] = ("a `set +e` earlier in the body turned errexit "
-                             "off, so the shell runs on past a failure here")
-        elif head in _CONDITION_ENDS:
-            in_condition = False
-        elif in_condition or head in _CONDITION_INTRODUCERS:
-            in_condition = True
-            exempt[index] = ("it is inside the condition of an `if`, `elif`, "
-                             "`while` or `until`, whose failure the shell "
-                             "tests rather than fires errexit on")
-        elif head == _NEGATION:
-            exempt[index] = ("it is negated with `!`, so the shell reports "
-                             "the opposite of its status")
-        # A `set -e` inside a subshell or a function body is scoped to it and
-        # does NOT restore errexit in the parent. Reading one at depth was a
-        # fail-OPEN and the declared limit named only the fail-closed half:
-        # MEASURED, a body of `set +e` then `( set -e )` then the runner then
-        # a trailing echo exits 0, and this file counted the gate as invoked.
-        # The nesting level is what tells the two apart.
-        if nest == 0:
-            switch = _errexit_switch(statement)
-            if switch is not None:
-                errexit_off = switch
-            if head == "exit":
-                after_exit = True
-        # Applied AFTER the tolerance decision, because a `{` or `(` separator
-        # opens a body that begins with the NEXT statement, where a `then` or
-        # `do` head sits on the same statement as the body command it
-        # introduces. Inside a `case`, a `)` closes an arm PATTERN and opens
-        # the arm, so it must not be read as a subshell close.
-        if separator in ("{", "("):
-            nest += 1
-        elif separator in ("}", ")") and not (separator == ")" and cases > 0):
-            nest = max(0, nest - 1)
-    return exempt
+    found = _RESERVED_WORD.search(outside)
+    carried = f"the shell keyword `{found.group(1)}`" if found else ""
+    if not carried:
+        for statement, separator in _statement_separators(source):
+            head = statement.strip().split(" ", 1)[0]
+            if head in _UNMODELLED_HEADS:
+                carried = f"a `{head}`"
+                break
+            if head == "!":
+                carried = "a `!` negation"
+                break
+            if separator in _GROUPING:
+                carried = f"a `{separator}`"
+                break
+    if not carried:
+        return
+    raise RuntimeError(
+        f"the `run:` on {where} carries {carried}, and this check does not "
+        f"model it. It answers whether CI is GUARANTEED to run each floor "
+        f"gate and report its failure, and every construct listed in "
+        f"`_RESERVED_WORDS`, `_UNMODELLED_HEADS` and `_GROUPING` can break "
+        f"that guarantee in a way three successive readers of bash's grammar "
+        f"each got wrong. A gate inside a body the shell never reaches, or "
+        f"after a `set +e`, or after an `exit`, still READS as an invocation. "
+        f"So it is refused by name rather than modelled: write the gate as one "
+        f"command per statement at the top level of the body, or add the "
+        f"construct here together with the `bash -ec` measurements that say "
+        f"what it does.")
 
 
 def _tolerated_statements(text: str) -> dict[int, str]:
@@ -2346,11 +2271,10 @@ def _tolerated_statements(text: str) -> dict[int, str]:
                 tolerated[index] = ("it is a non-final command of an AND-OR "
                                     "list that is not the last list in the "
                                     "body, and `bash -e` discards that")
-    # Merged LAST and overwriting, because a context reason is the more
-    # specific of the two: a gate inside an `if` condition is discarded for
-    # being a condition whether or not a separator would also have discarded
-    # it, and the reason a refusal prints is the edit a maintainer has to undo.
-    tolerated.update(_errexit_exempt(pairs, last))
+    # No context rules any more. Everything a context rule used to answer is
+    # refused outright by `_refuse_unmodelled_shell`, so what remains here is
+    # the SEPARATOR reading, which is about a flat list of commands and is the
+    # only shape this file now accepts.
     return tolerated
 
 
