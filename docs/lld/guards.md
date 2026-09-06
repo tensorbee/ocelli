@@ -1,6 +1,6 @@
 # The guard harness
 
-**F-IDs that contributed:** F-X008, F-X009, F-X010, F-X014, F-X020
+**F-IDs that contributed:** F-X008, F-X009, F-X010, F-X014, F-X015, F-X020
 **Last updated:** 2026-09-06
 
 A guard is any refusal this repository can produce: a script that exits 1, a
@@ -1085,6 +1085,46 @@ The wall-clock ceiling is deliberately generous, five times the recorded value
 plus thirty seconds. It catches a change that made the harness ten times slower
 and not a shared runner having a bad afternoon, because a timing gate tuned
 tight is a timing gate that gets disabled.
+
+## Executable skill examples
+
+`scripts/skill_examples_check.py` executes only examples enclosed by its exact
+column-zero HTML markers in canonical `.claude/skills/*/SKILL.md` files. The
+marker fixes the interpreter to `python3` and selects either exact stdout or a
+self-asserting block. The command accepts no selector, so CI always checks the
+complete marked set. Marker-shaped text inside a top-level, blockquoted or
+list-nested unmarked fence remains documentation. Leaving a quote or list
+container returns to the live column-zero grammar immediately. An active list
+container takes precedence over the zero-to-three-space top-level fence form,
+so two-space, three-space and four-space continuations all return to the live
+grammar on dedent. A backtick fence is valid only when its info string contains
+no backtick. Tilde fences use their separate CommonMark rule.
+
+The checker parses every canonical skill and rejects malformed markers,
+duplicate ids, empty declarations and unmatched fences before it starts a
+process. The canonical root is the lexical `.claude/skills` path under the
+repository that contains the checker. A symlink at that root is refused before
+resolution, and every child must resolve beneath it. The checker then runs each
+example as an argument vector without a shell, in a fresh temporary working
+directory with a minimal deterministic environment. Every run has a timeout,
+and failure diagnostics are bounded.
+
+Pass-1 remediation moves the `skill-examples` discovery count from 11 to 15
+refusal sites. The four additions reject a noncanonical root argument, a root
+symlink, an unresolvable root and a root moved outside the repository by a
+symlinked parent. Separate adversarial cases watch all four, and the existing
+child-symlink case watches a skill path escaping an otherwise valid root.
+
+The `skills` gate runs adapter drift detection, the marked examples and their
+adversarial unit suite in that order. CI invokes the named gate rather than
+reconstructing those commands. The already gate-reached catalogue suite
+asserts the complete arm exactly, so either executable check disappearing is a
+failure. The catalogue also mutates one expected VOI digit and requires the
+checker to report the stdout mismatch, applying HLD 27.3 to the documentation
+fixture itself. Two more mutations reverse the PS3.3 SIGMOID exponent and its
+positive-width predicate. The marked output evaluates an input whose exponent
+is exactly `+1`, and also exercises the zero-width refusal, so both mutations
+must turn the checker red.
 
 ## What this harness does not cover
 

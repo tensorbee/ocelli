@@ -731,6 +731,30 @@ def _stale_codex_adapter(box: Sandbox) -> None:
                "\nA line the adapter has not seen.\n")
 
 
+def _changed_skill_example_digit(box: Sandbox) -> None:
+    box.substitute(
+        ".claude/skills/dicom-tooling/SKILL.md",
+        "    40   127.820   127.500",
+        "    40   127.821   127.500",
+    )
+
+
+def _reverse_skill_sigmoid_exponent(box: Sandbox) -> None:
+    box.substitute(
+        ".claude/skills/dicom-tooling/SKILL.md",
+        "math.exp(-4 * (x - c) / w)",
+        "math.exp(4 * (x - c) / w)",
+    )
+
+
+def _reverse_skill_sigmoid_width_precondition(box: Sandbox) -> None:
+    box.substitute(
+        ".claude/skills/dicom-tooling/SKILL.md",
+        '"""PS3.3 C.11.2.1.3.1. Requires w > 0."""\n    assert w > 0',
+        '"""PS3.3 C.11.2.1.3.1. Requires w > 0."""\n    assert w < 0',
+    )
+
+
 def _renumber_an_error_code(box: Sandbox) -> None:
     registry = json.loads(box.read("ci/error-codes.json"))
     codes = registry["codes"]
@@ -6577,6 +6601,47 @@ GUARDS: tuple[Guard, ...] = (
             Probe("skills.stale-adapter", _stale_codex_adapter,
                   script("python3", "scripts/sync_agent_skills.py", "--check"),
                   "is stale, its source changed"),
+        ),
+    ),
+    Guard(
+        id="skill-examples",
+        file="scripts/skill_examples_check.py",
+        gate="skills",
+        spec="HLD 27.2 R2 and R3, HLD 27.3, and deviation D-13",
+        refuses="A malformed or duplicate marked skill example, an empty "
+                "example set, a nonzero or timed-out Python example, hidden "
+                "stderr, unexpected assertion output, or stdout that differs "
+                "from the declared result.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "skill-examples.changed-expected-digit",
+                _changed_skill_example_digit,
+                script("python3", "scripts/skill_examples_check.py"),
+                "stdout differs",
+                note="HLD 27.3 requires changing one expected value and "
+                     "watching the check fail. This changes the centre-row "
+                     "digit beside the PS3.3-derived VOI example without "
+                     "changing its calculation.",
+            ),
+            Probe(
+                "skill-examples.reversed-sigmoid-exponent",
+                _reverse_skill_sigmoid_exponent,
+                script("python3", "scripts/skill_examples_check.py"),
+                "stdout differs",
+                note="PS3.3 C.11.2.1.3.1 fixes the exponent sign. The "
+                     "selected input reduces the correct exponent to +1, so "
+                     "reversing the formula changes the declared output.",
+            ),
+            Probe(
+                "skill-examples.reversed-sigmoid-width-precondition",
+                _reverse_skill_sigmoid_width_precondition,
+                script("python3", "scripts/skill_examples_check.py"),
+                "exited 1",
+                note="PS3.3 C.11.2.1.3.1 requires positive width. Reversing "
+                     "that predicate rejects the positive-width arithmetic "
+                     "call before the zero-width refusal is reached.",
+            ),
         ),
     ),
     Guard(

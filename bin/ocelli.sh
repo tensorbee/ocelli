@@ -70,7 +70,7 @@ GATES=(
   "content|no|no DICOM and no build artefacts tracked"
   "backlog|no|BACKLOG, SPRINT_PLAN, tracker and as-built agree"
   "deviations|no|every HLD deviation declared and still true"
-  "skills|no|Codex adapters match their canonical command and skill files"
+  "skills|no|Codex adapters match canonical sources and marked examples run"
   "lint|no|eslint, including the cached-wasm-view ban (HLD 17.2)"
   "types|no|tsc --build across the TypeScript workspaces"
   "wasm|no|wasm-pack build and the size budget (E1.2, gate A4)"
@@ -164,7 +164,10 @@ run_gate() {
     backlog)     python3 scripts/backlog_check.py &&
                  python3 scripts/gen_sprint_plan.py --check ;;
     deviations)  python3 scripts/deviation_check.py ;;
-    skills)      python3 scripts/sync_agent_skills.py --check ;;
+    skills)      python3 scripts/sync_agent_skills.py --check &&
+                 python3 scripts/skill_examples_check.py &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_skill_examples_check.py ;;
     lint)        [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
                  npm run lint ;;
     types)       [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }

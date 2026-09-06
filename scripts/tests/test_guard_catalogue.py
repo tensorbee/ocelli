@@ -132,6 +132,19 @@ class SandboxCopyPreservesTrackedShape(unittest.TestCase):
 
 
 class CatalogueIsWellFormed(unittest.TestCase):
+    def test_the_skills_gate_names_its_checker_and_suite_exactly(self) -> None:
+        """The named CI gate must not lose either executable check."""
+        runner = (ROOT / "bin" / "ocelli.sh").read_text(encoding="utf-8")
+        arm = runner[runner.index("    skills)"):
+                     runner.index("    lint)")]
+        self.assertEqual(
+            arm,
+            "    skills)      python3 scripts/sync_agent_skills.py --check &&\n"
+            "                 python3 scripts/skill_examples_check.py &&\n"
+            "                 python3 -B -m unittest discover -s scripts/tests \\\n"
+            "                   -p test_skill_examples_check.py ;;\n",
+        )
+
     def test_the_guards_gate_names_its_python_suites_exactly(self) -> None:
         """A focused suite must not exist only as a manual invocation."""
         runner = (ROOT / "bin" / "ocelli.sh").read_text(encoding="utf-8")
