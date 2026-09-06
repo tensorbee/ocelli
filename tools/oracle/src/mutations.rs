@@ -1397,6 +1397,8 @@ mod tests {
             parameter_divergences: Vec::new(),
             geometry_divergences: Vec::new(),
             register_entry: None,
+            reference_render_hash: "reference-hash".to_owned(),
+            candidate_render_hash: "candidate-hash".to_owned(),
             statistics: None,
             monochrome_frame: true,
             photometric_interpretation: photometric.map(str::to_owned),

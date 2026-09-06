@@ -46,6 +46,7 @@ use crate::frame::{ChannelSet, Frame, FrameError, Rect, difference};
 use crate::geometry::{
     Divergence, canvas_divergences, reformat_scale_divergences, stack_extent, world_divergences,
 };
+use crate::render_hash::render_hash;
 use crate::report::{
     ChannelReport, Outcome, ParameterDivergence, Qualifier, Side, ViewRecord, ViewStatistics,
 };
@@ -884,6 +885,8 @@ pub fn compare_view(
         parameter_divergences: parameters,
         geometry_divergences: geometry,
         register_entry,
+        reference_render_hash: render_hash(kind, id, reference_frame).sha256,
+        candidate_render_hash: render_hash(kind, id, candidate_frame).sha256,
         statistics: Some(statistics),
         monochrome_frame,
         photometric_interpretation,
