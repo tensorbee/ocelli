@@ -71,6 +71,9 @@ current evidence.
    `completed`. Accept it at close only when `CURRENT_SPRINT.md` records a
    non-empty reason under this sprint's carry-forward heading. Do not require a
    feature review for work whose state makes no implementation claim.
+7. Make the recorded-carry accept probe synthesize its own reason in the
+   disposable repository. It must not depend on the active sprint allocating
+   one of the stories carried from an earlier sprint.
 
 Anticipated implementation write set, exactly. The authoritative workflow,
 generated runbook and LLD index are included because the implementation changes

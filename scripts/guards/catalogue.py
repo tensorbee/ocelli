@@ -1012,15 +1012,23 @@ def _close_tree_changed_after_evidence(box: Sandbox) -> None:
 
 def _close_carried(box: Sandbox, *, recorded: bool) -> None:
     """Put one story in carried state, with or without a tracked reason."""
-    _write_close_state(box)
     sprint = re.search(r"^#\s+Current sprint,\s*(S[\d.]+)",
                        box.read("docs/sprints/CURRENT_SPRINT.md"), re.M)
     if sprint is None:
         raise AssertionError("CURRENT_SPRINT.md names no sprint")
+    name = sprint.group(1)
+    allocation = json.loads(box.read("docs/sprints/allocation.json"))
+    allocated_fids = sorted(
+        story["fid"] for story in allocation["stories"]
+        if story.get("sprint") == name
+    )
+    if not allocated_fids:
+        raise AssertionError(f"allocation.json puts no story in {name}")
+    current_sprint = box.read("docs/sprints/CURRENT_SPRINT.md")
     section = re.search(
-        rf"^## Carried forward from {re.escape(sprint.group(1))}\s*$\n"
+        rf"^## Carried forward from {re.escape(name)}\s*$\n"
         r"(.*?)(?=^## |\Z)",
-        box.read("docs/sprints/CURRENT_SPRINT.md"),
+        current_sprint,
         re.M | re.S,
     )
     recorded_fids = set() if section is None else set(re.findall(
@@ -1028,16 +1036,36 @@ def _close_carried(box: Sandbox, *, recorded: bool) -> None:
         section.group(1),
         re.M,
     ))
-    state_path = (box.path / ".claude" / "scratch" /
-                  f"{sprint.group(1)}-run.json")
-    data = json.loads(state_path.read_text())
+
     candidates = sorted(
-        fid for fid in data["features"]
+        fid for fid in allocated_fids
         if (fid in recorded_fids) == recorded
     )
+    if recorded and not candidates:
+        fid = allocated_fids[0]
+        heading = f"## Carried forward from {name}\n"
+        reason = f"\n- **{fid}** probe-only recorded reason\n"
+        if heading in current_sprint:
+            current_sprint = current_sprint.replace(
+                heading,
+                heading + reason,
+                1,
+            )
+        else:
+            current_sprint = current_sprint.rstrip() + (
+                f"\n\n{heading}{reason}"
+            )
+        box.write("docs/sprints/CURRENT_SPRINT.md", current_sprint)
+        box.stage_all()
+        box.git("commit", "-q", "-m", "probe recorded carry")
+        candidates = [fid]
     if not candidates:
         kind = "recorded" if recorded else "unrecorded"
         raise AssertionError(f"sprint has no {kind} carry-forward candidate")
+
+    _write_close_state(box)
+    state_path = box.path / ".claude" / "scratch" / f"{name}-run.json"
+    data = json.loads(state_path.read_text())
     data["features"][candidates[0]]["state"] = "carried"
     box.write(
         str(state_path.relative_to(box.path)),
