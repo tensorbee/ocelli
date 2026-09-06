@@ -27,6 +27,7 @@ use serde_json::{Value, json};
 
 use crate::frame::StatsError;
 use crate::geometry::Divergence;
+use crate::render_hash::{ALGORITHM as RENDER_HASH_ALGORITHM, RenderHash, run_render_hash};
 use crate::sidecar::ViewKind;
 use crate::tolerance::ToleranceClass;
 
@@ -280,6 +281,10 @@ pub struct ViewRecord {
     pub parameter_divergences: Vec<ParameterDivergence>,
     pub geometry_divergences: Vec<Divergence>,
     pub register_entry: Option<String>,
+    /// Exact, shape-aware identity of the already validated reference frame.
+    pub reference_render_hash: String,
+    /// Exact, shape-aware identity of the already validated candidate frame.
+    pub candidate_render_hash: String,
     pub statistics: Option<ViewStatistics>,
     /// Whether the frame is grey on every pixel, red equal to green equal to
     /// blue. Recorded for EVERY view rather than only for class one, because
@@ -364,6 +369,11 @@ impl ViewRecord {
                     .collect()
             ),
             "referenceDivergenceEntry": self.register_entry,
+            "renderHashes": {
+                "algorithm": RENDER_HASH_ALGORITHM,
+                "reference": self.reference_render_hash,
+                "candidate": self.candidate_render_hash,
+            },
             "monochromeFrame": self.monochrome_frame,
             "statistics": statistics,
         })
@@ -464,6 +474,33 @@ pub struct RunReport {
 }
 
 impl RunReport {
+    fn hashes(&self, reference: bool) -> Vec<RenderHash> {
+        self.records
+            .iter()
+            .map(|record| RenderHash {
+                kind: record.kind,
+                id: record.id.clone(),
+                sha256: if reference {
+                    record.reference_render_hash.clone()
+                } else {
+                    record.candidate_render_hash.clone()
+                },
+            })
+            .collect()
+    }
+
+    /// Stable identity of all declared reference views, in canonical order.
+    #[must_use]
+    pub fn reference_render_hash(&self) -> String {
+        run_render_hash(&self.hashes(true))
+    }
+
+    /// Stable identity of all declared candidate views, in canonical order.
+    #[must_use]
+    pub fn candidate_render_hash(&self) -> String {
+        run_render_hash(&self.hashes(false))
+    }
+
     #[must_use]
     pub fn count(&self, outcome: Outcome) -> usize {
         self.records
@@ -543,7 +580,7 @@ impl RunReport {
     #[must_use]
     pub fn to_json(&self) -> Value {
         json!({
-            "story": "F-011",
+            "story": "F-011, F-015",
             "reference": self.reference_directory,
             "candidate": self.candidate_directory,
             "views": self.records.len(),
@@ -560,6 +597,11 @@ impl RunReport {
             "problems": self.problems,
             "absorbedDivergences": self.absorbed_divergences(),
             "green": self.green(),
+            "renderHashes": {
+                "algorithm": RENDER_HASH_ALGORITHM,
+                "reference": self.reference_render_hash(),
+                "candidate": self.candidate_render_hash(),
+            },
             "records": Value::Array(self.records.iter().map(ViewRecord::to_json).collect()),
         })
     }
@@ -588,6 +630,8 @@ mod tests {
             parameter_divergences: Vec::new(),
             geometry_divergences: Vec::new(),
             register_entry: None,
+            reference_render_hash: "reference-hash".to_owned(),
+            candidate_render_hash: "candidate-hash".to_owned(),
             statistics: None,
             monochrome_frame: true,
             photometric_interpretation: Some("MONOCHROME2".to_owned()),
@@ -681,6 +725,15 @@ mod tests {
         );
         assert!(clean.green());
         assert!(clean.absorbed_divergences().is_empty());
+        let json = clean.to_json();
+        assert_eq!(
+            json.pointer("/renderHashes/algorithm"),
+            Some(&json!("sha256-rgba8-v1"))
+        );
+        assert_eq!(
+            json.pointer("/records/0/renderHashes/reference"),
+            Some(&json!("reference-hash"))
+        );
     }
 
     /// `divergent-while-unmeasured` fails the run BY ITSELF. Zero fails, zero

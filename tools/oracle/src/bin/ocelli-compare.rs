@@ -40,6 +40,7 @@ use ocelli_oracle::mutations::{
     CATALOGUE, Expectation, MutatedSide, Mutation, apply_to_frame, apply_to_run, resolve_target,
     touches_the_frame,
 };
+use ocelli_oracle::render_hash::ALGORITHM as RENDER_HASH_ALGORITHM;
 use ocelli_oracle::report::{Census, Outcome, RunReport, Side, ViewRecord};
 use ocelli_oracle::sidecar::Run;
 use ocelli_oracle::tolerance::{MONOCHROME_SIGNED_MEAN_BIAS, ToleranceClass};
@@ -319,6 +320,11 @@ fn summarise(report: &RunReport) {
     for absorbed in report.absorbed_divergences() {
         println!("  PROBLEM {absorbed}");
     }
+    println!(
+        "render hashes ({RENDER_HASH_ALGORITHM}): reference {}, candidate {}",
+        report.reference_render_hash(),
+        report.candidate_render_hash()
+    );
 }
 
 fn identity(
@@ -440,7 +446,9 @@ fn mutations(
             census,
             Some((&target, mutation)),
         );
-        match check(mutation, &target, &outcome) {
+        match check(mutation, &target, &outcome)
+            .and_then(|()| check_render_hash_changed(mutation, &target, &baseline, &outcome))
+        {
             Ok(()) => println!("  {:<44} ok  ({target})", mutation.name),
             Err(reason) => {
                 failures = failures.saturating_add(1);
@@ -455,6 +463,43 @@ fn mutations(
         failures
     );
     Ok(failures == 0)
+}
+
+/// Every mutation that changes frame bytes must also change the stable hash
+/// for the mutated side. The catalogue already proves the comparator sees the
+/// damage. This makes it prove the F-015 hook sees the same damage too.
+fn check_render_hash_changed(
+    mutation: &Mutation,
+    target: &str,
+    baseline: &RunReport,
+    outcome: &Result<RunReport, String>,
+) -> Result<(), String> {
+    if !touches_the_frame(mutation) {
+        return Ok(());
+    }
+    let Ok(mutated) = outcome else {
+        return Ok(());
+    };
+    let before = baseline
+        .records
+        .iter()
+        .find(|record| record.id == target)
+        .ok_or_else(|| format!("{target} is not in the baseline hash report"))?;
+    let after = mutated
+        .records
+        .iter()
+        .find(|record| record.id == target)
+        .ok_or_else(|| format!("{target} is not in the mutated hash report"))?;
+    let (before_hash, after_hash) = match mutation.side {
+        MutatedSide::Reference => (&before.reference_render_hash, &after.reference_render_hash),
+        MutatedSide::Candidate => (&before.candidate_render_hash, &after.candidate_render_hash),
+    };
+    if before_hash == after_hash {
+        return Err(format!(
+            "{target}: frame bytes changed and the {RENDER_HASH_ALGORITHM} hash did not"
+        ));
+    }
+    Ok(())
 }
 
 /// The catalogue entry that carries the real divergence. Looked up by name

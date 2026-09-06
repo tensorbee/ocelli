@@ -1,6 +1,6 @@
 # The comparator, the oracle's judging half
 
-**F-IDs that contributed:** F-011
+**F-IDs that contributed:** F-011, F-015
 **Last updated:** 2026-09-06
 
 HLD section 11 says the harness "pushes the same study through both stacks and
@@ -1020,7 +1020,8 @@ worth reading.
 
 - `compare.json`, the whole report: every view's outcome, qualifiers, attributed
   side, ladder rung, parameter and geometry divergences, and all four regions of
-  statistics per lane.
+  statistics per lane. It also carries the versioned reference and candidate
+  render hash for every view, plus one aggregate render hash per side.
 - `<id>.diff.raw` for every view carrying a difference, in the same RGBA8 shape
   as the frames it came from, beside the reference's own `<id>.png` pair. It is
   the per-lane ABSOLUTE difference, **unamplified**: a scale factor is a number
@@ -1086,6 +1087,64 @@ fifty-two, fifty of them on the first pixel. Restoring the single subtraction
 per pixel turns exactly those two red and leaves the four above green, which is
 what says the mutation is the narrow-window defect and not something else.
 
+## Stable render hashes
+
+F-015 gives the exact RGBA8 output a versioned identity before F-151 builds an
+attestation over presentation state plus that identity. The algorithm token is
+`sha256-rgba8-v1`.
+
+The comparator hashes the `Frame` it already loaded and validated. It never
+opens the raw file a second time. The frame constructor has already required
+the byte length to equal `width * height * 4`, so allocation padding cannot
+enter the digest. PNG bytes, difference statistics, report key order, elapsed
+time, environment identity and presentation parameters do not enter either.
+
+### Per-view byte contract
+
+The SHA-256 input starts with the fixed bytes `sha256-rgba8-v1\0`. Each field
+after that is framed by an unsigned 64-bit little-endian byte length followed
+by those bytes, in this order:
+
+1. the view kind token
+2. the opaque view identifier
+3. width as unsigned 32-bit little-endian bytes
+4. height as unsigned 32-bit little-endian bytes
+5. the literal format token `RGBA8`
+6. the exact tightly packed frame bytes
+
+Binding the kind, identifier and dimensions means one byte buffer cannot be
+silently reinterpreted as a different view or shape. The literal fixture is a
+2 by 1 frame with bytes `[0, 0, 0, 255, 1, 2, 3, 255]`. Its independently
+computed digest is:
+
+```text
+7ce1f3d20a7aa3652620049f76d3b99123acc1ccf35cd59649bef6a87c1785e0
+```
+
+`tools/oracle/tests/render_hash_fixture.rs` pins that value and proves that a
+pixel byte, dimension, kind or identifier change moves it.
+
+### Run byte contract
+
+The run hash starts with `sha256-rgba8-run-v1\0`, followed by the number of
+views as an unsigned 64-bit little-endian value. Per-view entries are sorted by
+kind, identifier and digest. Each entry frames the kind, identifier and ASCII
+per-view digest with the same length convention. Sorting makes report or input
+iteration order irrelevant. The view count and framed entries mean an omitted
+or duplicate view cannot have the same aggregate identity.
+
+The comparator writes both levels under `renderHashes` in `compare.json` and
+prints the two aggregate hashes on stdout. The identity run has equal reference
+and candidate hashes. A candidate mutation changes its per-view and run hash.
+Every catalogue effect that changes frame bytes must now move the damaged
+side's hash as well as produce its declared comparator result, or the mutation
+is reported as not detected.
+
+An equal hash means exact equality under this byte contract. It is not a
+tolerance and it is not a claim of cross-machine reproducibility. D14's
+measured divergence remains the claim an attestation may make when hashes are
+unequal.
+
 ## What F-011 did not build
 
 Named, because each is somebody's story.
@@ -1099,5 +1158,4 @@ Named, because each is somebody's story.
   reference frame.
 - Resolving the reference's SIGMOID divergence. F-X012, S04. F-011 built the
   register that holds it.
-- Stable render-hash emission, F-015, E2.7, S04, and the CI gate that renders
-  the corpus per pull request, F-012, E2.4, S04.
+- The CI gate that renders the corpus per pull request, F-012, E2.4, S04.

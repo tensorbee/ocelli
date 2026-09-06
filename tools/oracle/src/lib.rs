@@ -57,6 +57,7 @@ pub mod attribution;
 pub mod frame;
 pub mod geometry;
 pub mod mutations;
+pub mod render_hash;
 pub mod report;
 pub mod sidecar;
 pub mod tolerance;
