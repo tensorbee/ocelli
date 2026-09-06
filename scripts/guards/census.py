@@ -63,10 +63,19 @@ under `.githooks/` has entries. The three gate rules are one rule seen three
 ways, because the S03 review's fourth pass deleted the `prose` row and measured
 a green census, a green `ci_floor_check.py` over one gate fewer, and probes
 still passing because they invoke `scripts/prose_check.py` rather than the
-gate. The array is parsed with the same
-regex `scripts/ci_floor_check.py` uses, and it is a second copy of that regex
-rather than a shared one. `bin/ocelli.sh` carries a third. Nothing joins the
-three, which is a duplication this module does not get to describe away.
+gate.
+
+**The array is read by `scripts/ci_floor_check.py`'s own reader since the S03
+review's eleventh pass, and it used to be read by a copy of that file's
+regex.** The sentence here said the runner "carries a third" copy of the
+regex, which was imprecise in the way that hid the defect: `bin/ocelli.sh`
+carries no regex, it reads an entry with `IFS='|' read -r name gpu desc` and so
+imposes no character class on the name at all. Both Python copies spelled it
+`[a-z-]+`. MEASURED: a gate named `prose2` gave bash 29 gates and Python 28,
+this census exit 0, `ci_floor_check.py` exit 0, `gates_declared` unmoved
+because the Python side never counted it, and `gate --floor` selecting a gate
+no CI step ran and no catalogue entry claimed. An entry the reader cannot use
+is a refusal now, in both checks, from one function.
 
 **c. The declared-constant ratchet.** The class of weakening no probe can
 reach. A probe proves a guard still refuses what it refuses, and cannot notice
@@ -188,9 +197,38 @@ class Match:
 
 
 def gates_declared() -> list[str]:
-    """The GATES array, read with `scripts/ci_floor_check.py`'s own idiom."""
+    """The GATES array, read with `scripts/ci_floor_check.py`'s own READER.
+
+    Not with its idiom. This carried a second copy of that file's row regex
+    and the module docstring called the duplication out, and the S03 review's
+    eleventh pass measured what the copies cost: both spelled the gate name
+    `[a-z-]+` while `bin/ocelli.sh` reads an entry with `IFS='|' read -r name
+    gpu desc`, which imposes no class at all. A gate named `prose2` gave bash
+    29 gates and Python 28, this census exit 0, `scripts/ci_floor_check.py`
+    exit 0, `gates_declared` unmoved because this function never counted it,
+    and `gate --floor` selecting a gate no CI step ran and no entry claimed.
+
+    Imported lazily for the reason `scripts/guards/catalogue.py` gives at
+    `_ci_arm_commands`: every caller of this package puts `scripts/` on
+    `sys.path`, and a top-level import would make the census depend on one
+    particular guard at import time.
+    """
+    import ci_floor_check
     runner = (ROOT / "bin" / "ocelli.sh").read_text()
-    return re.findall(r'^\s*"([a-z-]+)\|(?:no|YES)\|', runner, re.M)
+    return ci_floor_check.declared_gates(runner)
+
+
+def gate_entry_problems() -> list[str]:
+    """Check b's other half. An entry the reader cannot use is a REFUSAL.
+
+    The same function `scripts/ci_floor_check.py` applies, applied here too,
+    because the two checks run in different gates and a gate the reader dropped
+    is invisible to both. `bin/ocelli.sh` is the file both are about and
+    neither of them owns it.
+    """
+    import ci_floor_check
+    runner = (ROOT / "bin" / "ocelli.sh").read_text()
+    return ci_floor_check.gate_row_problems(runner)
 
 
 def profile_problems(rows: list[tuple[str, str, str]]) -> list[str]:
@@ -225,7 +263,23 @@ def profile_problems(rows: list[tuple[str, str, str]]) -> list[str]:
 
 
 def constant_value(constant: Constant, root: Path) -> str | None:
-    """The recorded text of one strictness-deciding value."""
+    """The recorded text of one strictness-deciding value.
+
+    A `read` entry hands the file's text to a parser for the file's own
+    grammar and takes back the value. That route exists because a regex over a
+    FOREIGN grammar is a second reader of it, and the S03 review's eleventh
+    pass measured what two hand-rolled TOML readers cost: a quoted key was
+    outside the recorded slice and outside the guard's row regex at the same
+    time, so cargo, the guard and this census were all at exit 0 with four of
+    HLD 27.1's five lints switched off. `None` from the parser means the value
+    could not be read, and the caller refuses that, which is the same
+    fail-closed answer a `pattern` that stops matching gets.
+    """
+    if constant.read is not None:
+        path = root / constant.file
+        if not path.is_file():
+            return None
+        return constant.read(path.read_text(encoding="utf-8"))
     if "*" in constant.file:
         # A set spread over several files, such as the crates declaring
         # no_std. The value is the sorted list of files that match.
@@ -606,6 +660,7 @@ def run(profile: str = "floor") -> tuple[int, list[str]]:
     # `--all` with nothing to say so: the entry kept its probes, the probes
     # kept passing because they invoke the underlying script directly, and the
     # census counted 487 refusals all claimed.
+    problems += gate_entry_problems()
     declared_gates = gates_declared()
     entry_gates = {name for g in GUARDS for name in g.gate.split()
                    if name != "-"}

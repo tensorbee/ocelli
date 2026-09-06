@@ -131,8 +131,11 @@ command did not answer.
 **"Every probe" became true of the bare command in the tenth pass**, and the
 same sentence was the same kind of wrong one field over until it did.
 `--profile` defaulted to `floor` for listing as well as for running, so bare
-`--list` printed 112 rows all marked `floor` while four files, this one
-included, sent a reader to it to check something about the deep set. A RUN
+`--list` printed the floor rows alone, all marked `floor`, while four files,
+this one included, sent a reader to it to check something about the deep set.
+The row count is not written here, and the tenth pass wrote one in the commit
+that deleted a stale count from two other files: it said 112 and the set was
+114 within a sprint. Run the command. A RUN
 still defaults to the floor, which is what CI's `guards` gate is about. A LIST
 is an inventory and takes every probe, and `--list --profile floor` still
 prints the floor set for anyone who wants only that.
@@ -343,10 +346,24 @@ rules are one rule seen three ways: the S03 review's fourth pass deleted the
 `prose` row and got a green census, a green `ci_floor_check.py` over one gate
 fewer, and probes still passing, because a probe invokes
 `scripts/prose_check.py` directly rather than through the gate. `--floor`,
-`--sprint` and `--all` all shrank and nothing said so. The `GATES` array is
-parsed with a copy of `scripts/ci_floor_check.py`'s regex, and `bin/ocelli.sh`
-carries a third. Nothing joins the three, which is a duplication this file does
-not get to describe away.
+`--sprint` and `--all` all shrank and nothing said so.
+
+**The `GATES` array has ONE reader since the eleventh pass**, and this
+paragraph used to record the duplication instead of removing it. It said the
+census parsed the array with a copy of `scripts/ci_floor_check.py`'s regex and
+that `bin/ocelli.sh` carried a third, which is the imprecision that hid the
+defect: the runner carries no regex. It reads an entry with `IFS='|' read -r
+name gpu desc`, so it imposes no character class on a gate name at all, while
+both Python copies spelled it `[a-z-]+`. MEASURED at HEAD: a gate named
+`prose2` with a real arm gave bash 29 gates and Python 28,
+`scripts/ci_floor_check.py` at exit 0, the census at exit 0, `gates_declared`
+unmoved because the Python side never counted the entry, and `gate --floor`
+selecting a gate that no CI step ran and no catalogue entry claimed. An entry
+the reader could not parse became an omission rather than a refusal.
+`ci_floor_check.gate_entries` scans the array as shell WORDS with the same
+tokenizer the gate arms are read with, the census calls that function, and an
+entry outside `[A-Za-z0-9_-]+` or missing a field is refused by name in both
+checks.
 
 **c. The declared-constant ratchet.** The class of weakening no probe can
 reach. A probe proves a guard still refuses what it refuses and cannot notice
@@ -358,6 +375,18 @@ the same change. That puts the widening in the diff and in front of a reviewer
 rather than in a refactor nobody reads. A recorded value that no longer parses
 also fails, because a constant the ratchet cannot read is a ratchet that has
 quietly stopped holding.
+
+**A regex reads a Python literal out of a Python file, and one entry is not
+that.** `Cargo.toml:workspace.lints` records HLD 27.1's lint table, which is
+TOML, and a regex over it is a second reader of a foreign grammar. The
+eleventh pass measured the cost: six passes tuned that capture, and a QUOTED
+key appended as the last line of the table was outside it and outside
+`scripts/lint_policy_check.py`'s row regex at the same time, so cargo clippy
+went 101 to 0 with the guard and the census both at exit 0. A `Constant` may
+now carry a `read` callable instead of a `pattern`, and that entry calls
+`lint_policy_check.workspace_lints_rows`, which is the guard's own `tomllib`
+parse rendered as sorted rows. Two mechanisms reading one grammar two ways is
+not two mechanisms.
 
 **The ratchet can also be narrowed, and the number of declared constants is
 recorded for exactly that.** Deleting a `Constant` and its recorded row is a
@@ -484,16 +513,21 @@ harness exists to fix.
   since the fifth, and those probes were unwatched on the pull request that
   would weaken them. **What is left of the floor exclusion is duplication and
   nothing else.** The deep profile is a strict superset of the floor one, so a
-  `gate --floor` including it would run every floor probe twice. The numbers
-  are QUOTED from `ci/guard-probe-budget.json`'s `wall_clock_seconds`, deep
-  27.2s against floor 18.3s, so about nine seconds of the twenty-seven is new
-  coverage and about eighteen is the duplication CI now pays deliberately.
-  They are quoted rather than measured again because this file, `ci.yml` and
-  `bin/ocelli.sh` all carried a second pair, deep 23.8s against floor 15.9s,
-  that the recorded budget disagreed with, and the recorded pair is the one
-  `--record-budget` wrote. Removing it would mean `gate guards`
-  running a different probe set in CI from the one a developer gets, which is
-  the failure this harness exists to catch.
+  `gate --floor` including it would run every floor probe twice. **The timings
+  are in `ci/guard-probe-budget.json` under `wall_clock_seconds` and are not
+  written here**, and the arithmetic over them is not written here either. The
+  pair went stale twice. This file, `ci.yml`, `bin/ocelli.sh` and
+  `scripts/ci_floor_check.py` all carried deep 23.8s against floor 15.9s while
+  the recorded budget disagreed, and the tenth pass answered that by copying
+  the recorded pair into all four. The eleventh pass found all four saying deep
+  27.2s against floor 18.3s while the file said 28.4 and 18.6, because the
+  `--record-budget` run moved them in the same commit that quoted them, and the
+  derived sentence about nine seconds of new coverage was arithmetic over the
+  stale pair. A copy of a measurement goes stale the next time the measurement
+  is taken, so this points at the file, which is the rule that same commit
+  applied to the probe count in `ci.yml`. Removing the duplication would mean
+  `gate guards` running a different probe set in CI from the one a developer
+  gets, which is the failure this harness exists to catch.
 
 `guards-deep` is excluded by name in two places, `bin/ocelli.sh`'s `--floor`
 arm and `scripts/ci_floor_check.py`'s `NOT_IN_FLOOR`. **The mechanism that

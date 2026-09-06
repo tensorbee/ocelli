@@ -110,8 +110,9 @@ level only, so `pedantic = { level = "allow", priority = 1 }` in
 row beside `cast_possible_truncation = "deny"` takes cargo clippy from 101 to
 0, because the higher priority is applied last and the group wins. The census's
 digest over the table caught it, so the gate held, but this check was wrong
-about all five. The inline form is parsed now and a group row weaker than
-`deny` is refused.
+about all five. A group row weaker than `deny` is refused now, in every TOML
+spelling, because the table is parsed rather than matched. See "The class,
+named in the eleventh pass" below.
 
 ## Four more routes, all measured in the S03 review's seventh pass
 
@@ -230,9 +231,28 @@ them. MEASURED under the pinned 1.97.1 toolchain: `build.rustflags =
 repository this check printed "1 cargo config(s) lower no denied lint through
 rustflags" at exit 0, which is the eighth pass's `--cap-lints` outcome exactly.
 The config is parsed with `tomllib` now and the three keys are read by NAME,
-which retires the whole regex-against-TOML class from that function. The
-`lint-policy` limit already recorded that a dotted key defeats `LINT_ROW`, so
-the lesson had been learned in one parser here and not in the other.
+which retires the whole regex-against-TOML class from that function.
+
+## The class, named in the eleventh pass, and what closing it looks like
+
+The lesson above was learned in ONE parser of this file and not in the other.
+`LINT_ROW` went on reading `[workspace.lints.*]` with a regex twenty lines
+away, and five passes closed five spellings of the same group row one
+alternation at a time: the inline table, the trailing comment, the dotted key,
+the two-line row and finally the QUOTED key. The last of those defeated the row
+regex and the declared constant that was supposed to backstop it at the same
+time, because that constant was a text slice captured by another regex over the
+same grammar. Two parsers agreeing with each other is not either of them
+agreeing with TOML.
+
+So there is no row regex any more. `workspace_lints` reads the tables with
+`tomllib`, `lint_levels` reduces a row to a level, `workspace_lints_rows`
+renders the parsed rows for the ratchet, and `inherits_workspace_lints` reads
+`lints.workspace` as a key path rather than as two regexes plus a line scanner.
+All five spellings, and the ones nobody has thought of, are one code path.
+`tomllib` is stdlib on 3.11 and up, `pyproject.toml` requires 3.12 and the CI
+job pins 3.12. A document `tomllib` cannot parse is REFUSED here rather than
+read as an empty table, which is the direction the regexes had wrong.
 
 ## The one departure, declared rather than discovered
 
@@ -402,62 +422,35 @@ def _without_comments(text: str) -> tuple[str, bool]:
         index += 1
     return LINE_COMMENT.sub("", "".join(kept)), depth == 0
 
-# One row of a `[workspace.lints.*]` table, in both TOML forms: the quoted
-# level and the inline table. The inline form was invisible, and
-# `pedantic = { level = "allow", priority = 1 }` is measured to take cargo
-# clippy from 101 to 0 on a crate denying cast_possible_truncation.
+# `LINT_ROW` and `_row_body` USED TO SIT HERE, and the eleventh review pass
+# named the class rather than the spelling: a regex against TOML closes the one
+# spelling whoever wrote it thought of, and TOML has more. The record, in the
+# order the passes found them, every one measured under the pinned 1.97.1
+# toolchain on a minimal crate carrying `cast_possible_truncation = "deny"` and
+# one `x as i32`, baseline cargo clippy exit 101:
 #
-# It matches the row BODY and not the whole line, because the anchor was `\s*$`
-# and a TOML trailing comment is not whitespace. `_row_body` below removes the
-# comment first. THE CLASS OF INPUT THAT IS NOW CLOSED: any row of either TOML
-# form carrying a trailing `#` comment, at any level, in either
-# `[workspace.lints.clippy]` or `[workspace.lints.rust]`. On a REQUIRED row the
-# old anchor failed safe, reporting the row missing. On a GROUP row it failed
-# OPEN, which is the whole table switched off in one line that this check read
-# as absent. Measured under the pinned 1.97.1 toolchain on a minimal crate
-# carrying `cast_possible_truncation = "deny"` and one `x as i32`: cargo clippy
-# exits 101, and with
-# `pedantic = { level = "allow", priority = 1 } # keeps noise down` appended it
-# exits 0. What is NOT closed is a row spread over two lines: TOML 1.0 puts an
-# inline table on one line, and a `pedantic = { level = "allow",` / `priority =
-# 1 }` pair is invisible to this regex, MEASURED at exit 0. The declared
-# constant `Cargo.toml:workspace.lints` is the backstop for that and it was
-# measured too: the same pair moves the digest from adf2cb2237be28da to
-# e3d02e83d8b52dab and `guard_census.py` refuses. That is the division of
-# labour between the two mechanisms and it is why both had to be fixed. What
-# `table()` adds on its own is that an inline form it CAN see and whose level
-# it cannot read yields the empty string, which is weaker than every level in
-# `STRENGTH` and is refused rather than skipped.
-LINT_ROW = re.compile(
-    r'^\s*([A-Za-z_][\w:-]*)\s*=\s*(?:"([a-z]+)"|\{([^}]*)\})\s*$')
-
-# A TOML trailing comment. `#` opens one only outside a string, so the scan
-# tracks the quote it is inside rather than splitting on the first `#`: a level
-# is never a string carrying one today, and `reason = "see #123"` in an inline
-# table is legal TOML and would otherwise truncate the row into something this
-# parser reads as unparseable.
-def _row_body(line: str) -> str:
-    """`line` with any trailing `#` comment removed, quotes respected."""
-    quote = ""
-    index = 0
-    while index < len(line):
-        char = line[index]
-        if quote:
-            # A backslash escapes the next character inside a TOML basic
-            # string, so the pair is stepped over together. Skipping only the
-            # backslash would leave an escaped quote closing the string.
-            if char == "\\" and quote == '"':
-                index += 2
-                continue
-            if char == quote:
-                quote = ""
-        elif char in "\"'":
-            quote = char
-        elif char == "#":
-            return line[:index]
-        index += 1
-    return line
-
+#     pedantic = { level = "allow", priority = 1 }              exit 0, pass 6
+#     ... } # keeps noise down                                  exit 0, pass 6
+#     pedantic.level = "allow" / pedantic.priority = 1          exit 0, pass 9
+#     pedantic = { level = "allow",  / priority = 1 }           exit 0, pass 6
+#     "pedantic" = { level = "allow", priority = 1 }            exit 0, pass 11
+#
+# The first three were patched into the regex one alternation at a time. The
+# fourth was declared a residual. The FIFTH, the quoted key, defeated the regex
+# and its declared backstop together, because the constant's capture ended at
+# the last line beginning with a BARE key and `"` is not in `[\w.-]`.
+#
+# `tomllib` is stdlib on 3.11 and up, `pyproject.toml` requires 3.12 and the CI
+# job pins 3.12, and this file was ALREADY reading cargo configs with it twenty
+# lines below. So all five spellings are one code path now, `workspace_lints`
+# is the only reader of these tables, and the same function is what the
+# declared constant in `scripts/guards/catalogue.py` records, so the two
+# mechanisms cannot disagree with each other or with the grammar.
+#
+# What fails CLOSED and did not before: a `Cargo.toml` this parser cannot parse
+# at all. The regexes returned an empty table and the check went on to report
+# five absent lints. `main` refuses the document instead.
+#
 # A stricter level satisfies a weaker requirement and not the other way round.
 STRENGTH = {"allow": 0, "warn": 1, "deny": 2, "forbid": 3}
 
@@ -512,8 +505,10 @@ def member_patterns(text: str) -> tuple[list[str], list[str]]:
 # `tomllib` is stdlib on 3.11 and up and `pyproject.toml` requires 3.12, so
 # there is no reason to read TOML with a regex here. That removes the whole
 # regex-against-TOML class from this function, and the `lint-policy` limit
-# already recorded that a dotted key defeats `LINT_ROW`, so the lesson had been
-# learned in one parser of this file and not in the other.
+# already recorded that a dotted key defeated `LINT_ROW`, so the lesson had
+# been learned in one parser of this file and not in the other. The eleventh
+# pass finished the job: `workspace_lints` reads the lint tables the same way
+# and there is no regex over TOML left in this file.
 #
 # `[env] RUSTFLAGS` is read too and it is NOT a route today. MEASURED the same
 # way: `[env] RUSTFLAGS = "-Aclippy::pedantic"` leaves cargo clippy at 101,
@@ -1133,9 +1128,11 @@ def manifest_members(text: str) -> tuple[list[Path], list[str]]:
 # - `#[cfg_attr(all(), path = "...")]` matched nothing. `INNER_ALLOW` above
 #   deliberately reads an `allow` reached through `cfg_attr` and says so, and
 #   the same wrapper one attribute over was invisible here.
-# - `#[path = r"..."]` matched nothing. `INCLUDE_PATH` twenty lines below
-#   already carries `(?:r#*)?` for exactly this, because a raw string literal
-#   is the same file name written another way.
+# - `#[path = r"..."]` matched nothing. `INCLUDE_PATH` below already carries
+#   `(?:r#*)?` for exactly this, because a raw string literal is the same file
+#   name written another way. The distance between the two was written here as
+#   "twenty lines" and is twenty-six, which is the kind of number that is wrong
+#   the first time either regex moves and is worth nobody's arithmetic.
 #
 # MEASURED under the pinned 1.97.1 toolchain on a minimal workspace carrying
 # `cast_possible_truncation = "deny"`, with the module source holding
@@ -1299,12 +1296,22 @@ def member_sources(member: Path,
     # that counted attributes would go on printing "1 `#[path]` module
     # followed" with the following removed, which is the sentence in the
     # language of success that this whole module exists to stop writing.
-    followed = {"path": 0, "include": 0}
+    #
+    # `root` is the same measurement one key over and it is the S03 review's
+    # ELEVENTH pass. The OK line said "cargo's own target roots seeded" as an
+    # unconditional f-string literal, so `lint-policy.clean-crate-root-outside-
+    # the-member`, the accept probe whose whole subject is that seeding, was
+    # asserting a sentence the guard prints whether it seeds anything or not:
+    # MEASURED, with `for root in roots or []` changed to `for root in []` the
+    # probe stayed GREEN. That is the class pass 10 fixed in the two clauses
+    # beside it and left standing in the third.
+    followed = {"path": 0, "include": 0, "root": 0}
     queue = [path for path in sorted(member.rglob("*.rs"))
              if path.relative_to(member).parts[:1] != ("target",)]
     for root in roots or []:
         if root.is_file():
             queue.append(root)
+            followed["root"] += 1
             continue
         problems.append(
             f"cargo reports `{root}` as a compilation root of the workspace "
@@ -1393,8 +1400,8 @@ def member_sources(member: Path,
     return sorted(found.items()), problems, followed
 
 
-def inherits_workspace_lints(manifest: str) -> bool:
-    """Does this member manifest inherit `[workspace.lints]`.
+def inherits_workspace_lints(manifest: str) -> tuple[bool, str]:
+    """Does this member manifest inherit `[workspace.lints]`, and a parse error.
 
     TWO spellings, and the guard read one of them until the S03 review's
     eighth pass. `[lints]` with `workspace = true` under it is the common
@@ -1406,27 +1413,25 @@ def inherits_workspace_lints(manifest: str) -> bool:
     while the previous regex found nothing and this check refused a legitimate
     manifest at exit 1.
 
-    The line has to sit before the first table header to be the top-level
-    `lints` table. MEASURED the same way: written under `[package]` it is
-    `package.lints`, cargo prints `unused manifest key: package.lints` and
-    clippy exits 0, so that spelling really is a member that does not inherit
-    and refusing it is right.
+    The two spellings are ONE key path to `tomllib`, `lints.workspace`, which
+    is the eleventh pass's structural repair: the regex pair this replaced had
+    to be told about each spelling, and the quoted third, `[lints]` with
+    `"workspace" = true`, was told to neither of them. Same for a trailing
+    comment, which the regexes needed a quote-aware line scanner to strip and
+    a TOML parser removes by construction.
 
-    Trailing `#` comments are removed with `_row_body`, quote-aware, so
-    `workspace = true  # HLD 27.1` is not read as a different value.
+    A member that writes `lints` under `[package]` really does NOT inherit,
+    MEASURED the same way: cargo prints `unused manifest key: package.lints`
+    and clippy exits 0. That falls out of the key path here, where the previous
+    version needed a hand-rolled "lines before the first table header" scan to
+    tell the two apart.
     """
-    body = "\n".join(_row_body(line) for line in manifest.splitlines())
-    block = re.search(r"^\[lints\]\s*$(.*?)(?=^\[|\Z)", body, re.M | re.S)
-    if block is not None and re.search(r"^\s*workspace\s*=\s*true\s*$",
-                                       block.group(1), re.M):
-        return True
-    head: list[str] = []
-    for line in body.splitlines():
-        if line.lstrip().startswith("["):
-            break
-        head.append(line)
-    return re.search(r"^\s*lints\.workspace\s*=\s*true\s*$",
-                     "\n".join(head), re.M) is not None
+    try:
+        document = tomllib.loads(manifest)
+    except tomllib.TOMLDecodeError as error:
+        return False, str(error)
+    lints = document.get("lints")
+    return (isinstance(lints, dict) and lints.get("workspace") is True), ""
 
 
 def _names_in(argument_list: str) -> list[str]:
@@ -1524,47 +1529,128 @@ def module_allows(source: str) -> list[tuple[str, str]]:
     return found
 
 
-def table(text: str, name: str) -> dict[str, str]:
-    """One `[workspace.lints.*]` table, in both of TOML's forms.
+# The two tables HLD 27.1 is about. Named here so `workspace_lints` and the
+# declared constant that records its output cannot come to disagree about which
+# tables are in scope.
+LINT_TABLES = ("clippy", "rust")
 
-    The inline form was invisible, so a group row switching the whole table off
-    left this check printing "5 clippy lint(s) at or above HLD 27.1's level"
-    at exit 0. A row whose inline table carries no readable `level` yields the
-    empty string, which is weaker than every level in `STRENGTH` and is
-    therefore refused rather than skipped.
 
-    A trailing `#` comment is removed before the row is matched. `LINT_ROW`
-    anchors on `\\s*$` and a comment is not whitespace, so the sixth pass
-    measured `pedantic = { level = "allow", priority = 1 } # keeps noise down`
-    read as no row at all: this check printed "no group row weaker than deny"
-    and exited 0 while cargo clippy went from 101 to 0.
+def workspace_lints(text: str) -> tuple[dict[str, dict[str, object]], str]:
+    """`[workspace.lints.clippy]` and `[workspace.lints.rust]`, PARSED.
 
-    The block runs to the next `[` header and not to the first blank line. A
-    blank line does not end a TOML table, so a row after one is still in it.
+    Returns each table's rows exactly as `tomllib` gives them, and a parse
+    error, which is the empty string when the document parsed.
+
+    **This is the only reader of these tables in the repository**, and that is
+    the eleventh review pass's finding rather than a preference. Five spellings
+    of one group row were found in five passes, each one measured to take cargo
+    clippy from 101 to 0, and each was answered by another alternation in a
+    regex. The quoted key, `"pedantic" = { level = "allow", priority = 1 }`,
+    defeated the row regex and the declared constant that was supposed to
+    backstop it at the same time. A parser cannot be taught the grammar one
+    spelling at a time, so it is not taught, it is imported: TOML's dotted key,
+    quoted key, inline table, multi-line row and trailing comment are the same
+    document to `tomllib` and are the same code path here.
+
+    A row is returned VERBATIM rather than reduced to a level, because a
+    reduction loses `priority`, which is what decides whether a group row
+    outranks a named lint. `lint_levels` does the reduction where a level is
+    what the caller wants, and `workspace_lints_rows` records the whole row.
     """
-    block = re.search(rf"^\[{re.escape(name)}\]$(.*?)(?=^\[|\Z)", text,
-                      re.M | re.S)
-    if block is None:
-        return {}
-    found = {}
-    for line in block.group(1).splitlines():
-        match = LINT_ROW.match(_row_body(line))
-        if match is None:
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        return {}, str(error)
+    node: object = document
+    for key in ("workspace", "lints"):
+        node = node.get(key) if isinstance(node, dict) else None
+    tables: dict[str, dict[str, object]] = {}
+    for name in LINT_TABLES:
+        rows = node.get(name) if isinstance(node, dict) else None
+        tables[name] = dict(rows) if isinstance(rows, dict) else {}
+    return tables, ""
+
+
+def lint_levels(rows: dict[str, object]) -> dict[str, str]:
+    """One lints table reduced to name -> level.
+
+    A row whose level this function cannot read yields the EMPTY STRING, which
+    is weaker than every level in `STRENGTH` and is therefore refused rather
+    than skipped. That covers a level that is not a string and an inline table
+    or dotted group carrying no `level` key at all.
+    """
+    levels: dict[str, str] = {}
+    for name, value in rows.items():
+        if isinstance(value, str):
+            levels[name] = value
             continue
-        if match.group(2) is not None:
-            found[match.group(1)] = match.group(2)
-            continue
-        level = re.search(r'level\s*=\s*"([a-z]+)"', match.group(3))
-        found[match.group(1)] = level.group(1) if level else ""
-    return found
+        level = value.get("level") if isinstance(value, dict) else None
+        levels[name] = level if isinstance(level, str) else ""
+    return levels
+
+
+def workspace_lints_rows(text: str) -> str | None:
+    """Both lints tables as sorted `table.name = <json>` rows, or `None`.
+
+    `None` when the document does not parse, so the declared-constant ratchet
+    in `scripts/guards/catalogue.py` refuses a `Cargo.toml` this reader cannot
+    read rather than recording a digest over nothing.
+
+    The recorded value is the PARSED ROWS and not a slice of the file's text,
+    which is what makes the ratchet and the guard above agree with the grammar
+    instead of with each other. The text slice it replaces was captured by a
+    regex that backtracked to the last line starting with a bare key, so a
+    quoted key appended after that line was outside the recorded value: cargo
+    exit 0, guard exit 0, census exit 0, all three at once. Sorted, so the same
+    table written in a different order records the same digest and a row added,
+    removed, renamed, re-levelled or re-prioritised anywhere in either table
+    moves it.
+    """
+    tables, error = workspace_lints(text)
+    if error:
+        return None
+    return "\n".join(
+        f"{table}.{name} = {json.dumps(value, sort_keys=True)}"
+        for table in sorted(tables)
+        for name, value in sorted(tables[table].items()))
+
+
+def _fail(problems: list[str]) -> int:
+    """Print the refusals under the one header this guard has.
+
+    Two callers since the eleventh pass, because an unparseable `Cargo.toml`
+    ends the run where it is found rather than falling through the checks that
+    would then be reasoning about an empty table.
+    """
+    print("FAIL: the HLD 27.1 lint policy")
+    for problem in problems:
+        print(f"  {problem}")
+    return 1
 
 
 def main() -> int:
     text = CARGO.read_text(encoding="utf-8")
-    clippy = table(text, "workspace.lints.clippy")
-    rust = table(text, "workspace.lints.rust")
-
     problems: list[str] = []
+
+    tables, toml_error = workspace_lints(text)
+    if toml_error:
+        # Fail CLOSED, and this branch is new with the eleventh pass. The
+        # regexes this replaced returned an empty table for a document they
+        # could not read, so an unparseable Cargo.toml would have arrived as
+        # five separate "lint is not in the table" refusals naming the wrong
+        # problem, and a version of that shape one step weaker would have been
+        # silence. It returns here rather than continuing, because every check
+        # below would otherwise be reasoning about an empty table.
+        problems.append(
+            f"{_relative(CARGO)} cannot be parsed as TOML ({toml_error}). "
+            f"Whether HLD 27.1's five lints are denied is therefore unknown, "
+            f"and an unknown is not a denial. This check reads the lint "
+            f"tables with `tomllib` rather than with a regex, so a document "
+            f"cargo accepts and this parser rejects is a real disagreement "
+            f"about the grammar and needs a person.")
+        return _fail(problems)
+    clippy = lint_levels(tables["clippy"])
+    rust = lint_levels(tables["rust"])
 
     for lint, wanted in sorted(REQUIRED_CLIPPY.items()):
         level = clippy.get(lint)
@@ -1653,7 +1739,21 @@ def main() -> int:
                 f"HLD 27.1's table is therefore unknown, and an unknown is not "
                 f"an inheritance.")
             continue
-        if not inherits_workspace_lints(manifest):
+        inherits, manifest_error = inherits_workspace_lints(manifest)
+        if manifest_error:
+            # Fail CLOSED on a member manifest `tomllib` cannot read, on the
+            # same argument as the workspace document above. The regex pair
+            # this replaced answered "does not inherit" for an unreadable
+            # manifest, which is the right DIRECTION and the wrong sentence:
+            # the refusal named a missing table rather than a document nobody
+            # could parse.
+            problems.append(
+                f"{where} is a workspace member cargo reports and its "
+                f"Cargo.toml cannot be parsed as TOML ({manifest_error}). "
+                f"Whether it inherits HLD 27.1's table is therefore unknown, "
+                f"and an unknown is not an inheritance.")
+            continue
+        if not inherits:
             problems.append(
                 f"{where} does not inherit the workspace lint table. "
                 f"`[lints]` with `workspace = true`, or the top-level dotted "
@@ -1679,12 +1779,14 @@ def main() -> int:
     # nothing with.
     module_paths = 0
     includes = 0
+    seeded_roots = 0
     for member in members:
         sources, source_problems, followed = member_sources(
             member, roots.get(member))
         problems += source_problems
         module_paths += followed["path"]
         includes += followed["include"]
+        seeded_roots += followed["root"]
         # The text comes back with the path. `main` read every file a second
         # time until the S03 review's ninth pass, with no guard on the read, so
         # a `.rs` file under a member that is a broken symlink or is not UTF-8
@@ -1763,10 +1865,7 @@ def main() -> int:
     problems += rustflag_problems()
 
     if problems:
-        print("FAIL: the HLD 27.1 lint policy")
-        for problem in problems:
-            print(f"  {problem}")
-        return 1
+        return _fail(problems)
 
     # Every number here is derived from the walk that produced it. The member
     # count was the literal `crates/` glob until the fifth pass, and it read
@@ -1779,12 +1878,19 @@ def main() -> int:
     # four keys had been exercised over a repository holding no `#[path]` and
     # no `include!`, and a run that followed nothing said so in the language of
     # having followed things.
+    #
+    # The SEEDED ROOTS are counted for the same reason since the eleventh pass,
+    # and the reason is sharper here, because that clause is the whole subject
+    # of an accept probe. `lint-policy.clean-crate-root-outside-the-member`
+    # expected the literal words and passed with the seeding deleted, MEASURED.
+    # It expects the count now, and the count is taken where the root is put on
+    # the queue.
     configs = _cargo_configs()
     print(f"OK: {len(REQUIRED_CLIPPY)} clippy lint(s) at or above HLD 27.1's "
           f"level and no group row weaker than deny, {len(members)} workspace "
           f"member(s) from {member_source} inherit the table, "
           f"{scanned} .rs file(s), a set RECONSTRUCTED from four keys with "
-          f"the member globbed, cargo's own target roots seeded, "
+          f"the member globbed, {seeded_roots} cargo target root(s) seeded, "
           f"{module_paths} `#[path]` module(s) followed and {includes} "
           f"`include!`(s) followed, carry no inner "
           f"allow or expect of a denied lint or of a group holding one, and "

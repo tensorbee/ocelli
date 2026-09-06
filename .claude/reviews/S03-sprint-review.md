@@ -126,6 +126,7 @@ and a mutation is an input to a test: it derives from the specification too.
 | 8 | Three reviewers. **The comparator returned zero defects**, the first clean area of the sprint, and reproduced all five of pass 7's claims independently. Six defects elsewhere: the eighth and ninth routes past the lint policy, a declared exception nothing ratcheted, and a 68-mutation sweep finding seven tests that cannot fail | remediated |
 | 9 | Three reviewers. **The comparator was clean a second time.** Ten defects elsewhere, and the lint-policy sequence finally got a diagnosis rather than a tenth route: the guard RECONSTRUCTS the compiled file set by hand. HLD 17.2's central architectural rule was found guarded by nothing | remediated |
 | 10 | Three reviewers, 12 defects, 8 smells, 6 nitpicks, and this row's tally is in `e2b11d8`'s successor because pass 10 found the sentence claiming pass 3's was the only unrecorded one to be false for passes 8 and 9 as well. **The comparator was clean a third time and the crates sweep converged at five survivors in ninety mutations.** The guard harness produced a backtick shape and two `#[path]` spellings | remediated |
+| 11 | Two reviewers, 6 defects, 2 smells, 5 nitpicks. **The comparator and the crates were both declared done**, at four and two consecutive clean passes. The guard reviewer named the class ten passes had been patching and the remediation replaced two of three hand-rolled grammars with real parsers | remediated |
 
 **Three of these tallies are recorded here and nowhere else, not one.** The
 pass-4 row explained pass 3's missing tally and asserted it was the only one,
@@ -612,9 +613,72 @@ fixed prose. With `#[path]` following removed entirely both stayed green. Their
 expects now carry the count the run derives, so the same mutation drives both to
 `HARNESS`.
 
+## Pass 11, and the class gets named
+
+**Two areas were declared done.** The comparator has four consecutive passes
+with no defect in its substance, and the crates and bench sweep two, with every
+pass-10 figure reproducing to the digit: `left: 4`, `0 of 8` against `8 of 8`,
+`7 failed | 1 passed`, and a 27-name published list that catches a deletion, an
+addition and a de-callabling. The delivery record was checked against 62 further
+numeric claims with no disagreement.
+
+**The guard reviewer named the class.** Ten passes had been closing spellings,
+and the diagnosis is one sentence:
+
+> These two files parse three foreign grammars, TOML, Rust attributes and POSIX
+> shell, with regexes and hand-rolled scanners, and each pass closes the
+> spelling that pass happened to think of. Deriving one alternation from
+> another makes two parsers agree. It does not make either of them agree with
+> the GRAMMAR.
+
+Three findings, three grammars, one defect. A QUOTED TOML key defeated
+`LINT_ROW` and the ratchet meant to back it up, in a file whose own comment
+sixty-four lines below names that spelling. `$( )` defeated the shell comment
+scanner. And `[a-z-]` in two Python readers of the `GATES` array did not match
+what bash accepts, so a gate named `prose2` would be selected by `gate --floor`,
+run by no CI step, claimed by no catalogue entry, and counted by neither ratchet.
+
+**And pass 10's fix for a fail-open had created one.** Adding `)` to the
+comment word-start set was the right RULE, since a `#` begins a comment after an
+unquoted operator, and the scanner could not tell an operator `)` from the one
+closing `$(...)`. The proof is a parent-commit control: the same input fails
+CLOSED at `e2b11d8` and OPEN at `a83dbae`, and the declared limit beside it
+asserted the space was closed.
+
+**So the remediation was structural rather than another alternation.** Both
+`[workspace.lints.*]` tables are parsed with `tomllib`, which the same file
+already used for cargo configs twenty lines away, and the declared constant now
+CALLS the guard's own reader rather than matching its own regex, so the ratchet
+and the guard cannot disagree. The shell scanner is one tokenizer with a span
+stack over quote, backtick, `$( )`, `${ }` and here-document, replacing a
+delimiter set plus three copies of a close rule that agreed only because one
+commit had touched all three. The `GATES` array has one reader, shared by both
+checks, tested against bash itself.
+
+**What the remediation says is still unbounded, in its own words.** `ci.yml` is
+read by hand-rolled YAML in `run_commands`, `workflow_events` and
+`steps_running`, which is the same shape as the three that failed, and nobody
+has planted an input at it. The statement-head policy is still an enumeration
+and has been wrong four times, though a missed head fails closed. And the
+declared limits are prose asserting properties of code, three of which were
+false this pass, where the real answer is fewer sentences a mechanism could
+carry instead.
+
 ## What is still open, and it is declared rather than hidden
 
 - **G-02 and G-04**, the two remaining declared guard holes. F-X014.
+- **`.github/workflows/ci.yml` is read by hand-rolled YAML.** The eleventh
+  pass's remediation replaced the TOML and shell readers with real parsers and
+  says plainly that this one is the same shape as the three that failed, and
+  that nobody has planted an input at it. No story yet, and it is the first
+  place to look in S04.
+- **`GpuContext::supports_compute` is a forwarder no test reaches.** The
+  decision it forwards to is in `caps.rs` with a six-row truth table, and
+  reaching the forwarder needs a real device, which deviation D-04 leaves the
+  floor without. Declared at the site and in `docs/lld/gpu-ownership.md` and
+  listed here because the eleventh pass pointed out that this list opens with
+  "it is declared rather than hidden" and this one was declared elsewhere.
+  F-037 or F-X002.
 - **`close-preflight` reports on a stale source.** It reads each feature's
   last per-feature review, all recorded at pass 1 before nine sprint-level
   passes and nine remediation commits, and its verification check accepts a

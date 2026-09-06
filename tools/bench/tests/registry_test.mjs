@@ -145,7 +145,8 @@ test("a `## ` section ends the status table above it", () => {
   // `backlogStatuses` resets `inStatusTable` on a `## ` heading, and until
   // this test existed nothing observed that line. Measured in the S03 sprint
   // review's tenth pass: deleting `inStatusTable = false` from the `## `
-  // branch left all 68 bench tests green, because in
+  // branch left every bench test green, 67 passing and 1 skipped for the
+  // browser, because in
   // `docs/sprints/BACKLOG.md` today every `## ` heading precedes the first
   // `### ` heading, so the reset only ever fires while the flag is already
   // false. The line is correct and unobserved rather than wrong.

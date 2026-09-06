@@ -484,10 +484,15 @@ def main() -> int:
     # and the reason is `--list`. RUNNING defaults to the floor, because that
     # is the set CI's `guards` gate is about. LISTING is an inventory, and an
     # inventory that silently omits a third of the probes is the defect: bare
-    # `--list` printed 112 rows, every one of them marked `floor`, while
+    # `--list` printed the floor set alone, every row marked `floor`, while
     # `.github/workflows/ci.yml`, `bin/ocelli.sh`, `docs/lld/guards.md` and
     # `scripts/guards/catalogue.py` all sent a reader here to check something
-    # about the 50 DEEP probes, which none of those rows was. That is the same
+    # about the DEEP probes, which none of those rows was. The counts are not
+    # written here, and the tenth pass wrote two of them in the commit that
+    # deleted a third stale count from two other files under the banner that a
+    # number beside a list goes stale the next time the list grows. It did:
+    # they read 112 and 50 and the sets were 114 and 54 within a sprint. Run
+    # the command. That is the same
     # shape as the fifth pass's `needs` finding one field over: a pointer to a
     # command that does not answer is worse than the sentence it replaced. So
     # `--list` alone is every probe, and `--list --profile floor` is still the

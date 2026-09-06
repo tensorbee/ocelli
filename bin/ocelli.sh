@@ -207,7 +207,14 @@ run_gate() {
                  python3 scripts/guard_probe.py --self-test &&
                  python3 scripts/guard_probe.py --profile floor &&
                  python3 -B -m unittest discover -s scripts/tests \
-                   -p test_guard_catalogue.py ;;
+                   -p test_guard_catalogue.py &&
+                 # The two readers that stopped being regexes in the S03
+                 # review's eleventh pass, checked against bash and against
+                 # TOML rather than against themselves. Named rather than
+                 # globbed, so a file added under scripts/tests/ does not
+                 # silently join or leave this gate.
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_guard_readers.py ;;
     # The level-3 runs that need a toolchain. NOT in the floor, and excluded
     # by name in the --floor arm below and in scripts/ci_floor_check.py's
     # NOT_IN_FLOOR. The two lists are compared for set equality there, so
@@ -298,12 +305,16 @@ gates_cmd() {
         #
         # What is left, and it is the whole of it: `--profile deep` is a strict
         # SUPERSET of `--profile floor`, so a `gate --floor` that included this
-        # would run every floor probe twice. The numbers are QUOTED from
-        # ci/guard-probe-budget.json's `wall_clock_seconds`, deep 27.2s
-        # against floor 18.3s, rather than measured a second time here: this
-        # comment carried 23.8 against 15.9 while the recorded pair said
-        # otherwise, and two measured pairs in one commit are two answers
-        # somebody has to reconcile. CI pays that duplication deliberately,
+        # would run every floor probe twice. THE TIMINGS ARE NOT WRITTEN
+        # HERE. They are in ci/guard-probe-budget.json under
+        # `wall_clock_seconds` and `--record-budget` writes them. This comment
+        # carried deep 23.8s against floor 15.9s while the recorded pair said
+        # otherwise, the tenth pass fixed that by copying the recorded pair
+        # into four files, and the eleventh pass found all four saying 27.2
+        # and 18.3 while the file said 28.4 and 18.6, because the recording
+        # run moved them in the same commit that quoted them. A copy of a
+        # measurement goes stale the next time the measurement is taken, so
+        # read the file. CI pays that duplication deliberately,
         # because the alternative is `gate guards` running a different probe
         # set there from the one a developer gets. `gate --sprint` and
         # `gate --all` run both and so does the `guards` CI job.

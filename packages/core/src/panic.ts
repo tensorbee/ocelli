@@ -3,7 +3,13 @@
  *
  * THIS IS THE SECOND FILE PERMITTED TO BUILD A VIEW OVER WASM LINEAR MEMORY.
  * `packages/core/src/bulk.ts` is the first. `eslint.config.js` turns
- * `no-restricted-syntax` off here and in that one file and nowhere else.
+ * `no-restricted-syntax` off here and in that one PRODUCTION file, and
+ * separately in `packages/core/src/*.test.ts`, which `ALLOWED_TO_DISABLE`
+ * declares as a second list. This line said "and nowhere else" until the S03
+ * review's eleventh pass, which was true when F-005 wrote it and was falsified
+ * by the same sprint's first and second remediation passes adding the test
+ * block. The identical sentence in `bulk.ts` was corrected one pass earlier
+ * and this one was a file away from it.
  *
  * Section 17.2's own wording is "outside the two functions that are allowed to
  * do it", so the specification expected two. The repository had one only

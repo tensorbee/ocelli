@@ -169,14 +169,16 @@ jobs:
       # probe is a deep probe, the review keeps finding holes in exactly those,
       # and they were unwatched on the pull request that would weaken them.
       #
-      # The price, and the numbers are QUOTED from
-      # `ci/guard-probe-budget.json`'s `wall_clock_seconds` rather than
-      # measured a second time, because a second measurement in the same
-      # commit is a second answer somebody has to reconcile: the deep profile
-      # takes 27.2s against the floor profile's 18.3s, and the deep profile is
-      # a strict SUPERSET of the floor one, so this step re-runs the probes the
-      # step above already ran. About 9s of the 27 is new coverage and about
-      # 18s is duplication. The duplication is kept
+      # The price is in `ci/guard-probe-budget.json` under
+      # `wall_clock_seconds` and is NOT written here, for the reason the probe
+      # count is not written here either. The deep profile is a strict
+      # SUPERSET of the floor one, so this step re-runs the probes the step
+      # above already ran, and the difference between the two recorded numbers
+      # is what the extra coverage costs. A quoted pair went stale twice: deep
+      # 23.8s against floor 15.9s until the tenth pass, then 27.2 against 18.3
+      # in four files while the recorded pair said 28.4 and 18.6, because the
+      # recording run moved them in the same commit that quoted them. The
+      # duplication is kept
       # deliberately: removing it would mean `gate guards` running a different
       # probe set here from the one a developer gets, and a gate that does
       # different things in different places is the failure this whole harness

@@ -108,12 +108,25 @@ S03 review's ninth pass**, each on the one-line `fmt` arm with a real command
 CI does not run appended after the shape, each leaving this check at exit 0
 with one extracted command and `unseen` `None`, and each accepted by `sh -n`:
 a `;;` inside a quoted string, a `while case ... esac`, and an `if case ...
-esac`. The first is why the arm's end is found by a scan that steps over quoted
-spans rather than by a regex, and why the comment strip and the statement split
-use that same scan. The other two are why `NESTED_CASE`'s alternation is DERIVED
+esac`. The first is why the arm's end is found by a scan rather than by a
+regex. The other two are why `NESTED_CASE`'s alternation is DERIVED
 from `SHELL_INTRODUCERS` instead of being written out beside it: this file knew
 `if`, `while` and `until` introduce a command in one function and not in the
 other, and two lists that must agree are one list.
+
+**"That same scan" was half true until the S03 review's eleventh pass, and the
+other half was a live regression.** The arm's end, the comment strip and the
+statement split shared the rule for OPENING a span and the set of delimiters.
+The rule for CLOSING one was written out three times and agreed only because
+all three were edited in one commit, which is the condition that sentence
+claimed had been removed. The scan also had no `$( ... )` span, so when the
+tenth pass made `)` a word start, which is bash's own rule, it could not tell
+an operator `)` from the one closing a substitution: `echo $(printf x)#no &&`
+in an arm dropped the rest of the line at exit 0, and the SAME input one commit
+earlier exited 1. There is one tokenizer now, `shell_pieces`, with a span
+stack, and its callers consume pieces. It reads the `GATES` array too, which is
+what removed the second copy of the gate-row regex from
+`scripts/guards/census.py`.
 
 The continuation join closed a loss of its
 own: the extraction pattern stops at the backslash, so `-p <suite>` fell
@@ -293,12 +306,18 @@ MANUAL_EVENTS = {"workflow_dispatch", "repository_dispatch", "schedule"}
 #
 # What is left is duplication and nothing else: `--profile deep` is a strict
 # superset of `--profile floor`, so a `gate --floor` including this gate would
-# run every floor probe twice. The numbers are QUOTED from
-# ci/guard-probe-budget.json's `wall_clock_seconds`, deep 27.2s against floor
-# 18.3s, rather than measured again here: this comment carried 23.8 against
-# 15.9, as did `bin/ocelli.sh`, `.github/workflows/ci.yml` and
-# `docs/lld/guards.md`, while the recorded pair said otherwise, and two
-# measured pairs in one commit are two answers somebody has to reconcile.
+# run every floor probe twice.
+#
+# **THE TIMINGS ARE NOT WRITTEN HERE.** They are in
+# `ci/guard-probe-budget.json` under `wall_clock_seconds`, and `--record-budget`
+# is what writes them. This comment carried deep 23.8s against floor 15.9s
+# while the recorded pair said otherwise, which the tenth pass fixed by copying
+# the recorded pair into four files, and the eleventh pass found all four
+# saying deep 27.2 and floor 18.3 while the file said 28.4 and 18.6, because
+# the recording run moved them in the same commit that quoted them. A quoted
+# number is a copy, and a copy of a measurement goes stale the next time the
+# measurement is taken. So read the file, which is the rule the same commit
+# already applied to the probe count in `.github/workflows/ci.yml`.
 # `python3 scripts/guard_probe.py --list --profile deep` prints each
 # probe's profile and what it needs, and reading that beats reading this. The
 # profile filters the listing to the probes this paragraph is about, and it was
@@ -309,8 +328,124 @@ MANUAL_EVENTS = {"workflow_dispatch", "repository_dispatch", "schedule"}
 NOT_IN_FLOOR = {"oracle", "corpus", "guards-deep"}
 
 
+# The `GATES=( ... )` array literal. The array is read as SHELL WORDS by
+# `shell_words` below and not matched row by row, which is the S03 review's
+# eleventh pass and is the third foreign grammar this file stopped reading with
+# a regex.
+#
+# What that fixes, MEASURED at HEAD before the change. `bin/ocelli.sh` reads
+# each entry as `IFS='|' read -r name gpu desc`, which imposes no character
+# class on the name at all, and the two Python copies of the row regex, here
+# and in `scripts/guards/census.py`, both spelled it `[a-z-]+`. So a gate named
+# `prose2`, with a real arm beside it, gave bash 29 gates and Python 28,
+# `scripts/ci_floor_check.py` exit 0, the census exit 0, `gates_declared`
+# unmoved because the Python side never counted it, and `gate --floor`
+# selecting it while no CI step ran it and no catalogue entry claimed it. An
+# entry the reader cannot parse became an OMISSION rather than a refusal, and
+# the check's own sentence, that `--floor` is what CI runs, was false in a
+# direction with no detection anywhere.
+#
+# Latent today because no gate name carries a digit. It is a mechanism now
+# rather than a coincidence: the name class is `GATE_NAME` below, an entry
+# outside it is REFUSED by name, and `scripts/guards/census.py` calls this
+# function rather than carrying a second copy of it.
+GATES_ARRAY = re.compile(r"^GATES=\(\n(.*?)^\)[ \t]*$", re.M | re.S)
+
+# What a gate name may be. Wider than the `[a-z-]+` two copies of a regex used
+# to allow, because bash allows anything, and BOUNDED, because a name reaches
+# `re.escape`-free patterns elsewhere in this file and in the catalogue's probe
+# builders. A name outside it is a refusal here, which is the point: the reader
+# does not get to drop an entry it cannot use.
+GATE_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
+
+# The GPU column's two values. `bin/ocelli.sh`'s own comment above the array
+# says `name|needs_gpu|description`, and `gpu_gates` reads `YES` to decide
+# which excluded gate CI may not run at all under deviation D-04. A third
+# spelling would be read as `no` by that function and as nothing by a reader.
+GPU_COLUMN = ("no", "YES")
+
+
+def gate_entries(runner: str) -> list[str]:
+    """Every element of `bin/ocelli.sh`'s GATES array, as bash sees it.
+
+    Scanned with `shell_words`, so an entry is a word rather than a line: two
+    entries on one line, a comment between them and a blank line are all
+    exactly what bash makes of them, and none of them can silently drop one.
+    """
+    block = GATES_ARRAY.search(runner)
+    if block is None:
+        raise RuntimeError(
+            "bin/ocelli.sh carries no `GATES=(` ... `)` array where this "
+            "parser looks for it. Every gate would then be undeclared, this "
+            "check would have no floor to compare against and the census "
+            "would have no gate list. Both need a person, and neither may be "
+            "read as agreement.")
+    return shell_words(block.group(1))
+
+
+def gate_rows(runner: str) -> list[tuple[str, str, str]]:
+    """Each GATES entry as `(name, gpu, description)`.
+
+    Split exactly as `IFS='|' read -r name gpu desc` splits it, so a `|` in a
+    description stays in the description.
+    """
+    rows = []
+    for entry in gate_entries(runner):
+        fields = entry.split("|", 2)
+        rows.append(tuple(fields + [""] * (3 - len(fields)))[:3])
+    return rows
+
+
+def gate_row_problems(runner: str) -> list[str]:
+    """Every GATES entry this reader cannot use, as a refusal.
+
+    An entry that cannot be read is a REFUSAL and not an omission, which is
+    the whole finding: a row regex that skips what it cannot match leaves the
+    gate running in bash, selected by `--floor`, and invisible to every Python
+    check that is supposed to demand a CI step and a catalogue entry for it.
+    """
+    problems = []
+    for entry in gate_entries(runner):
+        fields = entry.split("|", 2)
+        if len(fields) < 3:
+            problems.append(
+                f"bin/ocelli.sh's GATES array carries the entry {entry!r}, "
+                f"which is not `name|needs_gpu|description`. The runner reads "
+                f"each entry with `IFS='|' read -r name gpu desc`, so a "
+                f"missing field is an empty variable there and a row this "
+                f"check has to guess at here. Write all three fields.")
+            continue
+        name, gpu, _ = fields
+        if not GATE_NAME.match(name):
+            problems.append(
+                f"bin/ocelli.sh's GATES array declares the gate {name!r}, "
+                f"whose name is outside `{GATE_NAME.pattern}`. bash imposes "
+                f"no class on it and this check, the census and the "
+                f"catalogue's probe builders all match gate names by pattern, "
+                f"so a name outside the class runs in `gate --floor` and is "
+                f"invisible to every one of them. That is refused rather than "
+                f"skipped, because skipping it is the defect: it was measured "
+                f"at exit 0 here and in the census with the gate running and "
+                f"nothing in CI invoking it.")
+        if gpu not in GPU_COLUMN:
+            problems.append(
+                f"bin/ocelli.sh's GATES array declares the gate `{name}` with "
+                f"{gpu!r} in the GPU column, which is neither "
+                f"{' nor '.join(repr(v) for v in GPU_COLUMN)}. `gpu_gates` "
+                f"reads that column to decide which gate CI may not run at "
+                f"all under deviation D-04, and an unrecognised value reads "
+                f"there as `no`, which is the permissive answer.")
+    return problems
+
+
 def declared_gates(runner: str) -> list[str]:
-    declared = re.findall(r'^\s*"([a-z-]+)\|(?:no|YES)\|', runner, re.M)
+    """Every gate name `bin/ocelli.sh` declares.
+
+    THE reader. `scripts/guards/census.py` calls this rather than carrying a
+    second copy, because two copies of a regex over a foreign grammar agreeing
+    with each other is not either of them agreeing with the grammar.
+    """
+    declared = [name for name, _, _ in gate_rows(runner)]
     if not declared:
         raise RuntimeError("bin/ocelli.sh declares no GATES entries")
     return declared
@@ -328,14 +463,14 @@ def gpu_gates(runner: str) -> set[str]:
     to run at all, and it is the runner's own declaration rather than a second
     copy of it.
     """
-    return set(re.findall(r'^\s*"([a-z-]+)\|YES\|', runner, re.M))
+    return {name for name, gpu, _ in gate_rows(runner) if gpu == "YES"}
 
 
 # `case "$name" in oracle|corpus|guards-deep) continue ;; esac`, inside the
 # `--floor` arm. Anchored on `"$name"` and on `continue`, which together occur
 # once in the file, so this cannot drift onto some other case statement.
 RUNNER_EXCLUSION = re.compile(
-    r'case\s+"\$name"\s+in\s+([a-z|-]+)\)\s*continue\s*;;\s*esac')
+    r'case\s+"\$name"\s+in\s+([A-Za-z0-9_|-]+)\)\s*continue\s*;;\s*esac')
 
 
 def runner_excluded(runner: str) -> set[str]:
@@ -594,7 +729,8 @@ def invoked_gates(commands: list[Command]) -> set[str]:
     names: set[str] = set()
     for command in commands:
         for match in re.finditer(
-                r"\bbin/ocelli\.sh\s+gate\s+((?:[a-z][a-z-]*\s+)*[a-z][a-z-]*)",
+                r"\bbin/ocelli\.sh\s+gate\s+"
+                r"((?:[A-Za-z0-9_-]+[ \t]+)*[A-Za-z0-9_-]+)",
                 command.text):
             names.update(match.group(1).split())
     return names
@@ -726,31 +862,101 @@ CONTINUATION = re.compile(r"\\\n\s*")
 # `unseen['fmt']` `None`, with `sh -n` accepting the file. That is the eighth
 # pass's comment-holding-a-terminator defect one lexer rule along: the comment
 # route was closed by stripping comments first, and a string cannot be stripped.
-ARM_LABEL = re.compile(r"^[ \t]*([a-z-]+)\)", re.M)
+ARM_LABEL = re.compile(r"^[ \t]*([A-Za-z0-9_-]+)\)", re.M)
 
 
-# The delimiters `_quote_spans` opens a span on. A BACKTICK is one of them
-# since the S03 review's tenth pass and it was the fourth fully fail-open
-# terminator shape. `` ` `` is not a quote in the POSIX sense, it delimits a
-# command substitution, and for this parser that is the same job: the text
-# between the pair is not where this arm ends. MEASURED on the one-line `fmt`
-# arm rewritten as `fmt) cargo fmt --all --check && test -n `case x in *) echo
-# y ;; esac` && python3 scripts/prose_check.py --extra ;;`, which `bash -n`
-# accepts: `scripts/ci_floor_check.py` exited 0, the arm came out as one
-# command, `unseen['fmt']` was `None` and bash really runs the dropped
-# `prose_check.py --extra`. It is worse than the comment shape the eighth pass
-# closed, because the residue's heads, `test` and `echo`, are both in
-# `SHELL_NOISE`, so the unseen-command rule fires on nothing either. `$(case
-# ...)` was caught only because `(` happens to sit in `NESTED_CASE`'s class.
-QUOTE_DELIMITERS = "\"'`"
+# ---------------------------------------------------------------------------
+# One shell tokenizer, with a span stack
+# ---------------------------------------------------------------------------
+#
+# **This replaced `_quote_spans` and three hand-written copies of its CLOSE
+# rule in the S03 review's eleventh pass, and the reviewer's sentence is the
+# reason.** `_quote_spans` shared the rule for OPENING a span and the set of
+# delimiters. Closing one was written out three times, in
+# `_strip_shell_comments`, in `_arm_end` and in `_split_statements`, and the
+# three agreed only because all three were edited in one commit. The docstring
+# claimed the drift `NESTED_CASE` and `SHELL_INTRODUCERS` suffered had been
+# removed, and it had been removed from half the rule.
+#
+# It also could not tell an operator `)` from the `)` that closes a `$( ... )`,
+# because it had no `$(` span at all. That was measured as a live regression:
+# see `COMMENT_WORD_START` below.
+#
+# So there is one scanner. It walks the text once with a STACK, and yields
+# pieces its three callers consume: a piece is either one plain character
+# outside every span, or a whole span from its opener to its closer. A caller
+# never inspects the inside of a span and never has to know how one ends.
+#
+# What is covered: single quote, double quote, backtick, `$( ... )` with its
+# parentheses counted, `${ ... }` with its braces counted, a backslash escape,
+# and a here-document body. Arithmetic `$(( ... ))` falls out of the `$(` span
+# and its nesting count without a rule of its own.
+#
+# What is NOT covered, declared rather than left to be found: `$'...'`, whose
+# escapes differ from a double quote's, and the fact that bash DOES open a
+# command substitution inside a double quote. `"` therefore runs to its closer
+# here. Both were outside `_quote_spans` as well, so this is the previous limit
+# unchanged rather than a new one, and both would be a `Span` entry and a
+# nesting rule rather than a new copy of the close loop, which is the property
+# this rewrite is for.
+#
+# A third limit, and it is asserted in `scripts/tests/test_guard_readers.py`
+# rather than left here: `$(case y in *) ... esac)` closes at the pattern's `)`,
+# because bash's `case` grammar is not modelled and the nesting count sees an
+# unbalanced parenthesis. The arm then ends at the inner `;;`, which is
+# FAIL-CLOSED rather than a hole: the truncated body still carries `$(case `
+# and `NESTED_CASE` refuses a nested `case` in an arm. The test exists so that
+# the day somebody teaches this scanner `case`, the refusal that was carrying
+# the weight is visible rather than assumed.
+#
+# MEASURED over both regions this scanner is used on, in the S03 review's
+# eleventh pass and not carried forward from an earlier one: after comments are
+# stripped, the `run_gate` region carries 0 `$'`, 0 `$(`, 0 `${`, 0 `<<` and 0
+# backticks, against 48 backticks before stripping, and the `GATES` array
+# carries 0 of all five. The `$(` count was 0 before the fix as well, which is
+# the point: the shape that walked past this parser was planted, and a parser
+# that only handles what the file happens to contain today is the class the
+# eleventh pass is about.
 
-# The delimiters inside which a backslash escapes the next character. A single
-# quote takes no escape. A double quote does, and so does a backtick: `` \` ``
-# inside a command substitution is a literal backtick and does not close it, so
-# a scanner that ended the span there would resume in the middle of the
-# substitution and could stop at a `;;` that ends nothing, which is the same
-# fail-open one lexer rule along.
-ESCAPING_DELIMITERS = "\"`"
+
+@dataclass(frozen=True)
+class Span:
+    """One kind of shell span, and how the scanner leaves it."""
+
+    close: str
+    # Does a backslash escape the next character inside. A single quote takes
+    # no escape. A double quote does, and so does a backtick: `` \` `` inside a
+    # command substitution is a literal backtick and does not close it, so a
+    # scanner that ended the span there would resume in the middle of the
+    # substitution and could stop at a `;;` that ends nothing.
+    escapes: bool
+    # The character that DEEPENS this span, so `$(printf "%s" $(date))` closes
+    # at the outer `)` and not at the inner one. "" for a span that does not
+    # nest.
+    nests: str
+    # May another span open inside this one. A command substitution holds
+    # arbitrary shell, so it may. A quote may not, which is the declared limit
+    # above.
+    opens: bool
+
+
+SPANS: dict[str, Span] = {
+    "'": Span("'", False, "", False),
+    '"': Span('"', True, "", False),
+    "`": Span("`", True, "", True),
+    "$(": Span(")", True, "(", True),
+    "${": Span("}", True, "{", True),
+}
+
+# Longest opener first, so `$(` is seen as itself rather than as a `$` followed
+# by a `(`.
+SPAN_OPENERS = tuple(sorted(SPANS, key=len, reverse=True))
+
+# A here-document redirection, and NOT a here-string. `<<<` is three characters
+# of one operator that takes a word rather than a body, so the lookahead is
+# load-bearing. The delimiter may be quoted, which turns off expansion inside
+# the body and changes nothing this scanner does.
+HEREDOC = re.compile(r"<<(-?)(?!<)[ \t]*(['\"]?)([A-Za-z_]\w*)\2")
 
 # What may sit immediately before a `#` for that `#` to begin a COMMENT. POSIX
 # and bash start a comment at a `#` that begins a word, and a word begins after
@@ -758,127 +964,266 @@ ESCAPING_DELIMITERS = "\"`"
 # operator character. `_strip_shell_comments` accepted the first three only,
 # which is the S03 review's tenth pass finding: `true;#;;` planted in the
 # one-line `fmt` arm dropped the trailing command, and it failed closed only by
-# accident, with the refusal naming `#` as the missing command. The empty
-# string is the start-of-input case, which the caller also spells as an empty
-# `kept` list.
+# accident, with the refusal naming `#` as the missing command.
+#
+# **`)` in this set was a REGRESSION for as long as the scanner had no `$(`
+# span, and the eleventh pass measured it.** The rule is right and the
+# implementation could not tell an operator `)` from the `)` closing a
+# `$( ... )`. MEASURED: `bash -c 'echo A$(printf x)#no && echo RAN_SECOND'`
+# prints both lines, so bash does not begin a comment there, and with
+# `echo $(printf x)#no && cargo fmt --all --check --probe-extra &&` planted in
+# the `fmt` arm this check exited 0 with the trailing command dropped, while
+# the SAME input at `e2b11d8`, before `)` joined this set, exited 1. Failing
+# closed there was luck: the `#no` survived as a token whose head is not a
+# builtin.
+#
+# The scanner answers it now instead of this tuple doing so. A `)` the scanner
+# opened is inside a span and is never a piece a caller sees, and a `)` that is
+# really an operator, which is what a `case` pattern ends with, still is. A `#`
+# straight after a closing quote or substitution is NOT a comment in bash,
+# `echo "a"#b` prints `a#b`, and a span therefore leaves the scanner not at a
+# word start, which is the direction this must not widen into.
 COMMENT_WORD_START = ("", " ", "\t", "\n", ";", "&", "|", "(", ")", "<", ">")
 
 
-def _quote_spans(text: str, index: int) -> tuple[int, str]:
-    """Step over one character of shell text, tracking the span it opens.
+def _opener_at(text: str, index: int) -> str:
+    """The span opener starting at `index`, or "" for none."""
+    for opener in SPAN_OPENERS:
+        if text.startswith(opener, index):
+            return opener
+    return ""
 
-    Returns the next index and the delimiter that is now open, "" for none. One
-    reader for three callers, `_strip_shell_comments`, `_arm_end` and
-    `_split_statements`, because they are the same lexer rule and written three
-    times they would drift, which is exactly what `NESTED_CASE` and
-    `SHELL_INTRODUCERS` did.
 
-    Single quotes take no escape, double quotes and backticks take a backslash
-    escape, and a backslash outside all three escapes the next character.
+def _heredoc_end(text: str, start: int, pending: list[tuple[str, bool]]) -> int:
+    """Where the bodies of the here-documents `pending` declares end.
 
-    **The declared limit, and it named the wrong things until the S03 review's
-    tenth pass.** It said the `run_gate` arms hold no here-document and no
-    `$'...'`, both true, and said nothing about the BACKTICK, which the region
-    carries forty-eight of today. They are all inside comments, so
-    `_strip_shell_comments` removes them before `_arm_end` ever sees one, and
-    that is the accident this limit was resting on rather than a property.
-    Backticks are a span now, `NESTED_CASE` holds one in its class, and what
-    remains outside this reader is a here-document, `$'...'`, and a `#` inside
-    `${...}` or an arithmetic expansion. None of the three is in the region and
-    none of them is what the tenth pass measured open.
+    Several may be queued on one line, `cmd <<A <<B`, and their bodies follow
+    in order. A body that reaches the end of the text is unterminated, which
+    this reports as the whole remainder so the caller's unclosed-span refusal
+    is what fires.
     """
-    char = text[index]
-    if char == "\\":
-        return index + 2, ""
-    if char in QUOTE_DELIMITERS:
-        return index + 1, char
-    return index + 1, ""
+    index = start
+    for delimiter, stripped in pending:
+        while index < len(text):
+            end = text.find("\n", index)
+            line = text[index:len(text) if end == -1 else end]
+            index = len(text) if end == -1 else end + 1
+            if (line.lstrip("\t") if stripped else line) == delimiter:
+                break
+        else:
+            return len(text)
+    return index
+
+
+# What a piece of a scanned shell text is. `TEXT` is one character outside
+# every span, `SPAN` is a whole quoted or substituted region including its
+# delimiters, and `COMMENT` is a `#` that begins a word and everything after it
+# on its line.
+#
+# COMMENT is a piece of this scanner rather than a pass before it, and that is
+# not a preference. A `#` opens a comment only outside a span, and a span opens
+# only outside a comment, so the two rules are one rule and a scanner that ran
+# them in sequence would be wrong in whichever order it chose: strip comments
+# with a scanner that knows spans and an apostrophe in `# don't` opens a span
+# that runs to the next quote in the file, and scan spans first and a `;;`
+# inside a comment ends an arm, which is the eighth pass's measured fail-open.
+TEXT = "text"
+SPAN = "span"
+COMMENT = "comment"
+
+
+def shell_pieces(text: str) -> tuple[list[tuple[int, int, str]], str]:
+    """`text` as `(start, end, kind)` pieces, plus an unclosed opener.
+
+    A `TEXT` piece is one character, except that a backslash escape outside
+    every span is one piece of two and a here-document redirection is one piece
+    of its whole operator, neither of which can hold anything a caller looks
+    for. A `SPAN` or a `COMMENT` piece is the whole region.
+
+    The second return value is the opener of a span that is never closed, ""
+    when every span closed. `_arm_end` refuses on it rather than guessing.
+    """
+    pieces: list[tuple[int, int, str]] = []
+    stack: list[list] = []
+    pending: list[tuple[str, bool]] = []
+    word_start = True
+    span_start = 0
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if stack:
+            opener, span, depth = stack[-1]
+            if span.escapes and char == "\\" and index + 1 < len(text):
+                index += 2
+                continue
+            if span.nests and char == span.nests:
+                stack[-1][2] = depth + 1
+                index += 1
+                continue
+            if text.startswith(span.close, index):
+                if depth:
+                    stack[-1][2] = depth - 1
+                else:
+                    stack.pop()
+                index += len(span.close)
+                if not stack:
+                    pieces.append((span_start, index, SPAN))
+                    # A `#` straight after a closing quote or substitution is
+                    # NOT a comment in bash: `echo "a"#b` prints `a#b`. This is
+                    # the line that answers the tenth pass's `)` regression,
+                    # and it answers it in the scanner rather than by taking
+                    # `)` back out of `COMMENT_WORD_START`, which a `case`
+                    # pattern needs.
+                    word_start = False
+                continue
+            nested = _opener_at(text, index) if span.opens else ""
+            if nested:
+                stack.append([nested, SPANS[nested], 0])
+                index += len(nested)
+                continue
+            index += 1
+            continue
+        if char == "#" and word_start:
+            newline = text.find("\n", index)
+            end = len(text) if newline == -1 else newline
+            pieces.append((index, end, COMMENT))
+            index = end
+            word_start = False
+            continue
+        if char == "\\" and index + 1 < len(text):
+            pieces.append((index, index + 2, TEXT))
+            index += 2
+            word_start = False
+            continue
+        if char == "\n" and pending:
+            pieces.append((index, index + 1, TEXT))
+            body = _heredoc_end(text, index + 1, pending)
+            pieces.append((index + 1, body, SPAN))
+            pending = []
+            index = body
+            word_start = True
+            continue
+        redirect = HEREDOC.match(text, index)
+        if redirect is not None:
+            pending.append((redirect.group(3), redirect.group(1) == "-"))
+            pieces.append((index, redirect.end(), TEXT))
+            index = redirect.end()
+            word_start = False
+            continue
+        opener = _opener_at(text, index)
+        if opener:
+            span_start = index
+            stack.append([opener, SPANS[opener], 0])
+            index += len(opener)
+            continue
+        pieces.append((index, index + 1, TEXT))
+        word_start = char in COMMENT_WORD_START
+        index += 1
+    if stack:
+        # The unclosed span is still a PIECE, so `_strip_shell_comments` keeps
+        # its text and the refusal comes from `_arm_end`, which is the caller
+        # that can say what it cost. Dropping it here instead would delete the
+        # rest of the region from the arm parser in silence, which is the
+        # failure shape this whole file is about.
+        pieces.append((span_start, len(text), SPAN))
+        return pieces, stack[0][0]
+    if pending:
+        return pieces, f"<<{pending[0][0]}"
+    return pieces, ""
 
 
 def _strip_shell_comments(text: str) -> str:
-    """`text` with every `#` that BEGINS A WORD removed, quoted spans kept.
+    """`text` with every `#` that BEGINS A WORD removed, spans kept whole.
 
     `SHELL_COMMENT` was `(?<!\\S)#.*$`, which cannot tell a comment from a `#`
     inside a string. It ran over the whole `run_gate` region, so a legitimate
     `echo "issue #12"` in an arm would have been truncated mid-string and the
     quote left open. Nothing in the region carries one today, and the whole
     point of the ninth pass's arm work is that the parser must not depend on
-    that staying true: the scan below is the same one `_arm_end` uses, so a `#`
-    inside a string is text and a `;;` inside a string is text, by one rule
-    rather than by two that agree today.
+    that staying true.
 
     **The first sentence said "every `#` comment" and that was wider than the
-    test below it until the S03 review's tenth pass.** POSIX and bash begin a
+    test under it until the S03 review's tenth pass.** POSIX and bash begin a
     comment at any `#` that starts a word, and a word starts after an operator
     as well as after a blank, so `;#`, `&#`, `|#`, `(#`, `)#`, `<#` and `>#`
     all open one. The test accepted start-of-input, space, tab and newline
     only. MEASURED on the one-line `fmt` arm with `true;#;;` planted in it: the
     trailing command was dropped, and it failed CLOSED only by accident,
     because the residue's head was `#` and the refusal named `#` as a command
-    CI does not run. `COMMENT_WORD_START` is the operator set now.
+    CI does not run.
 
-    What this still does not remove, stated exactly: a `#` inside a
-    here-document, inside `$'...'`, or inside `${...}` or an arithmetic
-    expansion, none of which is in the region and all of which are outside
-    `_quote_spans` by the same declared limit. A `#` that follows a closing
-    quote, as in `echo "a"#b`, is NOT a comment in bash and is not removed
-    here, which is the direction this test must not widen into.
+    **Then `)` in that set was itself a fail-open until the eleventh pass**,
+    because the scanner had no `$( ... )` span and could not tell an operator
+    `)` from the one closing a substitution. Where a comment BEGINS is
+    `shell_pieces`'s answer now, not this function's, so the three callers
+    cannot come to disagree about it.
+
+    What this still does not remove, stated exactly: a `#` inside `$'...'`, and
+    a `#` inside a command substitution written inside a double quote. Neither
+    is in the region and both are the declared limit of `shell_pieces` rather
+    than of this function.
     """
-    kept: list[str] = []
-    quote = ""
-    index = 0
-    while index < len(text):
-        char = text[index]
-        if quote:
-            if quote in ESCAPING_DELIMITERS and char == "\\":
-                kept.append(text[index:index + 2])
-                index += 2
-                continue
-            if char == quote:
-                quote = ""
-            kept.append(char)
-            index += 1
-            continue
-        if char == "#" and (not kept or kept[-1][-1:] in COMMENT_WORD_START):
-            end = text.find("\n", index)
-            index = len(text) if end == -1 else end
-            continue
-        step, opened = _quote_spans(text, index)
-        kept.append(text[index:step])
-        quote = opened
-        index = step
-    return "".join(kept)
+    pieces, _ = shell_pieces(text)
+    return "".join(text[start:end] for start, end, kind in pieces
+                   if kind != COMMENT)
 
 
 def _arm_end(text: str, start: int) -> tuple[int, str]:
     """Where the arm beginning at `start` ends, or why this parser cannot say.
 
-    The first `;;` OUTSIDE a quoted string. Returns its index and an empty
-    reason, or `-1` and the reason to refuse. Two reasons, both fail-closed: a
-    quote that is never closed, which is not a shell script this parser should
-    guess at, and an arm with no terminator at all.
+    The first `;;` OUTSIDE every span and every comment. Returns its index and
+    an empty reason, or `-1` and the reason to refuse. Two reasons, both
+    fail-closed: a span that is never closed, which is not a shell script this
+    parser should guess at, and an arm with no terminator at all.
     """
-    quote = ""
-    index = start
-    while index < len(text):
-        char = text[index]
-        if quote:
-            if quote in ESCAPING_DELIMITERS and char == "\\":
-                index += 2
-                continue
-            if char == quote:
-                quote = ""
-            index += 1
+    pieces, unclosed = shell_pieces(text[start:])
+    for piece_start, _end, kind in pieces:
+        if kind != TEXT:
             continue
-        if text.startswith(";;", index):
-            return index, ""
-        step, opened = _quote_spans(text, index)
-        quote = opened
-        index = step
-    if quote:
-        return -1, (f"a {quote} quote is opened and never closed, so this "
+        if text.startswith(";;", start + piece_start):
+            return start + piece_start, ""
+    if unclosed:
+        return -1, (f"a {unclosed} span is opened and never closed, so this "
                     f"parser cannot tell which `;;` ends the arm")
     return -1, "the arm reaches the end of the region with no `;;` terminator"
+
+
+def shell_words(text: str) -> list[str]:
+    """`text` split into shell WORDS, with quotes removed.
+
+    The reader `bin/ocelli.sh`'s `GATES=( ... )` array needs, and it is the
+    same scanner rather than a fourth grammar. A word ends at a blank or a
+    newline outside every span, a comment ends a word and is dropped, and a
+    quoted span contributes its CONTENTS so `"fmt|no|..."` is one word without
+    its quotes. A substitution or a here-document body is contributed verbatim,
+    because this scanner does not run the shell and a word it cannot resolve
+    has to stay visible to whoever reads it.
+    """
+    words: list[str] = []
+    current: list[str] = []
+    pieces, _ = shell_pieces(text)
+    for start, end, kind in pieces:
+        if kind == COMMENT:
+            continue
+        if kind == SPAN:
+            opener = _opener_at(text, start)
+            if opener in {"'", '"'}:
+                current.append(text[start + 1:end - 1])
+            else:
+                current.append(text[start:end])
+            continue
+        if text[start] in " \t\n":
+            if current:
+                words.append("".join(current))
+                current = []
+            continue
+        if text[start] == "\\" and end - start == 2:
+            current.append(text[start + 1])
+            continue
+        current.append(text[start:end])
+    if current:
+        words.append("".join(current))
+    return words
 
 
 # Keywords that INTRODUCE a statement rather than being one. What follows one
@@ -957,7 +1302,7 @@ SHELL_INTRODUCERS = frozenset({
 # `fmt) cargo fmt --all --check && test -n `case x in *) echo y ;; esac` &&
 # python3 scripts/prose_check.py --extra ;;`, which `bash -n` accepts: this
 # check exited 0, the arm came out as one command, `unseen['fmt']` was `None`
-# and bash really runs the dropped command. `_quote_spans` treats the backtick
+# and bash really runs the dropped command. `shell_pieces` treats the backtick
 # as a span as well, so the two halves of the fix agree: the substitution's
 # body cannot end the arm and cannot hide a `case` from this pattern.
 _WORD_INTRODUCERS = sorted(w for w in SHELL_INTRODUCERS if w[:1].isalpha())
@@ -983,35 +1328,35 @@ STATEMENT_BREAK = re.compile(r"[\n;{}()]|&&|\|\||\|")
 
 
 def _split_statements(text: str) -> list[str]:
-    """`text` split on `STATEMENT_BREAK`, quoted spans left whole."""
-    pieces: list[str] = []
+    """`text` split on `STATEMENT_BREAK`, spans left whole.
+
+    A separator inside a span does not separate anything, and it is the same
+    scanner that says so here, in `_arm_end` and in `_strip_shell_comments`.
+    A `$( ... )` is one piece, so the `(` and `)` that delimit it are not the
+    `(` and `)` of `STATEMENT_BREAK`, which is what a subshell writes.
+    """
+    statements: list[str] = []
     current: list[str] = []
-    quote = ""
+    pieces, _ = shell_pieces(text)
     index = 0
-    while index < len(text):
-        if quote:
-            char = text[index]
-            if quote in ESCAPING_DELIMITERS and char == "\\":
-                current.append(text[index:index + 2])
-                index += 2
-                continue
-            if char == quote:
-                quote = ""
-            current.append(char)
-            index += 1
+    for start, end, kind in pieces:
+        if start < index:
             continue
-        separator = STATEMENT_BREAK.match(text, index)
+        if kind == COMMENT:
+            continue
+        if kind == SPAN:
+            current.append(text[start:end])
+            continue
+        separator = STATEMENT_BREAK.match(text, start)
         if separator is not None:
-            pieces.append("".join(current))
+            statements.append("".join(current))
             current = []
             index = separator.end()
             continue
-        step, opened = _quote_spans(text, index)
-        current.append(text[index:step])
-        quote = opened
-        index = step
-    pieces.append("".join(current))
-    return pieces
+        current.append(text[start:end])
+    statements.append("".join(current))
+    return statements
+
 
 # Statement heads that are not the work a gate does, and whose REMAINDER is
 # arguments rather than a command. A builtin decides whether the real command
@@ -1221,6 +1566,7 @@ def main() -> int:
         unseen = unseen_commands(runner)
         declared = declared_gates(runner)
         excluded = runner_excluded(runner)
+        entry_problems = gate_row_problems(runner)
     except RuntimeError as error:
         print("FAIL: CI does not run the whole floor")
         print(f"  {error}")
@@ -1228,7 +1574,10 @@ def main() -> int:
     commands = run_commands(workflow)
     events = workflow_events(workflow) - MANUAL_EVENTS
 
-    problems = []
+    # An entry the gate reader cannot use, FIRST, because every rule below is
+    # about the gates it did read and none of them can say anything about one
+    # it dropped. That was measured at exit 0 with a gate running.
+    problems = list(entry_problems)
     if not events:
         problems.append(
             f"{WORKFLOW.relative_to(ROOT)} declares no automatic event, so "

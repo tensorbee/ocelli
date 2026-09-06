@@ -1386,6 +1386,119 @@ def _group_row_after_a_blank_line_with_a_trailing_comment(
                ' # keeps noise down')
 
 
+def _quoted_group_row(box: Sandbox) -> None:
+    """A group row whose KEY is quoted, planted at the end of the table.
+
+    The route past the row regex AND its declared backstop at once, and the one
+    the eleventh review pass named the class from. TOML's quoted key is the
+    same key as the bare one, so `"pedantic"` is `pedantic` to cargo.
+
+    MEASURED under the pinned 1.97.1 toolchain on a minimal workspace carrying
+    `cast_possible_truncation = "deny"` and one `x as i32`: baseline cargo
+    clippy exit 101, and with `"pedantic" = { level = "allow", priority = 1 }`
+    appended as the LAST line of `[workspace.lints.clippy]`, exit 0. In this
+    repository the same row left `scripts/lint_policy_check.py` at exit 0
+    printing "no group row weaker than deny" and `scripts/guard_census.py` at
+    exit 0, because `LINT_ROW`'s name class started `[A-Za-z_]` and the
+    declared constant's capture ended at the last line beginning with a bare
+    key, and `"` is in neither class.
+
+    The POSITION is the whole point and is why this probe plants at the end
+    rather than beside a named row: the same row in the MIDDLE of the table
+    moved the recorded digest from `adf2cb2237be28da` to `034c52d0054007ea`
+    and the census held. Only at the end were both mechanisms blind.
+    """
+    last = _last_lint_table_row(box)
+    box.substitute(
+        "Cargo.toml", last,
+        last + '\n"pedantic" = { level = "allow", priority = 1 }')
+
+
+def _quoted_required_row(box: Sandbox) -> None:
+    """A REQUIRED row whose key is quoted, which weakens nothing.
+
+    The accept half of the same spelling, and the direction a repair could get
+    wrong by refusing the quoting itself rather than reading through it.
+    MEASURED under the pinned 1.97.1 toolchain: `"cast_possible_truncation" =
+    "deny"` leaves cargo clippy at 101, so the lint is denied and the guard has
+    to say so.
+    """
+    row = re.search(r'^cast_possible_truncation = "[a-z]+"$',
+                    box.read("Cargo.toml"), re.M)
+    if row is None:
+        raise AssertionError(
+            "Cargo.toml carries no `cast_possible_truncation` row in the "
+            "quoted-level form, so this probe cannot quote its key.")
+    name, _, level = row.group(0).partition(" = ")
+    box.substitute("Cargo.toml", row.group(0), f'"{name}" = {level}')
+
+
+def _dotted_required_row(box: Sandbox) -> None:
+    """A REQUIRED row written as a dotted key, which weakens nothing.
+
+    The other legitimate spelling, and the one the guard's declared limit used
+    to name as a residual on the refusing side only. MEASURED under the pinned
+    1.97.1 toolchain: `cast_possible_truncation.level = "deny"` leaves cargo
+    clippy at 101. A parser reading TOML rather than matching it sees the same
+    row here as in the quoted, bare and inline forms, and this probe is what
+    says the guard did not simply learn one more alternation.
+    """
+    row = re.search(r'^cast_possible_truncation = ("[a-z]+")$',
+                    box.read("Cargo.toml"), re.M)
+    if row is None:
+        raise AssertionError(
+            "Cargo.toml carries no `cast_possible_truncation` row in the "
+            "quoted-level form, so this probe cannot rewrite it as a dotted "
+            "key.")
+    box.substitute("Cargo.toml", row.group(0),
+                   f"cast_possible_truncation.level = {row.group(1)}")
+
+
+def _two_line_group_row(box: Sandbox) -> None:
+    """A group row spread over two lines, which was a DECLARED residual.
+
+    TOML 1.0 puts an inline table on one line, cargo's parser accepts it over
+    two, and `LINT_ROW` read one line at a time. MEASURED under the pinned
+    1.97.1 toolchain: `pedantic = { level = "allow",` and `priority = 1 }` on
+    the next line takes cargo clippy from 101 to 0, and the guard exited 0.
+    The declared constant caught it, which is why the guard's limit called it a
+    division of labour rather than a hole.
+
+    It is not a residual now, and the reason is worth more than the fix: the
+    guard reads the document with `tomllib`, `tomllib` rejects a multi-line
+    inline table, and a document cargo accepts and this parser rejects is
+    refused rather than read as an empty table. That is the fail-closed
+    direction, and the regexes it replaced had it the other way.
+    """
+    last = _last_lint_table_row(box)
+    box.substitute(
+        "Cargo.toml", last,
+        last + '\npedantic = { level = "allow",\n  priority = 1 }')
+
+
+def _a_member_manifest_that_is_not_toml(box: Sandbox) -> None:
+    """A workspace member whose Cargo.toml cannot be parsed.
+
+    The fail-closed half of reading the member manifests with `tomllib`. The
+    regex pair this replaced answered "does not inherit" for a document nobody
+    could parse, which is the right direction under a refusal that names the
+    wrong thing, and one rule weaker in the same shape would have been silence.
+
+    The member is chosen for the property rather than named, so the probe does
+    not go stale when a crate is added or renamed.
+    """
+    for member in sorted((box.path / "crates").iterdir()):
+        candidate = member / "Cargo.toml"
+        if not candidate.is_file():
+            continue
+        rel = candidate.relative_to(box.path).as_posix()
+        box.append(rel, "\nthis line = = is not toml\n")
+        return
+    raise AssertionError(
+        "no crate under `crates/` carries a Cargo.toml, so there is no member "
+        "manifest for this probe to make unparseable.")
+
+
 def _required_row_with_a_trailing_comment(box: Sandbox) -> None:
     """A trailing comment on a REQUIRED row, which weakens nothing.
 
@@ -1619,7 +1732,7 @@ def _a_raw_string_module_outside_the_member(box: Sandbox) -> None:
     """The same module, declared through `#[path = r"..."]`.
 
     The second spelling of key three, and the file already knew this one too:
-    `INCLUDE_PATH` ten lines below `MODULE_PATH` carries `(?:r#*)?` for exactly
+    `INCLUDE_PATH` below `MODULE_PATH` carries `(?:r#*)?` for exactly
     this, because a raw string literal is the same file name written another
     way. MEASURED under the pinned 1.97.1 toolchain, on the minimal workspace
     and again in a full clone of this repository: guard exit 0 with cargo
@@ -2016,8 +2129,8 @@ def _a_required_row_with_a_tail(box: Sandbox) -> None:
     and with the tail loosened to `.*$` the same line reads as a `deny` row and
     the guard says nothing at all.
 
-    `and we mean it` and not a `#` comment, deliberately. A comment is what
-    `_row_body` legitimately removes.
+    `and we mean it` and not a `#` comment, deliberately. A comment is legal
+    TOML and is removed by the parser, so it would test nothing here.
     """
     row = re.search(r'^cast_possible_truncation = "[a-z]+"$',
                     box.read("Cargo.toml"), re.M)
@@ -2690,6 +2803,113 @@ def _a_backtick_in_an_arm(box: Sandbox) -> None:
     line, indent, gate, tail, _ = _a_single_line_arm_ci_runs(box)
     box.substitute("bin/ocelli.sh", line,
                    f"{indent}{gate}){tail} && test -n `printf x` ;;")
+
+
+def _comment_after_a_substitution_in_an_arm(box: Sandbox) -> None:
+    """A `#` straight after the `)` that closes a `$( ... )`, which is text.
+
+    **A REGRESSION the S03 review's tenth pass introduced while closing a
+    fail-open, and the eleventh pass measured it.** That pass made `)` a word
+    start for `_strip_shell_comments`, which is right, POSIX and bash begin a
+    comment at a `#` that begins a word and a word begins after an unquoted
+    operator. The scanner could not tell an operator `)` from the `)` closing a
+    command substitution, because it knew backticks and did not know `$(`.
+
+    MEASURED. `bash -c 'echo A$(printf x)#no && echo RAN_SECOND'` prints both
+    lines, so bash reads `#no` as part of the word rather than as a comment.
+    With this shape planted in the one-line arm below, `bash -n` green,
+    `scripts/ci_floor_check.py` exited 0 with the `--probe-extra` command
+    dropped, and the SAME input at `e2b11d8`, the commit before `)` joined
+    `COMMENT_WORD_START`, exited 1 naming that command. So this route was not a
+    survival, it was opened by the previous repair.
+
+    The dropped command is on the FIRST line and the arm's `;;` on the second,
+    deliberately: a comment that swallows the `;;` as well leaves the arm with
+    no terminator, which the parser refuses for a different reason and which
+    would read as a pass while discriminating nothing.
+    """
+    line, indent, gate, tail, commands = _a_single_line_arm_ci_runs(box)
+    pad = indent + " " * (len(gate) + 1)
+    box.substitute(
+        "bin/ocelli.sh", line,
+        f"{indent}{gate}) echo $(printf x)#no && {commands[0]} --probe-extra "
+        f"&&\n{pad}{tail.strip()} ;;")
+
+
+def _a_substitution_in_an_arm(box: Sandbox) -> None:
+    """A `$( ... )` with nothing dropped, which must be accepted.
+
+    The direction the fix could get wrong, and it is the same direction the
+    backtick fix could get wrong one delimiter along. A command substitution in
+    a gate arm is ordinary shell and weakens nothing, and the over-tight
+    repair, taking `)` back out of `COMMENT_WORD_START` or refusing any `$(`,
+    would pass the probe above and either refuse a legitimate runner or reopen
+    the tenth pass's `;#` route, which a `case` pattern's `)` needs closed. The
+    substitution's head is `printf`, which is in `SHELL_NOISE`, so the
+    statement scan has nothing to demand of CI and the only thing under test is
+    the delimiter.
+    """
+    line, indent, gate, tail, _ = _a_single_line_arm_ci_runs(box)
+    box.substitute("bin/ocelli.sh", line,
+                   f"{indent}{gate}) test -n $(printf x) &&{tail} ;;")
+
+
+def _a_gates_entry_the_reader_cannot_use(box: Sandbox, entry: str) -> None:
+    """Put `entry` into `bin/ocelli.sh`'s GATES array, above the first row.
+
+    The array is found by its own opening line rather than by naming a gate, so
+    these probes do not go stale when the first gate changes.
+    """
+    runner = box.read("bin/ocelli.sh")
+    match = re.search(r"^GATES=\(\n([ \t]*)", runner, re.M)
+    if match is None:
+        raise AssertionError(
+            "bin/ocelli.sh carries no `GATES=(` array opening a line, so "
+            "there is no array for this probe to add an entry to.")
+    box.substitute("bin/ocelli.sh", match.group(0),
+                   f"{match.group(0)}{entry}\n{match.group(1)}")
+
+
+def _a_gate_named_outside_the_python_class(box: Sandbox) -> None:
+    """A gate whose name carries a DIGIT, which bash reads and Python did not.
+
+    `bin/ocelli.sh` reads an entry with `IFS='|' read -r name gpu desc`, which
+    imposes no character class on the name. `scripts/ci_floor_check.py` and
+    `scripts/guards/census.py` both matched `[a-z-]+`, in two copies of one
+    regex.
+
+    MEASURED at HEAD with a `prose2` gate carrying a real arm: bash reported 29
+    gates and Python 28, `scripts/ci_floor_check.py` exited 0, the census
+    exited 0, `gates_declared` did not move because the Python side never
+    counted the entry, and `gate --floor` selected the gate while no CI step
+    ran it and no catalogue entry claimed it. An entry the reader cannot parse
+    became an OMISSION rather than a refusal, which is the one outcome a guard
+    may not have.
+
+    The arm is a real command CI does not run, so the gate is genuinely
+    unrun rather than accidentally covered by another gate's step. Measured
+    while building this probe: an arm identical to the `prose` gate's left
+    `scripts/ci_floor_check.py` legitimately at exit 0, because every command
+    in the arm really was run by CI.
+    """
+    line, indent, gate, tail, commands = _a_single_line_arm_ci_runs(box)
+    _a_gates_entry_the_reader_cannot_use(
+        box, f'"{gate}2|no|a second {gate} pass nothing declares"')
+    box.substitute("bin/ocelli.sh", line,
+                   f"{line}\n{indent}{gate}2) {commands[0]} --probe-extra ;;")
+
+
+def _a_comment_inside_the_gates_array(box: Sandbox) -> None:
+    """A comment and a blank line inside the GATES array, which change nothing.
+
+    The direction the entry reader could get wrong. bash ignores both, so a
+    reader that demanded one quoted entry per line would refuse a legitimate
+    runner, which is the runbook's own sentence about a guard that fails on
+    everything. The scanner drops a comment and treats a blank line as
+    whitespace between words, by the same rule it uses inside a gate arm.
+    """
+    _a_gates_entry_the_reader_cannot_use(
+        box, "# The gates, grouped. This comment is not an entry.\n")
 
 
 def _an_unbalanced_quote_in_an_arm(box: Sandbox) -> None:
@@ -3725,7 +3945,7 @@ GUARDS: tuple[Guard, ...] = (
                        "residue's heads are `test` and `echo`, both in "
                        "`SHELL_NOISE`, so the unseen-command rule fires on "
                        "nothing either. The backtick is a span in "
-                       "`_quote_spans` and a member of `NESTED_CASE`'s class "
+                       "`shell_pieces` and a member of `NESTED_CASE`'s class "
                        "now, so the arm cannot end inside a substitution and "
                        "a `case` cannot hide in one."),
             Probe("ci-floor.a-backtick-in-an-arm",
@@ -3743,14 +3963,94 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.unbalanced-quote-in-an-arm",
                   _an_unbalanced_quote_in_an_arm,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "quote is opened and never closed",
-                  note="The fail-CLOSED half of the quote scan. A parser that "
+                  "span is opened and never closed",
+                  note="The fail-CLOSED half of the span scan. A parser that "
                        "cannot delimit an arm must refuse rather than report "
                        "whatever it stopped at. The probe plants the quote in "
                        "the LAST arm, which is the only position from which a "
                        "later quote in the region cannot close it, and that "
                        "dependence is declared in the entry's limit rather "
                        "than left to be discovered."),
+            Probe("ci-floor.comment-after-a-substitution",
+                  _comment_after_a_substitution_in_an_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "runs only part of it on",
+                  note="A REGRESSION the tenth pass introduced, not a "
+                       "survival. That pass made `)` a word start, which is "
+                       "right, and the scanner could not tell an operator `)` "
+                       "from the one closing a `$( ... )`, because it knew "
+                       "backticks and not `$(`. MEASURED: `bash -c 'echo "
+                       "A$(printf x)#no && echo RAN_SECOND'` prints both "
+                       "lines, this check exited 0 with the trailing command "
+                       "dropped, and the same input at `e2b11d8`, before `)` "
+                       "joined the set, exited 1. There is one scanner with a "
+                       "span stack now and a `)` it opened is never a word "
+                       "boundary."),
+            Probe("ci-floor.a-substitution-in-an-arm",
+                  _a_substitution_in_an_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The direction the fix could get wrong. `$( ... )` in "
+                       "a gate arm is ordinary shell, and the two over-tight "
+                       "repairs, taking `)` out of `COMMENT_WORD_START` or "
+                       "refusing `$(` outright, would each pass the probe "
+                       "above while either reopening the tenth pass's `;#` "
+                       "route or refusing a legitimate runner."),
+            Probe("ci-floor.gate-name-with-a-digit",
+                  _a_gate_named_outside_the_python_class,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "gate is in the CI floor",
+                  note="The third foreign grammar. `bin/ocelli.sh` reads an "
+                       "entry with `IFS='|' read -r name gpu desc` and "
+                       "imposes no character class, and this file and "
+                       "scripts/guards/census.py both matched `[a-z-]+` in "
+                       "two copies of one regex. MEASURED at HEAD: bash 29 "
+                       "gates against Python 28, this check exit 0, the "
+                       "census exit 0, `gates_declared` unmoved, and "
+                       "`gate --floor` selecting a gate no CI step ran. An "
+                       "entry the reader cannot use was an omission, which is "
+                       "the one outcome a guard may not have."),
+            Probe("ci-floor.gates-entry-missing-a-field",
+                  lambda box: _a_gates_entry_the_reader_cannot_use(
+                      box, '"probe-extra|no"'),
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "which is not `name|needs_gpu|description`",
+                  note="The runner reads three fields and an entry with two "
+                       "leaves `desc` empty there and a row this file would "
+                       "have to guess at here. Refused rather than guessed, "
+                       "on the same argument as the name class above."),
+            Probe("ci-floor.gates-gpu-column-unknown",
+                  lambda box: _a_gates_entry_the_reader_cannot_use(
+                      box, '"probe-extra|maybe|a third value for the column"'),
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "in the GPU column, which is neither",
+                  note="`gpu_gates` reads that column to decide which "
+                       "excluded gate CI may not run at all under deviation "
+                       "D-04, and an unrecognised value reads there as `no`, "
+                       "which is the permissive answer. The runner's own "
+                       "comment above the array declares the two values."),
+            Probe("ci-floor.gates-array-unreadable",
+                  lambda box: box.substitute(
+                      "bin/ocelli.sh", "GATES=(\n", "GATE_LIST=(\n"),
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "carries no `GATES=(`",
+                  note="The fail-closed half of reading the array. A reader "
+                       "that found nothing and reported agreement would say "
+                       "the floor is covered about a list it could not read, "
+                       "which is the shape this repository refuses "
+                       "everywhere else."),
+            Probe("ci-floor.comment-inside-the-gates-array",
+                  _a_comment_inside_the_gates_array,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The direction the entry reader could get wrong. bash "
+                       "ignores a comment and a blank line inside an array, "
+                       "so a reader demanding one quoted entry per line would "
+                       "refuse a legitimate runner. The array is read as "
+                       "shell WORDS by the same scanner the arms are read "
+                       "with, which is what makes both true at once."),
             Probe("ci-floor.comment-only",
                   lambda box: _delete_ci_step(box, leave_comment=True),
                   script("python3", "scripts/ci_floor_check.py"),
@@ -3845,11 +4145,34 @@ GUARDS: tuple[Guard, ...] = (
               "`if case`, which are statement positions `SHELL_INTRODUCERS` "
               "already knew about and `NESTED_CASE`'s hand-written "
               "`then|do|else|elif|!` did not. The alternation is DERIVED from "
-              "`SHELL_INTRODUCERS` now, so the two cannot drift again, the "
-              "arm's end is found by a scan that steps over quoted spans, and "
-              "the statement split and the comment strip use the same scan, "
-              "because three regexes over shell that must agree about quoting "
-              "are three chances to disagree. What is NOT probed is the "
+              "`SHELL_INTRODUCERS` now, so the two cannot drift again. "
+              "**The claim that the arm's end, the statement split and the "
+              "comment strip all use one scan was half true until the S03 "
+              "review's eleventh pass.** They shared the rule for OPENING a "
+              "span and the delimiter set. The rule for CLOSING one was "
+              "written out three times and agreed only because all three were "
+              "edited in one commit, which is the condition that claim says "
+              "had been removed. There is one tokenizer now, "
+              "`ci_floor_check.shell_pieces`, with a span STACK, and its "
+              "callers consume pieces rather than reimplementing a close "
+              "loop. It covers the single quote, the double quote, the "
+              "backtick, a nesting-counted `$( ... )` and `${ ... }`, a "
+              "backslash escape, a here-document body and the comment itself, "
+              "so a `#` that opens a comment and a quote that opens a span "
+              "are decided by one rule rather than by an ordering between "
+              "two passes. `ci_floor_check.gate_entries` reads the GATES "
+              "array with the same scanner, which is what removed the second "
+              "copy of the gate-row regex from `scripts/guards/census.py`. "
+              "The seventh limit is what the tokenizer still does not model: "
+              "`$'...'`, whose escapes differ from a double quote's, and the "
+              "fact that bash opens a command substitution INSIDE a double "
+              "quote while this scanner runs `\"` to its closer. MEASURED "
+              "this session over both regions the scanner is used on: after "
+              "comments are stripped the `run_gate` region carries 0 `$'`, 0 "
+              "`$(`, 0 `${`, 0 `<<` and 0 backticks against 48 before, and "
+              "the GATES array carries 0 of all five. Both are a `Span` entry "
+              "away rather than a new copy of the close loop, which is the "
+              "property the rewrite is for. What is NOT probed is the "
               "unbalanced-quote refusal in `_arm_end`, and it is probed: "
               "`ci-floor.unbalanced-quote-in-an-arm` plants the unclosed "
               "quote in the LAST arm, which is the only position from which a "
@@ -4745,6 +5068,74 @@ GUARDS: tuple[Guard, ...] = (
                        "repository the same row left this check at 0, the "
                        "census at 0 and `gate guards` ALL GREEN.",
                   needs="cargo", profile="deep"),
+            Probe("lint-policy.quoted-group-row",
+                  _quoted_group_row,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "carries the lint GROUP",
+                  note="The fifth spelling of one row in five passes, and the "
+                       "first to defeat the row regex and its declared "
+                       "backstop together. MEASURED under 1.97.1 on a minimal "
+                       "workspace: baseline 101, and `\"pedantic\" = { level "
+                       "= \"allow\", priority = 1 }` as the LAST line of the "
+                       "table gives cargo 0, the guard 0 printing \"no group "
+                       "row weaker than deny\" and the census 0. In the "
+                       "MIDDLE of the table the ratchet held, digest "
+                       "`034c52d0054007ea` against `adf2cb2237be28da`, so the "
+                       "position is what this probe is about. Both halves "
+                       "read the table with `tomllib` now.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.two-line-group-row",
+                  _two_line_group_row,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "cannot be parsed as TOML",
+                  note="A DECLARED residual until the eleventh pass. TOML 1.0 "
+                       "puts an inline table on one line and cargo accepts it "
+                       "over two, MEASURED at cargo clippy 101 to 0 with the "
+                       "guard at exit 0. `tomllib` rejects it, and a document "
+                       "cargo accepts and this parser rejects is refused "
+                       "rather than read as an empty table, which is the "
+                       "fail-closed direction the regexes had backwards.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.unparseable-member-manifest",
+                  _a_member_manifest_that_is_not_toml,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "is a workspace member cargo reports and its Cargo.toml "
+                  "cannot be parsed as TOML",
+                  note="The fail-closed half of reading the MEMBER manifests "
+                       "with `tomllib`. The regex pair this replaced answered "
+                       "\"does not inherit\" for a document nobody could "
+                       "parse, which is a refusal naming the wrong thing, and "
+                       "one rule weaker in the same shape is silence. The run "
+                       "is red for a second reason too, because cargo cannot "
+                       "read the workspace either, so the expected fragment "
+                       "is the member sentence rather than the exit code.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.quoted-required-row-is-permitted",
+                  _quoted_required_row,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "clippy lint(s) at or above HLD 27.1's level",
+                  polarity="accept",
+                  note="The accept half of the quoted key. MEASURED under "
+                       "1.97.1: `\"cast_possible_truncation\" = \"deny\"` "
+                       "leaves cargo clippy at 101, so the lint is denied and "
+                       "the guard has to say so. A repair that refused the "
+                       "quoting rather than reading through it would pass the "
+                       "group probe above and refuse a legitimate manifest.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.dotted-required-row-is-permitted",
+                  _dotted_required_row,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "clippy lint(s) at or above HLD 27.1's level",
+                  polarity="accept",
+                  note="The other legitimate spelling, and what says the "
+                       "guard did not simply learn one more alternation. "
+                       "MEASURED under 1.97.1: "
+                       "`cast_possible_truncation.level = \"deny\"` leaves "
+                       "cargo clippy at 101. A parser reading TOML sees the "
+                       "same row in the bare, quoted, dotted and inline "
+                       "forms, and each of those was a separate finding in a "
+                       "separate pass while the reader was a regex.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.commented-required-row-is-permitted",
                   _required_row_with_a_trailing_comment,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -4904,7 +5295,7 @@ GUARDS: tuple[Guard, ...] = (
                   script("python3", "scripts/lint_policy_check.py"),
                   "allows the lint group",
                   note="The second spelling, and the file knew this one too: "
-                       "`INCLUDE_PATH` ten lines below `MODULE_PATH` already "
+                       "`INCLUDE_PATH` below `MODULE_PATH` already "
                        "carries `(?:r#*)?`, because a raw string literal is "
                        "the same file name written another way. MEASURED the "
                        "same way, on the minimal workspace and again in a "
@@ -4927,20 +5318,21 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.required-row-with-a-tail",
                   _a_required_row_with_a_tail,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "is in HLD 27.1's table and is not in",
-                  note="What `lint-policy.commented-required-row-is-permitted` "
-                       "claims to discriminate and does not. MEASURED in the "
-                       "seventh pass: deleting `_row_body` entirely and "
-                       "loosening `LINT_ROW`'s tail to `.*$` leaves both that "
-                       "accept probe and "
-                       "`lint-policy.group-row-with-a-trailing-comment` green, "
-                       "so the quote-aware twenty-line function the sixth pass "
-                       "added is deletable with the harness silent. "
+                  "cannot be parsed as TOML",
+                  note="A required row with rubbish after its value, which is "
+                       "not TOML at all. This probe watched `LINT_ROW`'s tail "
+                       "anchor until the eleventh pass: MEASURED in the "
+                       "seventh, deleting `_row_body` and loosening the tail "
+                       "to `.*$` left both accept twins green while "
                        "`cast_possible_truncation = \"deny\" and we mean it` "
-                       "is the input that tells the two repairs apart: "
-                       "anchored, the line is not a row and the guard says the "
-                       "lint is absent, and loosened to `.*$` the same line "
-                       "reads as a `deny` row and the guard says nothing.",
+                       "read as a `deny` row and the guard said nothing. "
+                       "There is no row regex to loosen now, so what it "
+                       "watches is the direction that replaced it: a document "
+                       "`tomllib` cannot parse is REFUSED, where the regexes "
+                       "returned an empty table and the check went on to "
+                       "report five absent lints. The refusal is stronger "
+                       "than the one this probe used to expect, which is why "
+                       "the expected fragment moved.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.crate-root-outside-the-member",
                   _crate_root_outside_the_member,
@@ -4967,7 +5359,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-crate-root-outside-the-member",
                   _clean_crate_root_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "cargo's own target roots seeded",
+                  "26 cargo target root(s) seeded",
                   polarity="accept",
                   note="The other direction. A `[lib] path` outside the "
                        "member is legal cargo and says nothing about lint "
@@ -4975,7 +5367,21 @@ GUARDS: tuple[Guard, ...] = (
                        "must not turn the LAYOUT into a refusal. The member's "
                        "own src/lib.rs is left in place and unread by cargo, "
                        "which is the state that would make a guard refusing "
-                       "the shape rather than the attribute look correct.",
+                       "the shape rather than the attribute look correct. "
+                       "**The expect carries the COUNT since the S03 review's "
+                       "eleventh pass**, and until then it was the words "
+                       "`cargo's own target roots seeded`, an unconditional "
+                       "f-string literal the guard printed whether it seeded "
+                       "anything or not: MEASURED, with `for root in roots or "
+                       "[]` changed to `for root in []` this probe stayed "
+                       "GREEN. That is the class pass 10 fixed in the two "
+                       "clauses beside it, `#[path]` and `include!`, and left "
+                       "standing in the third. The number is this "
+                       "repository's target count from `cargo metadata`, so a "
+                       "target added to any member moves it and this probe "
+                       "says so, which is the same bargain `entry_sites` "
+                       "makes and the reason the count is here rather than a "
+                       "sentence that cannot go wrong.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.unreadable-crate-root",
                   _crate_root_the_guard_cannot_open,
@@ -5260,22 +5666,29 @@ GUARDS: tuple[Guard, ...] = (
               "narrowing it fails the census in the same change. Two of the "
               "nine are measured to reach 27.1's table under clippy 1.97.1 "
               "and the other seven are refused as blanket allows, which the "
-              "message says rather than overclaiming. The second limit is a "
-              "table row spread over two lines. `LINT_ROW` reads one line, so "
-              "`pedantic = { level = \"allow\",` followed by `priority = 1 }` "
-              "is invisible to it, MEASURED at exit 0. The declared constant "
-              "`Cargo.toml:workspace.lints` is the backstop and was measured "
-              "too: the same pair moves its digest from adf2cb2237be28da to "
-              "e3d02e83d8b52dab and the census refuses. That division of "
-              "labour is why the sixth pass had to fix both the row regex and "
-              "the constant's capture, and it is the reason a probe here is "
-              "not the whole answer. A DOTTED-KEY row is the second residual "
-              "of the same shape and the sixth pass's wording named only the "
-              "first: `pedantic.level = \"allow\"` beside "
-              "`pedantic.priority = 1` is measured to take cargo clippy from "
-              "101 to 0, because `LINT_ROW`'s name class excludes `.`. The "
-              "same declared constant refuses it on the digest, so the "
-              "division of labour holds and only the sentence was short. The "
+              "message says rather than overclaiming. **The second limit "
+              "was a TOML row this guard's regex could not read, and it is "
+              "not a limit any more.** It was declared twice and both "
+              "declarations claimed a division of labour with the declared "
+              "constant `Cargo.toml:workspace.lints`: a two-line inline table "
+              "for the sixth pass, a dotted key for the ninth, each measured "
+              "past `LINT_ROW` at cargo clippy 101 to 0 and each said to be "
+              "caught on the digest instead. **That sentence was false of the "
+              "third spelling and the eleventh pass measured it.** A QUOTED "
+              "key defeated both mechanisms at once: `\"pedantic\" = { level "
+              "= \"allow\", priority = 1 }` as the LAST line of the table "
+              "gave cargo 0, the guard 0 printing \"no group row weaker than "
+              "deny\" and the census 0, because the constant's capture ended "
+              "at the last line beginning with a bare key. In the middle of "
+              "the table the ratchet held, `034c52d0054007ea` against "
+              "`adf2cb2237be28da`, so the boundary was exact. Both halves "
+              "read the tables with `tomllib` now and the constant records "
+              "the guard's own parse, so every spelling is one code path and "
+              "the two mechanisms cannot agree with each other while "
+              "disagreeing with the grammar. What is refused rather than "
+              "read is a document `tomllib` cannot parse, which is the "
+              "two-line row, and `lint-policy.two-line-group-row` watches it. "
+              "The "
               "third limit arrived with the seventh pass's fix and is the "
               "PROFILE: this guard reads its member set from `cargo metadata "
               "--no-deps`, so every probe here declares `needs=\"cargo\"` and "
@@ -5497,6 +5910,19 @@ GUARDS: tuple[Guard, ...] = (
                       '  "probe-gate|no|a gate nobody declared"\n  "ci|no|'),
                   script("python3", "scripts/guard_census.py"),
                   "has no catalogue entry and no `delegated` reason"),
+            Probe("census.gate-name-with-a-digit",
+                  _a_gate_named_outside_the_python_class,
+                  script("python3", "scripts/guard_census.py"),
+                  "has no catalogue entry and no `delegated` reason",
+                  note="The same route as `ci-floor.gate-name-with-a-digit` "
+                       "seen from the census, and both are needed because the "
+                       "two checks run in different gates and a gate the "
+                       "reader dropped was invisible to both. This module "
+                       "carried its own copy of the row regex and its "
+                       "docstring said `bin/ocelli.sh` carried a third, which "
+                       "was the imprecision that hid the defect: the runner "
+                       "carries no regex at all. It calls "
+                       "`ci_floor_check.declared_gates` now."),
             Probe("census.floor-needing-a-gpu", None,
                   python_snippet(
                       "census.profile_agrees",
@@ -6001,14 +6427,56 @@ GUARDS: tuple[Guard, ...] = (
 
 @dataclass(frozen=True)
 class Constant:
-    """One value that decides how strict a guard is."""
+    """One value that decides how strict a guard is.
+
+    `pattern` is a regex over the file's text and is how almost every entry
+    below is read, because almost every entry below records a Python literal
+    out of a Python file, which is a grammar a regex can pin down between two
+    anchors it owns.
+
+    `read` is the alternative, and it exists because one entry is not that.
+    A value in a FOREIGN grammar has to be read by that grammar's parser or the
+    ratchet is a second regex disagreeing with the guard's first one, which is
+    the eleventh review pass's finding: the recorded slice of
+    `[workspace.lints.clippy]` and `scripts/lint_policy_check.py`'s row regex
+    were two hand-rolled TOML readers that were kept in step with each other
+    and neither of which was in step with TOML. A quoted key was outside both.
+    When `read` is set it takes the file's text and returns the recorded value,
+    or `None` when the value cannot be read at all, which the census refuses.
+    Exactly one of `pattern` and `read` is set.
+    """
 
     guard: str
     file: str
     name: str
-    pattern: str
+    pattern: str = ""
     tunable: bool = False
     why: str = ""
+    read: Callable[[str], str | None] | None = None
+
+
+def _workspace_lints_rows(text: str) -> str | None:
+    """`Cargo.toml`'s two lints tables, through the GUARD'S OWN parser.
+
+    Imported lazily for the reason `_ci_arm_commands` gives: every caller of
+    this catalogue puts `scripts/` on `sys.path`, and a top-level import would
+    make the catalogue depend on one particular guard.
+
+    Calling the guard's parser rather than writing a second one is the whole
+    repair. The ratchet's job is to notice the table being WIDENED, and it can
+    only do that over the rows cargo reads. Reading them a second way was how a
+    quoted key ended up outside the recorded value while the guard was blind to
+    it as well, so cargo exit 0, guard exit 0 and census exit 0 all held at once
+    with four of HLD 27.1's five lints switched off.
+
+    This does not make the ratchet redundant. `lint_policy_check.py` refuses
+    the rows it knows are wrong, HLD 27.1's five at too low a level and the nine
+    named groups. The ratchet refuses ANY change to either table, including a
+    row for a lint no rule here has heard of, and including a `priority` moved
+    under a level left alone.
+    """
+    import lint_policy_check
+    return lint_policy_check.workspace_lints_rows(text)
 
 
 # A probe proves a guard still refuses what it refuses. It cannot notice that
@@ -6128,61 +6596,54 @@ CONSTANTS: tuple[Constant, ...] = (
              why="G-04's undocumented contract. A field added or removed here "
                  "changes what every worker must write and is documented "
                  "nowhere else."),
-    # THE WHOLE TABLE, and not to the first blank line. A blank line does not
-    # end a TOML table, so the non-greedy `\n\n` stopped the capture inside the
-    # table it was recording: the S03 review's sixth pass put
-    # `pedantic = { level = "allow", priority = 1 } # keeps noise down` after a
-    # blank line and inside `[workspace.lints.clippy]`, and this digest did not
-    # move. `lint_policy_check.py`'s row regex missed it too, for the trailing
-    # comment, so `bin/ocelli.sh gate guards` was ALL GREEN with four of HLD
-    # 27.1's five lints switched off. Both halves are closed, and this is the
-    # half that still catches a row the row parser cannot read at all.
+    # THE WHOLE TABLE, PARSED, and this entry stopped being a regex in the
+    # S03 review's ELEVENTH pass. What it recorded before was a text slice of
+    # `Cargo.toml` captured by a regex that ran from the
+    # `[workspace.lints.clippy]` header to the last line beginning with a bare
+    # key. Six passes tuned that capture. Their measurements are kept here
+    # because they are the argument for not doing it a seventh time:
     #
-    # The capture is bounded by the next `[` header and then backtracks to the
-    # LAST `name = value` line inside it, so a comment block that introduces
-    # the following section and happens to sit before its header is not part of
-    # the recorded value. Every row of the table is, wherever the blank lines
-    # fall.
+    #   pass 6   the capture stopped at the first blank line, so a row after
+    #            one was outside it and the digest did not move
+    #   pass 9   the backtrack was unanchored, matched `f=` inside an awk
+    #            snippet in a COMMENT, and ran twelve lines past the table:
+    #            digest `319e61ab2cda36f4` for a prose edit with the table
+    #            byte identical, which trains the next author to re-record on
+    #            sight
+    #   pass 10  the backtrack was anchored to the start of a line, `.` was
+    #            put in the key class for the dotted row, and both halves of
+    #            the mechanism were made to agree with each other
+    #   pass 11  `"pedantic" = { level = "allow", priority = 1 }` appended as
+    #            the LAST line of the table. `"` is not in `[\w.-]`, so the
+    #            capture ended at the line above it and the row was outside
+    #            the recorded value. MEASURED on a minimal workspace under the
+    #            pinned 1.97.1 toolchain: cargo clippy 101 to 0, guard exit 0
+    #            printing "no group row weaker than deny", census exit 0.
     #
-    # **That sentence was measurably false between the ninth and tenth passes,
-    # and the way it failed is worth more than the sentence.** `[\w-]\s*=` was
-    # unanchored, so it matched a `name =` ANYWHERE on a line, comments
-    # included, and the pass-9 commit put an awk snippet holding `{f=1;next}`
-    # in the comment block that introduces `[workspace.dependencies]`. The
-    # backtrack found `f=` there, so the capture ran twelve lines past the end
-    # of the table and the recorded value ended mid-sentence inside a
-    # dependency comment. MEASURED: the HEAD digest was `319e61ab2cda36f4`, the
-    # `828037e` digest was `adf2cb2237be28da`, and the lints table is BYTE
-    # IDENTICAL between the two commits. So the pass-9 commit re-recorded this
-    # ratchet for a prose edit with the table unchanged, which is precisely the
-    # erosion a ratchet exists to prevent: it trains the next author to
-    # re-record on sight.
+    # Pass 10 made the two hand-rolled TOML readers agree. It did not make
+    # either agree with TOML, and pass 11 walked through the gap between them.
+    # So this records `lint_policy_check.workspace_lints_rows`, which is the
+    # guard's own `tomllib` parse of both tables rendered as sorted
+    # `table.name = <json>` rows. Every spelling of a row is the same value
+    # here because it is the same value to cargo, the whole ROW is recorded
+    # rather than its level so a moved `priority` moves the digest, and the
+    # sort means a reordered table records the same digest, which it should:
+    # order carries no meaning in TOML and `priority` is where precedence
+    # lives.
     #
-    # The backtrack is anchored to the START of a line now, with an optional
-    # indent, so only a real table row can end the capture. MEASURED after the
-    # anchor: HEAD and `828037e` both give `adf2cb2237be28da`, the digest the
-    # table has had all along, and an unrelated edit inside that dependency
-    # comment leaves it there. The three mutations the sixth and ninth passes
-    # recorded still move it, and the two-line row still gives
-    # `e3d02e83d8b52dab`, which is the number the `lint-policy` entry's limit
-    # quotes as its reproduction.
-    #
-    # `.` is in the key class deliberately. A DOTTED row, `pedantic.level =
-    # "allow"` beside `pedantic.priority = 1`, is measured to take cargo clippy
-    # from 101 to 0 and `LINT_ROW` cannot read it, so this constant is its only
-    # backstop and a class that stopped at `[\w-]` would have ended the capture
-    # before it. Measured at `a7b52d1fe58cbfeb`, which is not the base.
+    # A `Cargo.toml` that does not parse records NOTHING, and the census
+    # refuses a constant it cannot read. That is the third mechanism failing
+    # closed on the same input as the guard, rather than recording a digest
+    # over an empty table.
     Constant("lint-policy", "Cargo.toml", "workspace.lints",
-             r"^\[workspace\.lints\.clippy\]\n"
-             r"((?:(?!^\[)[\s\S])*^[ \t]*[\w.-]+[ \t]*=[^\n]*)",
-             why="HLD 27.1's denied lint table, verbatim, and every other row "
-                 "of the table it sits in. A row added anywhere in that table "
-                 "moves this digest, blank lines, dotted keys and trailing "
-                 "comments included. It ends at the last line that STARTS with "
-                 "a table row, so prose below the table, in the comment block "
-                 "introducing the next section, is not part of the recorded "
-                 "value and cannot make this ratchet ask to be re-recorded for "
-                 "a change the table never saw."),
+             read=_workspace_lints_rows,
+             why="HLD 27.1's denied lint table and every other row of both "
+                 "`[workspace.lints.*]` tables, parsed with `tomllib` by the "
+                 "guard's own reader. A row added, removed, renamed, "
+                 "re-levelled or re-prioritised in either table moves this "
+                 "digest, in any TOML spelling, because the spelling is gone "
+                 "by the time the value is rendered. Six passes tuned the "
+                 "regex this replaced and the seventh input walked past it."),
     # The group names that exist only in this guard. HLD 27.1 names five
     # lints and no groups, so `lint-policy.group-allow` has to write one of
     # the nine and narrowing the nine to that one would leave the probe green
