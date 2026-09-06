@@ -320,6 +320,7 @@ pub struct ViewStatistics {
 #[derive(Clone, Debug)]
 pub struct ChannelReport {
     pub pixels: u64,
+    pub signed_histogram: Vec<(i16, u64)>,
     pub max_abs_diff: u8,
     pub count_at_zero: u64,
     pub count_at_one: u64,
@@ -338,6 +339,12 @@ impl ChannelReport {
     pub fn of(stats: &crate::frame::ChannelStats) -> Result<Self, StatsError> {
         Ok(Self {
             pixels: stats.pixels(),
+            signed_histogram: (-255_i16..=255_i16)
+                .filter_map(|difference| {
+                    let count = stats.signed_count_at(difference);
+                    (count > 0).then_some((difference, count))
+                })
+                .collect(),
             max_abs_diff: stats.max_abs_diff(),
             count_at_zero: stats.count_at(0),
             count_at_one: stats.count_at(1),
@@ -354,6 +361,7 @@ impl ChannelReport {
     fn to_json(&self) -> Value {
         json!({
             "pixels": self.pixels,
+            "signedHistogram": self.signed_histogram,
             "maxAbsDiff": self.max_abs_diff,
             "countAtZero": self.count_at_zero,
             "countAtOne": self.count_at_one,
@@ -835,6 +843,7 @@ mod tests {
     fn zero_channel() -> ChannelReport {
         ChannelReport {
             pixels: 1,
+            signed_histogram: vec![(0, 1)],
             max_abs_diff: 0,
             count_at_zero: 1,
             count_at_one: 0,

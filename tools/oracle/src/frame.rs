@@ -34,6 +34,12 @@ const BYTES_PER_PIXEL: u32 = 4;
 /// The alpha lane. Never compared.
 const ALPHA_LANE: usize = 3;
 
+/// Signed display-code differences from -255 through 255, inclusive.
+const SIGNED_DIFFERENCE_BINS: usize = 511;
+
+/// The array index corresponding to a signed difference of zero.
+const SIGNED_DIFFERENCE_OFFSET: i32 = 255;
+
 #[derive(Debug, Error)]
 pub enum FrameError {
     #[error(
@@ -203,6 +209,7 @@ impl Rect {
 pub struct ChannelStats {
     pixels: u64,
     histogram: Box<[u64; 256]>,
+    signed_histogram: Box<[u64; SIGNED_DIFFERENCE_BINS]>,
     signed_sum: i64,
 }
 
@@ -211,6 +218,7 @@ impl ChannelStats {
         Self {
             pixels: 0,
             histogram: Box::new([0; 256]),
+            signed_histogram: Box::new([0; SIGNED_DIFFERENCE_BINS]),
             signed_sum: 0,
         }
     }
@@ -218,6 +226,11 @@ impl ChannelStats {
     fn add(&mut self, absolute: u8, signed: i16) {
         self.pixels = self.pixels.saturating_add(1);
         if let Some(slot) = self.histogram.get_mut(usize::from(absolute)) {
+            *slot = slot.saturating_add(1);
+        }
+        if let Ok(index) = usize::try_from(i32::from(signed) + SIGNED_DIFFERENCE_OFFSET)
+            && let Some(slot) = self.signed_histogram.get_mut(index)
+        {
             *slot = slot.saturating_add(1);
         }
         self.signed_sum = self.signed_sum.saturating_add(i64::from(signed));
@@ -231,6 +244,15 @@ impl ChannelStats {
     #[must_use]
     pub fn histogram(&self) -> &[u64; 256] {
         &self.histogram
+    }
+
+    #[must_use]
+    pub fn signed_count_at(&self, difference: i16) -> u64 {
+        usize::try_from(i32::from(difference) + SIGNED_DIFFERENCE_OFFSET)
+            .ok()
+            .and_then(|index| self.signed_histogram.get(index))
+            .copied()
+            .unwrap_or(0)
     }
 
     #[must_use]
@@ -840,6 +862,11 @@ mod tests {
         assert_eq!(background.pixels(), 2);
         assert_eq!(image.max_abs_diff(), 1);
         assert_eq!(background.max_abs_diff(), 5);
+        assert_eq!(image.signed_count_at(0), 1);
+        assert_eq!(image.signed_count_at(1), 1);
+        assert_eq!(image.signed_count_at(-1), 0);
+        assert_eq!(background.signed_count_at(0), 1);
+        assert_eq!(background.signed_count_at(5), 1);
         assert_eq!(diff.image_pixels, 2);
     }
 

@@ -1937,6 +1937,14 @@ undeclared class, qualifier and rung combination makes the comparator red.
 Verification also removed a scheduler-dependent output-order assertion from
 the shell grammar test while retaining its requirement that both commands run.
 
+The eighth review replaced inference over separately published summaries with
+one compact sparse signed-difference histogram per channel. The ledger now
+derives the buckets, maximum, percentile, fractions and signed mean from that
+exact distribution, then checks exact distribution composition across regions.
+This rejects approximate means and reports whose percentile and signed sum
+could not come from one producer histogram. Standing green-state probes now
+take their count and run-hash algorithm from the tracked report contract.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured

@@ -61,6 +61,7 @@
     ],
     "channel": [
       "pixels",
+      "signedHistogram",
       "maxAbsDiff",
       "countAtZero",
       "countAtOne",
@@ -270,6 +271,12 @@
           "full": [
             {
               "pixels": 1,
+              "signedHistogram": [
+                [
+                  0,
+                  1
+                ]
+              ],
               "maxAbsDiff": 0,
               "countAtZero": 1,
               "countAtOne": 0,
@@ -284,6 +291,12 @@
           "image": [
             {
               "pixels": 1,
+              "signedHistogram": [
+                [
+                  0,
+                  1
+                ]
+              ],
               "maxAbsDiff": 0,
               "countAtZero": 1,
               "countAtOne": 0,
@@ -299,6 +312,12 @@
           "informative": [
             {
               "pixels": 1,
+              "signedHistogram": [
+                [
+                  0,
+                  1
+                ]
+              ],
               "maxAbsDiff": 0,
               "countAtZero": 1,
               "countAtOne": 0,

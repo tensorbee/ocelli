@@ -294,9 +294,12 @@ and over 2, `fractionWithinOneLsb`, `signedMeanDiff` as candidate minus
 reference, `differingFraction`, the 99.9th percentile of the absolute
 difference, `rowsTouched` and `columnsTouched`, and all of it four times over:
 the full frame, the image rectangle, the letterbox, and the informative subset.
-Every one of those falls out of one 256-bucket histogram per lane, computed in a
-single pass, so no two regions can be taken over different readings of the same
-buffers.
+Every one of those falls out of one 256-bucket absolute histogram per lane,
+computed in a single pass, so no two regions can be taken over different
+readings of the same buffers. The JSON report also carries the same samples as
+a sparse `signedHistogram` of `[difference, count]` pairs. The ledger derives
+every published channel statistic from that one exact distribution instead of
+trying to prove separately summarized values can share an unseen histogram.
 
 **The gating predicate for class one, and only this:**
 
@@ -1252,10 +1255,10 @@ Named, because each is somebody's story.
 
 `scripts/verify_ledger.py record --comparison-report OUT/compare.json` accepts
 only a green `gate` report with a positive judged-view count, zero absent views
-and a complete record set whose paths, attribution states, histograms,
-predicates and aggregate hashes are internally consistent. It records the
-report's exact SHA-256 digest, judged count and verdict. The commit hook carries
-those values in `Ocelli-Verify` when present.
+and a complete record set whose paths, attribution states, sparse signed
+histograms, derived statistics, predicates and aggregate hashes are internally
+consistent. It records the report's exact SHA-256 digest, judged count and
+verdict. The commit hook carries those values in `Ocelli-Verify` when present.
 
 `tools/oracle/report-contract.json` is the cross-language contract for the
 closed object schemas, vocabularies, hash domains and green control report.

@@ -330,125 +330,49 @@ def _hash(value: object, label: str) -> str:
     return value
 
 
-def _small_bucket_sum_is_attainable(
-        signed_sum: int, count_at_one: int, count_at_two: int) -> bool:
-    if count_at_one > 0:
-        bound = count_at_one + 2 * count_at_two
-        return abs(signed_sum) <= bound and signed_sum % 2 == count_at_one % 2
-    return (
-        abs(signed_sum) <= 2 * count_at_two
-        and signed_sum % 4 == (-2 * count_at_two) % 4
-    )
-
-
-def _interval_combines_with_small_buckets(
-        signed_sum: int, lower: int, upper: int,
-        count_at_one: int, count_at_two: int) -> bool:
-    bound = count_at_one + 2 * count_at_two
-    lower = max(lower, signed_sum - bound)
-    upper = min(upper, signed_sum + bound)
-    if lower > upper:
-        return False
-    if count_at_one > 0:
-        modulus = 2
-        residue = (signed_sum - count_at_one) % modulus
-    else:
-        modulus = 4
-        residue = (signed_sum + 2 * count_at_two) % modulus
-    first = lower + (residue - lower) % modulus
-    return first <= upper
-
-
-def _tail_family_is_attainable(
-        signed_sum: int, count_at_one: int, count_at_two: int,
-        count_over_two: int, maximum: int, first_k: int, last_k: int,
-        lower_offset: int, upper_offset: int) -> bool:
-    if first_k > last_k:
-        return False
-    step = maximum + 3
-    interval_width = (maximum - 3) * (count_over_two - 1)
-    if interval_width >= step - 1:
-        return _interval_combines_with_small_buckets(
-            signed_sum,
-            step * first_k + lower_offset,
-            step * last_k + upper_offset,
-            count_at_one,
-            count_at_two,
-        )
-    return any(
-        _interval_combines_with_small_buckets(
-            signed_sum,
-            step * positive_count + lower_offset,
-            step * positive_count + upper_offset,
-            count_at_one,
-            count_at_two,
-        )
-        for positive_count in range(first_k, last_k + 1)
-    )
-
-
-def _signed_sum_is_attainable(
-        signed_sum: int, count_at_one: int, count_at_two: int,
-        count_over_two: int, maximum: int) -> bool:
-    if count_over_two == 0:
-        return _small_bucket_sum_is_attainable(
-            signed_sum, count_at_one, count_at_two
-        )
-    if maximum == 3:
-        small_bound = count_at_one + 2 * count_at_two
-        lower = max(
-            0,
-            -((-(signed_sum - small_bound + 3 * count_over_two)) // 6),
-        )
-        upper = min(
-            count_over_two,
-            (signed_sum + small_bound + 3 * count_over_two) // 6,
-        )
-        if lower > upper:
-            return False
-        if count_at_one > 0:
-            return signed_sum % 2 == (count_at_one + count_over_two) % 2
-        residue = signed_sum + 3 * count_over_two + 2 * count_at_two
-        if residue % 2 != 0:
-            return False
-        required_parity = (residue // 2) % 2
-        if lower % 2 != required_parity:
-            lower += 1
-        return lower <= upper
-    positive_maximum = _tail_family_is_attainable(
-        signed_sum,
-        count_at_one,
-        count_at_two,
-        count_over_two,
-        maximum,
-        1,
-        count_over_two,
-        -maximum * count_over_two + maximum - 3,
-        -3 * count_over_two,
-    )
-    negative_maximum = _tail_family_is_attainable(
-        signed_sum,
-        count_at_one,
-        count_at_two,
-        count_over_two,
-        maximum,
-        0,
-        count_over_two - 1,
-        -maximum * count_over_two,
-        -3 * count_over_two - maximum + 3,
-    )
-    return positive_maximum or negative_maximum
+def _signed_histogram(value: object, label: str) -> tuple[list[int], int, int]:
+    entries = _array(value, label)
+    if not entries:
+        sys.exit(f"comparison report {label} is empty")
+    absolute = [0] * 256
+    total = 0
+    signed_sum = 0
+    previous = -256
+    for index, entry in enumerate(entries):
+        entry_label = f"{label}[{index}]"
+        if not isinstance(entry, list) or len(entry) != 2:
+            sys.exit(f"comparison report has invalid {entry_label}")
+        difference, raw_count = entry
+        if (isinstance(difference, bool) or not isinstance(difference, int)
+                or not -255 <= difference <= 255 or difference <= previous):
+            sys.exit(f"comparison report has invalid {entry_label} difference")
+        count = _integer(raw_count, f"{entry_label} count", maximum=U32_MAX)
+        if count == 0:
+            sys.exit(f"comparison report {entry_label} count is zero")
+        previous = difference
+        absolute[abs(difference)] += count
+        total += count
+        signed_sum += difference * count
+    return absolute, total, signed_sum
 
 
 def _channel_report(value: object, label: str) -> dict:
     channel = _schema(value, label, CHANNEL_KEYS)
     pixels = _integer(channel["pixels"], f"{label}.pixels", maximum=U32_MAX)
+    histogram, histogram_pixels, signed_sum = _signed_histogram(
+        channel["signedHistogram"], f"{label}.signedHistogram"
+    )
+    if histogram_pixels != pixels:
+        sys.exit(f"comparison report {label} signed histogram does not total pixels")
     counts = [
         _integer(channel[key], f"{label}.{key}", maximum=U32_MAX)
         for key in ("countAtZero", "countAtOne", "countAtTwo", "countOverTwo")
     ]
     if sum(counts) != pixels:
         sys.exit(f"comparison report {label} channel counts do not total pixels")
+    expected_counts = [histogram[0], histogram[1], histogram[2], sum(histogram[3:])]
+    if counts != expected_counts:
+        sys.exit(f"comparison report {label} channel counts contradict signed histogram")
     maximum = _integer(channel["maxAbsDiff"], f"{label}.maxAbsDiff", maximum=255)
     percentile = _integer(
         channel["percentile999AbsDiff"],
@@ -468,43 +392,25 @@ def _channel_report(value: object, label: str) -> dict:
     expected_differing = (pixels - counts[0]) / pixels
     if within != expected_within or differing != expected_differing:
         sys.exit(f"comparison report {label} channel fractions contradict counts")
-    if counts[3] > 0:
-        maximum_is_consistent = maximum > 2
-    elif counts[2] > 0:
-        maximum_is_consistent = maximum == 2
-    elif counts[1] > 0:
-        maximum_is_consistent = maximum == 1
-    else:
-        maximum_is_consistent = maximum == 0
-    if not maximum_is_consistent:
-        sys.exit(f"comparison report {label} maximum contradicts counts")
+    expected_maximum = next(
+        difference for difference in range(255, -1, -1)
+        if histogram[difference] > 0
+    )
+    if maximum != expected_maximum:
+        sys.exit(f"comparison report {label} maximum contradicts signed histogram")
     cumulative = 0
-    expected_percentile = None
-    for difference, count in enumerate(counts[:3]):
+    expected_percentile = 255
+    for difference, count in enumerate(histogram):
         cumulative += count
         if cumulative / pixels >= MONOCHROME_WITHIN_ONE_LSB_FRACTION:
             expected_percentile = difference
             break
-    if expected_percentile is not None:
-        percentile_is_consistent = percentile == expected_percentile
-    elif ((pixels - 1) / pixels
-          < MONOCHROME_WITHIN_ONE_LSB_FRACTION):
-        percentile_is_consistent = percentile == maximum
-    else:
-        percentile_is_consistent = 3 <= percentile <= maximum
-    if not percentile_is_consistent:
-        sys.exit(f"comparison report {label} percentile contradicts counts")
-    if abs(signed_mean) > maximum:
-        sys.exit(f"comparison report {label} signed mean exceeds its maximum")
-    signed_sum = signed_mean * pixels
-    if (not I32_MIN <= signed_sum <= I32_MAX
-            or not math.isclose(signed_sum, round(signed_sum), abs_tol=1e-6)):
-        sys.exit(f"comparison report {label} signed mean is not pixel-derived")
-    signed_sum_integer = round(signed_sum)
-    if not _signed_sum_is_attainable(
-        signed_sum_integer, counts[1], counts[2], counts[3], maximum
-    ):
-        sys.exit(f"comparison report {label} signed mean contradicts buckets")
+    if percentile != expected_percentile:
+        sys.exit(f"comparison report {label} percentile contradicts signed histogram")
+    if not I32_MIN <= signed_sum <= I32_MAX:
+        sys.exit(f"comparison report {label} signed sum exceeds producer range")
+    if signed_mean != signed_sum / pixels:
+        sys.exit(f"comparison report {label} signed mean contradicts signed histogram")
     return channel
 
 
@@ -571,33 +477,24 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
         sys.exit(f"comparison report {label} informative total is inconsistent")
     if rows > next(iter(full_pixels)) or columns > next(iter(full_pixels)):
         sys.exit(f"comparison report {label} touched counts exceed the frame")
-    bucket_keys = ("countAtZero", "countAtOne", "countAtTwo", "countOverTwo")
     if regions["background"]:
         for channel_index in range(channels):
             full = regions["full"][channel_index]
             image = regions["image"][channel_index]
             background = regions["background"][channel_index]
-            if any(full[key] != image[key] + background[key] for key in bucket_keys):
-                sys.exit(
-                    f"comparison report {label} full histogram is not image plus background"
+            combined_histogram: dict[int, int] = {}
+            for entry in image["signedHistogram"] + background["signedHistogram"]:
+                difference, count = entry
+                combined_histogram[difference] = (
+                    combined_histogram.get(difference, 0) + count
                 )
-            combined_sum = (
-                image["signedMeanDiff"] * image["pixels"]
-                + background["signedMeanDiff"] * background["pixels"]
-            )
-            if not math.isclose(
-                full["signedMeanDiff"] * full["pixels"],
-                combined_sum,
-                abs_tol=1e-6,
-            ):
+            expected_histogram = [
+                [difference, count]
+                for difference, count in sorted(combined_histogram.items())
+            ]
+            if full["signedHistogram"] != expected_histogram:
                 sys.exit(
-                    f"comparison report {label} full mean is not image plus background"
-                )
-            if full["maxAbsDiff"] != max(
-                image["maxAbsDiff"], background["maxAbsDiff"]
-            ):
-                sys.exit(
-                    f"comparison report {label} full maximum is not image plus background"
+                    f"comparison report {label} full signed histogram is not image plus background"
                 )
     else:
         for channel_index in range(channels):
@@ -611,17 +508,13 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
         for channel_index in range(channels):
             image = regions["image"][channel_index]
             informative = regions["informative"][channel_index]
-            if any(informative[key] > image[key] for key in bucket_keys):
+            image_histogram = dict(image["signedHistogram"])
+            if any(
+                count > image_histogram.get(difference, 0)
+                for difference, count in informative["signedHistogram"]
+            ):
                 sys.exit(
-                    f"comparison report {label} informative histogram exceeds image"
-                )
-            if informative["maxAbsDiff"] > image["maxAbsDiff"]:
-                sys.exit(
-                    f"comparison report {label} informative maximum exceeds image"
-                )
-            if informative_pixels == image_pixels and informative != image:
-                sys.exit(
-                    f"comparison report {label} whole-image informative statistics disagree"
+                    f"comparison report {label} informative signed histogram exceeds image"
                 )
     any_difference = any(
         channel["countAtZero"] != channel["pixels"] for channel in regions["full"]

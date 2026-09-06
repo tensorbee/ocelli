@@ -1126,6 +1126,24 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         record["qualifiers"] = ["unstated-threshold"]
         record["rung"] = "class-two"
         record["notes"] = ["controlled impossible class"]
+    elif variant == "signed-histogram-not-array":
+        statistics["full"][0]["signedHistogram"] = None
+    elif variant == "signed-histogram-empty":
+        statistics["full"][0]["signedHistogram"] = []
+    elif variant == "signed-histogram-entry-shape":
+        statistics["full"][0]["signedHistogram"] = [[0]]
+    elif variant == "signed-histogram-difference":
+        statistics["full"][0]["signedHistogram"] = [[256, 1]]
+    elif variant == "signed-histogram-count":
+        statistics["full"][0]["signedHistogram"] = [[0, True]]
+    elif variant == "signed-histogram-zero-count":
+        statistics["full"][0]["signedHistogram"] = [[0, 0]]
+    elif variant == "signed-histogram-total":
+        statistics["full"][0]["signedHistogram"] = [[0, 2]]
+    elif variant == "signed-histogram-summary":
+        statistics["full"][0]["signedHistogram"] = [[1, 1]]
+    elif variant == "signed-histogram-sum-range":
+        _set_signed_distribution(statistics["full"][0], [(255, (1 << 32) - 1)])
     elif variant == "maximum-contradicts-counts":
         statistics["full"][0]["maxAbsDiff"] = 255
     elif variant == "percentile-contradicts-counts":
@@ -1135,30 +1153,14 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
     elif variant == "predicate-contradicts-statistics":
         for region in regions:
             channel = statistics[region][0]
-            channel.update({
-                "maxAbsDiff": 3,
-                "countAtZero": 0,
-                "countOverTwo": 1,
-                "fractionWithinOneLsb": 0.0,
-                "differingFraction": 1.0,
-                "signedMeanDiff": 3.0,
-                "percentile999AbsDiff": 3,
-            })
+            _set_signed_distribution(channel, [(3, 1)])
         statistics["rowsTouched"] = 1
         statistics["columnsTouched"] = 1
         statistics["signedMeanDiff"] = 3.0
     elif variant == "bias-contradicts-statistics":
         for region in regions:
             channel = statistics[region][0]
-            channel.update({
-                "maxAbsDiff": 1,
-                "countAtZero": 0,
-                "countAtOne": 1,
-                "fractionWithinOneLsb": 1.0,
-                "differingFraction": 1.0,
-                "signedMeanDiff": 1.0,
-                "percentile999AbsDiff": 1,
-            })
+            _set_signed_distribution(channel, [(1, 1)])
         statistics["rowsTouched"] = 1
         statistics["columnsTouched"] = 1
         statistics["signedMeanDiff"] = 1.0
@@ -1166,39 +1168,45 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         too_many = 1 << 32
         for region in regions:
             channel = statistics[region][0]
-            channel["pixels"] = too_many
-            channel["countAtZero"] = too_many
+            _set_signed_distribution(channel, [(0, too_many)])
         statistics["imagePixels"] = too_many
         statistics["informativePixels"] = too_many
     elif variant == "signed-mean-not-pixel-derived":
         for region in regions:
             channel = statistics[region][0]
-            channel.update({
-                "maxAbsDiff": 1,
-                "countAtZero": 0,
-                "countAtOne": 1,
-                "fractionWithinOneLsb": 1.0,
-                "differingFraction": 1.0,
-                "signedMeanDiff": 0.5,
-                "percentile999AbsDiff": 1,
-            })
+            _set_signed_distribution(channel, [(1, 1)])
+            channel["signedMeanDiff"] = 0.5
         statistics["rowsTouched"] = 1
         statistics["columnsTouched"] = 1
         statistics["signedMeanDiff"] = 0.5
     elif variant == "signed-mean-contradicts-buckets":
         for region in regions:
             channel = statistics[region][0]
-            channel.update({
-                "maxAbsDiff": 1,
-                "countAtZero": 0,
-                "countAtOne": 1,
-                "fractionWithinOneLsb": 1.0,
-                "differingFraction": 1.0,
-                "signedMeanDiff": 0.0,
-                "percentile999AbsDiff": 1,
-            })
+            _set_signed_distribution(channel, [(1, 1)])
+            channel["signedMeanDiff"] = 0.0
         statistics["rowsTouched"] = 1
         statistics["columnsTouched"] = 1
+    elif variant == "fractional-pixel-derived-mean":
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(3, 1)])
+            channel["signedMeanDiff"] = 2.9999995
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["predicatePasses"] = False
+        statistics["signedMeanDiff"] = 2.9999995
+    elif variant == "percentile-sum-disagree":
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(3, 1998), (255, 2)])
+            channel["signedMeanDiff"] = 255.0
+        statistics["imagePixels"] = 2000
+        statistics["informativePixels"] = 2000
+        statistics["rowsTouched"] = 40
+        statistics["columnsTouched"] = 50
+        statistics["predicatePasses"] = False
+        statistics["biasPasses"] = False
+        statistics["signedMeanDiff"] = 255.0
     elif variant == "negative-zero":
         for region in regions:
             statistics[region][0]["signedMeanDiff"] = -0.0
@@ -1206,15 +1214,8 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
     elif variant == "single-tail-percentile":
         for region in regions:
             channel = statistics[region][0]
-            channel.update({
-                "maxAbsDiff": 255,
-                "countAtZero": 0,
-                "countOverTwo": 1,
-                "fractionWithinOneLsb": 0.0,
-                "differingFraction": 1.0,
-                "signedMeanDiff": 255.0,
-                "percentile999AbsDiff": 3,
-            })
+            _set_signed_distribution(channel, [(255, 1)])
+            channel["percentile999AbsDiff"] = 3
         statistics["rowsTouched"] = 1
         statistics["columnsTouched"] = 1
         statistics["predicatePasses"] = False
@@ -1230,16 +1231,8 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
     elif variant == "rank-at-end-percentile":
         for region in regions:
             channel = statistics[region][0]
-            channel.update({
-                "pixels": 2,
-                "maxAbsDiff": 255,
-                "countAtZero": 0,
-                "countOverTwo": 2,
-                "fractionWithinOneLsb": 0.0,
-                "differingFraction": 1.0,
-                "signedMeanDiff": 129.0,
-                "percentile999AbsDiff": 3,
-            })
+            _set_signed_distribution(channel, [(3, 1), (255, 1)])
+            channel["percentile999AbsDiff"] = 3
         statistics["imagePixels"] = 2
         statistics["informativePixels"] = 2
         statistics["rowsTouched"] = 1
@@ -1253,18 +1246,10 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["informativeFraction"] = 0.0
     elif variant == "full-histogram-composition":
         _add_zero_background(statistics)
-        statistics["full"][0].update({
-            "maxAbsDiff": 1,
-            "countAtZero": 1,
-            "countAtOne": 1,
-            "fractionWithinOneLsb": 1.0,
-            "differingFraction": 0.5,
-            "signedMeanDiff": 0.5,
-            "percentile999AbsDiff": 1,
-        })
+        _set_signed_distribution(statistics["full"][0], [(0, 1), (1, 1)])
     elif variant == "full-mean-composition":
         _add_opposed_background(statistics)
-        statistics["full"][0]["signedMeanDiff"] = 1.0
+        _set_signed_distribution(statistics["full"][0], [(1, 2)])
     elif variant == "full-maximum-composition":
         image = statistics["image"][0]
         _set_tail_difference(image, 3)
@@ -1273,16 +1258,7 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         _set_tail_difference(background, 255)
         statistics["background"] = [background]
         full = statistics["full"][0]
-        full.update({
-            "pixels": 2,
-            "maxAbsDiff": 129,
-            "countAtZero": 0,
-            "countOverTwo": 2,
-            "fractionWithinOneLsb": 0.0,
-            "differingFraction": 1.0,
-            "signedMeanDiff": 129.0,
-            "percentile999AbsDiff": 129,
-        })
+        _set_signed_distribution(full, [(129, 2)])
         statistics["rowsTouched"] = 1
         statistics["columnsTouched"] = 2
         statistics["predicatePasses"] = False
@@ -1306,13 +1282,6 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["predicatePasses"] = False
         statistics["biasPasses"] = False
         statistics["signedMeanDiff"] = 4.0
-    elif variant == "whole-image-informative-disagrees":
-        for region, signed_mean in (("full", 1.0), ("image", 1.0),
-                                    ("informative", -1.0)):
-            _set_one_difference(statistics[region][0], signed_mean)
-        statistics["rowsTouched"] = 1
-        statistics["columnsTouched"] = 1
-        statistics["signedMeanDiff"] = -1.0
     elif variant == "touched-presence":
         for region in regions:
             _set_one_difference(statistics[region][0], 1.0)
@@ -1320,16 +1289,7 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
     elif variant == "touched-count":
         for region in regions:
             channel = statistics[region][0]
-            channel.update({
-                "pixels": 2,
-                "maxAbsDiff": 1,
-                "countAtZero": 0,
-                "countAtOne": 2,
-                "fractionWithinOneLsb": 1.0,
-                "differingFraction": 1.0,
-                "signedMeanDiff": 1.0,
-                "percentile999AbsDiff": 1,
-            })
+            _set_signed_distribution(channel, [(1, 2)])
         statistics["imagePixels"] = 2
         statistics["informativePixels"] = 2
         statistics["rowsTouched"] = 1
@@ -1353,45 +1313,60 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
     box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
 
-def _set_one_difference(channel: dict, signed_mean: float) -> None:
+def _set_signed_distribution(
+        channel: dict, entries: list[tuple[int, int]]) -> None:
+    entries = sorted(entries)
+    pixels = sum(count for _, count in entries)
+    absolute = [0] * 256
+    signed_sum = 0
+    for difference, count in entries:
+        absolute[abs(difference)] += count
+        signed_sum += difference * count
+    cumulative = 0
+    percentile = 255
+    for difference, count in enumerate(absolute):
+        cumulative += count
+        if cumulative / pixels >= 0.999:
+            percentile = difference
+            break
     channel.update({
-        "maxAbsDiff": 1,
-        "countAtZero": 0,
-        "countAtOne": 1,
-        "fractionWithinOneLsb": 1.0,
-        "differingFraction": 1.0,
-        "signedMeanDiff": signed_mean,
-        "percentile999AbsDiff": 1,
+        "pixels": pixels,
+        "signedHistogram": [[difference, count] for difference, count in entries],
+        "maxAbsDiff": next(
+            difference for difference in range(255, -1, -1)
+            if absolute[difference] > 0
+        ),
+        "countAtZero": absolute[0],
+        "countAtOne": absolute[1],
+        "countAtTwo": absolute[2],
+        "countOverTwo": sum(absolute[3:]),
+        "fractionWithinOneLsb": (absolute[0] + absolute[1]) / pixels,
+        "differingFraction": (pixels - absolute[0]) / pixels,
+        "signedMeanDiff": signed_sum / pixels,
+        "percentile999AbsDiff": percentile,
     })
+
+
+def _set_one_difference(channel: dict, signed_mean: float) -> None:
+    _set_signed_distribution(channel, [(int(signed_mean), 1)])
 
 
 def _set_tail_difference(channel: dict, maximum: int) -> None:
-    channel.update({
-        "maxAbsDiff": maximum,
-        "countAtZero": 0,
-        "countOverTwo": 1,
-        "fractionWithinOneLsb": 0.0,
-        "differingFraction": 1.0,
-        "signedMeanDiff": float(maximum),
-        "percentile999AbsDiff": maximum,
-    })
+    _set_signed_distribution(channel, [(maximum, 1)])
 
 
 def _add_zero_background(statistics: dict) -> None:
     full = statistics["full"][0]
-    full["pixels"] = 2
-    full["countAtZero"] = 2
+    _set_signed_distribution(full, [(0, 2)])
     statistics["background"] = [dict(statistics["image"][0])]
 
 
 def _add_opposed_background(statistics: dict) -> None:
-    for region, signed_mean in (("full", 0.0), ("image", 1.0),
-                                ("informative", 1.0)):
-        _set_one_difference(statistics[region][0], signed_mean)
-    statistics["full"][0]["pixels"] = 2
-    statistics["full"][0]["countAtOne"] = 2
+    _set_signed_distribution(statistics["full"][0], [(-1, 1), (1, 1)])
+    for region in ("image", "informative"):
+        _set_one_difference(statistics[region][0], 1.0)
     background = dict(statistics["image"][0])
-    background["signedMeanDiff"] = -1.0
+    _set_one_difference(background, -1.0)
     statistics["background"] = [background]
     statistics["rowsTouched"] = 1
     statistics["columnsTouched"] = 1
@@ -1503,8 +1478,7 @@ def _report_contract_mutation(box: Sandbox, variant: str) -> None:
     box.write(path, raw + ("" if raw.endswith("\n") else "\n"))
 
 
-def _comparison_run_hash(report: dict, side: str) -> str:
-    algorithm = "sha256-rgba8-run-v1"
+def _comparison_run_hash(report: dict, side: str, algorithm: str) -> str:
     records = sorted(
         report["records"],
         key=lambda record: (record["kind"], record["id"],
@@ -1550,7 +1524,9 @@ def _green_unmeasured_state_report(box: Sandbox, index: int) -> None:
     report["coverage"]["unmeasured"] = 1
     report["qualifiers"] = {qualifier: 1 for qualifier in state["qualifiers"]}
     for side in ("reference", "candidate"):
-        report["renderHashes"][side] = _comparison_run_hash(report, side)
+        report["renderHashes"][side] = _comparison_run_hash(
+            report, side, contract["hashAlgorithms"]["run"]
+        )
     box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
 
@@ -1561,26 +1537,36 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("class-two-pass", "pass record 'probe-view' is inconsistent"),
         ("weak-with-decimated-rung", "has the wrong rung"),
         ("mono-with-class-two-rung", "contradicts its class"),
-        ("maximum-contradicts-counts", "maximum contradicts counts"),
-        ("percentile-contradicts-counts", "percentile contradicts counts"),
-        ("signed-mean-exceeds-maximum", "signed mean exceeds its maximum"),
+        ("signed-histogram-not-array", "has no record 'probe-view' statistics.full[0].signedHistogram array"),
+        ("signed-histogram-empty", "signedHistogram is empty"),
+        ("signed-histogram-entry-shape", "invalid record 'probe-view' statistics.full[0].signedHistogram[0]"),
+        ("signed-histogram-difference", "invalid record 'probe-view' statistics.full[0].signedHistogram[0] difference"),
+        ("signed-histogram-count", "invalid record 'probe-view' statistics.full[0].signedHistogram[0] count"),
+        ("signed-histogram-zero-count", "signedHistogram[0] count is zero"),
+        ("signed-histogram-total", "signed histogram does not total pixels"),
+        ("signed-histogram-summary", "channel counts contradict signed histogram"),
+        ("signed-histogram-sum-range", "signed sum exceeds producer range"),
+        ("maximum-contradicts-counts", "maximum contradicts signed histogram"),
+        ("percentile-contradicts-counts", "percentile contradicts signed histogram"),
+        ("signed-mean-exceeds-maximum", "signed mean contradicts signed histogram"),
         ("predicate-contradicts-statistics", "predicate contradicts statistics"),
         ("bias-contradicts-statistics", "bias verdict contradicts statistics"),
         ("count-exceeds-producer-limit", "invalid record 'probe-view' statistics.full[0].pixels"),
-        ("signed-mean-not-pixel-derived", "signed mean is not pixel-derived"),
-        ("signed-mean-contradicts-buckets", "signed mean contradicts buckets"),
+        ("signed-mean-not-pixel-derived", "signed mean contradicts signed histogram"),
+        ("signed-mean-contradicts-buckets", "signed mean contradicts signed histogram"),
+        ("fractional-pixel-derived-mean", "signed mean contradicts signed histogram"),
+        ("percentile-sum-disagree", "signed mean contradicts signed histogram"),
         ("negative-zero", "signedMeanDiff is negative zero"),
-        ("single-tail-percentile", "percentile contradicts counts"),
-        ("single-tail-unattainable-sum", "signed mean contradicts buckets"),
-        ("rank-at-end-percentile", "percentile contradicts counts"),
+        ("single-tail-percentile", "percentile contradicts signed histogram"),
+        ("single-tail-unattainable-sum", "signed mean contradicts signed histogram"),
+        ("rank-at-end-percentile", "percentile contradicts signed histogram"),
         ("mono-pass-no-informative", "pass record 'probe-view' is inconsistent"),
-        ("full-histogram-composition", "full histogram is not image plus background"),
-        ("full-mean-composition", "full mean is not image plus background"),
-        ("full-maximum-composition", "full maximum is not image plus background"),
+        ("full-histogram-composition", "full signed histogram is not image plus background"),
+        ("full-mean-composition", "full signed histogram is not image plus background"),
+        ("full-maximum-composition", "full signed histogram is not image plus background"),
         ("full-without-background", "full region is not the whole image"),
-        ("informative-histogram-exceeds-image", "informative histogram exceeds image"),
-        ("informative-maximum-exceeds-image", "informative maximum exceeds image"),
-        ("whole-image-informative-disagrees", "whole-image informative statistics disagree"),
+        ("informative-histogram-exceeds-image", "informative signed histogram exceeds image"),
+        ("informative-maximum-exceeds-image", "informative signed histogram exceeds image"),
         ("touched-presence", "touched counts contradict differences"),
         ("touched-count", "touched counts contradict differing pixels"),
         ("top-signed-mean-source", "signed mean contradicts its source region"),
@@ -1655,6 +1641,9 @@ def _report_contract_probes() -> tuple[Probe, ...]:
 
 
 def _green_unmeasured_state_probes() -> tuple[Probe, ...]:
+    contract_path = Path(__file__).resolve().parents[2] / "tools/oracle/report-contract.json"
+    contract = json.loads(contract_path.read_text())
+    state_count = len(contract["semantics"]["greenUnmeasuredStates"])
     invoke = script("python3", "scripts/verify_ledger.py", "record",
                     "--comparison-report", ".claude/probe-comparison.json")
     return tuple(
@@ -1665,7 +1654,7 @@ def _green_unmeasured_state_probes() -> tuple[Probe, ...]:
             "recorded tree",
             polarity="accept",
         )
-        for index in range(7)
+        for index in range(state_count)
     )
 
 
