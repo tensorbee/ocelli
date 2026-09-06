@@ -867,7 +867,13 @@ def _comparison_report(box: Sandbox, *, verdict: str = "pass",
         "claimedVerdictViews": claimed,
         "gateVerdict": verdict,
         "green": green,
-        "coverage": {"absent": 0},
+        "coverage": {
+            "unmeasured": 0,
+            "absent": 0,
+            "unsupportedSourceRows": 0,
+            "declaredVolumeRefusals": 0,
+        },
+        "unmeasured": 0,
         "absent": 0,
         "problems": [],
         "coverageProblems": [],
@@ -935,6 +941,77 @@ def _top_level_absent_in_green_comparison_report(box: Sandbox) -> None:
     report = json.loads(box.read(".claude/probe-comparison.json"))
     report["absent"] = 1
     box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _invalid_coverage_count(box: Sandbox, field: str, variant: str) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    coverage = report["coverage"]
+    if variant == "missing":
+        del coverage[field]
+    else:
+        values = {
+            "null": None,
+            "bool": False,
+            "negative": -1,
+            "string": "0",
+        }
+        coverage[field] = values[variant]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _contradictory_unmeasured_counts(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["unmeasured"] = 1
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _invalid_top_level_unmeasured(box: Sandbox, variant: str) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    if variant == "missing":
+        del report["unmeasured"]
+    else:
+        values = {
+            "null": None,
+            "bool": False,
+            "negative": -1,
+            "string": "0",
+        }
+        report["unmeasured"] = values[variant]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _coverage_count_probes() -> tuple[Probe, ...]:
+    probes = []
+    for field in ("unmeasured", "unsupportedSourceRows",
+                  "declaredVolumeRefusals"):
+        for variant in ("missing", "null", "bool", "negative", "string"):
+            probes.append(Probe(
+                f"ledger.comparison-coverage-{field}-{variant}",
+                lambda box, field=field, variant=variant:
+                    _invalid_coverage_count(box, field, variant),
+                script("python3", "scripts/verify_ledger.py", "record",
+                       "--comparison-report",
+                       ".claude/probe-comparison.json"),
+                f"comparison report has invalid coverage count for {field}",
+            ))
+    return tuple(probes)
+
+
+def _top_level_unmeasured_probes() -> tuple[Probe, ...]:
+    probes = []
+    for variant in ("missing", "null", "bool", "negative", "string"):
+        probes.append(Probe(
+            f"ledger.comparison-unmeasured-{variant}",
+            lambda box, variant=variant:
+                _invalid_top_level_unmeasured(box, variant),
+            script("python3", "scripts/verify_ledger.py", "record",
+                   "--comparison-report", ".claude/probe-comparison.json"),
+            "comparison report has invalid top-level unmeasured count",
+        ))
+    return tuple(probes)
 
 
 def _ledger_without_comparison(box: Sandbox) -> None:
@@ -6613,8 +6690,9 @@ GUARDS: tuple[Guard, ...] = (
                 "set, malformed or red comparison evidence, a green report "
                 "with failed views, input problems, coverage problems, "
                 "absorbed divergences or absent views, a report missing one "
-                "of those emitted fields, zero judged views, and a required "
-                "comparison record that is absent.",
+                "of those emitted fields, an invalid coverage count, "
+                "contradictory unmeasured counts, zero judged views, and a "
+                "required comparison record that is absent.",
         claims=(r"no verification recorded", r"the corpus is RED",
                 r"corpus is ' ' for tree", r"--corpus must be one of",
                 r"comparison report",
@@ -6697,6 +6775,14 @@ GUARDS: tuple[Guard, ...] = (
                          "--comparison-report",
                          ".claude/probe-comparison.json"),
                   "comparison report has absent views"),
+            *_coverage_count_probes(),
+            *_top_level_unmeasured_probes(),
+            Probe("ledger.comparison-unmeasured-contradiction",
+                  _contradictory_unmeasured_counts,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report unmeasured count disagrees with coverage"),
             Probe("ledger.require-comparison", _ledger_without_comparison,
                   script("python3", "scripts/verify_ledger.py", "assert",
                          "--require-comparison"),

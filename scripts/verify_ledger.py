@@ -140,6 +140,22 @@ def comparison_evidence(path: str) -> dict:
     if isinstance(absent, bool) or not isinstance(absent, int) or absent != 0:
         sys.exit("comparison report has absent views")
 
+    coverage_counts = {}
+    for field in ("unmeasured", "unsupportedSourceRows",
+                  "declaredVolumeRefusals"):
+        value = coverage.get(field)
+        if (isinstance(value, bool) or not isinstance(value, int)
+                or value < 0):
+            sys.exit(f"comparison report has invalid coverage count for {field}")
+        coverage_counts[field] = value
+
+    unmeasured = report.get("unmeasured")
+    if (isinstance(unmeasured, bool) or not isinstance(unmeasured, int)
+            or unmeasured < 0):
+        sys.exit("comparison report has invalid top-level unmeasured count")
+    if unmeasured != coverage_counts["unmeasured"]:
+        sys.exit("comparison report unmeasured count disagrees with coverage")
+
     return {
         "reportSha256": hashlib.sha256(encoded).hexdigest(),
         "claimedVerdictViews": claimed,
