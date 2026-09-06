@@ -2,10 +2,11 @@
 """Generate docs/sprints/SPRINT_PLAN.md from docs/sprints/allocation.json.
 
 Written once at bootstrap. After that SPRINT_PLAN.md is hand-curated prose and
-this script runs only in `--check` mode, where it asserts the planning data
+this script normally runs in `--check` mode, where it asserts the planning data
 and nothing else: every planned F-ID appears in exactly one sprint table, and
 the sprint and the estimate it appears with match the allocation the backlog is
-rendered from. Prose drift is a human's business.
+rendered from. A deliberate full regeneration requires `--force`. Prose drift
+is a human's business.
 
 The estimate comparison was added by the S03 review's third pass. That pass
 widened F-X014 from one week to two, updated `BACKLOG.md` and
@@ -16,7 +17,8 @@ caught anything. It exists because nothing could have, and the drift it would
 have caught was real for the length of one edit.
 
 Usage:
-  python3 scripts/gen_sprint_plan.py            # write SPRINT_PLAN.md
+  python3 scripts/gen_sprint_plan.py            # bootstrap an absent plan
+  python3 scripts/gen_sprint_plan.py --force    # replace it deliberately
   python3 scripts/gen_sprint_plan.py --check    # assert plan matches backlog
 """
 
@@ -96,8 +98,8 @@ GOALS_HEADING = """
 """
 
 
-def load() -> dict:
-    return json.loads(ALLOCATION.read_text())
+def load(path: Path = ALLOCATION) -> dict:
+    return json.loads(path.read_text())
 
 
 def sprint_groups(data: dict) -> "OrderedDict[str, list[dict]]":
@@ -262,13 +264,13 @@ def parse_goals(text: str) -> dict[str, list[str]]:
     return found
 
 
-def check(data: dict) -> int:
-    if not PLAN.exists():
-        print(f"FAIL: {PLAN.relative_to(ROOT)} does not exist")
+def check(data: dict, plan_path: Path = PLAN) -> int:
+    if not plan_path.exists():
+        print(f"FAIL: {display_path(plan_path)} does not exist")
         return 1
     expected = {s["fid"]: (s["sprint"], f"{s['weeks']}w")
                 for s in data["stories"] if s["sprint"]}
-    actual = parse_plan(PLAN.read_text())
+    actual = parse_plan(plan_path.read_text())
 
     problems = []
 
@@ -309,7 +311,7 @@ def check(data: dict) -> int:
     # engineer-weeks against an allocation saying 62 and how S04's goal line
     # kept a story title the table row had already replaced. A generated line
     # nothing compares is a hand-maintained line that looks generated.
-    plan_text = PLAN.read_text()
+    plan_text = plan_path.read_text()
     expected_lines = rendered_milestones(data)
     actual_lines = [(a, b, int(n), int(w))
                     for a, b, n, w in MILESTONE_LINE.findall(plan_text)]
@@ -388,16 +390,34 @@ def check(data: dict) -> int:
     return 0
 
 
-def main() -> int:
+def display_path(path: Path) -> str:
+    """A repository-relative path when possible, otherwise the full path."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def main(argv: list[str] | None = None, *,
+         allocation_path: Path = ALLOCATION, plan_path: Path = PLAN) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
-    data = load()
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--force", action="store_true")
+    args = parser.parse_args(argv)
+    data = load(allocation_path)
     if args.check:
-        return check(data)
-    PLAN.write_text(render(data))
+        return check(data, plan_path)
+    if plan_path.exists() and not args.force:
+        print(f"FAIL: bare write mode refuses to overwrite "
+              f"{display_path(plan_path)}.")
+        print("This file is hand-curated after bootstrap. Use --check to")
+        print("verify its structured planning data, or --force to replace")
+        print("the whole file deliberately.")
+        return 1
+    plan_path.write_text(render(data))
     groups = sprint_groups(data)
-    print(f"wrote {PLAN.relative_to(ROOT)} ({len(groups)} sprints)")
+    print(f"wrote {display_path(plan_path)} ({len(groups)} sprints)")
     return 0
 
 

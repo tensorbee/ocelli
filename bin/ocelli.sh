@@ -208,6 +208,11 @@ run_gate() {
                  python3 scripts/guard_probe.py --profile floor &&
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_guard_catalogue.py &&
+                 # F-X020. The sprint-plan writer protects hand-curated prose,
+                 # and these tests cover its bootstrap, refusal, forced
+                 # replacement and read-only check modes.
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_gen_sprint_plan.py &&
                  # The two readers that stopped being regexes in the S03
                  # review's eleventh pass, checked against bash and against
                  # TOML rather than against themselves. Named rather than
