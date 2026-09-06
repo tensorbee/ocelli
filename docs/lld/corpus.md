@@ -171,7 +171,12 @@ uniform, which is ordinary for real data and is measured rather than judged.
   `openjp2` 0.6.1 is a C2Rust port of the OpenJPEG that encoded them, so its
   native decode is the same library on both sides, and `j2k_lossy` was compared
   against no other party at all. `docs/spikes/A1-htj2k-openjp2.md` carries
-  those digests.
+  those digests. F-X013 adds a different answer for the three `htj2k_*` rows:
+  `openjph-core` 0.1.0 reproduces the synthetic ramp exactly for `.201` and
+  `.202` on native and wasm. That ramp is the independent anchor. For `.203`,
+  the crate and `ojph_expand` share OpenJPH lineage, so their 41 one-level
+  differences are a measured divergence and not independent confirmation.
+  `docs/spikes/A1-htj2k-route.md` carries the exact digests and limitation.
 - **No encapsulation edge cases.** Every compressed case is one frame in one
   fragment with a populated Basic Offset Table, so multi-fragment frames, a
   multi-frame encapsulated instance and an empty Basic Offset Table are

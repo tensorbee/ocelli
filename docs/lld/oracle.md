@@ -559,7 +559,12 @@ there is something to compare.
 **F-X006 answered them, and the answers are in `docs/spikes/`.**
 `A1-htj2k-openjp2.md` records `Fail`, because `openjp2` 0.6.1 does not link for
 `wasm32-unknown-unknown` and traps on every codestream once forced to, HTJ2K and
-JPEG 2000 Part 1 alike, so HTJ2K has no decoder and F-X013 prices the route.
+JPEG 2000 Part 1 alike. `A1-htj2k-route.md` records F-X013's replacement
+measurement and recommends `openjph-core` 0.1.0 for E2.6's production design.
+The two lossless syntaxes are exact on native and wasm. The irreversible row
+is identical across those targets and differs from OpenJPH 0.31.0 by one at 41
+of 6,144 samples. HTJ2K still has no registered Ocelli decoder, because F-X013
+is evidence and not production activation.
 `A2-jpeg-ls.md` records `Pure Rust`, `pure_jpegls` 2.0.0 on every target. Read
 those beside this paragraph rather than in place of it: **neither answer moves a
 reference frame here.** The oracle decodes those five rows with the four

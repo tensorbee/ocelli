@@ -19,6 +19,13 @@ a supplied C allocator it traps on the first decode, on HTJ2K and on JPEG 2000
 Part 1 alike. Natively it is exact. The Appendix A consequence column applies
 verbatim and `/spike` step 5 stops here for the operator.
 
+**F-X013 has now priced the replacement route.**
+`docs/spikes/A1-htj2k-route.md` recommends `openjph-core` 0.1.0 for the E2.6
+production design. It decodes `.201`, `.202` and `.203` on native and wasm,
+with identical results across targets. The recommendation is conditional on
+provenance, allocation and unsafe-audit work recorded there. This A1 result
+remains `Fail` because the HLD's named `openjp2` route still fails.
+
 ---
 
 ## What a pass and a fail look like
