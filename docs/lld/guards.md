@@ -1,6 +1,6 @@
 # The guard harness
 
-**F-IDs that contributed:** F-X008, F-X009, F-X010, F-X020
+**F-IDs that contributed:** F-X008, F-X009, F-X010, F-X014, F-X020
 **Last updated:** 2026-09-06
 
 A guard is any refusal this repository can produce: a script that exits 1, a
@@ -417,6 +417,29 @@ probe inserts a hand-curated paragraph, runs the bare command and requires the
 overwrite refusal. The control runs `--force` and requires success, so a writer
 that refuses every mode cannot satisfy the probe.
 
+### Explicit sets and handoff grammar
+
+`scripts/no_std_check.py` owns an explicit `EXPECTED_NO_STD_CRATES` set. It
+compares source declarations in both directions before resolving any dependency
+graph, so a crate leaving the set and a deliberately `std` crate entering it
+are separate refusals that name the crate. The expected set is also a declared
+constant, which makes a deliberate posture change visible in the recorded
+budget rather than letting the check redefine its own population.
+
+`scripts/sprint_workflow.py` owns one `HANDOFF_FIELDS` tuple containing the six
+fields documented by `.claude/commands/complete-feature.md`. Each field appears
+exactly once. Its value is either non-empty backtick-free plain text or exactly
+one complete non-empty Markdown code span. Embedded, unmatched or multiple
+spans and content forged outside a closing span are refused. The branch value
+is unwrapped before the exact `work/<fid>-` prefix check, so repository house
+style does not change the value being validated. The tuple is a declared
+constant. Probes watch both valid branch forms, the wrong branch, every
+malformed span shape, duplicate fields and the required `Files touched` field.
+The `guards` arm also runs `scripts/tests/test_sprint_workflow.py` as a named,
+chained suite because the catalogue samples do not repeat every parser
+condition. The already-running catalogue suite asserts the arm's exact ordered
+Python suite list, so removing that registration is an independent failure.
+
 **A regex reads a Python literal out of a Python file, and one entry is not
 that.** `Cargo.toml:workspace.lints` records HLD 27.1's lint table, which is
 TOML, and a regex over it is a second reader of a foreign grammar. The
@@ -448,7 +471,8 @@ level-1 probe of its own.
 **e. The uncovered ratchet.** The count of refusals belonging to a `guard`
 entry with neither a probe nor a `covered_by` may only decrease. A new
 uncovered refusal fails the floor, and once the sweep is recorded complete any
-non-zero count fails `--profile deep`.
+non-zero count fails `--profile deep`. The sweep is recorded complete. Run
+`python3 scripts/guard_census.py` for the current measured buckets.
 
 **f. `covered_by` names a FILE that reaches the file.** Each named path must
 resolve to a file, and at least one must reach the guarded file: by naming it,
@@ -1069,7 +1093,9 @@ tight is a timing gate that gets disabled.
 - **Whether a `covered_by` test drives its refusal red.** Check f proves the
   test and the file are connected. Nothing more is claimed.
 - **The declared limits and the open defects**, which
-  `python3 scripts/guard_census.py` names in full with an owner.
+  `python3 scripts/guard_census.py` names in full. A limit names the external
+  browser, install, private input or dependency graph that prevents a sandbox
+  probe. It is not relabelled as coverage.
 - **That the hooks are enabled at all.** Every hook under `.githooks/` is inert
   until a clone runs `git config core.hooksPath .githooks`, which is per clone
   and untracked. `README.md`, `CONTRIBUTING.md` and `docs/DEVELOPER_SETUP.md`

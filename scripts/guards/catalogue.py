@@ -446,6 +446,23 @@ def _drop_no_std_everywhere(box: Sandbox) -> None:
         raise AssertionError("no crate declared no_std to remove")
 
 
+def _add_no_std_to_one_other_crate(box: Sandbox) -> None:
+    attribute = "#![cfg_attr(not(test), no_std)]"
+    lib = box.path / "crates" / "ocelli-compute" / "src" / "lib.rs"
+    box.write(
+        "crates/ocelli-compute/src/lib.rs",
+        f"{attribute}\n{lib.read_text(encoding='utf-8')}",
+    )
+
+
+def _shrink_expected_no_std_set(box: Sandbox) -> None:
+    box.substitute(
+        "scripts/no_std_check.py",
+        '    "ocelli-cache",\n',
+        "",
+    )
+
+
 def _glam_reaches_std(box: Sandbox) -> None:
     box.substitute(
         "Cargo.toml",
@@ -869,6 +886,7 @@ def _handoff(box: Sandbox, branch: str) -> None:
               f"**Branch**: {branch.replace('FID', fid.lower())}\n"
               f"**Base**: sprint/s03\n"
               f"**Head**: 0123456789ab\n"
+              f"**Files touched**: scripts/probe.py\n"
               f"**Review**: pass 1, zero defects\n"
               f"**Verify tree**: 0123456789ab\n")
     box.write(".claude/probe-fid", fid)
@@ -880,6 +898,54 @@ def _handoff_wrong_branch(box: Sandbox) -> None:
 
 def _handoff_backticked_branch(box: Sandbox) -> None:
     _handoff(box, "`work/FID-agent`")
+
+
+def _handoff_without_files_touched(box: Sandbox) -> None:
+    _handoff(box, "work/FID-agent")
+    fid = (box.path / ".claude" / "probe-fid").read_text().strip()
+    box.substitute(
+        f".claude/handoffs/{fid}-ready.md",
+        "**Files touched**: scripts/probe.py\n",
+        "",
+    )
+
+
+def _handoff_field_value(box: Sandbox, field: str, old: str, new: str) -> None:
+    _handoff(box, "work/FID-agent")
+    fid = (box.path / ".claude" / "probe-fid").read_text().strip()
+    box.substitute(
+        f".claude/handoffs/{fid}-ready.md",
+        f"**{field}**: {old}\n",
+        f"**{field}**: {new.replace('FID', fid.lower())}\n",
+    )
+
+
+def _handoff_multiple_code_spans(box: Sandbox) -> None:
+    _handoff(box, "`work/FID-agent` `forged`")
+
+
+def _handoff_unmatched_code_span(box: Sandbox) -> None:
+    _handoff_field_value(box, "Files touched", "scripts/probe.py",
+                         "`scripts/probe.py")
+
+
+def _handoff_embedded_code_span(box: Sandbox) -> None:
+    _handoff_field_value(box, "Head", "0123456789ab", "0123`forged`456")
+
+
+def _handoff_empty_code_span(box: Sandbox) -> None:
+    _handoff_field_value(box, "Review", "pass 1, zero defects", "``")
+
+
+def _handoff_forged_suffix(box: Sandbox) -> None:
+    _handoff_field_value(box, "Base", "sprint/s03", "`sprint/s03`forged")
+
+
+def _handoff_duplicate_head(box: Sandbox) -> None:
+    _handoff(box, "work/FID-agent")
+    fid = (box.path / ".claude" / "probe-fid").read_text().strip()
+    path = f".claude/handoffs/{fid}-ready.md"
+    box.write(path, box.read(path) + "**Head**: forged\n")
 
 
 def _validate_handoff(sandbox: Sandbox) -> "subprocess.CompletedProcess[str]":
@@ -4719,12 +4785,18 @@ GUARDS: tuple[Guard, ...] = (
                   script("python3", "scripts/no_std_check.py"),
                   "stopped declaring no_std",
                   needs="cargo", profile="deep",
-                  defect="G-02",
                   note="D-09 is a claim about a SET of crates. A crate that "
-                       "deletes the attribute leaves the set, and the guard "
-                       "reports a smaller number rather than a problem. The "
-                       "declared-constant ratchet in scripts/guard_census.py "
-                       "is what catches this today."),
+                       "deletes the attribute must be named by the direct "
+                       "comparison with EXPECTED_NO_STD_CRATES before any "
+                       "dependency graph is resolved."),
+            Probe("nostd.gains-a-crate", _add_no_std_to_one_other_crate,
+                  script("python3", "scripts/no_std_check.py"),
+                  "unexpectedly declares no_std",
+                  needs="cargo", profile="deep",
+                  note="The reverse set comparison. Entry-point and wgpu "
+                       "crates are deliberately outside the no_std set. A "
+                       "new attribute on one must be a reviewed posture "
+                       "change rather than silently joining by construction."),
         ),
     ),
 
@@ -6512,9 +6584,12 @@ GUARDS: tuple[Guard, ...] = (
         file="scripts/sprint_workflow.py",
         gate="-",
         spec="`.claude/WORKFLOW.md` and `.claude/commands/complete-feature.md`",
-        refuses="A handoff missing a required field, or naming a branch that "
-                "is not this story's.",
+        refuses="A handoff missing or duplicating a required field, carrying "
+                "a malformed field value, or naming a branch that is not "
+                "this story's.",
         claims=(r"handoff has no", r"branch does not start with",
+                r"value must be", r"handoff has duplicate",
+                r"handoff field is malformed",
                 r"FAIL: handoff for", r"does not exist"),
         probes=(
             Probe("handoff.wrong-branch", _handoff_wrong_branch,
@@ -6526,26 +6601,57 @@ GUARDS: tuple[Guard, ...] = (
                          _validate_handoff),
                   "validates",
                   polarity="accept",
-                  defect="G-04",
                   note="This repository writes every path in backticks and "
-                       "the branch is parsed as a bare token, so a correct "
-                       "handoff written in the house style is refused. The "
-                       "contract is documented nowhere. It cost one handoff "
-                       "rewritten at integration this sprint."),
+                       "the validator accepts that house style by unwrapping "
+                       "one matching code-span pair before applying the exact "
+                       "story branch prefix."),
+            Probe("handoff.missing-files-touched",
+                  _handoff_without_files_touched,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "handoff has no **Files touched** field",
+                  note="The completion command requires the file list as one "
+                       "of six handoff fields. The validator must enforce the "
+                       "same contract rather than a five-field subset."),
+            Probe("handoff.multiple-code-spans", _handoff_multiple_code_spans,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "**Branch** value must be non-empty plain text or exactly "
+                  "one Markdown code span"),
+            Probe("handoff.unmatched-code-span", _handoff_unmatched_code_span,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "**Files touched** value must be non-empty plain text or "
+                  "exactly one Markdown code span"),
+            Probe("handoff.embedded-code-span", _handoff_embedded_code_span,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "**Head** value must be non-empty plain text or exactly one "
+                  "Markdown code span"),
+            Probe("handoff.empty-code-span", _handoff_empty_code_span,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "**Review** value must be non-empty plain text or exactly "
+                  "one Markdown code span"),
+            Probe("handoff.forged-suffix", _handoff_forged_suffix,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "**Base** value must be non-empty plain text or exactly one "
+                  "Markdown code span"),
+            Probe("handoff.duplicate-head", _handoff_duplicate_head,
+                  Invoke("sprint_workflow validate-handoff",
+                         _validate_handoff),
+                  "handoff has duplicate **Head** fields"),
         ),
         limit="The other twenty-two refusals in this file belong to the "
-              "sprint lifecycle commands, and the entry below owns them. The "
-              "field list is a second limit and a sharper one. Both probes "
-              "here are about the BRANCH rule, and reaching it means writing "
-              "a handoff that passes the field check first, so their input "
-              "carries the five `**Field**` markers from the tool's own "
-              "tuple. `.claude/commands/complete-feature.md` names six items "
-              "including the files touched, which the tool does not require, "
-              "so the citation and the code do not agree and no probe can see "
-              "that. `HANDOFF_FIELDS` is in the declared-constant ratchet "
-              "instead, which is what puts a change to the contract in front "
-              "of a reviewer. G-04 is the same undocumented contract seen "
-              "from the branch side.",
+              "sprint lifecycle commands, and the entry below owns them. "
+              "These probes cover the branch grammar, malformed code spans, "
+              "duplicate fields and one absent required field. They do not "
+              "repeat the same shapes independently for all six fields. The "
+              "six-field tuple is "
+              "documented in `.claude/commands/complete-feature.md` and is "
+              "also in the declared-constant ratchet, so adding, removing or "
+              "renaming a field becomes a reviewed change.",
     ),
     Guard(
         id="sprint-lifecycle",
@@ -6720,9 +6826,10 @@ GUARDS: tuple[Guard, ...] = (
                        "graph and exits 0 is the shape runbook probe 18 "
                        "describes: nothing to check, said by succeeding."),
         ),
-        limit="The per-target divergence branch itself needs a dependency "
-              "whose features differ by target, which cannot be built from "
-              "the locked graph without a network fetch. Owner F-X014.",
+        limit="The per-target divergence branch needs a dependency whose "
+              "features differ by target. The locked graph contains no such "
+              "fixture, and the disposable sandbox has no network authority "
+              "to fetch a new dependency graph, so that branch has no probe.",
     ),
     Guard(
         id="packages",
@@ -6790,11 +6897,11 @@ GUARDS: tuple[Guard, ...] = (
                     "print('\\n'.join(bad));\n"
                     "sys.exit(1 if bad else 0)\n")),
         ),
-        limit="The consumer install, the node import, the two tsc "
-              "resolutions and the publish dry run are level 3 and need an "
-              "npm install the sandbox does not carry. They run for real in "
-              "the `packages` gate on every push, green, and this harness has "
-              "not watched them red. Owner F-X014.",
+        limit="The consumer install, node import, two tsc resolutions and "
+              "publish dry run need an npm install. `node_modules` is ignored "
+              "and therefore absent from the `git ls-files` sandbox, so these "
+              "level-3 refusals have no catalogue probe. The `packages` gate "
+              "runs them against the real install on every push.",
     ),
 
     # -- the runner and the source resolver --------------------------------
@@ -6869,11 +6976,11 @@ GUARDS: tuple[Guard, ...] = (
                        "the probe proves the converter tells the two apart "
                        "rather than refusing everything."),
         ),
-        limit="The redaction map's fail-closed branch, which is runbook probe "
-              "18 itself, sits behind a pandoc conversion of the private "
-              "`.docx`. Neither is in this repository, so a sandbox cannot "
-              "reach it, and the same is true of the drift and "
-              "section-mapping branches. Owner F-X014.",
+        limit="The redaction-map fail-closed branch sits behind pandoc "
+              "conversion of the private source `.docx`. The document and "
+              "conversion input are absent from the tracked repository, so a "
+              "`git ls-files` sandbox cannot reach that branch or the related "
+              "drift and section-mapping refusals.",
     ),
 
     # -- the new guard this story ships ------------------------------------
@@ -7360,7 +7467,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-crate-root-outside-the-member",
                   _clean_crate_root_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "26 cargo target root(s) seeded",
+                  "cargo target root(s) seeded",
                   polarity="accept",
                   note="The other direction. A `[lib] path` outside the "
                        "member is legal cargo and says nothing about lint "
@@ -7369,20 +7476,14 @@ GUARDS: tuple[Guard, ...] = (
                        "own src/lib.rs is left in place and unread by cargo, "
                        "which is the state that would make a guard refusing "
                        "the shape rather than the attribute look correct. "
-                       "**The expect carries the COUNT since the S03 review's "
-                       "eleventh pass**, and until then it was the words "
-                       "`cargo's own target roots seeded`, an unconditional "
-                       "f-string literal the guard printed whether it seeded "
-                       "anything or not: MEASURED, with `for root in roots or "
-                       "[]` changed to `for root in []` this probe stayed "
-                       "GREEN. That is the class pass 10 fixed in the two "
-                       "clauses beside it, `#[path]` and `include!`, and left "
-                       "standing in the third. The number is this "
-                       "repository's target count from `cargo metadata`, so a "
-                       "target added to any member moves it and this probe "
-                       "says so, which is the same bargain `entry_sites` "
-                       "makes and the reason the count is here rather than a "
-                       "sentence that cannot go wrong.",
+                       "The accept status is the assertion: this legal layout "
+                       "must not be refused. The paired "
+                       "`crate-root-outside-the-member` probe puts a group "
+                       "allow in the same moved root and proves it is scanned. "
+                       "The output fragment confirms the production path, but "
+                       "does not couple this property to the workspace-wide "
+                       "target count, which changes when unrelated targets "
+                       "land.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.unreadable-crate-root",
                   _crate_root_the_guard_cannot_open,
@@ -7932,12 +8033,13 @@ GUARDS: tuple[Guard, ...] = (
                   note="The class of weakening no probe can reach. After the "
                        "allow-list is widened the guard is CORRECT about its "
                        "new, weaker rule, so only a recorded value notices."),
-            Probe("census.no-std-set-shrunk", _drop_no_std_from_one_crate,
+            Probe("census.no-std-set-shrunk", _shrink_expected_no_std_set,
                   script("python3", "scripts/guard_census.py"),
                   "changed without its recorded value",
-                  note="The fix shape for defect G-02. `no_std_check.py` "
-                       "loses the crate silently and the recorded set does "
-                       "not."),
+                  note="The explicit expected no_std set is a reviewed "
+                       "posture value. Narrowing that value must move its "
+                       "recorded digest even though the direct guard agrees "
+                       "with the new set."),
             Probe("census.uncovered-grew",
                   lambda box: _budget_edit(box, "uncovered",
                                            {"sites": -1,
@@ -8328,20 +8430,10 @@ GUARDS: tuple[Guard, ...] = (
         file="tools/bench/run.mjs",
         gate="bench",
         spec="HLD section 26, and `docs/lld/benchmarks.md`",
-        refuses="An argument the harness does not accept, a subject that does "
-                "not exist, a comparison on a machine that does not own the "
-                "baseline, and a browser that is not installed.",
+        refuses="An argument the harness does not accept, and a runner for a "
+                "subject whose story is not done.",
         claims=("*",),
-        owner="F-X014",
-        reason="Nothing watches these nine refusals. This entry claimed "
-               "`scripts/tests/test_bench_check.py (the 7 argument refusals "
-               "and the 4 run-time refusals)` until the S03 review's second "
-               "pass measured it: that suite never opens `run.mjs`, "
-               "`bench_check.py` carries no mirror of its argument "
-               "validation, and the four node suites the `bench` gate runs do "
-               "not reference it either. Seven plus four is also eleven and "
-               "there are nine. A claim of coverage that is false is worse "
-               "than the gap it hides, so the gap is recorded instead.",
+        covered_by=("tools/bench/tests/run_test.mjs (run by the `bench` gate)",),
     ),
     Guard(
         id="bench.cold-start",
@@ -8352,14 +8444,11 @@ GUARDS: tuple[Guard, ...] = (
                 "artefact copy, and a page that never reported.",
         claims=("*",),
         covered_by=("tools/bench/tests/cold_start_test.mjs",),
-        limit="Six of that suite's seven tests are in the `bench` gate since "
-              "the S03 review's fourth pass, which moved playwright to an "
-              "`await import` inside `run()`. The seventh launches a browser "
-              "and is opted into with OCELLI_BENCH_BROWSER=1, so the "
-              "refusals THIS entry names, a measurement against a stub, an "
-              "incomplete artefact copy and a page that never reported, are "
-              "still watched only when a developer runs the harness. Owner "
-              "F-X014.",
+        limit="The test that reaches a measurement against a stub, an "
+              "incomplete artefact copy and a page that never reports launches "
+              "Chromium. It is opted into with OCELLI_BENCH_BROWSER=1 and "
+              "cannot run in the floor or a disposable sandbox that has no "
+              "browser install. The developer browser suite watches it.",
     ),
     Guard(
         id="bench.page",
@@ -8370,16 +8459,11 @@ GUARDS: tuple[Guard, ...] = (
                 "a mark count that does not match the phase list.",
         claims=("*",),
         covered_by=("tools/bench/tests/cold_start_test.mjs",),
-        limit="TWO refusals, and only the first carries the browser "
-              "dependency bench.cold-start describes. The artefact refusal is "
-              "watched only when a developer runs the harness. The mark-count "
-              "refusal is watched in the floor, by `a mark count that does "
-              "not match the phase list is refused`, which the S03 review's "
-              "seventh pass added beside `phaseTable`: the page's phase "
-              "arithmetic was reachable only through the browser test and "
-              "`PHASES.length === marks.length - 1` was asserted nowhere, so "
-              "a mark added with no phase beside it left the total right and "
-              "misaligned every label. Owner F-X014.",
+        limit="The incomplete-artefact refusal executes in the benchmark page "
+              "and requires the Chromium path, which the floor and disposable "
+              "sandbox do not carry. The mark-count refusal does not share "
+              "that limit and is watched in the floor by the phase-table unit "
+              "test.",
     ),
     Guard(
         id="panic-probe",
@@ -8391,10 +8475,10 @@ GUARDS: tuple[Guard, ...] = (
         covered_by=("bin/ocelli.sh gate panic, which builds a second module "
                     "carrying the panic-probe feature and runs this file on "
                     "every floor gate",),
-        limit="The stub refusal itself has not been watched red. It fires "
-              "only when the module fails to export what the probe imports, "
-              "which needs a broken wasm-pack build to construct. Owner "
-              "F-X014.",
+        limit="The stub refusal fires only when the wasm module fails to "
+              "export what the probe imports. Constructing that state needs a "
+              "broken wasm-pack build and its generated artefact, neither of "
+              "which exists in the tracked disposable sandbox.",
     ),
 
     # -- declared out of scope, with the reason -----------------------------
@@ -8644,16 +8728,14 @@ CONSTANTS: tuple[Constant, ...] = (
              why="The accessor shapes that defeat section 31 without any "
                  "crate calling a creator. Four names, and a probe can only "
                  "ever write one of them."),
-    # `validate-handoff`'s required fields, which are a contract nothing else
-    # documents. `.claude/commands/complete-feature.md` names six items and
-    # this tuple requires five, so the handoff probes have to write the tuple
-    # to reach the branch check they are actually about. Recording it is what
-    # makes a change to the contract land in a diff.
+    # `validate-handoff`'s required fields. The completion command documents
+    # the same six-field template, and recording the tuple makes a change to
+    # that contract land in a diff even if a branch probe still passes.
     Constant("handoff", "scripts/sprint_workflow.py", "HANDOFF_FIELDS",
-             r'for field in (\("Branch".*?\)):',
-             why="G-04's undocumented contract. A field added or removed here "
-                 "changes what every worker must write and is documented "
-                 "nowhere else."),
+             r'^HANDOFF_FIELDS = (\(.*?^\))',
+             why="The documented six-field integration handoff contract. A "
+                 "field added, removed or renamed here changes what every "
+                 "parallel worker must write."),
     # THE WHOLE TABLE, PARSED, and this entry stopped being a regex in the
     # S03 review's ELEVENTH pass. What it recorded before was a text slice of
     # `Cargo.toml` captured by a regex that ran from the
@@ -8755,25 +8837,12 @@ CONSTANTS: tuple[Constant, ...] = (
              r'files: (\["packages/core/src/bulk\.ts".*?\])',
              why="HLD 17.2 says two functions. F-005 widened this from one "
                  "file to two, and a third is not granted."),
-    # The fix shape for defect G-02: `no_std_check.py` builds its crate set
-    # from the crates that match the attribute, so a crate deleting it is not
-    # reported, it stops being checked. The set is recorded here instead.
-    Constant("nostd", "crates/*/src/lib.rs", "NO_STD_CRATES",
-             r"#!\[cfg_attr\(not\(test\), no_std\)\]",
-             why="Deviation D-09 is a claim about a SET of crates, and the "
-                 "guard cannot notice the set shrinking. This can."),
+    Constant("nostd", "scripts/no_std_check.py", "EXPECTED_NO_STD_CRATES",
+             r"^EXPECTED_NO_STD_CRATES = (frozenset\(\{.*?^\}\))",
+             why="Deviation D-09's explicit crate set. Direct comparison "
+                 "catches a source attribute entering or leaving it, and this "
+                 "digest makes a deliberate posture change visible."),
 )
 
 
-DEFECTS = {
-    "G-02": "scripts/no_std_check.py loses a crate rather than failing. Its "
-            "crate set is built from the crates that match the attribute, so "
-            "a crate deleting it is not reported, it stops being checked. The "
-            "only backstop fires when NO crate declares it. The recorded "
-            "NO_STD_CRATES constant is what catches it today.",
-    "G-04": "scripts/sprint_workflow.py validate-handoff has an undocumented "
-            "contract. It needs a literal `**Head**` and parses the branch as "
-            "a bare token, so backticks break it, and this repository writes "
-            "every path in backticks. It cost one handoff rewritten at "
-            "integration in S03.",
-}
+DEFECTS = {}

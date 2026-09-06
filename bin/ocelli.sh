@@ -152,6 +152,7 @@ run_gate() {
                    tools/bench/tests/paths_test.mjs \
                    tools/bench/tests/record_test.mjs \
                    tools/bench/tests/registry_test.mjs \
+                   tools/bench/tests/run_test.mjs \
                    tools/bench/tests/state_test.mjs \
                    tools/bench/tests/cold_start_test.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py ;;
@@ -211,6 +212,12 @@ run_gate() {
                  python3 scripts/guard_probe.py --profile floor &&
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_guard_catalogue.py &&
+                 # F-X014. The integration-handoff grammar is part of the
+                 # guard contract, including forms the catalogue samples do
+                 # not repeat. Keep this suite named so it cannot silently
+                 # leave the required gate.
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_sprint_workflow.py &&
                  # F-X020. The sprint-plan writer protects hand-curated prose,
                  # and these tests cover its bootstrap, refusal, forced
                  # replacement and read-only check modes.

@@ -70,6 +70,19 @@ Write `.claude/handoffs/F-XXX-ready.md` with the branch, base commit, head
 commit, the files touched, the review pass that came back clean, and the verify
 tree. Commit only feature-local changes.
 
+Use these six required fields exactly once. A value is either non-empty plain
+text containing no backtick, or exactly one complete non-empty Markdown code
+span. Keep the field names exact because `validate-handoff` reads them.
+
+```text
+**Branch**: `work/f-xxx-agent`
+**Base**: `<full base commit>`
+**Head**: `<full reviewed feature commit>`
+**Files touched**: `<feature-local paths>`
+**Review**: `<clean review pass>`
+**Verify tree**: `<full verified tree>`
+```
+
 **If the story is remediated after the handoff is written, the handoff is
 stale and must be regenerated at the reviewed head.** A handoff naming a head
 that later commits have overtaken is a record of work that is not what landed.

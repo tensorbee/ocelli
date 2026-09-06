@@ -44,6 +44,37 @@ STATES = ["pending", "claimed", "in-progress", "reviewed", "prepared",
 
 FID = re.compile(r"^F-X?\d{3}[a-z]?$")
 TAG = re.compile(r"^v\d+\.\d+\.\d+$")
+HANDOFF_FIELDS = (
+    "Branch",
+    "Base",
+    "Head",
+    "Files touched",
+    "Review",
+    "Verify tree",
+)
+
+
+def handoff_field(text: str, field: str) -> str | None:
+    """Read one unique field in plain text or one Markdown code span."""
+    matches = list(re.finditer(
+        rf"^\*\*{re.escape(field)}\*\*:[ \t]*(.*?)[ \t]*$",
+        text,
+        re.M,
+    ))
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise ValueError(f"handoff has duplicate **{field}** fields")
+    value = matches[0].group(1)
+    if value and "`" not in value:
+        return value
+    if (len(value) > 2 and value.startswith("`") and value.endswith("`")
+            and "`" not in value[1:-1]):
+        return value[1:-1]
+    raise ValueError(
+        f"handoff **{field}** value must be non-empty plain text or exactly "
+        "one Markdown code span"
+    )
 
 
 def state_path(sprint: str) -> Path:
@@ -233,16 +264,25 @@ def cmd_validate_handoff(args: argparse.Namespace) -> int:
         problems.append(f"{path.relative_to(ROOT)} does not exist")
     else:
         text = path.read_text()
-        for field in ("Branch", "Base", "Head", "Review", "Verify tree"):
-            if f"**{field}**" not in text:
+        fields = {}
+        malformed = set()
+        for field in HANDOFF_FIELDS:
+            try:
+                fields[field] = handoff_field(text, field)
+            except ValueError as error:
+                fields[field] = None
+                malformed.add(field)
+                problems.append(f"handoff field is malformed: {error}")
+        for field, value in fields.items():
+            if value is None and field not in malformed:
                 problems.append(f"handoff has no **{field}** field")
 
-        branch = re.search(r"\*\*Branch\*\*:\s*(\S+)", text)
-        if branch:
+        branch = fields["Branch"]
+        if branch is not None:
             expected = f"work/{fid.lower()}-"
-            if not branch.group(1).startswith(expected):
+            if not branch.startswith(expected):
                 problems.append(
-                    f"branch {branch.group(1)} does not start with "
+                    f"branch {branch} does not start with "
                     f"{expected}. The F-ID is hyphenated exactly as written, "
                     f"so {fid} is {expected}<agent>.")
 
