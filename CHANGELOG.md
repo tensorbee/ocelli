@@ -111,6 +111,22 @@ Repository bootstrap. Nothing is published.
   back by the shell after the trap without calling into the module, because
   `wasm32-unknown-unknown` is `panic = "abort"` in every profile and a trapped
   instance must not be reused.
+- The benchmark harness, `tools/bench`, which is an instrument rather than a
+  report. A tracked subject registry lists the things this project will ever
+  measure, each with its normative definition, its unit, its tier dimensions
+  and the F-ID of the story that will give it a subject. The driver resolves
+  each subject at run time to `measured`, to `unavailable` naming the blocking
+  story, or to `incomparable` on a host-class mismatch, and a recorded number
+  for a subject whose story has not landed is refused by the `bench` gate
+  rather than left to discipline. **Most subjects had nothing to measure when
+  this landed and the harness says so**, which is decision D7 holding rather
+  than a shortfall. No proxy workload was substituted, no stub was timed and no
+  number was invented. `bin/ocelli.sh bench --list` is the authority on the
+  split, because it reads the backlog and a count written here goes stale the
+  first time a story lands. **The HLD states no performance target of any
+  kind**, which was searched rather than assumed, so every subject's definition
+  is fixed now from the specification and a later story adds a runner into a
+  slot with no latitude to redefine the measurement into something easier.
 - Answers to Appendix A gates A1 and A2, in `docs/spikes/`. **JPEG-LS resolves
   to a single pure-Rust decoder on every target.** **HTJ2K does not resolve**:
   `openjp2` does not link for `wasm32-unknown-unknown` and traps on every
