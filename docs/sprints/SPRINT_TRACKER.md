@@ -79,3 +79,4 @@ that has something to put in it.
 | F-X016 | Adapter fallback after device-open failure | S04 | 1w | not measured, worker ran concurrently with other S04 stories | 2026-09-06 |
 | F-X020 | Protect the hand-curated sprint plan | S04 | 1w | not measured, worker ran concurrently with other S04 stories | 2026-09-06 |
 | F-012 | Candidate comparison gate contract and verification plumbing | S05 | 3w | not measured, the wall clock includes sprint replanning, controlled corpus-scale comparisons and repeated full floor runs | 2026-09-06 |
+| F-014 | Quirk-capture workflow: every field bug becomes a fixture | S05 | 3w | not measured, the wall clock includes three review passes, repeated full floor and oracle runs, and a verification-discovered oracle repair | 2026-09-06 |

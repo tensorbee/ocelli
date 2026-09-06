@@ -356,6 +356,57 @@ def _corpus_unrecorded_licence(box: Sandbox) -> None:
     _corpus_two_rows(box, ("a" * 64, "b" * 64), licences=("MIT", ""))
 
 
+def _quirk_record(box: Sandbox) -> dict:
+    return json.loads(box.read("corpus/quirks.json"))
+
+
+def _write_quirk_record(box: Sandbox, record: dict) -> None:
+    box.write("corpus/quirks.json", json.dumps(record, indent=2) + "\n")
+
+
+def _quirk_without_authority(box: Sandbox) -> None:
+    record = _quirk_record(box)
+    del record["quirks"][0]["expectation"]["authority"]
+    _write_quirk_record(box, record)
+
+
+def _quirk_with_ocelli_as_authority(box: Sandbox) -> None:
+    record = _quirk_record(box)
+    record["quirks"][0]["expectation"]["authority"] = {
+        "kind": "ocelli-output"
+    }
+    _write_quirk_record(box, record)
+
+
+def _quirk_with_absent_manifest_path(box: Sandbox) -> None:
+    record = _quirk_record(box)
+    record["quirks"][0]["generator"]["paths"] = ["synthetic/absent.dcm"]
+    _write_quirk_record(box, record)
+
+
+def _quirk_without_mutation_evidence(box: Sandbox) -> None:
+    record = _quirk_record(box)
+    record["quirks"][0]["mutations"] = []
+    _write_quirk_record(box, record)
+
+
+def _quirk_without_mutation(kind: str) -> Callable[[Sandbox], None]:
+    def mutate(box: Sandbox) -> None:
+        record = _quirk_record(box)
+        record["quirks"][0]["mutations"] = [
+            mutation for mutation in record["quirks"][0]["mutations"]
+            if mutation.get("kind") != kind
+        ]
+        _write_quirk_record(box, record)
+    return mutate
+
+
+def _quirk_with_tracked_generated_dicom(box: Sandbox) -> None:
+    path = "corpus/data/synthetic/ct_sigmoid_width_half.dcm"
+    box.write(path, DICOM_FIXTURE)
+    box.git("add", "-f", path)
+
+
 def _delete_ci_step(box: Sandbox, leave_comment: bool) -> None:
     gate = _floor_gate_with_own_step(box)
     workflow = box.read(".github/workflows/ci.yml")
@@ -7113,6 +7164,80 @@ GUARDS: tuple[Guard, ...] = (
               "this guard and it runs on every floor gate, so a level-3 "
               "probe would need a second registry fixture that the suite "
               "already carries.",
+    ),
+    Guard(
+        id="quirks",
+        file="scripts/quirk_check.py",
+        gate="quirks",
+        spec="HLD sections 11 and 27.2, and deviation D-05",
+        refuses="A field quirk without independent expectation provenance, "
+                "a callable synthetic recipe, one matching generator-owned "
+                "manifest row, active mutation evidence, or with a generated "
+                "DICOM tracked in git.",
+        claims=("*",),
+        probes=(
+            Probe("quirks.missing-authority", _quirk_without_authority,
+                  script("python3", "scripts/quirk_check.py"),
+                  "missing expectation authority"),
+            Probe("quirks.ocelli-derived-expectation",
+                  _quirk_with_ocelli_as_authority,
+                  script("python3", "scripts/quirk_check.py"),
+                  "expectation authority kind 'ocelli-output' is not independent"),
+            Probe("quirks.absent-manifest-row",
+                  _quirk_with_absent_manifest_path,
+                  script("python3", "scripts/quirk_check.py"),
+                  "needs exactly one manifest row"),
+            Probe("quirks.missing-mutation-evidence",
+                  _quirk_without_mutation_evidence,
+                  script("python3", "scripts/quirk_check.py"),
+                  "mutation evidence must be a non-empty array"),
+            Probe("quirks.missing-voi-function-mutation",
+                  _quirk_without_mutation("generator-voi-function"),
+                  script("python3", "scripts/quirk_check.py"),
+                  "required mutation generator-voi-function is missing"),
+            Probe("quirks.missing-window-width-mutation",
+                  _quirk_without_mutation("generator-window-width"),
+                  script("python3", "scripts/quirk_check.py"),
+                  "required mutation generator-window-width is missing"),
+            Probe("quirks.missing-attribution-mutation",
+                  _quirk_without_mutation("disable-reference-attribution"),
+                  script("python3", "scripts/quirk_check.py"),
+                  "required mutation disable-reference-attribution is missing"),
+            Probe("quirks.tracked-generated-dicom",
+                  _quirk_with_tracked_generated_dicom,
+                  script("python3", "scripts/quirk_check.py"),
+                  "generated path is a tracked DICOM"),
+        ),
+        covered_by=("scripts/tests/test_quirk_check.py (25 cases, run by the "
+                    "`quirks` gate)",),
+    ),
+    Guard(
+        id="quirk-mutation-boundaries",
+        file="scripts/quirk_mutation_boundaries.py",
+        gate="quirk-mutations",
+        spec="F-014's approved design and HLD section 27.2 R2",
+        refuses="A generated SIGMOID quirk case whose function or width no "
+                "longer matches the independently declared boundary.",
+        claims=("*",),
+        covered_by=("scripts/tests/test_quirk_mutations.py opens and checks "
+                    "the named boundary, and `bin/ocelli.sh gate "
+                    "quirk-mutations` executes it green then under both "
+                    "checker-owned generator mutations",),
+    ),
+    Guard(
+        id="quirk-mutations",
+        file="scripts/quirk_mutations.py",
+        gate="quirk-mutations",
+        spec="F-014's approved design and HLD section 27.2 R6",
+        refuses="Mutation evidence whose healthy control is red, whose fixed "
+                "edit stays green, whose failure has the wrong signature, or "
+                "whose registry row, kind, signature or replacement differs "
+                "from the executable contract, including a fixture symbol "
+                "with no live mutation target.",
+        claims=("*",),
+        covered_by=("scripts/tests/test_quirk_mutations.py (8 cases, run by "
+                    "the `quirks` gate), plus the three live mutations run by "
+                    "the `quirk-mutations` gate",),
     ),
     Guard(
         id="corpus",

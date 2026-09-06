@@ -1914,3 +1914,31 @@ implementation and F-X021 records the deferred activation. Review added the
 explicit operation field so identity output cannot satisfy ledger evidence.
 **Notes for future sessions.** Enable `--require-comparison` only when F-X021
 connects every current oracle view to real Ocelli output.
+
+## F-014, Quirk-capture workflow, completed 2026-09-06
+
+**What was built.** A closed-schema quirk registry now binds each captured
+field bug to its synthetic generator recipe, exact manifest row, independent
+expectation, named regression boundary and active mutation evidence. The
+worked SIGMOID width-below-one case exercises the full path.
+**HLD sections implemented.** Sections 11, 25.1 and 27.2 R2 and R6.
+**Deviations.** D-04 and D-05 retained.
+**Crates / packages modified.** Corpus tooling, quirk guards, CI wiring and the
+oracle mutation checker.
+**Tests added.** Thirty-three Python contract tests, three controlled live
+mutations, six fixture-binding live mutations and one Rust regression for
+coverage-problem mutation detection.
+**Fixture provenance.** The synthetic SIGMOID case and its expected display
+values are derived from DICOM PS3.3 C.11.2.1.3.1. No patient data is tracked.
+**Verification.** All floor gates, the active quirk-mutation gate, the 92-case
+corpus gate and the full browser oracle passed on the staged feature tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a.
+**LLD updated.** `docs/lld/corpus.md` and `docs/lld/oracle.md`.
+**Deviations from the design plan.** Review tightened literal, source and
+executable boundary binding. Final verification also repaired the oracle
+self-test so a missing view's coverage problem satisfies its declared
+run-problem expectation.
+**Notes for future sessions.** A captured quirk is evidence only when the
+recipe, expectation and regression boundary are exact, and controlled damage
+makes that boundary fail for the declared reason.

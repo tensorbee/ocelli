@@ -907,13 +907,14 @@ fn check(
             if report
                 .problems
                 .iter()
+                .chain(&report.coverage_problems)
                 .any(|problem| problem.contains(fragment))
             {
                 Ok(())
             } else {
                 Err(format!(
-                    "expected a run problem carrying {fragment:?}, got {:?}",
-                    report.problems
+                    "expected a run problem carrying {fragment:?}, got problems {:?} and coverage problems {:?}",
+                    report.problems, report.coverage_problems
                 ))
             }
         }
@@ -992,7 +993,9 @@ fn check(
 mod argument_tests {
     use std::path::PathBuf;
 
-    use super::{parse_arguments_from, validate_gate_directories};
+    use ocelli_oracle::{mutations::CATALOGUE, report::RunReport};
+
+    use super::{check, parse_arguments_from, validate_gate_directories};
 
     fn parsed<const N: usize>(arguments: [&str; N]) -> Result<super::Arguments, String> {
         parse_arguments_from(arguments)
@@ -1066,5 +1069,25 @@ mod argument_tests {
         assert_eq!(arguments.reference, PathBuf::from("reference"));
         assert_eq!(arguments.candidate, PathBuf::from("reference"));
         Ok(())
+    }
+
+    #[test]
+    fn a_coverage_problem_satisfies_a_run_problem_mutation() -> Result<(), String> {
+        let mutation = CATALOGUE
+            .iter()
+            .find(|mutation| mutation.name == "a-view-missing-from-the-candidate")
+            .ok_or_else(|| "the missing-view mutation is absent".to_owned())?;
+        let report = RunReport {
+            records: Vec::new(),
+            problems: Vec::new(),
+            coverage_problems: vec!["a is declared on one side and not the other".to_owned()],
+            absent_views: 1,
+            unsupported_source_rows: 0,
+            declared_volume_refusals: 0,
+            reference_directory: "reference".to_owned(),
+            candidate_directory: "candidate".to_owned(),
+        };
+
+        check(mutation, "a", &Ok(report))
     }
 }

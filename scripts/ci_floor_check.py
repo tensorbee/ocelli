@@ -448,9 +448,14 @@ MANUAL_EVENTS = {"workflow_dispatch", "repository_dispatch", "schedule"}
 # profile filters the listing to the probes this paragraph is about, and it was
 # load-bearing until the tenth pass, when bare `--list` printed the floor set
 # alone and showed none of them.
+#
+# `quirk-mutations` is excluded because its fixed generator boundaries need
+# the locked DICOM environment and its attribution boundary needs cargo. The
+# corpus-tooling job installs both and invokes it on every event. The separate
+# stdlib-only `quirks` gate remains in the floor.
 # Kept here so this script fails if the runner's exclusion list changes without
 # anyone thinking about CI.
-NOT_IN_FLOOR = {"oracle", "corpus", "guards-deep"}
+NOT_IN_FLOOR = {"oracle", "corpus", "guards-deep", "quirk-mutations"}
 
 
 # The `GATES=( ... )` array literal. The array is read as SHELL WORDS by

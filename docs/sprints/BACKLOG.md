@@ -107,7 +107,7 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-011 | E2.3 | S03 | Pixel-diff comparator with per-modality tolerance policy | Test | 3w | F-010 | done |
 | F-012 | E2.4 | S05 | Candidate comparison gate contract and verification plumbing | Test | 3w | F-011 | done |
 | F-013 | E2.5 | S04 | Metadata diff harness (LUT values, geometry, spacing) | Test | 2w | F-011 | done |
-| F-014 | E2.6 | S05 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | F-012 | pending |
+| F-014 | E2.6 | S05 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | F-012 | done |
 | F-015 | E2.7 | S04 | Stable render-hash emission from the comparator | Test | 2w | F-011 | done |
 | F-X001 | X1.1 | S04 | Tier C, software-adapter detection, and the feature-availability contract | Rust | 4w | F-004 | done |
 | F-X006 | Y1.1 | S03 | Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders | Test | 3w | F-009 | done |

@@ -80,6 +80,8 @@ GATES=(
   "ci|no|every floor gate is actually invoked by .github/workflows/ci.yml"
   "guards|no|every declared guard still refuses what it is for (F-X009)"
   "guards-deep|no|the guard probes needing a cargo toolchain (F-X009)"
+  "quirks|no|field quirks retain synthetic provenance and active regression evidence"
+  "quirk-mutations|no|checker-owned quirk mutations fail at their fixed boundaries"
   "corpus-tests|no|the corpus generator and coverage suites, a skip fails it"
   "corpus|no|corpus coverage over the codec registry, then presence and digests"
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
@@ -252,6 +254,15 @@ run_gate() {
     # were both false, and .github/workflows/ci.yml records which.
     guards-deep) python3 scripts/guard_census.py --profile deep &&
                  python3 scripts/guard_probe.py --profile deep ;;
+    # F-014. The registry is data only. Its checker parses the named source
+    # and fixture symbols but never executes a command read from JSON.
+    quirks)      python3 scripts/quirk_check.py &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p 'test_quirk*.py' ;;
+    # The executable half of F-014's mutation evidence. This is outside the
+    # floor because it needs both the locked DICOM environment and cargo. The
+    # corpus-tooling CI job installs both and runs it on every event.
+    quirk-mutations) python3 scripts/quirk_mutations.py ;;
     packages)    [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
                  npm run test &&
                  python3 scripts/package_check.py ;;
@@ -346,6 +357,11 @@ gates_cmd() {
         # fails if the module exceeds the agreed budget", and a wasm-pack
         # build costs no GPU.
         #
+        # `quirk-mutations` is also outside the floor. It needs both the locked
+        # DICOM Python environment and cargo, which no single floor job owns.
+        # The corpus-tooling job installs both and runs it on every event. The
+        # stdlib-only `quirks` checker remains in the floor.
+        #
         # This list and scripts/ci_floor_check.py's NOT_IN_FLOOR must agree,
         # and since the S03 review's fourth pass something joins them: that
         # file PARSES the `case` line below and refuses a set that differs
@@ -356,7 +372,7 @@ gates_cmd() {
         # while `gate --floor` silently stopped running `prose`. A gate
         # leaving the floor removes work rather than adding a demand, so
         # that direction had no detection at all. Now it does.
-        case "$name" in oracle|corpus|guards-deep) continue ;; esac
+        case "$name" in oracle|corpus|guards-deep|quirk-mutations) continue ;; esac
         selected+=("$name")
       done ;;
     --sprint|--all)

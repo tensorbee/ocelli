@@ -10,7 +10,7 @@ independently checkable corpus fixture.
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-012 | E2.4 | Candidate comparison gate contract and verification plumbing | Test | 3w | done |
-| F-014 | E2.6 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | pending |
+| F-014 | E2.6 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:
@@ -31,8 +31,9 @@ expected result, and make the relevant gate fail when the bug returns. The
 fixture is evidence for development and for a future regulatory submission.
 It is not a copy of production data.
 
-This is the final planned sprint in M1, but opening it does not complete the
-milestone. F-012 landed first and F-014 is ready to start.
+This is the final planned sprint in M1, but completing it does not complete the
+milestone. F-012 landed first and F-014 now supplies the permanent quirk
+capture path.
 
 ## What is carried in
 
@@ -83,9 +84,9 @@ the declared reason.
 
 ## Dependency order
 
-F-014 depends on F-012, which is done. F-014 is ready to start. F-X021 depends
-on F-012 and F-052, and later makes real Ocelli full-corpus candidate evidence
-binding under the retained D-04 local-verification model.
+F-014 depended on F-012, and both are done. F-X021 depends on F-012 and F-052,
+and later makes real Ocelli full-corpus candidate evidence binding under the
+retained D-04 local-verification model.
 
 F-X011 is also carried from S04 but is not a dependency of F-014.
 

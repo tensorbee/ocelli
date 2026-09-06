@@ -98,7 +98,7 @@ tree.
 
 1. Add `corpus/quirks.json` as the single tracked registry. Each entry has a
    stable quirk ID, a non-sensitive symptom description, one generator recipe,
-   one or more exact manifest paths, an independently written expected-value
+   its exact manifest path, an independently written expected-value
    fixture, a normative authority, the production regression command, the
    controlled mutation and the failure signature observed from it. The record
    never contains any field input or any value copied from one.
@@ -113,6 +113,9 @@ tree.
    path to have one matching `corpus/manifest.tsv` row sourced from that
    generator. It also refuses a tracked generated DICOM path. The existing
    staged-content guard remains the byte-level patient-data and DICOM refusal.
+   The initial contract is singular because the worked generator case writes
+   one path. A multi-output case gains a mechanically checked iteration
+   contract before this schema accepts more than one path.
 4. Put the checker and its negative fixtures in the CI floor. This checks that
    the evidence graph is complete without a corpus or GPU. Do not run commands
    taken from JSON. The checker accepts only named regression and mutation
@@ -125,8 +128,11 @@ tree.
 6. Make F-X012's three controlled mutations standing evidence in the capture
    record: change the function to LINEAR, change width to 1, and disable the
    reference attribution. Each named regression must fail at its declared
-   boundary, then pass with the mutation absent. A digest mismatch does not
-   satisfy this step.
+   boundary, then pass with the mutation absent. A checker-owned executable
+   harness applies the fixed edits in a disposable repository and compares the
+   observed failures with the registry. It also mutates each independently
+   declared fixture literal so the named test cannot retain an irrelevant read
+   while proving nothing. A digest mismatch does not satisfy this step.
 7. Document the intake path. The operator records only a non-sensitive defect
    shape, reconstructs it with synthetic constants, cites the independent
    authority, adds the generator and manifest link, adds the production
@@ -159,7 +165,7 @@ unavailability rather than silently selecting another answer.
 | conformance | The generated case declares the pixel module and transfer syntax that its record cites, and its manifest digest matches | existing `scripts/tests/test_corpus_synth.py` and `bin/ocelli.sh gate corpus` |
 | golden | The captured manifest path reaches the normal reference oracle and its declared divergence is attributed to the reference | `bin/ocelli.sh gate oracle` |
 | browser | The worked case reaches decode, presentation and readback through the reference render path | `tools/oracle/run.mjs` |
-| mutation | Function, width and attribution mutations each make the worked regression red at the boundary named in the record | F-X012's existing tests plus standing quirk-check probes |
+| mutation | Function, width and attribution mutations each make the worked regression red at the boundary named in the record, and each fixture literal reaches its executable expectation boundary | `scripts/quirk_mutations.py`, `scripts/quirk_mutation_boundaries.py` and `scripts/tests/test_quirk_mutations.py`, run by the non-floor `quirk-mutations` CI gate |
 
 The fixture values are written from the cited DICOM sections before the
 candidate path is touched. The mutation proves that the case drives the
@@ -187,24 +193,39 @@ D-04 and D-05 are load-bearing. No new deviation is required.
 
 - `corpus/quirks.json`, new
 - `scripts/quirk_check.py`, new
+- `scripts/quirk_mutations.py`, new
+- `scripts/quirk_mutation_boundaries.py`, new
 - `scripts/tests/test_quirk_check.py`, new
+- `scripts/tests/test_quirk_mutations.py`, new
+- `scripts/corpus_synth.py`
+- `scripts/tests/test_corpus_synth.py`
 - `bin/ocelli.sh`
 - `.github/workflows/ci.yml`
 - `scripts/ci_floor_check.py`
 - `scripts/guards/catalogue.py`
-- `scripts/tests/test_guard_catalogue.py`
+- `ci/guard-probe-budget.json`
+- `docs/runbooks/guard-verification.md`
 - `corpus/README.md`
+- `docs/lld/README.md`
 - `docs/lld/corpus.md`
 - `docs/lld/oracle.md`
+- `tools/oracle/src/bin/ocelli-compare.rs`, verification-discovered repair
 
 The completion workflow also updates the shared sprint records. It never
 tracks the generated DICOM bytes.
+
+The final oracle verification exposed a pre-existing mismatch in its mutation
+checker. Removing a view correctly creates a coverage problem, while the
+checker inspected only general problems. The one-line union and its unit test
+are included because the approved oracle gate cannot pass without proving that
+missing views fail the run.
 
 ## Dependency and conflict notes
 
 - F-012 is a hard dependency. Its narrowed candidate contract and ledger
   plumbing land before this plan enters implementation.
-- The worked mutation and the oracle are GPU-exclusive runtime work.
+- The oracle is GPU-exclusive runtime work. The worked mutation gate is
+  CPU-only and runs with the locked DICOM environment plus cargo.
 - The single-story wave is serial in the canonical `sprint/s05` worktree.
 
 ## Open questions
