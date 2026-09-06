@@ -25,9 +25,9 @@ pub mod gpu;
 pub mod probe;
 
 pub use caps::{
-    AdapterFacts, Caps, DecidedBy, FillRate, FillRateBands, OverrideOutcome, Resolution,
-    SimdSupport, SoftwareVerdict, Tier, TierEvidence, TierRequest, TierSignals, classify,
-    compute_available,
+    AdapterFacts, Caps, DecidedBy, FailedAdapter, FillRate, FillRateBands, OverrideOutcome,
+    ProbeOutcome, Resolution, SimdSupport, SoftwareVerdict, Tier, TierEvidence, TierRequest,
+    TierSignals, candidate_order, classify, compute_available,
 };
 pub use gpu::{GpuContext, SharedEncoder};
 pub use probe::resolve;

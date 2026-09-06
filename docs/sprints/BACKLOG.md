@@ -120,7 +120,7 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-X013 | Y1.8 | S04 | Price the HTJ2K decoder route after gate A1 failed | Test | 3w | F-X006 | pending |
 | F-X014 | Y1.9 | S04 | Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing | Build | 2w | F-X009 | pending |
 | F-X015 | Y1.10 | S04 | Execute the skills' worked examples, because the skills gate asserts nothing about their numbers | Build | 1w | F-X009 | pending |
-| F-X016 | Y1.11 | S04 | Try the next adapter when the best candidate cannot open a device, and record what was attempted | Rust | 1w | F-004 | pending |
+| F-X016 | Y1.11 | S04 | Try the next adapter when the best candidate cannot open a device, and record what was attempted | Rust | 1w | F-004 | in-progress |
 | F-X017 | Y1.12 | S04 | Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting | Build | 2w | F-005 | pending |
 | F-X018 | Y1.13 | S04 | Make close-preflight see the sprint review, and key its verification on the tree it is about | Build | 1w | F-X009 | pending |
 | F-X019 | Y1.14 | S04 | Decide whether a CI step that is not guaranteed to run counts as CI running the gate | Build | 1w | F-X009 | pending |
