@@ -127,6 +127,7 @@ and a mutation is an input to a test: it derives from the specification too.
 | 9 | Three reviewers. **The comparator was clean a second time.** Ten defects elsewhere, and the lint-policy sequence finally got a diagnosis rather than a tenth route: the guard RECONSTRUCTS the compiled file set by hand. HLD 17.2's central architectural rule was found guarded by nothing | remediated |
 | 10 | Three reviewers, 12 defects, 8 smells, 6 nitpicks, and this row's tally is in `e2b11d8`'s successor because pass 10 found the sentence claiming pass 3's was the only unrecorded one to be false for passes 8 and 9 as well. **The comparator was clean a third time and the crates sweep converged at five survivors in ninety mutations.** The guard harness produced a backtick shape and two `#[path]` spellings | remediated |
 | 11 | Two reviewers, 6 defects, 2 smells, 5 nitpicks. **The comparator and the crates were both declared done**, at four and two consecutive clean passes. The guard reviewer named the class ten passes had been patching and the remediation replaced two of three hand-rolled grammars with real parsers | remediated |
+| 12 | Two reviewers, 6 defects, 8 smells, 3 nitpicks, aimed at the two grammars pass 11 left. **The prediction pass 11's remediation made against itself came true**: the YAML reader had four fail-open routes, one of them key order, which is not a spelling and cannot be patched. Both readers are replaced | remediated |
 
 **Three of these tallies are recorded here and nowhere else, not one.** The
 pass-4 row explained pass 3's missing tally and asserted it was the only one,
@@ -664,14 +665,75 @@ declared limits are prose asserting properties of code, three of which were
 false this pass, where the real answer is fewer sentences a mechanism could
 carry instead.
 
+## Pass 12, and a prediction a remediation made against itself
+
+Pass 11's remediation ended by naming what it had not fixed: `ci.yml` is read by
+hand-rolled YAML, it is the same shape as the three that failed, nobody has
+planted an input at it, and pass 12 should expect to find one. **That is what
+happened**, and the discipline in how it was found is worth as much as the
+finding. Every planted input was parsed with a real YAML library and the
+resulting structure printed, and three routes the reviewer could not establish
+GitHub accepts, anchors, multi-document files and a Unicode line separator, it
+declined to report at all.
+
+**Four fail-open routes, and the first is not a spelling.** `run_commands`
+attached whatever `if:` it had seen SO FAR to a `run:`, so writing the condition
+AFTER the command hid it, and the control is the same two lines reversed, which
+refuses. **Key order is the entire difference and a YAML mapping has no key
+order.** A folded `run: >` split one command into two and defeated the argv
+equality pass 7 added, by one character. A quoted key in `on:` narrowed the
+event set the floor is checked against. And a gate name inside ANY `run:` text
+satisfied the gate, so `echo "... run bin/ocelli.sh gate panic locally"` stood in
+for HLD section 23's wasm panic-hook proof.
+
+**Five LEGITIMATE spellings were refused**, one of them with a message quoting a
+condition that plainly does run on the events it said it did not.
+
+The remediation argued the dependency rather than assuming it, and the argument
+is the one that settles it: the fail-closed alternative closes three routes,
+provably leaves key order open, and three of the five spellings it would have to
+refuse are the ones already being wrongly refused, so it makes a guard refusing a
+legitimate state permanent BY DESIGN at the moment it leaves the widest route
+open. `BaseLoader` turned out to be the more restrictive loader and it retires
+the `(?:on|"on"|'on'|true)` alternation rather than carrying it forward.
+Deviation **D-17** records a floor gate acquiring a third-party import.
+
+It then found a fifth route of its own, an unterminated flow sequence no parser
+accepts and therefore a workflow GitHub cannot run, read as all twenty-five
+gates invoked. It found **three existing probes planting a workflow GitHub
+Actions rejects**, which only a parse could see. And it wrote a span-mask
+defence and then deleted it, because with the match anchored at a statement head
+no probe could reach it: **a defence no probe can reach is a comment claiming a
+property.**
+
+**The shell half then went the other way, and the reasoning is the interesting
+part.** The obvious move was to ask bash, since `bin/ocelli.sh` is bash and the
+`GATES` array already has a test that does. The remediation measured three
+things and refused: `declare -f` needs the function DEFINED, which needs the file
+EXECUTED, and the catalogue plants adversarial shell into that very file inside a
+disposable clone, so a reader that asked bash would turn "this file is misparsed"
+into "this file is run". Its output is a pretty-printer with no stability
+contract that differs between the two bash versions on this machine. And it
+normalises neither of the two spellings that were failing open.
+
+**So bash is not the reader, bash is the test oracle**, comparing what bash
+PRINTS from a synthetic arm against what the scanner attributes to it. That
+found something nobody had asked about: the backtick's `opens` flag was wrong in
+the fail-open direction, and the scanner was accepting a file bash refuses.
+
+The last hand-written production, the here-document delimiter as a regex with an
+invented character class, is gone. It is a shell WORD now, read by the same rule
+that reads the `GATES` array.
+
 ## What is still open, and it is declared rather than hidden
 
 - **G-02 and G-04**, the two remaining declared guard holes. F-X014.
-- **`.github/workflows/ci.yml` is read by hand-rolled YAML.** The eleventh
-  pass's remediation replaced the TOML and shell readers with real parsers and
-  says plainly that this one is the same shape as the three that failed, and
-  that nobody has planted an input at it. No story yet, and it is the first
-  place to look in S04.
+- **Bash's compound-command grammar is not modelled**, so the shell scanner
+  cannot tell a subshell `(` from a `case` pattern's, nor `((` arithmetic from
+  `( (`, which bash resolves by attempting the arithmetic parse and backtracking.
+  Every consequence is fail-closed and asserted where the refusal carries the
+  weight. That is one unmodelled thing rather than a list, which is the
+  difference between this and the eleven passes before it.
 - **`GpuContext::supports_compute` is a forwarder no test reaches.** The
   decision it forwards to is in `caps.rs` with a six-row truth table, and
   reaching the forwarder needs a real device, which deviation D-04 leaves the

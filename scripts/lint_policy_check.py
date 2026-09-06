@@ -470,15 +470,39 @@ def _relative(path: Path) -> str:
 
 
 def member_patterns(text: str) -> tuple[list[str], list[str]]:
-    """The globs `[workspace] members` declares, and what `exclude` removes."""
-    block = re.search(r"^\[workspace\]$(.*?)(?=^\[|\Z)", text, re.M | re.S)
-    if block is None:
+    """The globs `[workspace] members` declares, and what `exclude` removes.
+
+    **The third hand-rolled reader of this document, and the S03 review's
+    thirteenth pass deleted it rather than repairing it.** It required
+    `[workspace]` to be a literal table HEADER on its own line and each entry
+    to be double quoted, so `workspace.members = ["crates/*"]`, a single-quoted
+    literal string and a member listed under a dotted `workspace.members`
+    sub-key were each read as no members at all. It sat in the same file as
+    `workspace_lints`, which had already stopped reading this document with a
+    regex for exactly that reason, three passes earlier.
+
+    Reading no members is not a silent pass here, because `main` refuses a
+    workspace whose member list it cannot resolve, but it is the same
+    "returned an empty result for a document it could not read" shape that
+    every other reader in this file has now had removed.
+
+    A parse error yields no members, and that branch is unreachable rather
+    than permissive: `main` parses this same text with `workspace_lints`
+    FIRST and returns on a parse error before this function is called.
+    """
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return [], []
+    workspace = document.get("workspace")
+    if not isinstance(workspace, dict):
         return [], []
 
     def listing(key: str) -> list[str]:
-        found = re.search(rf"^\s*{key}\s*=\s*\[(.*?)\]", block.group(1),
-                          re.M | re.S)
-        return re.findall(r'"([^"]+)"', found.group(1)) if found else []
+        found = workspace.get(key)
+        if not isinstance(found, list):
+            return []
+        return [entry for entry in found if isinstance(entry, str)]
 
     return listing("members"), listing("exclude")
 
@@ -1629,8 +1653,24 @@ def _fail(problems: list[str]) -> int:
 
 
 def main() -> int:
-    text = CARGO.read_text(encoding="utf-8")
+    # Read under the same FAIL header every other refusal here prints. The
+    # call was unguarded until the S03 review's thirteenth pass, so a
+    # `Cargo.toml` that is not valid UTF-8 arrived as a `UnicodeDecodeError`
+    # traceback: fail-closed, and still the wrong way to tell a maintainer
+    # what to do, which is the fifth pass's finding in the CI floor check one
+    # file over. A missing file is caught here for the same reason, and it is
+    # not hypothetical: this guard is run inside disposable clones by
+    # `scripts/guard_probe.py`.
     problems: list[str] = []
+    try:
+        text = CARGO.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        problems.append(
+            f"{_relative(CARGO)} cannot be read as UTF-8 text ({error}). "
+            f"Whether HLD 27.1's five lints are denied is therefore unknown, "
+            f"and an unknown is not a denial. cargo reads a manifest as UTF-8 "
+            f"too, so a file this refuses is a file cargo refuses.")
+        return _fail(problems)
 
     tables, toml_error = workspace_lints(text)
     if toml_error:

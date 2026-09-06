@@ -239,6 +239,102 @@ So the runner's list is PARSED here and compared with `NOT_IN_FLOOR` for set
 equality, in both directions. `NOT_IN_FLOOR` is also in the declared-constant
 ratchet, so the pair is now watched by a mechanism rather than by a comment.
 
+## The workflow is YAML, and it was read line by line until the twelfth pass
+
+The eleventh pass's remediation predicted that the next reviewer would plant
+inputs at the hand-rolled YAML reader, and the twelfth pass did exactly that
+and found FOUR fail-open routes and FIVE refusals of legitimate workflows. Each
+was measured at exit 0 where the check should refuse, or at exit 1 on a file
+GitHub Actions runs correctly.
+
+1. **Key order, and it is the one no spelling rule reaches.** `run_commands`
+   attached whatever `if:` it had seen SO FAR to a `run:`, so
+
+       - run: bin/ocelli.sh gate guards
+         if: github.event_name == 'workflow_dispatch'
+
+   exited 0 and the identical two lines in the other order exited 1. A YAML
+   mapping has no key order, so those two files are one workflow and the check
+   gave two answers. Two more spellings of the same thing, both measured at 0
+   against a reversed control at 1: a quoted `"if":` key before the `run:`, and
+   a multi-line flow mapping with `run` before `if`. All three land on
+   `guards`, the gate that watches every other gate, in an edit that reads as
+   tidying.
+2. **`run: >` folding.** A folded block scalar's body was split into one
+   `Command` per LINE, so `python3 scripts/prose_check.py` and
+   `--only-this-one-file README.md` became two commands and the argv equality
+   of `runs_command` matched the first. Exit 0, where the same narrowing
+   written on one plain line exits 1. That is the seventh pass's hole reached
+   by changing one character.
+3. **A quoted key in `on:`.** `"pull_request":` narrowed the event set the
+   floor is checked against, and with the `guards` step gated to push the check
+   printed "all 25 floor gate(s) are invoked by CI on push" at exit 0. The head
+   regex already spelled `(?:on|"on"|'on'|true)`, so the author knew keys may
+   be quoted, and the rule was not carried into the body scan.
+4. **A gate name in any `run:` TEXT, and a `run:` key at any depth.**
+   `echo "if the size budget moves, run bin/ocelli.sh gate panic locally"`
+   satisfied `panic` at exit 0, and so did a `run:` written as an action input
+   under `with:`. `panic` is HLD section 23's wasm panic-hook proof, the one
+   property no native test can observe.
+
+A fifth, found while building the probe for the parse refusal and measured the
+same way: `- run: [bin/ocelli.sh gate guards`, an unterminated flow sequence
+that no YAML parser accepts and that GitHub Actions therefore cannot run at
+all, left the line reader at exit **0** reporting the whole floor covered. The
+text after `run:` still held the gate name, and a scanner that does not parse
+cannot tell a workflow from a file that merely looks like one.
+
+And the five it refused, each a workflow GitHub runs: a quoted `run:` scalar, a
+block scalar with an explicit indentation indicator, a single-line flow-mapping
+step, a trailing YAML comment on an `if:`, and `on:` written as a block
+sequence. The comment one is the worst of them, because the refusal quoted a
+condition that plainly does run on the events it said it did not.
+
+### So this file parses the workflow, and takes a dependency to do it
+
+`yaml.load(..., Loader=yaml.BaseLoader)` for the structure, and `shell_pieces`,
+which this file already owns, for the `run:` body. **The dependency is the
+cost and it is recorded as deviation D-17 rather than left quiet**, because a
+FLOOR gate acquiring a third-party import is exactly the kind of thing this
+project makes visible.
+
+The alternative was considered and rejected, and the reason is not taste.
+Dependency-free, the only move available is to REFUSE every spelling the reader
+does not model. That closes routes 2, 3 and 4, and it does not close route 1,
+because key order is not a spelling to refuse: it is what reading a tree line
+by line produces. Worse, three of the five legitimate spellings above ARE the
+spellings such a rule would have to refuse, so the fail-closed repair makes a
+guard that refuses a legitimate state permanent by design at the same moment it
+leaves the widest route open. A parser satisfies both halves at once, because
+it accepts every legal spelling and yields ONE tree, and key order stops
+existing as a concept rather than being defended against.
+
+That is also the argument this file has already made three times. The shell
+arms and the `GATES` array stopped being read with a regex in the ninth and
+eleventh passes, and the declared-constant ratchet reads HLD 27.1's lint table
+with `tomllib` for the same reason. YAML was the fourth foreign grammar here
+and the only one still read by hand. `tomllib` was free because it is stdlib
+and PyYAML is not, and that difference is a cost, not a different argument.
+
+What the cost actually is, stated exactly. `pyproject.toml` pins
+`pyyaml==6.0.3` beside its eight other pins. `.github/workflows/ci.yml`'s
+`guards` job installs it, reading the version out of `pyproject.toml` rather
+than carrying a second copy of it, and that job is the only one that runs the
+`ci` gate or the probes that run this file inside a disposable clone. An absent
+PyYAML is a loud refusal at import with the install command in it, never a
+skipped check: the import guard below is the whole of that mechanism.
+
+`BaseLoader` and not `SafeLoader`, deliberately, and it is the more restrictive
+of the two rather than the looser. It constructs `str`, `list` and `dict` and
+nothing else, resolving no implicit tag and no `!!python/` tag, so it cannot do
+what `yaml.load` with the default loader can. What that buys here is that `on`
+stays the STRING `'on'` instead of becoming YAML 1.1's boolean true, every
+scalar arrives as `str`, and `(?:on|"on"|'on'|true)` goes away rather than
+being carried forward into a tree reader. It also means a workflow whose
+event block is written as the YAML 1.1 boolean spelling `true:` is read as
+having no `on` key at all, which refuses with the top-level keys named. That is
+fail-closed and it is declared here rather than found.
+
 ## What it still does not check
 
 That the CI step is EQUIVALENT to the gate. `ci.yml` deliberately runs several
@@ -281,6 +377,31 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+# The one third-party import in the CI floor, and the reason it is here is in
+# the docstring's "So this file parses the workflow" section. It is deviation
+# D-17.
+#
+# The failure it can produce is an ABSENCE, so it is caught here and turned
+# into the same `FAIL:` header every other refusal in this file prints, with
+# the install command in it. A floor gate whose dependency is missing must say
+# so in one readable line rather than as an import traceback, and it must never
+# be possible for it to say nothing: there is no fallback reader and no
+# `except ImportError: pass` anywhere below, which is what makes the absence
+# fail CLOSED.
+try:
+    import yaml
+except ModuleNotFoundError as _error:  # pragma: no cover, environment
+    raise SystemExit(
+        "FAIL: CI does not run the whole floor\n"
+        "  scripts/ci_floor_check.py reads .github/workflows/ci.yml with "
+        "PyYAML and PyYAML is not installed. It is pinned in pyproject.toml, "
+        "and `python3 -m pip install \"$(grep -om1 'pyyaml==[0-9.]*' "
+        "pyproject.toml)\"` is what .github/workflows/ci.yml's `guards` job "
+        "runs. This check reads YAML with a YAML parser since the S03 "
+        "review's twelfth pass, which measured four fail-open routes and five "
+        "false refusals at the hand-rolled reader it replaced, so there is "
+        "deliberately no fallback to that reader here.") from _error
 
 ROOT = Path(__file__).resolve().parent.parent
 RUNNER = ROOT / "bin" / "ocelli.sh"
@@ -492,32 +613,82 @@ def runner_excluded(runner: str) -> set[str]:
     return {name for name in match.group(1).split("|") if name}
 
 
-def workflow_events(workflow: str) -> set[str]:
-    """The events `on:` declares.
+def workflow_tree(workflow: str) -> dict:
+    """`.github/workflows/ci.yml` as the tree GitHub Actions reads.
 
-    Both the block form this workflow uses and the inline list form. A
-    workflow that declares none is refused by the caller rather than treated
-    as covering everything.
+    THE reader. Every question this file asks of the workflow is asked of this
+    tree, so there is one grammar and one answer, and the four fail-open routes
+    the twelfth pass measured at the line-by-line reader are gone as a class
+    rather than one spelling at a time.
+
+    Refuses on a file it cannot parse and on a top level that is not a mapping.
+    A workflow this parser cannot read is not a workflow whose coverage it may
+    report, and returning an empty tree would say "nothing in ci.yml runs the
+    floor" about a file that runs it, which is a refusal naming the wrong
+    thing.
     """
-    head = re.search(r"^(?:on|\"on\"|'on'|true):[^\S\n]*(.*)$",
-                     workflow, re.M)
-    if head is None:
+    try:
+        tree = yaml.load(workflow, Loader=yaml.BaseLoader)
+    except yaml.YAMLError as error:
+        raise RuntimeError(
+            f"{WORKFLOW.relative_to(ROOT)} cannot be parsed as YAML: "
+            f"{str(error).strip()}. GitHub Actions reads this file with a "
+            f"YAML parser and so does this check, so a file neither can read "
+            f"is a workflow that does not run at all. That needs a person and "
+            f"may not be read as agreement.") from error
+    if not isinstance(tree, dict):
+        raise RuntimeError(
+            f"{WORKFLOW.relative_to(ROOT)} parses as "
+            f"{type(tree).__name__} rather than as a YAML mapping, so it "
+            f"declares neither `on:` nor `jobs:` and nothing in it could run "
+            f"a floor gate.")
+    return tree
+
+
+def _shaped(value: object, kind: type, where: str) -> object:
+    """`value` when it is `kind`, or the one refusal for a shape not modelled.
+
+    ONE message for every shape this reader cannot use, so a workflow written
+    in a form it does not model is a named refusal rather than a silently
+    smaller answer. Under `BaseLoader` every scalar is a `str`, so `str` here
+    means "a scalar" and nothing narrower.
+    """
+    if isinstance(value, kind):
+        return value
+    names = {dict: "a mapping", list: "a sequence", str: "a scalar"}
+    raise RuntimeError(
+        f"{WORKFLOW.relative_to(ROOT)} carries {where}, which this reader "
+        f"cannot use: it is {type(value).__name__} where GitHub Actions and "
+        f"this check both expect {names[kind]}. A shape this file does not "
+        f"model is refused rather than skipped, because a skipped step is a "
+        f"step whose gate then reads as uninvoked or, worse, as covered by "
+        f"whatever was read instead.")
+
+
+def workflow_events(workflow: str) -> set[str]:
+    """The events `on:` declares, in every shape GitHub accepts.
+
+    A mapping, an inline sequence, a block sequence and a bare scalar, which is
+    four shapes where the sentence here named two and the reader handled two.
+    The block sequence was the fifth of the twelfth pass's false refusals: it
+    is what GitHub's own documentation writes as `on: [push, pull_request]`
+    laid out over lines, and this file read it as declaring no automatic event
+    at all and refused the whole floor.
+
+    A workflow that declares none is refused by the caller rather than treated
+    as covering everything. `on` is the string key here and not YAML 1.1's
+    boolean, which is what `BaseLoader` buys and what removed the
+    `(?:on|"on"|'on'|true)` alternation this function used to open with.
+    """
+    declared = workflow_tree(workflow).get("on")
+    if declared is None or declared == "":
         return set()
-    inline = head.group(1).strip()
-    if inline:
-        return set(re.findall(r"[a-z_]+", inline))
-    events: set[str] = set()
-    body = workflow[head.end():].splitlines()
-    for line in body:
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip())
-        if indent == 0:
-            break
-        name = re.match(r"^\s{2}([a-z_]+):", line)
-        if name:
-            events.add(name.group(1))
-    return events
+    if isinstance(declared, str):
+        return {declared}
+    if isinstance(declared, list):
+        return {str(_shaped(event, str, "an entry of `on:`"))
+                for event in declared}
+    return set(_shaped(declared, dict, "`on:`"))
 
 
 # The atoms `_permits` can resolve. `github.event_name` is the one that
@@ -657,82 +828,113 @@ class Command:
 def run_commands(workflow: str) -> list[Command]:
     """Every line `.github/workflows/ci.yml` executes, and when.
 
-    Both YAML forms, `run: <command>` and a `run: |` block, with any trailing
-    comment removed. A gate named anywhere else in the file, in a comment, in
-    a `name:` field or in an `if:` expression, is not an invocation.
+    A `run:` is a STEP KEY, reached as `jobs.<id>.steps[n].run` and nowhere
+    else, and its conditions are that step's `if:` and its job's. Both facts
+    are read off the parsed tree, which is what closed the twelfth pass's four
+    routes at once:
 
-    Each command carries the `if:` conditions above it, the job's and the
-    step's. A step's keys sit deeper than the `- ` that opens it and a job's
-    sit shallower, which is what tells the two apart.
+    - **Key order stops existing.** The previous reader walked lines and
+      attached whatever `if:` it had seen SO FAR, so a step with `run:` written
+      above `if:` exited 0 and the same two keys in the other order exited 1.
+      A mapping has no order and this function no longer has one either.
+    - **`run: >` folds.** The previous reader split a block scalar's body into
+      one command per LINE, which turned one narrowed command into two and let
+      the argv comparison in `runs_command` match the first half. The parser
+      folds `>` and keeps `|`, exactly as GitHub does, and the split here is on
+      the FOLDED value.
+    - **A `run:` under `with:` is an action input**, not a step's shell, and a
+      `run:` under `defaults:` is a shell setting. Neither is reached from
+      `steps[n]`, so neither is a command any more. It was one at any depth.
+    - **A quoted key is the same key.** `"if":` and `if:` are one key after a
+      parse, where the reader's `^\\s*(?:-\\s+)?if:` matched only the second.
+
+    Each line of the value is one command. A `#` in it is a shell comment and
+    is removed by `shell_pieces`, the scanner this file already reads
+    `bin/ocelli.sh` with, so `echo "issue #12"` keeps its `#` and `true;#x`
+    loses everything after the `;`. The YAML-level comment is gone before this
+    function ever sees the value, which is the parser's job and used to be a
+    second `#` rule here that could not tell the two apart.
     """
-    lines = workflow.splitlines()
+    tree = workflow_tree(workflow)
     commands: list[Command] = []
-    job_if = ""
-    step_if = ""
-    step_indent: int | None = None
-    in_jobs = False
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        index += 1
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip())
-        if indent == 0:
-            in_jobs = line.startswith("jobs:")
-            job_if, step_if, step_indent = "", "", None
-            continue
-        if not in_jobs:
-            continue
-        if indent == 2 and re.match(r"^\s{2}[\w.-]+:\s*$", line):
-            job_if, step_if, step_indent = "", "", None
-            continue
-        item = re.match(r"^(\s*)-\s", line)
-        if item:
-            step_if, step_indent = "", len(item.group(1))
-        condition = re.match(r"^\s*(?:-\s+)?if:\s*(.*)$", line)
-        if condition:
-            if step_indent is not None and indent >= step_indent:
-                step_if = condition.group(1).strip()
-            else:
-                job_if = condition.group(1).strip()
-            continue
-        head = re.match(r"^(\s*)(?:-\s+)?run:\s*(.*)$", line)
-        if head is None:
-            continue
-        conditions = tuple(c for c in (job_if, step_if) if c)
-        rest = head.group(2).strip()
-        if rest in {"|", ">", "|-", ">-", "|+", ">+"}:
-            block = len(head.group(1))
-            while index < len(lines):
-                body = lines[index]
-                if body.strip() and len(body) - len(body.lstrip()) <= block:
-                    break
-                commands.append(Command(body, conditions))
-                index += 1
-        else:
-            commands.append(Command(rest, conditions))
-    # A comment is what the `#` opens in both languages here, YAML for the
-    # single-line form and the shell for the block form.
-    return [Command(re.sub(r"(?<!\S)#.*$", "", command.text).strip(),
-                    command.conditions)
-            for command in commands]
+    jobs = _shaped(tree.get("jobs") or {}, dict, "`jobs:`")
+    for job_id, raw_job in jobs.items():
+        job = _shaped(raw_job, dict, f"the job `{job_id}`")
+        job_if = str(_shaped(job.get("if", ""), str,
+                             f"an `if:` on the job `{job_id}`")).strip()
+        steps = _shaped(job.get("steps") or [], list,
+                        f"a `steps:` on the job `{job_id}`")
+        for index, raw_step in enumerate(steps):
+            where = f"step {index + 1} of the job `{job_id}`"
+            step = _shaped(raw_step, dict, where)
+            if "run" not in step:
+                continue
+            body = str(_shaped(step["run"], str, f"a `run:` on {where}"))
+            step_if = str(_shaped(step.get("if", ""), str,
+                                  f"an `if:` on {where}")).strip()
+            conditions = tuple(c for c in (job_if, step_if) if c)
+            for line in body.splitlines():
+                text = shell_source(line).strip()
+                if text:
+                    commands.append(Command(text, conditions))
+    return commands
+
+
+# `bin/ocelli.sh gate a b c` at the head of a statement. `a b c` runs three
+# gates, so the names are split rather than kept as one string, and a name
+# matches only whole: `guards` and `guards-deep` are two gates and neither
+# satisfies the other.
+GATE_INVOCATION = re.compile(
+    r"bin/ocelli\.sh\s+gate\s+((?:[A-Za-z0-9_-]+[ \t]+)*[A-Za-z0-9_-]+)")
 
 
 def invoked_gates(commands: list[Command]) -> set[str]:
     """The gate NAMES CI invokes through the runner.
 
-    `bin/ocelli.sh gate a b c` runs three gates, so the names are split rather
-    than kept as one string, and a name matches only whole. `guards` and
-    `guards-deep` are two gates and neither satisfies the other.
+    An invocation is the runner at a STATEMENT HEAD, which is what "CI runs the
+    gate" means. A gate name inside a string, inside a comment or as an
+    argument to some other command is a MENTION, and the floor's claim is about
+    what runs. Route 4a of the twelfth pass measured the difference: the name
+    was matched ANYWHERE in a `run:` line, and a string is anywhere, so
+    `echo "... run bin/ocelli.sh gate panic locally"` satisfied `panic` at exit
+    0 with the real step deleted. `panic` is HLD section 23's wasm panic-hook
+    proof, the one property no native test can observe. It is the comment-only
+    lesson one language along: a comment runs nothing and neither does a
+    sentence in a string.
+
+    This is where `shell_pieces` reaches a `run:` body, which it never did
+    before, and it reaches it through `_split_statements`. That matters for
+    more than the head: `echo "a; bin/ocelli.sh gate panic"` is ONE statement,
+    because the `;` is inside a span and separates nothing, so the runner never
+    appears at a head at all. Heads are then stripped with
+    `SHELL_INTRODUCERS`, so this file asks the question about a CI step exactly
+    as `unseen_commands` asks it about a gate arm, and `cd x && bin/ocelli.sh
+    gate y` is two statements of which the second is an invocation.
+
+    A separate span MASK over the statement was written first and removed, and
+    the reason is worth keeping: with the match anchored at the head, a span
+    can only sit at index 0, where the match already fails on the quote itself.
+    Probe `ci-floor.gate-name-inside-a-run-string` stayed red with the mask
+    made an identity function and reports HARNESS when the anchor is taken
+    away, which is what says which half of the pair was carrying the weight.
+    A defence no probe can reach is a comment claiming a property, and this
+    file has been rewritten twice for exactly that.
+
+    What the anchor costs, declared rather than left to be found: a genuine
+    invocation this file cannot see at a statement head is not counted, so
+    `sh -c 'bin/ocelli.sh gate x'` and `FOO=1 bin/ocelli.sh gate x` are
+    refusals rather than passes. Both fail CLOSED and the refusal names the
+    gate, which is a message a maintainer can act on.
     """
     names: set[str] = set()
     for command in commands:
-        for match in re.finditer(
-                r"\bbin/ocelli\.sh\s+gate\s+"
-                r"((?:[A-Za-z0-9_-]+[ \t]+)*[A-Za-z0-9_-]+)",
-                command.text):
-            names.update(match.group(1).split())
+        for statement in _split_statements(command.text):
+            head = statement.strip()
+            while head.split(" ", 1)[0] in SHELL_INTRODUCERS:
+                head = head.partition(" ")[2].strip()
+            match = GATE_INVOCATION.match(head)
+            if match:
+                names.update(match.group(1).split())
     return names
 
 
@@ -847,11 +1049,6 @@ def covers(gate: str, arms: dict[str, list[str]],
 # be satisfied by a step naming it.
 COMMAND_PREFIXES = ("python3 ", "npm run ", "cargo ", "ci/")
 
-# A line continuation. Joined BEFORE anything else, because the extraction
-# class stops at the backslash and `-p <suite>` then falls off the end of every
-# multi-line arm.
-CONTINUATION = re.compile(r"\\\n\s*")
-
 # A `run_gate` case LABEL at the start of a line. The arm's END is found by
 # `_arm_end` below and not by this pattern, which is the S03 review's ninth
 # pass. `ARM` was `^[ \t]*([a-z-]+)\)(.*?);;`, and a `;;` inside a QUOTED STRING
@@ -873,134 +1070,253 @@ ARM_LABEL = re.compile(r"^[ \t]*([A-Za-z0-9_-]+)\)", re.M)
 # rule in the S03 review's eleventh pass, and the reviewer's sentence is the
 # reason.** `_quote_spans` shared the rule for OPENING a span and the set of
 # delimiters. Closing one was written out three times, in
-# `_strip_shell_comments`, in `_arm_end` and in `_split_statements`, and the
+# `shell_source`, in `_arm_end` and in `_split_statements`, and the
 # three agreed only because all three were edited in one commit. The docstring
 # claimed the drift `NESTED_CASE` and `SHELL_INTRODUCERS` suffered had been
 # removed, and it had been removed from half the rule.
 #
 # It also could not tell an operator `)` from the `)` that closes a `$( ... )`,
 # because it had no `$(` span at all. That was measured as a live regression:
-# see `COMMENT_WORD_START` below.
+# see `WORD_BREAK` below.
 #
 # So there is one scanner. It walks the text once with a STACK, and yields
 # pieces its three callers consume: a piece is either one plain character
 # outside every span, or a whole span from its opener to its closer. A caller
 # never inspects the inside of a span and never has to know how one ends.
 #
-# What is covered: single quote, double quote, backtick, `$( ... )` with its
-# parentheses counted, `${ ... }` with its braces counted, a backslash escape,
-# and a here-document body. Arithmetic `$(( ... ))` falls out of the `$(` span
-# and its nesting count without a rule of its own.
+# **Was bash asked instead, and it can be asked. It is not, and the reason is
+# three measurements rather than a preference.** The S03 review's twelfth pass
+# put the question exactly right: `bin/ocelli.sh` is bash, `declare -f run_gate`
+# is bash's own reparse of the function, and `test_the_names_match_bash` already
+# asks bash about the `GATES` array while nothing asked it about the arms.
 #
-# What is NOT covered, declared rather than left to be found: `$'...'`, whose
-# escapes differ from a double quote's, and the fact that bash DOES open a
-# command substitution inside a double quote. `"` therefore runs to its closer
-# here. Both were outside `_quote_spans` as well, so this is the previous limit
-# unchanged rather than a new one, and both would be a `Span` entry and a
-# nesting rule rather than a new copy of the close loop, which is the property
-# this rewrite is for.
+# 1. `declare -f` needs the function DEFINED, and defining it needs the file
+#    EXECUTED. `set -n` is the only way to ask bash to parse without running,
+#    and it does not define functions: MEASURED, `bash -c 'set -n; source
+#    f.sh; set +n; declare -f run_gate'` prints nothing. So the reader would
+#    source the file. This check exists to read a `bin/ocelli.sh` that somebody
+#    has changed, and `scripts/guards/catalogue.py` plants adversarial shell
+#    into that very file inside a disposable clone and runs this check over it.
+#    A reader that sources turns "this file is misparsed" into "this file is
+#    run", which is a strictly worse failure than the one it repairs.
+# 2. `declare -f`'s output is a PRETTY-PRINTED form with no stability contract,
+#    and it differs between the two bash versions on this machine. MEASURED on
+#    the same input: bash 5.3.15 prints `cat <<'EOF'` and `esac`, and
+#    /bin/bash 3.2.57 prints `cat  <<'EOF'`, two spaces, and `esac;`. Consuming
+#    that as text is a hand-written model of an undocumented printer, which is
+#    the defect class one layer along rather than an escape from it.
+# 3. What it would have bought is smaller than it looks. `declare -f` strips
+#    comments and joins continuations, both of which the scanner below now does
+#    from the grammar. It does NOT normalise the two spellings the twelfth pass
+#    measured as fail-open: `<<\EOF` comes back as `<<'EOF'` and `<<'EOF-1'`
+#    comes back unchanged, so the delimiter production had to be fixed either
+#    way.
 #
-# A third limit, and it is asserted in `scripts/tests/test_guard_readers.py`
-# rather than left here: `$(case y in *) ... esac)` closes at the pattern's `)`,
-# because bash's `case` grammar is not modelled and the nesting count sees an
-# unbalanced parenthesis. The arm then ends at the inner `;;`, which is
-# FAIL-CLOSED rather than a hole: the truncated body still carries `$(case `
-# and `NESTED_CASE` refuses a nested `case` in an arm. The test exists so that
-# the day somebody teaches this scanner `case`, the refusal that was carrying
-# the weight is visible rather than assumed.
+# So bash IS asked, in `scripts/tests/test_guard_readers.py`, where it is safe
+# and where a divergence is a red test rather than an executed plant: each arm
+# shape below is run as a synthetic `case` of `echo` markers and what bash
+# PRINTS is compared with what this scanner attributes to the arm. That is
+# asking bash for the production. It is not asking bash to be the reader.
+#
+# WHAT STAYS HAND-ROLLED, then, stated as what it cannot see rather than as a
+# list of constructs it can:
+#
+# - The scanner models spans and words. It does not model bash's COMPOUND
+#   COMMANDS, so it cannot tell a `(` that opens a subshell from one that ends
+#   a `case` pattern, and it cannot tell `((` arithmetic from `( (` nested
+#   subshells the way bash does, which is by trying the arithmetic parse and
+#   backtracking. Every consequence is fail-closed and asserted rather than
+#   assumed: `$(case y in *) ... esac)` closes at the pattern's `)` and the arm
+#   then ends at the inner `;;`, which `NESTED_CASE` refuses, and
+#   `scripts/tests/test_guard_readers.py` asserts that it is the refusal and
+#   not the scan carrying the weight. `(( a << b ))` reads the `<<` as a
+#   here-document whose body then runs to the end of the region, which refuses.
+#   Doing better needs a compound-command parser, which is a second grammar,
+#   and the point of one tokenizer is that there is not one.
+# - `$'...'` is a span here, so its EXTENT is right, but its C escapes are not
+#   decoded, so `shell_words` yields `a\'b` where bash yields `a'b`. In the
+#   `GATES` array that is a name outside `GATE_NAME` and a refusal. It is not
+#   decoded because the escape set is bash's own table and copying a table is
+#   how the last four passes went wrong.
+# - A here-document written INSIDE a command substitution is not queued,
+#   because the scanner does not look inside a span. Its body is inside the
+#   span too, so the two cancel unless the body carries the span's closer, in
+#   which case the span ends early and the arm refuses.
 #
 # MEASURED over both regions this scanner is used on, in the S03 review's
-# eleventh pass and not carried forward from an earlier one: after comments are
-# stripped, the `run_gate` region carries 0 `$'`, 0 `$(`, 0 `${`, 0 `<<` and 0
-# backticks, against 48 backticks before stripping, and the `GATES` array
-# carries 0 of all five. The `$(` count was 0 before the fix as well, which is
+# eleventh pass and re-measured in the thirteenth: after comments are stripped,
+# the `run_gate` region carries 0 `$'`, 0 `$(`, 0 `${`, 0 `<<` and 0 backticks,
+# against 48 backticks before stripping, and the `GATES` array carries 0 of all
+# five. The `$(` count was 0 before the eleventh pass's fix as well, which is
 # the point: the shape that walked past this parser was planted, and a parser
-# that only handles what the file happens to contain today is the class the
-# eleventh pass is about.
+# that only handles what the file happens to contain today is the class these
+# passes are about.
 
 
 @dataclass(frozen=True)
 class Span:
-    """One kind of shell span, and how the scanner leaves it."""
+    """One kind of shell span, and how the scanner leaves it.
+
+    **Every field below is a measurement against bash, not a reading of the
+    manual.** The script each row was measured with is in
+    `scripts/tests/test_guard_readers.py`, which re-runs it, because a table
+    of shell facts nothing re-derives is the shape four review passes have
+    already gone wrong on.
+    """
 
     close: str
-    # Does a backslash escape the next character inside. A single quote takes
-    # no escape. A double quote does, and so does a backtick: `` \` `` inside a
-    # command substitution is a literal backtick and does not close it, so a
-    # scanner that ended the span there would resume in the middle of the
-    # substitution and could stop at a `;;` that ends nothing.
+    # Does a backslash escape the next character inside.
+    #
+    # MEASURED. `echo 'a\'` prints `a\`, so a single quote takes none. `echo
+    # "a\" ;; b"` prints `a" ;; b`, so a double quote does. `x=`printf "%s"
+    # a\`b`` is an unterminated substitution to bash, so a backtick does: the
+    # `` \` `` did not close it and bash ran to end of file looking for one.
     escapes: bool
-    # The character that DEEPENS this span, so `$(printf "%s" $(date))` closes
-    # at the outer `)` and not at the inner one. "" for a span that does not
-    # nest.
+    # The character that DEEPENS this span, so `$( (printf x) )` closes at the
+    # outer `)` and not at the inner one. "" for a span that does not nest.
+    #
+    # MEASURED. `echo A$( (printf x) )#b && echo RAN_SECOND` prints `Ax#b` and
+    # `RAN_SECOND`, so bash balanced the bare parentheses. `${u:-'}'}` prints
+    # `}`, so the brace inside the quote did not close the expansion, and
+    # `${u:-a\}b}` prints `a}b`, so a backslash does not either.
     nests: str
-    # May another span open inside this one. A command substitution holds
-    # arbitrary shell, so it may. A quote may not, which is the declared limit
-    # above.
-    opens: bool
+    # Which openers may open a span INSIDE this one, and it is a SET rather
+    # than the boolean it was until the S03 review's thirteenth pass, because
+    # bash's answer is per pair and the boolean forced two of the pairs wrong.
+    #
+    # MEASURED, and the backtick was a fail-open. `x=`printf '%s' 'a`b'`` is
+    # an error to bash, "unexpected EOF while looking for matching `''", so a
+    # quote inside a backtick does NOT hide the closing backtick: the backtick
+    # runs to the next unescaped one and nothing opens inside it. The scanner
+    # said the whole thing was one closed span and accepted a file bash
+    # refuses.
+    #
+    # MEASURED the other way for the double quote, which was the declared
+    # limit until the same pass. `"a$(printf "%s" X)b"` prints `aXb`,
+    # `"a`printf b`c"` prints `abc` and `"${u:-"}"}"` prints `}`, so all three
+    # substitutions open inside a double quote and carry their own nesting.
+    # `"a'b"` prints `a'b` and `"$'a'"` prints `$'a'`, so the two quote forms
+    # do not.
+    inner: tuple[str, ...]
+    # Does quote removal drop this span's delimiters when a WORD is read.
+    # `shell_words` decided this with a literal `{"'", '"'}` set, which is a
+    # second table beside this one, and a here-document delimiter needs the
+    # same answer.
+    strips: bool
 
+
+# Every opener, longest first, so `$(` is seen as itself rather than as a `$`
+# followed by a `(`. Declared before the table because the two substitutions
+# admit every opener and say so by naming this rather than by repeating it.
+SPAN_OPENERS = ("$(", "${", "$'", "'", '"', "`")
 
 SPANS: dict[str, Span] = {
-    "'": Span("'", False, "", False),
-    '"': Span('"', True, "", False),
-    "`": Span("`", True, "", True),
-    "$(": Span(")", True, "(", True),
-    "${": Span("}", True, "{", True),
+    "'": Span("'", False, "", (), True),
+    '"': Span('"', True, "", ("$(", "${", "`"), True),
+    "`": Span("`", True, "", (), False),
+    "$(": Span(")", True, "(", SPAN_OPENERS, False),
+    "${": Span("}", True, "{", SPAN_OPENERS, False),
+    "$'": Span("'", True, "", (), True),
 }
 
-# Longest opener first, so `$(` is seen as itself rather than as a `$` followed
-# by a `(`.
-SPAN_OPENERS = tuple(sorted(SPANS, key=len, reverse=True))
-
-# A here-document redirection, and NOT a here-string. `<<<` is three characters
-# of one operator that takes a word rather than a body, so the lookahead is
-# load-bearing. The delimiter may be quoted, which turns off expansion inside
-# the body and changes nothing this scanner does.
-HEREDOC = re.compile(r"<<(-?)(?!<)[ \t]*(['\"]?)([A-Za-z_]\w*)\2")
-
-# What may sit immediately before a `#` for that `#` to begin a COMMENT. POSIX
-# and bash start a comment at a `#` that begins a word, and a word begins after
-# a blank, after a newline, at the start of the input and after any unquoted
-# operator character. `_strip_shell_comments` accepted the first three only,
-# which is the S03 review's tenth pass finding: `true;#;;` planted in the
-# one-line `fmt` arm dropped the trailing command, and it failed closed only by
-# accident, with the refusal naming `#` as the missing command.
+# A here-document redirection OPERATOR, and nothing about its delimiter.
 #
-# **`)` in this set was a REGRESSION for as long as the scanner had no `$(`
-# span, and the eleventh pass measured it.** The rule is right and the
-# implementation could not tell an operator `)` from the `)` closing a
-# `$( ... )`. MEASURED: `bash -c 'echo A$(printf x)#no && echo RAN_SECOND'`
-# prints both lines, so bash does not begin a comment there, and with
-# `echo $(printf x)#no && cargo fmt --all --check --probe-extra &&` planted in
-# the `fmt` arm this check exited 0 with the trailing command dropped, while
-# the SAME input at `e2b11d8`, before `)` joined this set, exited 1. Failing
-# closed there was luck: the `#no` survived as a token whose head is not a
-# builtin.
+# **The delimiter used to be modelled here, as `(['\"]?)([A-Za-z_]\w*)\2`, and
+# that was the S03 review's twelfth fail-open.** bash takes a WORD, and a word
+# is not a character class. MEASURED, each shape planted in the `prose` arm
+# with a real `python3 scripts/prose_check.py --probe-extra` after it, each
+# accepted by `bash -n`, each leaving this check at exit 0 with that command
+# dropped and bash really running it:
 #
-# The scanner answers it now instead of this tuple doing so. A `)` the scanner
+#     : <<\EOF        the third quoting mechanism, beside `'` and `"`
+#     : <<'EOF-1'     `\w*` stops at the hyphen, so `\2` then fails to match
+#
+# When the redirection is not recognised the body is scanned as CODE, so a `;;`
+# in it ends the arm and everything after it leaves in silence.
+#
+# So the delimiter is read as a word by the scanner itself, which is the one
+# word production this file has, and `shell_words` reads the `GATES` array with
+# the same one. What that production is, MEASURED rather than recalled:
+#
+# - It is not expanded. `cat <<EOF$X` wants the literal `EOF$X`, which bash
+#   says in as many words when it hits end of file.
+# - It is subject to quote removal only. `cat <<a"b"c` is terminated by `abc`,
+#   and `cat <<a$(b)c` by the literal `a$(b)c`, so `$( )` delimits the word
+#   without being expanded in it.
+# - It ends at a blank, a newline or the first character of an operator.
+#   `cat <<EOF; echo AFTER`, `cat <<EOF|cat`, `cat <<EOF>/dev/null` and
+#   `cat <<EOF & wait` all terminate on `EOF` and run what follows.
+#
+# `<<<` is a here-STRING, three characters of one operator that takes a word
+# rather than a body, so the negative lookahead is load-bearing.
+HEREDOC_OPERATOR = re.compile(r"<<(-?)(?!<)[ \t]*")
+
+# Where a shell WORD ends when it is not quoted, and equally what may sit
+# before a `#` for that `#` to begin a comment. POSIX and bash end a word at a
+# blank, at a newline or at the first character of an operator, and begin a
+# word in exactly those places, so these are one fact and were two constants
+# until the S03 review's thirteenth pass. Two lists that must agree are one
+# list, which is the repair `NESTED_CASE` and `SHELL_INTRODUCERS` got in the
+# ninth pass and the runner's exclusion list got in the fourth.
+#
+# The comment half is the tenth pass's finding: `_strip_shell_comments`
+# accepted the start of input, a blank and a newline only, so `true;#;;`
+# planted in the one-line `fmt` arm dropped the trailing command.
+#
+# **`)` here was a REGRESSION for as long as the scanner had no `$(` span, and
+# the eleventh pass measured it.** The rule is right and the implementation
+# could not tell an operator `)` from the `)` closing a `$( ... )`. MEASURED:
+# `bash -c 'echo A$(printf x)#no && echo RAN_SECOND'` prints both lines, so
+# bash does not begin a comment there, and with `echo $(printf x)#no && cargo
+# fmt --all --check --probe-extra &&` planted in the `fmt` arm this check
+# exited 0 with the trailing command dropped, while the SAME input at
+# `e2b11d8`, before `)` joined the set, exited 1. Failing closed there was
+# luck: the `#no` survived as a token whose head is not a builtin.
+#
+# The scanner answers it now instead of a tuple doing so. A `)` the scanner
 # opened is inside a span and is never a piece a caller sees, and a `)` that is
 # really an operator, which is what a `case` pattern ends with, still is. A `#`
 # straight after a closing quote or substitution is NOT a comment in bash,
 # `echo "a"#b` prints `a#b`, and a span therefore leaves the scanner not at a
 # word start, which is the direction this must not widen into.
-COMMENT_WORD_START = ("", " ", "\t", "\n", ";", "&", "|", "(", ")", "<", ">")
+WORD_BREAK = " \t\n;&|<>()"
 
 
-def _opener_at(text: str, index: int) -> str:
-    """The span opener starting at `index`, or "" for none."""
+def _opener_at(text: str, index: int,
+               allowed: tuple[str, ...] = SPAN_OPENERS) -> str:
+    """The span opener starting at `index`, or "" for none.
+
+    `allowed` is the current span's `inner`, so an opener bash does not honour
+    inside a backtick or a quote is not honoured here either. It defaulted to
+    everything and was called unconditionally from inside a span, which is why
+    `test_a_nested_substitution_closes_at_the_outer_paren` never reached the
+    `nests` counter: the inner `$(` was re-opened as a span whatever the
+    counter said.
+    """
     for opener in SPAN_OPENERS:
-        if text.startswith(opener, index):
+        if opener in allowed and text.startswith(opener, index):
             return opener
     return ""
 
 
-def _heredoc_end(text: str, start: int, pending: list[tuple[str, bool]]) -> int:
+def _heredoc_end(text: str, start: int,
+                 pending: list[tuple[str, bool]]) -> tuple[int, str]:
     """Where the bodies of the here-documents `pending` declares end.
 
     Several may be queued on one line, `cmd <<A <<B`, and their bodies follow
-    in order. A body that reaches the end of the text is unterminated, which
-    this reports as the whole remainder so the caller's unclosed-span refusal
-    is what fires.
+    in order. Returns the end and the delimiter of the FIRST body that reaches
+    the end of the text without meeting its terminator, "" when every body
+    closed.
+
+    **That second value is new in the S03 review's thirteenth pass and the
+    docstring here claimed it for two passes without it existing.** It said an
+    unterminated body "reports the whole remainder so the caller's
+    unclosed-span refusal is what fires", and the caller cleared `pending`
+    before its own `if pending:` test, so nothing fired. MEASURED with
+    `: <<EOF-1` planted in the `prose` arm, the near miss of the second
+    fail-open above: the check refused, which is the right direction, saying
+    "the arm reaches the end of the region with no `;;` terminator" about an
+    arm whose `;;` is present and whose here-document is the actual problem.
     """
     index = start
     for delimiter, stripped in pending:
@@ -1011,14 +1327,24 @@ def _heredoc_end(text: str, start: int, pending: list[tuple[str, bool]]) -> int:
             if (line.lstrip("\t") if stripped else line) == delimiter:
                 break
         else:
-            return len(text)
-    return index
+            return len(text), delimiter
+    return index, ""
 
 
 # What a piece of a scanned shell text is. `TEXT` is one character outside
 # every span, `SPAN` is a whole quoted or substituted region including its
-# delimiters, and `COMMENT` is a `#` that begins a word and everything after it
-# on its line.
+# delimiters, `COMMENT` is a `#` that begins a word and everything after it on
+# its line, `JOIN` is a line continuation, a backslash and the newline it eats,
+# and `BODY` is a here-document body together with the line that terminates it.
+#
+# BODY is its own kind rather than a `SPAN` because it is DATA and a span is
+# not. `_split_statements` and `shell_words` drop it, which is the fix for a
+# false refusal both the eleventh pass's scanner and its predecessor had:
+# MEASURED with a legitimate `: <<'EOF-1'` note in the `prose` arm, this check
+# exited 1 reporting that the arm "runs 'a note', 'EOF-1'", two lines of
+# English demanded of CI as commands. `shell_source` KEEPS it, because the text
+# it returns is re-scanned by `_arm_end` and a source with the body cut out
+# declares a here-document whose terminator is then missing.
 #
 # COMMENT is a piece of this scanner rather than a pass before it, and that is
 # not a preference. A `#` opens a comment only outside a span, and a span opens
@@ -1027,25 +1353,48 @@ def _heredoc_end(text: str, start: int, pending: list[tuple[str, bool]]) -> int:
 # with a scanner that knows spans and an apostrophe in `# don't` opens a span
 # that runs to the next quote in the file, and scan spans first and a `;;`
 # inside a comment ends an arm, which is the eighth pass's measured fail-open.
+#
+# **JOIN is a piece here for the same reason, and it was a regex pre-pass over
+# shell until the S03 review's thirteenth pass.** `arm_bodies` ran
+# `CONTINUATION.sub(" ", region)` BEFORE the tokenizer, which is exactly what
+# this scanner's header argues no pass may do. MEASURED: a backslash ending a
+# COMMENT line continues nothing in bash, `echo A # c \` then `echo B` prints
+# both, and the pre-pass joined the next line INTO the comment before the
+# tokenizer could see either. With `# the voice rules, and the flag below \`
+# planted above a real `python3 scripts/prose_check.py --probe-extra ;;` in the
+# `prose` arm, that command vanished entirely, `arms['prose']` came back
+# holding the `content` gate's command instead, and the check failed closed
+# only because the swallowed `content` arm then had no body, refusing while
+# naming two gates neither of which was the one edited.
 TEXT = "text"
 SPAN = "span"
 COMMENT = "comment"
+JOIN = "join"
+BODY = "body"
 
 
 def shell_pieces(text: str) -> tuple[list[tuple[int, int, str]], str]:
     """`text` as `(start, end, kind)` pieces, plus an unclosed opener.
 
     A `TEXT` piece is one character, except that a backslash escape outside
-    every span is one piece of two and a here-document redirection is one piece
-    of its whole operator, neither of which can hold anything a caller looks
-    for. A `SPAN` or a `COMMENT` piece is the whole region.
+    every span is one piece of two and a here-document redirection OPERATOR is
+    one piece, neither of which can hold anything a caller looks for. A `SPAN`,
+    a `COMMENT` or a `JOIN` piece is the whole region.
 
-    The second return value is the opener of a span that is never closed, ""
-    when every span closed. `_arm_end` refuses on it rather than guessing.
+    The second return value is the opener of a span that is never closed, or
+    `<<` and the delimiter of a here-document whose body never meets it, and ""
+    when everything closed. `_arm_end` refuses on it rather than guessing.
     """
     pieces: list[tuple[int, int, str]] = []
     stack: list[list] = []
     pending: list[tuple[str, bool]] = []
+    # The here-document delimiter being read, as the index of the first piece
+    # of its word and whether the `<<-` form stripped tabs. The word is read by
+    # this same loop rather than by a pattern of its own, which is what makes
+    # the delimiter production and `shell_words`'s word production one
+    # production. See `HEREDOC_OPERATOR` for what that production is and how
+    # each half of it was measured.
+    delimiter: tuple[int, bool] | None = None
     word_start = True
     span_start = 0
     index = 0
@@ -1072,17 +1421,27 @@ def shell_pieces(text: str) -> tuple[list[tuple[int, int, str]], str]:
                     # NOT a comment in bash: `echo "a"#b` prints `a#b`. This is
                     # the line that answers the tenth pass's `)` regression,
                     # and it answers it in the scanner rather than by taking
-                    # `)` back out of `COMMENT_WORD_START`, which a `case`
-                    # pattern needs.
+                    # `)` back out of `WORD_BREAK`, which a `case` pattern
+                    # needs.
                     word_start = False
                 continue
-            nested = _opener_at(text, index) if span.opens else ""
+            nested = _opener_at(text, index, span.inner)
             if nested:
                 stack.append([nested, SPANS[nested], 0])
                 index += len(nested)
                 continue
             index += 1
             continue
+        # The delimiter word ends here, and the check comes before every rule
+        # below it because the newline that ends the word is also the newline
+        # that starts the body.
+        if delimiter is not None and char in WORD_BREAK:
+            word = _word_value(text, pieces[delimiter[0]:])
+            if not word:
+                # `<<` with no word, which bash refuses to parse at all.
+                return pieces, "<<"
+            pending.append((word, delimiter[1]))
+            delimiter = None
         if char == "#" and word_start:
             newline = text.find("\n", index)
             end = len(text) if newline == -1 else newline
@@ -1091,23 +1450,32 @@ def shell_pieces(text: str) -> tuple[list[tuple[int, int, str]], str]:
             word_start = False
             continue
         if char == "\\" and index + 1 < len(text):
-            pieces.append((index, index + 2, TEXT))
+            kind = JOIN if text[index + 1] == "\n" else TEXT
+            pieces.append((index, index + 2, kind))
             index += 2
+            # A JOIN leaves the scanner exactly where the backslash was, which
+            # for a word start is the character before it. Nothing here needs
+            # that character back, because a continuation inside a word is
+            # removed and a continuation between words sits after a blank, so
+            # False is the answer in the direction that cannot widen.
             word_start = False
             continue
         if char == "\n" and pending:
             pieces.append((index, index + 1, TEXT))
-            body = _heredoc_end(text, index + 1, pending)
-            pieces.append((index + 1, body, SPAN))
+            body, unterminated = _heredoc_end(text, index + 1, pending)
+            pieces.append((index + 1, body, BODY))
             pending = []
             index = body
             word_start = True
+            if unterminated:
+                return pieces, f"<<{unterminated}"
             continue
-        redirect = HEREDOC.match(text, index)
+        redirect = (HEREDOC_OPERATOR.match(text, index)
+                    if delimiter is None else None)
         if redirect is not None:
-            pending.append((redirect.group(3), redirect.group(1) == "-"))
             pieces.append((index, redirect.end(), TEXT))
             index = redirect.end()
+            delimiter = (len(pieces), redirect.group(1) == "-")
             word_start = False
             continue
         opener = _opener_at(text, index)
@@ -1117,23 +1485,69 @@ def shell_pieces(text: str) -> tuple[list[tuple[int, int, str]], str]:
             index += len(opener)
             continue
         pieces.append((index, index + 1, TEXT))
-        word_start = char in COMMENT_WORD_START
+        word_start = char in WORD_BREAK
         index += 1
     if stack:
-        # The unclosed span is still a PIECE, so `_strip_shell_comments` keeps
-        # its text and the refusal comes from `_arm_end`, which is the caller
-        # that can say what it cost. Dropping it here instead would delete the
-        # rest of the region from the arm parser in silence, which is the
-        # failure shape this whole file is about.
+        # The unclosed span is still a PIECE, so `shell_source` keeps its text
+        # and the refusal comes from `_arm_end`, which is the caller that can
+        # say what it cost. Dropping it here instead would delete the rest of
+        # the region from the arm parser in silence, which is the failure shape
+        # this whole file is about.
         pieces.append((span_start, len(text), SPAN))
         return pieces, stack[0][0]
+    if delimiter is not None:
+        # The delimiter word runs to the end of the text, so the body is
+        # absent rather than unterminated. Named the same way, because the
+        # thing a maintainer has to look at is the same redirection.
+        word = _word_value(text, pieces[delimiter[0]:])
+        return pieces, f"<<{word}" if word else "<<"
     if pending:
         return pieces, f"<<{pending[0][0]}"
     return pieces, ""
 
 
-def _strip_shell_comments(text: str) -> str:
-    """`text` with every `#` that BEGINS A WORD removed, spans kept whole.
+def _word_value(text: str, pieces: list[tuple[int, int, str]]) -> str:
+    """The pieces of ONE shell word, after quote removal.
+
+    The whole of what "a word" means here, in one place, so the `GATES` array
+    and a here-document delimiter get the same answer. A span contributes its
+    contents when `Span.strips` says bash removes its delimiters and itself
+    otherwise, a backslash escape contributes the character it escapes, a line
+    continuation contributes nothing, and everything else contributes itself.
+
+    A substitution and a here-document body are contributed VERBATIM, because
+    this scanner does not run the shell and a word it cannot resolve has to
+    stay visible to whoever reads it. In the `GATES` array that lands outside
+    `GATE_NAME` and refuses.
+    """
+    out: list[str] = []
+    for start, end, kind in pieces:
+        if kind in (COMMENT, JOIN, BODY):
+            continue
+        if kind == SPAN:
+            opener = _opener_at(text, start)
+            span = SPANS.get(opener)
+            # Both delimiters have to be THERE. A `SPAN` piece is also how an
+            # unclosed span and a here-document BODY reach a caller, and a body
+            # that happens to begin with a quote would otherwise lose its first
+            # and last character to a closer that was never scanned.
+            closed = (span is not None
+                      and end - start >= len(opener) + len(span.close)
+                      and text.endswith(span.close, start, end))
+            if closed and span.strips:
+                out.append(text[start + len(opener):end - len(span.close)])
+            else:
+                out.append(text[start:end])
+            continue
+        if text[start] == "\\" and end - start == 2:
+            out.append(text[start + 1])
+            continue
+        out.append(text[start:end])
+    return "".join(out)
+
+
+def shell_source(text: str) -> str:
+    """`text` as the shell reads it: comments gone, continuations joined.
 
     `SHELL_COMMENT` was `(?<!\\S)#.*$`, which cannot tell a comment from a `#`
     inside a string. It ran over the whole `run_gate` region, so a legitimate
@@ -1158,23 +1572,36 @@ def _strip_shell_comments(text: str) -> str:
     `shell_pieces`'s answer now, not this function's, so the three callers
     cannot come to disagree about it.
 
-    What this still does not remove, stated exactly: a `#` inside `$'...'`, and
-    a `#` inside a command substitution written inside a double quote. Neither
-    is in the region and both are the declared limit of `shell_pieces` rather
-    than of this function.
+    **This was `_strip_shell_comments` and the continuation was a regex
+    pre-pass beside it until the thirteenth pass**, which is the fail-open
+    `JOIN` records above. Both are the scanner's answer now, for the same
+    reason the comment already was: a backslash is a continuation only outside
+    a comment, and a comment ends at a newline a continuation would otherwise
+    eat, so the two rules are one rule.
+
+    What this does NOT remove, stated exactly: a continuation INSIDE a double
+    quote or a substitution, which bash also removes and which this leaves in
+    place because a span is opaque to every caller here. It reaches only
+    `runs_command`'s text comparison, where it would make an arm command CI
+    runs verbatim look absent, which is a refusal.
     """
     pieces, _ = shell_pieces(text)
     return "".join(text[start:end] for start, end, kind in pieces
-                   if kind != COMMENT)
+                   if kind not in (COMMENT, JOIN))
 
 
 def _arm_end(text: str, start: int) -> tuple[int, str]:
     """Where the arm beginning at `start` ends, or why this parser cannot say.
 
     The first `;;` OUTSIDE every span and every comment. Returns its index and
-    an empty reason, or `-1` and the reason to refuse. Two reasons, both
-    fail-closed: a span that is never closed, which is not a shell script this
-    parser should guess at, and an arm with no terminator at all.
+    an empty reason, or `-1` and the reason to refuse. Three reasons, all
+    fail-closed: a span that is never closed, a here-document whose body never
+    meets its delimiter, and an arm with no terminator at all.
+
+    The here-document reason is separate from the span one since the S03
+    review's thirteenth pass, and it is not cosmetic. `: <<EOF-1` in an arm
+    used to reach the third reason, which says the arm has no `;;` about an
+    arm whose `;;` is right there, and sends a maintainer to the wrong line.
     """
     pieces, unclosed = shell_pieces(text[start:])
     for piece_start, _end, kind in pieces:
@@ -1182,6 +1609,11 @@ def _arm_end(text: str, start: int) -> tuple[int, str]:
             continue
         if text.startswith(";;", start + piece_start):
             return start + piece_start, ""
+    if unclosed.startswith("<<"):
+        return -1, (f"the here-document `{unclosed}` opens a body that never "
+                    f"meets its delimiter, so everything after it is read as "
+                    f"that body and this parser cannot tell which `;;` ends "
+                    f"the arm")
     if unclosed:
         return -1, (f"a {unclosed} span is opened and never closed, so this "
                     f"parser cannot tell which `;;` ends the arm")
@@ -1192,37 +1624,39 @@ def shell_words(text: str) -> list[str]:
     """`text` split into shell WORDS, with quotes removed.
 
     The reader `bin/ocelli.sh`'s `GATES=( ... )` array needs, and it is the
-    same scanner rather than a fourth grammar. A word ends at a blank or a
-    newline outside every span, a comment ends a word and is dropped, and a
-    quoted span contributes its CONTENTS so `"fmt|no|..."` is one word without
-    its quotes. A substitution or a here-document body is contributed verbatim,
-    because this scanner does not run the shell and a word it cannot resolve
-    has to stay visible to whoever reads it.
+    same scanner rather than a fourth grammar. A word ends where `WORD_BREAK`
+    says a word ends, which is at a blank, a newline or the first character of
+    an operator, and its value is `_word_value`'s, which a here-document
+    delimiter also uses.
+
+    The operator half of that break arrived in the S03 review's thirteenth
+    pass with the delimiter production, and it cannot change what this reads
+    out of the array today: MEASURED, `GATES=( a;b )`, `GATES=( a|b )` and
+    `GATES=( a>b )` are each a SYNTAX ERROR to bash, so an unquoted operator in
+    an entry is a file bash will not run, and the runner's twenty-nine entries
+    carry every one of theirs inside a quote.
     """
     words: list[str] = []
-    current: list[str] = []
+    current: list[tuple[int, int, str]] = []
     pieces, _ = shell_pieces(text)
-    for start, end, kind in pieces:
-        if kind == COMMENT:
+    for piece in pieces:
+        start, end, kind = piece
+        if kind in (COMMENT, BODY):
             continue
-        if kind == SPAN:
-            opener = _opener_at(text, start)
-            if opener in {"'", '"'}:
-                current.append(text[start + 1:end - 1])
-            else:
-                current.append(text[start:end])
-            continue
-        if text[start] in " \t\n":
+        if kind == JOIN:
+            # A continuation is removed and neither breaks a word nor begins
+            # one, so it joins a word already open and is dropped otherwise.
             if current:
-                words.append("".join(current))
+                current.append(piece)
+            continue
+        if kind == TEXT and end - start == 1 and text[start] in WORD_BREAK:
+            if current:
+                words.append(_word_value(text, current))
                 current = []
             continue
-        if text[start] == "\\" and end - start == 2:
-            current.append(text[start + 1])
-            continue
-        current.append(text[start:end])
+        current.append(piece)
     if current:
-        words.append("".join(current))
+        words.append(_word_value(text, current))
     return words
 
 
@@ -1331,7 +1765,7 @@ def _split_statements(text: str) -> list[str]:
     """`text` split on `STATEMENT_BREAK`, spans left whole.
 
     A separator inside a span does not separate anything, and it is the same
-    scanner that says so here, in `_arm_end` and in `_strip_shell_comments`.
+    scanner that says so here, in `_arm_end` and in `shell_source`.
     A `$( ... )` is one piece, so the `(` and `)` that delimit it are not the
     `(` and `)` of `STATEMENT_BREAK`, which is what a subshell writes.
     """
@@ -1342,7 +1776,7 @@ def _split_statements(text: str) -> list[str]:
     for start, end, kind in pieces:
         if start < index:
             continue
-        if kind == COMMENT:
+        if kind in (COMMENT, JOIN, BODY):
             continue
         if kind == SPAN:
             current.append(text[start:end])
@@ -1418,10 +1852,17 @@ def command_builtin_runs(statement: str) -> str:
 
 
 def arm_bodies(runner: str) -> dict[str, str]:
-    """Each gate's `run_gate` arm body, comments stripped, continuations joined.
+    """Each gate's `run_gate` arm body, as `shell_source` leaves the region.
 
     An arm ends at its `;;`. Nothing here can read a command out of prose. See
     the docstring's "Where an arm ENDS" section for what that cost.
+
+    **Comments and continuations are ONE call since the S03 review's
+    thirteenth pass, and the continuation was a regex pre-pass over shell
+    before it.** `CONTINUATION.sub(" ", region)` ran before the tokenizer,
+    which is the one thing the tokenizer's own header argues no pass may do,
+    and it joined the line after a COMMENT ending in a backslash into that
+    comment. bash joins nothing there. What that cost is measured at `JOIN`.
 
     **The stripping happens BEFORE any `;;` is looked for, and doing it after
     was a fail-open the S03 review's eighth pass measured.** The arm ends at the
@@ -1454,7 +1895,7 @@ def arm_bodies(runner: str) -> dict[str, str]:
             "restructured, in which case this parser has to be restructured "
             "with it, or the arms are gone. Both need a person, and neither "
             "may be read as agreement.") from error
-    body = _strip_shell_comments(CONTINUATION.sub(" ", region))
+    body = shell_source(region)
     bodies: dict[str, str] = {}
     index = 0
     while True:
@@ -1501,9 +1942,18 @@ def gate_commands(runner: str) -> dict[str, list[str]]:
             "(?:" + "|".join(re.escape(p) for p in COMMAND_PREFIXES) +
             r")[\w./ -]+", text)
         # Collapsed to single spaces. A joined continuation leaves the space
-        # that sat before the backslash beside the one that replaced it, and
-        # `runs_command` compares the text, so a doubled space would make an
-        # arm command that CI runs verbatim look absent.
+        # that sat before the backslash beside the whole of the next line's
+        # indentation, and `runs_command` compares the text, so the run of
+        # blanks would make an arm command CI runs verbatim look absent.
+        #
+        # A here-document BODY is still in `text` here, because `shell_source`
+        # has to return something `_arm_end` can re-scan and a source with the
+        # body cut out declares a here-document whose terminator is missing.
+        # So a body carrying one of `COMMAND_PREFIXES` yields a command this
+        # file then demands of CI. That is fail-CLOSED, it can only ADD a
+        # demand, and the refusal names the text, which is a message a
+        # maintainer can act on. `unseen_commands` does not see it: the body
+        # is its own piece kind and `_split_statements` drops it.
         arms[gate] = [re.sub(r"\s+", " ", c).strip() for c in found]
     return arms
 
@@ -1561,29 +2011,47 @@ def main() -> int:
     # exited 1 with `RuntimeError:` and no `FAIL:` header, which is fail-closed
     # and is still the wrong way to tell a maintainer what to do. The refusals
     # are unchanged. Only how they are printed is.
+    #
+    # The workflow's readers are inside this block since the S03 review's
+    # twelfth pass, and they were outside it while they could not fail. They
+    # can now: `.github/workflows/ci.yml` is PARSED, so a file that is not
+    # YAML, or whose shape this reader does not model, is a refusal here
+    # exactly as an unreadable `run_gate` region already was, and it arrives
+    # under the same header rather than as a traceback.
     try:
         arms = gate_commands(runner)
         unseen = unseen_commands(runner)
         declared = declared_gates(runner)
         excluded = runner_excluded(runner)
         entry_problems = gate_row_problems(runner)
+        commands = run_commands(workflow)
+        every_event = workflow_events(workflow)
     except RuntimeError as error:
         print("FAIL: CI does not run the whole floor")
         print(f"  {error}")
         return 1
-    commands = run_commands(workflow)
-    events = workflow_events(workflow) - MANUAL_EVENTS
+    events = every_event - MANUAL_EVENTS
 
     # An entry the gate reader cannot use, FIRST, because every rule below is
     # about the gates it did read and none of them can say anything about one
     # it dropped. That was measured at exit 0 with a gate running.
     problems = list(entry_problems)
     if not events:
+        # The declared keys are named because `on` is read as a string key
+        # here, so a workflow whose event block is written as YAML 1.1's
+        # boolean spelling `true:` reaches this branch, and a message saying
+        # only "no automatic event" would send its author looking at the
+        # events rather than at the key. That is the declared cost of
+        # `BaseLoader` and this is where it is paid.
+        top_level = sorted(workflow_tree(workflow))
         problems.append(
             f"{WORKFLOW.relative_to(ROOT)} declares no automatic event, so "
             f"there is no event on which the floor could be said to run. "
             f"`--floor` claims to be what CI runs, and a workflow only a "
-            f"person can start does not run on a pull request.")
+            f"person can start does not run on a pull request. The top-level "
+            f"keys this parser read are "
+            f"{', '.join(repr(key) for key in top_level) or 'none'}, and the "
+            f"event block is the one spelled `on`.")
 
     # The two exclusion lists, joined. A comment used to say they had to
     # agree and nothing read either of them.
@@ -1692,10 +2160,9 @@ def main() -> int:
     # somewhere. Nothing asserted that until the S03 review's fourth pass
     # deleted the whole `guards-deep` job and watched this exit 0.
     #
-    # Every declared event, MANUAL ONES INCLUDED, because a manual dispatch is
-    # exactly what `guards-deep` is on. The floor's own claim is about a change
-    # and stays narrower.
-    every_event = workflow_events(workflow)
+    # `every_event` is read above, MANUAL ONES INCLUDED, because a manual
+    # dispatch is exactly what `guards-deep` is on. The floor's own claim is
+    # about a change and stays narrower.
     gpu = gpu_gates(runner)
     reached_outside: dict[str, list[str]] = {}
     for gate in sorted(NOT_IN_FLOOR & set(declared)):

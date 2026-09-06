@@ -543,6 +543,211 @@ refuses a set that differs from `NOT_IN_FLOOR` either way, both files record
 the measurement, and this file was the last place still carrying the sentence
 they were rewritten to remove.
 
+### The shell half, and whether bash should be asked instead
+
+The `run_gate` arms and the `GATES` array are read by one tokenizer,
+`ci_floor_check.shell_pieces`. The S03 review's twelfth pass put the obvious
+question to it: `bin/ocelli.sh` is bash, `declare -f run_gate` is bash's own
+reparse of the function, and the unit suite already asks bash about the `GATES`
+array while nothing asked it about the arms. So why is a shell production
+written by hand at all.
+
+**The answer is three measurements, and it splits the question in two.** bash
+is not the READER, and bash IS the test oracle.
+
+1. `declare -f` needs the function defined, and defining it needs the file
+   EXECUTED. `set -n` is the only way to ask bash to parse without running and
+   it does not define functions, so a `set -n` source followed by a
+   `declare -f run_gate` prints nothing. A reader that asked bash would
+   source `bin/ocelli.sh`. This check exists to read a runner somebody has
+   changed, and `scripts/guards/catalogue.py` plants adversarial shell into
+   that very file inside a disposable clone and runs the check over it. A
+   reader that sources turns "this file is misparsed" into "this file is run".
+2. `declare -f`'s output is a pretty-printed form with no stability contract,
+   and it differs between the two bash versions on this machine. On one input,
+   5.3.15 prints `cat <<'EOF'` and `esac`, and /bin/bash 3.2.57 prints
+   `cat  <<'EOF'`, with two spaces, and `esac;`. Consuming that as text is a
+   hand-written model of an undocumented printer, which is the same defect
+   class one layer along rather than an escape from it.
+3. What it would have bought is smaller than it looks. `declare -f` strips
+   comments and joins continuations, which the scanner now does from the
+   grammar, and it normalises NEITHER spelling the twelfth pass measured as
+   fail-open: `<<\EOF` comes back as `<<'EOF'` and `<<'EOF-1'` comes back
+   unchanged.
+
+So bash is asked in `scripts/tests/test_guard_readers.py`, where it is safe and
+where a divergence is a red test rather than an executed plant. Every row of
+the span table and the here-document production is run as a synthetic `case`
+arm of `echo` markers, and what bash PRINTS is compared with what the scanner
+attributes to the arm. That found a fail-open nobody had suspected: the
+backtick's "may a span open inside me" flag was true, and bash's answer is no.
+``x=`printf '%s' 'a`b'` `` is an error to bash, "unexpected EOF while looking
+for matching `''", so a quote inside a backtick does not hide the closing
+backtick, and the scanner had been accepting a file bash refuses.
+
+**The two measured fail-opens the thirteenth pass closed**, both in the
+here-document delimiter, which was the last hand-written production in the
+tokenizer. It was spelled as a regex with an invented character class,
+`(['"]?)([A-Za-z_]\w*)\2`, and bash takes a WORD quoted by any of three
+mechanisms. When the redirection is not recognised the body is scanned as CODE,
+so a `;;` in it ends the arm and everything after it leaves in silence. Planted
+in the `prose` arm of a real clone with a real command after it, `bash -n`
+green, `scripts/ci_floor_check.py` at exit 0 with that command dropped, and the
+same shape under bash running it:
+
+- `<<\EOF`, backslash-quoted, the third mechanism beside `'` and `"`.
+- `<<'EOF-1'`, where `\w*` stops at the hyphen and the closing quote then fails
+  to match.
+
+The delimiter is read as a shell word by the scanner itself now, which is the
+one word production this file has and the one `shell_words` reads the `GATES`
+array with. Each half of it was measured: the word is not expanded, `cat
+<<EOF$X` wanting the literal `EOF$X`; it is subject to quote removal only, `cat
+<<a"b"c` terminating on `abc`. And it ends at a blank, a newline or the first
+character of an operator, which `cat <<EOF; echo AFTER` and `cat <<EOF|cat`
+both show by running what follows.
+
+**Two smells went with them.** A regex pre-pass joined line continuations
+BEFORE the tokenizer, which is the one thing the tokenizer's own header argues
+no pass may do, and a backslash ending a COMMENT line continues nothing in
+bash: `echo A # c \` then `echo B` prints both. The pre-pass joined the next
+line into the comment, the planted command vanished entirely, the arm map came
+back holding the NEXT gate's command, and the check refused while naming two
+gates neither of which was the one edited. And a here-document BODY was being
+read as commands: with a two-word English note in an arm, the check exited 1
+reporting that the arm "runs 'a note', 'EOF-1'", which is a guard refusing a
+legitimate state. A body is data, it is its own piece kind now, and the
+statement split drops it.
+
+**What stays hand-rolled, said as what it cannot see.** The scanner models
+spans and words and does not model bash's compound commands, so it cannot tell
+a `(` that opens a subshell from one that ends a `case` pattern, and it cannot
+tell `((` arithmetic from `( (` nested subshells the way bash does, which is by
+attempting the arithmetic parse and backtracking. `$(case y in *) ... esac)`
+closes at the pattern's `)` and the arm ends at the inner `;;`, which
+`NESTED_CASE` refuses. `(( a << b ))` reads the `<<` as a here-document whose
+body runs to the end of the region, which refuses. And a here-document inside a
+substitution is not queued, its body being inside the same span. All three are
+fail-closed and each is asserted where it is rather than assumed away. Doing
+better needs a compound-command parser, which is a second grammar, and the
+point of one tokenizer is that there is not one.
+
+**The refusal for a gate name outside `[A-Za-z0-9_-]+` was watched by
+nothing**, and the unit test carrying its name asserted the opposite. That test
+planted `prose2`, which is INSIDE the class, and asserted the problem list was
+empty, under a docstring reading "Refused, and not dropped". MEASURED with the
+branch disabled: the census, all 54 `ci-floor` probes and both unit suites
+stayed at their unmutated status. It is probed now with a dotted name, which is
+the shape the refusal's own sentence is about, because a gate name reaches
+`re.escape`-free patterns in three files and a dot is a wildcard in every one
+of them. The digit case keeps its probe and its note now says what it actually
+watches, which is that the entry is COUNTED, and an accept probe beside it
+watches the direction the class must not narrow back into.
+
+`scripts/lint_policy_check.py` lost its last hand-rolled reader of `Cargo.toml`
+in the same pass. `member_patterns` required a literal `[workspace]` header on
+its own line and each member in double quotes, so `workspace.members =
+["crates/*"]` and a single-quoted glob each read as no members at all, and both
+are one workspace to cargo 1.97.1 at `cargo metadata` exit 0. It reads the
+parsed document now, beside `workspace_lints` and `inherits_workspace_lints`,
+so there is no regex over TOML left in that file. Its `main` also read the
+manifest with an unguarded `read_text`, so a file that is not UTF-8 arrived as
+a traceback rather than under the `FAIL:` header, which probe
+`lint-policy.manifest-not-utf8` now watches.
+
+### The workflow is YAML, and the CI floor now has one dependency
+
+`scripts/ci_floor_check.py` reads `.github/workflows/ci.yml` with
+`yaml.load(..., Loader=yaml.BaseLoader)`. That is **deviation D-17**, the only
+third-party import anywhere in the CI floor, and it is recorded rather than
+quiet because a floor gate acquiring one is exactly the kind of change this
+project puts in front of a reviewer.
+
+**What it bought, measured.** The S03 review's twelfth pass planted inputs at
+the hand-rolled reader, which is what the eleventh pass's remediation predicted
+somebody would do, and found four fail-open routes and five refusals of
+workflows GitHub Actions runs correctly. Each was measured against a real parse
+and only reported where the parse is unambiguous.
+
+The four, each at exit 0 where the check should refuse:
+
+1. **Key order.** `run_commands` attached whatever `if:` it had seen so far, so
+   `- run: bin/ocelli.sh gate guards` with its `if:` written underneath exited
+   0, and the identical two lines in the other order exited 1. Two more
+   spellings of the same mapping, a quoted `"if":` key and a multi-line flow
+   mapping with `run` first, did the same. All three on `guards`, the gate that
+   watches every other gate, in an edit that reads as tidying.
+2. **`run: >` folding**, which split one narrowed command into two and let the
+   argv comparison match the first half. The seventh pass's hole reached by
+   changing one character.
+3. **A quoted key in `on:`**, which narrowed the event set the floor is checked
+   against and printed the narrowed list in the OK line.
+4. **A gate name in any `run:` TEXT**, so an `echo` mentioning the gate
+   satisfied it, and **a `run:` key at any depth**, so an action input under
+   `with:` did too. The gate reached that way was `panic`, HLD section 23's
+   wasm panic-hook proof.
+
+A fifth turned up while building the probe for the parse refusal.
+`- run: [bin/ocelli.sh gate guards` is an unterminated flow sequence that no
+YAML parser accepts, so GitHub Actions cannot run that workflow at all, and the
+line reader exited **0** reporting the whole floor covered because the text
+after `run:` still held the gate name.
+
+And the five refusals: a quoted `run:` scalar, a block scalar with an explicit
+indentation indicator, a single-line flow-mapping step, a trailing YAML comment
+on an `if:`, and `on:` written as a block sequence. The comment one quoted a
+condition back at its author while saying the gate does not run on events that
+condition plainly runs on.
+
+**Why the dependency rather than a fail-closed reader.** Refusing every
+spelling the reader does not model closes routes 2, 3 and 4 and is
+dependency-free, and it provably does not close route 1: key order is not a
+spelling, it is what reading a tree line by line produces. Worse, three of the
+five legitimate spellings above are spellings such a rule would have to refuse,
+so the fail-closed repair makes a guard that refuses a legitimate state
+permanent by design at the moment it leaves the widest route open. A parser
+satisfies both halves at once, because it accepts every legal spelling and
+yields one tree.
+
+It is also the argument this file has already recorded three times. The shell
+arms and the `GATES` array stopped being read with a regex in the ninth and
+eleventh passes, and check c's `Cargo.toml:workspace.lints` entry reads TOML
+with `tomllib`. YAML was the fourth foreign grammar in that file and the only
+one still read by hand. `tomllib` is stdlib and PyYAML is not, and that is the
+whole of the difference.
+
+**The cost, stated exactly.** `pyyaml==6.0.3` is pinned in `pyproject.toml`
+beside the eight corpus-tooling pins, and `uv.lock` carries it. The `guards`
+job in `.github/workflows/ci.yml` installs it, reading the version out of
+`pyproject.toml` rather than copying it, and that job is the only one running
+the `ci` gate, the census that imports the module, or the probes that run it
+inside a disposable clone. An absent PyYAML is a refusal at import with the
+install command in it, under the same `FAIL:` header as every other refusal in
+that file. There is no `except ImportError` fallback anywhere, because a quiet
+return to the reader with four measured fail-open routes would be a floor gate
+that silently checks less wherever a dependency is missing. Probe
+`ci-floor.pyyaml-absent` runs the guard under `python3 -S`, which takes
+site-packages off the path, and reports HARNESS the moment that refusal becomes
+a fallback.
+
+`BaseLoader` and not `SafeLoader`, and it is the more restrictive of the two:
+it constructs `str`, `list` and `dict` and resolves no implicit tag. What that
+buys is that `on` stays the string `'on'` rather than becoming YAML 1.1's
+boolean, so the reader's `(?:on|"on"|'on'|true)` alternation went away instead
+of being carried into a tree. The cost of that choice is declared in the
+catalogue's limit and paid in the refusal message: a workflow whose event block
+is written `true:` reads as having no `on` key, and the refusal names the
+top-level keys it did read.
+
+**Three existing probes were planting a file GitHub Actions rejects**, and only
+the parse could see it. `_put_gate_step_behind` turned a step's `run:` line into
+a new `- ` list item, which is right when the `run:` is the step's first key and
+invalid YAML when the step carries a `name:` as well. The line reader accepted
+it and the probes passed, so `ci-floor.event-gated`, its accept twin and
+`ci-floor.complementary-steps` were asserting this guard's behaviour on
+something that is not a workflow. A probe input has to be a state the real
+system can be in.
+
 `scripts/lint_policy_check.py` is in the `guards` gate rather than in `clippy`
 because it is check c's class of problem rather than clippy's. The `clippy`
 gate runs `-D warnings`, which turns whatever is enabled into an error and

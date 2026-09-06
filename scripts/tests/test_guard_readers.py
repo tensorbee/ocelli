@@ -22,6 +22,7 @@ machine that runs the gate has one.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -48,8 +49,51 @@ def bash_says(script: str) -> str:
     return done.stdout
 
 
+MARKER = re.compile(r"\bM\d\b")
+
+
+def bash_runs_in_the_arm(body: str) -> set[str]:
+    """The markers bash RUNS when `body` is one arm of a `case`.
+
+    **This is the arm reader's oracle, and it is bash rather than a reading of
+    POSIX.** The S03 review's twelfth pass asked whether bash can be asked for
+    the arm bodies of `run_gate` instead of a hand-written model, and
+    `ci_floor_check`'s tokenizer header records why the READER does not ask it:
+    `declare -f` needs the file executed, and its output format differs between
+    the two bash versions on this machine. Neither objection touches a TEST,
+    which runs a SYNTHETIC arm of `echo` markers and reads what bash prints.
+
+    So every case in `WhereAnArmEnds` below states its claim twice: what bash
+    really runs, and what the scanner attributes to the arm. A shape where
+    those two disagree is the fail-open class this file has been rewritten for
+    five passes running.
+
+    A second arm is present and must never run, because an arm that ends early
+    runs the NEXT arm's body in this parser's reading and not in bash's.
+    """
+    script = f"case g in\n  g) {body} ;;\n  g2) echo M9 ;;\nesac\n"
+    return set(MARKER.findall(bash_says(script)))
+
+
+def scanner_keeps_in_the_arm(body: str) -> set[str]:
+    """The markers `ci_floor_check`'s arm reader attributes to the same arm.
+
+    The same region the check itself reads, through the same two functions:
+    `shell_source` for comments and continuations, `_arm_end` for the
+    terminator. Reading it any other way would test a path the guard does not
+    take.
+    """
+    region = f"case g in\n  g) {body} ;;\n  g2) echo M9 ;;\nesac\n"
+    text = ci_floor_check.shell_source(region)
+    start = text.index("g)") + 2
+    end, reason = ci_floor_check._arm_end(text, start)
+    if reason:
+        raise AssertionError(f"the scanner refused the arm: {reason}")
+    return set(MARKER.findall(text[start:end]))
+
+
 class WhereAShellCommentBegins(unittest.TestCase):
-    """`_strip_shell_comments`, against bash rather than against itself."""
+    """`shell_source`, against bash rather than against itself."""
 
     @unittest.skipUnless(BASH, "no bash on this machine")
     def test_a_hash_after_a_substitution_is_not_a_comment(self) -> None:
@@ -63,23 +107,23 @@ class WhereAShellCommentBegins(unittest.TestCase):
             bash_says("echo A$(printf x)#no && echo RAN_SECOND"),
             "Ax#no\nRAN_SECOND\n")
         self.assertEqual(
-            ci_floor_check._strip_shell_comments("echo A$(printf x)#no && x"),
+            ci_floor_check.shell_source("echo A$(printf x)#no && x"),
             "echo A$(printf x)#no && x")
 
     @unittest.skipUnless(BASH, "no bash on this machine")
     def test_a_hash_after_an_operator_is_a_comment(self) -> None:
         """The direction the fix must not undo. A `case` pattern ends with a
         real operator `)` and a `#` after one opens a comment, which is why
-        `)` stays in `COMMENT_WORD_START`."""
+        `)` stays in `WORD_BREAK`."""
         self.assertEqual(bash_says("true;#;;\necho AFTER"), "AFTER\n")
         self.assertEqual(
-            ci_floor_check._strip_shell_comments("true;#;;\necho AFTER"),
+            ci_floor_check.shell_source("true;#;;\necho AFTER"),
             "true;\necho AFTER")
 
     @unittest.skipUnless(BASH, "no bash on this machine")
     def test_a_hash_after_a_closing_quote_is_not_a_comment(self) -> None:
         self.assertEqual(bash_says('echo "a"#b'), "a#b\n")
-        self.assertEqual(ci_floor_check._strip_shell_comments('echo "a"#b'),
+        self.assertEqual(ci_floor_check.shell_source('echo "a"#b'),
                          'echo "a"#b')
 
     def test_a_hash_inside_a_span_is_not_a_comment(self) -> None:
@@ -89,7 +133,7 @@ class WhereAShellCommentBegins(unittest.TestCase):
                      "echo ${x#y} c",
                      "cat <<EOF\n# kept\nEOF\nc"):
             with self.subTest(text):
-                self.assertEqual(ci_floor_check._strip_shell_comments(text),
+                self.assertEqual(ci_floor_check.shell_source(text),
                                  text)
 
     def test_an_unclosed_span_keeps_its_text(self) -> None:
@@ -100,10 +144,278 @@ class WhereAShellCommentBegins(unittest.TestCase):
         in silence, which is the failure shape this whole file is about.
         """
         text = "a && echo 'never closed\nb ;;"
-        self.assertEqual(ci_floor_check._strip_shell_comments(text), text)
+        self.assertEqual(ci_floor_check.shell_source(text), text)
         end, reason = ci_floor_check._arm_end(text, 0)
         self.assertEqual(end, -1)
         self.assertIn("opened and never closed", reason)
+
+
+class WhatBashRunsInAnArm(unittest.TestCase):
+    """Every span-table row and the here-document production, against bash.
+
+    **These are the six mutations the S03 review's twelfth pass found the suite
+    could not see, plus the two fail-opens it measured.** Each case runs the
+    shape under bash, reads the markers bash printed, and requires the scanner
+    to attribute the same set to the arm. A table of shell facts nothing
+    re-derives is how the last four passes each shipped one more wrong row.
+    """
+
+    def check(self, body: str, expected: set[str]) -> None:
+        self.assertEqual(bash_runs_in_the_arm(body), expected,
+                         "bash does not do what this case claims")
+        self.assertEqual(scanner_keeps_in_the_arm(body), expected)
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_backslash_quoted_heredoc_delimiter(self) -> None:
+        """`<<\\EOF`, the third quoting mechanism beside `'` and `"`.
+
+        The first of the twelfth pass's two measured fail-opens. `HEREDOC` was
+        `<<(-?)(?!<)[ \\t]*(['\\"]?)([A-Za-z_]\\w*)\\2`, which knows two of the
+        three, so the redirection was not recognised, the body was scanned as
+        CODE and its `;;` ended the arm. MEASURED in the `prose` arm of a real
+        clone with a real `python3 scripts/prose_check.py --probe-extra` after
+        it: `bash -n` green, `scripts/ci_floor_check.py` exit 0, that command
+        dropped, and bash really runs it.
+        """
+        self.check("echo M1 &&\n: <<\\EOF\ntrue ;;\nEOF\necho M2",
+                   {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_quoted_heredoc_delimiter_holding_a_hyphen(self) -> None:
+        """`<<'EOF-1'`, where `\\w*` stops at the hyphen.
+
+        The second fail-open, and it is the one that shows why a character
+        class was the wrong shape rather than the wrong class: `\\w*` matched
+        `EOF`, the closing `'` then failed to match `-`, and the whole
+        redirection went unrecognised. Same measurement as above, exit 0 with
+        the command dropped.
+        """
+        self.check("echo M1 &&\n: <<'EOF-1'\ntrue ;;\nEOF-1\necho M2",
+                   {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_an_unquoted_heredoc_delimiter_holding_a_hyphen(self) -> None:
+        """`<<EOF-1`, the near miss, which used to refuse for the wrong reason.
+
+        The delimiter is a WORD and a hyphen is in it, so this terminates and
+        the arm reads to its own `;;`. The old class stopped at `EOF`, never
+        met a terminator, swallowed the rest of the region as one span, and
+        then could not even report that: `shell_pieces` cleared `pending`
+        before its own `if pending:` test, so the refusal said "the arm reaches
+        the end of the region with no `;;` terminator" about an arm whose `;;`
+        was right there.
+        """
+        self.check("echo M1 &&\n: <<EOF-1\ntrue ;;\nEOF-1\necho M2",
+                   {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_heredoc_delimiter_ends_at_an_operator(self) -> None:
+        """The word ends at a blank, a newline or an operator, not at a class.
+
+        Each of these is a shape bash runs, and the delimiter in each is `EOF`
+        with the operator after it belonging to the command line.
+        """
+        for body in ("echo M1 &&\n: <<EOF; echo M2\ntrue ;;\nEOF\n:",
+                     "echo M1 &&\n: <<EOF>/dev/null\ntrue ;;\nEOF\necho M2",
+                     "echo M1 &&\n: <<- EOF\n\ttrue ;;\n\tEOF\necho M2"):
+            with self.subTest(body):
+                self.check(body, {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_comment_ending_in_a_backslash_continues_nothing(self) -> None:
+        """A backslash ending a COMMENT line, which bash does not join.
+
+        `arm_bodies` ran `CONTINUATION.sub(" ", region)` BEFORE the tokenizer,
+        which is the one thing the tokenizer's own header says no pass may do.
+        MEASURED: the pre-pass joined the next line into the comment, the
+        planted `python3 scripts/prose_check.py --probe-extra` vanished
+        entirely, `arms['prose']` came back holding the `content` gate's
+        command, and the check refused while naming two gates neither of which
+        was the one edited.
+        """
+        self.check("echo M1 &&\n# a note ending in a backslash \\\necho M2",
+                   {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_continuation_inside_a_command_joins_it(self) -> None:
+        """The direction the fix must not undo, and the reason `JOIN` is a
+        piece rather than a deletion in the scanner.
+
+        The marker set alone cannot see this: a backslash left in the text
+        does not move a `;;`. What it moves is `gate_commands`, whose
+        extraction class stops at the backslash, so `-p <suite>` falls off the
+        end of every multi-line arm and the arm command CI runs verbatim reads
+        as absent. So the join is asserted on the TEXT as well.
+        """
+        self.check("echo M1 &&\necho \\\nM2", {"M1", "M2"})
+        self.assertEqual(
+            ci_floor_check.shell_source("python3 x.py \\\n  --flag"),
+            "python3 x.py   --flag")
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_single_quote_takes_no_backslash_escape(self) -> None:
+        """`Span("'", escapes=False)`, and the suite could not see it flipped.
+
+        MEASURED: `echo 'a\\'` prints `a\\`, so the quote closes at the second
+        `'` and the backslash is literal. With `escapes` True the span would
+        run past it to the next quote in the region.
+        """
+        self.assertEqual(bash_says("echo 'a\\'"), "a\\\n")
+        self.check("echo M1 && echo 'a\\' && echo M2", {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_double_quote_does_take_one(self) -> None:
+        self.assertEqual(bash_says('echo "a\\" ;; b"'), 'a" ;; b\n')
+        self.check('echo M1 && echo "a\\" ;; b" && echo M2', {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_backtick_takes_one_too(self) -> None:
+        """An escaped backtick does not close a backtick span.
+
+        With `escapes` False the span would end at the first `` \\` ``, the
+        rest of the substitution would be read as code and the next backtick
+        would open a span that never closes, which refuses. bash runs both
+        markers here, so refusing is wrong and the escape is load-bearing.
+        """
+        self.check("echo M1 && test -n `printf '%s' a\\`:\\`c` && echo M2",
+                   {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_backtick_opens_no_span_inside_itself(self) -> None:
+        """**A fail-open in the span table, and the twelfth pass's mutation
+        list is what found it.**
+
+        The backtick's `opens` was `True`, and flipping it to `False` left all
+        24 tests green. `False` is bash's answer. MEASURED:
+        `x=`printf '%s' 'a`b'`` is an ERROR to bash, "unexpected EOF while
+        looking for matching `''", so the quote inside did NOT hide the closing
+        backtick: a backtick runs to the next unescaped backtick and nothing
+        opens inside it. The scanner said the whole thing was one closed span
+        and accepted a file bash refuses.
+        """
+        done = subprocess.run([BASH, "-c", "x=`printf '%s' 'a`b'`"],
+                              capture_output=True, text=True)
+        self.assertIn("unexpected EOF", done.stderr)
+        end, reason = ci_floor_check._arm_end("x=`printf '%s' 'a`b'` ;; t", 0)
+        self.assertEqual(end, -1)
+        self.assertIn("opened and never closed", reason)
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_double_quote_opens_the_three_substitutions(self) -> None:
+        """The declared limit until the thirteenth pass, closed and measured.
+
+        `"` ran to its closer, so a `"` inside a `$( )` inside a `"` ended the
+        outer quote early. All three of these print through, so all three open
+        inside a double quote and carry their own nesting.
+        """
+        for script, printed in (
+                ('printf "[%s]" "a$(printf "%s" X)b"', "[aXb]"),
+                ('printf "[%s]" "a`printf b`c"', "[abc]"),
+                ('u=;printf "[%s]" "${u:-"}"}"', "[}]")):
+            with self.subTest(script):
+                self.assertEqual(bash_says(script), printed)
+        self.check('echo M1 && echo "a$(printf ";;")b" && echo M2',
+                   {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_double_quote_opens_neither_quote_form(self) -> None:
+        """The direction that must not widen with it. Inside a double quote a
+        `'` is literal and `$'...'` is a `$` beside a literal quote, so opening
+        either would run the span to some later quote in the region."""
+        self.assertEqual(bash_says("""printf "[%s]" "a'b\""""), "[a'b]")
+        self.assertEqual(bash_says("""printf "[%s]" "$'a'\""""), "[$'a']")
+        self.check("""echo M1 && echo "a'b" && echo M2""", {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_bare_paren_deepens_a_substitution(self) -> None:
+        """`Span.nests`, reached at last.
+
+        `test_a_nested_substitution_closes_at_the_outer_paren` never touched
+        the counter, because the inner `$(` was re-opened as a span whatever
+        the counter said, so the twelfth pass could set the depth wrong and
+        watch 24 tests stay green. A SUBSHELL is the shape that needs it.
+        MEASURED: `echo A$( (printf x) )#b && echo RAN_SECOND` prints `Ax#b`
+        and `RAN_SECOND`, so bash balanced the bare parentheses and the `#`
+        after the closing one is not a comment. Without the counter the span
+        ends at the inner `)`, the next `)` is then an operator, a `#` after an
+        operator IS a comment and the rest of the line goes with it.
+        """
+        self.assertEqual(bash_says("echo A$( (printf x) )#b && echo RAN"),
+                         "Ax#b\nRAN\n")
+        self.check("echo A$( (printf x) )#b && echo M1 && echo M2",
+                   {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_bare_brace_deepens_an_expansion(self) -> None:
+        """The same field one span along, and the marker set alone cannot see
+        it: a `${ }` that ends early is followed by a `}` that is not a word
+        break, so no `;;` moves. What moves is `_split_statements`, where `{`
+        and `}` ARE separators, so an expansion read as ending early is split
+        into two statements and the residue is reported as a command CI does
+        not run.
+
+        MEASURED: `${u:-{a}}` prints `{a}`, so bash balanced the bare braces
+        rather than closing at the first `}`. `${u:-'}'}` prints `}` and
+        `${u:-a\\}b}` prints `a}b`, so a quote and a backslash each hide one
+        too.
+        """
+        self.assertEqual(bash_says("u=;printf '[%s]' ${u:-{a}}"), "[{a}]")
+        self.assertEqual(bash_says("u=;printf '[%s]' ${u:-'}'}"), "[}]")
+        self.assertEqual(bash_says("u=;printf '[%s]' ${u:-a\\}b}"), "[a}b]")
+        self.check("u=; echo M1 ${u:-{a}} && echo M2", {"M1", "M2"})
+        self.assertEqual(
+            ci_floor_check._split_statements("echo M1 ${u:-{a}} && echo M2"),
+            ["echo M1 ${u:-{a}} ", " echo M2"])
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_dollar_single_quote_is_a_span(self) -> None:
+        """The other half of the limit the eleventh pass declared.
+
+        `$'...'` was not an opener, so the `$` was text and the `'` opened an
+        ordinary single quote, which closes at the escaped quote inside and
+        leaves the rest of the region reading as quoted. MEASURED: `$'a\\'b'`
+        is the one string `a'b` to bash. Its EXTENT is modelled now. Its C
+        escapes are not decoded, which `shell_words` declares.
+        """
+        self.assertEqual(bash_says("printf '[%s]' $'a\\'b'"), "[a'b]")
+        self.check("echo M1 && echo $'a\\';;b' && echo M2", {"M1", "M2"})
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_heredoc_body_is_not_a_command(self) -> None:
+        """A legitimate here-document note in an arm, which used to refuse.
+
+        MEASURED before the fix, with `: <<'EOF-1'` and a two-word note in the
+        `prose` arm of a real clone: `scripts/ci_floor_check.py` exited 1
+        reporting that the arm "runs 'a note', 'EOF-1'". Two lines of English
+        demanded of CI as commands is a guard refusing a legitimate state,
+        which is the runbook's own sentence. The body is a piece of its own
+        kind now, and `_split_statements` drops it.
+        """
+        arm = "python3 x.py &&\n: <<'EOF-1'\na note\nEOF-1\n"
+        text = ci_floor_check.shell_source(f"case g in\n  g) {arm} ;;\nesac\n")
+        start = text.index("g)") + 2
+        end, reason = ci_floor_check._arm_end(text, start)
+        self.assertEqual(reason, "")
+        statements = ci_floor_check._split_statements(text[start:end])
+        self.assertEqual([s for s in statements if "a note" in s], [])
+        self.assertEqual([s for s in statements if "EOF-1" in s
+                          and "<<" not in s], [])
+
+    def test_a_heredoc_body_that_never_closes_is_named(self) -> None:
+        """The refusal `_heredoc_end`'s docstring claimed for two passes.
+
+        It said an unterminated body "reports the whole remainder so the
+        caller's unclosed-span refusal is what fires", and `shell_pieces`
+        cleared `pending` before its own `if pending:` test, so `unclosed` came
+        back empty and the arm was refused for having no `;;` at all. bash
+        refuses this file too, with a here-document warning, so the direction
+        was never in doubt. What it said was.
+        """
+        end, reason = ci_floor_check._arm_end(
+            "echo a &&\n: <<EOF\nbody ;;\necho b ;;", 0)
+        self.assertEqual(end, -1)
+        self.assertIn("here-document `<<EOF`", reason)
+        self.assertIn("never meets its delimiter", reason)
 
 
 class WhereAnArmEnds(unittest.TestCase):
@@ -177,7 +489,39 @@ class TheGatesArrayHasOneReader(unittest.TestCase):
             listed.split())
 
     def test_an_entry_outside_the_name_class_is_refused(self) -> None:
-        """Refused, and not dropped. Dropping it was the defect."""
+        """Refused, and not dropped. Dropping it was the defect.
+
+        **This test planted `prose2` and asserted `gate_row_problems` was
+        EMPTY until the S03 review's thirteenth pass**, with a docstring
+        saying "Refused, and not dropped". `prose2` is INSIDE
+        `[A-Za-z0-9_-]+`, so it asserted the opposite of its own name: that a
+        digit in a name is counted, which is true, which is
+        `test_a_digit_in_a_name_is_counted` below, and which says nothing
+        about the refusal. MEASURED: with the `if not GATE_NAME.match(name)`
+        branch disabled, all 24 tests, both unit suites, the census and all 54
+        `ci-floor` probes stayed at their unmutated status. The name-class
+        refusal was watched by nothing at all.
+
+        A dot is the shape that matters, because the refusal's own sentence is
+        that a gate name reaches `re.escape`-free patterns in this file, in
+        `scripts/guards/census.py` and in the catalogue's probe builders, and
+        a dot in a name is a regex wildcard in every one of them.
+        """
+        runner = self.RUNNER.read_text().replace(
+            "GATES=(\n", 'GATES=(\n  "pro.se|no|a dotted name"\n', 1)
+        problems = ci_floor_check.gate_row_problems(runner)
+        self.assertTrue(any("whose name is outside" in p for p in problems),
+                        problems)
+        self.assertIn("pro.se", ci_floor_check.declared_gates(runner))
+
+    def test_a_digit_in_a_name_is_counted(self) -> None:
+        """The direction the class must not narrow into.
+
+        `bin/ocelli.sh` reads an entry with `IFS='|' read -r name gpu desc`
+        and imposes no class, and the two Python copies of the row regex both
+        spelled it `[a-z-]+`, so a gate named `prose2` was counted by bash and
+        by neither of them. It is counted here and it is not a problem row.
+        """
         runner = self.RUNNER.read_text().replace(
             "GATES=(\n", 'GATES=(\n  "prose2|no|a second pass"\n', 1)
         self.assertIn("prose2", ci_floor_check.declared_gates(runner))
@@ -298,6 +642,67 @@ class OneLintTableRowFiveWays(unittest.TestCase):
                             lint_policy_check.workspace_lints_rows(other))
 
 
+class BothLintTablesAreRead(unittest.TestCase):
+    """`LINT_TABLES`, which the twelfth pass could narrow to `("clippy",)`
+    with 24 tests staying green.
+
+    MEASURED under the pinned 1.97.1 toolchain, one workspace declaring
+    `[workspace.lints.clippy] cast_possible_truncation = "deny"` and
+    `[workspace.lints.rust] unused_variables = "deny"`, one member inheriting
+    with `[lints] workspace = true`, one `x as i32` and one unused binding.
+    `cargo clippy --workspace --all-targets` exits 101 reporting BOTH, as
+    errors: `casting `i64` to `i32` may truncate the value` and `unused
+    variable: y`. So the `rust` table is enforced exactly as the `clippy` one
+    is, and HLD 27.1's `unsafe_code` row lives in it.
+    """
+
+    DOCUMENT = ('[workspace.lints.clippy]\n'
+                'cast_possible_truncation = "deny"\n\n'
+                '[workspace.lints.rust]\n'
+                'unsafe_code = "forbid"\n')
+
+    def test_the_rust_table_is_read_and_not_only_clippy(self) -> None:
+        tables, error = lint_policy_check.workspace_lints(self.DOCUMENT)
+        self.assertEqual(error, "")
+        self.assertEqual(sorted(tables), ["clippy", "rust"])
+        self.assertEqual(lint_policy_check.lint_levels(tables["rust"]),
+                         {"unsafe_code": "forbid"})
+
+    def test_the_recorded_rows_carry_both_tables(self) -> None:
+        """The ratchet records what the guard reads, so narrowing the tables
+        has to move the recorded value rather than leaving it stale."""
+        rows = lint_policy_check.workspace_lints_rows(self.DOCUMENT)
+        self.assertIn("clippy.cast_possible_truncation", rows)
+        self.assertIn("rust.unsafe_code", rows)
+
+
+class WhichMemberGlobsTheWorkspaceDeclares(unittest.TestCase):
+    """`member_patterns`, the third hand-rolled reader of this document.
+
+    Every spelling below was MEASURED to be one workspace to cargo 1.97.1:
+    `cargo metadata --no-deps --offline` exits 0 on each. The regex this
+    replaced required a literal `[workspace]` header on its own line and each
+    entry in DOUBLE quotes, so it read no members at all from two of them, and
+    `main` then refuses a workspace whose member list it could not resolve.
+    """
+
+    def test_every_spelling_of_one_member_list(self) -> None:
+        for document in ('[workspace]\nmembers = ["crates/*"]\n',
+                         'workspace.members = ["crates/*"]\n',
+                         '[workspace]\n"members" = [\'crates/*\']\n',
+                         '[workspace]\nmembers = [\n  "crates/*",\n]\n'):
+            with self.subTest(document):
+                self.assertEqual(lint_policy_check.member_patterns(document),
+                                 (["crates/*"], []))
+
+    def test_the_exclude_list_is_read_the_same_way(self) -> None:
+        self.assertEqual(
+            lint_policy_check.member_patterns(
+                'workspace.members = ["crates/*"]\n'
+                'workspace.exclude = ["crates/skip"]\n'),
+            (["crates/*"], ["crates/skip"]))
+
+
 class WhichMembersInheritTheTable(unittest.TestCase):
     """`lints.workspace = true`, as a key path rather than as two regexes."""
 
@@ -319,6 +724,31 @@ class WhichMembersInheritTheTable(unittest.TestCase):
         inherits, error = lint_policy_check.inherits_workspace_lints(
             '[package]\nname = "a"\nlints.workspace = true\n')
         self.assertEqual((inherits, error), (False, ""))
+
+    def test_a_value_that_is_not_the_boolean_true_does_not_inherit(self
+                                                                    ) -> None:
+        """`is True`, and the twelfth pass could weaken it to `is not None`
+        with the suite staying green.
+
+        MEASURED under the pinned 1.97.1 toolchain on a workspace carrying
+        `cast_possible_truncation = "deny"` and `unused_variables = "deny"`,
+        against a member with one `x as i32` and one unused binding:
+
+            [lints] workspace = true      101, both lints fire
+            [lints] workspace = false     101, `workspace` cannot be false
+            [lints] workspace = "yes"     101, invalid type: string
+
+        so neither of the last two is a manifest cargo will build, let alone
+        one that inherits the table. `is not None` reports both as inheriting,
+        which is a positive assertion of a false thing about a manifest that
+        does not compile.
+        """
+        for spelling in ("false", '"yes"', "1"):
+            with self.subTest(spelling):
+                inherits, error = lint_policy_check.inherits_workspace_lints(
+                    f'[package]\nname = "a"\n\n[lints]\n'
+                    f'workspace = {spelling}\n')
+                self.assertEqual((inherits, error), (False, ""))
 
     def test_a_manifest_that_is_not_toml_reports_the_error(self) -> None:
         inherits, error = lint_policy_check.inherits_workspace_lints(

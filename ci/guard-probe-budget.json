@@ -173,10 +173,10 @@
     "bench.state": 3,
     "bindgen": 3,
     "bootstrap-importer": 5,
-    "catalogue": 64,
+    "catalogue": 69,
     "census": 35,
     "census-runbook": 3,
-    "ci-floor": 18,
+    "ci-floor": 22,
     "content": 7,
     "corpus": 28,
     "corpus-synth": 5,
@@ -188,7 +188,7 @@
     "hooks.commit-msg": 3,
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
-    "lint-policy": 26,
+    "lint-policy": 27,
     "nostd": 5,
     "oracle.faults": 22,
     "oracle.faults-declaration": 2,
@@ -233,7 +233,7 @@
     "sweep_complete": false
   },
   "wall_clock_seconds": {
-    "deep": 30.9,
-    "floor": 21.8
+    "deep": 37.6,
+    "floor": 28.5
   }
 }

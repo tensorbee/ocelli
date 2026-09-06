@@ -12,6 +12,15 @@ dependencies = [
     "pylibjpeg-libjpeg==2.4.0",
     "pylibjpeg-openjpeg==2.5.0",
     "pylibjpeg-rle==2.2.0",
+    # The one dependency the CI FLOOR takes, and deviation D-17 records it.
+    # `scripts/ci_floor_check.py` reads `.github/workflows/ci.yml` with a YAML
+    # parser rather than line by line, because the S03 review's twelfth pass
+    # measured four fail-open routes and five refusals of legitimate workflows
+    # at the hand-rolled reader, and one of the four, key order, is not a
+    # spelling a hand reader can refuse. This is the ONLY place the version is
+    # written: the `guards` job in .github/workflows/ci.yml greps it out of
+    # here rather than carrying a second copy.
+    "pyyaml==6.0.3",
 ]
 
 [tool.uv]

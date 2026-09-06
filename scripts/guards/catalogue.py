@@ -345,14 +345,30 @@ def _delete_ci_step(box: Sandbox, leave_comment: bool) -> None:
 
 
 def _put_gate_step_behind(box: Sandbox, gate: str, condition: str) -> None:
-    """Put one named gate's step behind an `if:`, leaving the step in place."""
+    """Put one named gate's step behind an `if:`, leaving the step in place.
+
+    Two step SHAPES, and writing only the first was a defect this harness
+    could not see until `scripts/ci_floor_check.py` started parsing the
+    workflow in the S03 review's twelfth pass. A step whose `run:` is its
+    first key opens with `- `, and one that carries a `name:` as well does
+    not, so turning that second shape's `run:` line into a new `- ` list item
+    produced YAML that GitHub Actions rejects outright. The line-by-line
+    reader accepted it and the probe passed, which means three probes here
+    were asserting this guard's behaviour on a file that is not a workflow.
+    A probe input has to be a state the real system can be IN.
+    """
     workflow = box.read(".github/workflows/ci.yml")
     line = next(l for l in workflow.splitlines()
                 if f"bin/ocelli.sh gate {gate}" in l)
     indent = " " * (len(line) - len(line.lstrip()))
-    body = line.lstrip().removeprefix("- ")
-    box.substitute(".github/workflows/ci.yml", line,
-                   f"{indent}- if: {condition}\n{indent}  {body}")
+    if line.lstrip().startswith("- "):
+        body = line.lstrip().removeprefix("- ")
+        replacement = f"{indent}- if: {condition}\n{indent}  {body}"
+    else:
+        # The `run:` is not the step's first key, so the condition is a
+        # SIBLING key written above it and not a new list item.
+        replacement = f"{indent}if: {condition}\n{line}"
+    box.substitute(".github/workflows/ci.yml", line, replacement)
 
 
 def _gate_step_behind(box: Sandbox, condition: str) -> None:
@@ -373,13 +389,15 @@ def _gate_step_split_across_events(box: Sandbox) -> None:
     question `--floor` actually asks. The first version of the condition
     reader asked whether ONE step covered them all, refused this, and named
     no missing event while doing it, so the message could not be acted on.
+
+    The step is chosen by `_gate_step_pieces` below, which requires a step
+    whose whole text is one `- run:` line. This builder writes TWO steps in
+    place of one, so a step carrying a `name:` key as well cannot be rewritten
+    by replacing a single line, and doing it anyway produced a workflow GitHub
+    Actions rejects. That went unnoticed for as long as this guard read the
+    file line by line.
     """
-    gate = _floor_gate_with_own_step(box)
-    workflow = box.read(".github/workflows/ci.yml")
-    line = next(l for l in workflow.splitlines()
-                if f"bin/ocelli.sh gate {gate}" in l)
-    indent = " " * (len(line) - len(line.lstrip()))
-    body = line.lstrip().removeprefix("- ")
+    _, line, indent, body = _gate_step_pieces(box)
     box.substitute(
         ".github/workflows/ci.yml", line,
         f"{indent}- if: github.event_name == 'push'\n{indent}  {body}\n"
@@ -1096,6 +1114,23 @@ def _expect_attribute_at_a_crate_root(box: Sandbox) -> None:
     """
     _prepend(box, _a_crate_root(box),
              "#![expect(clippy::cast_possible_truncation)]")
+
+
+def _a_manifest_that_is_not_utf8(box: Sandbox) -> None:
+    """A `Cargo.toml` that is not UTF-8 text at all.
+
+    `main` read it with an unguarded `CARGO.read_text(encoding="utf-8")` until
+    the S03 review's thirteenth pass, so this arrived as a
+    `UnicodeDecodeError` traceback with no `FAIL:` header. Fail-closed, and
+    still the wrong way to tell a maintainer what to do, which is the fifth
+    pass's finding in `scripts/ci_floor_check.py` one file over.
+
+    A lone 0x80 byte, which is a continuation byte with no lead byte and is
+    therefore not valid UTF-8 in any position. cargo reads a manifest as UTF-8
+    too, so this is a file cargo refuses, not one it reads differently.
+    """
+    box.write("Cargo.toml",
+              b"[workspace]\nmembers = [\"crates/*\"]\n# \x80\n")
 
 
 def _no_crate_sources_at_all(box: Sandbox) -> None:
@@ -2810,7 +2845,7 @@ def _comment_after_a_substitution_in_an_arm(box: Sandbox) -> None:
 
     **A REGRESSION the S03 review's tenth pass introduced while closing a
     fail-open, and the eleventh pass measured it.** That pass made `)` a word
-    start for `_strip_shell_comments`, which is right, POSIX and bash begin a
+    start for the comment strip, which is right, POSIX and bash begin a
     comment at a `#` that begins a word and a word begins after an unquoted
     operator. The scanner could not tell an operator `)` from the `)` closing a
     command substitution, because it knew backticks and did not know `$(`.
@@ -2820,7 +2855,7 @@ def _comment_after_a_substitution_in_an_arm(box: Sandbox) -> None:
     With this shape planted in the one-line arm below, `bash -n` green,
     `scripts/ci_floor_check.py` exited 0 with the `--probe-extra` command
     dropped, and the SAME input at `e2b11d8`, the commit before `)` joined
-    `COMMENT_WORD_START`, exited 1 naming that command. So this route was not a
+    `WORD_BREAK`, exited 1 naming that command. So this route was not a
     survival, it was opened by the previous repair.
 
     The dropped command is on the FIRST line and the arm's `;;` on the second,
@@ -2842,7 +2877,7 @@ def _a_substitution_in_an_arm(box: Sandbox) -> None:
     The direction the fix could get wrong, and it is the same direction the
     backtick fix could get wrong one delimiter along. A command substitution in
     a gate arm is ordinary shell and weakens nothing, and the over-tight
-    repair, taking `)` back out of `COMMENT_WORD_START` or refusing any `$(`,
+    repair, taking `)` back out of `WORD_BREAK` or refusing any `$(`,
     would pass the probe above and either refuse a legitimate runner or reopen
     the tenth pass's `;#` route, which a `case` pattern's `)` needs closed. The
     substitution's head is `printf`, which is in `SHELL_NOISE`, so the
@@ -2852,6 +2887,188 @@ def _a_substitution_in_an_arm(box: Sandbox) -> None:
     line, indent, gate, tail, _ = _a_single_line_arm_ci_runs(box)
     box.substitute("bin/ocelli.sh", line,
                    f"{indent}{gate}) test -n $(printf x) &&{tail} ;;")
+
+
+def _an_arm_with_a_heredoc(box: Sandbox, redirection: str,
+                           body: str = "true ;;") -> None:
+    """A here-document in the arm, and a real command CI does not run.
+
+    One builder for the delimiter spellings, because they differ in the
+    redirection and in nothing else, and a copy per spelling is how the arm
+    parser acquired four almost identical probes in earlier passes.
+
+    The body and its terminator sit at column 0. `<<-` is not used, so a
+    leading tab would be part of the line and the terminator would not match,
+    which is a property of the runner's own indentation rather than of this
+    probe.
+    """
+    line, indent, gate, tail, commands = _a_single_line_arm_ci_runs(box)
+    pad = indent + " " * (len(gate) + 1)
+    box.substitute(
+        "bin/ocelli.sh", line,
+        f"{indent}{gate}){tail} &&\n"
+        f"{pad}: {redirection}\n"
+        f"{body}\n"
+        f"{pad}{commands[0]} --probe-extra ;;")
+
+
+def _a_backslash_quoted_heredoc_delimiter(box: Sandbox) -> None:
+    """`<<\\EOF`, the third quoting mechanism beside `'` and `"`.
+
+    `HEREDOC` modelled bash's delimiter as
+    `<<(-?)(?!<)[ \\t]*(['\\"]?)([A-Za-z_]\\w*)\\2`, which knows two of the
+    three quoting mechanisms. When the redirection is not recognised the body
+    is scanned as CODE, so a `;;` in it ends the arm and everything after it
+    leaves in silence.
+
+    MEASURED in the S03 review's twelfth pass, planted in the one-line arm
+    below with `bash -n` accepting the runner:
+    `scripts/ci_floor_check.py` exited 0 with the trailing command dropped, and
+    the same shape run under bash prints both markers, so the dropped command
+    really runs. The delimiter is read as a shell WORD by the scanner itself
+    now, which is the one word production this file has.
+    """
+    _an_arm_with_a_heredoc(box, "<<\\EOF", "true ;;\nEOF")
+
+
+def _a_quoted_heredoc_delimiter_with_a_hyphen(box: Sandbox) -> None:
+    """`<<'EOF-1'`, where the character class stops before the closing quote.
+
+    The second of the twelfth pass's two measured fail-opens, and it is the one
+    that shows the class was the wrong SHAPE rather than the wrong class:
+    `\\w*` matched `EOF`, the back-reference to the opening `'` then failed to
+    match `-`, and the whole redirection went unrecognised. Same measurement,
+    exit 0 with the command dropped and bash really running it.
+
+    Its near miss, the unquoted `<<EOF-1`, is not a second probe here: it is a
+    legitimate here-document that terminates, and
+    `scripts/tests/test_guard_readers.py` asserts it reads correctly rather
+    than refusing for a reason that names the wrong line.
+    """
+    _an_arm_with_a_heredoc(box, "<<'EOF-1'", "true ;;\nEOF-1")
+
+
+def _a_heredoc_body_that_never_closes(box: Sandbox) -> None:
+    """A here-document whose body never meets its delimiter.
+
+    Fail-closed before and after, and the REFUSAL is what changed.
+    `_heredoc_end`'s docstring said this state "reports the whole remainder so
+    the caller's unclosed-span refusal is what fires", and `shell_pieces`
+    cleared `pending` before its own `if pending:` test, so `unclosed` came
+    back empty and the arm was refused for reaching the end of the region with
+    no `;;` terminator, about an arm whose `;;` is right there. bash refuses
+    this runner too, warning that the here-document is delimited by end of
+    file, so the direction was never in doubt. What the guard SAID was.
+    """
+    _an_arm_with_a_heredoc(box, "<<EOF", "true ;;")
+
+
+def _a_heredoc_in_an_arm(box: Sandbox) -> None:
+    """A here-document with nothing dropped, which must be accepted.
+
+    The direction the delimiter fix could get wrong, and the previous scanner
+    DID get it wrong. MEASURED before the fix with exactly this shape: the
+    check exited 1 reporting that the arm "runs 'a note', 'EOF-1'", so two
+    lines of English were demanded of CI as commands. A here-document body is
+    DATA, it is its own piece kind in the scanner now, and `_split_statements`
+    drops it. The redirection's head is `:`, which is in `SHELL_NOISE`, so the
+    statement scan has nothing to demand of CI and the only thing under test is
+    the body.
+    """
+    line, indent, gate, tail, _ = _a_single_line_arm_ci_runs(box)
+    pad = indent + " " * (len(gate) + 1)
+    box.substitute(
+        "bin/ocelli.sh", line,
+        f"{indent}{gate}){tail} &&\n"
+        f"{pad}: <<'EOF-1'\n"
+        f"a note the arm carries about why it runs\n"
+        f"EOF-1\n"
+        f"{pad};;")
+
+
+def _a_continuation_at_the_end_of_an_arm_comment(box: Sandbox) -> None:
+    """A backslash ending a COMMENT line, which continues nothing in bash.
+
+    `arm_bodies` ran `CONTINUATION.sub(" ", region)` BEFORE the tokenizer,
+    which is the one thing the tokenizer's own header says no pass may do: a
+    regex pre-pass over shell cannot tell a comment from anything else, and a
+    comment ends at its newline whatever precedes that newline.
+
+    MEASURED. `echo A # c \\` then `echo B` prints both lines under bash, so
+    the comment continues nothing. With this shape planted in the one-line arm
+    below, the pre-pass joined the next line INTO the comment, the planted
+    command vanished entirely, `arms` came back holding the NEXT gate's
+    command, and the check refused while naming two gates neither of which was
+    the one edited. Fail-closed by luck and pointing at the wrong file.
+    """
+    line, indent, gate, tail, commands = _a_single_line_arm_ci_runs(box)
+    pad = indent + " " * (len(gate) + 1)
+    box.substitute(
+        "bin/ocelli.sh", line,
+        f"{indent}{gate}){tail} &&\n"
+        f"{pad}# the reason the flag below is here \\\n"
+        f"{pad}{commands[0]} --probe-extra ;;")
+
+
+def _a_continuation_inside_an_arm_command(box: Sandbox) -> None:
+    """One arm command split across a continuation, which must be accepted.
+
+    The direction the fix could get wrong, and it is why the continuation is a
+    PIECE the scanner emits rather than a deletion. `gate_commands` extracts
+    with a class that stops at a backslash, so a command left unjoined loses
+    everything after it and the arm command CI runs verbatim then reads as
+    absent. Four arms in the runner are already written this way.
+    """
+    line, indent, gate, tail, commands = _a_single_line_arm_ci_runs(box)
+    head, _, rest = commands[0].partition(" ")
+    if not rest or commands[0] not in line:
+        raise AssertionError(
+            f"the `{gate}` arm's command `{commands[0]}` is one word, or it "
+            f"does not appear verbatim in its own line, so there is nowhere "
+            f"in it to put a continuation and this probe would mutate "
+            f"nothing while reading as a pass.")
+    box.substitute("bin/ocelli.sh", line,
+                   line.replace(commands[0],
+                                f"{head} \\\n{indent}  {rest}", 1))
+
+
+def _a_gate_named_outside_the_name_class(box: Sandbox) -> None:
+    """A gate name carrying a DOT, which is outside `GATE_NAME`.
+
+    **The refusal this plants was watched by nothing until the S03 review's
+    thirteenth pass.** `ci-floor.gate-name-with-a-digit` plants `prose2`, which
+    is INSIDE `[A-Za-z0-9_-]+`, and expects the floor-coverage refusal, and the
+    unit test carrying the refusal's name asserted `gate_row_problems` was
+    EMPTY. MEASURED with the `if not GATE_NAME.match(name)` branch disabled:
+    the census, all 54 `ci-floor` probes and both unit suites stayed at their
+    unmutated status.
+
+    A dot rather than any other character, because the refusal's own sentence
+    is that a gate name reaches `re.escape`-free patterns in
+    `scripts/ci_floor_check.py`, in `scripts/guards/census.py` and in this
+    file's probe builders, and a dot in a name is a regex wildcard in every one
+    of them.
+    """
+    _a_gates_entry_the_reader_cannot_use(
+        box, '"pro.se|no|a dotted name nothing declares"')
+
+
+def _a_gate_name_with_a_digit_is_permitted(box: Sandbox) -> None:
+    """A digit in a gate name, with a real arm CI runs, which must be accepted.
+
+    The direction the widened class could get wrong, and it is the sentence
+    `_a_gate_named_outside_the_python_class` wrote down and did not probe:
+    "an arm identical to the gate's left `scripts/ci_floor_check.py`
+    legitimately at exit 0, because every command in the arm really was run by
+    CI." The over-tight repair, narrowing `GATE_NAME` back towards `[a-z-]+`,
+    passes every refusal probe beside this one and refuses a runner bash reads
+    without complaint.
+    """
+    line, indent, gate, tail, _ = _a_single_line_arm_ci_runs(box)
+    _a_gates_entry_the_reader_cannot_use(
+        box, f'"{gate}2|no|a second {gate} pass CI already runs"')
+    box.substitute("bin/ocelli.sh", line,
+                   f"{line}\n{indent}{gate}2){tail} ;;")
 
 
 def _a_gates_entry_the_reader_cannot_use(box: Sandbox, entry: str) -> None:
@@ -3138,6 +3355,317 @@ def _widen_a_ci_step_past_its_arm_command(box: Sandbox) -> None:
         "no floor gate is run by a CI step whose command is exactly its one "
         "arm command, so there is no step this probe can widen without "
         "changing what else covers the gate.")
+
+
+# ---------------------------------------------------------------------------
+# The workflow is YAML, and it was read line by line until the twelfth pass
+# ---------------------------------------------------------------------------
+#
+# Nine probes for the routes the S03 review's twelfth pass measured and five
+# for the legitimate workflows the reader refused. Each builder writes a file
+# GitHub Actions reads exactly as it reads the original, or, for the two
+# refusals the parse introduces, one it cannot read at all.
+#
+# The mutations are all in `.github/workflows/ci.yml` and none of them touches
+# `scripts/ci_floor_check.py`, which is what makes them assertions about the
+# workflow's grammar rather than about the guard's source.
+
+WORKFLOW_PATH = ".github/workflows/ci.yml"
+
+# A condition that is FALSE on both automatic events. The bypasses use it
+# because a step behind it does not run on a pull request, which is the same
+# outcome as deleting the step, and the check has to say so.
+MANUAL_ONLY = "github.event_name == 'workflow_dispatch'"
+
+
+def _a_floor_gate_whose_step_is_one_line(box: Sandbox) -> tuple[str, str]:
+    """A floor gate whose whole CI step is one `- run: bin/ocelli.sh gate X`.
+
+    ONE LINE, and that is the property rather than a preference.
+    `_floor_gate_with_own_step` returns the first floor gate `ci.yml` names,
+    which today is `native`, whose step carries a `name:` key as well. Every
+    builder below rewrites the step as a whole, so a step whose first key is
+    somewhere else on the page cannot be rewritten by replacing one line
+    without producing YAML that neither GitHub nor this check can read. The
+    gate is still chosen by property and read from the repository.
+    """
+    excluded = _not_in_floor(box)
+    for line in box.read(WORKFLOW_PATH).splitlines():
+        match = re.fullmatch(r"\s*- run: bin/ocelli\.sh gate ([a-z-]+)", line)
+        if match and match.group(1) not in excluded:
+            return match.group(1), line
+    raise AssertionError(
+        "no floor gate's CI step is a single `- run: bin/ocelli.sh gate <name>` "
+        "line, so there is no step these builders can rewrite whole and they "
+        "would each plant a workflow that is invalid for a second reason.")
+
+
+def _gate_step_pieces(box: Sandbox) -> tuple[str, str, str, str]:
+    """That gate, its step line, the line's indentation and its body."""
+    gate, line = _a_floor_gate_whose_step_is_one_line(box)
+    return gate, line, " " * (len(line) - len(line.lstrip())), \
+        line.lstrip().removeprefix("- ")
+
+
+def _a_floor_gate_run_as_its_one_arm_command(box: Sandbox) -> tuple[str, str]:
+    """A floor gate whose only CI step is its one arm command, and that line.
+
+    The same selection `_widen_a_ci_step_past_its_arm_command` makes and for
+    the same reason: the step is the only route to the gate, so a probe that
+    changes how the step is SPELLED changes nothing else about the gate's
+    coverage.
+    """
+    excluded = _not_in_floor(box)
+    workflow = box.read(WORKFLOW_PATH)
+    for gate in re.findall(r'^\s*"([a-z-]+)\|no\|', box.read("bin/ocelli.sh"),
+                           re.M):
+        if gate in excluded or f"bin/ocelli.sh gate {gate}" in workflow:
+            continue
+        commands = _ci_arm_commands(box, gate)
+        if len(commands) != 1:
+            continue
+        line = next((l for l in workflow.splitlines()
+                     if l.strip() == f"- run: {commands[0]}"), None)
+        if line is not None:
+            return commands[0], line
+    raise AssertionError(
+        "no floor gate is run by a CI step whose command is exactly its one "
+        "arm command, so this probe has no step whose spelling it can change "
+        "without changing what else covers the gate.")
+
+
+def _step_keys_in_the_other_order(box: Sandbox) -> None:
+    """A gate step with `run:` written ABOVE its `if:`, nothing else changed.
+
+    The twelfth pass's first route and the one no spelling rule reaches.
+    `run_commands` attached whatever `if:` it had seen so far, so this file
+    exited 0 and the identical two keys in the other order exited 1. A YAML
+    mapping has no key order, so those are one workflow and the check gave two
+    answers, on `guards` in an edit that reads as tidying.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- {body}\n{indent}  if: {MANUAL_ONLY}")
+
+
+def _a_quoted_if_key(box: Sandbox) -> None:
+    """The same bypass spelled `"if":`, with the key first.
+
+    The second spelling of route 1. The condition sits ABOVE the `run:` here,
+    so the line-by-line reader would have attached it had it recognised the
+    key, and it did not: its pattern was `^\\s*(?:-\\s+)?if:`. `"if"` and `if`
+    are one key after a parse. The workflow's own `on:` head pattern already
+    spelled `(?:on|"on"|'on'|true)`, so this file knew keys may be quoted in
+    one function and not in the other, which is the drift shape
+    `NESTED_CASE` and `SHELL_INTRODUCERS` were joined to remove.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f'{indent}- "if": {MANUAL_ONLY}\n{indent}  {body}')
+
+
+def _a_flow_mapping_step_with_run_first(box: Sandbox) -> None:
+    """Route 1 again, as a multi-line flow mapping with `run` before `if`.
+
+    A third spelling of one mapping. The block form and the flow form are the
+    same node to a parser and were two different answers to a line reader.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    box.substitute(
+        WORKFLOW_PATH, line,
+        f"{indent}- {{\n{indent}    {body},\n"
+        f"{indent}    if: {MANUAL_ONLY}\n{indent}  }}")
+
+
+def _a_folded_run_scalar_narrowing_a_command(box: Sandbox) -> None:
+    """Narrow a gate's one CI command, spelled as a FOLDED block scalar.
+
+    Route 2, and it is the seventh pass's hole reached by changing one
+    character. `run: >` folds its body into one line, and the reader split a
+    block scalar into one `Command` per line, so `python3
+    scripts/prose_check.py` and its narrowing argument became two commands and
+    the argv equality in `runs_command` matched the first. MEASURED at exit 0,
+    where `ci-floor.widened-ci-step` writes the same narrowing on one plain
+    line and is refused at exit 1.
+    """
+    command, line = _a_floor_gate_run_as_its_one_arm_command(box)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: >\n"
+                   f"{indent}    {command}\n"
+                   f"{indent}    --probe-only-this-one-file README.md")
+
+
+def _a_quoted_event_key_in_on(box: Sandbox) -> None:
+    """Quote one key in `on:` and gate a floor step to the other event.
+
+    Route 3. Quoting a key removed the event from the set the floor is checked
+    against, so the check compared the workflow with a smaller floor and
+    printed the narrowed event list as its OK line. The gate then legitimately
+    fails to run on the event nobody was asking about.
+
+    Both halves are read from the repository: the event comes from the
+    workflow's own `on:` block through the guard's own reader, and the gate
+    from the first floor gate `ci.yml` names.
+    """
+    import ci_floor_check
+    workflow = box.read(WORKFLOW_PATH)
+    events = sorted(ci_floor_check.workflow_events(workflow)
+                    - ci_floor_check.MANUAL_EVENTS)
+    if len(events) < 2:
+        raise AssertionError(
+            "the workflow declares fewer than two automatic events, so "
+            "hiding one leaves nothing for the surviving step to miss.")
+    hidden, kept = events[0], events[1]
+    box.substitute(WORKFLOW_PATH, f"  {hidden}:", f'  "{hidden}":')
+    _, line, indent, body = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- if: github.event_name == '{kept}'\n"
+                   f"{indent}  {body}")
+
+
+def _a_gate_name_inside_a_run_string(box: Sandbox) -> None:
+    """Replace a gate's step with an `echo` that MENTIONS the gate.
+
+    Route 4a. The gate name was matched anywhere in a `run:` line and a string
+    is anywhere, so `echo "if the size budget moves, run bin/ocelli.sh gate
+    panic locally"` satisfied the gate at exit 0 with the real step gone. That
+    is the comment-only lesson one language along: a comment runs nothing and
+    neither does a sentence inside a string. `shell_pieces` already placed that
+    string in a span and this file used it on `bin/ocelli.sh` and never on a
+    `run:` body.
+    """
+    gate, line, indent, _ = _gate_step_pieces(box)
+    box.substitute(
+        WORKFLOW_PATH, line,
+        f'{indent}- run: echo "if this fails, run bin/ocelli.sh gate {gate} '
+        f'locally"')
+
+
+def _a_run_key_under_with(box: Sandbox) -> None:
+    """Replace a gate's step with an action whose INPUT is called `run`.
+
+    Route 4b. A `run:` was a command at any depth, so an action input under
+    `with:` was read as a step's shell. It is not one: GitHub runs the action,
+    and `run` is a string it hands the action. The step is a real step and a
+    reader of `ci.yml` still sees the gate named, which is what makes this the
+    same shape as the comment-only probe.
+    """
+    gate, line, indent, _ = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- uses: actions/github-script@v7\n"
+                   f"{indent}  with:\n"
+                   f"{indent}    run: bin/ocelli.sh gate {gate}")
+
+
+def _an_unparseable_workflow(box: Sandbox) -> None:
+    """Open a flow sequence in a `run:` and never close it.
+
+    The fail-closed half of parsing the workflow. GitHub Actions reads this
+    file with a YAML parser, so a file no parser can read is a workflow that
+    does not run at all, and reporting coverage over whatever a line scanner
+    salvaged from it would be the widest possible false green.
+    """
+    gate, line, indent, _ = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: [bin/ocelli.sh gate {gate}")
+
+
+def _a_run_that_is_not_a_scalar(box: Sandbox) -> None:
+    """Write a step's `run:` as a sequence rather than as a command.
+
+    The other half of the parse's own refusal. The tree is readable and the
+    step's shape is not one GitHub accepts, so the reader refuses it by name
+    rather than reading a smaller workflow. A shape skipped here is a step
+    whose gate then reads as uninvoked, or worse as covered by whatever was
+    read in its place.
+    """
+    gate, line, indent, _ = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run:\n"
+                   f"{indent}    - bin/ocelli.sh gate {gate}")
+
+
+def _a_quoted_run_scalar(box: Sandbox) -> None:
+    """Quote a step's `run:` value. The same command, refused at exit 1.
+
+    The first of the five legitimate workflows the line reader refused. Its
+    pattern took everything after `run:` as the command, quotes included, so
+    the argv comparison saw `"python3` and `scripts/prose_check.py"` and
+    reported the gate uninvoked while CI ran it.
+    """
+    command, line = _a_floor_gate_run_as_its_one_arm_command(box)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(WORKFLOW_PATH, line, f'{indent}- run: "{command}"')
+
+
+def _a_block_scalar_with_an_indentation_indicator(box: Sandbox) -> None:
+    """`run: |2`, which names the body's indentation instead of inferring it.
+
+    The second. The reader compared the text after `run:` against a set of six
+    block headers and an explicit indentation indicator is in none of them, so
+    the body was not read as a body and the command vanished. The indicator is
+    ordinary YAML and the value it produces is identical.
+    """
+    command, line = _a_floor_gate_run_as_its_one_arm_command(box)
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |2\n{indent}    {command}")
+
+
+def _a_flow_mapping_step(box: Sandbox) -> None:
+    """One step written as a flow mapping on one line.
+
+    The third, and it is the accept direction of `_a_flow_mapping_step_with_
+    run_first`. The condition here is TRUE on every automatic event, so the
+    step covers the floor and the check must say so: a repair that refused
+    the flow form outright would pass the refuse probe and refuse this.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- {{if: github.event_name != "
+                   f"'workflow_dispatch', {body}}}")
+
+
+def _a_comment_after_an_if(box: Sandbox) -> None:
+    """A trailing YAML comment on an `if:` that permits every automatic event.
+
+    The fourth, and the worst of the five, because the refusal it produced
+    QUOTED the condition back at its author: the comment was part of the
+    condition text, `_permits` could not read the result, and the message said
+    the gate does not run on the events that condition plainly runs on. A
+    reader who trusted the message would have gone looking at the condition,
+    which was correct.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- if: github.event_name != 'workflow_dispatch'"
+                   f"  # never on a manual dispatch\n{indent}  {body}")
+
+
+def _on_as_a_block_sequence(box: Sandbox) -> None:
+    """`on:` written as a block sequence of event names.
+
+    The fifth. GitHub documents this as `on: [push, pull_request]` and a block
+    sequence is the same node laid out over lines. The reader handled the
+    mapping and the inline list, its docstring named those two, and this third
+    shape read as declaring no automatic event at all, which refused the whole
+    floor at once with a message about the workflow being manual.
+
+    The events are taken from the workflow's own `on:` block through the
+    guard's reader, so this rewrites what is there rather than asserting a
+    list.
+    """
+    import ci_floor_check
+    workflow = box.read(WORKFLOW_PATH)
+    events = sorted(ci_floor_check.workflow_events(workflow))
+    head = re.search(r"^on:\n(?:[ \t]+\S.*\n)+", workflow, re.M)
+    if head is None or not events:
+        raise AssertionError(
+            "the workflow declares no `on:` block this probe can rewrite as a "
+            "sequence, so it would mutate nothing.")
+    box.substitute(WORKFLOW_PATH, head.group(0),
+                   "on:\n" + "".join(f"  - {event}\n" for event in events))
 
 
 def _reorder_the_runner_exclusion_list(box: Sandbox) -> None:
@@ -3993,7 +4521,7 @@ GUARDS: tuple[Guard, ...] = (
                   polarity="accept",
                   note="The direction the fix could get wrong. `$( ... )` in "
                        "a gate arm is ordinary shell, and the two over-tight "
-                       "repairs, taking `)` out of `COMMENT_WORD_START` or "
+                       "repairs, taking `)` out of `WORD_BREAK` or "
                        "refusing `$(` outright, would each pass the probe "
                        "above while either reopening the tenth pass's `;#` "
                        "route or refusing a legitimate runner."),
@@ -4010,7 +4538,118 @@ GUARDS: tuple[Guard, ...] = (
                        "census exit 0, `gates_declared` unmoved, and "
                        "`gate --floor` selecting a gate no CI step ran. An "
                        "entry the reader cannot use was an omission, which is "
-                       "the one outcome a guard may not have."),
+                       "the one outcome a guard may not have. What this "
+                       "watches, said exactly since the thirteenth pass: "
+                       "`prose2` is INSIDE the widened class, so the refusal "
+                       "here is the floor-coverage one and what is proved is "
+                       "that the entry is COUNTED. The name-class refusal is "
+                       "`ci-floor.gate-name-outside-the-class` and it was "
+                       "watched by nothing at all."),
+            Probe("ci-floor.gate-name-outside-the-class",
+                  _a_gate_named_outside_the_name_class,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "whose name is outside",
+                  note="The refusal `gate_row_problems` has for a name it "
+                       "cannot use, and nothing reached it. MEASURED with the "
+                       "`if not GATE_NAME.match(name)` branch disabled: the "
+                       "census, all 54 `ci-floor` probes and both unit suites "
+                       "stayed at their unmutated status, and the unit test "
+                       "carrying the refusal's name planted `prose2`, which "
+                       "is inside the class, and asserted the problem list "
+                       "was EMPTY. A dot is the shape that matters, because "
+                       "the refusal's own sentence is that a gate name "
+                       "reaches `re.escape`-free patterns in three files and "
+                       "a dot is a wildcard in every one of them."),
+            Probe("ci-floor.gate-name-with-a-digit-permitted",
+                  _a_gate_name_with_a_digit_is_permitted,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The direction the widened class could get wrong, and "
+                       "it is the sentence the probe above wrote down and did "
+                       "not watch: a gate named with a digit whose arm CI "
+                       "really runs is a legitimate runner. The over-tight "
+                       "repair, narrowing `GATE_NAME` back towards `[a-z-]+`, "
+                       "passes every refusal probe beside this one."),
+            Probe("ci-floor.heredoc-delimiter-backslash-quoted",
+                  _a_backslash_quoted_heredoc_delimiter,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "--probe-extra",
+                  note="The twelfth pass's first measured fail-open, and the "
+                       "last hand-written production in the tokenizer. "
+                       "`HEREDOC` spelled bash's delimiter as a regex with an "
+                       "invented character class, `(['\\\"]?)([A-Za-z_]\\\\w*)"
+                       "\\\\2`, and bash accepts any WORD quoted by any of "
+                       "three mechanisms. Unrecognised, the body is scanned "
+                       "as CODE and its `;;` ends the arm. MEASURED with "
+                       "`bash -n` green: exit 0 with the trailing command "
+                       "dropped, and the same shape run under bash prints "
+                       "both markers."),
+            Probe("ci-floor.heredoc-delimiter-quoted-with-a-hyphen",
+                  _a_quoted_heredoc_delimiter_with_a_hyphen,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "--probe-extra",
+                  note="The second, and the one that shows the class was the "
+                       "wrong SHAPE rather than the wrong class: `\\\\w*` "
+                       "stopped at the hyphen and the back-reference to the "
+                       "opening quote then failed to match it. Same "
+                       "measurement, exit 0 with the command dropped. The "
+                       "message is worded apart from its sibling "
+                       "deliberately: two refusals whose words normalise "
+                       "alike are ONE site to the census, and the two probes "
+                       "would read as covering one refusal between them."),
+            Probe("ci-floor.heredoc-body-never-closed",
+                  _a_heredoc_body_that_never_closes,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "never meets its delimiter",
+                  note="Fail-closed before and after, and the REFUSAL is what "
+                       "changed. `_heredoc_end`'s docstring said this state "
+                       "fires the caller's unclosed-span refusal, and "
+                       "`shell_pieces` cleared `pending` before its own `if "
+                       "pending:` test, so the guard said the arm reaches the "
+                       "end of the region with no `;;` terminator about an "
+                       "arm whose `;;` is right there. bash refuses this "
+                       "runner too, warning that the here-document is "
+                       "delimited by end of file."),
+            Probe("ci-floor.heredoc-in-an-arm",
+                  _a_heredoc_in_an_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The direction the delimiter fix could get wrong, and "
+                       "the previous scanner DID get it wrong. MEASURED with "
+                       "this exact shape before the fix: exit 1 reporting "
+                       "that the arm runs 'a note', 'EOF-1', so two lines of "
+                       "English were demanded of CI as commands. A body is "
+                       "DATA, it is its own piece kind now, and "
+                       "`_split_statements` drops it."),
+            Probe("ci-floor.continuation-after-an-arm-comment",
+                  _a_continuation_at_the_end_of_an_arm_comment,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "--probe-extra",
+                  note="A regex pre-pass over shell running BEFORE the "
+                       "tokenizer, which is the one thing the tokenizer's own "
+                       "header says no pass may do. MEASURED: a comment "
+                       "line ending in a backslash, then `echo B`, prints "
+                       "both under bash, so a backslash "
+                       "ending a comment continues nothing, and "
+                       "`CONTINUATION.sub` joined the next line INTO the "
+                       "comment. The planted command vanished entirely, "
+                       "`arms` came back holding the NEXT gate's command, and "
+                       "the check refused while naming two gates neither of "
+                       "which was the one edited."),
+            Probe("ci-floor.continuation-inside-an-arm-command",
+                  _a_continuation_inside_an_arm_command,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The direction the fix could get wrong, and why the "
+                       "continuation is a PIECE the scanner emits rather than "
+                       "a deletion. `gate_commands` extracts with a class "
+                       "that stops at a backslash, so a command left unjoined "
+                       "loses everything after it and the arm command CI runs "
+                       "verbatim reads as absent. Four arms in the runner are "
+                       "written this way today."),
             Probe("ci-floor.gates-entry-missing-a-field",
                   lambda box: _a_gates_entry_the_reader_cannot_use(
                       box, '"probe-extra|no"'),
@@ -4062,6 +4701,194 @@ GUARDS: tuple[Guard, ...] = (
                        "test over the whole workflow file, which a comment "
                        "satisfied, and which `gate guards` also satisfied "
                        "from inside `gate guards-deep`."),
+
+            # -- the workflow is YAML, and it was read by hand -------------
+            Probe("ci-floor.step-keys-in-the-other-order",
+                  _step_keys_in_the_other_order,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "is behind a condition that does not run it on",
+                  note="The twelfth pass's first route and the only one no "
+                       "spelling rule could have closed. `run_commands` "
+                       "attached whatever `if:` it had seen SO FAR, so "
+                       "`- run: bin/ocelli.sh gate guards` followed by its "
+                       "`if:` exited 0 while the identical two lines in the "
+                       "other order exited 1. A YAML mapping has no key "
+                       "order, so one workflow got two answers, and the gate "
+                       "it got them on watches every other gate. "
+                       "`ci-floor.event-gated` is the same condition written "
+                       "the other way round and is what proves the difference "
+                       "was the ORDER."),
+            Probe("ci-floor.quoted-if-key",
+                  _a_quoted_if_key,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "is behind a condition that does not run it on",
+                  note="The same route spelled `\"if\":`, with the key above "
+                       "the `run:` so that order is not what carries it. The "
+                       "reader's pattern was `^\\s*(?:-\\s+)?if:` while its "
+                       "own `on:` head pattern spelled "
+                       "`(?:on|\"on\"|'on'|true)`, so this file knew keys may "
+                       "be quoted in one function and not in the other. "
+                       "Measured at exit 0."),
+            Probe("ci-floor.flow-mapping-run-before-if",
+                  _a_flow_mapping_step_with_run_first,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "is behind a condition that does not run it on",
+                  note="Route 1's third spelling, a multi-line flow mapping "
+                       "with `run` before `if`. The block form and the flow "
+                       "form are one node to a parser and were two answers to "
+                       "a line reader. Measured at exit 0."),
+            Probe("ci-floor.folded-run-scalar",
+                  _a_folded_run_scalar_narrowing_a_command,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "and nothing in",
+                  note="The seventh pass's hole reached by changing one "
+                       "character. A `run: >` folds its body into one line and "
+                       "the reader split a block scalar per LINE, so a "
+                       "narrowed command became two commands and the argv "
+                       "equality matched the first. MEASURED at exit 0, where "
+                       "`ci-floor.widened-ci-step` writes the same narrowing "
+                       "on one plain line and is refused at exit 1."),
+            Probe("ci-floor.quoted-event-key",
+                  _a_quoted_event_key_in_on,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "is behind a condition that does not run it on",
+                  note="Route 3. `\"pull_request\":` in the `on:` block "
+                       "narrowed the event set the floor is checked against, "
+                       "so with the `guards` step gated to push the check "
+                       "printed \"all 25 floor gate(s) are invoked by CI on "
+                       "push\" at exit 0. The head pattern already allowed a "
+                       "quoted key and the body scan did not, which is one "
+                       "rule written twice."),
+            Probe("ci-floor.gate-name-inside-a-run-string",
+                  _a_gate_name_inside_a_run_string,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "and nothing in",
+                  note="Route 4a, and it is the comment-only lesson one "
+                       "language along. A gate name was matched anywhere in a "
+                       "`run:` line and a string is anywhere, so `echo \"... "
+                       "run bin/ocelli.sh gate panic locally\"` satisfied the "
+                       "gate at exit 0 with the real step deleted. `panic` is "
+                       "HLD section 23's wasm panic-hook proof, the one "
+                       "property no native test can observe. `shell_pieces` "
+                       "already put that string in a span and this file used "
+                       "it on `bin/ocelli.sh` and never on a `run:` body."),
+            Probe("ci-floor.run-key-under-with",
+                  _a_run_key_under_with,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "and nothing in",
+                  note="Route 4b. A `run:` was a command at any depth, so an "
+                       "action INPUT called `run` under `with:` satisfied the "
+                       "gate at exit 0. GitHub hands that string to the "
+                       "action and runs no shell with it. A `run:` is reached "
+                       "as `jobs.<id>.steps[n].run` now and nowhere else."),
+            Probe("ci-floor.workflow-unparseable",
+                  _an_unparseable_workflow,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "cannot be parsed as YAML",
+                  note="The first of the two refusals the parse introduces, "
+                       "and it is a fail-open in its own right rather than "
+                       "only a fail-closed half. MEASURED against the line "
+                       "reader: `- run: [bin/ocelli.sh gate guards`, which no "
+                       "YAML parser accepts and which GitHub Actions "
+                       "therefore cannot run at all, left the check at exit 0 "
+                       "reporting the whole floor covered, because the text "
+                       "after `run:` still held the gate name. GitHub reads "
+                       "this file with a YAML parser, so a file no parser can "
+                       "read is a workflow that does not run, and reporting "
+                       "coverage over whatever a line scanner salvaged from "
+                       "it is the widest false green available here. It arrives under the same `FAIL:` header as "
+                       "every other refusal rather than as a traceback, which "
+                       "is the presentation the fifth pass fixed for the "
+                       "runner's parsers."),
+            Probe("ci-floor.run-that-is-not-a-scalar",
+                  _a_run_that_is_not_a_scalar,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "which this reader cannot use",
+                  note="The second refusal the parse introduces. The tree is "
+                       "readable and the step's shape is not one GitHub "
+                       "accepts, so it is refused by name rather than read as "
+                       "a smaller workflow. A shape skipped here is a step "
+                       "whose gate then reads as uninvoked, or worse as "
+                       "covered by whatever was read in its place, which is "
+                       "the omission-rather-than-refusal shape the eleventh "
+                       "pass removed from the GATES reader."),
+            Probe("ci-floor.quoted-run-scalar",
+                  _a_quoted_run_scalar,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The first of five legitimate workflows the line "
+                       "reader REFUSED, and a guard that refuses a legitimate "
+                       "state is the runbook's own sentence. Everything after "
+                       "`run:` was the command, quotes included, so the argv "
+                       "comparison saw `\"python3` and reported the gate "
+                       "uninvoked while CI ran it. Measured at exit 1."),
+            Probe("ci-floor.block-scalar-indentation-indicator",
+                  _a_block_scalar_with_an_indentation_indicator,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The second. The reader compared the text after `run:` "
+                       "against six literal block headers and `|2` is in none "
+                       "of them, so the body was never read as a body and the "
+                       "command vanished. An indentation indicator is "
+                       "ordinary YAML and produces an identical value."),
+            Probe("ci-floor.flow-mapping-step-is-permitted",
+                  _a_flow_mapping_step,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The third, and the direction "
+                       "`ci-floor.flow-mapping-run-before-if` could get "
+                       "wrong. A repair that refused the flow form outright "
+                       "would pass that probe and refuse this workflow, which "
+                       "is the trade the dependency-free option would have "
+                       "had to make on three of these five."),
+            Probe("ci-floor.comment-after-an-if",
+                  _a_comment_after_an_if,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The fourth and the worst of them, because the refusal "
+                       "QUOTED the condition back at its author. The comment "
+                       "was part of the condition text, `_permits` could not "
+                       "read the result, and the message said the gate does "
+                       "not run on the events that condition plainly runs on. "
+                       "A reader who trusted the message would have gone and "
+                       "looked at a correct condition."),
+            Probe("ci-floor.on-as-a-block-sequence",
+                  _on_as_a_block_sequence,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The fifth. GitHub documents this as `on: [push, "
+                       "pull_request]` and a block sequence is the same node "
+                       "laid out over lines. `workflow_events` handled the "
+                       "mapping and the inline list, its docstring named "
+                       "those two, and this third shape read as declaring no "
+                       "automatic event, which refused the WHOLE floor at "
+                       "once with a message about the workflow being manual."),
+            Probe("ci-floor.pyyaml-absent", None,
+                  script("python3", "-S", "scripts/ci_floor_check.py"),
+                  "PyYAML is not installed",
+                  control=script("python3", "scripts/ci_floor_check.py"),
+                  note="The dependency's own failure mode, and the reason it "
+                       "is a refusal rather than a fallback. `-S` skips "
+                       "`site`, so site-packages is off the path and the "
+                       "import fails exactly as it fails on a machine that "
+                       "never installed it. What must NOT happen is a quiet "
+                       "return to the line-by-line reader, which is why there "
+                       "is no `except ImportError` anywhere in that file: the "
+                       "reader it replaced had four measured fail-open routes "
+                       "and a fallback to it would be a floor gate that "
+                       "silently checks less wherever a dependency is "
+                       "missing. The control is the same file run WITHOUT "
+                       "`-S`, which exits 0, so this probe discriminates "
+                       "between the dependency being absent and the check "
+                       "being broken. Its one assumption is that PyYAML lives "
+                       "in site-packages rather than beside the standard "
+                       "library, and if that is ever false here the probe "
+                       "reports HARNESS rather than passing quietly."),
         ),
         limit="The non-floor rule exempts a gate `bin/ocelli.sh` marks YES in "
               "its GPU column, which is `oracle` and deviation D-04's reason "
@@ -4163,16 +4990,62 @@ GUARDS: tuple[Guard, ...] = (
               "two passes. `ci_floor_check.gate_entries` reads the GATES "
               "array with the same scanner, which is what removed the second "
               "copy of the gate-row regex from `scripts/guards/census.py`. "
-              "The seventh limit is what the tokenizer still does not model: "
-              "`$'...'`, whose escapes differ from a double quote's, and the "
-              "fact that bash opens a command substitution INSIDE a double "
-              "quote while this scanner runs `\"` to its closer. MEASURED "
-              "this session over both regions the scanner is used on: after "
-              "comments are stripped the `run_gate` region carries 0 `$'`, 0 "
-              "`$(`, 0 `${`, 0 `<<` and 0 backticks against 48 before, and "
-              "the GATES array carries 0 of all five. Both are a `Span` entry "
-              "away rather than a new copy of the close loop, which is the "
-              "property the rewrite is for. What is NOT probed is the "
+              "**The seventh limit is what the tokenizer still does not "
+              "model, and it was written as an ENUMERATION of two constructs "
+              "until the S03 review's thirteenth pass, which measured the "
+              "enumeration wrong.** It named `$'...'` and a substitution "
+              "inside a double quote and said the residue was those two. It "
+              "was not. A here-document body was claimed as covered and was "
+              "covered for a DELIMITER SUBSET only, which was where the "
+              "twelfth fail-open lived. Process substitution was not modelled "
+              "and not mentioned, and a regex pre-pass over line "
+              "continuations ran BEFORE the tokenizer and appeared nowhere. "
+              "An enumeration of a grammar's constructs is not a limit, it is "
+              "a claim that the author thought of all of them, and twelve "
+              "passes say that shape does not hold. So the limit is stated as "
+              "what the scanner CANNOT SEE and why, and it is one thing: the "
+              "scanner models spans and words and does not model bash's "
+              "COMPOUND COMMANDS, so it cannot tell a `(` that opens a "
+              "subshell from one that ends a `case` pattern, and it cannot "
+              "tell `((` arithmetic from `( (` nested subshells the way bash "
+              "does, which is by attempting the arithmetic parse and "
+              "backtracking. `$(case y in *) ... esac)` therefore closes at "
+              "the pattern's `)` and the arm ends at the inner `;;`, which "
+              "`NESTED_CASE` refuses and "
+              "`scripts/tests/test_guard_readers.py` asserts is the refusal "
+              "carrying the weight rather than the scan. `(( a << b ))` reads "
+              "the `<<` as a here-document whose body then runs to the end of "
+              "the region, which refuses, and a here-document written inside "
+              "a substitution is not queued at all, its body being inside the "
+              "same span. Every one is fail-closed and each is asserted where "
+              "it is rather than assumed away. Two smaller residues, both "
+              "measured: `$'...'` is a span so its EXTENT is right and its C "
+              "escapes are not decoded, which lands a name outside "
+              "`GATE_NAME` and refuses, and a continuation INSIDE a double "
+              "quote is left in place, which reaches `runs_command`'s text "
+              "comparison and refuses. **Was bash asked instead, and it can "
+              "be.** `declare -f run_gate` is bash's own reparse. It is not "
+              "the reader, for three measured reasons: `set -n` does not "
+              "define functions, so `declare -f` needs the audited file "
+              "EXECUTED, and this catalogue plants adversarial shell into "
+              "that very file inside a disposable clone. The output is a "
+              "pretty-printed form with no stability contract, differing "
+              "between the two bash versions on this machine, `cat <<'EOF'` "
+              "and `esac` under 5.3.15 against `cat  <<'EOF'` and `esac;` "
+              "under 3.2.57, and it normalises neither spelling the twelfth "
+              "pass measured, `<<\\\\EOF` coming back as `<<'EOF'` and "
+              "`<<'EOF-1'` unchanged. bash IS asked, in "
+              "`scripts/tests/test_guard_readers.py`, where every span-table "
+              "row and the delimiter production is run as a synthetic arm of "
+              "`echo` markers and what bash PRINTS is compared with what the "
+              "scanner attributes to the arm. That found the backtick's "
+              "`opens` flag wrong: `x=`printf '%s' 'a`b'`` is an error to "
+              "bash, so a quote does not hide a closing backtick, and the "
+              "scanner had been accepting a file bash refuses. MEASURED over "
+              "both regions the scanner is used on: after comments are "
+              "stripped the `run_gate` region carries 0 `$'`, 0 `$(`, 0 "
+              "`${`, 0 `<<` and 0 backticks against 48 before, and the GATES "
+              "array carries 0 of all five. What is NOT probed is the "
               "unbalanced-quote refusal in `_arm_end`, and it is probed: "
               "`ci-floor.unbalanced-quote-in-an-arm` plants the unclosed "
               "quote in the LAST arm, which is the only position from which a "
@@ -4181,7 +5054,33 @@ GUARDS: tuple[Guard, ...] = (
               "an unclosed quote in an EARLIER arm is closed by the next "
               "quote in the region and read as a very long arm, which the "
               "per-command rule then refuses for a different reason, measured "
-              "at exit 1 with a message naming the wrong thing.",
+              "at exit 1 with a message naming the wrong thing. "
+              "**The eighth limit is the workflow's own grammar, and it was "
+              "not declared at all until the S03 review's twelfth pass, which "
+              "measured four fail-open routes and five refusals of workflows "
+              "GitHub Actions runs correctly.** `.github/workflows/ci.yml` is "
+              "PARSED now, with `yaml.BaseLoader`, which is deviation D-17 "
+              "and the only third-party import in the CI floor. What remains "
+              "a limit is what a parse does not decide. The gate-name match "
+              "is anchored at a STATEMENT HEAD, so a real invocation this "
+              "file cannot see at a head is not counted: `sh -c "
+              "'bin/ocelli.sh gate x'` and `FOO=1 bin/ocelli.sh gate x` are "
+              "refusals rather than passes, which is fail-CLOSED and names "
+              "the gate. `_split_statements` splits on the boolean operators "
+              "without evaluating them, so `false && bin/ocelli.sh gate x` "
+              "counts as an invocation and never runs, and that is a shape "
+              "nobody has measured in this repository rather than one that "
+              "has been shown safe. `on` is read as the string key, so the "
+              "YAML 1.1 boolean spelling `true:` reads as no event block at "
+              "all, which refuses with the top-level keys named. And the "
+              "shapes the twelfth pass deliberately did NOT claim, because it "
+              "could not establish them against a real parse, are anchors, "
+              "the merge key, multi-document files and U+2028. The first "
+              "three would now be answered by PyYAML rather than by this "
+              "file, and a multi-document workflow raises a `YAMLError`, "
+              "which `ci-floor.workflow-unparseable` is the probe for. That "
+              "is a consequence rather than a claim and it is written here "
+              "as one.",
     ),
 
     # -- D-04's chain, the part CI reads ------------------------------------
@@ -4930,6 +5829,18 @@ GUARDS: tuple[Guard, ...] = (
                   script("python3", "scripts/lint_policy_check.py"),
                   "re-allows",
                   needs="cargo", profile="deep"),
+            Probe("lint-policy.manifest-not-utf8",
+                  _a_manifest_that_is_not_utf8,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "cannot be read as UTF-8 text",
+                  note="The read was unguarded, so a `Cargo.toml` that is not "
+                       "UTF-8 arrived as a `UnicodeDecodeError` traceback "
+                       "with no FAIL header. Fail-closed, and still the wrong "
+                       "way to tell a maintainer what to do, which is the "
+                       "S03 review's fifth-pass finding in the CI floor check "
+                       "one file over. The byte planted is a lone 0x80, a "
+                       "continuation byte with no lead byte, which cargo "
+                       "refuses as well."),
             Probe("lint-policy.nothing-scanned", _no_crate_sources_at_all,
                   script("python3", "scripts/lint_policy_check.py"),
                   "not one `.rs` file was read",
