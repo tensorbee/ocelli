@@ -1184,7 +1184,7 @@ async function report(context) {
     // has already rendered three reformats that are not reference output, and
     // adding them here made one `boundaries` object use `readBack` to mean
     // "achieved and written" for stacks and "attempted and discarded" for
-    // reformats. `readBack: 89` equals the files on disk, so
+    // reformats. `readBack: 90` equals the files on disk, so
     // `reformatsReadBack` has to as well.
     //
     // Nothing is lost by that. What a refused subject reached is recorded per

@@ -1,6 +1,7 @@
 # The oracle, reference half
 
-**F-IDs that contributed:** F-010, F-X006, F-X007, F-X008, F-X009, F-X013
+**F-IDs that contributed:** F-010, F-X006, F-X007, F-X008, F-X009, F-X012,
+F-X013
 **Last updated:** 2026-09-06
 
 HLD section 11 names cornerstone3D as the reference the differential harness
@@ -38,7 +39,7 @@ From `docs/sprints/CURRENT_SPRINT.md`:
 > pixels.
 
 Every design choice below is shaped by that sentence. In particular a blank
-canvas reads back perfectly and hashes stably, so "the run produced 91 digests"
+canvas reads back perfectly and hashes stably, so "the run produced 92 digests"
 is not evidence of anything on its own.
 
 ## Layout
@@ -260,7 +261,7 @@ settable by a rule at all: one viewport serves every row and is sized and
 coloured once, so a per-row value would be published in the sidecar as a
 parameter that produced the frame, having produced nothing.
 
-**Eighty-seven of the eighty-nine rendered rows are smaller than the canvas
+**Eighty-eight of the ninety rendered rows are smaller than the canvas
 and are magnified into it. Two are not.** `real/dx_varepop/00000001.dcm` is
 879 by 1168 and `real/us_cmb_crc/00000001.dcm` is 590 by 819, both larger than
 512 in both dimensions, so both are fitted DOWN under `NEAREST`, which discards
@@ -332,18 +333,28 @@ One constant shared between them would be the same class of defect as one
 branch shared between them, and the difference between LINEAR and LINEAR_EXACT
 is a half and a one.
 
-**One divergence between that rule and the reference, recorded for F-011.**
+**One helper divergence between that rule and the reference, reached by
+F-X012.**
 cornerstone3D 5.8.2's `toLowHighRange` applies LINEAR's `(w - 1) / 2` to
 `SAMPLED_SIGMOID` as well, so a file declaring SIGMOID with a width between 0
-and 1 would be accepted here, correctly under C.11.2.1.3.1, and produce an
-inverted range in the reference: width 0.5 at centre 40 gives lower 39.75 and
-upper 39.25. No corpus row reaches it, because all eighty-five windowed rows
-resolve LINEAR. It is written down because the first SIGMOID row added to the
-corpus will meet it, and because it is the reference's divergence from the
-standard rather than this harness's.
+and 1 is accepted here, correctly under C.11.2.1.3.1, while that helper returns
+an inverted range. The new synthetic row reaches it: width 0.5 at centre 40
+returns lower 39.75 and upper 39.25, so lower exceeds upper by 0.5.
+
+The approved F-X012 plan expected that helper result to invert the presented
+pixels. The normal oracle contradicted that expectation. The 5.8.2 viewport's
+SIGMOID presentation remains monotonic increasing and its observed display
+codes at modality values 39.5, 39.75, 40, 40.25 and 40.5 are 5, 30, 127, 225
+and 250. Those are the observed quantised RGBA8 codes. They track the
+independent PS3.3 curve, with 127 observed for the exact centre value 127.5,
+so this record does not claim nearest-integer rounding.
+The frame digest is
+`03da6fdededcadf69d33416c37ec80bd5a32c3ded31cf685bc122eda16155aea`.
+The helper defect is therefore recorded as reachable, with its direction and
+magnitude, but not invented as a presented-pixel divergence.
 
 **Neither the CT default nor the full-range rule is reached by the corpus as it
-stands.** Eighty-five of the eighty-nine rendered rows carry their own window
+stands.** Eighty-six of the ninety rendered rows carry their own window
 and four are colour, so both fallback branches are exercised by the unit tests
 alone. They are not dead code, they are the declared answer for a file that
 arrives without a window, and the tests are what keep them honest until one
@@ -534,12 +545,12 @@ produced. Strict in both directions:
 - a row an entry claims that then succeeds fails the run, so a stale claim
   cannot read as a known limit and hide a coverage gain.
 
-That is the difference between an oracle that covers 89 rows and knows it, and
-one that covers 89 and reports 91.
+That is the difference between an oracle that covers 90 rows and knows it, and
+one that covers 90 and reports 92.
 
 ### What cornerstone3D 5.8.2 could not render, measured
 
-Two rows of ninety-one. Both are in `unsupported.json` with the full reasoning.
+Two rows of ninety-two. Both are in `unsupported.json` with the full reasoning.
 
 - **`synthetic/us_ybr_full_422.dcm`**, uncompressed YBR_FULL_422. PS3.3
   C.7.6.3.1.2 subsamples chroma two to one horizontally, so the frame is
@@ -694,7 +705,7 @@ That is not a failure. The frame is exactly what the file asks for, and the
 plan's rule is that the file's own window wins. So the run **counts and names**
 these rows instead: any frame over `informationFloor.extremeFractionWarnAbove`
 black and white together is listed in `run.json` under `lowInformation` and
-noted on stdout. Sixteen of the eighty-nine rendered rows are on that list:
+noted on stdout. Sixteen of the ninety rendered rows are on that list:
 every rendered `syntax/` row whose content is a mono16 ramp, which is fifteen
 of them, plus `synthetic/ct_unsigned_16.dcm`, which is a 16-bit ramp under the
 same CT window. (`syntax/` holds eighteen rows. The sixteenth mono16 one,
@@ -1039,7 +1050,7 @@ row does, which is exactly why it is a check rather than an observation.
 Each frame id writes the same three files beside the stack frames, in the same
 flat `out/` directory: `<id>.raw`, `<id>.png`, `<id>.json`.
 
-**Every sidecar carries a top-level `kind`, including the eighty-nine stack
+**Every sidecar carries a top-level `kind`, including the ninety stack
 ones.** `"stack"` on those, `"volume-reformat"` on the nine that are written. F-011 switches on
 it and must not infer a shape from a filename. This is the single field that
 makes "a comparator written before F-X007 lands must not assume stack-only
@@ -1077,7 +1088,7 @@ one exception.
   means something exact.
 - new `volumeParamsSha256` and `volumeTruthSha256`, beside `renderParamsSha256`
   and `unsupportedSha256`. **`renderParamsSha256` not moving is mechanical
-  evidence that the eighty-nine stack frames are the same artefact F-011
+  evidence that the ninety stack frames are the same artefact F-011
   started against**, which is why F-X007 does not touch `render-params.json` at
   all.
 - new `volumes[]`, one entry per subject, and `framePairs[]`, one per declared
@@ -1086,7 +1097,7 @@ one exception.
   `volumesRefusedAsDeclared`, `reformatsDeclared`, `reformatsPresented`,
   `reformatsReadBack` and `reformatsWritten`. **The last three all mean
   ACHIEVED, the way the stack half's `readBack` does**, so on this corpus they
-  are 9, 9 and 9 against a `reformatsDeclared` of 12, and `readBack: 89` and
+  are 9, 9 and 9 against a `reformatsDeclared` of 12, and `readBack: 90` and
   `reformatsReadBack: 9` both equal their own count of files on disk.
   `reformatsDeclared` is the subjects times the orientations and is the only
   one that says what was asked for.

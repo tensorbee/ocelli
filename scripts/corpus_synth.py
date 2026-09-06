@@ -395,6 +395,26 @@ def case_unsigned_16(out: Path) -> None:
     write(ds, out / "synthetic" / f"{name}.dcm")
 
 
+def case_sigmoid_width_half(out: Path) -> None:
+    """A SIGMOID VOI whose legal width is below the LINEAR minimum.
+
+    PS3.3 C.11.2.1.3.1 permits any positive width for SIGMOID. The stored
+    ramp maps to modality values 37.75 through 42.5, crossing both shoulders
+    of the window around centre 40 without relying on a real study.
+    """
+    name = "ct_sigmoid_width_half"
+    ds = new_dataset(name, CT_STORAGE, "CT")
+    ct_common(ds)
+    ds.RescaleSlope = "0.25"
+    ds.RescaleIntercept = "0"
+    ds.WindowCenter = "40"
+    ds.WindowWidth = "0.5"
+    ds.VOILUTFunction = "SIGMOID"
+    pixels = np.tile(np.arange(151, 171, dtype=np.uint16), (TRAP_ROWS, 1))
+    set_monochrome_pixels(ds, pixels, 16, 16, 15, 0)
+    write(ds, out / "synthetic" / f"{name}.dcm")
+
+
 def case_monochrome1(out: Path) -> None:
     """MONOCHROME1: minimum value is WHITE (PS3.3 C.7.6.3.1.2).
 
@@ -947,6 +967,7 @@ def generate(out: Path) -> Path:
     case_signed_12in16(out, 11, "ct_signed_12in16_right")
     case_signed_12in16(out, 15, "ct_signed_12in16_left")
     case_unsigned_16(out)
+    case_sigmoid_width_half(out)
     case_monochrome1(out)
     case_nonsquare_spacing(out)
     case_series(out, "ct_series_uniform", nonuniform=False)
@@ -973,6 +994,8 @@ CATEGORIES = {
     "synthetic/ct_signed_12in16_left.dcm":
         ("CT", "synthetic, mono16, signed-12in16, high-bit-15"),
     "synthetic/ct_unsigned_16.dcm": ("CT", "synthetic, mono16, unsigned-16"),
+    "synthetic/ct_sigmoid_width_half.dcm":
+        ("CT", "synthetic, mono16, sigmoid-width-below-one"),
     "synthetic/cr_monochrome1.dcm": ("CR", "synthetic, mono16, monochrome1"),
     "synthetic/mr_nonsquare_spacing.dcm":
         ("MR", "synthetic, mono16, nonsquare-spacing"),

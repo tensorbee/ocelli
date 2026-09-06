@@ -11,7 +11,7 @@
 //!
 //! An identity comparison of the reference against itself proves the loader,
 //! the identifier mapping, the class resolution, the sidecar contract and the
-//! report shape over all ninety-eight views. **It proves nothing about
+//! report shape over all ninety-nine views. **It proves nothing about
 //! detection**, which is why it is never allowed to be the only corpus-scale
 //! exercise. This file is the other half.
 //!
@@ -394,7 +394,7 @@ pub const CATALOGUE: &[Mutation] = &[
         name: "plus-three-on-one-pixel-of-a-reformat",
         why: "The same damage on a volume reformat. It is here because \
               run.json's rows[] is stack-only, so a comparator that read that \
-              list alone would compare eighty-nine of ninety-eight views and \
+              list alone would compare ninety of ninety-nine views and \
               report success, and a catalogue that only ever damaged a stack \
               row would not notice.",
         side: MutatedSide::Candidate,

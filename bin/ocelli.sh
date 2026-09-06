@@ -526,7 +526,7 @@ case "$command" in
     # gives.
     #
     # RELEASE, and not for speed alone. A debug build of a comparison over
-    # ninety-eight frames plus twenty-one mutation replays is minutes rather
+    # ninety-nine frames plus twenty-one mutation replays is minutes rather
     # than seconds, and a check nobody wants to wait for is a check that stops
     # being run.
     #

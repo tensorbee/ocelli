@@ -1,6 +1,6 @@
 # The comparator, the oracle's judging half
 
-**F-IDs that contributed:** F-011, F-015
+**F-IDs that contributed:** F-011, F-015, F-X012
 **Last updated:** 2026-09-06
 
 HLD section 11 says the harness "pushes the same study through both stacks and
@@ -36,7 +36,7 @@ directories are filled by three things, none of which is a renderer.
    real strengthening of what CI covers.
 2. **Identity over the real reference output**, `ocelli-compare identity`. It
    proves the loader, the identifier mapping, the tolerance-class resolution,
-   the sidecar contract and the report shape over all ninety-eight views. **It
+   the sidecar contract and the report shape over all ninety-nine views. **It
    proves nothing whatever about detection**, which is why it is never allowed
    to be the only corpus-scale exercise.
 3. **A declared mutation catalogue**, `tools/oracle/src/mutations.rs`, applied
@@ -69,7 +69,7 @@ its LAST command, so an unchained render could fail and be reported green by a
 passing comparison. **No new gate name was added.** The comparator is part of
 what `oracle` means.
 
-The binary is built in release. A debug comparison over ninety-eight frames
+The binary is built in release. A debug comparison over ninety-nine frames
 plus twenty-one mutation replays is minutes rather than seconds, and a check
 nobody wants to wait for is a check that stops being run.
 
@@ -105,8 +105,8 @@ place a later story could otherwise break the comparator silently.
   declared list names fails the run.** `run.json`'s `rows[]` stays stack-only on
   purpose, so that the accounting identity `readBack + unsupported ==
   applicable` means something exact, and F-X007 put its reformats in
-  `volumes[].frames[]`. A comparator reading `rows[]` alone would compare 89 of
-  98 views and report success. The orphan refusal is what turns that into a
+  `volumes[].frames[]`. A comparator reading `rows[]` alone would compare 90 of
+  99 views and report success. The orphan refusal is what turns that into a
   failure, and it keeps working when a later story adds a third list.
 - **Each sidecar carries a top-level `kind` and the comparator switches on it.**
   An unknown value is refused and never defaulted to `stack`, because defaulting
@@ -154,7 +154,7 @@ assumed it would. A reformat's class is resolved from its members' own stack
 sidecars instead, through `volume.members[].stackSidecar`. The class token is a
 property of the pixel data and every member of a series carries the same one.
 
-Measured on the current corpus: 84 class one and 5 class two among the stack
+Measured on the current corpus: 85 class one and 5 class two among the stack
 views, and all 9 volume reformats class one.
 
 ## The per-view record, and what gates
@@ -383,8 +383,8 @@ predicate and does not say what a comparator reports, so this vocabulary is
 F-011's construction.
 
 **`unmeasured` is a third outcome and not a synonym for `pass`.** A run that
-reports "70 pass, 0 fail, 28 unmeasured" over 98 views is saying something a run
-that reported "98 compared" would not. The number is uncomfortable on purpose:
+reports "71 pass, 0 fail, 28 unmeasured" over 99 views is saying something a run
+that reported "99 compared" would not. The number is uncomfortable on purpose:
 better than a quarter of the corpus is covered and not measured, and that was
 true before F-011 and invisible.
 
@@ -812,7 +812,7 @@ rung compares.
 
 ## The low-information views
 
-Twenty-two of the ninety-eight, sixteen stack and six volume reformats. The
+Twenty-two of the ninety-nine, sixteen stack and six volume reformats. The
 comparator reads `run.json`'s `lowInformation.rows` rather than rederiving
 saturation from the frames, because the reference half already computes it
 against a declared threshold in `render-params.json` and a second derivation
@@ -926,29 +926,44 @@ reported as a defect.
 Each entry carries an identifier, a match condition over the reference
 sidecar's fields, a PS3.3 citation, what 5.8.2 does, what the standard requires,
 the expected shape of the pixel effect, a `reachable` flag with its reason, and
-the F-ID that raised it. When a view's divergence is explained by a matching
-entry, the outcome is `unmeasured` with the qualifier `reference-divergence` and
-the record names the entry, rather than `fail`.
+the F-ID that raised it. A reachable entry also carries the valid F-ID that
+resolved the evidence gap, and an `effect` naming the pixel relationship the
+comparator can prove. F-IDs use the repository's canonical form: `F-` or
+`F-X`, three digits, and an optional lowercase suffix. The current
+`monochrome-inversion` effect requires geometry agreement, every
+image-rectangle code to be the pointwise complement of the other side, and the
+image to contain more than one code. Only then is the outcome `unmeasured` with
+the qualifier `reference-divergence` and the record names the entry, rather
+than `fail`. Matching sidecar conditions alone never change an identical view,
+an arbitrary pixel defect, an unrelated parameter mismatch or an unrelated
+geometry mismatch from its normal verdict.
 
 The match language is deliberately small: an RFC 6901 pointer mapped to exactly
 one of `equals`, `lessThan` or `greaterThan`, and every condition must hold. **A
-test the comparator cannot evaluate is refused at load rather than read as
-unsatisfied**, because a condition nobody evaluates is an entry that never fires
-and nobody notices.
+test or effect the comparator cannot evaluate is refused at load rather than
+read as unsatisfied**, because a declaration nobody evaluates is an entry that
+never fires and nobody notices.
 
 **The strictness is asymmetric, and that is deliberate.** An entry marked
 `reachable: false` that FIRES is a run failure, because the claim was wrong.
 The opposite direction, an entry no row exercises failing the run, is
-`unsupported.json`'s other half and is not applied while the only entry is
-unreachable by today's corpus, since it would fail every run from the first one.
+`unsupported.json`'s other half and is not applied here.
 
 **A new entry is a reviewed change with a rationale, exactly like a tolerance
 change.** The register is the one mechanism in this design that can turn a
 failure into a non-failure, so it gets the same handling as the other one.
 
-Its only entry on day one is the SIGMOID width case F-010 recorded, carrying
-`reachable: false` with the reason that all eighty-five windowed corpus rows
-resolve LINEAR. Resolving the case itself is F-X012, S04.
+Its only entry is the SIGMOID width case F-010 recorded. F-X012 preserves that
+`raisedBy`, adds `resolvedBy: F-X012`, and makes it reachable with
+`synthetic/ct_sigmoid_width_half.dcm`. The pinned helper returns lower 39.75 and
+upper 39.25, but the observed presented pixels remain standard-correct and
+monotonic. The register therefore acts only if a future candidate comparison
+contains the declared pointwise monochrome inversion while geometry agrees. An
+unrelated candidate pixel, rescale parameter or camera geometry change stays
+attributed by its ordinary rung. This preserves D-11's attribution rule
+without manufacturing a pixel divergence. D14's Ocelli bound remains against
+the standard-correct presented output. The helper's separately measured
+inverted range is not widened into that bound.
 
 ### Two mechanisms for "the reference is wrong", and why both
 
@@ -996,10 +1011,10 @@ not emit is refused at load, so a stale census cannot read as an empty set.
 
 ## Today's numbers
 
-`bin/ocelli.sh compare` over `tools/oracle/out/`, all ninety-eight views:
+`bin/ocelli.sh compare` over `tools/oracle/out/`, all ninety-nine views:
 
 ```text
-98 views: 70 pass, 0 fail, 28 unmeasured, 0 absent
+99 views: 71 pass, 0 fail, 28 unmeasured, 0 absent
   decimated: 2
   unstated-threshold: 5
   weak: 22
@@ -1009,9 +1024,9 @@ compare: 21 mutations, 0 not detected
 Twenty-eight and not twenty-nine, because `real/us_cmb_crc/00000001.dcm` is
 class two and decimated and is counted once with both qualifiers.
 
-The seventy pass numbers mean nothing on their own. **The identity run compares
+The seventy-one pass numbers mean nothing on their own. **The identity run compares
 the reference against itself**, so a comparator that always answered zero would
-produce the same seventy passes. The mutation line is what makes the seventy
+produce the same seventy-one passes. The mutation line is what makes the seventy-one
 worth reading.
 
 ## Output
@@ -1156,6 +1171,4 @@ Named, because each is somebody's story.
 - Re-rendering the saturated rows at a wider window, or a magnified render for
   the two decimated rows. Both change `render-params.json` and therefore every
   reference frame.
-- Resolving the reference's SIGMOID divergence. F-X012, S04. F-011 built the
-  register that holds it.
 - The CI gate that renders the corpus per pull request, F-012, E2.4, S04.

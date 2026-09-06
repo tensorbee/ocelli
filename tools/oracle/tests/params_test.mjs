@@ -11,7 +11,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { Enums } from "@cornerstonejs/core";
+import { Enums, utilities } from "@cornerstonejs/core";
 
 import {
   canvasScale,
@@ -196,7 +196,7 @@ test("a rule replaces a key wholesale rather than merging into it", () => {
   assert.deepEqual(resolveRenderParams(spec, colour).voi, { source: "none" });
 });
 
-// `spec` is read once per run and resolved ninety-one times. If a rule's value
+// `spec` is read once per run and resolved ninety-two times. If a rule's value
 // or the defaults table were handed out by reference, one row's mutation would
 // be every row's, and the row that noticed would be whichever came last.
 // Nothing mutates them today, and these are what stop that being a thing to
@@ -584,6 +584,41 @@ test("the same window is honoured under LINEAR_EXACT, which allows it", () => {
     assert.equal(voi.windowWidth, width);
     assert.equal(voi.voiLutFunction, "LINEAR_EXACT");
   }
+});
+
+// The corpus row that makes F-010's known reference divergence reachable.
+// PS3.3 C.11.2.1.3.1 requires only w > 0 for SIGMOID. This test binds the
+// committed manifest row to the resolver the browser page uses.
+test("the corpus SIGMOID window keeps its width below one", () => {
+  const sigmoid = MANIFEST.find(
+    (entry) => entry.path === "synthetic/ct_sigmoid_width_half.dcm",
+  );
+  assert.ok(sigmoid, "the committed manifest has no SIGMOID width-half row");
+  const params = resolveRenderParams(SPEC, sigmoid);
+  const voi = resolveVoi(params.voi, {
+    modality: "CT",
+    fileWindowCenter: [40],
+    fileWindowWidth: [0.5],
+    fileVoiLutFunction: "SIGMOID",
+    minPixelValue: 151,
+    maxPixelValue: 170,
+    defaults: params.modalityVoiDefaults,
+  });
+  assert.equal(voi.source, "file");
+  assert.equal(voi.windowCenter, 40);
+  assert.equal(voi.windowWidth, 0.5);
+  assert.equal(voi.voiLutFunction, "SIGMOID");
+});
+
+// This is the pinned helper divergence F-010 recorded. It is deliberately
+// separate from the resolver assertion above and from presented pixels. The
+// normal F-X012 oracle run observed that presentation remains standard-correct
+// even though this helper returns an inverted range.
+test("cornerstone 5.8.2 derives the recorded inverted SIGMOID range", () => {
+  assert.deepEqual(
+    utilities.windowLevel.toLowHighRange(0.5, 40, "SIGMOID"),
+    { lower: 39.75, upper: 39.25 },
+  );
 });
 
 // The other side of the same boundary: zero and below are refused, and this is

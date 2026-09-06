@@ -20,7 +20,7 @@ const MATCH_KEYS = new Set(["path", "modality", "category", "transferSyntax"]);
  *
  * Deliberately narrower than the set of keys in `base`. `canvas` and
  * `background` are properties of the RUN rather than of a row: one viewport
- * serves all ninety-one rows, and it is sized and coloured once, from the
+ * serves all ninety-two rows, and it is sized and coloured once, from the
  * first row's resolution. A rule that set either would be copied into the
  * sidecar as "the parameters that produced this frame" while having produced
  * nothing, which is the exact failure the refusal below exists for. Widening
@@ -84,7 +84,7 @@ function applyBlock(target, block) {
           `a parameter that did not take effect.`,
       );
     }
-    // Cloned, not shared. `spec` is read once per run and resolved ninety-one
+    // Cloned, not shared. `spec` is read once per run and resolved ninety-two
     // times, so handing every row a reference into the same declaration would
     // make one row's mutation everybody's. Nothing mutates them today, and
     // this is what keeps that from being a thing to remember.
