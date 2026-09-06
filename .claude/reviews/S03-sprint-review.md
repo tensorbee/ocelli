@@ -128,6 +128,7 @@ and a mutation is an input to a test: it derives from the specification too.
 | 10 | Three reviewers, 12 defects, 8 smells, 6 nitpicks, and this row's tally is in `e2b11d8`'s successor because pass 10 found the sentence claiming pass 3's was the only unrecorded one to be false for passes 8 and 9 as well. **The comparator was clean a third time and the crates sweep converged at five survivors in ninety mutations.** The guard harness produced a backtick shape and two `#[path]` spellings | remediated |
 | 11 | Two reviewers, 6 defects, 2 smells, 5 nitpicks. **The comparator and the crates were both declared done**, at four and two consecutive clean passes. The guard reviewer named the class ten passes had been patching and the remediation replaced two of three hand-rolled grammars with real parsers | remediated |
 | 12 | Two reviewers, 6 defects, 8 smells, 3 nitpicks, aimed at the two grammars pass 11 left. **The prediction pass 11's remediation made against itself came true**: the YAML reader had four fail-open routes, one of them key order, which is not a spelling and cannot be patched. Both readers are replaced | remediated |
+| 13 | Two reviewers, 6 defects, 2 smells, 4 nitpicks. **The verdict was that the class is NOT closed**: pass 12 closed the grammar and left the CONSUMERS of the grammar unguarded, and the bash oracle stopped at the arm's extent. The confirmation sweep declared the sprint able to close | remediated |
 
 **Three of these tallies are recorded here and nowhere else, not one.** The
 pass-4 row explained pass 3's missing tally and asserted it was the only one,
@@ -725,9 +726,66 @@ The last hand-written production, the here-document delimiter as a regex with an
 invented character class, is gone. It is a shell WORD now, read by the same rule
 that reads the `GATES` array.
 
+## Pass 13, and the difference between a grammar and its consumers
+
+Pass 12 replaced all three hand-rolled readers and pass 13 was asked for a
+verdict rather than a list. **The verdict was that the class is not closed**,
+and the sentence that carries it is worth keeping:
+
+> The tokenizer is closed. I could not get a single shell span, quote,
+> backtick, here-document, comment or continuation past `shell_pieces`. But
+> pass 12 closed the GRAMMAR and left the CONSUMERS OF THE GRAMMAR unguarded,
+> and the oracle that would have caught it stops at the arm's extent.
+
+Thirteen compound-command shapes were planted at the tokenizer and every one
+failed closed, each with its refusing mechanism named. Then four routes went
+through the things sitting on top of it. `STATEMENT_BREAK` knew `&&` and not
+`&`, so `A & B` was one statement and six node suites left CI at exit 0, which
+is passes 6, 7 and 8 with a different operator. `run_commands` scanned a `run:`
+body LINE BY LINE, so a here-document holding a gate name counted as an
+invocation and a legitimate backslash continuation read as an uninvoked gate,
+one fail-open and one false refusal from one line of code.
+`lint_policy_check.py` still matched `bin/ocelli.sh` with a regex a trailing
+comment satisfies, after which `unsafe_allowlist_check.py` ran nowhere and HLD
+27.1's `unsafe_code` deny was enforced by nothing. And `continue-on-error` sat
+in the parsed tree with nothing reading it, so the gate that watches every other
+gate could be taken out of CI's verdict in one line that reads as tolerating
+flakiness.
+
+**Three of those four are the propagation failure again.** The repair for the
+third already existed two files over, where the catalogue calls
+`ci_floor_check.gate_commands` for exactly this reason, and it had not reached
+the third caller.
+
+**The oracle is why they survived.** `scanner_keeps_in_the_arm` ran the
+tokenizer and the arm-end scan, so it tested where the arm ENDS, and every
+planted marker sits inside the extent either way. The loss happened one function
+later. There is now a `scanner_runs_in_the_arm` that compares what bash PRINTS
+against the markers surviving `_split_statements` and the head policy, and a
+seven-test oracle over `run_commands`, which had none at all.
+
+**The remediation then found two things by measuring what it had been told.**
+The prescribed `&` fix refuses a legitimate state, because `>&2` in the `panic`
+arm's own error message becomes a command CI does not run. And the obvious
+reading of the errexit rule is wrong: `bash -ec 'false && true'` followed by
+another line exits 0, because the short circuit means nothing fires errexit.
+Ten such measurements are a table in the suite now, asserted row by row.
+
+**The residue is stated per production rather than as one sentence.** "One
+tokenizer" was achieved and "one reader" was not, and the limit had been reading
+as if it had been. The seam named as next is `_tolerated_statements`' assumption
+that a step body runs under `bash -e`, since a `shell:` key is unread and
+`shell: python` would have the body scanned as shell. That is declared and not
+measured, and declared is what the last three passes found insufficient.
+
 ## What is still open, and it is declared rather than hidden
 
 - **G-02 and G-04**, the two remaining declared guard holes. F-X014.
+- **A step's `shell:` key is unread**, so `_tolerated_statements` assumes every
+  `run:` body is `bash -e` and `shell: python` would have the body scanned as
+  shell. No step sets one today. Declared by the thirteenth pass's remediation
+  as the seam it would plant at next, and declared is what three passes have
+  found insufficient, so treat it as open rather than as bounded.
 - **Bash's compound-command grammar is not modelled**, so the shell scanner
   cannot tell a subshell `(` from a `case` pattern's, nor `((` arithmetic from
   `( (`, which bash resolves by attempting the arithmetic parse and backtracking.
@@ -742,8 +800,11 @@ that reads the `GATES` array.
   "it is declared rather than hidden" and this one was declared elsewhere.
   F-037 or F-X002.
 - **`close-preflight` reports on a stale source.** It reads each feature's
-  last per-feature review, all recorded at pass 1 before nine sprint-level
-  passes and nine remediation commits, and its verification check accepts a
+  last per-feature review, all recorded at pass 1 and never since. **The count
+  of passes since is deliberately not written here**, because this bullet said
+  "nine" from the ninth pass through the twelfth while three more ran, which is
+  the defect the bullet is about. `git log --oneline --grep='^S03, sprint
+  review pass' 36adc98..HEAD` prints it. Its verification check also accepts a
   recorded sprint profile with no tree hash. Its green is true about a
   different question. F-X018, and the mitigation is that `/close-sprint` runs
   `gate --sprint` itself.

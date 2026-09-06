@@ -92,6 +92,53 @@ def scanner_keeps_in_the_arm(body: str) -> set[str]:
     return set(MARKER.findall(text[start:end]))
 
 
+def scanner_runs_in_the_arm(body: str) -> set[str]:
+    """The markers the guard's CONSUMERS of the arm resolve to a statement.
+
+    **`scanner_keeps_in_the_arm` above tests where the arm ENDS, and that is
+    where this suite stopped until the S03 review's thirteenth pass.** Every
+    marker in every shape below sits INSIDE the arm's extent, so the extent
+    test stayed green while a consumer one function later merged two statements
+    into one and dropped the work in the second. That is exactly what happened:
+    `STATEMENT_BREAK` carried `&&` and no `&`, `A & B` came out as one
+    statement, and a head that is a `COMMAND_PREFIXES` prefix or a
+    `SHELL_NOISE` builtin took `B` out of `unseen_commands` with it. Measured
+    at exit 0 with six node suites out of CI.
+
+    The shell reader is one tokenizer and four hand-written productions on top
+    of it, and this is the oracle for the one the extent test cannot reach. The
+    consumer question is not "what text is in the arm" but "does the reader
+    resolve each command to its OWN statement head", because that is the
+    question `unseen_commands` and `invoked_gates` both ask. So a marker counts
+    here when it is the ONLY marker of a statement whose head, after the same
+    policy `unseen_commands` applies, is the command that prints it. Two
+    markers in one statement is a merge, and a merge is the defect.
+
+    The policy is the guard's, not a paraphrase: `SHELL_INTRODUCERS` heads are
+    stripped and the remainder re-scanned, `command ...` goes through
+    `command_builtin_runs`, and what is left is the head. The three fail-opens
+    of the sixth, seventh and eighth passes all lived in those two consumers,
+    and nothing in this file reached them until now.
+    """
+    region = f"case g in\n  g) {body} ;;\n  g2) echo M9 ;;\nesac\n"
+    text = ci_floor_check.shell_source(region)
+    start = text.index("g)") + 2
+    end, reason = ci_floor_check._arm_end(text, start)
+    if reason:
+        raise AssertionError(f"the scanner refused the arm: {reason}")
+    resolved: set[str] = set()
+    for raw in ci_floor_check._split_statements(text[start:end]):
+        statement = re.sub(r"\s+", " ", raw).strip()
+        while statement.split(" ", 1)[0] in ci_floor_check.SHELL_INTRODUCERS:
+            statement = statement.partition(" ")[2].strip()
+        if statement.split(" ", 1)[0] == "command":
+            statement = ci_floor_check.command_builtin_runs(statement)
+        markers = MARKER.findall(statement)
+        if len(markers) == 1 and statement.split(" ", 1)[0] == "echo":
+            resolved.add(markers[0])
+    return resolved
+
+
 class WhereAShellCommentBegins(unittest.TestCase):
     """`shell_source`, against bash rather than against itself."""
 
@@ -164,6 +211,11 @@ class WhatBashRunsInAnArm(unittest.TestCase):
         self.assertEqual(bash_runs_in_the_arm(body), expected,
                          "bash does not do what this case claims")
         self.assertEqual(scanner_keeps_in_the_arm(body), expected)
+        # The consumers, and this line is the thirteenth pass's. Every shape
+        # above was already inside the arm's extent, so the two assertions
+        # before this one agreed while a statement was being lost one function
+        # later. See `scanner_runs_in_the_arm`.
+        self.assertEqual(scanner_runs_in_the_arm(body), expected)
 
     @unittest.skipUnless(BASH, "no bash on this machine")
     def test_a_backslash_quoted_heredoc_delimiter(self) -> None:
@@ -302,7 +354,7 @@ class WhatBashRunsInAnArm(unittest.TestCase):
 
     @unittest.skipUnless(BASH, "no bash on this machine")
     def test_a_double_quote_opens_the_three_substitutions(self) -> None:
-        """The declared limit until the thirteenth pass, closed and measured.
+        """The declared limit until the twelfth pass, closed and measured.
 
         `"` ran to its closer, so a `"` inside a `$( )` inside a `"` ended the
         outer quote early. All three of these print through, so all three open
@@ -366,6 +418,54 @@ class WhatBashRunsInAnArm(unittest.TestCase):
         self.assertEqual(
             ci_floor_check._split_statements("echo M1 ${u:-{a}} && echo M2"),
             ["echo M1 ${u:-{a}} ", " echo M2"])
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_bare_ampersand_ends_a_statement(self) -> None:
+        """**The fourteenth route, and it is passes 6, 7 and 8 one operator
+        along.**
+
+        bash's `&` terminates a list exactly as `;` does. `STATEMENT_BREAK`
+        carried `&&` and no `&`, so `A & B` was ONE statement whose head is
+        `A`, and `unseen_commands` drops a statement whose head is a
+        `COMMAND_PREFIXES` prefix or a `SHELL_NOISE` builtin. MEASURED in a
+        real clone: the `&&` before `node --test` in the `bench` arm rewritten
+        as `&` on one line, with the `- run: bin/ocelli.sh gate bench` step
+        replaced by the arm's two extractable `python3` commands, gave
+        `bash -n` 0 and `scripts/ci_floor_check.py` exit 0 printing "every
+        command in each gate's arm", `bench` gone from the named-only list and
+        six node suites out of CI.
+
+        The extent test could not see it. `M2` is inside the arm either way,
+        which is why `scanner_runs_in_the_arm` exists.
+        """
+        self.assertEqual(bash_says("echo M1 & echo M2\nwait"), "M2\nM1\n")
+        self.check("echo M1 & echo M2", {"M1", "M2"})
+        self.assertEqual(ci_floor_check._split_statements("echo M1 & echo M2"),
+                         ["echo M1 ", " echo M2"])
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_redirection_ampersand_is_not_a_statement_break(self) -> None:
+        """The direction the fix must not widen into, and it was measured open.
+
+        `&` is also the second character of `>&` and `<&` and the first of `&>`
+        and `&>>`, and none of those separates anything. MEASURED with the
+        naive alternative `r"[\\n;{}()]|&&|\\|\\||\\||&"` over the real runner:
+        `unseen_commands` grew `unseen['panic'] = ['2', ...]`, a file descriptor
+        reported as a command CI does not run, out of the `panic` arm's real
+        `echo "wasm-pack is not installed. ..." >&2`. It cost no exit code only
+        because `panic` already holds unseen commands and CI names the gate, so
+        an arm whose only unextractable text was a redirection would have
+        refused a legitimate state.
+
+        bash is the authority here too: `echo M1 2>&1` prints `M1` and exits 0,
+        where the naive reading `echo M1 2 & 1` backgrounds one command and
+        then fails to find `1`, which `bash_says` would refuse outright.
+        """
+        self.assertEqual(bash_says("echo M1 2>&1"), "M1\n")
+        for text in ("echo M1 2>&1", "echo M1 >&2", "echo M1 &> /dev/null",
+                     "echo M1 &>> /dev/null", "echo M1 <&0"):
+            with self.subTest(text):
+                self.assertEqual(ci_floor_check._split_statements(text), [text])
 
     @unittest.skipUnless(BASH, "no bash on this machine")
     def test_a_dollar_single_quote_is_a_span(self) -> None:
@@ -456,6 +556,190 @@ class WhereAnArmEnds(unittest.TestCase):
             ["test -n $(printf x) ", " cargo z"])
 
 
+def workflow_with(step: str) -> str:
+    """One job, one step, the smallest workflow `run_commands` will read."""
+    return ("on: [push]\njobs:\n  j:\n    runs-on: ubuntu-latest\n"
+            "    steps:\n" + step)
+
+
+class WhatCiRunsInAStepBody(unittest.TestCase):
+    """The SECOND consumer of the tokenizer, and it had no oracle at all.
+
+    `run_commands` reads `.github/workflows/ci.yml`'s `run:` bodies, and until
+    the S03 review's thirteenth pass it read them ONE LINE AT A TIME while the
+    workflow itself was parsed. Cross-line shell state was discarded between
+    the line that establishes it and the lines it governs, which is one line of
+    code producing a fail-open and a false refusal at once. bash is the
+    authority for both, exactly as it is for the arm reader above.
+    """
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_heredoc_body_is_not_an_invocation(self) -> None:
+        """Route 4a of the twelfth pass, in the spelling that pass left open.
+
+        A gate name in a here-document BODY is data. MEASURED in a real clone
+        with the `- run: bin/ocelli.sh gate panic` step rewritten as this
+        body: `scripts/ci_floor_check.py` exit 0 with the runner never called,
+        on HLD section 23's wasm panic-hook proof, the one property no native
+        test can observe.
+        """
+        self.assertEqual(
+            bash_says("cat <<'EOF'\nbin/ocelli.sh gate panic\nEOF"),
+            "bin/ocelli.sh gate panic\n")
+        commands = ci_floor_check.run_commands(workflow_with(
+            "      - run: |\n"
+            "          cat <<'EOF'\n"
+            "          bin/ocelli.sh gate panic\n"
+            "          EOF\n"))
+        self.assertNotIn("panic", ci_floor_check.invoked_gates(commands))
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_continuation_hides_no_invocation_either(self) -> None:
+        """The same fail-open through the other cross-line production."""
+        self.assertEqual(bash_says("echo not \\\nbin/ocelli.sh gate panic"),
+                         "not bin/ocelli.sh gate panic\n")
+        commands = ci_floor_check.run_commands(workflow_with(
+            "      - run: |\n"
+            "          echo not \\\n"
+            "          bin/ocelli.sh gate panic\n"))
+        self.assertNotIn("panic", ci_floor_check.invoked_gates(commands))
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_a_continued_command_is_one_command(self) -> None:
+        """The false refusal, which is the direction the fix must not undo.
+
+        MEASURED before the fix, with the real `content` step continued onto a
+        second line: the check exited 1 saying nothing in the workflow ran the
+        gate, while bash runs it as one command.
+        """
+        self.assertEqual(
+            bash_says("echo python3 scripts/staged_content_check.py \\\n"
+                      "  --tracked"),
+            "python3 scripts/staged_content_check.py --tracked\n")
+        commands = ci_floor_check.run_commands(workflow_with(
+            "      - run: |\n"
+            "          python3 scripts/staged_content_check.py \\\n"
+            "            --tracked\n"))
+        self.assertTrue(ci_floor_check.runs_command(
+            "python3 scripts/staged_content_check.py --tracked", commands))
+
+    def test_two_commands_on_one_line_are_two_commands(self) -> None:
+        """A statement and not a line is the unit now, so a step chaining two
+        of a gate's arm commands covers both. The line reader matched neither,
+        because `a && b` is not either argv."""
+        commands = ci_floor_check.run_commands(workflow_with(
+            "      - run: python3 scripts/a.py && python3 scripts/b.py\n"))
+        self.assertTrue(ci_floor_check.runs_command("python3 scripts/a.py",
+                                                    commands))
+        self.assertTrue(ci_floor_check.runs_command("python3 scripts/b.py",
+                                                    commands))
+
+    def test_continue_on_error_takes_the_step_away(self) -> None:
+        """`continue-on-error` was in the parsed tree and nothing read it.
+
+        Three plants, each valid YAML, each leaving the check at exit 0 with
+        the `guards` gate reported covered: the key on the step, the key on the
+        job, and `|| true` appended to the run.
+        """
+        step = ci_floor_check.run_commands(workflow_with(
+            "      - continue-on-error: true\n"
+            "        run: bin/ocelli.sh gate guards\n"))
+        self.assertTrue(all(c.tolerated for c in step), step)
+        self.assertEqual(
+            [c for c in step if c.runs_on({"push"})], [])
+
+        job = ci_floor_check.run_commands(
+            "on: [push]\njobs:\n  j:\n    runs-on: ubuntu-latest\n"
+            "    continue-on-error: true\n    steps:\n"
+            "      - run: bin/ocelli.sh gate guards\n")
+        self.assertTrue(all(c.tolerated for c in job), job)
+
+        swallowed = ci_floor_check.run_commands(workflow_with(
+            "      - run: bin/ocelli.sh gate guards || true\n"))
+        runner = [c for c in swallowed if "gate guards" in c.text]
+        self.assertEqual(len(runner), 1, swallowed)
+        self.assertTrue(runner[0].tolerated, runner)
+
+    def test_continue_on_error_false_takes_nothing_away(self) -> None:
+        """The accept direction. `false` is a value GitHub accepts and it
+        tolerates nothing, so reading the key must not turn writing it down
+        explicitly into a refusal."""
+        for value in ("false", "False", "no", "off", "0"):
+            with self.subTest(value):
+                commands = ci_floor_check.run_commands(workflow_with(
+                    f"      - continue-on-error: {value}\n"
+                    "        run: bin/ocelli.sh gate guards\n"))
+                self.assertEqual([c.tolerated for c in commands], [""])
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_which_failures_bash_e_actually_reports(self) -> None:
+        """**The obvious reading of the errexit paragraph is wrong, and this is
+        the table that says so.** GitHub runs a `run:` body as `bash -e`, and
+        every row of `_tolerated_statements` is one of these measurements
+        rather than a reading. The first version of that function asserted that
+        a failing left side of `&&` fails the step, and rows two and three say
+        it does not: the short circuit means the command after the final `&&`
+        never runs, so nothing fires errexit and the list status is discarded.
+        """
+        for script, status in (("false\necho AFTER", 1),
+                               ("false && true\necho AFTER", 0),
+                               ("false && false\necho AFTER", 0),
+                               ("false && true", 1),
+                               ("true && false\necho AFTER", 1),
+                               ("false || false\necho AFTER", 1),
+                               ("false || true\necho AFTER", 0),
+                               ("true | false\necho AFTER", 1),
+                               ("false | cat\necho AFTER", 0),
+                               ("false &\necho AFTER\nwait", 0)):
+            with self.subTest(script):
+                done = subprocess.run([BASH, "-ec", script],
+                                      capture_output=True, text=True)
+                self.assertEqual(done.returncode, status)
+
+    def test_the_toleration_rule_matches_that_table(self) -> None:
+        """The same shapes, asked of the reader rather than of bash.
+
+        The set is the statement indices whose failure the shell discards, read
+        straight off the measurements above.
+        """
+        for body, tolerated in (("x\ny", set()),
+                                ("x && y\nz", {0}),
+                                ("x && y", set()),
+                                ("x || y\nz", {0}),
+                                ("x || y", {0}),
+                                ("x | y\nz", {0}),
+                                ("x | y", {0}),
+                                ("x &\ny", {0}),
+                                ("x && y || z", {0, 1}),
+                                ("x && y && z", set())):
+            with self.subTest(body):
+                self.assertEqual(
+                    set(ci_floor_check._tolerated_statements(body)), tolerated)
+
+    def test_a_final_and_list_keeps_both_halves(self) -> None:
+        """The accept direction the rule must not lose. A step whose whole body
+        is `a && b` reports `a`'s failure, because the last list in the body
+        decides the script's status, so reading `&&` as a swallow everywhere
+        would refuse a legitimate arrangement."""
+        commands = ci_floor_check.run_commands(workflow_with(
+            "      - run: bin/ocelli.sh gate guards && python3 scripts/a.py\n"))
+        self.assertEqual([c.tolerated for c in commands], ["", ""])
+
+    def test_an_unclosed_quote_in_a_body_is_named(self) -> None:
+        """A refusal that names the quote rather than a gate.
+
+        The swallowed text can only HIDE commands, so the outcome without this
+        is a refusal naming whichever gate went missing, which sends its reader
+        to `bin/ocelli.sh` for a defect in `ci.yml`.
+        """
+        with self.assertRaises(RuntimeError) as caught:
+            ci_floor_check.run_commands(workflow_with(
+                "      - run: |\n"
+                "          echo 'never closed\n"
+                "          bin/ocelli.sh gate guards\n"))
+        self.assertIn("opened and never closed", str(caught.exception))
+
+
 class TheGatesArrayHasOneReader(unittest.TestCase):
     """The Python reader has to agree with bash, not with another regex."""
 
@@ -492,7 +776,7 @@ class TheGatesArrayHasOneReader(unittest.TestCase):
         """Refused, and not dropped. Dropping it was the defect.
 
         **This test planted `prose2` and asserted `gate_row_problems` was
-        EMPTY until the S03 review's thirteenth pass**, with a docstring
+        EMPTY until the S03 review's twelfth pass**, with a docstring
         saying "Refused, and not dropped". `prose2` is INSIDE
         `[A-Za-z0-9_-]+`, so it asserted the opposite of its own name: that a
         digit in a name is counted, which is true, which is

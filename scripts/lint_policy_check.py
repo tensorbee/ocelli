@@ -473,7 +473,7 @@ def member_patterns(text: str) -> tuple[list[str], list[str]]:
     """The globs `[workspace] members` declares, and what `exclude` removes.
 
     **The third hand-rolled reader of this document, and the S03 review's
-    thirteenth pass deleted it rather than repairing it.** It required
+    twelfth pass deleted it rather than repairing it.** It required
     `[workspace]` to be a literal table HEADER on its own line and each entry
     to be double quoted, so `workspace.members = ["crates/*"]`, a single-quoted
     literal string and a member listed under a dotted `workspace.members`
@@ -1639,6 +1639,67 @@ def workspace_lints_rows(text: str) -> str | None:
         for name, value in sorted(tables[table].items()))
 
 
+UNSAFE_GATE_COMMAND = "python3 scripts/unsafe_allowlist_check.py"
+
+
+def _unsafe_gate_runs_the_script() -> tuple[bool, str]:
+    """Does `bin/ocelli.sh`'s `unsafe` arm really run the allowlist check.
+
+    Returns the answer and a refusal for a runner that cannot be read at all,
+    which is not the same as an arm that does not run the script and must not
+    be reported as one.
+
+    **This was a regex over shell until the S03 review's thirteenth pass, and
+    a TRAILING COMMENT satisfied it.** The pattern was
+    `^\\s*unsafe\\)[^\\n]*?python3 scripts/unsafe_allowlist_check\\.py` with
+    `re.M`, and `[^\\n]*?` reaches a `#` as happily as it reaches a command.
+    MEASURED in a real clone, with the arm rewritten to `unsafe)      python3
+    scripts/prose_check.py ;;  # python3 scripts/unsafe_allowlist_check.py` and
+    the `- run: python3 scripts/unsafe_allowlist_check.py` step deleted from
+    `.github/workflows/ci.yml`: `bash -n` 0, this check exit 0 PRINTING
+    "unsafe_code denied by scripts/unsafe_allowlist_check.py in the `unsafe`
+    gate, which is the declared substitution", `scripts/ci_floor_check.py` exit
+    0, the census exit 0 and both unit suites exit 0.
+    `scripts/unsafe_allowlist_check.py` then ran nowhere, so HLD 27.1's
+    `unsafe_code` deny and HLD 27.2 R5 were enforced by nothing, and the guard
+    said so in the language of success.
+
+    **The repair already existed two files over and did not reach this
+    caller**, which is the propagation failure the review has now named three
+    times. `ci_floor_check.gate_commands` reads the arm through the one shell
+    tokenizer this repository has: comments are stripped from the grammar
+    rather than by a `[^\\n]*?`, the arm ends at its own `;;` rather than at
+    the end of a line, and a `;;` inside a quote or a here-document does not
+    end it. `scripts/guards/catalogue.py`'s `_ci_arm_commands` already called
+    it, so this is the third caller getting the answer the other two had.
+
+    Imported lazily and by path for the same reason the catalogue gives: this
+    guard must not depend on another guard at module scope, and it is run from
+    directories that are not `scripts/`.
+    """
+    import sys as _sys
+    if str(ROOT / "scripts") not in _sys.path:
+        _sys.path.insert(0, str(ROOT / "scripts"))
+    import ci_floor_check
+    try:
+        runner = RUNNER.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        return False, (
+            f"{_relative(RUNNER)} cannot be read as UTF-8 text ({error}). "
+            f"Whether the `unsafe` gate still runs "
+            f"scripts/unsafe_allowlist_check.py is therefore unknown, and an "
+            f"unknown is not an enforcement.")
+    try:
+        arms = ci_floor_check.gate_commands(runner)
+    except RuntimeError as error:
+        return False, (
+            f"{_relative(RUNNER)} cannot be read for its gate arms "
+            f"({error}). Whether the `unsafe` gate still runs "
+            f"scripts/unsafe_allowlist_check.py is therefore unknown, and an "
+            f"unknown is not an enforcement.")
+    return UNSAFE_GATE_COMMAND in arms.get("unsafe", []), ""
+
+
 def _fail(problems: list[str]) -> int:
     """Print the refusals under the one header this guard has.
 
@@ -1654,7 +1715,7 @@ def _fail(problems: list[str]) -> int:
 
 def main() -> int:
     # Read under the same FAIL header every other refusal here prints. The
-    # call was unguarded until the S03 review's thirteenth pass, so a
+    # call was unguarded until the S03 review's twelfth pass, so a
     # `Cargo.toml` that is not valid UTF-8 arrived as a `UnicodeDecodeError`
     # traceback: fail-closed, and still the wrong way to tell a maintainer
     # what to do, which is the fifth pass's finding in the CI floor check one
@@ -1735,14 +1796,9 @@ def main() -> int:
     # The declared departure. One of the two mechanisms must be present.
     lint_level = rust.get("unsafe_code")
     script = (ROOT / "scripts" / "unsafe_allowlist_check.py").is_file()
-    # The ARM, not the GATES table row. `'unsafe|no|' in RUNNER` matched the
-    # row in the gate inventory, which is a description, so replacing the
-    # `unsafe)` arm with `true` left this check asserting a substitution it had
-    # not established. The `ci` gate catches that separately and this one is no
-    # longer wrong about it.
-    gate = re.search(
-        r"^\s*unsafe\)[^\n]*?python3 scripts/unsafe_allowlist_check\.py",
-        RUNNER.read_text(encoding="utf-8"), re.M) is not None
+    gate, gate_problem = _unsafe_gate_runs_the_script()
+    if gate_problem:
+        problems.append(gate_problem)
     if lint_level is not None and STRENGTH.get(lint_level, 0) >= 2:
         unsafe_by = f"[workspace.lints.rust] unsafe_code = \"{lint_level}\""
     elif script and gate:

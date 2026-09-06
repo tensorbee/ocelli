@@ -812,14 +812,47 @@ def _permits(condition: str, event: str) -> bool:
     return value is True and cursor.peek() is None
 
 
+# `continue-on-error` written so that it does NOT tolerate a failure. GitHub
+# reads the key as a boolean or as an expression, `yaml.BaseLoader` hands every
+# scalar over as a string, and YAML 1.1 spells false five ways. Anything not in
+# this set tolerates, an unevaluated `${{ ... }}` expression included, which is
+# the same direction `_permits` takes on an `if:` it cannot prove: a value this
+# file cannot read as harmless is not read as harmless.
+NOT_TOLERATING = frozenset({"", "false", "no", "off", "n", "0"})
+
+
+def _tolerates_failure(value: object) -> bool:
+    """Does this `continue-on-error:` value take a failure away."""
+    return str(value).strip().lower() not in NOT_TOLERATING
+
+
 @dataclass(frozen=True)
 class Command:
-    """One line CI executes, and the conditions that decide whether it runs."""
+    """One statement CI executes, and what decides whether it can fail the run.
+
+    `tolerated` is the reason this command's FAILURE cannot fail the workflow,
+    and "" when nothing takes it away. **It exists because `continue-on-error`
+    was in the parsed tree and nothing read it, which the S03 review's
+    thirteenth pass measured three ways**, each valid YAML, each leaving this
+    check at exit 0 with the `guards` gate covered: the key on the `gate
+    guards` STEP, the same key on the `guards` JOB, and `|| true` appended to
+    the run. `--floor` claims to be what CI runs, and a step whose failure
+    cannot fail the run does not run the gate in the sense that claim means, on
+    the gate that watches every other gate, in one line that reads as
+    tolerating flakiness.
+
+    A tolerated command is kept in the list rather than dropped, so that `main`
+    can say WHICH of the three shapes took the gate away. Every consumer asks
+    `runs_on` first and a tolerated command answers no on every event.
+    """
 
     text: str
     conditions: tuple[str, ...]
+    tolerated: str = ""
 
     def runs_on(self, events: set[str]) -> bool:
+        if self.tolerated:
+            return False
         return all(_permits(condition, event)
                    for condition in self.conditions
                    for event in events)
@@ -848,12 +881,44 @@ def run_commands(workflow: str) -> list[Command]:
     - **A quoted key is the same key.** `"if":` and `if:` are one key after a
       parse, where the reader's `^\\s*(?:-\\s+)?if:` matched only the second.
 
-    Each line of the value is one command. A `#` in it is a shell comment and
-    is removed by `shell_pieces`, the scanner this file already reads
-    `bin/ocelli.sh` with, so `echo "issue #12"` keeps its `#` and `true;#x`
-    loses everything after the `;`. The YAML-level comment is gone before this
-    function ever sees the value, which is the parser's job and used to be a
-    second `#` rule here that could not tell the two apart.
+    A `#` in the value is a shell comment and is removed by `shell_pieces`, the
+    scanner this file already reads `bin/ocelli.sh` with, so `echo "issue #12"`
+    keeps its `#` and `true;#x` loses everything after the `;`. The YAML-level
+    comment is gone before this function ever sees the value, which is the
+    parser's job and used to be a second `#` rule here that could not tell the
+    two apart.
+
+    **The whole body is scanned ONCE since the S03 review's thirteenth pass,
+    and it was scanned line by line before that.** One line of code produced a
+    fail-open and a false refusal together, because cross-line shell state was
+    discarded between the lines that establish it and the lines it governs.
+
+    - Fail-open. A step whose body is `cat <<'EOF'` / `bin/ocelli.sh gate
+      panic` / `EOF` satisfied the `panic` gate at exit 0 with the real step
+      gone, and bash confirms the runner is never called: the body is DATA.
+      That is the twelfth pass's route 4a, a gate name that is a mention rather
+      than an invocation, in the spelling that pass did not close, on HLD
+      section 23's wasm panic-hook proof. `echo not \\` then `bin/ocelli.sh
+      gate panic` reaches the same place through the continuation, and bash
+      prints `not bin/ocelli.sh gate panic`.
+    - False refusal. `python3 scripts/staged_content_check.py \\` continued
+      onto the next line made the `content` gate read as uninvoked at exit 1,
+      while bash runs it as one command.
+
+    Both were measured in a real clone at 0 and 1 respectively. The body now
+    goes through `shell_source` and `_split_statements` exactly as a `run_gate`
+    arm does, so the `BODY` piece kind drops a here-document here for the same
+    reason it drops one there, `JOIN` joins a continuation, and a statement
+    rather than a line is the unit. That also makes `a && b` written on one
+    `run:` line two commands, so a step chaining two of a gate's arm commands
+    now covers both, which the line reader could match against neither.
+
+    A span the scanner cannot close REFUSES here, on `_arm_end`'s argument.
+    Everything after an unclosed quote is swallowed into one span, which can
+    only hide commands and therefore only cause refusals, but the refusal it
+    causes names a gate rather than the quote, and a message that sends its
+    reader to the wrong file is the shape this whole check has been rewritten
+    for. bash will not run such a body either.
     """
     tree = workflow_tree(workflow)
     commands: list[Command] = []
@@ -862,6 +927,9 @@ def run_commands(workflow: str) -> list[Command]:
         job = _shaped(raw_job, dict, f"the job `{job_id}`")
         job_if = str(_shaped(job.get("if", ""), str,
                              f"an `if:` on the job `{job_id}`")).strip()
+        job_tolerates = _tolerates_failure(
+            _shaped(job.get("continue-on-error", ""), str,
+                    f"a `continue-on-error:` on the job `{job_id}`"))
         steps = _shaped(job.get("steps") or [], list,
                         f"a `steps:` on the job `{job_id}`")
         for index, raw_step in enumerate(steps):
@@ -872,11 +940,36 @@ def run_commands(workflow: str) -> list[Command]:
             body = str(_shaped(step["run"], str, f"a `run:` on {where}"))
             step_if = str(_shaped(step.get("if", ""), str,
                                   f"an `if:` on {where}")).strip()
+            step_tolerates = _tolerates_failure(
+                _shaped(step.get("continue-on-error", ""), str,
+                        f"a `continue-on-error:` on {where}"))
             conditions = tuple(c for c in (job_if, step_if) if c)
-            for line in body.splitlines():
-                text = shell_source(line).strip()
-                if text:
-                    commands.append(Command(text, conditions))
+            source = shell_source(body)
+            _, unclosed = shell_pieces(source)
+            if unclosed:
+                raise RuntimeError(
+                    f"the `run:` on {where} carries a {unclosed} span that is "
+                    f"opened and never closed, so this parser cannot tell "
+                    f"where one command in it ends and the next begins. bash "
+                    f"will not run that body either. Fix the quoting, and do "
+                    f"not read this refusal as a statement about the gates: "
+                    f"the swallowed text can only HIDE commands from this "
+                    f"file, so the message you would otherwise get names a "
+                    f"gate rather than the quote.")
+            tolerated = _tolerated_statements(source)
+            for position, statement in enumerate(_split_statements(source)):
+                text = statement.strip()
+                if not text:
+                    continue
+                if step_tolerates:
+                    reason = (f"`continue-on-error` on {where}")
+                elif job_tolerates:
+                    reason = (f"`continue-on-error` on the job `{job_id}`")
+                elif position in tolerated:
+                    reason = f"on {where}, {tolerated[position]}"
+                else:
+                    reason = ""
+                commands.append(Command(text, conditions, reason))
     return commands
 
 
@@ -1119,32 +1212,69 @@ ARM_LABEL = re.compile(r"^[ \t]*([A-Za-z0-9_-]+)\)", re.M)
 # asking bash for the production. It is not asking bash to be the reader.
 #
 # WHAT STAYS HAND-ROLLED, then, stated as what it cannot see rather than as a
-# list of constructs it can:
+# list of constructs it can.
 #
-# - The scanner models spans and words. It does not model bash's COMPOUND
-#   COMMANDS, so it cannot tell a `(` that opens a subshell from one that ends
-#   a `case` pattern, and it cannot tell `((` arithmetic from `( (` nested
-#   subshells the way bash does, which is by trying the arithmetic parse and
-#   backtracking. Every consequence is fail-closed and asserted rather than
-#   assumed: `$(case y in *) ... esac)` closes at the pattern's `)` and the arm
-#   then ends at the inner `;;`, which `NESTED_CASE` refuses, and
-#   `scripts/tests/test_guard_readers.py` asserts that it is the refusal and
-#   not the scan carrying the weight. `(( a << b ))` reads the `<<` as a
-#   here-document whose body then runs to the end of the region, which refuses.
-#   Doing better needs a compound-command parser, which is a second grammar,
-#   and the point of one tokenizer is that there is not one.
-# - `$'...'` is a span here, so its EXTENT is right, but its C escapes are not
-#   decoded, so `shell_words` yields `a\'b` where bash yields `a'b`. In the
-#   `GATES` array that is a name outside `GATE_NAME` and a refusal. It is not
-#   decoded because the escape set is bash's own table and copying a table is
-#   how the last four passes went wrong.
-# - A here-document written INSIDE a command substitution is not queued,
-#   because the scanner does not look inside a span. Its body is inside the
-#   span too, so the two cancel unless the body carries the span's closer, in
-#   which case the span ends early and the arm refuses.
+# **This section stated the residue as ONE thing until the S03 review's
+# thirteenth pass, and one thing was not the count.** It said the scanner does
+# not model compound commands and stopped there. That is accurate about
+# `shell_pieces`, and `shell_pieces` is not the whole shell reader: it is ONE
+# tokenizer with FOUR hand-written productions sitting on top of it, and the
+# fourteenth route lived in the first of them. "One tokenizer" was achieved and
+# "one reader" was not, and the limit read as if it had been. So the residue is
+# stated per production.
+#
+# THE TOKENIZER, `shell_pieces`. It models spans and words. It does not model
+# bash's COMPOUND COMMANDS, so it cannot tell a `(` that opens a subshell from
+# one that ends a `case` pattern, and it cannot tell `((` arithmetic from
+# `( (` nested subshells the way bash does, which is by trying the arithmetic
+# parse and backtracking. Every consequence is fail-closed and asserted rather
+# than assumed: `$(case y in *) ... esac)` closes at the pattern's `)` and the
+# arm then ends at the inner `;;`, which `NESTED_CASE` refuses, and
+# `scripts/tests/test_guard_readers.py` asserts that it is the refusal and not
+# the scan carrying the weight. `(( a << b ))` reads the `<<` as a
+# here-document whose body then runs to the end of the region, which refuses.
+# `$'...'` is a span, so its EXTENT is right and its C escapes are not decoded,
+# so `shell_words` yields `a\'b` where bash yields `a'b`, which in the `GATES`
+# array is a name outside `GATE_NAME` and a refusal. A here-document written
+# INSIDE a command substitution is not queued, because the scanner does not
+# look inside a span. Doing better needs a compound-command parser, which is a
+# second grammar, and the point of one tokenizer is that there is not one.
+#
+# `STATEMENT_BREAK` and `_split_statements`, where one statement ends. It sees
+# the control operators and nothing else about a list. It cannot see that a
+# `coproc` names its own compound command, and `coproc case x in *) : ;; esac`
+# is refused only because `unseen_commands` reports `coproc case x in *` as a
+# command CI does not run, which is a real refusal and not the one the compound
+# limit above claims carries the weight: `NESTED_CASE` misses that shape.
+# `_tolerated_statements` reads the SAME separators to decide whose failure
+# `bash -e` discards, so it inherits every one of these blind spots and is
+# conservative where it cannot see: a shape it cannot resolve leaves a command
+# uncounted rather than counted.
+#
+# `NESTED_CASE`, where an arm holds a nested `case`. Its alternation is DERIVED
+# from `SHELL_INTRODUCERS`, so it sees a `case` after a keyword, after a
+# control operator and after a backtick. It does not see one introduced by a
+# word `SHELL_INTRODUCERS` does not list. MEASURED: `time case x in *) : ;;
+# esac` matches, because `time` is in that set, and `coproc case x in *) : ;;
+# esac` does NOT, and `bash -n` accepts both. The `coproc` shape fails closed
+# anyway, through the statement scanner rather than through this pattern, which
+# is the row above. That is worth the line: the refusal carrying the weight is
+# not the one the compound-command limit names.
+#
+# `SHELL_INTRODUCERS` against `SHELL_NOISE`, whether a head is the work or a
+# decision about the work. `eval` and `command` were each measured on the wrong
+# side of that line and each has a reader now. What remains is any OTHER head
+# whose remainder is really a command, and the split is a list rather than a
+# grammar, so a builtin bash adds is a builtin this file does not know.
+#
+# `ARM_LABEL` and `GATE_INVOCATION`, where an arm and an invocation begin. Both
+# anchor at a statement head, so both inherit the statement scanner's residue
+# rather than adding one, and `invoked_gates` declares what its anchor costs at
+# its own docstring: `sh -c 'bin/ocelli.sh gate x'` and `FOO=1 bin/ocelli.sh
+# gate x` are refusals rather than passes.
 #
 # MEASURED over both regions this scanner is used on, in the S03 review's
-# eleventh pass and re-measured in the thirteenth: after comments are stripped,
+# eleventh pass and re-measured in the twelfth: after comments are stripped,
 # the `run_gate` region carries 0 `$'`, 0 `$(`, 0 `${`, 0 `<<` and 0 backticks,
 # against 48 backticks before stripping, and the `GATES` array carries 0 of all
 # five. The `$(` count was 0 before the eleventh pass's fix as well, which is
@@ -1181,7 +1311,7 @@ class Span:
     # `${u:-a\}b}` prints `a}b`, so a backslash does not either.
     nests: str
     # Which openers may open a span INSIDE this one, and it is a SET rather
-    # than the boolean it was until the S03 review's thirteenth pass, because
+    # than the boolean it was until the S03 review's twelfth pass, because
     # bash's answer is per pair and the boolean forced two of the pairs wrong.
     #
     # MEASURED, and the backtick was a fail-open. `x=`printf '%s' 'a`b'`` is
@@ -1255,7 +1385,7 @@ HEREDOC_OPERATOR = re.compile(r"<<(-?)(?!<)[ \t]*")
 # before a `#` for that `#` to begin a comment. POSIX and bash end a word at a
 # blank, at a newline or at the first character of an operator, and begin a
 # word in exactly those places, so these are one fact and were two constants
-# until the S03 review's thirteenth pass. Two lists that must agree are one
+# until the S03 review's twelfth pass. Two lists that must agree are one
 # list, which is the repair `NESTED_CASE` and `SHELL_INTRODUCERS` got in the
 # ninth pass and the runner's exclusion list got in the fourth.
 #
@@ -1308,7 +1438,7 @@ def _heredoc_end(text: str, start: int,
     the end of the text without meeting its terminator, "" when every body
     closed.
 
-    **That second value is new in the S03 review's thirteenth pass and the
+    **That second value is new in the S03 review's twelfth pass and the
     docstring here claimed it for two passes without it existing.** It said an
     unterminated body "reports the whole remainder so the caller's
     unclosed-span refusal is what fires", and the caller cleared `pending`
@@ -1355,7 +1485,7 @@ def _heredoc_end(text: str, start: int,
 # inside a comment ends an arm, which is the eighth pass's measured fail-open.
 #
 # **JOIN is a piece here for the same reason, and it was a regex pre-pass over
-# shell until the S03 review's thirteenth pass.** `arm_bodies` ran
+# shell until the S03 review's twelfth pass.** `arm_bodies` ran
 # `CONTINUATION.sub(" ", region)` BEFORE the tokenizer, which is exactly what
 # this scanner's header argues no pass may do. MEASURED: a backslash ending a
 # COMMENT line continues nothing in bash, `echo A # c \` then `echo B` prints
@@ -1573,7 +1703,7 @@ def shell_source(text: str) -> str:
     cannot come to disagree about it.
 
     **This was `_strip_shell_comments` and the continuation was a regex
-    pre-pass beside it until the thirteenth pass**, which is the fail-open
+    pre-pass beside it until the twelfth pass**, which is the fail-open
     `JOIN` records above. Both are the scanner's answer now, for the same
     reason the comment already was: a backslash is a continuation only outside
     a comment, and a comment ends at a newline a continuation would otherwise
@@ -1599,7 +1729,7 @@ def _arm_end(text: str, start: int) -> tuple[int, str]:
     meets its delimiter, and an arm with no terminator at all.
 
     The here-document reason is separate from the span one since the S03
-    review's thirteenth pass, and it is not cosmetic. `: <<EOF-1` in an arm
+    review's twelfth pass, and it is not cosmetic. `: <<EOF-1` in an arm
     used to reach the third reason, which says the arm has no `;;` about an
     arm whose `;;` is right there, and sends a maintainer to the wrong line.
     """
@@ -1629,12 +1759,21 @@ def shell_words(text: str) -> list[str]:
     an operator, and its value is `_word_value`'s, which a here-document
     delimiter also uses.
 
-    The operator half of that break arrived in the S03 review's thirteenth
+    The operator half of that break arrived in the S03 review's twelfth
     pass with the delimiter production, and it cannot change what this reads
     out of the array today: MEASURED, `GATES=( a;b )`, `GATES=( a|b )` and
     `GATES=( a>b )` are each a SYNTAX ERROR to bash, so an unquoted operator in
-    an entry is a file bash will not run, and the runner's twenty-nine entries
-    carry every one of theirs inside a quote.
+    an entry is a file bash will not run, and every entry in the runner's array
+    carries its own operators inside a quote.
+
+    **That sentence quoted a COUNT until the S03 review's thirteenth pass, and
+    the count was wrong.** It said "the runner's twenty-nine entries" where
+    `declared_gates` returns 28 and `ci/guard-probe-budget.json` records
+    `gates_declared` 28, in a file that legislates against exactly this: a
+    quoted number is a copy, and a copy of a measurement goes stale. The count
+    is not restated here because nothing here needs one. The number a reader
+    wants is printed by the check and recorded in the budget, and the census
+    compares those two.
     """
     words: list[str] = []
     current: list[tuple[int, int, str]] = []
@@ -1758,18 +1897,55 @@ NESTED_CASE = re.compile(
 # guard refusing a legitimate state, which is the runbook's own sentence, and
 # it is the same defect as the `;;` this pass fixed in the arm parser: shell
 # read with a regex that does not know about quotes.
-STATEMENT_BREAK = re.compile(r"[\n;{}()]|&&|\|\||\|")
+#
+# **`&` was ABSENT until the S03 review's thirteenth pass, and it is passes 6,
+# 7 and 8 with a different operator.** bash's `&` terminates a list exactly as
+# `;` does, this pattern carried `&&` and no `&`, so `A & B` was ONE statement
+# whose head is `A`, and a head that is a `COMMAND_PREFIXES` prefix or a
+# `SHELL_NOISE` builtin took `B` out of `unseen_commands` with it. MEASURED in
+# a real clone: the `&&` before `node --test` in the `bench` arm rewritten as
+# `&` on one line, and the `- run: bin/ocelli.sh gate bench` step replaced by
+# the arm's two extractable `python3` commands, gave `bash -n` 0 and this check
+# exit 0 printing "every command in each gate's arm", with `bench` gone from
+# the named-only list and six node suites out of CI. The bash oracle disagrees
+# on the same body: `case g in g) echo M1 & echo M2 ;; esac` prints both
+# markers, and `scripts/tests/test_guard_readers.py` runs that comparison now.
+#
+# **The `&` is NOT a bare alternative, and the naive spelling was measured to
+# refuse a legitimate state.** `&` is also the second character of `>&` and
+# `<&` and the first of `&>` and `&>>`, none of which separates anything, and
+# the `panic` arm really contains `echo "wasm-pack is not installed. See
+# docs/DEVELOPER_SETUP.md" >&2`. MEASURED with `r"[\n;{}()]|&&|\|\||\||&"`:
+# `unseen_commands` grew the entry `unseen['panic'] = ['2', ...]`, a file
+# descriptor reported as a command CI does not run. It cost no exit code today
+# only because `panic` already holds unseen commands and CI names the gate, so
+# an arm whose only unextractable text was a redirection would have refused.
+# The lookbehind and the lookahead are what a redirection operator is, and
+# `&&` stays ahead of `&` so the two-character control operator still wins.
+STATEMENT_BREAK = re.compile(r"[\n;{}()]|&&|\|\||\||(?<![<>])&(?!>)")
+
+# The separators that end an AND-OR LIST rather than continuing one, which is
+# the distinction `_statement_separators`' callers need and `STATEMENT_BREAK`
+# does not draw. Everything not here, so `&&`, `||` and `|`, joins the
+# statement before it to the statement after it into one list whose exit
+# status is decided by ONE of its members. See `_tolerated_statements`.
+LIST_CONTINUATIONS = frozenset({"&&", "||", "|"})
 
 
-def _split_statements(text: str) -> list[str]:
-    """`text` split on `STATEMENT_BREAK`, spans left whole.
+def _statement_separators(text: str) -> list[tuple[str, str]]:
+    """`text` as (statement, the separator that FOLLOWED it) pairs.
+
+    The separator is "" for the last statement, which nothing followed. It is
+    kept because two callers need it and neither may re-scan the text to find
+    it: `_split_statements` throws it away, and `_tolerated_statements` asks
+    which statements' failures a following `||` or `|` swallows.
 
     A separator inside a span does not separate anything, and it is the same
     scanner that says so here, in `_arm_end` and in `shell_source`.
     A `$( ... )` is one piece, so the `(` and `)` that delimit it are not the
     `(` and `)` of `STATEMENT_BREAK`, which is what a subshell writes.
     """
-    statements: list[str] = []
+    statements: list[tuple[str, str]] = []
     current: list[str] = []
     pieces, _ = shell_pieces(text)
     index = 0
@@ -1783,13 +1959,99 @@ def _split_statements(text: str) -> list[str]:
             continue
         separator = STATEMENT_BREAK.match(text, start)
         if separator is not None:
-            statements.append("".join(current))
+            statements.append(("".join(current), separator.group(0)))
             current = []
             index = separator.end()
             continue
         current.append(text[start:end])
-    statements.append("".join(current))
+    statements.append(("".join(current), ""))
     return statements
+
+
+def _split_statements(text: str) -> list[str]:
+    """`text` split on `STATEMENT_BREAK`, spans left whole."""
+    return [statement for statement, _ in _statement_separators(text)]
+
+
+def _tolerated_statements(text: str) -> dict[int, str]:
+    """Which statements' FAILURE the shell discards, and why, by index.
+
+    Keyed by the index in `_statement_separators(text)`, valued with the reason
+    a refusal can print. A reason rather than a bare set, because the four
+    shapes below are four different edits to undo and "swallowed" names none of
+    them.
+
+    GitHub Actions runs a `run:` body as `bash -e {0}`, and every rule below is
+    a MEASUREMENT of that shell rather than a reading of the errexit paragraph,
+    because the obvious reading of that paragraph is wrong. The scripts are run
+    as `bash -ec <body>` and the exit status is read from bash itself.
+
+    - `false\\necho AFTER` exits 1. A simple command's failure fires errexit.
+    - `false && true\\necho AFTER` exits 0, and so does `false && false\\necho
+      AFTER`. errexit is suppressed for a command in an AND-OR list, and the
+      short circuit means the command after the final `&&` never runs, so
+      nothing fires it and the list's status is discarded. **A failing left
+      side of `&&` is therefore swallowed, which is the opposite of what this
+      function asserted when it was first written.**
+    - `false && true` ALONE exits 1. The last list in the body decides the
+      script's status, so the same statement is not swallowed there.
+    - `false || false\\necho AFTER` exits 1 and `true | false\\necho AFTER`
+      exits 1. The last member of a list or pipeline runs, and errexit fires
+      on it.
+    - `false &\\necho AFTER\\nwait` exits 0. An asynchronous command reports 0
+      at once, so `&` swallows unconditionally.
+
+    So a failure reaches the step exactly when the statement is the last member
+    of its AND-OR list or pipeline and is not backgrounded, or when its list is
+    the LAST one in the body and nothing to its right can overwrite the status,
+    which a `||` after it and a `|` immediately after it both can.
+
+    `.github/workflows/ci.yml` runs `sudo apt-get update && sudo apt-get
+    install -y dcmtk` today, and this reports the left side as swallowed. That
+    is not a false refusal, it is bash: if the update fails, the step is green.
+    It costs no verdict because neither half is a gate command, and the day one
+    is, the refusal will be right.
+    """
+    pairs = _statement_separators(text)
+    segments: list[list[int]] = []
+    current: list[int] = []
+    for index, (_, separator) in enumerate(pairs):
+        current.append(index)
+        if separator not in LIST_CONTINUATIONS:
+            segments.append(current)
+            current = []
+    if current:
+        segments.append(current)
+    # The last list that carries a command. A body normally ends in a newline,
+    # so the last pair is an empty statement and its own segment, and reading
+    # THAT as the final list would swallow the real final list with it.
+    last = max((index for index, (statement, _) in enumerate(pairs)
+                if statement.strip()), default=-1)
+    tolerated: dict[int, str] = {}
+    for segment in segments:
+        final = last in segment
+        for position, index in enumerate(segment):
+            separator = pairs[index][1]
+            if separator == "&":
+                tolerated[index] = ("it is backgrounded with `&`, so the shell "
+                                    "reports 0 for it at once")
+                continue
+            if separator == "|":
+                tolerated[index] = ("it is a non-final member of a pipeline, "
+                                    "whose status is its last member's")
+                continue
+            if position == len(segment) - 1:
+                continue
+            after = [pairs[i][1] for i in segment[position:]]
+            if "||" in after:
+                tolerated[index] = ("a `||` after it runs the right-hand side "
+                                    "instead, and that side's status is what "
+                                    "the shell reports")
+            elif not final:
+                tolerated[index] = ("it is a non-final command of an AND-OR "
+                                    "list that is not the last list in the "
+                                    "body, and `bash -e` discards that")
+    return tolerated
 
 
 # Statement heads that are not the work a gate does, and whose REMAINDER is
@@ -1858,7 +2120,7 @@ def arm_bodies(runner: str) -> dict[str, str]:
     the docstring's "Where an arm ENDS" section for what that cost.
 
     **Comments and continuations are ONE call since the S03 review's
-    thirteenth pass, and the continuation was a regex pre-pass over shell
+    twelfth pass, and the continuation was a regex pre-pass over shell
     before it.** `CONTINUATION.sub(" ", region)` ran before the tokenizer,
     which is the one thing the tokenizer's own header argues no pass may do,
     and it joined the line after a COMMENT ending in a backslash into that
@@ -2071,7 +2333,23 @@ def main() -> int:
             f"kept equal.")
 
     for gate in [g for g in declared if g not in NOT_IN_FLOOR]:
-        running = steps_running(gate, arms, commands)
+        touching = steps_running(gate, arms, commands)
+        running = [c for c in touching if not c.tolerated]
+        # The step is IN the file, it names the gate, and its failure cannot
+        # fail the workflow. Without this the refusal below would fire on
+        # `blocked` and quote an empty condition, sending its reader to look
+        # for an `if:` that is not there. `Command.tolerated` records why, and
+        # the three shapes it distinguishes are the thirteenth pass's three
+        # measured plants.
+        tolerated = sorted({command.tolerated for command in touching
+                            if command.tolerated})
+        note = ""
+        if tolerated:
+            note = (f" A step in {WORKFLOW.relative_to(ROOT)} does run this "
+                    f"gate and is not counted, because its failure cannot "
+                    f"fail the workflow: {'; '.join(tolerated)}. `--floor` "
+                    f"claims to be what CI runs, and a check whose red is "
+                    f"discarded is not a check CI runs.")
         # Per event, not per step. Two steps with complementary conditions
         # cover the floor between them, and asking one step to cover every
         # event refuses that arrangement while naming no missing event, which
@@ -2117,7 +2395,7 @@ def main() -> int:
                     f"entire by definition, and that is the only form this "
                     f"check can accept here. Either restore the gate-name "
                     f"step, or exclude the gate from the floor in "
-                    f"bin/ocelli.sh and say why.")
+                    f"bin/ocelli.sh and say why." + note)
             if partial:
                 absent = sorted({command for gaps in partial.values()
                                  for command in gaps})
@@ -2131,7 +2409,7 @@ def main() -> int:
                     f"leaves the rest deletable from every pull request in "
                     f"one line. Either add a step for each command, or have "
                     f"one step run `bin/ocelli.sh gate {gate}`, which runs "
-                    f"the arm entire.")
+                    f"the arm entire." + note)
             if blocked:
                 gating = " and ".join(sorted(
                     {condition for command in running
@@ -2145,14 +2423,14 @@ def main() -> int:
                     f"step at all. Either drop the condition, or exclude the "
                     f"gate from the floor in bin/ocelli.sh and say why. "
                     f"`--floor` claims to be what CI runs, and that claim has "
-                    f"to be true.")
+                    f"to be true." + note)
             continue
         problems.append(
             f"the `{gate}` gate is in the CI floor and nothing in "
             f"{WORKFLOW.relative_to(ROOT)} runs it. Either add a step, or "
             f"exclude it from the floor in bin/ocelli.sh and say why. "
             f"`--floor` claims to be what CI runs, and that claim has to be "
-            f"true.")
+            f"true." + note)
 
     # The gates outside the floor. `oracle` needs a GPU and D-04 says CI has
     # none, so it is the one gate CI may not run. Every other excluded gate is
@@ -2175,6 +2453,13 @@ def main() -> int:
         if reachable:
             reached_outside[gate] = reachable
             continue
+        tolerated = sorted({command.tolerated for command in running
+                            if command.tolerated})
+        note = ""
+        if tolerated:
+            note = (f" A step does run it and is not counted, because its "
+                    f"failure cannot fail the workflow: "
+                    f"{'; '.join(tolerated)}.")
         problems.append(
             f"the `{gate}` gate is excluded from the floor and needs no GPU, "
             f"so CI is still supposed to run it, and no step in "
@@ -2183,7 +2468,7 @@ def main() -> int:
             f"pull request. It does not mean it runs nowhere, and a gate that "
             f"runs nowhere is a gate whose refusals nobody has watched. Add a "
             f"step, or mark the gate as needing a GPU in bin/ocelli.sh's GATES "
-            f"table and say why in a deviation.")
+            f"table and say why in a deviation." + note)
 
     if problems:
         print("FAIL: CI does not run the whole floor")

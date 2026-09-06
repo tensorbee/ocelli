@@ -585,7 +585,7 @@ backtick's "may a span open inside me" flag was true, and bash's answer is no.
 for matching `''", so a quote inside a backtick does not hide the closing
 backtick, and the scanner had been accepting a file bash refuses.
 
-**The two measured fail-opens the thirteenth pass closed**, both in the
+**The two measured fail-opens the twelfth pass closed**, both in the
 here-document delimiter, which was the last hand-written production in the
 tokenizer. It was spelled as a regex with an invented character class,
 `(['"]?)([A-Za-z_]\w*)\2`, and bash takes a WORD quoted by any of three
@@ -619,18 +619,46 @@ reporting that the arm "runs 'a note', 'EOF-1'", which is a guard refusing a
 legitimate state. A body is data, it is its own piece kind now, and the
 statement split drops it.
 
-**What stays hand-rolled, said as what it cannot see.** The scanner models
-spans and words and does not model bash's compound commands, so it cannot tell
-a `(` that opens a subshell from one that ends a `case` pattern, and it cannot
-tell `((` arithmetic from `( (` nested subshells the way bash does, which is by
-attempting the arithmetic parse and backtracking. `$(case y in *) ... esac)`
-closes at the pattern's `)` and the arm ends at the inner `;;`, which
-`NESTED_CASE` refuses. `(( a << b ))` reads the `<<` as a here-document whose
-body runs to the end of the region, which refuses. And a here-document inside a
-substitution is not queued, its body being inside the same span. All three are
-fail-closed and each is asserted where it is rather than assumed away. Doing
-better needs a compound-command parser, which is a second grammar, and the
-point of one tokenizer is that there is not one.
+**What stays hand-rolled, said as what it cannot see, and it was stated as ONE
+thing until the thirteenth pass.** The one thing was that the scanner does not
+model compound commands. That is accurate about `shell_pieces` and
+`shell_pieces` is not the whole shell reader: it is one tokenizer with four
+hand-written productions on top of it, and the fourteenth route lived in the
+first of them. "One tokenizer" was achieved and "one reader" was not, and the
+limit read as if it had been. Said per production:
+
+- **The tokenizer, `shell_pieces`.** It models spans and words and does not
+  model bash's compound commands, so it cannot tell a `(` that opens a subshell
+  from one that ends a `case` pattern, and it cannot tell `((` arithmetic from
+  `( (` nested subshells the way bash does, which is by attempting the
+  arithmetic parse and backtracking. `$(case y in *) ... esac)` closes at the
+  pattern's `)` and the arm ends at the inner `;;`, which `NESTED_CASE`
+  refuses. `(( a << b ))` reads the `<<` as a here-document whose body runs to
+  the end of the region, which refuses. `$'...'` has the right extent and its C
+  escapes are not decoded. A here-document inside a substitution is not queued,
+  its body being inside the same span. Every one is fail-closed and asserted
+  where it is rather than assumed away.
+- **`STATEMENT_BREAK` and `_split_statements`, where a statement ends.** They
+  see the control operators and nothing else about a list. A `coproc` in front
+  of a nested case is accepted by `bash -n`, is missed by `NESTED_CASE`, and
+  fails closed only because the statement scanner reports `coproc case x in *`
+  as a command CI does not run. That refusal is real and it is not the one the
+  compound-command limit above claims carries the weight.
+  `_tolerated_statements`, which decides whose failure `bash -e` discards,
+  reads the same separators and inherits every one of these blind spots.
+- **`NESTED_CASE`, where an arm holds a nested `case`.** Its alternation is
+  derived from `SHELL_INTRODUCERS`, so `time case` matches and `coproc case`
+  does not, measured both ways.
+- **`SHELL_INTRODUCERS` against `SHELL_NOISE`,** whether a head is the work or
+  a decision about the work. `eval` and `command` were each measured on the
+  wrong side and each has a reader now. What remains is any other head whose
+  remainder is really a command, and the split is a list rather than a grammar.
+- **`ARM_LABEL` and `GATE_INVOCATION`, where an arm and an invocation begin.**
+  Both anchor at a statement head, so both inherit the statement scanner's
+  residue rather than adding one.
+
+Doing better on the first of those needs a compound-command parser, which is a
+second grammar, and the point of one tokenizer is that there is not one.
 
 **The refusal for a gate name outside `[A-Za-z0-9_-]+` was watched by
 nothing**, and the unit test carrying its name asserted the opposite. That test
@@ -747,6 +775,95 @@ it and the probes passed, so `ci-floor.event-gated`, its accept twin and
 `ci-floor.complementary-steps` were asserting this guard's behaviour on
 something that is not a workflow. A probe input has to be a state the real
 system can be in.
+
+### The consumers of the grammar, which the thirteenth pass found unguarded
+
+The twelfth pass closed the grammar and the thirteenth pass measured what sits
+on top of it. The verdict is worth keeping in its own words: the tokenizer is
+closed, and thirteen shapes planted at `shell_pieces`' span table all failed
+closed, and the CONSUMERS of that grammar were not. Four routes, each measured
+at exit 0 in a real clone against the code at `726f9c6` and at exit 1 against
+the repair.
+
+1. **`STATEMENT_BREAK` had `&&` and no `&`.** bash's `&` terminates a list
+   exactly as `;` does, so `A & B` was one statement whose head is `A`, and a
+   head that is a `COMMAND_PREFIXES` prefix or a `SHELL_NOISE` builtin took `B`
+   out of `unseen_commands` with it. Measured: the `&&` before `node --test` in
+   the `bench` arm rewritten as `&` on one line, with `- run: bin/ocelli.sh
+   gate bench` replaced by the arm's two extractable commands, gave `bash -n`
+   0 and the check exit 0 printing "every command in each gate's arm", `bench`
+   gone from the named-only list and six node suites out of CI. This is the
+   sixth, seventh and eighth passes with a different operator.
+
+   The fix is not a bare `&` alternative, and the naive spelling was measured
+   to refuse a legitimate state: `&` is also the second character of `>&` and
+   `<&` and the first of `&>`, and with `r"[\n;{}()]|&&|\|\||\||&"` in place
+   `unseen['panic']` grew the entry `'2'` out of the `panic` arm's own `echo
+   "wasm-pack is not installed. ..." >&2`, a file descriptor reported as a
+   command CI does not run. Both directions are probed.
+
+2. **The workflow's `run:` bodies were scanned line by line** while the
+   workflow itself was parsed, so cross-line shell state was discarded. One
+   line of code, two defects. A step whose body is `cat <<'EOF'` then
+   `bin/ocelli.sh gate panic` then `EOF` satisfied the `panic` gate at exit 0
+   with bash never calling the runner, which is the twelfth pass's route 4a in
+   a spelling that pass did not close, on HLD section 23's wasm panic-hook
+   proof. `echo not \` followed by the invocation reaches the same place. And
+   in the other direction a legitimate `python3 scripts/staged_content_check.py
+   \` continued onto the next line made the `content` gate read as uninvoked at
+   exit 1, while bash runs it as one command. The body goes through
+   `shell_source` and `_split_statements` now, exactly as a `run_gate` arm
+   does, so the `BODY` piece kind drops a here-document here for the same
+   reason it drops one there.
+
+3. **`scripts/lint_policy_check.py` read the `unsafe` arm with a regex, and a
+   trailing comment satisfied it.** The pattern was
+   `^\s*unsafe\)[^\n]*?python3 scripts/unsafe_allowlist_check\.py`, and
+   `[^\n]*?` reaches a `#` as happily as a command. Measured with the arm
+   rewritten to run another gate's command and the real one moved into a
+   trailing comment, and the CI step deleted: `bash -n` 0, the guard exit 0
+   PRINTING that `unsafe_code` is denied by the script in the `unsafe` gate,
+   `scripts/ci_floor_check.py` exit 0, the census exit 0 and both unit suites
+   exit 0, while the script ran nowhere and HLD 27.1's deny and 27.2 R5 were
+   enforced by nothing. **The repair already existed two files over.**
+   `scripts/guards/catalogue.py`'s `_ci_arm_commands` calls
+   `ci_floor_check.gate_commands`, which is comment-stripped and span-aware by
+   construction, and the guard is its third caller now. That is the
+   propagation failure again, the answer present in the repository and not
+   reaching the caller.
+
+4. **`continue-on-error` was in the parsed tree and nothing read it.** The
+   string occurred nowhere in `scripts/`, in this file or in the runbook.
+   Three plants, each valid YAML, each at exit 0: the key on the `gate guards`
+   step, the same key on the `guards` job, and `|| true` appended to the run.
+   `--floor` claims to be what CI runs, and a step whose failure cannot fail
+   the run does not run the gate in the sense that claim means, on the gate
+   that watches every other gate, in one line that reads as tolerating
+   flakiness. Both keys are read now, and `_tolerated_statements` answers the
+   third.
+
+**And the oracle stopped at the arm's extent, which is why route 1 survived.**
+`scanner_keeps_in_the_arm` in `scripts/tests/test_guard_readers.py` ran
+`shell_source` and `_arm_end` and nothing else, so it tested where the arm
+ends. Every marker in every planted shape sits inside the extent either way, so
+the suite stayed green while a statement was lost one function later.
+`scanner_runs_in_the_arm` is the consumer oracle: a marker counts when it is
+the only marker of a statement whose head, after the same `SHELL_INTRODUCERS`,
+`command_builtin_runs` and `SHELL_NOISE` policy `unseen_commands` applies, is
+the command that prints it. Two markers in one statement is a merge, and a
+merge is the defect. Every existing shape is driven through it, and a
+`WhatCiRunsInAStepBody` class does the same for `run_commands`, which had no
+oracle at all.
+
+`_tolerated_statements` is measured against `bash -e` rather than read out of
+the errexit paragraph, and the obvious reading of that paragraph is wrong. The
+first version of the function asserted that a failing left side of `&&` fails
+the step. It does not: `false && true` followed by another line exits 0,
+because the short circuit means the command after the final `&&` never runs, so
+nothing fires errexit and the list's status is discarded. The same statement
+alone in a body exits 1, because the last list decides the script's status. Ten
+such measurements are a table in the suite and the reader is asserted against
+that table row by row.
 
 `scripts/lint_policy_check.py` is in the `guards` gate rather than in `clippy`
 because it is check c's class of problem rather than clippy's. The `clippy`

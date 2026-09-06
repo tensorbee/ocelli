@@ -1120,7 +1120,7 @@ def _a_manifest_that_is_not_utf8(box: Sandbox) -> None:
     """A `Cargo.toml` that is not UTF-8 text at all.
 
     `main` read it with an unguarded `CARGO.read_text(encoding="utf-8")` until
-    the S03 review's thirteenth pass, so this arrived as a
+    the S03 review's twelfth pass, so this arrived as a
     `UnicodeDecodeError` traceback with no `FAIL:` header. Fail-closed, and
     still the wrong way to tell a maintainer what to do, which is the fifth
     pass's finding in `scripts/ci_floor_check.py` one file over.
@@ -3036,7 +3036,7 @@ def _a_gate_named_outside_the_name_class(box: Sandbox) -> None:
     """A gate name carrying a DOT, which is outside `GATE_NAME`.
 
     **The refusal this plants was watched by nothing until the S03 review's
-    thirteenth pass.** `ci-floor.gate-name-with-a-digit` plants `prose2`, which
+    twelfth pass.** `ci-floor.gate-name-with-a-digit` plants `prose2`, which
     is INSIDE `[A-Za-z0-9_-]+`, and expects the floor-coverage refusal, and the
     unit test carrying the refusal's name asserted `gate_row_problems` was
     EMPTY. MEASURED with the `if not GATE_NAME.match(name)` branch disabled:
@@ -3611,6 +3611,227 @@ def _a_block_scalar_with_an_indentation_indicator(box: Sandbox) -> None:
     indent = " " * (len(line) - len(line.lstrip()))
     box.substitute(WORKFLOW_PATH, line,
                    f"{indent}- run: |2\n{indent}    {command}")
+
+
+def _a_background_operator_in_a_gate_arm(box: Sandbox) -> None:
+    """Join two arm commands with `&` instead of `&&`, on one line.
+
+    **The fourteenth route, and it is the sixth, seventh and eighth passes with
+    a different operator.** bash's `&` terminates a list exactly as `;` does,
+    and `STATEMENT_BREAK` carried `&&` and no `&`, so `A & B` was ONE statement
+    whose head is `A`. `unseen_commands` drops a statement whose head is a
+    `COMMAND_PREFIXES` prefix, so the command after the `&` left the arm.
+
+    MEASURED in a real clone: the `&&` before `node --test` in the `bench` arm
+    rewritten as `&` on one line, with `- run: bin/ocelli.sh gate bench`
+    replaced by the arm's two extractable `python3` commands, gave `bash -n` 0
+    and the check exit 0 printing "every command in each gate's arm", `bench`
+    gone from the named-only list and six node suites out of CI. bash disagrees
+    on the same body: `case g in g) echo M1 & echo M2 ;; esac` prints both.
+
+    The step is expanded for the SAME gate the runner was mutated for, which is
+    `_expand_the_step_for`'s own reason for taking the gate as an argument, and
+    the line search is bounded to that gate's OWN arm for the same reason. It
+    was not, in the first version of this builder, and the unbounded search
+    found the `panic` arm's `node scripts/panic_probe.mjs` first while the step
+    was expanded for `bench`. The probe then drove the guard red for a state
+    that is not the one it is about, which reads as a pass and discriminates
+    nothing: MEASURED green against the UNFIXED guard.
+    """
+    import ci_floor_check
+    gate = _a_gate_with_an_unextractable_arm_command(box)
+    runner = box.read("bin/ocelli.sh")
+    head = ci_floor_check.unseen_commands(runner)[gate][0].split(" ", 1)[0]
+    label = re.search(rf"^[ \t]*{re.escape(gate)}\)", runner, re.M)
+    following = re.search(r"^[ \t]*[A-Za-z0-9_-]+\)", runner[label.end():],
+                          re.M)
+    stop = label.end() + (following.start() if following else len(runner))
+    lines = runner[label.start():stop].splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if index == 0 or not line.lstrip().startswith(f"{head} "):
+            continue
+        before = lines[index - 1]
+        if not before.rstrip().endswith("&&"):
+            continue
+        box.substitute(
+            "bin/ocelli.sh", before + line,
+            f"{before.rstrip()[:-2].rstrip()} & {line.lstrip()}")
+        _expand_the_step_for(box, gate)
+        return
+    raise AssertionError(
+        f"the `{gate}` arm does not chain its unextractable command onto the "
+        f"line above it with `&&`, so the operator this probe is about has "
+        f"nowhere to go and the run would refuse for an unrelated reason.")
+
+
+def _a_redirection_in_a_gate_arm(box: Sandbox) -> None:
+    """`>&2` in a gate arm, which separates nothing and must be accepted.
+
+    The direction the `&` fix could get wrong, and the naive spelling
+    `r"[\\n;{}()]|&&|\\|\\||\\||&"` DID get it wrong. `&` is the second
+    character of `>&` and `<&` and the first of `&>`, none of which is a
+    control operator. MEASURED with that spelling over the real runner:
+    `unseen['panic']` grew the entry `'2'`, a file descriptor reported as a
+    command CI does not run, out of the `panic` arm's own `echo "wasm-pack is
+    not installed. ..." >&2`. It cost no exit code there only because `panic`
+    already holds unseen commands and CI names the gate.
+    """
+    line, indent, gate, tail, _ = _a_single_line_arm_ci_runs(box)
+    box.substitute("bin/ocelli.sh", line,
+                   f"{indent}{gate}){tail} && echo \"a note\" >&2 ;;")
+
+
+def _a_gate_name_in_a_heredoc_body(box: Sandbox) -> None:
+    """Replace a gate's step with a here-document whose BODY names the gate.
+
+    Route 4a of the twelfth pass in the spelling that pass did not close.
+    `run_commands` read the body one LINE at a time while the workflow itself
+    was parsed, so the cross-line state that makes the body DATA was discarded
+    between the line declaring the redirection and the line it governs.
+    MEASURED in a real clone with the `bin/ocelli.sh gate panic` step rewritten
+    this way: exit 0, and bash confirms the runner is never called, on HLD
+    section 23's wasm panic-hook proof.
+    """
+    gate, line, indent, _ = _gate_step_pieces(box)
+    box.substitute(
+        WORKFLOW_PATH, line,
+        f"{indent}- run: |\n"
+        f"{indent}    cat <<'PROBE_EOF'\n"
+        f"{indent}    bin/ocelli.sh gate {gate}\n"
+        f"{indent}    PROBE_EOF")
+
+
+def _a_continued_command_in_a_ci_step(box: Sandbox) -> None:
+    """The same step's one command continued onto a second line.
+
+    The FALSE REFUSAL half of the same line of code, and it is why this fix
+    arrives with an accept probe. Read line by line, `python3
+    scripts/staged_content_check.py \\` and `--tracked` are two commands and
+    neither is the arm's, so the gate read as uninvoked. MEASURED at exit 1,
+    while bash runs it as one command.
+    """
+    command, line = _a_floor_gate_run_as_its_one_arm_command(box)
+    head, _, tail = command.partition(" ")
+    indent = " " * (len(line) - len(line.lstrip()))
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f"{indent}    {head} \\\n"
+                   f"{indent}      {tail}")
+
+
+def _continue_on_error_on_a_gate_step(box: Sandbox) -> None:
+    """`continue-on-error: true` on the step that runs a floor gate.
+
+    `continue-on-error` was in the parsed tree and nothing read it. The string
+    occurred nowhere in `scripts/`, in `docs/lld/guards.md` or in the runbook.
+    `--floor` claims to be what CI runs, and a step whose failure cannot fail
+    the run does not run the gate in the sense that claim means, in one line
+    that reads as tolerating flakiness.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- continue-on-error: true\n"
+                   f"{indent}  {body}")
+
+
+def _continue_on_error_on_the_job(box: Sandbox) -> None:
+    """The same key one level up, on the JOB holding that step.
+
+    A job key rather than a step key, so a reader looking at the step sees
+    nothing at all. It takes every step in the job with it.
+    """
+    gate, line, _, _ = _gate_step_pieces(box)
+    workflow = box.read(WORKFLOW_PATH)
+    lines = workflow.splitlines()
+    index = lines.index(line)
+    for position in range(index, -1, -1):
+        match = re.fullmatch(r"( {2})([A-Za-z0-9_-]+):", lines[position])
+        if match:
+            box.substitute(WORKFLOW_PATH, lines[position] + "\n",
+                           f"{lines[position]}\n"
+                           f"    continue-on-error: true\n")
+            return
+    raise AssertionError(
+        f"the step running `{gate}` sits under no job key this probe can find, "
+        f"so the job-level form of the key cannot be planted.")
+
+
+def _a_gate_step_whose_failure_is_swallowed(box: Sandbox) -> None:
+    """`|| true` appended to the run, which is the third route to the same end.
+
+    The step is there, it names the gate, bash runs the gate, and the step's
+    exit status is `true`'s. MEASURED under `bash -e`: `false || true` followed
+    by another line exits 0. This one was arguably inside the declared limit,
+    that the reader "splits on the boolean operators without evaluating them",
+    and the other two were covered by nothing.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line, f"{indent}- {body} || true")
+
+
+def _the_unsafe_gate_named_only_in_a_comment(box: Sandbox) -> None:
+    """The `unsafe` arm running something else, with the real command in a
+    trailing comment, and the CI step deleted.
+
+    `scripts/lint_policy_check.py` read the arm with
+    `^\\s*unsafe\\)[^\\n]*?python3 scripts/unsafe_allowlist_check\\.py`, and
+    `[^\\n]*?` reaches a `#` as happily as it reaches a command. MEASURED in a
+    real clone: `bash -n` 0, the guard exit 0 PRINTING "unsafe_code denied by
+    scripts/unsafe_allowlist_check.py in the `unsafe` gate, which is the
+    declared substitution", `scripts/ci_floor_check.py` exit 0, the census exit
+    0 and both unit suites exit 0, while the script ran nowhere and HLD 27.1's
+    `unsafe_code` deny and HLD 27.2 R5 were enforced by nothing.
+
+    The repair already existed two files over: `_ci_arm_commands` above calls
+    `ci_floor_check.gate_commands`, which is comment-stripped and span-aware by
+    construction, and the guard is its third caller now.
+
+    The arm is given a real command from ANOTHER gate rather than `true`, so
+    the runner stays a file whose arms all do work and the only thing this
+    probe changes is which work the `unsafe` arm does.
+    """
+    runner = box.read("bin/ocelli.sh")
+    line = next(l for l in runner.splitlines()
+                if re.match(r"^\s*unsafe\)", l))
+    replacement = next(
+        c for c in _ci_arm_commands(box, "prose") if c.startswith("python3 "))
+    box.substitute(
+        "bin/ocelli.sh", line,
+        f"{line[:line.index('unsafe)')]}unsafe)      {replacement} ;;"
+        f"  # python3 scripts/unsafe_allowlist_check.py")
+    workflow = box.read(WORKFLOW_PATH)
+    wanted = "- run: python3 scripts/unsafe_allowlist_check.py"
+    step = next(l for l in workflow.splitlines() if l.strip() == wanted)
+    box.substitute(WORKFLOW_PATH, step + "\n", "")
+
+
+def _an_unclosed_quote_in_a_ci_step(box: Sandbox) -> None:
+    """A `run:` body with a quote that is opened and never closed.
+
+    bash will not run the body either, so the direction is not in doubt. What
+    is in doubt is the MESSAGE: the swallowed text can only hide commands from
+    this reader, so without a refusal here the check reports whichever gate
+    went missing and sends its reader to `bin/ocelli.sh` for a defect in
+    `ci.yml`. This is `_arm_end`'s argument, one file along.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f"{indent}    echo 'never closed\n"
+                   f"{indent}    {body.removeprefix('run: ')}")
+
+
+def _a_runner_that_is_not_utf8(box: Sandbox) -> None:
+    """`bin/ocelli.sh` as bytes no UTF-8 decoder accepts."""
+    box.write("bin/ocelli.sh", b"\xff\xfe unsafe) python3 x.py ;;\n")
+
+
+def _a_runner_with_no_run_gate_region(box: Sandbox) -> None:
+    """`bin/ocelli.sh` with the `run_gate` region renamed out from under the
+    arm parser, which is a runner somebody restructured rather than a broken
+    file. The gate-arm reader refuses, and the question this guard asks about
+    that arm is then UNKNOWN, which is not the same as answered no."""
+    box.substitute("bin/ocelli.sh", "run_gate() {", "run_gate_renamed() {")
 
 
 def _a_flow_mapping_step(box: Sandbox) -> None:
@@ -4539,7 +4760,7 @@ GUARDS: tuple[Guard, ...] = (
                        "`gate --floor` selecting a gate no CI step ran. An "
                        "entry the reader cannot use was an omission, which is "
                        "the one outcome a guard may not have. What this "
-                       "watches, said exactly since the thirteenth pass: "
+                       "watches, said exactly since the twelfth pass: "
                        "`prose2` is INSIDE the widened class, so the refusal "
                        "here is the floor-coverage one and what is proved is "
                        "that the entry is COUNTED. The name-class refusal is "
@@ -4868,6 +5089,125 @@ GUARDS: tuple[Guard, ...] = (
                        "those two, and this third shape read as declaring no "
                        "automatic event, which refused the WHOLE floor at "
                        "once with a message about the workflow being manual."),
+            Probe("ci-floor.background-operator-in-an-arm",
+                  _a_background_operator_in_a_gate_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "so it cannot demand those commands step by step",
+                  note="**The fourteenth route, and it is the sixth, seventh "
+                       "and eighth passes with a different operator.** bash's "
+                       "`&` terminates a list exactly as `;` does and "
+                       "`STATEMENT_BREAK` carried `&&` and no `&`, so `A & B` "
+                       "was ONE statement whose head is `A` and a head that is "
+                       "a `COMMAND_PREFIXES` prefix took `B` out of "
+                       "`unseen_commands` with it. MEASURED: the `&&` before "
+                       "`node --test` in the `bench` arm rewritten as `&` on "
+                       "one line, with the gate-name step replaced by the "
+                       "arm's two extractable commands, gave `bash -n` 0 and "
+                       "the check exit 0 printing \"every command in each "
+                       "gate's arm\", `bench` gone from the named-only list "
+                       "and six node suites out of CI. The oracle in "
+                       "`scripts/tests/test_guard_readers.py` could not see "
+                       "it: `scanner_keeps_in_the_arm` tests where the arm "
+                       "ENDS and every marker was inside the extent either "
+                       "way. `scanner_runs_in_the_arm` is what reaches it."),
+            Probe("ci-floor.redirection-in-an-arm-is-permitted",
+                  _a_redirection_in_a_gate_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The direction the `&` fix could get wrong, and the "
+                       "naive spelling DID get it wrong. `&` is the second "
+                       "character of `>&` and `<&` and the first of `&>`. "
+                       "MEASURED with `r\"[\\n;{}()]|&&|\\|\\||\\||&\"` over "
+                       "the real runner: `unseen['panic']` grew the entry "
+                       "`'2'`, a file descriptor reported as a command CI does "
+                       "not run, out of the `panic` arm's own `echo "
+                       "\"wasm-pack "
+                       "is not installed. ...\" >&2`. It cost no exit code "
+                       "there only because `panic` already holds unseen "
+                       "commands and CI names the gate, so an arm whose only "
+                       "unextractable text was a redirection would have "
+                       "refused a legitimate state."),
+            Probe("ci-floor.gate-name-in-a-heredoc-body",
+                  _a_gate_name_in_a_heredoc_body,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "and nothing in",
+                  note="Route 4a of the twelfth pass in the spelling that pass "
+                       "did not close. `run_commands` read a `run:` body one "
+                       "LINE at a time while the workflow itself was parsed, "
+                       "so the cross-line state that makes a here-document "
+                       "body DATA was discarded. MEASURED with the "
+                       "`bin/ocelli.sh gate panic` step rewritten as `cat "
+                       "<<'EOF'` / the invocation / `EOF`: exit 0, and bash "
+                       "confirms the runner is never called. `panic` is HLD "
+                       "section 23's wasm panic-hook proof, the one property "
+                       "no native test can observe. The continuation spelling, "
+                       "`echo not \\\\` then the invocation, reaches the same "
+                       "place and bash prints `not bin/ocelli.sh gate panic`."),
+            Probe("ci-floor.continued-ci-command-is-permitted",
+                  _a_continued_command_in_a_ci_step,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The FALSE REFUSAL half of the same line of code, which "
+                       "is why the fix arrives with an accept probe. Read line "
+                       "by line, `python3 "
+                       "scripts/staged_content_check.py \\\\` "
+                       "and `--tracked` are two commands and neither is the "
+                       "arm's, so the `content` gate read as uninvoked. "
+                       "MEASURED at exit 1, while bash runs it as one "
+                       "command."),
+            Probe("ci-floor.continue-on-error-on-a-gate-step",
+                  _continue_on_error_on_a_gate_step,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "because its failure cannot fail the workflow",
+                  note="`continue-on-error` was in the parsed tree and nothing "
+                       "read it. The string occurred nowhere in `scripts/`, in "
+                       "`docs/lld/guards.md` or in the runbook. MEASURED as "
+                       "valid YAML leaving the check at exit 0 with the gate "
+                       "reported covered. `--floor` claims to be what CI runs, "
+                       "and a step whose failure cannot fail the run does not "
+                       "run the gate in the sense that claim means, on the "
+                       "gate that watches every other gate, in one line that "
+                       "reads as tolerating flakiness."),
+            Probe("ci-floor.continue-on-error-on-the-job",
+                  _continue_on_error_on_the_job,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "because its failure cannot fail the workflow",
+                  note="The same key one level up, where a reader looking at "
+                       "the STEP sees nothing at all, and it takes every step "
+                       "in the job with it. Both levels are read now, which is "
+                       "why there are two probes rather than one: the key is "
+                       "reached through a different node of the parsed tree in "
+                       "each and a repair could close either alone."),
+            Probe("ci-floor.gate-step-failure-swallowed",
+                  _a_gate_step_whose_failure_is_swallowed,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "because its failure cannot fail the workflow",
+                  note="`|| true` appended to the run, the third route to the "
+                       "same end. The step is there, it names the gate, bash "
+                       "runs the gate and the step's exit status is `true`'s. "
+                       "This one was arguably inside the declared limit, that "
+                       "the reader \"splits on the boolean operators without "
+                       "evaluating them\", and the other two were covered by "
+                       "nothing. `_tolerated_statements` is measured against "
+                       "`bash -e` rather than read out of the errexit "
+                       "paragraph, because the obvious reading of that "
+                       "paragraph is wrong: `false && true` followed by "
+                       "another line exits 0."),
+            Probe("ci-floor.unclosed-quote-in-a-ci-step",
+                  _an_unclosed_quote_in_a_ci_step,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "opened and never closed",
+                  note="The refusal that arrived with the whole-body scan. An "
+                       "unclosed span swallows everything after it into one "
+                       "piece, which can only HIDE commands and therefore only "
+                       "cause refusals, so the direction was never in doubt. "
+                       "The MESSAGE was: without this the check names "
+                       "whichever gate went missing and sends its reader to "
+                       "`bin/ocelli.sh` for a defect in `ci.yml`. That is "
+                       "`_arm_end`'s argument one file along, and bash will "
+                       "not run the body either."),
             Probe("ci-floor.pyyaml-absent", None,
                   script("python3", "-S", "scripts/ci_floor_check.py"),
                   "PyYAML is not installed",
@@ -4992,7 +5332,7 @@ GUARDS: tuple[Guard, ...] = (
               "copy of the gate-row regex from `scripts/guards/census.py`. "
               "**The seventh limit is what the tokenizer still does not "
               "model, and it was written as an ENUMERATION of two constructs "
-              "until the S03 review's thirteenth pass, which measured the "
+              "until the S03 review's twelfth pass, which measured the "
               "enumeration wrong.** It named `$'...'` and a substitution "
               "inside a double quote and said the residue was those two. It "
               "was not. A here-document body was claimed as covered and was "
@@ -5003,9 +5343,20 @@ GUARDS: tuple[Guard, ...] = (
               "An enumeration of a grammar's constructs is not a limit, it is "
               "a claim that the author thought of all of them, and twelve "
               "passes say that shape does not hold. So the limit is stated as "
-              "what the scanner CANNOT SEE and why, and it is one thing: the "
-              "scanner models spans and words and does not model bash's "
-              "COMPOUND COMMANDS, so it cannot tell a `(` that opens a "
+              "what the reader CANNOT SEE and why. **It was then stated as ONE "
+              "thing, that the scanner does not model compound commands, and "
+              "one thing was not the count either: the S03 review's thirteenth "
+              "pass measured the fourteenth route in a production the sentence "
+              "did not mention.** That claim is accurate about `shell_pieces` "
+              "and `shell_pieces` is not the whole shell reader. It is ONE "
+              "tokenizer with FOUR hand-written productions on top of it, "
+              "`STATEMENT_BREAK`, `NESTED_CASE`, the "
+              "`SHELL_INTRODUCERS`/`SHELL_NOISE` split and "
+              "`ARM_LABEL`/`GATE_INVOCATION`, and the route lived in the "
+              "first. \"One tokenizer\" was achieved and \"one reader\" was "
+              "not, and the limit read as if it had been. Per production, "
+              "then. THE TOKENIZER models spans and words and does not model "
+              "bash's COMPOUND COMMANDS, so it cannot tell a `(` that opens a "
               "subshell from one that ends a `case` pattern, and it cannot "
               "tell `((` arithmetic from `( (` nested subshells the way bash "
               "does, which is by attempting the arithmetic parse and "
@@ -5017,13 +5368,32 @@ GUARDS: tuple[Guard, ...] = (
               "the `<<` as a here-document whose body then runs to the end of "
               "the region, which refuses, and a here-document written inside "
               "a substitution is not queued at all, its body being inside the "
-              "same span. Every one is fail-closed and each is asserted where "
-              "it is rather than assumed away. Two smaller residues, both "
-              "measured: `$'...'` is a span so its EXTENT is right and its C "
+              "same span. `$'...'` is a span so its EXTENT is right and its C "
               "escapes are not decoded, which lands a name outside "
               "`GATE_NAME` and refuses, and a continuation INSIDE a double "
               "quote is left in place, which reaches `runs_command`'s text "
-              "comparison and refuses. **Was bash asked instead, and it can "
+              "comparison and refuses. THE STATEMENT SCANNER, "
+              "`STATEMENT_BREAK` and `_split_statements`, sees the control "
+              "operators and nothing else about a list. MEASURED: `coproc case "
+              "x in *) : ;; esac` is accepted by `bash -n`, is MISSED by "
+              "`NESTED_CASE`, and fails closed only because the statement "
+              "scanner reports `coproc case x in *` as a command CI does not "
+              "run, so the refusal that carries the weight there is not the "
+              "one the compound-command sentence names. "
+              "`_tolerated_statements`, which decides whose failure `bash -e` "
+              "discards, reads the same separators and inherits every one of "
+              "these blind spots. `NESTED_CASE` derives its alternation from "
+              "`SHELL_INTRODUCERS`, so `time case` matches and `coproc case` "
+              "does not, measured both ways. The "
+              "`SHELL_INTRODUCERS`/`SHELL_NOISE` split is a list rather than a "
+              "grammar, and what remains of it is any head other than `eval` "
+              "and `command`, each of which was measured on the wrong side and "
+              "each of which has a reader now. `ARM_LABEL` and "
+              "`GATE_INVOCATION` both anchor at a statement head, so both "
+              "inherit the statement scanner's residue rather than adding one. "
+              "Every consequence above is fail-closed and each is asserted "
+              "where it is rather than assumed away. **Was bash asked "
+              "instead, and it can "
               "be.** `declare -f run_gate` is bash's own reparse. It is not "
               "the reader, for three measured reasons: `set -n` does not "
               "define functions, so `declare -f` needs the audited file "
@@ -5070,7 +5440,37 @@ GUARDS: tuple[Guard, ...] = (
               "without evaluating them, so `false && bin/ocelli.sh gate x` "
               "counts as an invocation and never runs, and that is a shape "
               "nobody has measured in this repository rather than one that "
-              "has been shown safe. `on` is read as the string key, so the "
+              "has been shown safe. **That sentence used to cover `|| true` as "
+              "well and it should not have, which the S03 review's "
+              "thirteenth pass measured.** A step whose FAILURE is "
+              "discarded does not run the gate in the sense `--floor` "
+              "means. `continue-on-error` on the step, the same key on "
+              "the job, and `|| true` on the run were three plants that "
+              "each left this check at exit 0 on the gate that watches "
+              "every other gate, and the first two were covered by "
+              "nothing at all: the string occurred nowhere in "
+              "`scripts/`, in `docs/lld/guards.md` or in this runbook. "
+              "Both keys are read now and `_tolerated_statements` "
+              "answers the third, MEASURED against `bash -e` rather "
+              "than read out of the errexit paragraph, whose obvious "
+              "reading is wrong: `false && true` followed by another "
+              "line exits 0. What remains a limit there is the SHELL "
+              "the body runs under. GitHub's default for a Linux "
+              "`run:` is `bash -e {0}` and a step may override it with "
+              "`shell:`, or a job or the workflow with "
+              "`defaults.run.shell`. None is read and no step in "
+              "`.github/workflows/ci.yml` sets one today. `set -o "
+              "pipefail` inside a body is not read either, and that "
+              "direction is fail-CLOSED: pipefail makes a failure this "
+              "file already treats as discarded reach the step, so the "
+              "file counts LESS coverage than exists rather than more. "
+              "A `shell:` that is not a shell at all, `python` being "
+              "the one GitHub offers, would be read as bash, and that "
+              "is the shape to measure the day a step wants one. A "
+              "`continue-on-error` whose value is a `${{ }}` "
+              "expression is treated as tolerating, on `_permits`' own "
+              "rule: a value this file cannot read as harmless is not "
+              "read as harmless. `on` is read as the string key, so the "
               "YAML 1.1 boolean spelling `true:` reads as no event block at "
               "all, which refuses with the top-level keys named. And the "
               "shapes the twelfth pass deliberately did NOT claim, because it "
@@ -6566,6 +6966,59 @@ GUARDS: tuple[Guard, ...] = (
                        "SPELLING into a refusal. `-Dwarnings` raises a level "
                        "and must be permitted here exactly as it is in the "
                        "bracketed form.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.runner-not-utf8",
+                  _a_runner_that_is_not_utf8,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "Whether the `unsafe` gate still runs",
+                  note="The guard reads `bin/ocelli.sh` to establish the "
+                       "declared substitution for HLD 27.1's `unsafe_code` "
+                       "deny, and a runner it cannot decode leaves that "
+                       "question UNKNOWN. An unknown is not an enforcement, so "
+                       "it refuses under the FAIL header rather than arriving "
+                       "as a `UnicodeDecodeError` traceback, which is the "
+                       "presentation the fifth pass took away from "
+                       "`scripts/ci_floor_check.py` and the eighth pass from "
+                       "this file's `Cargo.toml` read.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.runner-arms-unreadable",
+                  _a_runner_with_no_run_gate_region,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "cannot be read for its gate arms",
+                  note="The other half of reading the arm through "
+                       "`ci_floor_check.gate_commands`: that reader REFUSES a "
+                       "runner it cannot delimit, and this guard must not turn "
+                       "the refusal into the answer no. A restructured runner "
+                       "is a person's decision and the message says so.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.unsafe-gate-named-only-in-a-comment",
+                  _the_unsafe_gate_named_only_in_a_comment,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "neither mechanism is present",
+                  note="**One line of regex producing a positive assertion of "
+                       "a false thing.** The declared substitution for HLD "
+                       "27.1's `unsafe_code` deny is that the `unsafe` gate "
+                       "runs `scripts/unsafe_allowlist_check.py`, and this "
+                       "guard read the arm with "
+                       "`^\\\\s*unsafe\\\\)[^\\\\n]*?python3 "
+                       "scripts/unsafe_allowlist_check\\\\.py`, where "
+                       "`[^\\\\n]*?` reaches a `#` as happily as a command. "
+                       "MEASURED with the arm rewritten to run another gate's "
+                       "command and the real one moved into a trailing "
+                       "comment, and the CI step deleted: `bash -n` 0, this "
+                       "guard exit 0 PRINTING \"unsafe_code denied by "
+                       "scripts/unsafe_allowlist_check.py in the `unsafe` "
+                       "gate, which is the declared substitution\", "
+                       "`scripts/ci_floor_check.py` exit 0, the census exit 0 "
+                       "and both unit suites exit 0. The script then ran "
+                       "nowhere and HLD 27.2 R5 was enforced by nothing. The "
+                       "repair already existed two files over: "
+                       "`_ci_arm_commands` above calls "
+                       "`ci_floor_check.gate_commands`, which is "
+                       "comment-stripped and span-aware by construction, and "
+                       "this guard is its third caller now. That is the "
+                       "propagation failure again, the answer present in the "
+                       "repository and not reaching the caller.",
                   needs="cargo", profile="deep"),
         ),
         limit="`REFUSED_GROUPS` is a list of nine names that exists only in "

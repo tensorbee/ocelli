@@ -1466,7 +1466,7 @@ right, which is what makes it the clearest case in this sprint: a true
 correction applied by the forbidden method leaves the entry looking as though
 it had always been true, and nothing tells the next reader the claim was ever
 re-measured. `git show 828037e -- docs/sprints/AS_BUILT.md` is the whole of that
-edit and it is six lines. F-006's entry now reads as it did at completion, and
+edit and it is one hunk, two insertions and two deletions. It read six lines here until the S03 review's thirteenth pass ran the command. F-006's entry now reads as it did at completion, and
 the correction is here:
 
 | F-006's entry as written | What the command says |
