@@ -129,6 +129,7 @@ and a mutation is an input to a test: it derives from the specification too.
 | 11 | Two reviewers, 6 defects, 2 smells, 5 nitpicks. **The comparator and the crates were both declared done**, at four and two consecutive clean passes. The guard reviewer named the class ten passes had been patching and the remediation replaced two of three hand-rolled grammars with real parsers | remediated |
 | 12 | Two reviewers, 6 defects, 8 smells, 3 nitpicks, aimed at the two grammars pass 11 left. **The prediction pass 11's remediation made against itself came true**: the YAML reader had four fail-open routes, one of them key order, which is not a spelling and cannot be patched. Both readers are replaced | remediated |
 | 13 | Two reviewers, 6 defects, 2 smells, 4 nitpicks. **The verdict was that the class is NOT closed**: pass 12 closed the grammar and left the CONSUMERS of the grammar unguarded, and the bash oracle stopped at the arm's extent. The confirmation sweep declared the sprint able to close | remediated |
+| 15 | Two reviewers on the pass-14 remediation itself. The guard reviewer **contradicted pass 14's convergence answer on a new axis**: six errexit contexts absent from the generated oracle's GRAMMAR, three of them total bypasses where bash never runs the gate at all, plus a probe that could not flip on the defence it named. The prose reviewer found 3 defects, 5 smells and 2 nitpicks in the remediation, one of them a count that went stale twice inside the pass that wrote it | remediated |
 | 14 | Two reviewers. The guard reviewer returned 1 defect, 2 smells, 1 nitpick and answered the convergence question with evidence: **the area IS converging**, the defect sat at exactly the seam pass 13's remediation predicted, and four of the five categories it was told had produced late findings before were empty. The confirmation reviewer returned 11 defects, 7 smells and 5 nitpicks in `docs/lld/` and the root docs, one class, on the only surface thirteen passes never re-read | remediated |
 
 **Three of these tallies are recorded here and nowhere else, not one.** The
@@ -444,6 +445,7 @@ Every pass so far has found a NEW CLASS rather than more of the last one:
 | 6 | A refusal shape the scanner could not see |
 | 7 | **A test that asserts the implementation is itself** |
 | 14 | A table of examples standing in for an oracle, and a surface no pass had re-read |
+| 15 | **A grammar that only generates what its author thought of**, which is the same defect as the table it replaced |
 
 Pass 7's class is the sharpest because it is invisible to every gate. Two tests
 recomputed the implementation's own expression in the test body and asserted
@@ -889,9 +891,9 @@ documents agree.
 
 Where a correct sentence already existed elsewhere in the repository it was
 COPIED rather than recomposed, which is the review's standing answer to a
-remediation shipping new claims. Eight of the corrections had one:
+remediation shipping new claims. These five sources supplied one:
 `docs/lld/errors.md` for the eslint allowance, `tools/oracle/src/lib.rs` for
-what the Rust half is, `docs/lld/oracle.md`'s own line 520 for the difference
+what the Rust half is, `docs/lld/oracle.md`'s own covers-89-and-knows-it sentence for the difference
 between covering 89 rows and reporting 91, `docs/SOURCE-POLICY.md`'s own table
 row recording that Grok is out of bounds and must not be read or depended on,
 and `docs/lld/comparator.md` for the blind reformat pair that
@@ -922,6 +924,77 @@ That is worth stating rather than quietly fixing, because it is this sprint's
 own class committed by the remediation for this sprint's own class, at the pass
 that concluded the area converges. It is **F-X020**, and that story was filed
 by hand in all three planning files for the same reason.
+
+## Pass 15, and the oracle inherited the flaw of the table it replaced
+
+Pass 14 replaced a hand-written table of ten measured exit codes with a
+generated-input bash oracle, and concluded the guard area converges. Pass 15
+reviewed that work and **the conclusion did not survive contact with a new
+axis**. The reader was sound. The GRAMMAR the oracle generates from was not,
+and a grammar can only produce what its author thought of, which is exactly the
+criticism pass 14 made of the table.
+
+Six contexts had no production. Each was measured at exit 0 with the real
+`bin/ocelli.sh gate guards` step replaced, and **three of them are total
+bypasses in which bash never executes the runner at all**: a gate defined in a
+function nothing calls, a `case` arm whose pattern never matches, and a
+statement after a top-level `exit`. The other three are a never-taken `else`,
+an empty `for` word list and an `until true` body. `guards` is the gate that
+watches every other gate, and the check reported all 25 floor gates invoked for
+every one of them.
+
+Two more came with them. `shopt -uo errexit` is bash's other spelling of `set
++o errexit`, because `shopt -o` writes the same option set, and
+`_errexit_switch` read only the `set` family. And a `set -e` inside a subshell
+restores nothing in the parent, so reading one as a restore was a fail-OPEN
+that the declared limit had described as fail-closed in both directions.
+
+### The decision F-X019 was holding open got taken, because the evidence changed
+
+The fourteenth pass filed three not-guaranteed shapes as a story rather than
+closing them, on the argument that closing narrows what the check ACCEPTS and
+that is a decision with an owner. That argument was right for three cosmetic
+shapes and wrong once the same class turned out to include routes where the
+gate cannot run at all. So the contract changed: **a gate counts only when it
+is at the top level of the body and reachable.**
+
+The cost is declared and asserted as an exact set of eight false refusals, all
+of them compound bodies that really do run, and it is zero today because
+`.github/workflows/ci.yml` carries 0 compound statements in its `run:` bodies.
+One accept probe became a refusal probe as a result, and that flip is the
+honest record of the contract moving. F-X019 is narrowed to the single shape
+that remains, the right-hand side of `&&`, which is left open because
+`invoked_gates` documents `cd x && bin/ocelli.sh gate y` as legitimate and
+refusing it would contradict a declared behaviour rather than repair a reader.
+
+### A probe that could not flip on the defence it names, for the second time
+
+Pass 14 found one probe whose plant put the gate last in the body while the
+measurement it cited had a trailing command, so the shape it tested was not the
+defect. **Its sibling had the same mismatch and pass 14 did not look.**
+`ci-floor.errexit-restored-before-a-gate-step` stayed green under a mutation
+that destroyed the `set -e` restore it exists to watch, because
+`errexit_off and index != last` short circuits before the restore is ever
+consulted. Two further plants cite a trailing command they do not write, in
+positions where it does not bite. Three conventions in nine adjacent builders
+is what made the first one invisible, and they are now one.
+
+### What the prose reviewer found, and the count that went stale twice
+
+Three defects, five smells and two nitpicks in the pass-14 remediation. The
+sharpest is `CLAUDE.md`'s own paragraph about counts going stale, which
+transcribed `prints 13` while the same commit added a backlog row that made it
+14, and which was 15 by the time it was read, because a second story had been
+filed in between. **The count in the paragraph warning against counts went
+stale twice inside the pass that rewrote the lines around it.** It is now the
+command and no number.
+
+The licence widening was the other one worth naming. Four files were corrected
+and three were not, and one of the three is `scripts/source_provenance_check.py`
+itself, the enforcement script the corrected files cite as their authority.
+`.claude/WORKFLOW.md`, which `CLAUDE.md` says wins on process, still told a
+reader that Grok may be read. The mechanism was right the whole time. Every
+document describing it was not.
 
 ## What is still open, and it is declared rather than hidden
 

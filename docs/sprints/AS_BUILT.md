@@ -1518,8 +1518,20 @@ counters. F-X007's own note "The volume boundaries do not run in the order they
 are listed" says why: `volume-geometry` is the driver's boundary and runs last,
 so a subject can be refused having already presented every orientation. A
 reader who measures the per-subject record will conclude the sentence above was
-right and re-correct this back. `CHANGELOG.md` has carried the correct form
-since pass 5.
+right and re-correct this back. `CHANGELOG.md` has carried the correct COUNTS
+since pass 5, and its pointer was wrong over the same span: it said the figures
+live under `volumes` until this pass moved it to `boundaries`, which is the
+distinction this paragraph is about.
+
+**Pass 9's attribution is corrected IN PLACE, and this is the declaration of
+it.** Pass 9 recorded the sentence "the oracle's twelve suites to 210 in total"
+as F-011's. It is F-X007's, in that entry's `**Tests added.**` field, and
+`grep -n '210' docs/sprints/AS_BUILT.md` returns exactly the two lines. The
+edit is one word inside this corrections section rather than inside a story
+entry, so the fourth line of this file does not reach it, and passes 5, 6, 7, 9
+and 13 all edited here in place. It is declared anyway, because this subsection
+is the one arguing that a true correction applied silently leaves the record
+looking as though it had always been right.
 
 **Notes for future sessions.**
 - **A count and the mechanism it describes must be edited by the same hand or

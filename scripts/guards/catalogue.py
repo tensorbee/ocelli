@@ -3910,11 +3910,18 @@ def _errexit_restored_before_a_gate_invocation(box: Sandbox) -> None:
     in neither direction and `+e` inside `+eu` turns it off.
     """
     line, indent, command = _gate_step_command(box)
+    # The trailing command is LOAD-BEARING, for the reason its sibling above
+    # carries the same line. With the gate last, `_errexit_exempt` short
+    # circuits on `index != last` and never consults `errexit_off` at all, so
+    # the `set -e` restore this probe exists to watch is not reached and the
+    # probe cannot flip on its own defence. MEASURED in the S03 review's
+    # fifteenth pass: destroying the restore reading left this probe green.
     box.substitute(WORKFLOW_PATH, line,
                    f"{indent}- run: |\n"
                    f"{indent}    set +e\n"
                    f"{indent}    set -e\n"
-                   f"{indent}    {command}")
+                   f"{indent}    {command}\n"
+                   f'{indent}    echo "gate step done"')
 
 
 def _a_gate_invocation_in_an_if_condition(box: Sandbox) -> None:
@@ -3929,23 +3936,35 @@ def _a_gate_invocation_in_an_if_condition(box: Sandbox) -> None:
     """
     line, indent, command = _gate_step_command(box)
     box.substitute(WORKFLOW_PATH, line,
-                   f"{indent}- run: if {command}; then true; fi")
+                   f"{indent}- run: |\n"
+                   f"{indent}    if {command}; then true; fi\n"
+                   f'{indent}    echo "gate step done"')
 
 
 def _a_gate_invocation_in_an_if_body(box: Sandbox) -> None:
-    """The same `if`, with the gate in the `then` BODY, which is a real run.
+    """The same `if`, with the gate in the `then` BODY, which is REFUSED.
 
-    The direction that makes the exemption an EXTENT rather than a head test,
-    and the reason `_CONDITION_ENDS` exists. A `then`, an `else` or a `do` ends
-    the condition, and the body after one is under errexit like anything else.
-    MEASURED: `if true; then false; fi` then `echo AFTER` under `bash -ec`
-    exits 1, against the 0 the probe above measures. So this step really does
-    run the gate and really can fail on it, and refusing it would be refusing a
-    workflow that is doing the right thing.
+    This was an ACCEPT probe until the S03 review's fifteenth pass, on the
+    argument that the body runs under errexit, which it does: `if true; then
+    false; fi` then `echo AFTER` under `bash -ec` exits 1. That argument
+    answers the wrong question. The body runs under errexit WHEN IT RUNS, and
+    whether it runs depends on a condition this scanner cannot evaluate, so
+    the same construct with `if false` never calls the gate at all and this
+    file counted it invoked. The fifteenth pass measured five more of that
+    shape, including a `case` arm, a function body and a statement after
+    `exit`, where the runner is never executed.
+
+    So the question is no longer whether the failure reaches the step. It is
+    whether the shell is GUARANTEED to run the command, and a compound body is
+    not. The cost is a false refusal on a workflow that would have worked, and
+    it is fail-CLOSED and names the gate. No step in `.github/workflows/ci.yml`
+    puts a gate in a compound body, measured at 0 such statements.
     """
     line, indent, command = _gate_step_command(box)
     box.substitute(WORKFLOW_PATH, line,
-                   f"{indent}- run: if true; then {command}; fi")
+                   f"{indent}- run: |\n"
+                   f"{indent}    if true; then {command}; fi\n"
+                   f'{indent}    echo "gate step done"')
 
 
 def _a_negated_gate_invocation(box: Sandbox) -> None:
@@ -3959,6 +3978,80 @@ def _a_negated_gate_invocation(box: Sandbox) -> None:
     """
     line, indent, command = _gate_step_command(box)
     box.substitute(WORKFLOW_PATH, line, f"{indent}- run: '! {command}'")
+
+
+def _a_gate_invocation_in_a_function_body(box: Sandbox) -> None:
+    """The gate defined in a function that nothing calls. A TOTAL bypass.
+
+    MEASURED under `bash -e`: a body of `f() {{ echo RAN; }}` then `echo done`
+    prints only `done`. The runner is never executed, and this file reported
+    every floor gate invoked at exit 0 until the S03 review's fifteenth pass.
+    """
+    line, indent, command = _gate_step_command(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f"{indent}    guards_step() {{ {command}; }}\n"
+                   f'{indent}    echo "gate step done"')
+
+
+def _a_gate_invocation_in_a_case_arm(box: Sandbox) -> None:
+    """The gate in a `case` arm whose pattern the runner never matches.
+
+    MEASURED: `case "x" in Windows) echo RAN ;; esac` then `echo done` prints
+    only `done`. The arm reads as an invocation to anything counting names.
+    """
+    line, indent, command = _gate_step_command(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f'{indent}    case "$RUNNER_OS" in Windows) {command} ;; '
+                   f"esac\n"
+                   f'{indent}    echo "gate step done"')
+
+
+def _a_gate_invocation_after_exit(box: Sandbox) -> None:
+    """The gate on a line the shell never reaches, after a top-level `exit`.
+
+    MEASURED: `exit 0` then `echo RAN` under `bash -e` prints nothing and
+    exits 0. The step is green, the gate is listed, and it did not run.
+    """
+    line, indent, command = _gate_step_command(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f"{indent}    exit 0\n"
+                   f"{indent}    {command}")
+
+
+def _shopt_unsets_errexit_before_a_gate(box: Sandbox) -> None:
+    """`shopt -uo errexit`, which is bash's other spelling of `set +o errexit`.
+
+    `shopt -o` writes the same option set `set -o` writes, so this turns
+    errexit off and `_errexit_switch` read only the `set` family until the S03
+    review's fifteenth pass. MEASURED: `shopt -uo errexit` then `false` then
+    `echo AFTER` under `bash -e` exits 0.
+    """
+    line, indent, command = _gate_step_command(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f"{indent}    shopt -uo errexit\n"
+                   f"{indent}    {command}\n"
+                   f'{indent}    echo "gate step done"')
+
+
+def _a_scoped_set_e_that_does_not_restore(box: Sandbox) -> None:
+    """`set +e`, then a `set -e` inside a SUBSHELL, which restores nothing.
+
+    The fail-OPEN half of the subshell limit, which was declared as though
+    both halves were fail-closed. A `set -e` inside `( )` is scoped to the
+    subshell, so errexit is still off in the parent. MEASURED: `set +e` then
+    `( set -e )` then `false` then `echo AFTER` under `bash -e` exits 0.
+    """
+    line, indent, command = _gate_step_command(box)
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f"{indent}    set +e\n"
+                   f"{indent}    ( set -e )\n"
+                   f"{indent}    {command}\n"
+                   f'{indent}    echo "gate step done"')
 
 
 def _the_unsafe_gate_named_only_in_a_comment(box: Sandbox) -> None:
@@ -5489,18 +5582,69 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.gate-inside-an-if-body",
                   _a_gate_invocation_in_an_if_body,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "floor gate(s) are invoked by CI on",
-                  polarity="accept",
-                  note="The direction that makes the exemption an EXTENT "
-                       "rather than a head test, and the reason "
-                       "`_CONDITION_ENDS` exists. A `then`, an `else` or a "
-                       "`do` ends the condition and the body after one is "
-                       "under errexit like anything else. MEASURED under `bash "
-                       "-ec`: `if true; then false; fi` then `echo AFTER` "
-                       "exits 1, against the 0 the condition probe measures. "
-                       "So this step really does run the gate and really can "
-                       "fail on it, and refusing it would refuse a workflow "
-                       "doing the right thing."),
+                  "it is inside a compound body",
+                  note="An ACCEPT probe until the S03 review's fifteenth "
+                       "pass, on the argument that a `then` body runs under "
+                       "errexit. It does, WHEN IT RUNS, and that answers the "
+                       "wrong question: the same construct with `if false` "
+                       "never calls the gate and this file counted it "
+                       "invoked. Five further shapes of that class were "
+                       "measured at exit 0 in the same pass, including a "
+                       "`case` arm, a function body and a statement after "
+                       "`exit`, where the runner cannot execute at all. The "
+                       "question is whether the shell is GUARANTEED to run "
+                       "the command, and a compound body is not. The cost is "
+                       "a false refusal that names the gate, and "
+                       "`.github/workflows/ci.yml` carries 0 compound "
+                       "statements in its `run:` bodies."),
+            Probe("ci-floor.gate-in-a-function-body",
+                  _a_gate_invocation_in_a_function_body,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "it is inside a compound body",
+                  note="A TOTAL bypass rather than a discarded failure. The "
+                       "runner is never executed at all, and the check "
+                       "reported every floor gate invoked at exit 0. Found by "
+                       "the S03 review's fifteenth pass, which measured the "
+                       "grammar of the generated oracle rather than the "
+                       "reader, and found six contexts the grammar had no "
+                       "production for."),
+            Probe("ci-floor.gate-in-an-unmatched-case-arm",
+                  _a_gate_invocation_in_a_case_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "it is inside a compound body",
+                  note="The `case` arm is the shape a real workflow would "
+                       "plausibly carry, since gating a step on `$RUNNER_OS` "
+                       "is ordinary. On every runner but the named one the "
+                       "gate does not run, and nothing said so."),
+            Probe("ci-floor.gate-after-a-top-level-exit",
+                  _a_gate_invocation_after_exit,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "the shell never reaches this statement",
+                  note="Unreachable code, which is the one shape where no "
+                       "condition and no status is involved at all: the "
+                       "statement simply cannot execute. It was counted."),
+            Probe("ci-floor.shopt-unsets-errexit",
+                  _shopt_unsets_errexit_before_a_gate,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "turned errexit off",
+                  note="`shopt -o` writes the `set -o` option set, so this is "
+                       "`set +o errexit` in a spelling `_errexit_switch` did "
+                       "not read. The `set` family was measured exhaustively "
+                       "in the fourteenth pass and `shopt` was not considered "
+                       "at all, which is the enumeration failure one level up "
+                       "from the one that pass fixed."),
+            Probe("ci-floor.scoped-set-e-does-not-restore",
+                  _a_scoped_set_e_that_does_not_restore,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "turned errexit off",
+                  note="The fail-OPEN half of the subshell limit, which "
+                       "`_errexit_exempt` and this catalogue both declared as "
+                       "though both halves were fail-closed. A `set -e` "
+                       "inside `( )` is scoped to the subshell and restores "
+                       "nothing in the parent, so reading it as a restore "
+                       "counted the gate. The declared half does hold and is "
+                       "measured: a `set +e` inside an uncalled function "
+                       "still refuses."),
             Probe("ci-floor.negated-gate-step",
                   _a_negated_gate_invocation,
                   script("python3", "scripts/ci_floor_check.py"),

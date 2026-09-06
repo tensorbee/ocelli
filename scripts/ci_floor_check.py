@@ -869,7 +869,14 @@ class Command:
 # `_tolerated_statements` models. `shell: bash` is `bash --noprofile --norc
 # -eo pipefail {0}`, which is STRICTER: it adds pipefail, so this file's
 # pipeline rule over-tolerates under it, and over-tolerating is a refusal.
-# `shell: sh` is `sh -e {0}` and errexit is present.
+# `shell: sh` is `sh -e {0}`, and it is NOT in the set. Every citation in this
+# block is a `bash -ec` or `bash -e <file>` measurement, and on GitHub's ubuntu
+# runners `/bin/sh` is dash rather than bash, so none of them transfers to it.
+# The rules involved are POSIX and are very likely to hold, but this constant
+# is named for what has been MEASURED and `sh` had not been, which the S03
+# review's fifteenth pass called the one asserted row in the file. Refusing it
+# costs nothing today: no step in `.github/workflows/ci.yml` sets `shell:` at
+# all, and the refusal names the key and asks for the measurement.
 #
 # Everything else is refused BY NAME rather than read, which is what makes the
 # set closed against values GitHub adds later. The dangerous value is not
@@ -881,7 +888,7 @@ class Command:
 # `shell: bash {0}`: this check exited 0. The same template written once at
 # workflow level under `defaults:` took every `run:` in the file with it, also
 # at exit 0. `guards` is the gate that watches every other gate.
-MEASURED_SHELLS = frozenset({"bash", "sh"})
+MEASURED_SHELLS = frozenset({"bash"})
 
 
 def _defaults_shell(node: dict, where: str) -> tuple[str, str]:
@@ -2072,6 +2079,12 @@ def _split_statements(text: str) -> list[str]:
 # the runner rather than `if`.
 _CONDITION_INTRODUCERS = frozenset({"if", "elif", "while", "until"})
 _CONDITION_ENDS = frozenset({"then", "else", "do"})
+# Heads that OPEN a compound body, and heads that close one. `else` and `elif`
+# are deliberately absent from the openers: they continue a body that `then`
+# already opened, and counting them would leave the nesting level above zero
+# for the rest of the script.
+_BODY_OPENERS = frozenset({"then", "do", "case"})
+_BODY_CLOSERS = frozenset({"fi", "done", "esac"})
 _NEGATION = "!"
 assert _CONDITION_INTRODUCERS <= SHELL_INTRODUCERS
 assert _CONDITION_ENDS <= SHELL_INTRODUCERS
@@ -2085,6 +2098,20 @@ def _errexit_switch(statement: str) -> bool | None:
     substring test: it turns nothing off, and `+e` inside `+eu` does.
     """
     words = shell_words(statement)
+    # `shopt -o` operates on the `set -o` option set, so `shopt -uo errexit` IS
+    # `set +o errexit` and `shopt -so errexit` is `set -o errexit`. MEASURED:
+    # a body of `shopt -uo errexit` then the runner then a trailing echo exits
+    # 0 with the gate's red discarded, and this function returned None for it
+    # until the S03 review's fifteenth pass. `-u` unsets and `-s` sets, which
+    # is the opposite sense to `set`, where `+` unsets.
+    if words and words[0] == "shopt":
+        answer = None
+        for index, word in enumerate(words[1:], start=1):
+            if word.startswith("-") and "o" in word[1:]:
+                target = words[index + 1] if index + 1 < len(words) else ""
+                if target == "errexit":
+                    answer = "u" in word[1:]
+        return answer
     if not words or words[0] != "set":
         return None
     answer = None
@@ -2128,8 +2155,25 @@ def _errexit_exempt(pairs: list[tuple[str, str]],
     exempt: dict[int, str] = {}
     errexit_off = False
     in_condition = False
-    for index, (statement, _) in enumerate(pairs):
+    nest = 0
+    cases = 0
+    after_exit = False
+    for index, (statement, separator) in enumerate(pairs):
         head = statement.strip().split(" ", 1)[0]
+        if head in _BODY_CLOSERS:
+            nest = max(0, nest - 1)
+            if head == "esac":
+                cases = max(0, cases - 1)
+        if head in _BODY_OPENERS:
+            nest += 1
+            if head == "case":
+                cases += 1
+        if nest > 0:
+            exempt[index] = ("it is inside a compound body, and nothing here "
+                             "says the shell reaches that body at all")
+        elif after_exit:
+            exempt[index] = ("a top-level `exit` earlier in the body means "
+                             "the shell never reaches this statement")
         if errexit_off and index != last:
             # NOT when it is the last command in the body. `set +e` stops
             # errexit, and errexit is not what makes the FINAL command's
@@ -2150,9 +2194,27 @@ def _errexit_exempt(pairs: list[tuple[str, str]],
         elif head == _NEGATION:
             exempt[index] = ("it is negated with `!`, so the shell reports "
                              "the opposite of its status")
-        switch = _errexit_switch(statement)
-        if switch is not None:
-            errexit_off = switch
+        # A `set -e` inside a subshell or a function body is scoped to it and
+        # does NOT restore errexit in the parent. Reading one at depth was a
+        # fail-OPEN and the declared limit named only the fail-closed half:
+        # MEASURED, a body of `set +e` then `( set -e )` then the runner then
+        # a trailing echo exits 0, and this file counted the gate as invoked.
+        # The nesting level is what tells the two apart.
+        if nest == 0:
+            switch = _errexit_switch(statement)
+            if switch is not None:
+                errexit_off = switch
+            if head == "exit":
+                after_exit = True
+        # Applied AFTER the tolerance decision, because a `{` or `(` separator
+        # opens a body that begins with the NEXT statement, where a `then` or
+        # `do` head sits on the same statement as the body command it
+        # introduces. Inside a `case`, a `)` closes an arm PATTERN and opens
+        # the arm, so it must not be read as a subshell close.
+        if separator in ("{", "("):
+            nest += 1
+        elif separator in ("}", ")") and not (separator == ")" and cases > 0):
+            nest = max(0, nest - 1)
     return exempt
 
 

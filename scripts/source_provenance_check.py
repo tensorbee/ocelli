@@ -9,7 +9,7 @@ touches any repository, and the policy says why it is sharper here than usual:
      depending. Agent-assisted development sharpens this: exposure cannot be
      shown to be absent after the fact, which weakens any clean-room position."
 
-Two projects are read-blocked and neither may be opened by a person or an agent
+Three projects are read-blocked and none may be opened by a person or an agent
 on this project: **dwv** (GPL-3.0) and **Horos** (LGPL-3 with a linked AGPL-3
 component, Grok). Grok itself is listed because Horos links it, and an AGPL
 component in a browser-delivered product would trigger network-use disclosure.

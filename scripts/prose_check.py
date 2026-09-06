@@ -21,7 +21,8 @@ exempt", which is what an earlier version of this docstring implied and what
 sit under an INCLUDE_PREFIXES directory, so `## Unreleased` is unchecked too.
 S01 found a stale gate count there that nothing would have caught.
 
-Fenced blocks, inline code spans and link targets are exempt. Indentation is
+Fenced blocks, inline code spans, link targets and markdown table rows are
+exempt, the last because a row's cells are data rather than sentences. Indentation is
 not a code signal this checker honours, because a four-space indent under a
 list bullet is a continuation paragraph rather than code and exempting it would
 let real prose past both rules.

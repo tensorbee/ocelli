@@ -62,8 +62,11 @@ So:
   transmute is `unsafe` with no upside, and `unsafe` is allow-listed to two
   files that are not this one.
 - **Never build a view over wasm linear memory outside
-  `packages/core/src/bulk.ts`.** ESLint refuses it. The failure mode is silent.
-- **Do not read dwv or Horos**, and do not fetch a URL belonging to either.
+  `packages/core/src/bulk.ts` and `packages/core/src/panic.ts`.** ESLint
+  refuses it, through `ALLOWED_TO_DISABLE`, whose second list also exempts the
+  tests. The failure mode is silent.
+- **Do not read dwv, Horos or Grok**, and do not fetch a URL belonging to
+  any of them.
 - **A new refusal arrives with its probe.** Every refusal under `scripts/`,
   `ci/`, `.githooks/`, `bin/` and `tools/` is claimed by an entry in
   `scripts/guards/catalogue.py` naming the citation it enforces and how to

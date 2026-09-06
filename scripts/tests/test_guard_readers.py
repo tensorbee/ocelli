@@ -775,30 +775,39 @@ STEP_BODY_SHAPES = (
     "if {0} || {1}; then echo T; fi\n",
     "if true; then {0}; fi\n", "if true; then {0}; fi\necho tail\n",
     "if false; then echo A; else {0}; fi\n",
+    "if true; then echo A; else {0}; fi\necho tail\n",
     "if false; then echo A; elif {0}; then echo T; fi\n",
     "while {0}; do break; done\n", "while {0}; do break; done\necho tail\n",
     "until {0}; do break; done\n",
     "while true; do {0}; break; done\n",
+    "until true; do {0}; done\necho tail\n",
     "for x in a; do {0}; done\n",
+    "for f in $NOTHING; do {0}; done\necho tail\n",
     "! {0}\n", "! {0}\necho tail\n", "! {0} && {1}\n",
     "set +e\n{0}\necho done\n", "set +e\n{0}\n",
     "set +o errexit\n{0}\necho done\n", "set +o errexit\n{0}\n",
     "set +e\nset -e\n{0}\n", "set +e\nset -e\n{0}\necho tail\n",
     "set +eu\n{0}\necho done\n", "set +o pipefail\n{0}\necho done\n",
+    "shopt -uo errexit\n{0}\necho done\n",
+    "set +e\n( set -e )\n{0}\necho done\n",
     "{0} && {1} || echo fallback\n",
     "if {0}; then {1}; fi\n",
     "while {0}; do {1}; break; done\n",
     "set +e\nif {0}; then echo T; fi\n{1}\n",
+    "guards_step() {{ {0}; }}\necho tail\n",
+    'case "$X" in Windows) {0} ;; esac\necho tail\n',
+    "exit 0\n{0}\n",
+    "{{ {0}; }}\necho tail\n",
 )
 
 
 def bash_fails(body: str) -> bool | None:
     """Does `body` exit non-zero under `bash -ec`, or None if bash refuses it.
 
-    This is the whole oracle. GitHub runs a step body as `bash -e {0}`, so a
-    command's failure reaches the step exactly when the script exits non-zero,
-    and a command that never RUNS cannot make it do so. Both halves of what
-    `_tolerated_statements` decides are therefore one measurement.
+    GitHub runs a step body as `bash -e {0}`, so a command's failure reaches
+    the step exactly when the script exits non-zero, and a command that never
+    RUNS cannot make it do so. Both halves of what this file has to decide are
+    therefore one measurement.
     """
     if subprocess.run([BASH, "-n"], input=body, text=True,
                       capture_output=True).returncode != 0:
@@ -815,12 +824,11 @@ def _slot_count(shape: str) -> int:
     return len(set(re.findall(r"\{(\d)\}", shape)))
 
 
-def _body_and_index(shape: str, target: int, others_succeed: bool
-                    ) -> tuple[str, int] | None:
-    """`shape` with `target` failing, and which statement index it became."""
+def _body_and_index(shape: str, target: int) -> tuple[str, int] | None:
+    """`shape` with `target` failing and every other command succeeding."""
     count = _slot_count(shape)
-    words = [("false" if i == target or not others_succeed else "true")
-             + f" M{i}" for i in range(count)]
+    words = [("false" if i == target else "true") + f" M{i}"
+             for i in range(count)]
     body = shape.format(*words)
     pairs = ci_floor_check._statement_separators(
         ci_floor_check.shell_source(body))
@@ -832,37 +840,40 @@ def _body_and_index(shape: str, target: int, others_succeed: bool
 class WhoseFailureBashDiscards(unittest.TestCase):
     """`_tolerated_statements` against bash over GENERATED bodies.
 
-    The fourth and last consumer of the tokenizer to get an oracle. The other
-    three got one in the eleventh, twelfth and thirteenth passes of the S03
-    review, and this one still carried a hand-written table of ten measured
-    `bash -ec` exit codes. The table was correct about every row in it. It was
-    missing four whole contexts, and the fourteenth pass planted all four at
-    exit 0 with the real `gate guards` step replaced: a `set +e` in the body,
-    an `if` condition, a `!` negation, and a custom `shell:` template.
+    The fourth and last consumer of the tokenizer to get an oracle. It carried
+    a hand-written table of ten measured `bash -ec` exit codes until the S03
+    review's fourteenth pass. The table was correct about every row in it and
+    was missing four whole contexts, because a table of examples can only
+    contain what its author thought of.
 
-    Generating the input found two more that neither the table nor that pass
-    named, and both are fixed rather than recorded:
+    Generating the input has now found six more that no reviewer named, in two
+    rounds. The fifteenth pass added `case`, a function definition, `exit`, a
+    never-taken `else`, an empty `for` word list and an `until true` body, and
+    the first three are TOTAL BYPASSES: bash never runs the command at all,
+    and the check reported every floor gate invoked. Each was measured at exit
+    0 with the real `bin/ocelli.sh gate guards` step replaced.
 
-    - `set +e` does not stop the LAST command's status becoming the script's,
-      so exempting it there was a false refusal.
-    - the right-hand side of `||` runs only when the left side FAILED, so
-      `true || bin/ocelli.sh gate guards` never runs `guards` at all and the
-      check counted it as invoked.
+    **So the question this file asks is not "does the failure reach the step".
+    It is "is the shell GUARANTEED to run this command and report its
+    failure".** The first is what `bash -e` decides. The second is what "CI
+    runs the floor" means, and it is strictly stronger. The two tests below
+    are the two halves of that: no shape may be counted when bash discards it,
+    and the shapes counted MORE strictly than bash are declared exactly.
     """
 
     @unittest.skipUnless(BASH, "no bash on this machine")
-    def test_the_scanner_agrees_with_bash_on_every_generated_shape(
-            self) -> None:
-        """No fail-open and no false refusal, over the whole grammar.
+    def test_no_generated_shape_is_a_fail_open(self) -> None:
+        """If bash exits 0, the statement must NOT count as an invocation.
 
-        A statement is tolerated exactly when bash discards its failure. Any
-        disagreement is reported with the body that produced it, because a
-        count alone would say a shape broke and not which one.
+        This is the direction that matters and it is asserted with no
+        exceptions. A shape bash exits 0 on either discarded the failure or
+        never ran the command, and in both cases nothing here says CI runs the
+        gate.
         """
         checked = 0
         for shape in STEP_BODY_SHAPES:
             for target in range(_slot_count(shape)):
-                made = _body_and_index(shape, target, others_succeed=True)
+                made = _body_and_index(shape, target)
                 self.assertIsNotNone(made, f"ambiguous marker in {shape!r}")
                 body, index = made
                 reaches = bash_fails(body)
@@ -870,49 +881,76 @@ class WhoseFailureBashDiscards(unittest.TestCase):
                 tolerated = index in ci_floor_check._tolerated_statements(
                     ci_floor_check.shell_source(body))
                 checked += 1
-                self.assertEqual(
-                    tolerated, not reaches,
-                    f"bash and the scanner disagree about statement {index} "
-                    f"of {body!r}: bash "
-                    f"{'fails' if reaches else 'exits 0'} and the scanner "
-                    f"says it is {'discarded' if tolerated else 'reported'}")
-        self.assertGreaterEqual(checked, 55)
+                if not reaches:
+                    self.assertTrue(
+                        tolerated,
+                        f"FAIL-OPEN: bash exits 0 for statement {index} of "
+                        f"{body!r}, so its failure cannot fail the step, and "
+                        f"this file counts it as CI running the gate")
+        self.assertGreaterEqual(checked, 64)
 
     @unittest.skipUnless(BASH, "no bash on this machine")
-    def test_the_shapes_not_guaranteed_to_run_are_exactly_these_three(
+    def test_the_shapes_refused_more_strictly_than_bash_are_declared(
             self) -> None:
-        """The DECLARED residue, asserted so a change to it is visible.
+        """The DECLARED cost, asserted as an exact set.
 
-        The test above asks whether a failure is discarded when every other
-        command succeeds. The stronger question is whether the command is
-        guaranteed to run AT ALL, and under that question three shapes are
-        still counted as invocations while a different status upstream skips
-        them entirely. None of the three appears around a gate in
-        `.github/workflows/ci.yml` today, and closing them narrows what the
-        check ACCEPTS rather than fixing a reader, which is a decision with an
-        owner rather than a patch. F-X019.
+        Every member is a compound BODY that does run, so bash reports its
+        failure and this file declines to count it anyway, because whether the
+        body is reached depends on a condition, a word list or a caller that
+        this scanner cannot evaluate. Each therefore costs a REFUSAL naming
+        the gate rather than a pass, which is the safe direction.
 
-        Asserted as an exact set. A fourth shape appearing here is a new hole
-        and must fail this test rather than be absorbed by it.
+        None of these appears around a gate in `.github/workflows/ci.yml`, and
+        `python3 scripts/ci_floor_check.py` measures 0 compound statements in
+        its `run:` bodies, so the cost today is zero. A shape LEAVING this set
+        is a fail-open and the test above catches it. A shape joining it is a
+        new false refusal and this test catches that.
         """
-        open_shapes = set()
+        conservative = set()
         for shape in STEP_BODY_SHAPES:
             for target in range(_slot_count(shape)):
-                made = _body_and_index(shape, target, others_succeed=True)
-                body, index = made
+                body, index = _body_and_index(shape, target)
+                if not bash_fails(body):
+                    continue
                 if index in ci_floor_check._tolerated_statements(
                         ci_floor_check.shell_source(body)):
-                    continue
-                skipped = _body_and_index(shape, target, others_succeed=False)
-                if skipped is None:
-                    continue
-                if bash_fails(skipped[0]) is False:
-                    open_shapes.add(skipped[0])
-        self.assertEqual(open_shapes, {
-            "false M0 && false M1\necho tail\n",
-            "if false M0; then false M1; fi\n",
-            "while false M0; do false M1; break; done\n",
+                    conservative.add(body)
+        self.assertEqual(conservative, {
+            "for x in a; do false M0; done\n",
+            "if false; then echo A; else false M0; fi\n",
+            "if true M0; then false M1; fi\n",
+            "if true; then false M0; fi\n",
+            "if true; then false M0; fi\necho tail\n",
+            "while true M0; do false M1; break; done\n",
+            "while true; do false M0; break; done\n",
+            "{ false M0; }\necho tail\n",
         })
+
+    @unittest.skipUnless(BASH, "no bash on this machine")
+    def test_the_right_hand_side_of_and_is_the_remaining_residue(self) -> None:
+        """F-X019, reduced to one shape by the fifteenth pass.
+
+        `a && GATE` runs the gate only when `a` SUCCEEDS, so it is not a
+        guaranteed invocation either, and this asserts that it is STILL
+        COUNTED, which is a fail-open held open on purpose. It is not closed
+        here because `invoked_gates`' own docstring documents `cd x &&
+        bin/ocelli.sh gate y` as a legitimate invocation, so refusing it
+        contradicts a declared behaviour rather than repairing a reader. That
+        is a decision with an owner.
+
+        The test above cannot see this shape: it fails ONE slot and succeeds
+        every other, so it never constructs the failing left side that makes
+        the right side unreachable. **This test is the record that the hole is
+        known**, and it goes red when F-X019 closes it, which is the signal to
+        delete it rather than a regression.
+        """
+        body = "false M0 && false M1\necho tail\n"
+        self.assertFalse(bash_fails(body), "bash must exit 0 for this body")
+        source = ci_floor_check.shell_source(body)
+        pairs = ci_floor_check._statement_separators(source)
+        index = next(i for i, (s, _) in enumerate(pairs) if "M1" in s)
+        self.assertNotIn(index, ci_floor_check._tolerated_statements(source),
+                         "F-X019 appears to be closed. Delete this test.")
 
 
 class WhichShellTheStepRunsUnder(unittest.TestCase):

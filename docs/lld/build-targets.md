@@ -1,7 +1,7 @@
 # Build targets
 
 **F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-06
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.

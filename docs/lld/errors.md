@@ -82,7 +82,7 @@ outside doc comments, because `error.rs` states the absence in a comment that a
 bare grep hands back as a hit:
 
 ```bash
-grep -rn "From<ComputeError>" crates/ --include='*.rs' | grep -vc '\.rs:[0-9]*:///'
+grep -rn "From<ComputeError>" crates/ --include='*.rs' | grep -v '\.rs:[0-9]*:///' | wc -l
 sed -n '/^\[dependencies\]/,/^$/p' crates/ocelli-compute/Cargo.toml
 ```
 

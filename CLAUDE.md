@@ -87,11 +87,14 @@ asked whether tier C is worth building at all and is resolved, outcome `Pass`,
 so it is built. F-X001 to F-X005 are the stories, and
 `grep -n '| X1\.' docs/sprints/BACKLOG.md` lists exactly those five, because X1
 is the epic and the epic column is what identifies them. **Do not
-grep the F-IDs.** `grep -c 'F-X00[0-9]' docs/sprints/BACKLOG.md` prints 13, not
-5: F-X006 to F-X009 are Y1 stories that match the same pattern, and four
-further rows match through their `Depends on` cell. A range that reads
-five and returns thirteen is the shape of claim this file keeps having to
-correct. This said F-X004 while `docs/spikes/A7-tier-c.md` said "see F-X004 and
+grep the F-IDs.** `grep -c 'F-X00[0-9]' docs/sprints/BACKLOG.md` returns more
+than five and the number RISES every time a story is filed: F-X006 to F-X009
+are Y1 stories matching the same pattern, and further rows match through their
+`Depends on` cell. Run both commands rather than trusting a number written
+here. **This paragraph carried the number until the S03 review's fifteenth
+pass**, and it went stale twice inside the single pass that rewrote the lines
+around it, once for F-X019 and again for F-X020. A count in prose beside the
+command that prints it is the shape this file keeps having to correct. This said F-X004 while `docs/spikes/A7-tier-c.md` said "see F-X004 and
 F-X005", so the range here excluded the story that decides CPU volume
 rendering.
 

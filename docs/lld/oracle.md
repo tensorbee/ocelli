@@ -20,8 +20,10 @@ Two passes, in two pages, in that order. The **stack pass** attempts one frame
 of one instance for every applicable corpus row and renders every one the
 reference can render, which is not the same count: `run.json`'s `boundaries`
 carries both, and the difference is declared in `unsupported.json`.
-The **volume pass** assembles four series
-directories into volumes and renders three reformats of each. Twelve are
+The **volume pass** attempts four series
+directories and assembles the ones that are volumes, which is not the same
+count either: one of the four is refused as declared, and `boundaries` carries
+both numbers. Twelve are
 declared and nine are reference output, because one of the four directories
 turns out not to be a volume at all.
 The volume pass runs second, in its own browser context, after the stack page
