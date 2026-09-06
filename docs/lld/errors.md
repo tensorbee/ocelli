@@ -365,18 +365,35 @@ that makes the ordering observable from outside: **a `BulkSink` stand-in whose
 previous `ArrayBuffer`, so a view hoisted above the `alloc` is a view over a
 buffer that no longer exists, and it throws or writes where nothing reads. The
 stand-in grows by a whole page and returns the first byte of the new page, so
-the returned pointer does not exist in the pre-growth buffer at all. Every
-assertion runs against that sink, because a sink that does not grow passes
-under both shapes and is evidence of nothing.
+the returned pointer does not exist in the pre-growth buffer at all.
+
+**Seven of the eight cases run against that sink, and the eighth deliberately
+does not.** Against the hoisted shape,
+`npx vitest run packages/core/src/bulk.test.ts` reports `7 failed | 1 passed
+(8)` and exits 1, and the case that passes is `writes only inside the
+allocation`. That case is about bounds rather than about ordering, and bounds
+need neighbouring bytes that survive the call so they can be read back. A
+growing `alloc` returns a pointer into a fresh page, where there are no
+neighbours to disturb and nothing to assert, so that one case fixes `alloc` at
+4096 inside an already-allocated two-page memory and checks the eight bytes
+either side of the write. It passes under both shapes and is evidence of
+nothing about ordering, which is precisely why the other seven do not follow
+its pattern.
 
 The ordering against `commit_frame` is asserted from INSIDE the sink: the
 stand-in copies `[ptr, ptr + len)` at the moment ownership passes, so a shape
 that committed first and copied afterwards fails while satisfying every
-after-the-fact assertion. Seven of the eight cases go red against the hoisted
-shape and two against the commit-first shape.
+after-the-fact assertion. Two of the eight cases go red against that
+commit-first shape, measured as `2 failed | 6 passed (8)` with exit 1.
 
 `packages/core/src/ring.test.ts` covers `readEvent`, which was exported and
-untested, with three surviving offset mutations. **Its fixture is laid out from
+untested, with **eight** surviving offset and endianness mutations: the two
+nonzero field offsets, the two payload slice bounds, the `view.byteOffset`
+term, and the little-endian flag on each of the three numeric reads. Measured
+one mutation at a time against `npx vitest run packages/core`, `8 of 8` survive
+with `ring.test.ts` deleted and `0 of 8` with it present. Eight is the number
+the ninth pass acted on, and the two smaller counts recorded here and in that
+file were wrong. **Its fixture is laid out from
 HLD 17.3's struct definitions and never from `EVENT_STRIDE` or
 `HEADER_BYTES`**, because a fixture built with the constants moves the writer
 and the reader together and stays green when the constant moves. The ring is

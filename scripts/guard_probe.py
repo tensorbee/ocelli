@@ -38,8 +38,13 @@ Usage:
   python3 scripts/guard_probe.py --profile floor
   python3 scripts/guard_probe.py --profile deep
   python3 scripts/guard_probe.py --only content.dicom-magic
-  python3 scripts/guard_probe.py --list
+  python3 scripts/guard_probe.py --list          # every probe, both profiles
   python3 scripts/guard_probe.py --self-test
+
+A RUN defaults to `--profile floor`, which is the set CI's `guards` gate is
+about. A LIST defaults to every probe, because an inventory that omits a third
+of them is not an inventory, and four files send a reader here to check
+something about the deep set.
 """
 
 from __future__ import annotations
@@ -475,7 +480,19 @@ def _zero_is_not_a_pass(count: int) -> str | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--profile", default="floor",
+    # `--profile` has no argparse default since the S03 review's tenth pass,
+    # and the reason is `--list`. RUNNING defaults to the floor, because that
+    # is the set CI's `guards` gate is about. LISTING is an inventory, and an
+    # inventory that silently omits a third of the probes is the defect: bare
+    # `--list` printed 112 rows, every one of them marked `floor`, while
+    # `.github/workflows/ci.yml`, `bin/ocelli.sh`, `docs/lld/guards.md` and
+    # `scripts/guards/catalogue.py` all sent a reader here to check something
+    # about the 50 DEEP probes, which none of those rows was. That is the same
+    # shape as the fifth pass's `needs` finding one field over: a pointer to a
+    # command that does not answer is worse than the sentence it replaced. So
+    # `--list` alone is every probe, and `--list --profile floor` is still the
+    # floor set for anyone who wants it.
+    parser.add_argument("--profile", default=None,
                         choices=["floor", "deep"])
     parser.add_argument("--only", action="append", default=[])
     parser.add_argument("--list", action="store_true")
@@ -486,7 +503,8 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    probes = selected(args.profile, args.only)
+    profile = args.profile or ("deep" if args.list else "floor")
+    probes = selected(profile, args.only)
 
     if args.list:
         for guard_id, probe in probes:
@@ -568,7 +586,9 @@ def main() -> int:
             "the harness and not in a guard:\n      " +
             "\n      ".join(moved))
 
-    problems += _budget_problems(args.profile, elapsed, args.record_budget)
+    # `profile` and not `args.profile`, which is `None` when the flag is
+    # absent. A run defaults to the floor, so this is the profile that ran.
+    problems += _budget_problems(profile, elapsed, args.record_budget)
 
     print()
     for note in notes:

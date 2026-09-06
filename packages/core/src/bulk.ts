@@ -1,8 +1,13 @@
 /**
  * The bulk channel. HLD section 17.2.
  *
- * THIS IS THE ONLY FILE PERMITTED TO BUILD A VIEW OVER WASM LINEAR MEMORY.
- * `eslint.config.js` turns `no-restricted-syntax` off here and nowhere else.
+ * THIS IS ONE OF TWO FILES PERMITTED TO BUILD A VIEW OVER WASM LINEAR MEMORY.
+ * `eslint.config.js` turns `no-restricted-syntax` off here and in `panic.ts`,
+ * and in no other production file. It was the only one until F-005 landed
+ * `panic.ts` during S03, which is why an earlier version of this header said
+ * so. A separate block covers `packages/core/src/*.test.ts`, for a different
+ * reason that block states. `ALLOWED_TO_DISABLE` in `eslint.config.js` is the
+ * list, and a third production entry is a design-plan decision.
  *
  * The trap, in the HLD's words:
  *

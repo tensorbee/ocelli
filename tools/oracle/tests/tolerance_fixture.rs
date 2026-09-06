@@ -17,13 +17,16 @@
 //! is the substitution `SECTION_25_1_MONOCHROME` in
 //! `tools/oracle/src/tolerance.rs` spends a paragraph establishing that no
 //! lint requires: `scripts/prose_check.py` covers no Rust source at all.
-//! Reproduce by asking the checker itself, and note the path argument is one
-//! unbroken string, which an earlier wrapping of this comment split so it
-//! could not be pasted:
+//! Reproduce by asking the checker itself. **Paste this and run it**, which
+//! two earlier wrappings of this comment could not survive: the first split
+//! the path argument across lines, and the second indented a continuation
+//! inside the `-c` string, which Python reads as a second statement and
+//! refuses with an IndentationError. The line continuation is the shell's,
+//! outside the quotes, so the Python source stays one statement:
 //!
 //! ```text
-//! python3 -c "import sys; sys.path.insert(0, 'scripts'); import prose_check;
-//!     print(prose_check.in_scope('tools/oracle/tests/tolerance_fixture.rs'))"
+//! PYTHONPATH=scripts python3 -c \
+//!   "import prose_check; print(prose_check.in_scope('tools/oracle/tests/tolerance_fixture.rs'))"
 //! ```
 //!
 //! It prints `False`. A quotation labelled

@@ -1733,9 +1733,26 @@ async function report(context) {
   //
   // Also after the write, because it spawns whole runs of this driver and they
   // are slow. Its failures reach the same place.
+  //
+  // **The try is the point and it was missing.** `runSelfTest` returns its
+  // findings in `problems`, and it can also THROW, from its own `mkdtemp`, the
+  // driver spawn or the `rm`. An uncaught throw here reaches the entry point's
+  // catch, which prints `FAIL: oracle` and exits 1 WITHOUT reaching
+  // `discardOutput` below, leaving a complete-looking output directory behind
+  // a red run. That is the state this file's own guarantee says cannot exist,
+  // and `checkSidecarMetadata` above was already wrapped for exactly this
+  // reason while this was not. The S03 review's tenth pass measured the
+  // asymmetry.
   if (problems.length === 0 && options.selfTest) {
-    const selfTest = await runSelfTest();
-    problems.push(...selfTest.problems);
+    try {
+      const selfTest = await runSelfTest();
+      problems.push(...selfTest.problems);
+    } catch (error) {
+      problems.push(
+        `the fault injection self test threw rather than reporting: ` +
+          `${String(error?.message ?? error)}`,
+      );
+    }
   }
 
   process.stdout.write(

@@ -129,6 +129,19 @@ passes. `lib.rs` states the split it now obeys: everything that can be wrong
 about a tier is in `caps`, which needs no adapter to test. The six-row truth
 table is `caps::tests`.
 
+**The forwarder itself is still reachable by no test, and the move made the
+residue smaller rather than zero.** `GpuContext::supports_compute` needs a
+`GpuContext`, `GpuContext::new` needs a real `Device` and `Queue`, and
+deviation D-04 leaves the floor without an adapter to make either. Measured for
+the S03 review's tenth pass: negating the forwarder's body leaves
+`bin/ocelli.sh test ocelli-render` at exit 0 with 63 passed and 0 failed, and
+the method has no other caller in the workspace. A wrong forwarder answers
+`true` on a tier B context, which is the section 31 failure the predicate
+exists to prevent. What closes it is a `GpuContext` a test can build, which is
+F-037's long-lived device or F-X002's software-adapter path, and until one of
+them lands the only thing watching the line is the human check
+`docs/hld/24-agent-code-standards.md` section 27.3 requires.
+
 Which of the three a session gets is F-004's, and the rule is in
 [tier-resolution.md](tier-resolution.md). The short version: three signals,
 the fill-rate benchmark decides where it decided, and a candidate the evidence

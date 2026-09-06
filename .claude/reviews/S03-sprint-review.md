@@ -118,13 +118,36 @@ and a mutation is an input to a test: it derives from the specification too.
 |------|-------|---------|
 | 1 | 23 defects and 32 smells, three of them blocking. The rest were records asserting things the tree did not do, swept in one commit | remediated |
 | 2 | 20 defects, 19 smells. The bias bound detected nothing. The census counted a refusal as watched when its entry named a test that never opened the file. In-plane spacing was compared by nothing. Two DICOM skills reproduced HLD 18.3's wrong `LINEAR_EXACT(-160)` | remediated |
-| 3 | 10 defects and 6 smells, a tally that appears in no commit message and nowhere else in this tree, so it is the one row that fails this file's own rule. Pass 2's mutation was a caricature. The bound's blind spot starts at width 678 and not 2550. Three LLD updates were claimed and none existed | remediated |
-| 4 | Four independent reviewers on disjoint areas returned 34 defects and 27 smells, which `8fbfc88`'s message carries in the same form passes 1 and 2 carry theirs, so pass 3's is the only tally this tree does not record. Pass 3's replacement mutation was still not the divergence. A group `#![allow]` switched off four of HLD 27.1's five denied lints with both gates green. The `covered_by` directory route was satisfied by the catalogue itself. This record stated a caught defect that never existed | remediated |
+| 3 | 10 defects and 6 smells, a tally that appears in no commit message and nowhere else in this tree, and one of the three rows that fail this file's own rule. See the note below the table. Pass 2's mutation was a caricature. The bound's blind spot starts at width 678 and not 2550. Three LLD updates were claimed and none existed | remediated |
+| 4 | Four independent reviewers on disjoint areas returned 34 defects and 27 smells, which `8fbfc88`'s message carries in the same form passes 1 and 2 carry theirs. Pass 3's was the only unrecorded tally when this row was written, and it is not any more. See the note below the table. Pass 3's replacement mutation was still not the divergence. A group `#![allow]` switched off four of HLD 27.1's five denied lints with both gates green. The `covered_by` directory route was satisfied by the catalogue itself. This record stated a caught defect that never existed | remediated |
 | 5 | Four reviewers again, on the same areas, with the pass-4 remediation as the primary target. A floor gate could be deleted from CI while the check said all 25 ran. `#![allow(clippy :: pedantic)]` with spaces defeated the fix for `#![allow(clippy::pedantic)]`. Four of the five refusals pass 4 added to the census were watched by nothing. The mutation's residue invariant was false below `w = 255` | remediated |
 | 6 | Three reviewers. Six defects, against twenty-one and thirty-four before. The comparator's white-pixel exclusion carried a wrong consequence of PS3.3 for the fourth consecutive pass. A TOML trailing comment was the fifth route past the lint policy. Eight refusals in scanned guard files, including gate A4's wasm size ceiling, were invisible to the scanner | remediated |
 | 7 | Three reviewers. Seventeen defects, and the count rose because the sweep widened. Six mutations left the suite green, two of them on paths whose rationale is written out at length in the source. The harness's own inverted-success refusal was watched by nothing. The lint policy took a sixth and a seventh route | remediated |
 | 8 | Three reviewers. **The comparator returned zero defects**, the first clean area of the sprint, and reproduced all five of pass 7's claims independently. Six defects elsewhere: the eighth and ninth routes past the lint policy, a declared exception nothing ratcheted, and a 68-mutation sweep finding seven tests that cannot fail | remediated |
 | 9 | Three reviewers. **The comparator was clean a second time.** Ten defects elsewhere, and the lint-policy sequence finally got a diagnosis rather than a tenth route: the guard RECONSTRUCTS the compiled file set by hand. HLD 17.2's central architectural rule was found guarded by nothing | remediated |
+| 10 | Three reviewers, 12 defects, 8 smells, 6 nitpicks, and this row's tally is in `e2b11d8`'s successor because pass 10 found the sentence claiming pass 3's was the only unrecorded one to be false for passes 8 and 9 as well. **The comparator was clean a third time and the crates sweep converged at five survivors in ninety mutations.** The guard harness produced a backtick shape and two `#[path]` spellings | remediated |
+
+**Three of these tallies are recorded here and nowhere else, not one.** The
+pass-4 row explained pass 3's missing tally and asserted it was the only one,
+and then the rows for passes 8 and 9 were added afterwards with the same defect
+in them, which is the shape that row exists to describe. Measured over
+`git log --reverse --format=%h 36adc98..HEAD`, reading each message with
+`git log -1 --format=%B <sha>`:
+
+- Recorded: pass 1 in `a651821` ("23 defects and 32 smells"), pass 2 in
+  `fe18a91` ("twenty defects and nineteen smells"), pass 4 in `8fbfc88`
+  ("34 defects and 27 smells"), pass 5 in `f51a9ea` ("Twenty-one defects"),
+  pass 6 in `a5a9a9c` ("Six defects"), pass 7 in `e33f824`
+  ("Seventeen defects").
+- Not recorded: pass 3, whose remediation `4139a54` gives no count. Pass 8,
+  whose `828037e` opens "THE COMPARATOR RETURNED ZERO DEFECTS" and gives no
+  count for the row's "Six defects elsewhere". Pass 9, whose `e2b11d8` says
+  "Six documentation defects" about a strict subset and gives no count for the
+  row's "Ten defects elsewhere".
+
+The tallies are kept rather than deleted, because this file is where a reader
+looks for them. What is corrected is the claim about how many of them stand
+alone.
 
 ### Pass 1's three blocking defects, which this record used to omit
 
@@ -528,11 +551,66 @@ toolchain.
 **HLD 17.2's rule was guarded by nothing.** `packages/core/src/bulk.ts` could be
 rewritten into the exact shape its own header quotes as "the classic failure"
 with `eslint` and `vitest` both green. The two guards cancelled: `bulk.ts` is in
-`ALLOWED_TO_DISABLE`, correctly, because it is the one file permitted to build
-the view, and there was no `bulk.test.ts`. `writeFrame` ships from the published
-index. The test now makes the ordering assertable by growing linear memory
-inside `alloc`, which detaches the previous buffer, so a view hoisted above the
-allocation reads a buffer that no longer exists.
+`ALLOWED_TO_DISABLE`, correctly, because it is one of the two files permitted
+to build the view, and there was no `bulk.test.ts`. `writeFrame` ships from the
+published index. The test now makes the ordering assertable by growing linear
+memory inside `alloc`, which detaches the previous buffer, so a view hoisted
+above the allocation reads a buffer that no longer exists. Seven of its eight
+cases go red against that shape and the eighth is a bounds case that needs a
+memory which does not grow, which the tenth pass corrected in three places that
+said "every assertion".
+
+**Two files, not one, and F-005 is what made it two.**
+`git show 36adc98:eslint.config.js` shows a single-entry allowance at the
+sprint base, and `ALLOWED_TO_DISABLE` now holds
+`["packages/core/src/bulk.ts", "packages/core/src/panic.ts"]` plus a separate
+`["packages/core/src/*.test.ts"]`. `bulk.ts`'s own header still said it was the
+only one until the tenth pass, which is S03 falsifying a claim inside the file
+the claim is about, and the pass-9 commit message carries the same wrong
+version.
+
+## Pass 10, and two areas out of three are done
+
+**The comparator is finished.** Three consecutive passes found no defect in its
+substance, and the third derived the mutation's distribution independently from
+PS3.3 in exact rationals and confirmed the accumulator produces what the
+standard implies. It also explained the original failure in one line: the
+repudiated `round(u - u/w)` is the same expression evaluated at `e = 0` for
+every pixel, where `e` is the rounding residue the reference frame no longer
+carries, which is why it degenerated into a threshold.
+
+**The crates sweep converged.** Five survivors in ninety mutations, three of
+them one-line fixture gaps, and `ocelli-core`, `ocelli-wasm/src/lib.rs`,
+`state.mjs`, `page/app.mjs` and `examples/` came back explicitly clean. The one
+genuinely new finding was pass 8's latent-constant class recurring on the
+TypeScript side: `fatal.test.ts` could not fail on the code it names, because
+`PANIC_FALLBACK_CODE` equals `ERROR_CODE.Panicked` and the only fixture used
+that value, so both branches produced the same number.
+
+**The guard harness has not converged, and the reason is now legible.** Pass 10
+found a nested `case` inside BACKTICK substitution, and two `#[path]` spellings
+the guard skips, `cfg_attr`-wrapped and raw-string. Neither is new ignorance:
+the same file already matches through `cfg_attr` in `INNER_ALLOW` and already
+handles the raw-string prefix in `INCLUDE_PATH` ten lines below `MODULE_PATH`.
+**The failure is knowledge that did not propagate between three parsers in one
+file**, which is why the fixes now derive one from another rather than restating
+it: `NESTED_CASE`'s alternation comes from `SHELL_INTRODUCERS`, and all three
+shell parsers share one `_quote_spans`.
+
+**A ratchet digest moved for a prose edit.** The `Cargo.toml:workspace.lints`
+capture backtracks to the last `key =` line before the next header, and an awk
+snippet in a nearby comment matched, so the recorded value ran twelve lines past
+the table. The lints table was byte-identical across that change. The fix
+anchors the backtrack to a line start and the digest returns to the value the
+table has had all along. **The point is not the bypass, it is that a ratchet
+which moves for unrelated prose trains the next author to re-record on sight**,
+which is the erosion the mechanism exists to prevent.
+
+**Two probes were found not to discriminate**, the first such finding in the
+sprint, and they were accept probes whose expected fragment was the OK line's
+fixed prose. With `#[path]` following removed entirely both stayed green. Their
+expects now carry the count the run derives, so the same mutation drives both to
+`HARNESS`.
 
 ## What is still open, and it is declared rather than hidden
 

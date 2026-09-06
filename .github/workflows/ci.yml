@@ -152,18 +152,31 @@ jobs:
       # and this job installs `dtolnay/rust-toolchain@1.97.1`,
       # `Swatinem/rust-cache@v2`, python and node four steps above. The deleted
       # job added `targets: wasm32-unknown-unknown` and nothing else, and no
-      # deep probe needs it: all 41 declare `needs="cargo"`, which
-      # `python3 scripts/guard_probe.py --list` prints.
+      # deep probe needs it: every one of them declares `needs="cargo"`, which
+      # `python3 scripts/guard_probe.py --list --profile deep` prints.
+      #
+      # THE COUNT IS NOT WRITTEN HERE, for the reason Cargo.toml's dependency
+      # comment gives one table over. It said 41, which was the number at
+      # `828037e`, written by the commit that took it to 50, and the
+      # substantive half, that all of them declare `needs="cargo"`, was right
+      # the whole time. The PROFILE is written into the command above because
+      # it filters the listing to the probes this sentence is about. It was
+      # load-bearing until the tenth pass, when bare `--list` printed the floor
+      # set alone, every row marked `floor`, so a reader checking this sentence
+      # against it would have found none of the probes it names.
       #
       # What that cost bought was the wrong way round. Every `lint-policy`
       # probe is a deep probe, the review keeps finding holes in exactly those,
       # and they were unwatched on the pull request that would weaken them.
       #
-      # The price, MEASURED on the development machine rather than guessed: the
-      # deep profile takes 23.8s against the floor profile's 15.9s, and the
-      # deep profile is a strict SUPERSET of the floor one, so this step re-runs
-      # the probes the step above already ran. About 8s of the 24 is new
-      # coverage and about 16s is duplication. The duplication is kept
+      # The price, and the numbers are QUOTED from
+      # `ci/guard-probe-budget.json`'s `wall_clock_seconds` rather than
+      # measured a second time, because a second measurement in the same
+      # commit is a second answer somebody has to reconcile: the deep profile
+      # takes 27.2s against the floor profile's 18.3s, and the deep profile is
+      # a strict SUPERSET of the floor one, so this step re-runs the probes the
+      # step above already ran. About 9s of the 27 is new coverage and about
+      # 18s is duplication. The duplication is kept
       # deliberately: removing it would mean `gate guards` running a different
       # probe set here from the one a developer gets, and a gate that does
       # different things in different places is the failure this whole harness

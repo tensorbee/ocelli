@@ -844,9 +844,13 @@ mod tests {
     ///
     /// Over the six combinations exactly one is `true`. A predicate that
     /// ignored `caps.compute` would report two, one that ignored the tier
-    /// would report three, and an `||` would report five. The count separates
-    /// all four implementations, which the single-row assertion above does
-    /// not.
+    /// would report three, and an `||` would report FOUR: three rows have
+    /// `compute` and two have `Tier::A`, and the two sets share the one row
+    /// that is genuinely permitted, so the union is `3 + 2 - 1`. Measured by
+    /// running this test against `caps.compute || caps.tier.supports_compute()`,
+    /// where the assertion below prints `left: 4`. The count still separates
+    /// all four implementations, because 1, 2, 3 and 4 are distinct, which the
+    /// single-row assertion above does not.
     #[test]
     fn exactly_one_of_the_six_combinations_permits_compute() {
         let rows = [Tier::A, Tier::B, Tier::Cpu]

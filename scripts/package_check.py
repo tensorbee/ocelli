@@ -180,10 +180,19 @@ def check_consumer(work: Path, tarballs: list[Path]) -> list[str]:
     problems = []
 
     # 1. It executes under plain node as ESM.
+    # `writeFrame` and `readEvent` are named deliberately. They are HLD 17.2's
+    # and 17.3's entry points, `packages/core/src/index.test.ts` asserts the
+    # SOURCE tree exports them, and until the S03 review's tenth pass nothing
+    # asserted the published tarball does. Deleting either export left eslint,
+    # tsc and vitest all at 0 and this consumer green, because it exercised
+    # only `VERSION`, `coreAvailable` and the React component.
     (consumer / "smoke.mjs").write_text(
-        'import { VERSION, coreAvailable } from "@ocelli/core";\n'
+        'import { VERSION, coreAvailable, writeFrame, readEvent } '
+        'from "@ocelli/core";\n'
         'if (typeof VERSION !== "string") { throw new Error("VERSION"); }\n'
         'if (coreAvailable() !== false) { throw new Error("coreAvailable"); }\n'
+        'if (typeof writeFrame !== "function") { throw new Error("writeFrame"); }\n'
+        'if (typeof readEvent !== "function") { throw new Error("readEvent"); }\n'
         'console.log("ok", VERSION);\n')
     smoke = run(["node", "smoke.mjs"], consumer)
     if smoke.returncode != 0:
@@ -194,12 +203,23 @@ def check_consumer(work: Path, tarballs: list[Path]) -> list[str]:
     # 2. It type-checks under BOTH resolution modes. `bundler` is what a Vite
     #    or webpack consumer uses and `node16` is what a plain tsc consumer
     #    uses, and an exports map can satisfy one and not the other.
+    #
+    #    The type-only imports are here for the same reason as the two runtime
+    #    ones above: nothing proved a TYPE resolves through the published
+    #    exports map, under either mode.
     (consumer / "check.ts").write_text(
-        'import { VERSION, coreAvailable } from "@ocelli/core";\n'
+        'import { VERSION, coreAvailable, writeFrame, readEvent } '
+        'from "@ocelli/core";\n'
+        'import type { BulkSink, OcelliEvent, WasmMemory } '
+        'from "@ocelli/core";\n'
         'import { OcelliViewport } from "@ocelli/react";\n'
         'export const version: string = VERSION;\n'
         'export const available: boolean = coreAvailable();\n'
-        'export const component = OcelliViewport;\n')
+        'export const component = OcelliViewport;\n'
+        'export const write: (w: WasmMemory, s: BulkSink, b: Uint8Array, '
+        'm: unknown) => void = writeFrame;\n'
+        'export const read: (v: DataView, o: number) => OcelliEvent '
+        '= readEvent;\n')
     typescript = ROOT / "node_modules" / "typescript" / "bin" / "tsc"
     if not typescript.exists():
         problems.append("typescript is not installed, run npm ci")

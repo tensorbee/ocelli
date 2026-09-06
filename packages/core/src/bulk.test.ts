@@ -34,9 +34,25 @@ import { writeFrame, type BulkSink, type WasmMemory } from "./bulk.js";
  * hazard is about. A view hoisted above the `alloc` is a view over the
  * pre-growth ArrayBuffer, and growth detaches that buffer, so the write
  * either throws or lands somewhere nothing will ever read. A view built after
- * the `alloc` is a view over the buffer the core is now using. Every
- * assertion below therefore runs against a sink that grows, because a sink
- * that does not grow passes under both shapes and is evidence of nothing.
+ * the `alloc` is a view over the buffer the core is now using.
+ *
+ * **Seven of the eight tests below therefore run against a sink that grows,
+ * and the eighth deliberately does not.** Rewriting the body into
+ *
+ *   const heap = new Uint8Array(wasm.memory.buffer);
+ *   const ptr = session.alloc(bytes.byteLength);
+ *   heap.set(bytes, ptr);
+ *
+ * turns those seven red and leaves `writes only inside the allocation` green,
+ * measured: `npx vitest run packages/core/src/bulk.test.ts` reports
+ * `7 failed | 1 passed (8)` and exits 1. That eighth test is about bounds
+ * rather than about ordering, and bounds need a memory whose surrounding
+ * bytes survive the call so they can be read back. A growing `alloc` returns
+ * a pointer into a fresh page, where there are no neighbouring bytes to
+ * disturb and nothing to assert. So it fixes `alloc` at 4096 inside an
+ * already-allocated two-page memory and checks the eight bytes either side of
+ * the write. It passes under both shapes and is evidence of nothing about
+ * ordering, which is exactly why the other seven do not follow its pattern.
  */
 
 const PAGE_BYTES = 65536;

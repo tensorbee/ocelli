@@ -128,6 +128,15 @@ S03 review's fifth pass, and until then this file and
 `.github/workflows/ci.yml` both sent a reader to the command for it and the
 command did not answer.
 
+**"Every probe" became true of the bare command in the tenth pass**, and the
+same sentence was the same kind of wrong one field over until it did.
+`--profile` defaulted to `floor` for listing as well as for running, so bare
+`--list` printed 112 rows all marked `floor` while four files, this one
+included, sent a reader to it to check something about the deep set. A RUN
+still defaults to the floor, which is what CI's `guards` gate is about. A LIST
+is an inventory and takes every probe, and `--list --profile floor` still
+prints the floor set for anyone who wants only that.
+
 ### Known defects
 
 `DEFECTS` at the foot of the catalogue holds each declared hole in full, so the
@@ -446,12 +455,23 @@ harness exists to fix.
   guard needs cargo, exactly as `no_std_check.py` has always needed it for
   `cargo tree`, and every `lint-policy` probe moved to `needs="cargo"` and the
   deep profile with it. The floor gate still runs the guard on every pull
-  request. What moved to push-to-main is the harness watching the guard.
+  request, and since the ninth pass the `guards` CI job runs the deep harness
+  beside it on every event, so nothing about these probes is behind
+  push-to-main any more. The two sentences that said otherwise stood here and
+  in `scripts/guards/catalogue.py` for a pass after the job they described was
+  deleted.
 - **`guards-deep`**, not in the floor. `--profile deep` is every probe, so this
   re-runs the floor set and adds the ones that need a toolchain, plus the
-  census at `--profile deep`. Every probe it adds declares `needs` `cargo`, all
-  41 of them, and none needs npm or wasm-pack, which
-  `python3 scripts/guard_probe.py --list` is the place to check. **It runs in
+  census at `--profile deep`. Every probe it adds declares `needs` `cargo` and
+  none needs npm or wasm-pack, which
+  `python3 scripts/guard_probe.py --list --profile deep` is the place to
+  check. **The count is deliberately not written here**, for the reason
+  `Cargo.toml`'s dependency comment gives: it said 41, which was the number at
+  `828037e`, written by the commit that took it to 50. `--profile deep` is
+  written out because it filters the listing to the probes this bullet is
+  about. It was load-bearing until the tenth pass, when bare `--list` printed
+  the floor set alone and a reader checking this bullet against it would have
+  seen none of them. **It runs in
   the `guards` CI job on every event since the S03 review's ninth pass**, and
   it was a separate job gated to push-to-main and dispatch until then. The two
   reasons that gate carried were both false: the first named npm and wasm-pack
@@ -464,10 +484,14 @@ harness exists to fix.
   since the fifth, and those probes were unwatched on the pull request that
   would weaken them. **What is left of the floor exclusion is duplication and
   nothing else.** The deep profile is a strict superset of the floor one, so a
-  `gate --floor` including it would run every floor probe twice. MEASURED on
-  the development machine, deep 23.8s against floor 15.9s, so about eight
-  seconds of the twenty-four is new coverage and about sixteen is the
-  duplication CI now pays deliberately. Removing it would mean `gate guards`
+  `gate --floor` including it would run every floor probe twice. The numbers
+  are QUOTED from `ci/guard-probe-budget.json`'s `wall_clock_seconds`, deep
+  27.2s against floor 18.3s, so about nine seconds of the twenty-seven is new
+  coverage and about eighteen is the duplication CI now pays deliberately.
+  They are quoted rather than measured again because this file, `ci.yml` and
+  `bin/ocelli.sh` all carried a second pair, deep 23.8s against floor 15.9s,
+  that the recorded budget disagreed with, and the recorded pair is the one
+  `--record-budget` wrote. Removing it would mean `gate guards`
   running a different probe set in CI from the one a developer gets, which is
   the failure this harness exists to catch.
 

@@ -179,23 +179,37 @@ says which is which without a second literal here. `oracle` is the one gate
 `bin/ocelli.sh` marks `YES` in its GPU column, and deviation D-04 is that CI
 has no GPU, so nothing in CI may run it. The other two are excluded for cost or
 for the corpus, and CI does run part of each: `corpus_check.py --coverage` for
-`corpus`, and the whole `guards-deep` job for `guards-deep`.
+`corpus`, and a `gate guards-deep` step inside the `guards` job for
+`guards-deep`.
 
 So the rule is: **a gate outside the floor that does not need a GPU must still
 be run by some CI step, provably reachable on at least one event the workflow
-declares.** State the claim exactly and no more. `_permits` cannot evaluate
-`github.ref`, and `guards-deep`'s job condition is
+declares.** State the claim exactly and no more, and print the events proved
+rather than a sentence somebody has to keep current.
+
+**Four sentences here described a job that no longer exists, and the S03
+review's tenth pass found them still standing.** The `guards-deep` JOB was
+gated to
 
     github.event_name == 'workflow_dispatch'
       || (github.event_name == 'push' && github.ref == 'refs/heads/main')
 
-which is provably true on `workflow_dispatch`, provably FALSE on
-`pull_request`, and unprovable on `push` because the branch decides. The claim
-this check makes is therefore "CI runs `guards-deep` on `workflow_dispatch`",
-and the OK line prints the event so the claim is read rather than assumed. A
-push to `main` reaching it is the workflow's own comment and is not something
-this file can prove. Deleting the job, or putting it behind a condition that is
-false on every declared event, is refused.
+and the ninth pass deleted it, moving its one step into the `guards` job, which
+is behind no condition at all. So the claim written here, "CI runs
+`guards-deep` on `workflow_dispatch`", was narrower than what the check itself
+now prints, which is `pull_request, push, workflow_dispatch`. It was stale
+prose rather than a hole in the logic, and it sat in a DECLARED LIMIT in
+`scripts/guards/catalogue.py` as well, where this project treats a declared
+limit as load-bearing.
+
+What is still true, and it is a property of this file rather than of one job:
+`_permits` cannot evaluate `github.ref`, so an event is counted only where the
+governing conditions are provably true on the event name alone. No step this
+check reads sits behind a `github.ref` condition today, so nothing is currently
+being dropped by that rule, and the OK line prints the event list it proved so
+a reader compares it with the workflow rather than with a sentence. Deleting
+the step, or putting it behind a condition that is false on every declared
+event, is refused.
 
 ## The two exclusion lists, joined
 
@@ -279,9 +293,17 @@ MANUAL_EVENTS = {"workflow_dispatch", "repository_dispatch", "schedule"}
 #
 # What is left is duplication and nothing else: `--profile deep` is a strict
 # superset of `--profile floor`, so a `gate --floor` including this gate would
-# run every floor probe twice. MEASURED on the development machine, deep 23.8s
-# against floor 15.9s. `python3 scripts/guard_probe.py --list` prints each
-# probe's profile and what it needs, and reading that beats reading this.
+# run every floor probe twice. The numbers are QUOTED from
+# ci/guard-probe-budget.json's `wall_clock_seconds`, deep 27.2s against floor
+# 18.3s, rather than measured again here: this comment carried 23.8 against
+# 15.9, as did `bin/ocelli.sh`, `.github/workflows/ci.yml` and
+# `docs/lld/guards.md`, while the recorded pair said otherwise, and two
+# measured pairs in one commit are two answers somebody has to reconcile.
+# `python3 scripts/guard_probe.py --list --profile deep` prints each
+# probe's profile and what it needs, and reading that beats reading this. The
+# profile filters the listing to the probes this paragraph is about, and it was
+# load-bearing until the tenth pass, when bare `--list` printed the floor set
+# alone and showed none of them.
 # Kept here so this script fails if the runner's exclusion list changes without
 # anyone thinking about CI.
 NOT_IN_FLOOR = {"oracle", "corpus", "guards-deep"}
@@ -707,29 +729,74 @@ CONTINUATION = re.compile(r"\\\n\s*")
 ARM_LABEL = re.compile(r"^[ \t]*([a-z-]+)\)", re.M)
 
 
+# The delimiters `_quote_spans` opens a span on. A BACKTICK is one of them
+# since the S03 review's tenth pass and it was the fourth fully fail-open
+# terminator shape. `` ` `` is not a quote in the POSIX sense, it delimits a
+# command substitution, and for this parser that is the same job: the text
+# between the pair is not where this arm ends. MEASURED on the one-line `fmt`
+# arm rewritten as `fmt) cargo fmt --all --check && test -n `case x in *) echo
+# y ;; esac` && python3 scripts/prose_check.py --extra ;;`, which `bash -n`
+# accepts: `scripts/ci_floor_check.py` exited 0, the arm came out as one
+# command, `unseen['fmt']` was `None` and bash really runs the dropped
+# `prose_check.py --extra`. It is worse than the comment shape the eighth pass
+# closed, because the residue's heads, `test` and `echo`, are both in
+# `SHELL_NOISE`, so the unseen-command rule fires on nothing either. `$(case
+# ...)` was caught only because `(` happens to sit in `NESTED_CASE`'s class.
+QUOTE_DELIMITERS = "\"'`"
+
+# The delimiters inside which a backslash escapes the next character. A single
+# quote takes no escape. A double quote does, and so does a backtick: `` \` ``
+# inside a command substitution is a literal backtick and does not close it, so
+# a scanner that ended the span there would resume in the middle of the
+# substitution and could stop at a `;;` that ends nothing, which is the same
+# fail-open one lexer rule along.
+ESCAPING_DELIMITERS = "\"`"
+
+# What may sit immediately before a `#` for that `#` to begin a COMMENT. POSIX
+# and bash start a comment at a `#` that begins a word, and a word begins after
+# a blank, after a newline, at the start of the input and after any unquoted
+# operator character. `_strip_shell_comments` accepted the first three only,
+# which is the S03 review's tenth pass finding: `true;#;;` planted in the
+# one-line `fmt` arm dropped the trailing command, and it failed closed only by
+# accident, with the refusal naming `#` as the missing command. The empty
+# string is the start-of-input case, which the caller also spells as an empty
+# `kept` list.
+COMMENT_WORD_START = ("", " ", "\t", "\n", ";", "&", "|", "(", ")", "<", ">")
+
+
 def _quote_spans(text: str, index: int) -> tuple[int, str]:
-    """Step over one character of shell text, tracking the quote it opens.
+    """Step over one character of shell text, tracking the span it opens.
 
-    Returns the next index and the quote that is now open, "" for none. One
-    reader for two callers, `_strip_shell_comments` and `_arm_end`, because
-    they are the same lexer rule and written twice they would drift, which is
-    exactly what `NESTED_CASE` and `SHELL_INTRODUCERS` did.
+    Returns the next index and the delimiter that is now open, "" for none. One
+    reader for three callers, `_strip_shell_comments`, `_arm_end` and
+    `_split_statements`, because they are the same lexer rule and written three
+    times they would drift, which is exactly what `NESTED_CASE` and
+    `SHELL_INTRODUCERS` did.
 
-    Single quotes take no escape, double quotes take a backslash escape, and a
-    backslash outside quotes escapes the next character. That is POSIX shell
-    quoting and it is all this file needs: the `run_gate` arms hold no
-    here-document and no `$'...'`.
+    Single quotes take no escape, double quotes and backticks take a backslash
+    escape, and a backslash outside all three escapes the next character.
+
+    **The declared limit, and it named the wrong things until the S03 review's
+    tenth pass.** It said the `run_gate` arms hold no here-document and no
+    `$'...'`, both true, and said nothing about the BACKTICK, which the region
+    carries forty-eight of today. They are all inside comments, so
+    `_strip_shell_comments` removes them before `_arm_end` ever sees one, and
+    that is the accident this limit was resting on rather than a property.
+    Backticks are a span now, `NESTED_CASE` holds one in its class, and what
+    remains outside this reader is a here-document, `$'...'`, and a `#` inside
+    `${...}` or an arithmetic expansion. None of the three is in the region and
+    none of them is what the tenth pass measured open.
     """
     char = text[index]
     if char == "\\":
         return index + 2, ""
-    if char in "\"'":
+    if char in QUOTE_DELIMITERS:
         return index + 1, char
     return index + 1, ""
 
 
 def _strip_shell_comments(text: str) -> str:
-    """`text` with every `#` comment removed, QUOTES RESPECTED.
+    """`text` with every `#` that BEGINS A WORD removed, quoted spans kept.
 
     `SHELL_COMMENT` was `(?<!\\S)#.*$`, which cannot tell a comment from a `#`
     inside a string. It ran over the whole `run_gate` region, so a legitimate
@@ -739,6 +806,23 @@ def _strip_shell_comments(text: str) -> str:
     that staying true: the scan below is the same one `_arm_end` uses, so a `#`
     inside a string is text and a `;;` inside a string is text, by one rule
     rather than by two that agree today.
+
+    **The first sentence said "every `#` comment" and that was wider than the
+    test below it until the S03 review's tenth pass.** POSIX and bash begin a
+    comment at any `#` that starts a word, and a word starts after an operator
+    as well as after a blank, so `;#`, `&#`, `|#`, `(#`, `)#`, `<#` and `>#`
+    all open one. The test accepted start-of-input, space, tab and newline
+    only. MEASURED on the one-line `fmt` arm with `true;#;;` planted in it: the
+    trailing command was dropped, and it failed CLOSED only by accident,
+    because the residue's head was `#` and the refusal named `#` as a command
+    CI does not run. `COMMENT_WORD_START` is the operator set now.
+
+    What this still does not remove, stated exactly: a `#` inside a
+    here-document, inside `$'...'`, or inside `${...}` or an arithmetic
+    expansion, none of which is in the region and all of which are outside
+    `_quote_spans` by the same declared limit. A `#` that follows a closing
+    quote, as in `echo "a"#b`, is NOT a comment in bash and is not removed
+    here, which is the direction this test must not widen into.
     """
     kept: list[str] = []
     quote = ""
@@ -746,7 +830,7 @@ def _strip_shell_comments(text: str) -> str:
     while index < len(text):
         char = text[index]
         if quote:
-            if quote == '"' and char == "\\":
+            if quote in ESCAPING_DELIMITERS and char == "\\":
                 kept.append(text[index:index + 2])
                 index += 2
                 continue
@@ -755,7 +839,7 @@ def _strip_shell_comments(text: str) -> str:
             kept.append(char)
             index += 1
             continue
-        if char == "#" and (not kept or kept[-1][-1:] in ("", " ", "\t", "\n")):
+        if char == "#" and (not kept or kept[-1][-1:] in COMMENT_WORD_START):
             end = text.find("\n", index)
             index = len(text) if end == -1 else end
             continue
@@ -779,7 +863,7 @@ def _arm_end(text: str, start: int) -> tuple[int, str]:
     while index < len(text):
         char = text[index]
         if quote:
-            if quote == '"' and char == "\\":
+            if quote in ESCAPING_DELIMITERS and char == "\\":
                 index += 2
                 continue
             if char == quote:
@@ -864,10 +948,22 @@ SHELL_INTRODUCERS = frozenset({
 # out a second time, which is the ninth pass's fix. A word introducer needs a
 # `\b` in front of it and a punctuation one must not have it, so the set is
 # split on that property here rather than hand-sorted into two literals.
+#
+# A BACKTICK is in the character class since the S03 review's tenth pass, and
+# it was the fourth fully fail-open terminator shape. `$(case ...)` was caught
+# only because `(` happens to be in the class, and `` `case ...` `` was caught
+# by nothing: a backtick is not `^`, not one of `[\n;{}()&|]` and not a
+# `SHELL_INTRODUCERS` word. MEASURED on the one-line `fmt` arm rewritten as
+# `fmt) cargo fmt --all --check && test -n `case x in *) echo y ;; esac` &&
+# python3 scripts/prose_check.py --extra ;;`, which `bash -n` accepts: this
+# check exited 0, the arm came out as one command, `unseen['fmt']` was `None`
+# and bash really runs the dropped command. `_quote_spans` treats the backtick
+# as a span as well, so the two halves of the fix agree: the substitution's
+# body cannot end the arm and cannot hide a `case` from this pattern.
 _WORD_INTRODUCERS = sorted(w for w in SHELL_INTRODUCERS if w[:1].isalpha())
 _PUNCT_INTRODUCERS = sorted(w for w in SHELL_INTRODUCERS if not w[:1].isalpha())
 NESTED_CASE = re.compile(
-    r"(?:^|[\n;{}()&|]|(?:"
+    r"(?:^|[\n;{}()&|`]|(?:"
     + "|".join([r"\b(?:" + "|".join(re.escape(w) for w in _WORD_INTRODUCERS)
                 + r")"]
                + [re.escape(w) for w in _PUNCT_INTRODUCERS])
@@ -895,7 +991,7 @@ def _split_statements(text: str) -> list[str]:
     while index < len(text):
         if quote:
             char = text[index]
-            if quote == '"' and char == "\\":
+            if quote in ESCAPING_DELIMITERS and char == "\\":
                 current.append(text[index:index + 2])
                 index += 2
                 continue

@@ -101,6 +101,28 @@ impl GpuContext {
     /// the arithmetic being here contradicted it. A forwarder is normally a
     /// construct this repository refuses, and it is the right shape in this one
     /// case because the alternative is the decision existing twice.
+    ///
+    /// **What the move did NOT close, stated because the paragraph above
+    /// otherwise reads as if the gap were shut.** The decision is now tested,
+    /// exhaustively, by `caps::tests`. This forwarder is not. It is reachable
+    /// by no test in the crate, because reaching it needs a `GpuContext`,
+    /// `GpuContext::new` takes a real `Device` and `Queue`, and deviation D-04
+    /// leaves the floor without an adapter to produce either. Measured for the
+    /// S03 review's tenth pass: replacing the body with
+    /// `!compute_available(&self.caps)` leaves `bin/ocelli.sh test
+    /// ocelli-render` at exit 0, 63 passed and 0 failed, and this method has no
+    /// other caller in the workspace.
+    ///
+    /// **The residue went from a decision nothing reached to a forwarding call
+    /// nothing reaches, which is smaller and is not zero.** A wrong forwarder
+    /// answers `true` on a tier B context and a kernel with no fallback then
+    /// runs where section 31 says it must report unavailable, which is the
+    /// failure this method exists to prevent. What closes it is a `GpuContext`
+    /// a test can build, which is F-037's long-lived device and F-X002's
+    /// software-adapter path, and both are named on `new` above as the reason
+    /// that constructor is public. Until one of them lands, the only thing
+    /// watching this line is the human check
+    /// `docs/hld/24-agent-code-standards.md` section 27.3 requires.
     #[must_use]
     pub fn supports_compute(&self) -> bool {
         compute_available(&self.caps)

@@ -1572,6 +1572,91 @@ def _a_clean_module_outside_the_member(box: Sandbox) -> None:
                f'\n#[path = "{relative}"]\npub mod probe_shared;\n')
 
 
+def _a_cfg_attr_module_outside_the_member(box: Sandbox) -> None:
+    """The same module, declared through `#[cfg_attr(all(), path = "...")]`.
+
+    Not a fifth key. It is key three written another way, and the guard read
+    one spelling: `MODULE_PATH` required `path` to be the first thing inside
+    the attribute, so a `cfg_attr` wrapper made the whole module invisible
+    while `INNER_ALLOW` twenty lines above deliberately reads an `allow`
+    reached through exactly that wrapper and says so.
+
+    MEASURED under the pinned 1.97.1 toolchain on a minimal workspace carrying
+    `cast_possible_truncation = "deny"`, with the module source holding
+    `#![allow(clippy::pedantic)]` and one `x as i32`: the plain form is refused
+    at guard exit 1, this form gave guard exit 0, and both take `cargo clippy
+    --workspace --all-targets -- -D warnings` from 101 to 0. Planted in a full
+    clone of this repository the same pair holds, measured at 101 without the
+    attribute and 0 with it, and the guard printed its usual "46 .rs file(s)"
+    line at exit 0 having read neither file.
+    """
+    outside, relative = _a_module_source_outside_the_member(box)
+    box.write(outside, "#![allow(clippy::pedantic)]\n"
+                       "pub fn probe(x: i64) -> i32 { x as i32 }\n")
+    box.append(_a_crate_root(box),
+               f'\n#[cfg_attr(all(), path = "{relative}")]\n'
+               f'pub mod probe_shared;\n')
+
+
+def _a_clean_cfg_attr_module_outside_the_member(box: Sandbox) -> None:
+    """The same `cfg_attr` layout with nothing switched off, which must pass.
+
+    The direction widening `MODULE_PATH` could get wrong. `cfg_attr` is legal
+    Rust and says nothing about lint levels, and the guard now resolves the
+    file it names and REFUSES a `#[path]` it cannot resolve, so an over-tight
+    read of the wrapper would refuse a crate that moves a module behind a
+    feature. The `.rs` file count in the OK line is what proves the file was
+    read rather than skipped: it moves from 46 to 47, measured.
+    """
+    outside, relative = _a_module_source_outside_the_member(box)
+    box.write(outside, "pub fn probe(x: i64) -> i64 { x + 1 }\n")
+    box.append(_a_crate_root(box),
+               f'\n#[cfg_attr(all(), path = "{relative}")]\n'
+               f'pub mod probe_shared;\n')
+
+
+def _a_raw_string_module_outside_the_member(box: Sandbox) -> None:
+    """The same module, declared through `#[path = r"..."]`.
+
+    The second spelling of key three, and the file already knew this one too:
+    `INCLUDE_PATH` ten lines below `MODULE_PATH` carries `(?:r#*)?` for exactly
+    this, because a raw string literal is the same file name written another
+    way. MEASURED under the pinned 1.97.1 toolchain, on the minimal workspace
+    and again in a full clone of this repository: guard exit 0 with cargo
+    clippy taken from 101 to 0, the guard printing "46 .rs file(s)" having
+    read neither file.
+    """
+    outside, relative = _a_module_source_outside_the_member(box)
+    box.write(outside, "#![allow(clippy::pedantic)]\n"
+                       "pub fn probe(x: i64) -> i32 { x as i32 }\n")
+    box.append(_a_crate_root(box),
+               f'\n#[path = r"{relative}"]\npub mod probe_shared;\n')
+
+
+def _deny_a_group_in_rustflags(box: Sandbox) -> None:
+    """`-Dclippy::pedantic` in a cargo config, which RAISES and must pass.
+
+    The acceptance direction of the tenth pass's message split, and the reason
+    the refusal was not narrowed instead. `clippy::pedantic` defaults to allow,
+    so a project may legitimately turn it on from a cargo config, and the flag
+    that does that is `-D`. MEASURED under the pinned 1.97.1 toolchain on a
+    minimal crate carrying `cast_possible_truncation = "deny"` and one
+    `x as i32`: `["-Dclippy::pedantic"]` exits 101 with the `clippy` gate's own
+    `-D warnings` and 101 without it, so it weakens nothing in either
+    invocation.
+
+    `-W` on the same group is a different measurement and stays refused:
+    without `-D warnings` it takes the same crate from 101 to 0 and prints
+    `warning: casting i64 to i32 may truncate the value` where the error was,
+    because a group flag outranks the manifest for every member lint. This
+    probe is what stops the obvious over-tight repair, refusing any rustflag
+    naming a `REFUSED_GROUPS` member, and the obvious over-loose one, dropping
+    groups from `ALLOWING_FLAGS`'s reach, from both reading as correct.
+    """
+    box.write(".cargo/config.toml",
+              '[build]\nrustflags = ["-Dclippy::pedantic"]\n')
+
+
 def _a_crate_root_the_manifest_moves(box: Sandbox) -> tuple[str, str, str]:
     """Where a `[lib] path` outside the member goes, and the manifest to edit.
 
@@ -2555,6 +2640,56 @@ def _nested_case_after_if(box: Sandbox) -> None:
         f"{indent}{gate}){tail} &&\n"
         f"{pad}if case \"$OSTYPE\" in *) true ;; esac; then : ; fi &&\n"
         f"{pad}{commands[0]} --probe-extra ;;")
+
+
+def _nested_case_in_a_backtick(box: Sandbox) -> None:
+    """A nested `case` inside a BACKTICK command substitution.
+
+    The fourth fully fail-open terminator shape, and the one the ninth pass's
+    three fixes all missed. `NESTED_CASE` matched `case` after `^`, after one
+    of `[\\n;{}()&|]` or after a `SHELL_INTRODUCERS` word, and a backtick is
+    none of the three, while `_quote_spans` knew `"` and `'` and not `` ` ``.
+    `$(case ...)` was caught only because `(` happens to sit in that character
+    class. MEASURED in the S03 review's tenth pass on the one-line `fmt` arm
+    rewritten as `fmt) cargo fmt --all --check && test -n `case x in *) echo y
+    ;; esac` && python3 scripts/prose_check.py --extra ;;`, which `bash -n`
+    accepts: `scripts/ci_floor_check.py` exited 0, `arm_bodies['fmt']` came out
+    as `cargo fmt --all --check && test -n `case x in *) echo y`, `unseen`
+    was `None` and bash really runs the dropped command.
+
+    **It is worse than the comment shape the eighth pass closed**, and that is
+    why it needed both halves of the fix rather than one. The residue the
+    truncation leaves is `test -n `case x in *) echo y`, whose heads are `test`
+    and `echo`, and both are in `SHELL_NOISE`, so the unseen-command rule that
+    catches the other shapes fires on nothing at all here.
+
+    The command appended after the substitution is a real one from the same
+    arm with an argument added, so what the truncation drops is work CI does
+    not run.
+    """
+    line, indent, gate, tail, commands = _a_single_line_arm_ci_runs(box)
+    pad = indent + " " * (len(gate) + 1)
+    box.substitute(
+        "bin/ocelli.sh", line,
+        f"{indent}{gate}){tail} &&\n"
+        f"{pad}test -n `case x in *) echo y ;; esac` &&\n"
+        f"{pad}{commands[0]} --probe-extra ;;")
+
+
+def _a_backtick_in_an_arm(box: Sandbox) -> None:
+    """A backtick command substitution with nothing dropped, which must pass.
+
+    The direction the backtick fix could get wrong. A command substitution in a
+    gate arm is ordinary shell and weakens nothing, so treating `` ` `` as a
+    span must not turn the construct itself into a refusal, and the obvious
+    over-tight repair, refusing any backtick in an arm, would pass the probe
+    above and refuse a legitimate runner. The substitution's head is `printf`,
+    which is in `SHELL_NOISE`, so the statement scan has nothing to demand of
+    CI and the only thing under test is the delimiter.
+    """
+    line, indent, gate, tail, _ = _a_single_line_arm_ci_runs(box)
+    box.substitute("bin/ocelli.sh", line,
+                   f"{indent}{gate}){tail} && test -n `printf x` ;;")
 
 
 def _an_unbalanced_quote_in_an_arm(box: Sandbox) -> None:
@@ -3572,6 +3707,39 @@ GUARDS: tuple[Guard, ...] = (
                        "alternation. `if case ... esac; then` puts it after "
                        "`if`, which was not, and it is measured at exit 0 with "
                        "the trailing command dropped."),
+            Probe("ci-floor.nested-case-in-a-backtick",
+                  _nested_case_in_a_backtick,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "holds a nested `case`",
+                  note="The FOURTH terminator shape and the only one that was "
+                       "fully fail-open after the ninth pass. A backtick is "
+                       "not `^`, not one of `[\\n;{}()&|]` and not a "
+                       "`SHELL_INTRODUCERS` word, and `_quote_spans` knew `\"` "
+                       "and `'` and not `` ` ``, so `$(case ...)` was caught "
+                       "only because `(` sits in that class and "
+                       "`` `case ...` `` was caught by nothing. MEASURED in "
+                       "the tenth pass on the one-line `fmt` arm, with "
+                       "`bash -n` green: exit 0, one command in the arm, "
+                       "`unseen` `None`, and bash really runs the dropped "
+                       "command. Worse than the comment shape, because the "
+                       "residue's heads are `test` and `echo`, both in "
+                       "`SHELL_NOISE`, so the unseen-command rule fires on "
+                       "nothing either. The backtick is a span in "
+                       "`_quote_spans` and a member of `NESTED_CASE`'s class "
+                       "now, so the arm cannot end inside a substitution and "
+                       "a `case` cannot hide in one."),
+            Probe("ci-floor.a-backtick-in-an-arm",
+                  _a_backtick_in_an_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The direction the backtick fix could get wrong. A "
+                       "command substitution in a gate arm is ordinary shell "
+                       "and weakens nothing, and the over-tight repair, "
+                       "refusing any backtick in an arm, would pass the probe "
+                       "above and refuse a legitimate runner. The "
+                       "substitution's head is in `SHELL_NOISE`, so the "
+                       "delimiter is the only thing under test."),
             Probe("ci-floor.unbalanced-quote-in-an-arm",
                   _an_unbalanced_quote_in_an_arm,
                   script("python3", "scripts/ci_floor_check.py"),
@@ -3605,12 +3773,21 @@ GUARDS: tuple[Guard, ...] = (
               "a person, and because `NOT_IN_FLOOR` and the runner's "
               "exclusion list are both watched, so the OTHER routes out of "
               "the floor are closed. The second limit is that this file "
-              "cannot evaluate `github.ref`, so what it proves about "
-              "`guards-deep` is that CI runs it on `workflow_dispatch`. The "
-              "workflow's own comment claims a push to `main` as well and "
-              "that half is unproven, which the OK line says in as many "
-              "words rather than leaving a reader to infer the stronger "
-              "claim. The third limit is the arm-command extractor's own "
+              "cannot evaluate `github.ref`, so a step behind a condition "
+              "naming a branch counts on no event and the OK line prints the "
+              "events it PROVED rather than the events that can happen. No "
+              "step in `.github/workflows/ci.yml` sits behind such a "
+              "condition today, so the limit currently drops nothing, and "
+              "this sentence says so rather than naming a job. It named one "
+              "until the S03 review's tenth pass, and the job had been "
+              "deleted a pass earlier: it said what this file proves about "
+              "`guards-deep` is that CI runs it on `workflow_dispatch`, and "
+              "that the push-to-main half is unproven, while the check prints "
+              "`pull_request, push, workflow_dispatch` for that gate because "
+              "the step moved into the unconditional `guards` job. Both "
+              "halves were false, in a declared limit, which this project "
+              "treats as load-bearing. The third limit is the arm-command "
+              "extractor's own "
               "vocabulary. It recognises `python3 `, `npm run `, `cargo ` and "
               "`ci/`, so `node`, `wasm-pack` and `\"$0\"` are invisible and "
               "the check cannot demand those commands of CI step by step. "
@@ -4693,12 +4870,59 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-module-outside-the-member",
                   _a_clean_module_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "`#[path]` modules followed",
+                  "1 `#[path]` module(s) followed",
                   polarity="accept",
                   note="The other direction. A module source outside the "
                        "member directory is legal Rust and says nothing about "
                        "lint levels, so following `#[path]` must not turn the "
-                       "layout itself into a refusal.",
+                       "layout itself into a refusal. The expect fragment "
+                       "carries the COUNT since the S03 review's tenth pass. "
+                       "The OK line named the four keys in a fixed string, so "
+                       "this probe passed on a sentence that would have "
+                       "printed identically had the file been skipped, and "
+                       "the count is derived from the sources actually read.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.cfg-attr-module-path",
+                  _a_cfg_attr_module_outside_the_member,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "allows the lint group",
+                  note="Key three with a spelling the code did not read, and "
+                       "the file knew it elsewhere: `INNER_ALLOW` "
+                       "deliberately matches an `allow` reached through "
+                       "`cfg_attr` and says so, while `MODULE_PATH` required "
+                       "`path` to be the first thing inside the attribute. "
+                       "MEASURED under the pinned 1.97.1 toolchain on a "
+                       "minimal workspace: the plain form refused at guard "
+                       "exit 1, this form at guard exit 0, and both take "
+                       "cargo clippy from 101 to 0. Planted in a full clone "
+                       "of this repository the guard printed its usual "
+                       "\"46 .rs file(s)\" line at exit 0 having read neither "
+                       "file.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.raw-string-module-path",
+                  _a_raw_string_module_outside_the_member,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "allows the lint group",
+                  note="The second spelling, and the file knew this one too: "
+                       "`INCLUDE_PATH` ten lines below `MODULE_PATH` already "
+                       "carries `(?:r#*)?`, because a raw string literal is "
+                       "the same file name written another way. MEASURED the "
+                       "same way, on the minimal workspace and again in a "
+                       "full clone: guard exit 0 with cargo clippy taken from "
+                       "101 to 0.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.clean-cfg-attr-module-path",
+                  _a_clean_cfg_attr_module_outside_the_member,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "1 `#[path]` module(s) followed",
+                  polarity="accept",
+                  note="The direction widening `MODULE_PATH` could get wrong. "
+                       "`cfg_attr` is legal Rust and says nothing about lint "
+                       "levels, and the guard REFUSES a `#[path]` it cannot "
+                       "resolve, so an over-tight read of the wrapper would "
+                       "refuse a crate that moves a module behind a feature. "
+                       "The count in the expect is what proves the file was "
+                       "read: 46 .rs files becomes 47, measured.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.required-row-with-a-tail",
                   _a_required_row_with_a_tail,
@@ -4830,6 +5054,30 @@ GUARDS: tuple[Guard, ...] = (
                        "-D warnings. The lint is read from HLD 27.1's copy in "
                        "Cargo.toml rather than named here.",
                   needs="cargo", profile="deep"),
+            Probe("lint-policy.deny-a-group-is-permitted",
+                  _deny_a_group_in_rustflags,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "cargo config(s) lower no denied lint through rustflags",
+                  polarity="accept",
+                  note="The acceptance direction of the tenth pass's message "
+                       "split, and the reason the refusal was not narrowed "
+                       "instead. `clippy::pedantic` defaults to allow, so a "
+                       "project may legitimately turn it on from a cargo "
+                       "config, and `-D` is the flag that does it: MEASURED "
+                       "under the pinned 1.97.1 toolchain, "
+                       "`[\"-Dclippy::pedantic\"]` exits 101 with the "
+                       "`clippy` gate's own -D warnings and 101 without it. "
+                       "`-W` on the same group is a DIFFERENT measurement and "
+                       "stays refused: without -D warnings it takes the same "
+                       "crate from 101 to 0 and demotes the "
+                       "cast_possible_truncation error to a warning, because "
+                       "a group flag outranks the manifest for every member "
+                       "lint. This probe is what stops the over-tight repair, "
+                       "refusing any rustflag naming a group, and the "
+                       "over-loose one, dropping groups from "
+                       "`ALLOWING_FLAGS`'s reach, from both reading as "
+                       "correct.",
+                  needs="cargo", profile="deep"),
             Probe("lint-policy.empty-rustflags-is-permitted",
                   _rustflags_that_are_empty,
                   script("python3", "scripts/lint_policy_check.py"),
@@ -4888,7 +5136,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-include-macro",
                   _a_clean_include_macro,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "`include!` followed",
+                  "1 `include!`(s) followed",
                   polarity="accept",
                   note="The other direction. `include!` is legal Rust and says "
                        "nothing about lint levels, so following it must not "
@@ -5031,11 +5279,17 @@ GUARDS: tuple[Guard, ...] = (
               "third limit arrived with the seventh pass's fix and is the "
               "PROFILE: this guard reads its member set from `cargo metadata "
               "--no-deps`, so every probe here declares `needs=\"cargo\"` and "
-              "sits in `guards-deep` rather than in the floor, which is the "
-              "same rule `nostd` already lives under for `cargo tree`. The "
-              "guard itself still runs on every pull request in the `guards` "
-              "gate. What moved to push-to-main is the harness watching the "
-              "guard, and that cost buys a member set cargo computes rather "
+              "sits in the deep profile rather than in the floor, which is "
+              "the same rule `nostd` already lives under for `cargo tree`. "
+              "The guard itself still runs on every pull request in the "
+              "`guards` gate, and since the ninth pass so does the deep "
+              "harness, because `gate guards-deep` is a STEP in the "
+              "unconditional `guards` job rather than the push-to-main job it "
+              "used to be. This sentence said the harness watching the guard "
+              "had moved to push-to-main, and it was still saying it a pass "
+              "after that job was deleted, which the S03 review's tenth pass "
+              "found. What the profile costs is a second run of the floor "
+              "set, and what it buys is a member set cargo computes rather "
               "than one this file guesses at, after two passes in which the "
               "guess was wrong through a different key each time. The eighth "
               "pass found a THIRD key to that same defect and it is now "
@@ -5889,12 +6143,46 @@ CONSTANTS: tuple[Constant, ...] = (
     # the following section and happens to sit before its header is not part of
     # the recorded value. Every row of the table is, wherever the blank lines
     # fall.
+    #
+    # **That sentence was measurably false between the ninth and tenth passes,
+    # and the way it failed is worth more than the sentence.** `[\w-]\s*=` was
+    # unanchored, so it matched a `name =` ANYWHERE on a line, comments
+    # included, and the pass-9 commit put an awk snippet holding `{f=1;next}`
+    # in the comment block that introduces `[workspace.dependencies]`. The
+    # backtrack found `f=` there, so the capture ran twelve lines past the end
+    # of the table and the recorded value ended mid-sentence inside a
+    # dependency comment. MEASURED: the HEAD digest was `319e61ab2cda36f4`, the
+    # `828037e` digest was `adf2cb2237be28da`, and the lints table is BYTE
+    # IDENTICAL between the two commits. So the pass-9 commit re-recorded this
+    # ratchet for a prose edit with the table unchanged, which is precisely the
+    # erosion a ratchet exists to prevent: it trains the next author to
+    # re-record on sight.
+    #
+    # The backtrack is anchored to the START of a line now, with an optional
+    # indent, so only a real table row can end the capture. MEASURED after the
+    # anchor: HEAD and `828037e` both give `adf2cb2237be28da`, the digest the
+    # table has had all along, and an unrelated edit inside that dependency
+    # comment leaves it there. The three mutations the sixth and ninth passes
+    # recorded still move it, and the two-line row still gives
+    # `e3d02e83d8b52dab`, which is the number the `lint-policy` entry's limit
+    # quotes as its reproduction.
+    #
+    # `.` is in the key class deliberately. A DOTTED row, `pedantic.level =
+    # "allow"` beside `pedantic.priority = 1`, is measured to take cargo clippy
+    # from 101 to 0 and `LINT_ROW` cannot read it, so this constant is its only
+    # backstop and a class that stopped at `[\w-]` would have ended the capture
+    # before it. Measured at `a7b52d1fe58cbfeb`, which is not the base.
     Constant("lint-policy", "Cargo.toml", "workspace.lints",
-             r"^\[workspace\.lints\.clippy\]\n((?:(?!^\[)[\s\S])*[\w-]\s*=[^\n]*)",
+             r"^\[workspace\.lints\.clippy\]\n"
+             r"((?:(?!^\[)[\s\S])*^[ \t]*[\w.-]+[ \t]*=[^\n]*)",
              why="HLD 27.1's denied lint table, verbatim, and every other row "
                  "of the table it sits in. A row added anywhere in that table "
-                 "moves this digest, blank lines and trailing comments "
-                 "included."),
+                 "moves this digest, blank lines, dotted keys and trailing "
+                 "comments included. It ends at the last line that STARTS with "
+                 "a table row, so prose below the table, in the comment block "
+                 "introducing the next section, is not part of the recorded "
+                 "value and cannot make this ratchet ask to be re-recorded for "
+                 "a change the table never saw."),
     # The group names that exist only in this guard. HLD 27.1 names five
     # lints and no groups, so `lint-policy.group-allow` has to write one of
     # the nine and narrowing the nine to that one would leave the probe green

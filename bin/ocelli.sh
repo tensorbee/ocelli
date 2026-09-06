@@ -298,13 +298,20 @@ gates_cmd() {
         #
         # What is left, and it is the whole of it: `--profile deep` is a strict
         # SUPERSET of `--profile floor`, so a `gate --floor` that included this
-        # would run every floor probe twice. MEASURED on this machine, deep
-        # 23.8s against floor 15.9s. CI pays that duplication deliberately,
+        # would run every floor probe twice. The numbers are QUOTED from
+        # ci/guard-probe-budget.json's `wall_clock_seconds`, deep 27.2s
+        # against floor 18.3s, rather than measured a second time here: this
+        # comment carried 23.8 against 15.9 while the recorded pair said
+        # otherwise, and two measured pairs in one commit are two answers
+        # somebody has to reconcile. CI pays that duplication deliberately,
         # because the alternative is `gate guards` running a different probe
         # set there from the one a developer gets. `gate --sprint` and
         # `gate --all` run both and so does the `guards` CI job.
-        # `python3 scripts/guard_probe.py --list` prints each probe's profile
-        # and what it needs, and reading that beats reading this.
+        # `python3 scripts/guard_probe.py --list --profile deep` prints each
+        # probe's profile and what it needs, and reading that beats reading
+        # this. The PROFILE filters the listing to the probes this paragraph
+        # is about. It was load-bearing until the tenth pass, when bare
+        # `--list` printed the floor set alone and showed none of them.
         # Everything else runs, INCLUDING `wasm`: story E1.2's note is "CI
         # fails if the module exceeds the agreed budget", and a wasm-pack
         # build costs no GPU.

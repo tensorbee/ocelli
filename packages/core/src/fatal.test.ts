@@ -1,6 +1,6 @@
 import { describe as group, expect, it } from "vitest";
 
-import { ERROR_CODE } from "./errors.js";
+import { describeError, ERROR_CODE } from "./errors.js";
 import {
   CORE_OK,
   fatalFromPanic,
@@ -8,11 +8,22 @@ import {
   nextStatus,
   type CoreStatus,
 } from "./fatal.js";
-import type { PanicRecord } from "./panic.js";
+import { PANIC_FALLBACK_CODE, type PanicRecord } from "./panic.js";
 
+/**
+ * **The code here is deliberately not `PANIC_FALLBACK_CODE`.**
+ *
+ * `PANIC_FALLBACK_CODE` is `ERROR_CODE.Panicked` (`./panic.ts`), so a fixture
+ * carrying that number makes the two branches of `fatalFromPanic` produce the
+ * same status, and the record-carrying branch becomes unobservable: replacing
+ * `record.code` with `PANIC_FALLBACK_CODE` in that branch passes every
+ * assertion. The field is genuinely variable, and `fill(code: u32, ...)` in
+ * `crates/ocelli-wasm/src/panic.rs` takes any `u32` (its own test drives 7),
+ * so the fixture uses a code the fallback cannot supply.
+ */
 const RECORD: PanicRecord = {
   version: 1,
-  code: ERROR_CODE.Panicked,
+  code: ERROR_CODE.Unavailable,
   message: "ocelli panic probe at crates/ocelli-wasm/src/lib.rs:110:5",
   location: "crates/ocelli-wasm/src/lib.rs:110:5",
   truncated: false,
@@ -99,12 +110,17 @@ group("fatalFromPanic", () => {
     if (status.kind !== "fatal") {
       return;
     }
-    expect(status.code).toBe(ERROR_CODE.Panicked);
+    // The record's own code, which is not the code the no-record branch
+    // supplies. Both halves are asserted, because equal numbers here would
+    // make the branch that reads the record unobservable.
+    expect(status.code).toBe(ERROR_CODE.Unavailable);
+    expect(status.code).not.toBe(PANIC_FALLBACK_CODE);
     expect(status.location).toBe("crates/ocelli-wasm/src/lib.rs:110:5");
     // The user-facing sentence is the shell's table, not the core's panic
     // text. Section 23 puts the message on this side.
     expect(status.message).not.toBe(RECORD.message);
-    expect(status.message.length).toBeGreaterThan(0);
+    expect(status.message).toBe(describeError(ERROR_CODE.Unavailable));
+    expect(status.message).not.toBe(describeError(PANIC_FALLBACK_CODE));
   });
 
   /**

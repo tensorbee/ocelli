@@ -1,7 +1,7 @@
 {
   "constants": {
     "Cargo.toml:workspace.lints": {
-      "digest": "319e61ab2cda36f4",
+      "digest": "adf2cb2237be28da",
       "guard": "lint-policy",
       "tunable": false
     },
@@ -204,7 +204,7 @@
     "oracle.unsupported": 3,
     "oracle.voi": 5,
     "oracle.volume": 31,
-    "packages": 19,
+    "packages": 21,
     "panic-probe": 1,
     "pins": 10,
     "populate-corpus": 10,
@@ -233,7 +233,7 @@
     "sweep_complete": false
   },
   "wall_clock_seconds": {
-    "deep": 27.2,
-    "floor": 18.3
+    "deep": 28.4,
+    "floor": 18.6
   }
 }

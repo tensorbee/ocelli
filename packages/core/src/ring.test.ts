@@ -17,10 +17,17 @@ import { EVENT_STRIDE, HEADER_BYTES, readEvent } from "./ring.js";
  * **Every offset and every size below is typed in from that paragraph rather
  * than imported from `ring.ts`.** A test that laid its fixture out using
  * `EVENT_STRIDE` would move the writer and the reader together and assert
- * nothing: mutating the constant from 48 to 64 would keep it green. Measured
- * in the S03 sprint review's ninth pass, along with two surviving offset
- * mutations, on a `readEvent` that is exported from `@ocelli/core`'s index and
- * had no test at all.
+ * nothing: mutating the constant from 48 to 64 would keep it green.
+ *
+ * **Eight offset and endianness mutations of `readEvent` survived before this
+ * file existed, on a function exported from `@ocelli/core`'s index with no
+ * test at all, and none survives now.** The eight are the two nonzero field
+ * offsets, the two payload slice bounds, the `view.byteOffset` term, and the
+ * little-endian flag on each of the three numeric reads. Re-measured for the
+ * tenth pass, one mutation at a time against `npx vitest run packages/core`:
+ * `8 of 8` survive with this file deleted, `0 of 8` with it present. The
+ * ninth pass's own commit message says eight and two other places said two
+ * and three, which is the defect this sentence replaces.
  *
  * **The wire contract itself is not yet checkable and the file says so.**
  * `crates/ocelli-wasm/src/ring.rs` does not exist, F-101 writes it, so
