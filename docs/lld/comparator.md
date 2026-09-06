@@ -1,7 +1,7 @@
 # The comparator, the oracle's judging half
 
 **F-IDs that contributed:** F-011
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-06
 
 HLD section 11 says the harness "pushes the same study through both stacks and
 compares frames within a written per-modality tolerance, with metadata diffed
@@ -346,8 +346,10 @@ one. It asserted only its own arithmetic until the eighth pass while this
 paragraph and its own comment both said it was checked against the instrument.
 `tools/oracle/out/` is gitignored, so the read is conditional, and the
 condition is `run.json` present rather than the sidecar present, because
-`run.mjs` writes `run.json` last and the directory therefore holds a complete
-run or holds nothing. Under a complete run a missing worked case is a failure
+`run.mjs` writes `run.json` after every row sidecar and discards the whole
+directory on any later problem, so it holds a complete run or holds nothing.
+The guarantee is the discard rather than the write order, and a `console.log`
+does follow the write. Under a complete run a missing worked case is a failure
 and not a skip.
 
 **For a volume reformat the image rectangle is the whole frame**, and that
@@ -649,10 +651,14 @@ band, the counts and the clamped-pixel case, and which now evaluates both
 transcribed formulas AT both endpoints rather than asserting a literal derived
 from neither. Until the seventh pass this section's `509/510` was checked
 entirely in closed form: mutating the C.11.2.1.2 transcription left the band
-test green. Measured again after the eighth pass, on a file of fourteen tests.
-Writing `w` where C.11.2.1.2 says `w - 1` takes eight of the fourteen red, the
-band test among them. Writing `w - 1` where C.11.2.1.3.2 says `w` takes nine,
-the band test failing on its `254w/510` endpoint.
+test green. Measured again after the eighth pass, on a file of fourteen tests, by
+rewriting each formula's own `Exact::whole` binding, which is the symmetric
+mutation and the one these counts belong to. Writing `w` where C.11.2.1.2 says
+`w - 1` takes eight of the fourteen red, the band test among them. Writing
+`w - 1` where C.11.2.1.3.2 says `w` takes nine, the band test failing on its
+`254w/510` endpoint. **Name the site, because the other readings give other
+numbers**: rewriting the `2 * w` denominator alone takes ten, and rewriting
+both that and the binding takes seven. The ninth pass measured all three.
 
 An 8-bit frame does not carry the stored value behind a 255, so there is no way
 to tell a pixel inside the band from one outside it, and excluding the whole

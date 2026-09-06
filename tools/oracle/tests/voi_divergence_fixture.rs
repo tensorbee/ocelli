@@ -1209,7 +1209,7 @@ fn the_two_empty_rows_are_empty_because_a_half_rounds_up() {
     // The counts the file header quotes, asserted rather than written down.
     assert_eq!(
         scanned_values, 43_212,
-        "twelve widths, 2w + 1 values at each"
+        "twelve widths, 2w + 1 stored values at each, through both functions"
     );
     assert_eq!(
         on_the_half,

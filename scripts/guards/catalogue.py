@@ -1752,6 +1752,172 @@ def _dotted_lints_inheritance(box: Sandbox) -> None:
     box.write(manifest, "lints.workspace = true\n\n" + box.read(manifest))
 
 
+def _an_included_source(box: Sandbox) -> tuple[str, str, str]:
+    """Where an `include!`d file goes, its argument, and the crate root.
+
+    Derived from the repository rather than named, exactly as
+    `_a_module_source_outside_the_member` derives its own. rustc resolves an
+    `include!` argument against the directory of the file the macro is written
+    in, which is not the rule `#[path]` uses, so the relative path is computed
+    from the crate root's directory and from nothing else.
+    """
+    root = _a_crate_root(box)
+    outside = "probe-included/hidden.rs"
+    relative = os.path.relpath(outside, Path(root).parent.as_posix())
+    return outside, relative, root
+
+
+def _an_include_macro_hiding_a_group_allow(box: Sandbox) -> None:
+    """`include!` of a file that switches HLD 27.1's table off for a module.
+
+    The FOURTH key to the set of files this guard reads, after the member glob,
+    `targets[].src_path` and `#[path]`. `include!` pastes another file's tokens
+    in at that point, so the file is compiled and is named by none of the other
+    three. MEASURED under the pinned 1.97.1 toolchain on a minimal crate
+    carrying `cast_possible_truncation = "deny"`: with `crates/a/src/lib.rs`
+    reading `include!("../../../outside/hidden.rs")`, `hidden.rs` carrying
+    `#[allow(clippy::pedantic)]` on a `#[path = "inner.rs"] pub mod` and the
+    module holding one `x as i32`, `cargo clippy --workspace --all-targets --
+    -D warnings` exits 0 against a baseline of 101. In a full copy of this
+    repository the same pair holds, measured at 101 without the attribute and
+    0 with it, and the guard exited 0 printing its usual "46 .rs file(s)" line
+    having read neither file.
+
+    The attribute is the OUTER form on a `mod` rather than an inner one, and
+    that is rustc's constraint rather than a choice: an inner `#![allow(...)]`
+    at the top of an `include!`d file is rejected, measured. The two have the
+    same scope, which is the fifth pass's finding.
+    """
+    outside, relative, root = _an_included_source(box)
+    box.write(outside, "#[allow(clippy::pedantic)]\n"
+                       "#[path = \"inner.rs\"]\npub mod probe_inner;\n")
+    box.write("probe-included/inner.rs",
+              "pub fn probe(x: i64) -> i32 { x as i32 }\n")
+    box.append(root, f'\ninclude!("{relative}");\n')
+
+
+def _a_clean_include_macro(box: Sandbox) -> None:
+    """The same layout with nothing switched off, which must be accepted.
+
+    `include!` is legal Rust and says nothing about lint levels, so following
+    it must not turn the construct itself into a refusal. Without this the
+    obvious repair, refusing any `include!` at all, would pass the probe above
+    and would refuse a crate that generates code, which is the runbook's
+    sentence about a guard that fails on everything.
+    """
+    outside, relative, root = _an_included_source(box)
+    box.write(outside, "pub fn probe(x: i64) -> i64 { x + 1 }\n")
+    box.append(root, f'\ninclude!("{relative}");\n')
+
+
+def _an_include_macro_naming_no_file(box: Sandbox) -> None:
+    """`include!` of a path that resolves to nothing.
+
+    The same argument as an unresolvable `#[path]`: it names a file that is
+    compiled and this pass did not read, and an unread file is the state every
+    measurement in the guard's header was taken in. Refused rather than skipped.
+    """
+    _, relative, root = _an_included_source(box)
+    box.append(root, f'\ninclude!("{relative}");\n')
+
+
+def _an_include_macro_the_guard_cannot_resolve(box: Sandbox) -> None:
+    """`include!(concat!(env!("OUT_DIR"), "/generated.rs"))`.
+
+    The argument a build script writes, and the shape that says which repair
+    was made. Only the build knows where `OUT_DIR` is, so the guard cannot
+    resolve it and refuses rather than passing over an `include!` whose file
+    name it could not read. Generated code carrying a group allow is the same
+    hole through a path nobody typed.
+    """
+    root = _a_crate_root(box)
+    box.append(root,
+               '\ninclude!(concat!(env!("OUT_DIR"), "/probe_generated.rs"));\n')
+
+
+def _a_member_source_that_is_not_utf8(box: Sandbox) -> None:
+    """A `.rs` file under a member that cannot be decoded.
+
+    `member_sources` caught `(OSError, UnicodeDecodeError)` and CONTINUED with
+    the path still in its result, and `main` then read the same file again with
+    no guard at all, so this state was a raw traceback at exit 1 rather than a
+    refusal under the FAIL header. That is the presentation
+    `scripts/ci_floor_check.py` stopped giving in the fifth pass, and the guard
+    was fail-open in one place and fail-closed by accident in the other. The
+    file is read once now and a file that cannot be read is a refusal.
+    """
+    member = Path(_a_crate_root(box)).parent.as_posix()
+    box.write(f"{member}/probe_not_utf8.rs", b"// \xff\xfe not utf-8\n")
+
+
+def _dotted_rustflags_key(box: Sandbox) -> None:
+    """`build.rustflags` written as a dotted key, which the `^` anchor missed.
+
+    `RUSTFLAG_KEY` was `^[^\\S\\n]*(?:rustflags|RUSTFLAGS)\\s*=\\s*`, so the key
+    had to start its line and TOML's dotted spelling never did. MEASURED under
+    the pinned 1.97.1 toolchain on a minimal crate carrying
+    `cast_possible_truncation = "deny"` and one `x as i32`, with the `clippy`
+    gate's own `-D warnings` passed: `build.rustflags =
+    ["-Aclippy::cast_possible_truncation"]` takes cargo clippy from 101 to 0
+    and `build.rustflags = ["-Aclippy::pedantic"]` does the same, while
+    `_flag_values` returned `[]` for both. Planted in a full copy of this
+    repository the guard printed "1 cargo config(s) lower no denied lint
+    through rustflags" at exit 0, which is the eighth pass's `--cap-lints`
+    outcome exactly: a positive assertion of the false thing.
+    """
+    box.write(".cargo/config.toml",
+              'build.rustflags = ["-Aclippy::pedantic"]\n')
+
+
+def _quoted_rustflags_key(box: Sandbox) -> None:
+    """`"rustflags"` written as a quoted key under `[build]`.
+
+    TOML's third spelling of the same key, and the second the anchor could not
+    see: the key does not start the line's first non-space character as a bare
+    word. MEASURED under the pinned 1.97.1 toolchain, `[build]` with
+    `"rustflags" = ["-Aclippy::pedantic"]` takes cargo clippy from 101 to 0.
+    A parsed document has one key here where the regex had three spellings,
+    which is why the repair was `tomllib` rather than a fourth alternative.
+    """
+    box.write(".cargo/config.toml",
+              '[build]\n"rustflags" = ["-Aclippy::pedantic"]\n')
+
+
+def _a_cargo_config_that_is_not_toml(box: Sandbox) -> None:
+    """A cargo config that does not parse.
+
+    cargo refuses a config it cannot parse, so this is not a working state, and
+    a parse failure read as a file declaring no rustflags would answer a
+    question about an empty set in the language of success. The regex this
+    replaced had no notion of a document at all, so a malformed config was
+    silently a config with no `rustflags` in it.
+
+    The document is written DOTTED and with the array left open, which is the
+    combination that tells the two repairs apart. Written bracketed the old
+    regex matched the key, failed to close the array and refused already, so a
+    bracketed malformed config discriminates nothing. Dotted, it matched
+    nothing at all and the guard exited 0 over a file holding
+    `-Aclippy::pedantic`.
+    """
+    box.write(".cargo/config.toml",
+              'build.rustflags = ["-Aclippy::pedantic"\n')
+
+
+def _a_dotted_cargo_config_that_lowers_nothing(box: Sandbox) -> None:
+    """Dotted keys throughout, and not one of them lowers a lint.
+
+    The direction the `tomllib` repair could get wrong. A dotted key is
+    ordinary TOML and a cargo config is the ordinary home for a job count, an
+    alias and a linker choice, so reading the document must not turn the
+    SPELLING into a refusal. `-Dwarnings` here raises a level and must be
+    permitted, exactly as it is in the bracketed form.
+    """
+    box.write(".cargo/config.toml",
+              'build.jobs = 4\n'
+              'build.rustflags = ["-Dwarnings"]\n'
+              'alias.probe-check = "check --workspace"\n')
+
+
 def _a_required_row_with_a_tail(box: Sandbox) -> None:
     """A required row whose line carries text that is not a comment.
 
@@ -2309,6 +2475,111 @@ def _nested_case_after_a_bang(box: Sandbox) -> None:
         f"{indent}{gate}){tail} &&\n"
         f"{pad}! case \"$OSTYPE\" in *) : ;; esac &&\n"
         f"{pad}{commands[0]} --probe-extra ;;")
+
+
+def _arm_terminator_inside_a_quote(box: Sandbox) -> None:
+    """A `;;` inside a QUOTED STRING, which is not the end of an arm.
+
+    The eighth pass closed the comment route by stripping comments before the
+    arm was delimited, and a string cannot be stripped. MEASURED in the S03
+    review's ninth pass on the one-line `fmt` arm rewritten as `fmt) cargo fmt
+    --all --check && echo "a ;; b" && python3 scripts/prose_check.py --extra
+    ;;`, which `sh -n` accepts: `scripts/ci_floor_check.py` exited 0 with
+    `arms['fmt']` holding one command, `unseen['fmt']` `None`, no refusal and
+    the real trailing command dropped. The arm's end is found by a scan that
+    steps over quoted spans now, and the statement split and the comment strip
+    use that same scan, because three regexes over shell that must agree about
+    quoting are three chances to disagree.
+    """
+    line, indent, gate, tail, commands = _a_single_line_arm_ci_runs(box)
+    pad = indent + " " * (len(gate) + 1)
+    box.substitute(
+        "bin/ocelli.sh", line,
+        f"{indent}{gate}){tail} &&\n"
+        f"{pad}echo \"a ;; b\" &&\n"
+        f"{pad}{commands[0]} --probe-extra ;;")
+
+
+def _a_quoted_string_in_an_arm(box: Sandbox) -> None:
+    """The same quoted string with nothing dropped, which must be accepted.
+
+    The direction the quote scanner could get wrong, and the first attempt at
+    this fix DID get it wrong. `STATEMENT_BREAK` split inside the string as
+    well, so `echo "a ;; b"` became `echo "a` and ` b"` and the check refused,
+    naming `b"` as a command CI does not run. A quoted string in a gate arm is
+    ordinary shell and weakens nothing, so the split respects quotes too.
+    """
+    line, indent, gate, tail, _ = _a_single_line_arm_ci_runs(box)
+    box.substitute("bin/ocelli.sh", line,
+                   f"{indent}{gate}){tail} && echo \"a ;; b\" ;;")
+
+
+def _nested_case_after_while(box: Sandbox) -> None:
+    """A nested `case` introduced by `while`, which the alternation did not hold.
+
+    `NESTED_CASE` listed `then|do|else|elif` plus `!` while `SHELL_INTRODUCERS`
+    twenty lines below held ten names including `while`, `until` and `if`. The
+    same file knew `while` introduces a command in one function and not in the
+    other, and the smaller list was the fail-open. MEASURED in the S03 review's
+    ninth pass on the one-line `fmt` arm, with `sh -n` accepting the file:
+    `arms['fmt']` held one command, `unseen['fmt']` was `None`, no refusal
+    fired and the real trailing command was dropped at exit 0. The alternation
+    is DERIVED from `SHELL_INTRODUCERS` now, so the two cannot drift again.
+    """
+    line, indent, gate, tail, commands = _a_single_line_arm_ci_runs(box)
+    pad = indent + " " * (len(gate) + 1)
+    box.substitute(
+        "bin/ocelli.sh", line,
+        f"{indent}{gate}){tail} &&\n"
+        f"{pad}while case \"$OSTYPE\" in *) false ;; esac; do : ; done &&\n"
+        f"{pad}{commands[0]} --probe-extra ;;")
+
+
+def _nested_case_after_if(box: Sandbox) -> None:
+    """A nested `case` introduced by `if`, the other keyword the lists differed on.
+
+    The seventh pass's probe used `if true; then case ...`, so the inner case
+    followed `then` and `then` was in the alternation. `if case ... esac; then`
+    puts it after `if`, which was not, and MEASURED in the S03 review's ninth
+    pass on the one-line `fmt` arm it left the check at exit 0 with one
+    extracted command, `unseen` `None` and the real trailing command dropped,
+    with `sh -n` accepting the file. The message is worded apart from
+    `_nested_case_after_while`'s deliberately: two refusals in one file whose
+    words normalise alike are ONE site to the census, and these two probes
+    would then read as covering one refusal between them.
+    """
+    line, indent, gate, tail, commands = _a_single_line_arm_ci_runs(box)
+    pad = indent + " " * (len(gate) + 1)
+    box.substitute(
+        "bin/ocelli.sh", line,
+        f"{indent}{gate}){tail} &&\n"
+        f"{pad}if case \"$OSTYPE\" in *) true ;; esac; then : ; fi &&\n"
+        f"{pad}{commands[0]} --probe-extra ;;")
+
+
+def _an_unbalanced_quote_in_an_arm(box: Sandbox) -> None:
+    """A quote that is opened in the LAST arm and never closed.
+
+    The fail-closed half of the quote scan. `_arm_end` refuses rather than
+    guessing which `;;` was meant, and the position matters: a quote opened in
+    an EARLIER arm is closed by the next quote anywhere in the region and read
+    as one very long arm, which the per-command rule then refuses for a
+    different reason. MEASURED both ways in the S03 review's ninth pass, and
+    the guard's declared limit records it. The last arm is chosen by property
+    rather than named, so the probe does not go stale when an arm is added.
+    """
+    runner = box.read("bin/ocelli.sh")
+    region = runner[runner.index("run_gate() {"):runner.index("skip() {")]
+    arms = re.findall(r"^[ \t]*([a-z-]+)\)(?:.*?);;", region, re.M | re.S)
+    if not arms:
+        raise AssertionError(
+            "bin/ocelli.sh's `run_gate` has no case arm this probe can find, "
+            "so there is no last arm to leave a quote open in and the "
+            "unbalanced-quote branch cannot be reached.")
+    last = re.search(rf"^[ \t]*{re.escape(arms[-1])}\).*?;;", region,
+                     re.M | re.S)
+    box.substitute("bin/ocelli.sh", last.group(0),
+                   last.group(0)[:-2] + '&& echo "unclosed ;;')
 
 
 def _arm_comment_holding_a_terminator(box: Sandbox) -> None:
@@ -3254,6 +3525,64 @@ GUARDS: tuple[Guard, ...] = (
                        "gate-name step for an arm that runs its own commands "
                        "as steps today, which is the runbook's sentence about "
                        "a guard that fails on everything."),
+            Probe("ci-floor.arm-terminator-inside-a-quote",
+                  _arm_terminator_inside_a_quote,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "runs only part of it on",
+                  note="The eighth pass's comment route one lexer rule along, "
+                       "and stripping cannot reach this one. `ARM` stopped at "
+                       "the first `;;` and a `;;` inside a quoted string is "
+                       "not one. MEASURED in the ninth pass on the one-line "
+                       "`fmt` arm, with `sh -n` accepting the file: one "
+                       "command in `arms`, `unseen` `None`, no refusal and the "
+                       "real trailing command dropped at exit 0. The arm's end "
+                       "is found by a scan over quoted spans now."),
+            Probe("ci-floor.quoted-string-in-an-arm-is-permitted",
+                  _a_quoted_string_in_an_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "floor gate(s) are invoked by CI on",
+                  polarity="accept",
+                  note="The direction the fix could get wrong, and the first "
+                       "attempt DID get it wrong. Making only the arm scan "
+                       "quote-aware left `STATEMENT_BREAK` splitting inside "
+                       "the string, so `echo \"a ;; b\"` became `echo \"a` and "
+                       "` b\"` and the check refused, naming `b\"` as a "
+                       "command CI does not run. A quoted string in a gate arm "
+                       "weakens nothing and the guard has to say so."),
+            Probe("ci-floor.nested-case-after-while",
+                  _nested_case_after_while,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "holds a nested `case`",
+                  note="`NESTED_CASE` alternated `then|do|else|elif` plus `!` "
+                       "while `SHELL_INTRODUCERS` twenty lines below held ten "
+                       "names, `while`, `until` and `if` among them. The same "
+                       "file knew `while` introduces a command in one function "
+                       "and not in the other. MEASURED in the ninth pass on "
+                       "the one-line `fmt` arm: one command in `arms`, "
+                       "`unseen` `None`, no refusal and the real trailing "
+                       "command dropped at exit 0, with `sh -n` green. The "
+                       "alternation is DERIVED from the set now."),
+            Probe("ci-floor.nested-case-after-if",
+                  _nested_case_after_if,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "holds a nested `case`",
+                  note="The other keyword the two lists differed on. The "
+                       "seventh pass's probe wrote `if true; then case ...`, "
+                       "so the inner case followed `then`, which WAS in the "
+                       "alternation. `if case ... esac; then` puts it after "
+                       "`if`, which was not, and it is measured at exit 0 with "
+                       "the trailing command dropped."),
+            Probe("ci-floor.unbalanced-quote-in-an-arm",
+                  _an_unbalanced_quote_in_an_arm,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "quote is opened and never closed",
+                  note="The fail-CLOSED half of the quote scan. A parser that "
+                       "cannot delimit an arm must refuse rather than report "
+                       "whatever it stopped at. The probe plants the quote in "
+                       "the LAST arm, which is the only position from which a "
+                       "later quote in the region cannot close it, and that "
+                       "dependence is declared in the entry's limit rather "
+                       "than left to be discovered."),
             Probe("ci-floor.comment-only",
                   lambda box: _delete_ci_step(box, leave_comment=True),
                   script("python3", "scripts/ci_floor_check.py"),
@@ -3326,16 +3655,33 @@ GUARDS: tuple[Guard, ...] = (
               "directions. What remains of the split is any OTHER head whose "
               "remainder is really a command, and neither `eval` nor "
               "`command` is one of them any more. The fifth limit is the arm "
-              "parser's own two fail-opens, both closed in the eighth pass and "
-              "both probed: `NESTED_CASE` carried a `\\b` in front of an "
-              "alternation containing `!`, which needs a word character before "
-              "it, so `&& ! case` matched nothing, and `SHELL_COMMENT` ran "
-              "AFTER `ARM` had matched, so a `;;` inside a shell comment ended "
-              "the arm before the comment was stripped. Each dropped a real "
-              "trailing command at exit 0. Comments and continuations are "
-              "removed from the whole `run_gate` region before `ARM.finditer` "
-              "now, which is the only order in which a comment cannot "
-              "terminate an arm.",
+              "parser's own fail-opens, and the eighth pass called them two "
+              "when two was not the count. FIVE are closed and probed now. "
+              "`NESTED_CASE` carried a `\\b` in front of an alternation "
+              "containing `!`, which needs a word character before it, so "
+              "`&& ! case` matched nothing. `SHELL_COMMENT` ran AFTER `ARM` "
+              "had matched, so a `;;` inside a shell comment ended the arm "
+              "before the comment was stripped. The ninth pass measured three "
+              "more, each dropping a real trailing command at exit 0 with "
+              "`sh -n` accepting the file: a `;;` inside a QUOTED STRING, "
+              "which no amount of stripping reaches, and `while case` and "
+              "`if case`, which are statement positions `SHELL_INTRODUCERS` "
+              "already knew about and `NESTED_CASE`'s hand-written "
+              "`then|do|else|elif|!` did not. The alternation is DERIVED from "
+              "`SHELL_INTRODUCERS` now, so the two cannot drift again, the "
+              "arm's end is found by a scan that steps over quoted spans, and "
+              "the statement split and the comment strip use the same scan, "
+              "because three regexes over shell that must agree about quoting "
+              "are three chances to disagree. What is NOT probed is the "
+              "unbalanced-quote refusal in `_arm_end`, and it is probed: "
+              "`ci-floor.unbalanced-quote-in-an-arm` plants the unclosed "
+              "quote in the LAST arm, which is the only position from which a "
+              "later quote in the region cannot close it. That dependence on "
+              "position is the sixth limit, declared here rather than hidden: "
+              "an unclosed quote in an EARLIER arm is closed by the next "
+              "quote in the region and read as a very long arm, which the "
+              "per-command rule then refuses for a different reason, measured "
+              "at exit 1 with a message naming the wrong thing.",
     ),
 
     # -- D-04's chain, the part CI reads ------------------------------------
@@ -4519,6 +4865,143 @@ GUARDS: tuple[Guard, ...] = (
                        "inherit, measured at exit 0, and refusing that "
                        "spelling is right.",
                   needs="cargo", profile="deep"),
+            Probe("lint-policy.include-macro",
+                  _an_include_macro_hiding_a_group_allow,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "allows the lint group",
+                  note="The FOURTH key to the set of files this guard reads, "
+                       "after the member glob, `targets[].src_path` and "
+                       "`#[path]`, and the ninth consecutive route past the "
+                       "guard. `include!` pastes a file's tokens in, so that "
+                       "file is compiled and is named by none of the other "
+                       "three. MEASURED under the pinned 1.97.1 toolchain: an "
+                       "`include!`d file carrying `#[allow(clippy::pedantic)]` "
+                       "on a `#[path]` module takes cargo clippy from 101 to 0 "
+                       "in a minimal crate AND in a full copy of this "
+                       "repository, where the guard exited 0 printing its "
+                       "usual \"46 .rs file(s)\" line having read neither "
+                       "file. The attribute is the outer form on a `mod` "
+                       "because rustc REJECTS an inner `#![allow(...)]` at the "
+                       "top of an included file, measured, and the two have "
+                       "the same scope, which is the fifth pass's finding.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.clean-include-macro",
+                  _a_clean_include_macro,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "`include!` followed",
+                  polarity="accept",
+                  note="The other direction. `include!` is legal Rust and says "
+                       "nothing about lint levels, so following it must not "
+                       "turn the construct into a refusal. Without this the "
+                       "obvious repair, refusing every `include!`, would pass "
+                       "the probe above and refuse a crate that generates "
+                       "code, which is the runbook's sentence about a guard "
+                       "that fails on everything.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.unresolvable-include-macro",
+                  _an_include_macro_naming_no_file,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "did not read the source it pastes in",
+                  note="The same argument as an unresolvable `#[path]`: a file "
+                       "that is compiled and was not read, which is the state "
+                       "every measurement in the guard's header was taken in. "
+                       "rustc resolves the argument against the directory of "
+                       "the file the macro is written in, which is NOT the "
+                       "rule `#[path]` uses, so the resolution is written out "
+                       "rather than shared.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.computed-include-macro",
+                  _an_include_macro_the_guard_cannot_resolve,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "could not read a file name out of it",
+                  note="`include!(concat!(env!(\"OUT_DIR\"), \"/x.rs\"))` is "
+                       "what a build script writes, and only the build knows "
+                       "where that is. The guard refuses rather than passing "
+                       "over an `include!` whose file name it could not read, "
+                       "because generated code carrying a group allow is the "
+                       "same hole through a path nobody typed.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.unreadable-member-source",
+                  _a_member_source_that_is_not_utf8,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "is reached by this check's walk of the workspace member",
+                  note="`member_sources` caught `(OSError, "
+                       "UnicodeDecodeError)` and CONTINUED with the path still "
+                       "in its result, and `main` then read the same file "
+                       "again with no guard at all, so this state was a raw "
+                       "traceback at exit 1 rather than a refusal under the "
+                       "FAIL header. That is the presentation "
+                       "`scripts/ci_floor_check.py` stopped giving in the "
+                       "fifth pass and the eighth pass restated four lines "
+                       "earlier in this same guard. One read, one answer. "
+                       "This probe discriminates on the MESSAGE and not on the "
+                       "exit status, and that is worth saying: the unfixed "
+                       "guard also exits 1 here, by tracebacking, so only the "
+                       "`expect` fragment tells the refusal from the crash.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.dotted-rustflags-key",
+                  _dotted_rustflags_key,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "in `rustflags`",
+                  note="`RUSTFLAG_KEY`'s `^` anchor required the key to start "
+                       "its line, and TOML's dotted spelling never does. "
+                       "MEASURED under the pinned 1.97.1 toolchain: "
+                       "`build.rustflags = "
+                       "[\"-Aclippy::cast_possible_truncation\"]` takes cargo "
+                       "clippy from 101 to 0 and the group form does too, "
+                       "while `_flag_values` returned `[]` for both. Planted "
+                       "in a full copy of this repository the guard printed "
+                       "\"1 cargo config(s) lower no denied lint through "
+                       "rustflags\" at exit 0, which is the eighth pass's "
+                       "`--cap-lints` outcome exactly. The config is parsed "
+                       "with `tomllib` now, which retires the whole "
+                       "regex-against-TOML class from that function.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.quoted-rustflags-key",
+                  _quoted_rustflags_key,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "in `rustflags`",
+                  note="TOML's third spelling of the same key and the second "
+                       "the anchor could not see. MEASURED under the pinned "
+                       "1.97.1 toolchain: `[build]` with `\"rustflags\" = "
+                       "[\"-Aclippy::pedantic\"]` takes cargo clippy from 101 "
+                       "to 0. A parsed document has ONE key here where the "
+                       "regex had three spellings, which is why the repair was "
+                       "`tomllib` rather than a fourth alternative.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.cargo-config-unparseable",
+                  _a_cargo_config_that_is_not_toml,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "does not parse as TOML",
+                  note="cargo refuses a config it cannot parse, so this is not "
+                       "a working state, and a parse failure read as a file "
+                       "declaring no rustflags answers a question about an "
+                       "empty set in the language of success. The regex this "
+                       "replaced had no notion of a document at all, so a "
+                       "malformed config was silently a config with no "
+                       "`rustflags` in it. It discriminates on the MESSAGE "
+                       "rather than on the exit status, and the reason is "
+                       "worth recording: a malformed config at the repository "
+                       "root also makes `cargo metadata` fail, which this "
+                       "guard already refuses on, so the unfixed guard exits 1 "
+                       "here for a different reason and only the `expect` "
+                       "fragment tells the two apart. A malformed config in a "
+                       "SUBDIRECTORY is not read by a root `cargo metadata` at "
+                       "all, and there the new refusal is the only one.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.dotted-cargo-config-is-permitted",
+                  _a_dotted_cargo_config_that_lowers_nothing,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "cargo config(s) lower no denied lint through rustflags",
+                  polarity="accept",
+                  note="The direction the `tomllib` repair could get wrong. A "
+                       "dotted key is ordinary TOML and a cargo config is the "
+                       "ordinary home for a job count, an alias and a linker "
+                       "choice, so reading the document must not turn the "
+                       "SPELLING into a refusal. `-Dwarnings` raises a level "
+                       "and must be permitted here exactly as it is in the "
+                       "bracketed form.",
+                  needs="cargo", profile="deep"),
         ),
         limit="`REFUSED_GROUPS` is a list of nine names that exists only in "
               "the guard, and a probe can only ever write one of them, so "
@@ -4561,7 +5044,27 @@ GUARDS: tuple[Guard, ...] = (
               "the member, measured at exit 0 with a group allow in it, so "
               "the walk is seeded from `cargo metadata`'s own "
               "`targets[].src_path` and the rglob is kept beside it for the "
-              "modules no target names. The fourth "
+              "modules no target names. **The NINTH pass found the fourth key "
+              "and stopped calling the result a set the guard knows.** "
+              "`include!` pastes a file's tokens in and is named by none of "
+              "the other three, measured at cargo clippy 101 to 0 with the "
+              "guard at exit 0, and it is followed and refused now like "
+              "`#[path]` is. What that leaves is the honest statement of the "
+              "class rather than another closed route: the source list is a "
+              "RECONSTRUCTION from four keys, every pass since the fifth has "
+              "found a new one, and `member_sources`'s docstring, this guard's "
+              "OK line and `docs/lld/guards.md` all say so rather than "
+              "claiming \"every `.rs` file a workspace member compiles\", "
+              "which is what the first two claimed through four passes in "
+              "which it was false. rustc's own dep-info at "
+              "`target/<profile>/deps/*.d` IS the set, and it was considered "
+              "as the authority and rejected with four measurements: it exists "
+              "only after a build, a stale one narrows in silence, freshness "
+              "by mtime would refuse after every keystroke, and making it "
+              "fresh means this guard runs `cargo check --workspace "
+              "--all-targets` at 10.8s in a clone with no `target/` and again "
+              "inside every one of these probes, whose sandbox is a fresh copy "
+              "of `git ls-files`. The fourth "
               "limit is what a rustflags scan cannot reach: cargo also reads "
               "`$CARGO_HOME/config.toml`, the `RUSTFLAGS` environment "
               "variable and `--config` on the command line, none of which is "

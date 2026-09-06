@@ -77,7 +77,7 @@ machine that recorded it, and against nothing else.
 | `tools/bench/src/record.mjs` | the run record, the comparison, the re-baseline |
 | `tools/bench/src/runners/` | one file per subject that has a runner. A row whose `subject_story` is `null` must have one. A row whose story has landed may not have one yet, which is `no_runner` |
 | `tools/bench/page/` | the page that times a cold start, `window.__bench` |
-| `tools/bench/tests/` | six suites. `npm test` in `tools/bench` names all six and the `bench` arm of `bin/ocelli.sh gate` names five, `paths_test.mjs` being the one it does not yet run. The one browser test inside `cold_start_test.mjs` is opted into with `OCELLI_BENCH_BROWSER=1` |
+| `tools/bench/tests/` | six suites, and `npm test` in `tools/bench` and the `bench` arm of `bin/ocelli.sh gate` now name the same six. `grep -o 'tools/bench/tests/[a-z_]*\.mjs' bin/ocelli.sh \| sort -u \| wc -l` prints what the arm names and `ls tools/bench/tests/*.mjs \| wc -l` prints what exists. The one browser test inside `cold_start_test.mjs` is opted into with `OCELLI_BENCH_BROWSER=1` |
 | `ci/bench-baseline.json` | tracked, the recorded measurement per subject per host class |
 | `scripts/bench_check.py` | the `bench` gate |
 | `tools/bench/out/` | ignored. One run's record and the page it served |
@@ -341,7 +341,7 @@ inside `--compare` and only on a machine that already owns a baseline for that
 subject. It is the same shape as `the_recorded_bands_match_the_checked_in_file`,
 a constant in source asserted equal to the checked-in file it claims to follow.
 
-That gate then runs the guard's own negative cases and all five node suites.
+That gate then runs the guard's own negative cases and the node suites, all of them since `828037e` added `paths_test.mjs` to the arm. This sentence said five while the arm named six, which is the third stale count this file has carried about the same list, so the arm is named rather than counted here too.
 
 **Three decisions the node suites state in prose were held by nothing until the
 seventh review pass**, and all three were found by mutating the source rather
@@ -374,6 +374,21 @@ older record, so a baseline naming a tool this run never captured would have
 compared as identical and been given a verdict. The parallel guard on
 `sameHostClass` was already covered both ways.
 
+**The fifth arrived in the ninth pass, in `backlogStatuses`.** The status-table
+heading rule is `/^M\d+,/` OR a heading starting `Roadmap`, and every fixture in
+`registry_test.mjs` used an `M<n>` heading, so dropping the `Roadmap` clause
+left every test in the harness green while `docs/sprints/BACKLOG.md` carries
+`### Roadmap, Phase 2 and Phase 3` with F-158 and F-159 under it. The rule is
+duplicated in `scripts/bench_check.py` and `scripts/backlog_check.py`, and this
+module's header says a rule that exists on one side only is a defect, so a
+Roadmap-blocked subject would have been refused by the driver and accepted by
+the gate. **The failure is loud rather than quiet**, because the driver throws
+on a story it cannot resolve instead of labelling one wrongly, and that is what
+caps the severity rather than what makes the clause optional. Two tests now hold
+it, one asserting a Roadmap row IS read and one asserting a heading that is
+neither shape is not, because a clause satisfied by reading every `### ` heading
+would be no clause.
+
 **The path rules decide whether the harness measures anything, and nothing
 executed them until the S03 review's eighth pass.** `run.mjs` asks
 `existsSync(runnerPath(id))` for every subject, so a `runnerBasename` that
@@ -393,8 +408,18 @@ its `no_runner` note from `runnerBasename` rather than from a second
 `replaceAll(".", "_")`, because a note naming a path the gate does not look at
 is the unseen runner the anti-fabrication rule is about.
 
-**Five and not four, since the S03 review's fourth pass.**
-`tools/bench/tests/cold_start_test.mjs` holds seven tests and only the last
+**Six, and the count has moved twice, which is why it is written with the
+command that prints it rather than as a number.** It reached five in the S03
+review's fourth pass and six in the eighth, when `paths_test.mjs` joined the
+arm in the same commit that added the paragraph above. A count in prose beside
+a list in a shell script goes stale the next time the list changes, and it did.
+`grep -o 'tools/bench/tests/[a-z_]*\.mjs' bin/ocelli.sh | sort -u | wc -l` is
+what the `bench` arm names, and `ls tools/bench/tests/*.mjs | wc -l` is what
+exists. They agree today, and the whole point of the two commands is that a
+reader can see whether they still do.
+
+The fourth pass was `cold_start_test.mjs`.
+It holds seven tests and only the last
 needs a browser, but `wasm_cold_start.mjs` imported `playwright` at module
 scope, so the file could not be loaded at all without a playwright install and
 the whole suite sat outside the gate. `workspaceVersion`, `median`,

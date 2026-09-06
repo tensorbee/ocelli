@@ -23,14 +23,18 @@ test("with no arguments, every check is on and the output is canonical", () => {
   const options = parseArgs([]);
   // Not `assert.equal(options.out, DEFAULT_OUT)`. That is the constant
   // `parseArgs` initialises from compared with itself, and it holds whatever
-  // the constant is. What matters about the default is that it IS the
-  // directory this whole file exists to protect, so it is asserted through the
-  // guard: `--rows` into the default output is refused.
-  assert.throws(
-    () => parseArgs(["--rows", "syntax/", "--out", options.out]),
-    /must name a directory outside/,
-    "the default output is not the directory the guard protects",
-  );
+  // the constant is.
+  //
+  // **And going through the guard does not fix that**, which the S03 review's
+  // ninth pass measured. `--rows` into `options.out` reaches
+  // `isInside(options.out, DEFAULT_OUT)`, and `options.out` IS `DEFAULT_OUT`
+  // here, so `isInside(x, x)` holds for every `x` and the refusal fires
+  // whatever the constant says. Pointing `DEFAULT_OUT` at `oraclePath(
+  // "outputs")` left that `assert.throws` green and reddened only the line
+  // below. `args_test.mjs`'s own "--rows into the canonical output is
+  // refused, absolutely spelled" covers the guard, so this test asserts the
+  // one thing that is about the DEFAULT: that it names the directory the
+  // guard protects, spelled out rather than taken from the constant.
   assert.ok(options.out.endsWith(join("tools", "oracle", "out")));
   assert.equal(options.rows, null);
   assert.equal(options.inject, null);

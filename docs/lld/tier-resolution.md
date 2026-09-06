@@ -475,18 +475,21 @@ the render path is wired in from S11. That crate had an empty
 `scripts/`, `ci/`, `.githooks/`, `bin/` and `tools/`, and `docs/lld/guards.md`
 says `crates/` is deliberately absent, because a runtime refusal inside a crate
 is that crate's story's test rather than that harness's. The census prints that
-boundary on every green run. Seventeen of the eighteen rows below name a file
-under `crates/` and the eighteenth names one under `packages/`, so **F-X009
-watches none of them.**
+boundary on every green run. **Every row below names a file under `crates/`
+except one, which names `packages/core/src/capabilities.test.ts`, so F-X009
+watches none of them.** The claim is written that way rather than as two
+counts because it was written as two counts, seventeen and eighteen, and the
+table has grown four times since without either number moving. The `Where`
+column is what a reader checks it against, and it needs no arithmetic.
 
 That was worse than the stale cross-references already corrected elsewhere in
 this directory, because it did not merely point at the wrong harness. It named
 as the covering harness the one thing that prints, every time it runs, the
 bucket it does not scan.
 
-What actually runs these is `bin/ocelli.sh gate test` for the seventeen Rust
-rows and `gate packages`, which is where `npm run test` lives, for the
-TypeScript one. Both are in the CI floor. What tests THEM
+What actually runs these is `bin/ocelli.sh gate test` for every row whose
+`Where` is under `crates/`, and `gate packages`, which is where `npm run test`
+lives, for the one under `packages/`. Both are in the CI floor. What tests THEM
 is a review pass mutating the code each row covers and confirming the row goes
 red, which is HLD 27.3's third bullet and is recorded per row in
 `.claude/reviews/`.
@@ -506,7 +509,12 @@ red, which is HLD 27.3's third bullet and is recorded per row in
 | `a_measurement_issues_the_warm_up_the_calibration_and_the_full_pass` | `probe.rs` | The full pass running at the calibration's size, and any stage leaving the sequence. The three fragment counts are asserted as `ci/tier-thresholds.json`'s literals rather than rebuilt from the constants |
 | `an_unaffordable_calibration_stops_before_the_full_pass` | `probe.rs` | The budget ceasing to gate the full pass, and the warm-up being gated by it. The warm-up is a discard rather than a stage the budget decides |
 | `a_calibration_that_reports_nothing_yields_no_measurement` | `probe.rs` | A calibration that could not be taken being papered over. Two runs are issued and no figure comes out, so the combination rule falls through to the two hints |
+| `a_full_pass_that_reports_nothing_keeps_the_calibration` | `probe.rs` | `.or(Some(calibration))` leaving the end of `measure_with`. The full pass is 256 times the work and the one that can reach `COMPLETION_TIMEOUT_NANOS`, so its failure is the likely one on a slow adapter, and dropping the fallback throws away a calibration already taken and affordable. `classify` then falls through to the two hints with one signal fewer than the probe actually produced |
+| `the_two_failure_points_do_not_give_the_same_answer` | `probe.rs` | The two failure paths collapsing into one. A calibration that fails is no measurement and yields `None`, a full pass that fails yields the calibration, and an implementation returning either answer for both satisfies exactly one of the two rows and not this one |
 | `the_recorded_workload_matches_the_checked_in_file` | `caps.rs` | `RUN_PLAN` and `ci/tier-thresholds.json`'s `warm_up_pixels`, `calibration_pixels` and `full_pixels` drifting apart. That file says a figure taken with a different workload is a different measurement, so the workload is part of the 400,000,000 floor's provenance |
+| `the_recorded_workload_names_the_shader_the_probe_compiles` | `caps.rs` | The OTHER three `workload` fields drifting, which were guarded by nothing until the S03 review's ninth pass: `alu_steps_per_fragment` against `probe::FILL_RATE_ALU_STEPS`, `target_format` against the `Debug` spelling of `probe::TARGET_FORMAT`, and `shader` against the CONTENT of `probe::WORKLOAD_WGSL` rather than against the path merely resolving. All five fields are the 400,000,000 floor's provenance by that file's own note, not three of them |
+| `compute_is_available_on_tier_a_with_adapter_support_and_nowhere_else` | `caps.rs` | `compute_available`'s `&&` becoming `||`, or either term being dropped. All six combinations of `caps.compute` and the three tiers, so the row that breaks in each direction is named rather than implied |
+| `exactly_one_of_the_six_combinations_permits_compute` | `caps.rs` | The same predicate, counted rather than enumerated. An `||` permits five of six, ignoring the tier permits three, ignoring `caps.compute` permits two, and exactly one is correct, so the count separates all four implementations |
 | `a_real_mesa_gpu_that_both_hints_abstain_on_is_demoted` | `caps.rs` | The `gallium` narrowing being restated as complete. It asserts the demotion that survives it as well as the containment it provides |
 | `a_gl_adapter_reporting_compute_shaders_is_still_a_b_candidate` | `caps.rs` | The boundary between the two GPU tiers being read off the downlevel flags rather than off the backend. HLD section 7 names tier B by its API, so a native GLES adapter reporting `COMPUTE_SHADERS` is still tier B. The proptest cannot cover this and must not be asked to: its `a_candidates` count calls `candidate_tier`, so on that branch the property is a tautology |
 | `the_adapter_type_signal_speaks_only_where_a7_licenses_it` | `caps.rs` | `VirtualGpu` or `Other` being read as a claim in either direction. A7 licenses the signal "where a fallback adapter identifies itself as one", and `SOFTWARE_RENDERER_STRINGS`'s stated residue leans on `VirtualGpu` abstaining |

@@ -137,7 +137,7 @@ run_gate() {
     # case arm returns the status of its LAST command.
     #
     # tests/cold_start_test.mjs IS here, and it was not until the S03 review's
-    # fourth pass. Four of its five tests need no browser, and the whole file
+    # fourth pass. Six of its seven tests need no browser, and the whole file
     # was excluded because the runner it imports pulled in `playwright` at
     # module scope, so the file could not load without an install. The runner
     # now imports playwright inside `run()`, and the one test that does launch
@@ -213,17 +213,17 @@ run_gate() {
     # NOT_IN_FLOOR. The two lists are compared for set equality there, so
     # missing either is refused rather than being a matter of care.
     #
-    # scripts/ci_floor_check.py also refuses the case where this job goes
+    # scripts/ci_floor_check.py also refuses the case where the CI step goes
     # away entirely: a gate outside the floor that needs no GPU must still
-    # be run by some CI step. What it can PROVE about this one is that the
-    # step is reachable on workflow_dispatch, because `github.ref` is
-    # outside the expression subset it evaluates, so the push-to-main half
-    # of the claim below is this comment's and not the check's.
+    # be run by some CI step.
     #
-    # It gets a CI job on pushes to `main` and on workflow_dispatch, and not
-    # on pull_request. So a weakened deep guard is caught on merge to main
-    # rather than on the pull request, and that is the strongest claim the
-    # cost allows.
+    # It is a STEP in the `guards` job since the S03 review's ninth pass, and
+    # it was a separate job gated to push-to-main and workflow_dispatch
+    # before that. So a weakened deep guard is caught on the pull request that
+    # weakened it, which matters most for the `lint-policy` probes: every one
+    # of them is here, and the sprint review has found a route past that guard
+    # on every pass since the fifth. The two reasons the old trigger carried
+    # were both false, and .github/workflows/ci.yml records which.
     guards-deep) python3 scripts/guard_census.py --profile deep &&
                  python3 scripts/guard_probe.py --profile deep ;;
     packages)    [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
@@ -284,15 +284,25 @@ gates_cmd() {
       for entry in "${GATES[@]}"; do
         IFS='|' read -r name gpu desc <<<"$entry"
         # The CI floor. `oracle` needs a GPU and a browser. `corpus` needs the
-        # corpus, which is not in git and so is not in CI. `guards-deep` needs
-        # a TOOLCHAIN: every probe in it declares `needs="cargo"` and none
-        # needs npm or wasm-pack, which this comment claimed until the S03
-        # review's eighth pass and which is the sentence .github/workflows/
-        # ci.yml already calls "an earlier version of this comment claimed".
-        # It is not minutes either: over four runs on this machine deep took
-        # 27.4s to 28.9s and the floor 19.6s to 20.6s. It runs on a push to
-        # main and on dispatch because a runner
-        # has to install the toolchain, not because of the clock.
+        # corpus, which is not in git and so is not in CI.
+        #
+        # `guards-deep` is here for a reason that has now been written three
+        # ways and was false twice. It is not npm or wasm-pack, which the
+        # eighth pass corrected. It is not the clock, and it is not "a runner
+        # has to install the toolchain" either, which is what this comment said
+        # until the S03 review's ninth pass: the `guards` CI job installs the
+        # pinned toolchain for `gate guards` itself, so the runner that would
+        # run the deep probes already has one. That job RUNS `gate guards-deep`
+        # on every event since the ninth pass, so the trigger is no longer a
+        # difference between the two at all.
+        #
+        # What is left, and it is the whole of it: `--profile deep` is a strict
+        # SUPERSET of `--profile floor`, so a `gate --floor` that included this
+        # would run every floor probe twice. MEASURED on this machine, deep
+        # 23.8s against floor 15.9s. CI pays that duplication deliberately,
+        # because the alternative is `gate guards` running a different probe
+        # set there from the one a developer gets. `gate --sprint` and
+        # `gate --all` run both and so does the `guards` CI job.
         # `python3 scripts/guard_probe.py --list` prints each probe's profile
         # and what it needs, and reading that beats reading this.
         # Everything else runs, INCLUDING `wasm`: story E1.2's note is "CI

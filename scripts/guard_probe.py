@@ -544,7 +544,15 @@ def main() -> int:
                     drove_red.add(guard_id)
                 else:
                     accepted += 1
-            mark = {"pass": f"{GREEN}red{OFF}", "fail": f"{RED}HARNESS{OFF}",
+            # `red` for a refusal probe that passed, `green` for an accept one.
+            # It printed `red` for both until the S03 review's ninth pass, so
+            # the sixteen accept probes announced the guard going red when what
+            # they proved was the guard exiting 0. In a harness whose stated
+            # premise is that a wrong result read as success voids a proof, the
+            # per-probe instrument read wrong.
+            passed = (f"{GREEN}red{OFF}" if probe.polarity == "refuse"
+                      else f"{GREEN}green{OFF}")
+            mark = {"pass": passed, "fail": f"{RED}HARNESS{OFF}",
                     "known-defect": f"{RED}defect{OFF}",
                     "error": f"{RED}error{OFF}"}[outcome]
             print(f"  {mark:18} {probe.id}")

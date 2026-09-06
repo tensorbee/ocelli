@@ -142,10 +142,33 @@ jobs:
       # month arrive with its test: the author sees this red in CI on the push
       # that adds the refusal, rather than discovering it later by hand.
       #
-      # The probes needing cargo, npm or wasm-pack are in `guards-deep`, which
-      # is the job at the end of this file and is deliberately not on
-      # pull_request.
+      # The probes needing a toolchain are in `guards-deep`, the step below,
+      # and it runs here on every event since the S03 review's ninth pass.
       - run: bin/ocelli.sh gate guards
+      # `guards-deep` WAS a separate job at the end of this file, gated to
+      # push-to-main and workflow_dispatch, and both reasons written for that
+      # gate were false. The first said npm and wasm-pack, which pass 8
+      # corrected. The second said "a runner has to install the toolchain",
+      # and this job installs `dtolnay/rust-toolchain@1.97.1`,
+      # `Swatinem/rust-cache@v2`, python and node four steps above. The deleted
+      # job added `targets: wasm32-unknown-unknown` and nothing else, and no
+      # deep probe needs it: all 41 declare `needs="cargo"`, which
+      # `python3 scripts/guard_probe.py --list` prints.
+      #
+      # What that cost bought was the wrong way round. Every `lint-policy`
+      # probe is a deep probe, the review keeps finding holes in exactly those,
+      # and they were unwatched on the pull request that would weaken them.
+      #
+      # The price, MEASURED on the development machine rather than guessed: the
+      # deep profile takes 23.8s against the floor profile's 15.9s, and the
+      # deep profile is a strict SUPERSET of the floor one, so this step re-runs
+      # the probes the step above already ran. About 8s of the 24 is new
+      # coverage and about 16s is duplication. The duplication is kept
+      # deliberately: removing it would mean `gate guards` running a different
+      # probe set here from the one a developer gets, and a gate that does
+      # different things in different places is the failure this whole harness
+      # exists to catch.
+      - run: bin/ocelli.sh gate guards-deep
       # The manifest's shape AND its coverage, neither of which needs the
       # corpus itself. `--coverage` calls load() first, so it subsumes
       # `--manifest-only` rather than replacing it. This is the half of the
@@ -282,34 +305,9 @@ jobs:
       # because it is the one with wasm-pack.
       - run: bin/ocelli.sh gate panic
 
-  guards-deep:
-    name: Guard probes needing a toolchain
-    # F-X009, and the trigger is a deliberate cost decision rather than an
-    # oversight. Every probe outside the floor declares `needs="cargo"`, and
-    # none of them needs npm or wasm-pack, which an earlier version of this
-    # comment claimed. Read the current answer rather than this sentence:
-    # `python3 scripts/guard_probe.py --list` prints each probe's profile and
-    # what it needs. They are excluded from the floor by name in
-    # bin/ocelli.sh's --floor arm and in scripts/ci_floor_check.py's
-    # NOT_IN_FLOOR, and since the S03 review's fourth pass those two lists are
-    # compared for set equality rather than kept in step by care.
-    #
-    # State the claim precisely: a deep guard that has been weakened is caught
-    # on MERGE TO MAIN, or on a manual dispatch, and not on the pull request
-    # that weakened it. That is the strongest claim this cost allows and the
-    # story does not word it more strongly.
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.97.1
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - run: bin/ocelli.sh gate guards-deep
+# The `guards-deep` JOB used to sit here, gated to push-to-main and
+# workflow_dispatch. The S03 review's ninth pass moved its one step into the
+# `guards` job above, where the toolchain it needs is already installed, and
+# the reasoning is written at that step. A deep guard that has been weakened
+# is now caught on the pull request that weakened it, which is what the story
+# wanted and what neither of the two recorded reasons was buying.

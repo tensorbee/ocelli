@@ -108,4 +108,16 @@ test("the instrument is compared separately from the machine", () => {
     "an instrument key the recorded side carries and this run does not was " +
       "read as a match");
   assert.deepEqual(richerBaseline.differing, ["gpu"]);
+  // `differing` is SORTED, and every case above has one element, so the
+  // `.sort()` was doing nothing any test could see. It goes into the run
+  // record, and a list whose order follows `Object.keys` order follows
+  // insertion order, so the same disagreement between the same two records
+  // reads differently depending on which side captured which field first.
+  // Three at once, declared in an order the sort has to change.
+  const several = sameInstrument(
+    { node: "v24.16.0", playwright: "1.62.1", chromium: "142.0.1" },
+    { node: "v24.17.0", playwright: "1.62.2", chromium: "143.0.1" },
+  );
+  assert.deepEqual(several.differing, ["chromium", "node", "playwright"],
+    "the differing list is not in a stable order");
 });

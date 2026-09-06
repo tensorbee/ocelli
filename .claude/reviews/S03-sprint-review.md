@@ -124,6 +124,7 @@ and a mutation is an input to a test: it derives from the specification too.
 | 6 | Three reviewers. Six defects, against twenty-one and thirty-four before. The comparator's white-pixel exclusion carried a wrong consequence of PS3.3 for the fourth consecutive pass. A TOML trailing comment was the fifth route past the lint policy. Eight refusals in scanned guard files, including gate A4's wasm size ceiling, were invisible to the scanner | remediated |
 | 7 | Three reviewers. Seventeen defects, and the count rose because the sweep widened. Six mutations left the suite green, two of them on paths whose rationale is written out at length in the source. The harness's own inverted-success refusal was watched by nothing. The lint policy took a sixth and a seventh route | remediated |
 | 8 | Three reviewers. **The comparator returned zero defects**, the first clean area of the sprint, and reproduced all five of pass 7's claims independently. Six defects elsewhere: the eighth and ninth routes past the lint policy, a declared exception nothing ratcheted, and a 68-mutation sweep finding seven tests that cannot fail | remediated |
+| 9 | Three reviewers. **The comparator was clean a second time.** Ten defects elsewhere, and the lint-policy sequence finally got a diagnosis rather than a tenth route: the guard RECONSTRUCTS the compiled file set by hand. HLD 17.2's central architectural rule was found guarded by nothing | remediated |
 
 ### Pass 1's three blocking defects, which this record used to omit
 
@@ -480,9 +481,68 @@ cost and the recorded fill rate collapses about seventeen times, which is
 deviation D-07's misdetection arriving from the direction the resolver exists to
 catch.
 
+## Pass 9, and the two answers worth keeping
+
+**The comparator was clean a second time**, and its reviewer derived the
+`255 | w` result independently and found it stronger than stated: it holds for
+every integer width, not only the twelve tabulated, because `u_end` lies in
+`(1/255)Z` and the largest non-integer fraction available is `254/255`, which
+is below `509/510`. So a band of that measure ending open at an integer holds
+no integer exactly when the endpoint is one. The area has now been reviewed
+twice with no defect found either time.
+
+**The lint policy got a diagnosis instead of a tenth route.** Nine rounds in,
+the reviewer named the class rather than the input: *"a file clippy compiles
+that the guard does not read"*, and the guard still RECONSTRUCTS that set by
+hand, now from three hand-picked keys rather than two. Every pass since the
+fifth found a new key to the same set, and pass 9 found a fourth, `include!`.
+
+rustc reports the exact set in its dep-info files, and the remediation
+**measured four things and declined to use it**: a stale `.d` narrows in
+silence, freshness by mtime refuses after every keystroke, making it fresh
+costs a `cargo check --workspace --all-targets` measured at 10.8 seconds inside
+every probe's sandbox on a gate that compiles nothing today, and a workspace
+that does not compile yields no dep-info at all. So the reconstruction stays and
+is now DECLARED as one: `member_sources`'s docstring, the OK line and
+`docs/lld/guards.md` all say four keys have been found, in place of "Every
+`.rs` file a workspace member compiles", which is what they said and which was
+false. **A guard that says what it does not know is worth more than one that
+overstates what it covers**, and that is the honest end of this sequence rather
+than a claim that it is closed.
+
+Two structural fixes did land. The cargo config is parsed with `tomllib` rather
+than matched with a regex anchored at the start of a line, which was defeated by
+TOML's dotted and quoted key spellings, and `NESTED_CASE`'s keyword list is now
+derived from `SHELL_INTRODUCERS` rather than written a second time beside it, so
+the two cannot drift again.
+
+**And `guards-deep` moved onto every pull request.** Its trigger had been
+justified twice, first by a clock and then by a toolchain, and neither survived
+contact with `ci.yml`: the `guards` job that runs on every pull request already
+installs the pinned toolchain, and the deep job added only a wasm32 target no
+deep probe needs. The consequence had been that every `lint-policy` probe, the
+ones this review kept finding holes in, was unwatched on the pull request that
+would weaken them. It costs about 24 seconds on a runner that already has the
+toolchain.
+
+**HLD 17.2's rule was guarded by nothing.** `packages/core/src/bulk.ts` could be
+rewritten into the exact shape its own header quotes as "the classic failure"
+with `eslint` and `vitest` both green. The two guards cancelled: `bulk.ts` is in
+`ALLOWED_TO_DISABLE`, correctly, because it is the one file permitted to build
+the view, and there was no `bulk.test.ts`. `writeFrame` ships from the published
+index. The test now makes the ordering assertable by growing linear memory
+inside `alloc`, which detaches the previous buffer, so a view hoisted above the
+allocation reads a buffer that no longer exists.
+
 ## What is still open, and it is declared rather than hidden
 
 - **G-02 and G-04**, the two remaining declared guard holes. F-X014.
+- **`close-preflight` reports on a stale source.** It reads each feature's
+  last per-feature review, all recorded at pass 1 before nine sprint-level
+  passes and nine remediation commits, and its verification check accepts a
+  recorded sprint profile with no tree hash. Its green is true about a
+  different question. F-X018, and the mitigation is that `/close-sprint` runs
+  `gate --sprint` itself.
 - **A device is requested on one adapter and no other is tried**, so a
   host with a broken driver beside a working one resolves a tier that
   renders nothing. F-X016, and the cost is the evidence design rather

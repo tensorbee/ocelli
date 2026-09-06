@@ -144,6 +144,31 @@ group("readPanicRecord", () => {
   });
 
   /**
+   * **The location is the TRAILING one**, which is what `LOCATION`'s `$`
+   * anchor is for and what nothing asserted. Rust's panic hook appends
+   * ` at file:line:column` to the end of the message, so a `file:line:column`
+   * appearing earlier is part of what the panic said and not where it
+   * happened. A message quoting one path while panicking in another is the
+   * ordinary shape of an assertion failure that names a file.
+   *
+   * Without the anchor the regex takes the FIRST match, so this test is the
+   * only thing separating the two. It is diagnostic rather than arithmetic,
+   * which is why it is one case: a wrong location sends a reader to the wrong
+   * file, it does not produce a wrong pixel.
+   */
+  it("takes the trailing location and not an earlier one", () => {
+    const wasm = memoryWith(PTR, (view, bytes) => {
+      writeRecord(view, bytes, {
+        message:
+          "assertion failed at crates/a/src/one.rs:1:2 at crates/b/src/two.rs:33:4",
+      });
+    });
+    expect(readPanicRecord(wasm, PTR, PANIC_RECORD_BYTES)?.location).toBe(
+      "crates/b/src/two.rs:33:4",
+    );
+  });
+
+  /**
    * A message that filled the buffer is reported as truncated. The core clamps
    * the length to capacity, and a length larger than capacity, which a newer
    * or damaged core could write, is clamped again here rather than trusted.

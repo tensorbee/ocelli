@@ -930,8 +930,8 @@ author, and one was re-run independently at integration with its control green.
 pure suites and 5 in a browser suite, and both statements have moved: the
 review's fourth pass took the module-scope `playwright` import out of
 `wasm_cold_start.mjs`, so `cold_start_test.mjs` is in the floor and only ONE of
-its seven cases needs a browser, and the pure suites have grown since. The
-`bench` arm of `bin/ocelli.sh gate` names the files and `node --test`
+its five cases needs a browser, and the four pure suites have grown since. The
+`bench` arm of `bin/ocelli.sh gate` names the five files and `node --test`
 prints the totals, reporting the browser case as skipped unless
 `OCELLI_BENCH_BROWSER=1` is set.
 **Fixture provenance.** No DICOM arithmetic. The one recorded figure states its
@@ -1450,6 +1450,49 @@ this section and `f51a9ea` had also rewritten F-011's story entry in place.
 the passes are recorded here per pass rather than left in `git log`. Both were
 written from the two commit messages, which
 `git log --oneline --grep='^S03, sprint review pass' 36adc98..HEAD` lists.
+
+### Pass 9, and this section's argument turned on pass 8
+
+Passes 7 and 8 added no subsection of their own, so the sequence above stops at
+pass 6 and the paragraph before this one is the last thing pass 7 wrote. That
+gap is recorded rather than filled, because writing those two subsections now
+would be this section inventing its own history from the outside.
+
+**Pass 8 rewrote F-006's entry in place, and the edit has been reverted.**
+`828037e` changed "only ONE of its five cases needs a browser" to "its seven
+cases" and "the four pure suites" to "the pure suites", in the file whose
+fourth line says **Never edit a prior entry.** The correction was factually
+right, which is what makes it the clearest case in this sprint: a true
+correction applied by the forbidden method leaves the entry looking as though
+it had always been true, and nothing tells the next reader the claim was ever
+re-measured. `git show 828037e -- docs/sprints/AS_BUILT.md` is the whole of that
+edit and it is six lines. F-006's entry now reads as it did at completion, and
+the correction is here:
+
+| F-006's entry as written | What the command says |
+|--------------------------|-----------------------|
+| `cold_start_test.mjs` has five cases and one needs a browser | Seven cases, one of which needs a browser. `node --test tools/bench/tests/cold_start_test.mjs` prints the total, and the browser case reports as skipped without `OCELLI_BENCH_BROWSER=1` |
+| the `bench` arm names the five files | It names six since `828037e` added `paths_test.mjs`. `grep -o 'tools/bench/tests/[a-z_]*\.mjs' bin/ocelli.sh \| sort -u \| wc -l` is the count, and `ls tools/bench/tests/*.mjs \| wc -l` is what exists |
+
+**F-011's `**Tests added.**` breakdown does not sum to its own headline.** The
+entry says 64 added and then lists 42 unit, 10 tolerance fixture, 5 VOI
+divergence fixture, 6 geometry fixture and 2 property, which is 65. Pass 1
+wrote 65 with this breakdown beside it and pass 7 deleted the trailing clause
+and left the two halves disagreeing, so the file cannot say which number is
+wrong and neither can this correction: the diff those figures were counted
+against is gone. `cargo test -p ocelli-oracle --all-targets -- --list` counts
+the crate today, and the entry already says the crate total is not transcribed
+for exactly this reason. Treat the 64 and the breakdown as one unrecoverable
+figure rather than as two claims one of which is right.
+
+**F-011's "the oracle's twelve suites to 210 in total" is point-in-time and is
+read as current.** It was true when written. `node --test
+tools/oracle/tests/*_test.mjs` prints what the twelve suites hold now, and
+`ls tools/oracle/tests/*_test.mjs | wc -l` prints that there are still twelve.
+The figure is left in the entry because it is what was believed at completion,
+which is the whole property of this file, and it is named here so that a reader
+who needs today's number has the command rather than the sentence. Smell 7
+above is the evidence that this file is not in fact read as point-in-time.
 
 **Notes for future sessions.**
 - **A count and the mechanism it describes must be edited by the same hand or

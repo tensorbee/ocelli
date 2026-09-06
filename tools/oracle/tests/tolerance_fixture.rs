@@ -17,9 +17,16 @@
 //! is the substitution `SECTION_25_1_MONOCHROME` in
 //! `tools/oracle/src/tolerance.rs` spends a paragraph establishing that no
 //! lint requires: `scripts/prose_check.py` covers no Rust source at all.
-//! Reproduce with `python3 -c "import sys; sys.path.insert(0, 'scripts');
-//! import prose_check; print(prose_check.in_scope('tools/oracle/tests/
-//! tolerance_fixture.rs'))"`, which prints `False`. A quotation labelled
+//! Reproduce by asking the checker itself, and note the path argument is one
+//! unbroken string, which an earlier wrapping of this comment split so it
+//! could not be pasted:
+//!
+//! ```text
+//! python3 -c "import sys; sys.path.insert(0, 'scripts'); import prose_check;
+//!     print(prose_check.in_scope('tools/oracle/tests/tolerance_fixture.rs'))"
+//! ```
+//!
+//! It prints `False`. A quotation labelled
 //! verbatim that is not verbatim costs the label its meaning, and the
 //! constant this file's own tests compare against carries the real
 //! characters.

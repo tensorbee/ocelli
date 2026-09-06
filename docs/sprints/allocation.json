@@ -4097,6 +4097,27 @@
       "depends_fids": [
         "F-005"
       ]
+    },
+    {
+      "fid": "F-X018",
+      "eid": "Y1.13",
+      "phase": "P1",
+      "epic": "EY Sprint follow-ups",
+      "epic_key": "EY",
+      "story": "Make close-preflight see the sprint review, and key its verification on the tree it is about",
+      "layer": "Build",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids_declared": [
+        "F-X009"
+      ],
+      "notes": "python3 scripts/sprint_workflow.py close-preflight prints OK: S03 is ready to close on a tree that had just taken nine sprint-level review passes and eight remediation commits, the last of which found HLD 17.2's central architectural rule guarded by nothing. THE GREEN IS NOT WRONG, IT IS ABOUT A DIFFERENT QUESTION. cmd_close_preflight reads the last entry of each feature's reviews list, which /complete-feature writes per F-ID at completion. Every S03 row in .claude/scratch/S03-run.json records pass 1 with zero defects, F-X007 records pass 2, and the sprint-level review loop that WORKFLOW.md step 5 describes writes nothing into that structure at all. So the preflight is structurally blind to the review that actually found this sprint's defects, and it says so in the language of success, which is the exact shape AGENTS.md already names about git add -N: the guard answered a question about an empty set. SECOND AND SEPARATELY, sprint_verified accepts any recorded profile=sprint entry with result=pass and the entries carry no tree hash, so a verification taken eight commits ago still satisfies it. The mechanism to fix that already exists and is not used: .claude/verify-ledger.json keys on git write-tree and scripts/verify_ledger.py check-commit asserts the trailer's tree matches the commit's. THE COST IS THE STATE SHAPE AND NOT THE CHECK. S03-run.json has no place to record a sprint-scope review, so the schema gains one, /microscope at sprint scope has to write it, and the preflight then requires the LATEST sprint-level pass to be zero-defect and zero-smell rather than the per-feature ones. The verification half should record the tree hash beside each entry and refuse one whose tree is not the current index, which is the rule CI already applies to the Ocelli-Verify trailer. Note the interaction with F-X009's census, which will want a catalogue entry for the new refusal, and note that .claude/scratch/ is gitignored so nothing here is a tracked-file change. MITIGATION, STATED SO THE STORY IS NOT OVER-SOLD: /close-sprint runs gate --sprint itself and no defect reached main because of this, so the failure is in the evidence rather than in an outcome. That is why it is one week and not a blocker.",
+      "milestone": "M1",
+      "sprint": "S04",
+      "added": true,
+      "depends_fids": [
+        "F-X009"
+      ]
     }
   ]
 }

@@ -13,7 +13,7 @@
 
 use wgpu::{CommandEncoder, Device, Queue};
 
-use crate::caps::Caps;
+use crate::caps::{Caps, compute_available};
 
 /// The device, the queue and the capabilities they resolved to, owned together.
 ///
@@ -90,9 +90,20 @@ impl GpuContext {
     /// kernel with no fallback reports its feature unavailable rather than
     /// quietly producing a different answer. Section 31, and deviation D-07's
     /// generalisation of it.
+    ///
+    /// **The decision is [`crate::caps::compute_available`] and this only
+    /// forwards.**
+    /// It was written out here, and `GpuContext::new` needs a real device, so
+    /// the one decision in this module was reachable by no test in the CI
+    /// floor: mutating its `&&` to `||` survived nine sprint-review passes.
+    /// `lib.rs` already says where a decision belongs, "everything that can be
+    /// WRONG about a tier is in `caps`, which needs no adapter to test", and
+    /// the arithmetic being here contradicted it. A forwarder is normally a
+    /// construct this repository refuses, and it is the right shape in this one
+    /// case because the alternative is the decision existing twice.
     #[must_use]
     pub fn supports_compute(&self) -> bool {
-        self.caps.compute && self.caps.tier.supports_compute()
+        compute_available(&self.caps)
     }
 }
 

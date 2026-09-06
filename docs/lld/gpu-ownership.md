@@ -1,7 +1,7 @@
 # GPU ownership
 
 **F-IDs that contributed:** F-004, F-005, F-008
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-06
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
 mechanism.
@@ -89,7 +89,11 @@ The weakest of the three, and it catches what the other two cannot: **a crate
 creating a device it never puts in a `GpuContext` at all.** No type is involved
 in that, so no type can refuse it.
 
-Three assertions, each proved red by mutation:
+Four assertions, each proved red by mutation. `grep -c 'fail=1'
+ci/check-device-ownership.sh` prints how many the script carries, and the table
+below has one row each. It said three over a four-row table from S02 until the
+S03 review's ninth pass, which is what a count written beside the thing it
+counts does.
 
 | Assertion | Mutation that proves it |
 |-----------|------------------------|
@@ -109,6 +113,21 @@ exactly one crate holding it, so deleting the contract has to fail too.
 | A, WebGPU | Full. Compute kernels are tier A by definition, and `Caps.compute` says so |
 | B, WebGL2 | The contract holds and no kernel runs, because tier B has no compute shaders. A kernel whose `tier()` is A with no declared fallback marks its feature unavailable |
 | C, CPU | Not constructible. A tier C session has no device, so it has no `GpuContext` and no `ComputeCtx`. Every kernel resolves through its section 31 fallback or reports unavailable |
+
+**Whether a kernel may run is one predicate and it lives in `caps`.**
+`ocelli_render::caps::compute_available` requires BOTH
+`caps.compute`, which is what the adapter reports, and
+`caps.tier.supports_compute()`, which is what this project resolved to. It is a
+conjunction, and `GpuContext::supports_compute` forwards to it and does nothing
+else. The conjunction is the content: an
+adapter can report compute support while D-07's combination rule has already
+resolved tier B or tier C because that adapter is a software rasteriser, so an
+`||` in that expression reports compute available on a tier that cannot run it. It was
+written out on `GpuContext`, where `new` needs a real device and the CI floor
+has none, so nothing could reach it and the `||` mutation survived nine review
+passes. `lib.rs` states the split it now obeys: everything that can be wrong
+about a tier is in `caps`, which needs no adapter to test. The six-row truth
+table is `caps::tests`.
 
 Which of the three a session gets is F-004's, and the rule is in
 [tier-resolution.md](tier-resolution.md). The short version: three signals,

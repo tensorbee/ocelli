@@ -74,9 +74,13 @@ const CANVAS: u32 = 512;
 ///
 /// **The second half reads the number, where there is one to read.**
 /// `tools/oracle/out/` is gitignored, so it exists on a machine that has run
-/// the reference half and not in CI, and `run.mjs` writes `run.json` LAST:
-/// "this directory holds the output of one complete run that passed every
-/// boundary, or it holds nothing". So `run.json` present is the condition, and
+/// the reference half and not in CI. `run.mjs` writes `run.json` after every
+/// row sidecar and calls `discardOutput` on any later problem, so the
+/// directory holds the output of one complete run that passed every boundary
+/// or it holds nothing. **That guarantee is the discard and not the write
+/// order**, which the S03 review's ninth pass had to say because a `console.log`
+/// follows the write and an earlier version of this comment leaned on "last".
+/// So `run.json` present is the condition, and
 /// under it the worked row's sidecar must exist and must carry
 /// `black: 65536` and `blackFraction: 0.25`. A missing sidecar under a
 /// complete run means the worked case named in `docs/lld/oracle.md` no longer
@@ -281,9 +285,16 @@ fn the_rectangle_is_clamped_to_the_canvas() -> Outcome {
 /// pass, which is the substitution `SECTION_25_1_MONOCHROME` in
 /// `tools/oracle/src/tolerance.rs` spends a paragraph establishing that no
 /// lint requires: `scripts/prose_check.py` covers no Rust source at all.
-/// Reproduce with `python3 -c "import sys; sys.path.insert(0, 'scripts');
-/// import prose_check; print(prose_check.in_scope('tools/oracle/tests/
-/// geometry_fixture.rs'))"`, which prints `False`. A quotation labelled
+/// Reproduce by asking the checker itself, and note the path argument is one
+/// unbroken string, which an earlier wrapping of this comment split so it
+/// could not be pasted:
+///
+/// ```text
+/// python3 -c "import sys; sys.path.insert(0, 'scripts'); import prose_check;
+///     print(prose_check.in_scope('tools/oracle/tests/geometry_fixture.rs'))"
+/// ```
+///
+/// It prints `False`. A quotation labelled
 /// verbatim that is not verbatim costs the label its meaning.
 ///
 /// The world half, at its boundary. 5e-7 mm is inside, 1e-6 mm is AT the bound

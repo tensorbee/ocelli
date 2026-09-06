@@ -1,7 +1,7 @@
 # The guard harness
 
 **F-IDs that contributed:** F-X009
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-06
 
 A guard is any refusal this repository can produce: a script that exits 1, a
 hook that rejects a commit, a gate that fails.
@@ -449,13 +449,27 @@ harness exists to fix.
   request. What moved to push-to-main is the harness watching the guard.
 - **`guards-deep`**, not in the floor. `--profile deep` is every probe, so this
   re-runs the floor set and adds the ones that need a toolchain, plus the
-  census at `--profile deep`. Every probe it adds today declares `needs`
-  `cargo`, and none of them needs npm or wasm-pack, which
-  `python3 scripts/guard_probe.py --list` is the place to check. Its CI job
-  installs node anyway, and that is a cost nobody has trimmed rather than a
-  requirement. It runs on pushes to `main` and on dispatch, and not on
-  `pull_request`, so a weakened deep guard is caught on merge to main rather
-  than on the pull request. That is the strongest claim the cost allows.
+  census at `--profile deep`. Every probe it adds declares `needs` `cargo`, all
+  41 of them, and none needs npm or wasm-pack, which
+  `python3 scripts/guard_probe.py --list` is the place to check. **It runs in
+  the `guards` CI job on every event since the S03 review's ninth pass**, and
+  it was a separate job gated to push-to-main and dispatch until then. The two
+  reasons that gate carried were both false: the first named npm and wasm-pack
+  and the eighth pass corrected it, and the second said a runner has to install
+  the toolchain, while the `guards` job installs the pinned toolchain,
+  `rust-cache`, python and node for `gate guards` itself. The deleted job added
+  `targets: wasm32-unknown-unknown` and nothing else, and no deep probe needs
+  it. What that cost bought was the wrong way round: every `lint-policy` probe
+  is a deep probe, the review has found a route past that guard on every pass
+  since the fifth, and those probes were unwatched on the pull request that
+  would weaken them. **What is left of the floor exclusion is duplication and
+  nothing else.** The deep profile is a strict superset of the floor one, so a
+  `gate --floor` including it would run every floor probe twice. MEASURED on
+  the development machine, deep 23.8s against floor 15.9s, so about eight
+  seconds of the twenty-four is new coverage and about sixteen is the
+  duplication CI now pays deliberately. Removing it would mean `gate guards`
+  running a different probe set in CI from the one a developer gets, which is
+  the failure this harness exists to catch.
 
 `guards-deep` is excluded by name in two places, `bin/ocelli.sh`'s `--floor`
 arm and `scripts/ci_floor_check.py`'s `NOT_IN_FLOOR`. **The mechanism that
@@ -487,30 +501,67 @@ stronger for what R5 asks, because a per-file `#![allow(unsafe_code)]` would
 silence the lint and would not silence the script. The check requires one of
 the two and names which it found.
 
-**Where that check gets its file list from, and it took three passes to
-settle.** The member set comes from `cargo metadata --no-deps`, because
+**Where that check gets its file list from, and the honest name for it is a
+RECONSTRUCTION.** The member set comes from `cargo metadata --no-deps`, because
 `[workspace] members` is not the member set. The SOURCE list under each member
-comes from `targets[].src_path`, seeded into the walk, plus a glob of the
-member directory, plus every `#[path]` module either of those declares. Each
-of the three exists because the previous shape was measured open: `crates/*`
-missed `tools/oracle` in the fifth pass, the globs missed a path dependency in
-the seventh, and the member directory missed a `[lib] path` in the eighth,
-where a crate root outside the member carrying `#![allow(clippy::pedantic)]`
-took cargo clippy from 101 to 0 while the guard read the file that is no
-longer compiled and exited 0. The glob is kept beside cargo's answer because a
+is rebuilt from four keys, and the guard does not know the set clippy compiles:
+
+1. a glob of the member directory, `rglob("*.rs")`,
+2. `targets[].src_path` from `cargo metadata`, seeded into the walk,
+3. `#[path = "..."]` on a module item, followed transitively,
+4. `include!("...")`, followed the same way, with rustc's own resolution rule,
+   which is the directory of the file the macro is written in.
+
+Each exists because the previous shape was measured open: `crates/*` missed
+`tools/oracle` in the fifth pass, the globs missed a path dependency in the
+seventh, the member directory missed a `[lib] path` in the eighth, and in the
+ninth an `include!` reached a file none of the first three names. Every one of
+those took cargo clippy from 101 to 0 with a group allow in the unread file
+while the guard exited 0. The glob is kept beside cargo's answer because a
 module reached by a plain `mod x;` is compiled and is named by no target.
 
-`.cargo/config.toml` is read by the same check, and it refuses the FLAG rather
-than the file: a cargo config is the ordinary home for an alias, a linker
-choice and a target runner. Five lint-naming flags are refused, `-A`,
-`--allow`, `-W`, `--warn` and `--force-warn`, and that list is a declared
-constant since the eighth pass because a probe can only ever write one of
-them. `--cap-lints` is refused separately at any level but `deny` or `forbid`,
+**So the class is open and it is declared rather than claimed.** The class is
+"a file clippy compiles that the guard does not read", four keys to it have been
+found, and the guard's docstring, its OK line and this paragraph all say
+"reconstructed" rather than "every `.rs` file a workspace member compiles",
+which is what the first two said through four passes in which it was false.
+
+**rustc's own answer was considered as the authority and rejected, with the
+reason in `member_sources`.** `target/<profile>/deps/*.d` lists exactly the
+files each compilation read, the `include!`d file and the `#[path]` module
+among them. It cannot be the authority here because it exists only after a
+build, a stale one narrows in silence, which was measured, freshness by mtime
+would refuse after every keystroke, making it fresh means this guard runs
+`cargo check --workspace --all-targets` at 10.8s in a clone with no `target/`
+and again inside every `lint-policy` probe sandbox, and a workspace that does
+not compile yields no dep-info at all.
+
+`.cargo/config.toml` is read by the same check and it is PARSED, with `tomllib`,
+since the ninth pass. It was matched with an `^`-anchored regex before, which
+TOML's dotted key and quoted key both defeat: `build.rustflags =
+["-Aclippy::pedantic"]` took cargo clippy from 101 to 0 while the guard printed
+"1 cargo config(s) lower no denied lint through rustflags" at exit 0. Three key
+paths are read by name, `build.rustflags`, `target.*.rustflags` and
+`env.RUSTFLAGS`, and a config that does not parse is refused rather than read
+as declaring nothing.
+
+It refuses the FLAG rather than the file: a cargo config is the ordinary home
+for an alias, a linker choice and a target runner. Five lint-naming flags are
+refused, `-A`, `--allow`, `-W`, `--warn` and `--force-warn`, and that list is a
+declared constant since the eighth pass because a probe can only ever write one
+of them. That set is a SUPERSET of what is measured to weaken: `-W` and
+`--warn` leave cargo clippy at 101 under the `clippy` gate's own `-D warnings`,
+so refusing them is a decision rather than a measurement, and the ninth pass
+corrected the guard's own claim that the set named "exactly" what weakens.
+`--cap-lints` is refused separately at any level but `deny` or `forbid`,
 because it names no lint and caps all of them, and both weakening levels have
 a probe rather than a ratchet, there being only four levels in total.
 `--force-warn` is in the first list against expectation: measured under the
 pinned 1.97.1 toolchain it outranks the `-D warnings` the `clippy` gate
-passes, so it silences a denied lint exactly as `-A` does.
+passes, so it silences a denied lint exactly as `-A` does. `env.RUSTFLAGS` is
+read and refused and is NOT a route today, measured at 101, because `[env]`
+sets a variable for the processes cargo spawns rather than for cargo's own flag
+resolution.
 
 ## What is recorded, and where
 

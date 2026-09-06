@@ -72,7 +72,7 @@ other sentence in this file**, all of which is hand-curated prose.
 
 The workspace builds to wasm and to native, and the oracle renders the corpus through cornerstone3D before any port code exists.
 
-_S01 to S05, 28 stories, 65 engineer-weeks._
+_S01 to S05, 29 stories, 66 engineer-weeks._
 
 #### Sprint S01
 
@@ -111,7 +111,7 @@ _S01 to S05, 28 stories, 65 engineer-weeks._
 
 #### Sprint S04
 
-**Goal**: CI gate: every PR renders the full corpus, Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract, One parity-target version string, and a licence in the published wasm package, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it, The reference's own SIGMOID width divergence, and what D14's bound says about it, Price the HTJ2K decoder route after gate A1 failed, Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing, Execute the skills' worked examples, because the skills gate asserts nothing about their numbers, Try the next adapter when the best candidate cannot open a device, and record what was attempted, Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting.
+**Goal**: CI gate: every PR renders the full corpus, Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract, One parity-target version string, and a licence in the published wasm package, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it, The reference's own SIGMOID width divergence, and what D14's bound says about it, Price the HTJ2K decoder route after gate A1 failed, Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing, Execute the skills' worked examples, because the skills gate asserts nothing about their numbers, Try the next adapter when the best candidate cannot open a device, and record what was attempted, Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting, Make close-preflight see the sprint review, and key its verification on the tree it is about.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
@@ -128,6 +128,7 @@ _S01 to S05, 28 stories, 65 engineer-weeks._
 | F-X015 | Y1.10 | Execute the skills' worked examples, because the skills gate asserts nothing about their numbers | Build | 1w |
 | F-X016 | Y1.11 | Try the next adapter when the best candidate cannot open a device, and record what was attempted | Rust | 1w |
 | F-X017 | Y1.12 | Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting | Build | 2w |
+| F-X018 | Y1.13 | Make close-preflight see the sprint review, and key its verification on the tree it is about | Build | 1w |
 
 #### Sprint S05
 

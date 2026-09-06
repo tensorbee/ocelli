@@ -83,8 +83,11 @@ Tier C reuses `ocelli-pixel` rather than reimplementing the LUT chain. §18
 requires that arithmetic to exist exactly once, and a second copy behind a tier
 check is the same defect as a second copy anywhere else, except that it only
 runs on hardware nobody develops on. Spike gate **A7** (`docs/spikes/GATES.md`)
-decides whether tier C is worth building at all, and F-X001 to F-X004 are the
-stories.
+decides whether tier C is worth building at all, and F-X001 to F-X005 are the
+stories. `grep -n 'F-X00[0-9]' docs/sprints/BACKLOG.md` lists them, and X1 is
+the epic. This said F-X004 while `docs/spikes/A7-tier-c.md` said "see F-X004 and
+F-X005", so the range here excluded the story that decides CPU volume
+rendering.
 
 ## Hard rules
 

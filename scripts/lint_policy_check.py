@@ -201,6 +201,39 @@ reason `REFUSED_GROUPS` four lines below it already was: a probe can only ever
 write one of the five names, and narrowing the set to that one leaves the guard
 correct about a smaller rule and every probe green.
 
+## Two more routes, both measured in the S03 review's ninth pass
+
+**`include!` is a fourth way to compile a file.** The set of files this check
+reads is RECONSTRUCTED rather than known, and every pass since the fifth has
+found a new key to it: the member glob, `targets[].src_path`, `#[path]`, and
+now this. MEASURED under the pinned 1.97.1 toolchain on a minimal crate
+carrying `cast_possible_truncation = "deny"`: `crates/a/src/lib.rs` reading
+`include!("../../../outside/hidden.rs")`, where `hidden.rs` carries
+`#[allow(clippy::pedantic)]` on a `#[path = "inner.rs"] pub mod` and the module
+holds one `x as i32`, takes `cargo clippy --workspace --all-targets --
+-D warnings` from 101 to 0, and `member_sources` returned only
+`crates/a/src/lib.rs`. Planted in a full copy of this repository the same pair
+holds and this check printed its usual "46 .rs file(s)" line at exit 0.
+`member_sources` follows `include!` now, refuses one it cannot resolve, and its
+docstring states plainly that the set is reconstructed and how, because it
+claimed "every `.rs` file a workspace member compiles" through four passes in
+which that sentence was false. **rustc's own dep-info was considered as the
+authority and rejected with a reason**, which `member_sources` records in full.
+
+**`RUSTFLAG_KEY`'s `^` anchor could not see a dotted or quoted key.** TOML
+spells `[build] rustflags = [...]` three ways and the regex matched one of
+them. MEASURED under the pinned 1.97.1 toolchain: `build.rustflags =
+["-Aclippy::cast_possible_truncation"]` takes cargo clippy from 101 to 0,
+`build.rustflags = ["-Aclippy::pedantic"]` does, `[build]` with `"rustflags" =
+[...]` does, and `target."cfg(all())".rustflags = [...]` does, while
+`_flag_values` returned `[]` for each. Planted in a full copy of this
+repository this check printed "1 cargo config(s) lower no denied lint through
+rustflags" at exit 0, which is the eighth pass's `--cap-lints` outcome exactly.
+The config is parsed with `tomllib` now and the three keys are read by NAME,
+which retires the whole regex-against-TOML class from that function. The
+`lint-policy` limit already recorded that a dotted key defeats `LINT_ROW`, so
+the lesson had been learned in one parser here and not in the other.
+
 ## The one departure, declared rather than discovered
 
 `unsafe_code = "deny"` is NOT in `Cargo.toml`. HLD 27.2 R5 is enforced instead
@@ -221,6 +254,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -455,12 +489,43 @@ def member_patterns(text: str) -> tuple[list[str], list[str]]:
     return listing("members"), listing("exclude")
 
 
-# A `rustflags` or `RUSTFLAGS` assignment anywhere in a cargo config, which is
-# every table cargo reads them from at once: `[build]`, `[target.<triple>]`,
-# `[target.'cfg(...)']` and an `[env]` entry setting the variable. Named by KEY
-# rather than by table, so a table this parser has never heard of cannot open
-# the route by being new.
-RUSTFLAG_KEY = re.compile(r"^[^\S\n]*(?:rustflags|RUSTFLAGS)\s*=\s*", re.M)
+# The cargo-config keys that carry rustflags, read from a PARSED document
+# rather than matched in the text. `RUSTFLAG_KEY` was
+# `^[^\S\n]*(?:rustflags|RUSTFLAGS)\s*=\s*`, whose `^` anchor requires the key
+# to start its line, and TOML has two spellings that do not: the dotted key and
+# the quoted key. MEASURED under the pinned 1.97.1 toolchain on a minimal crate
+# carrying `cast_possible_truncation = "deny"` and one `x as i32`, with the
+# `clippy` gate's own `-D warnings` passed:
+#
+#     no .cargo/config.toml                                  exits 101
+#     build.rustflags = ["-Aclippy::cast_possible_truncation"] exits 0
+#     build.rustflags = ["-Aclippy::pedantic"]                exits 0
+#     [build] then "rustflags" = ["-Aclippy::pedantic"]       exits 0
+#     target."cfg(all())".rustflags = ["-Aclippy::pedantic"]  exits 0
+#
+# and `_flag_values` returned `[]` for each of the first three. Planted in a
+# full copy of this repository the guard printed "1 cargo config(s) lower no
+# denied lint through rustflags" at exit 0, which is the eighth pass's
+# `--cap-lints` outcome exactly: a positive assertion of the false thing.
+#
+# `tomllib` is stdlib on 3.11 and up and `pyproject.toml` requires 3.12, so
+# there is no reason to read TOML with a regex here. That removes the whole
+# regex-against-TOML class from this function, and the `lint-policy` limit
+# already recorded that a dotted key defeats `LINT_ROW`, so the lesson had been
+# learned in one parser of this file and not in the other.
+#
+# `[env] RUSTFLAGS` is read too and it is NOT a route today. MEASURED the same
+# way: `[env] RUSTFLAGS = "-Aclippy::pedantic"` leaves cargo clippy at 101,
+# because `[env]` sets the variable for the processes cargo spawns rather than
+# for cargo's own flag resolution, and `CARGO_ENCODED_RUSTFLAGS` there is 101
+# as well. It is refused anyway, because it is the same intent written one
+# table over and this guard should not depend on cargo's precedence between the
+# two staying where it is.
+BUILD_TABLE = "build"
+TARGET_TABLE = "target"
+ENV_TABLE = "env"
+RUSTFLAGS_KEY = "rustflags"
+RUSTFLAGS_VARIABLE = "RUSTFLAGS"
 
 # The flags that lower a lint's level, NAMES ONLY, so the declared constant
 # ratchet in scripts/guards/catalogue.py records the set that decides how
@@ -523,58 +588,83 @@ def _cargo_configs() -> list[Path]:
     return sorted(found)
 
 
-# A `rustflags` value that carries no flag at all. `rustflags = []` is a
-# legitimate thing to write, most often left behind when the last flag is
-# removed, and `tokens or None` read it as "a value this parser cannot read"
-# and refused it. An empty list of arguments lowers nothing, so it is an empty
-# ANSWER rather than no answer, and the two must not share a return value in a
-# function whose `None` is a refusal.
-EMPTY_FLAGS = re.compile(r"""\[\s*\]|""|''""")
+def _argument_tokens(value: object) -> list[str] | None:
+    """A rustflags value as a list of arguments, or `None` when unreadable.
 
+    cargo accepts two forms and both are measured to work: an ARRAY, whose
+    elements are passed to rustc one argument each, and a bare STRING, which
+    cargo splits on whitespace. Anything else is a value this function did not
+    read, and there are arguments reaching rustc either way, so it is `None`
+    and the caller refuses.
 
-def _flag_values(text: str) -> list[tuple[str, list[str] | None]]:
-    """Each `rustflags` assignment's tokens, or `None` when unreadable.
+    An array element is split on whitespace as well, which cargo does not do.
+    That is deliberate and it is the fail-CLOSED direction: `["-A clippy::pedantic"]`
+    is one argument rustc rejects rather than a flag it honours, so splitting
+    can only ever make this function see a flag it would otherwise miss, and
+    the bare-string form needs the split anyway.
 
-    An array's elements and a bare string's whitespace-separated words are the
-    same list of arguments to rustc, which is why both forms are measured to
-    work and both are read here.
-
-    An UNCLOSED array is `None`, and so is a value holding something that is
-    not a string literal, because in both cases there are arguments reaching
-    rustc that this function did not read. An array or string that is empty is
-    an empty list, which is the distinction the S03 review's eighth pass found
-    collapsed.
+    An array or string that is EMPTY is an empty list rather than `None`.
+    `rustflags = []` is what a config holds when the last flag is removed, it
+    lowers nothing, and an empty ANSWER must not share a return value with no
+    answer in a function whose `None` is a refusal.
     """
-    values: list[tuple[str, list[str] | None]] = []
-    for match in RUSTFLAG_KEY.finditer(text):
-        rest = text[match.end():]
-        closed = True
-        if rest.startswith("["):
-            depth = 0
-            end = 0
-            for index, char in enumerate(rest):
-                if char == "[":
-                    depth += 1
-                elif char == "]":
-                    depth -= 1
-                    if depth == 0:
-                        end = index + 1
-                        break
-            span = rest[:end] if end else ""
-            closed = bool(end)
-        else:
-            span = rest.splitlines()[0] if rest else ""
-        quoted = re.findall(r'"([^"]*)"|\'([^\']*)\'', span)
-        tokens = [word for pair in quoted for cell in pair
-                  for word in cell.split() if cell]
-        label = " ".join(span.split())[:120]
-        if tokens:
-            values.append((label, tokens))
-        elif closed and EMPTY_FLAGS.fullmatch(span.strip()):
-            values.append((label, []))
-        else:
-            values.append((label, None))
-    return values
+    if isinstance(value, str):
+        return value.split()
+    if isinstance(value, list):
+        if not all(isinstance(item, str) for item in value):
+            return None
+        return [word for item in value for word in item.split()]
+    return None
+
+
+def _config_flag_values(
+        text: str) -> tuple[list[tuple[str, list[str] | None]], str]:
+    """Every rustflags setting a cargo config declares, and why not.
+
+    Returns the settings as (key path, arguments) and a refusal reason that is
+    the empty string when the document parsed. A cargo config that is not TOML
+    is REFUSED rather than read as declaring nothing: cargo would refuse it
+    too, and a parse failure read as an empty answer is this file's own named
+    failure of answering a question about an empty set in the language of
+    success.
+
+    Three key paths, named because cargo names them: `build.rustflags`,
+    `target.<any>.rustflags` and the `RUSTFLAGS` entry of `[env]`. Read from a
+    parsed document, so TOML's dotted and quoted spellings of each are the same
+    key here, which the `^`-anchored regex this replaced could not see.
+
+    An `[env]` entry may be a bare string or the `{ value = "...", force =
+    true }` table, and both are read.
+    """
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        return [], str(error)
+    if not isinstance(document, dict):  # pragma: no cover, tomllib returns one
+        return [], "the document is not a table"
+
+    found: list[tuple[str, list[str] | None]] = []
+
+    def top(name: str) -> dict:
+        """One top-level table, or an empty one. NOT `table()` below, which
+        reads a `[workspace.lints.*]` table out of `Cargo.toml`'s text."""
+        value = document.get(name)
+        return value if isinstance(value, dict) else {}
+
+    if RUSTFLAGS_KEY in top(BUILD_TABLE):
+        found.append((f"{BUILD_TABLE}.{RUSTFLAGS_KEY}",
+                      _argument_tokens(top(BUILD_TABLE)[RUSTFLAGS_KEY])))
+    for triple, settings in sorted(top(TARGET_TABLE).items()):
+        if isinstance(settings, dict) and RUSTFLAGS_KEY in settings:
+            found.append((f"{TARGET_TABLE}.{triple}.{RUSTFLAGS_KEY}",
+                          _argument_tokens(settings[RUSTFLAGS_KEY])))
+    entry = top(ENV_TABLE).get(RUSTFLAGS_VARIABLE)
+    if entry is not None:
+        if isinstance(entry, dict):
+            entry = entry.get("value")
+        found.append((f"{ENV_TABLE}.{RUSTFLAGS_VARIABLE}",
+                      _argument_tokens(entry)))
+    return found, ""
 
 
 def rustflag_problems() -> list[str]:
@@ -602,9 +692,37 @@ def rustflag_problems() -> list[str]:
     push a real need into an undeclared workaround where nothing watches it.
     Refusing an `-A`, `--allow`, `-W`, `--warn` or `--force-warn` that names one
     of HLD 27.1's five lints or one of `REFUSED_GROUPS`, and any `--cap-lints`
-    level other than `deny` or `forbid`, names exactly the things measured to
-    switch a denied lint off, and it fails CLOSED on a `rustflags` value this
-    parser cannot read at all.
+    level other than `deny` or `forbid`, covers everything measured to switch a
+    denied lint off, and it fails CLOSED on a `rustflags` value this parser
+    cannot read at all.
+
+    That set is a SUPERSET of what is measured to weaken, and this sentence
+    said "exactly" until the S03 review's ninth pass. `-W` and `--warn` are in
+    it and neither switches a denied lint off under the `clippy` gate's own
+    `-D warnings`: MEASURED under the pinned 1.97.1 toolchain,
+    `-Wclippy::cast_possible_truncation` exits 101,
+    `--warn=clippy::cast_possible_truncation` exits 101 and
+    `-Wclippy::pedantic` exits 101, because the lint is still a warning and
+    `-D warnings` promotes it. Refusing them is still right, because they lower
+    the level the manifest sets and the gate's `-D warnings` is the only thing
+    holding the line, and it is right by decision rather than by measurement.
+    `--force-warn` is the one in that family that really does weaken, measured
+    at 0 and recorded beside `ALLOWING_FLAGS`.
+
+    **The config is PARSED since the S03 review's ninth pass, and the SPELLING
+    was the hole.** `RUSTFLAG_KEY` anchored on `^`, so TOML's dotted key and
+    quoted key were never matched at all. MEASURED under the pinned 1.97.1
+    toolchain on the minimal crate: `build.rustflags =
+    ["-Aclippy::cast_possible_truncation"]` takes cargo clippy from 101 to 0,
+    `build.rustflags = ["-Aclippy::pedantic"]` does, `[build]` with `"rustflags"
+    = [...]` does, and `target."cfg(all())".rustflags = [...]` does, while
+    `_flag_values` returned `[]` for each. Planted in a full copy of this
+    repository the guard printed "1 cargo config(s) lower no denied lint
+    through rustflags" at exit 0, which is the eighth pass's `--cap-lints`
+    outcome exactly. `tomllib` reads the document now, which removes the whole
+    regex-against-TOML class from this function rather than one more spelling
+    of it, and a config that does not parse is refused rather than read as
+    declaring nothing.
 
     The limit, stated exactly, and it was not exhaustive until the S03 review's
     eighth pass. Two flags are OUT OF SCOPE by not existing here rather than by
@@ -617,15 +735,36 @@ def rustflag_problems() -> list[str]:
     nor the declared limit, and it is MEASURED to take cargo clippy from 101 to
     0 at `allow` and at `warn`. It has its own branch below, because it is a
     value flag rather than a lint-naming one.
+
+    One further limit, declared rather than closed: `[env] RUSTFLAGS` is read
+    and refused here and it is NOT a route today, MEASURED at 101 along with
+    `[env] CARGO_ENCODED_RUSTFLAGS`, because `[env]` sets a variable for the
+    processes cargo spawns rather than for cargo's own flag resolution.
+    Refusing it is a decision and not a measurement, and the reason is that it
+    is the same intent one table over.
     """
     problems: list[str] = []
     denied = set(REQUIRED_CLIPPY) | set(REQUIRED_RUST)
     for config in _cargo_configs():
         where = config.relative_to(ROOT).as_posix()
-        for span, tokens in _flag_values(config.read_text(encoding="utf-8")):
+        settings, unparseable = _config_flag_values(
+            config.read_text(encoding="utf-8"))
+        if unparseable:
+            problems.append(
+                f"{where} is a cargo config and does not parse as TOML "
+                f"({unparseable}). cargo refuses a config it cannot parse, so "
+                f"this is not a working state, and reading a parse failure as "
+                f"a file that declares no rustflags would answer a question "
+                f"about an empty set in the language of success. "
+                f"`build.rustflags = [\"-Aclippy::pedantic\"]` in this file is "
+                f"MEASURED to take cargo clippy from 101 to 0 on a crate that "
+                f"denies cast_possible_truncation, and a document this check "
+                f"cannot parse may hold exactly that.")
+            continue
+        for span, tokens in settings:
             if tokens is None:
                 problems.append(
-                    f"{where} sets `rustflags` to `{span}`, which this parser "
+                    f"{where} sets `{span}` to a value this parser "
                     f"cannot read as a list of arguments. A rustflags value "
                     f"reaches rustc whatever this file makes of it, and "
                     f"`-Aclippy::pedantic` there is MEASURED to take cargo "
@@ -913,11 +1052,86 @@ def manifest_members(text: str) -> tuple[list[Path], list[str]]:
 # `member.rglob("*.rs")` never opens it.
 MODULE_PATH = re.compile(r"#\[\s*path\s*=\s*\"([^\"]+)\"\s*\]")
 
+# `include!(...)`, the FOURTH key to the same set and the one none of the three
+# above reaches. It pastes another file's tokens in at this point, so that file
+# is compiled and is named by no target, no glob of the member and no `#[path]`.
+# MEASURED under the pinned 1.97.1 toolchain on a minimal crate carrying
+# `cast_possible_truncation = "deny"`: with `crates/a/src/lib.rs` reading
+# `include!("../../../outside/hidden.rs")`, that file carrying
+# `#[allow(clippy::pedantic)]` on a `#[path = "inner.rs"] pub mod` and the
+# module holding one `x as i32`, `cargo clippy --workspace --all-targets --
+# -D warnings` exits 0 against a baseline of 101. Planted in a full copy of
+# this repository, clippy went from 101 to 0 the same way and this check
+# printed the same "46 .rs file(s)" line at exit 0, having read neither file.
+#
+# TWO patterns, and the second is not a duplicate of the first. `INCLUDE_ANY`
+# finds the macro whatever its argument is, and `INCLUDE_PATH` reads the
+# argument when it is a plain string literal. An `include!` the second cannot
+# read is REFUSED by the first, because `include!(concat!(env!("OUT_DIR"),
+# "/generated.rs"))` names a real file this check cannot resolve without
+# running the build, and a generated file carrying a group allow is the same
+# hole through a path nobody typed.
+#
+# Rust's own resolution rule, and it differs from `#[path]`'s: the argument is
+# relative to the directory of the file the `include!` is written in. MEASURED
+# from the dep-info of the run above, `crates/a/src/../../../outside/hidden.rs`.
+INCLUDE_ANY = re.compile(r"\binclude!\s*[(\[{]")
+INCLUDE_PATH = re.compile(r"\binclude!\s*[(\[{]\s*(?:r#*)?\"([^\"]*)\"")
+
 
 def member_sources(member: Path,
                    roots: list[Path] | None = None
-                   ) -> tuple[list[Path], list[str]]:
-    """Every `.rs` file a workspace member compiles, and the refusals.
+                   ) -> tuple[list[tuple[Path, str]], list[str]]:
+    """A RECONSTRUCTION of the `.rs` files a member compiles, with their text.
+
+    **Read that first sentence as written.** This function does not know the
+    set clippy compiles. It rebuilds it from keys, and four keys have been
+    found so far, each by a review pass measuring the previous shape open:
+
+    1. the member directory walked with `rglob("*.rs")`, which misses a source
+       that is not under the member,
+    2. `targets[].src_path` from `cargo metadata`, which is where a manifest's
+       `[lib] path`, `[[bin]] path`, `[[test]] path`, `[[bench]] path` or
+       `[[example]] path` puts a compilation root,
+    3. `#[path = "..."]` on a module item, followed transitively,
+    4. `include!("...")`, which pastes a file in at a point and is named by
+       none of the other three.
+
+    Keys 1 to 3 were found in the fifth, seventh and eighth passes and key 4 in
+    the ninth. **The docstring here claimed "every `.rs` file a workspace member
+    compiles" through all of them, and that sentence was false every time.** It
+    is written this way now so the next reader sees the shape of the risk
+    rather than a guarantee: the class is "a file clippy compiles that this
+    function does not read", and finding a fifth key would surprise nobody.
+
+    **Why rustc's own answer is not the authority here, which is a decision.**
+    `target/<profile>/deps/*.d` lists exactly the files each compilation read,
+    the `include!`d file and the `#[path]` module among them, MEASURED on the
+    crate above as `crates/a/src/lib.rs
+    crates/a/src/../../../outside/hidden.rs
+    crates/a/src/../../../outside/inner.rs`. It is the right answer and it
+    cannot be had cheaply enough to be the one this check depends on:
+
+    - **It exists only after a build, and a stale one narrows in silence.**
+      MEASURED: with the crate built clean and the `include!` then added, every
+      `.d` still lists `crates/a/src/lib.rs` alone while cargo clippy exits 0
+      over the group allow. A guard reading that would print a smaller set and
+      pass, which is the exact failure this whole sequence is about.
+    - **Freshness cannot be checked by mtime without refusing normal work.**
+      Any edit makes every `.d` older than the sources, so a guard refusing on
+      that basis refuses on every developer run that follows a keystroke.
+    - **Making it fresh means this check builds.** MEASURED in a clone of this
+      repository with a warm registry and no `target/`,
+      `cargo check --workspace --all-targets` takes 10.8 seconds, and it would
+      be paid again inside every `lint-policy` probe, whose sandbox is a fresh
+      copy of `git ls-files` and therefore has no `target/` either. The
+      `guards` gate compiles nothing today.
+    - **A workspace that does not compile produces no dep-info at all**, so
+      every compile error would arrive as a lint-policy refusal.
+
+    So the reconstruction stays and it is declared rather than claimed. What
+    that costs is stated in the `lint-policy` entry's `limit` in
+    `scripts/guards/catalogue.py` and in `docs/lld/guards.md`.
 
     Not `src/lib.rs`. An inner attribute in `src/main.rs` is a second crate
     root and one in any module file governs that module, both measured, so a
@@ -953,8 +1167,17 @@ def member_sources(member: Path,
     A root cargo names and this pass cannot open is REFUSED, on the same
     argument as an unresolvable `#[path]`: it is a file that is compiled and
     was not read.
+
+    **The TEXT is returned with each path**, so `main` does not open the file a
+    second time. It did, with no guard on the second read, and a `.rs` file
+    under a member that is a broken symlink or is not UTF-8 gave a raw
+    traceback at exit 1 while this function silently carried the same path
+    forward as scanned. That is fail-closed by accident in one place and
+    fail-OPEN in the other, and one read means one answer: a file that cannot
+    be read is a refusal here and appears in no caller's list.
     """
-    found: dict[Path, None] = {}
+    found: dict[Path, str] = {}
+    seen: set[Path] = set()
     problems: list[str] = []
     queue = [path for path in sorted(member.rglob("*.rs"))
              if path.relative_to(member).parts[:1] != ("target",)]
@@ -972,13 +1195,23 @@ def member_sources(member: Path,
     while queue:
         path = queue.pop(0)
         resolved = path.resolve()
-        if resolved in found:
+        if resolved in seen:
             continue
-        found[resolved] = None
+        seen.add(resolved)
         try:
             source = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as error:
+            problems.append(
+                f"{_relative(path)} is reached by this check's walk of the "
+                f"workspace member `{_relative(member)}` and could not be read "
+                f"({error}). A broken symlink or a file that is not UTF-8 is "
+                f"still a file clippy may compile, and an unread file is the "
+                f"state every measurement in this module's header was taken "
+                f"in. It was passed over in silence until the S03 review's "
+                f"ninth pass, while `main` read the same path again with no "
+                f"guard at all and gave a traceback.")
             continue
+        found[resolved] = source
         for named in MODULE_PATH.findall(source):
             candidates = [path.parent / named, path.parent / path.stem / named]
             for candidate in candidates:
@@ -994,7 +1227,47 @@ def member_sources(member: Path,
                     f"outside the member directory is invisible to a walk of "
                     f"the member, and an inner group allow in one is MEASURED "
                     f"to take cargo clippy from 101 to 0.")
-    return sorted(found), problems
+        # `include!` LAST, and read the same way `#[path]` is: by following it
+        # where it can be followed and refusing it where it cannot. The
+        # resolution rule is rustc's own and it is not `#[path]`'s, so it is
+        # written out rather than shared: the argument is relative to the
+        # directory of the file the macro is written in, full stop, with no
+        # second candidate.
+        for match in INCLUDE_ANY.finditer(source):
+            named_match = INCLUDE_PATH.match(source, match.start())
+            if named_match is None:
+                problems.append(
+                    f"{_relative(path)} carries "
+                    f"`{source[match.start():match.start() + 60].splitlines()[0]}`"
+                    f" and this pass could not read a file name out of it. "
+                    f"`include!` pastes another file's tokens in at that "
+                    f"point, so that file is compiled and is named by no "
+                    f"target, no glob of the member and no `#[path]`. "
+                    f"MEASURED under the pinned 1.97.1 toolchain: an "
+                    f"`include!`d file carrying "
+                    f"`#[allow(clippy::pedantic)]` on a module takes cargo "
+                    f"clippy from 101 to 0 while this check reads neither "
+                    f"file. An argument built by `concat!` or `env!` names a "
+                    f"real file that only the build knows, so it is refused "
+                    f"rather than passed over. Write the path as a plain "
+                    f"string literal, or put the generated code behind a "
+                    f"module this check can walk.")
+                continue
+            candidate = path.parent / named_match.group(1)
+            if candidate.is_file():
+                queue.append(candidate)
+                continue
+            problems.append(
+                f"{_relative(path)} declares "
+                f"`include!(\"{named_match.group(1)}\")` and {candidate} is "
+                f"not a file, so this pass did not read the source it pastes "
+                f"in. rustc resolves that argument against the directory of "
+                f"the file the macro is written in, MEASURED from the "
+                f"dep-info of a run where it resolved to "
+                f"`crates/a/src/../../../outside/hidden.rs`, and a file this "
+                f"check never reads is the state an inner or module-level "
+                f"group allow was MEASURED to survive at cargo clippy exit 0.")
+    return sorted(found.items()), problems
 
 
 def inherits_workspace_lints(manifest: str) -> bool:
@@ -1273,10 +1546,15 @@ def main() -> int:
     for member in members:
         sources, source_problems = member_sources(member, roots.get(member))
         problems += source_problems
-        for path in sources:
+        # The text comes back with the path. `main` read every file a second
+        # time until the S03 review's ninth pass, with no guard on the read, so
+        # a `.rs` file under a member that is a broken symlink or is not UTF-8
+        # gave a raw traceback at exit 1 rather than a refusal under the FAIL
+        # header, which is the presentation the eighth pass had just stopped
+        # giving four lines of reasoning earlier in this same file.
+        for path, source in sources:
             scanned += 1
             where = _relative(path)
-            source = path.read_text(encoding="utf-8")
             for attribute in unreadable_allows(source):
                 problems.append(
                     f"{where} carries `{attribute}`, whose argument list this "
@@ -1360,8 +1638,9 @@ def main() -> int:
     print(f"OK: {len(REQUIRED_CLIPPY)} clippy lint(s) at or above HLD 27.1's "
           f"level and no group row weaker than deny, {len(members)} workspace "
           f"member(s) from {member_source} inherit the table, "
-          f"{scanned} .rs file(s), cargo's own target roots seeded and "
-          f"`#[path]` modules followed, carry no inner "
+          f"{scanned} .rs file(s), a set RECONSTRUCTED from four keys with "
+          f"the member globbed, cargo's own target roots seeded, "
+          f"`#[path]` modules followed and `include!` followed, carry no inner "
           f"allow or expect of a denied lint or of a group holding one, and "
           f"none on a `mod` item, {len(configs)} cargo config(s) lower no "
           f"denied lint through rustflags, unsafe_code denied by {unsafe_by}")

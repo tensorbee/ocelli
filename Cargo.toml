@@ -31,9 +31,21 @@ expect_used = "deny"
 panic = "deny"
 
 # HLD section 15.2's dependency list, no longer verbatim. Section 15.2 gives
-# five entries and this block has seven: `glam` differs under D-09, and
-# `proptest` and `trybuild` are dev-only tools section 15.2 does not cover.
-# Every departure is commented at the entry it belongs to. The `[profile.release]`
+# five entries and this block has more.
+#
+# THE COUNT IS NOT WRITTEN HERE, DELIBERATELY. It said seven while the block
+# held eight from the day it was written, because `wasm-bindgen` is a departure
+# the sentence never named, and S03 took it to twelve without the sentence
+# moving: `pollster` in 9df8539, then `serde`, `serde_json` and `sha2` in
+# 2ffabe3. Eight review passes read past it. A number in a comment beside a
+# list is stale the next time the list grows, and this list grows every sprint.
+#
+#   awk '/^\[workspace.dependencies\]/{f=1;next} /^\[/{f=0} f' Cargo.toml \
+#     | grep -cE '^[a-z0-9_-]+ ='
+#
+# prints how many there are. The rule that carries the weight instead is that
+# EVERY DEPARTURE IS COMMENTED AT THE ENTRY IT BELONGS TO, which is checkable
+# by reading down this block and needs no arithmetic. The `[profile.release]`
 # block further down is still verbatim and still says so.
 #
 # The exact wgpu pin is not fussiness: agents reliably emit wgpu 0.19-era

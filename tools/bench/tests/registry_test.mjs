@@ -91,6 +91,65 @@ test("backlog statuses come from the status tables only", () => {
     "a recorded-defect row was read as a status row");
 });
 
+test("the Roadmap table is a status table too", () => {
+  // `docs/sprints/BACKLOG.md` has eighteen `### M<n>,` headings and one
+  // `### Roadmap, Phase 2 and Phase 3`, and the rows under the last one carry
+  // a status like every other row. The heading rule is duplicated in
+  // `scripts/bench_check.py` and `scripts/backlog_check.py`, and this module's
+  // header says a rule that exists on one side only is a defect, so the clause
+  // is load bearing rather than defensive.
+  //
+  // Measured in the S03 sprint review's ninth pass: dropping
+  // `|| heading.startsWith("Roadmap")` left all sixty-six tests green, because
+  // every fixture above uses an `M<n>` heading. The failure is loud, the
+  // driver throws on an unknown F-ID rather than labelling one wrongly, which
+  // is what caps the severity and not what makes the clause optional.
+  //
+  // The Roadmap table has a DIFFERENT column count from the milestone tables,
+  // eight against eight with different headers, and the status is read as the
+  // second-to-last cell in both. Both shapes are here so the reader is not
+  // reading position off one example.
+  const backlog = [
+    "### M18, Whole-slide imaging",
+    "",
+    "| F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |",
+    "|------|----------|--------|-------|-------|-----|------------|--------|",
+    "| F-149 | E35.7 | S72 | a milestone row | Rust | 8w | F-144 | pending |",
+    "",
+    "### Roadmap, Phase 2 and Phase 3",
+    "",
+    "Tracked, unscheduled. No sprint is assigned.",
+    "",
+    "| F-ID | Epic ref | Phase | Epic | Story | Layer | Est | Status |",
+    "|------|----------|-------|------|-------|-------|-----|--------|",
+    "| F-158 | E20.1 | P2 | E20 gateway | adopt one | Server | 6w | pending |",
+    "| F-159 | E20.2 | P3 | E20 gateway | and another | Server | 4w | done |",
+  ].join("\n");
+  const statuses = backlogStatuses(backlog);
+  assert.equal(statuses.get("F-149"), "pending");
+  assert.equal(
+    statuses.get("F-158"),
+    "pending",
+    "a Roadmap row was not read as a status row",
+  );
+  assert.equal(statuses.get("F-159"), "done");
+  assert.equal(statuses.size, 3);
+});
+
+test("a heading that is neither a milestone nor the Roadmap is not a table", () => {
+  // The other direction, so the clause above cannot be satisfied by reading
+  // every `### ` heading as a status table. `docs/sprints/BACKLOG.md` carries
+  // prose subsections and the recorded-defects table, and a row under one of
+  // those has no status cell to read.
+  const backlog = [
+    "### Notes on the imported backlog",
+    "",
+    "| F-ID | Epic ref | Defect |",
+    "| F-145 | E35.3 | declared dependency E4.9 does not exist |",
+  ].join("\n");
+  assert.equal(backlogStatuses(backlog).size, 0);
+});
+
 test("an unknown F-ID is rejected rather than guessed at", () => {
   const subjects = parseRegistry(
     registryText([{ ...ROW, subject_story: "F-999" }]),

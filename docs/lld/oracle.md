@@ -1,7 +1,7 @@
 # The oracle, reference half
 
 **F-IDs that contributed:** F-010, F-X006, F-X007, F-X009
-**Last updated:** 2026-09-05
+**Last updated:** 2026-09-06
 
 HLD section 11 names cornerstone3D as the reference the differential harness
 measures against, and decision D7 makes the oracle the thing that exists before

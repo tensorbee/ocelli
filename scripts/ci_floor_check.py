@@ -101,8 +101,22 @@ property no native test can observe, and it could be deleted from CI by a
 change that reads as adding a test.
 
 So an arm now ends at its `;;`, `#` comments are stripped from the body before
-extraction, and a backslash line continuation is joined first. That last one
-own loss: the extraction pattern stops at the backslash, so `-p <suite>` fell
+extraction, and a backslash line continuation is joined first.
+
+**And "ends at its `;;`" was itself false three more ways, all measured in the
+S03 review's ninth pass**, each on the one-line `fmt` arm with a real command
+CI does not run appended after the shape, each leaving this check at exit 0
+with one extracted command and `unseen` `None`, and each accepted by `sh -n`:
+a `;;` inside a quoted string, a `while case ... esac`, and an `if case ...
+esac`. The first is why the arm's end is found by a scan that steps over quoted
+spans rather than by a regex, and why the comment strip and the statement split
+use that same scan. The other two are why `NESTED_CASE`'s alternation is DERIVED
+from `SHELL_INTRODUCERS` instead of being written out beside it: this file knew
+`if`, `while` and `until` introduce a command in one function and not in the
+other, and two lists that must agree are one list.
+
+The continuation join closed a loss of its
+own: the extraction pattern stops at the backslash, so `-p <suite>` fell
 off the end of `errors`, `bench` and `guards`, and `runs_command` uses
 `search`, which means any unittest step satisfied any of them. Replacing the
 `guards` step with its five arm commands but with
@@ -252,16 +266,21 @@ MANUAL_EVENTS = {"workflow_dispatch", "repository_dispatch", "schedule"}
 
 # Gates the floor deliberately excludes. `bin/ocelli.sh` excludes these by
 # name in its --floor arm, and the reason is deviation D-04: CI has no GPU and
-# no corpus. `guards-deep` is excluded for a different reason, a TOOLCHAIN
-# dependency: every probe in it declares `needs="cargo"` and none needs npm or
-# wasm-pack, so it runs on a push to `main` and on workflow_dispatch rather
-# than on every pull request. This comment said "cargo, npm or wasm-pack" and
-# "minutes rather than seconds" until the S03 review's eighth pass, which is
-# the sentence `.github/workflows/ci.yml` itself calls "an earlier version of
-# this comment claimed". MEASURED over four runs on this machine: deep took
-# 27.4s to 28.9s and the floor 19.6s to 20.6s, so the cost is a toolchain a
-# runner has to install
-# rather than a duration. `python3 scripts/guard_probe.py --list` prints each
+# no corpus.
+#
+# `guards-deep` is excluded for a different reason, and the reason has been
+# written three ways and was false twice. It said "cargo, npm or wasm-pack" and
+# "minutes rather than seconds" until the eighth pass. It said the cost was a
+# toolchain a runner has to install until the S03 review's NINTH pass, and the
+# `guards` job installs the pinned toolchain for `gate guards` anyway, so the
+# runner that would run the deep probes already had one. That job runs
+# `bin/ocelli.sh gate guards-deep` on every event now, so the TRIGGER is no
+# longer a difference between the two.
+#
+# What is left is duplication and nothing else: `--profile deep` is a strict
+# superset of `--profile floor`, so a `gate --floor` including this gate would
+# run every floor probe twice. MEASURED on the development machine, deep 23.8s
+# against floor 15.9s. `python3 scripts/guard_probe.py --list` prints each
 # probe's profile and what it needs, and reading that beats reading this.
 # Kept here so this script fails if the runner's exclusion list changes without
 # anyone thinking about CI.
@@ -670,27 +689,147 @@ def covers(gate: str, arms: dict[str, list[str]],
 # be satisfied by a step naming it.
 COMMAND_PREFIXES = ("python3 ", "npm run ", "cargo ", "ci/")
 
-# A shell comment, in the body of a case arm. `(?<!\S)` so a `#` inside a word
-# is not one, which is the same idiom `run_commands` uses on the workflow.
-SHELL_COMMENT = re.compile(r"(?<!\S)#.*$", re.M)
-
-# A line continuation. Joined BEFORE extraction, because the extraction class
-# stops at the backslash and `-p <suite>` then falls off the end of every
+# A line continuation. Joined BEFORE anything else, because the extraction
+# class stops at the backslash and `-p <suite>` then falls off the end of every
 # multi-line arm.
 CONTINUATION = re.compile(r"\\\n\s*")
 
-# One `run_gate` arm: a case label at the start of a line, then everything up
-# to its `;;`. Ending at the next LABEL instead is what let each arm swallow
-# the comment block introducing the following one.
+# A `run_gate` case LABEL at the start of a line. The arm's END is found by
+# `_arm_end` below and not by this pattern, which is the S03 review's ninth
+# pass. `ARM` was `^[ \t]*([a-z-]+)\)(.*?);;`, and a `;;` inside a QUOTED STRING
+# is not the end of an arm. MEASURED on the one-line `fmt` arm with a real
+# command CI does not run appended after it: `fmt) cargo fmt --all --check &&
+# echo "a ;; b" && python3 scripts/prose_check.py --extra ;;` left
+# `scripts/ci_floor_check.py` at exit 0, `arms['fmt']` holding one command and
+# `unseen['fmt']` `None`, with `sh -n` accepting the file. That is the eighth
+# pass's comment-holding-a-terminator defect one lexer rule along: the comment
+# route was closed by stripping comments first, and a string cannot be stripped.
+ARM_LABEL = re.compile(r"^[ \t]*([a-z-]+)\)", re.M)
+
+
+def _quote_spans(text: str, index: int) -> tuple[int, str]:
+    """Step over one character of shell text, tracking the quote it opens.
+
+    Returns the next index and the quote that is now open, "" for none. One
+    reader for two callers, `_strip_shell_comments` and `_arm_end`, because
+    they are the same lexer rule and written twice they would drift, which is
+    exactly what `NESTED_CASE` and `SHELL_INTRODUCERS` did.
+
+    Single quotes take no escape, double quotes take a backslash escape, and a
+    backslash outside quotes escapes the next character. That is POSIX shell
+    quoting and it is all this file needs: the `run_gate` arms hold no
+    here-document and no `$'...'`.
+    """
+    char = text[index]
+    if char == "\\":
+        return index + 2, ""
+    if char in "\"'":
+        return index + 1, char
+    return index + 1, ""
+
+
+def _strip_shell_comments(text: str) -> str:
+    """`text` with every `#` comment removed, QUOTES RESPECTED.
+
+    `SHELL_COMMENT` was `(?<!\\S)#.*$`, which cannot tell a comment from a `#`
+    inside a string. It ran over the whole `run_gate` region, so a legitimate
+    `echo "issue #12"` in an arm would have been truncated mid-string and the
+    quote left open. Nothing in the region carries one today, and the whole
+    point of the ninth pass's arm work is that the parser must not depend on
+    that staying true: the scan below is the same one `_arm_end` uses, so a `#`
+    inside a string is text and a `;;` inside a string is text, by one rule
+    rather than by two that agree today.
+    """
+    kept: list[str] = []
+    quote = ""
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if quote == '"' and char == "\\":
+                kept.append(text[index:index + 2])
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+            kept.append(char)
+            index += 1
+            continue
+        if char == "#" and (not kept or kept[-1][-1:] in ("", " ", "\t", "\n")):
+            end = text.find("\n", index)
+            index = len(text) if end == -1 else end
+            continue
+        step, opened = _quote_spans(text, index)
+        kept.append(text[index:step])
+        quote = opened
+        index = step
+    return "".join(kept)
+
+
+def _arm_end(text: str, start: int) -> tuple[int, str]:
+    """Where the arm beginning at `start` ends, or why this parser cannot say.
+
+    The first `;;` OUTSIDE a quoted string. Returns its index and an empty
+    reason, or `-1` and the reason to refuse. Two reasons, both fail-closed: a
+    quote that is never closed, which is not a shell script this parser should
+    guess at, and an arm with no terminator at all.
+    """
+    quote = ""
+    index = start
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if quote == '"' and char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if text.startswith(";;", index):
+            return index, ""
+        step, opened = _quote_spans(text, index)
+        quote = opened
+        index = step
+    if quote:
+        return -1, (f"a {quote} quote is opened and never closed, so this "
+                    f"parser cannot tell which `;;` ends the arm")
+    return -1, "the arm reaches the end of the region with no `;;` terminator"
+
+
+# Keywords that INTRODUCE a statement rather than being one. What follows one
+# of these is the work, so the head is dropped and the REST OF THE STATEMENT IS
+# RE-SCANNED rather than discarded with it.
 #
-# The remaining limit, and it is why `arm_bodies` refuses a nested `case`: a
-# `case` inside an arm body ends its own branches with `;;` too, so this would
-# stop at the FIRST of those and keep only whatever came before it. Today the
-# degradation would be safe by accident, because the one shape tried in the S03
-# review's sixth pass left the arm empty and `covers` refuses an empty arm. An
-# arm with a real command before a nested `case` would keep only that command
-# and drop the rest silently, so the shape is refused rather than parsed.
-ARM = re.compile(r"^[ \t]*([a-z-]+)\)(.*?);;", re.M | re.S)
+# Discarding it was a fail-open, and the S03 review's seventh pass measured the
+# outcome exactly. `STATEMENT_BREAK` splits on `[\n;{}()]|&&|\|\||\|`, so
+# `if node --test ...; then true; fi` is one statement whose head is `if`,
+# and `if` sat in the noise list below. Wrapping the `bench` arm's `node --test`
+# line that way and replacing the `gate bench` step with its two `python3`
+# commands gave `unseen bench: None` and exit 0, which is five node suites out
+# of CI. That is byte for byte the outcome the sixth pass measured and made a
+# rule.
+#
+# `eval` is here and not below, because `eval python3 x` runs the command.
+#
+# **`NESTED_CASE` is DERIVED from this set since the S03 review's ninth pass**,
+# and it is declared here rather than below so the derivation can read it. The
+# two lists were written out separately and had already drifted: this one held
+# ten names and the alternation held five, so `while case` and `if case` were
+# statement positions this file knew about in one function and not in the
+# other. MEASURED on the one-line `fmt` arm, each shape appending a real command
+# CI does not run and each leaving `scripts/ci_floor_check.py` at exit 0 with
+# `arms['fmt']` holding one command and `unseen['fmt']` `None`, with `sh -n`
+# accepting the file:
+#
+#     ... && while case x in *) false ;; esac; do :; done && python3 ... ;;
+#     ... && if case x in *) true ;; esac; then :; fi && python3 ... ;;
+#
+# Two lists that must agree are one list, which is the same repair
+# `bin/ocelli.sh`'s `--floor` arm and `NOT_IN_FLOOR` got in the fourth pass.
+SHELL_INTRODUCERS = frozenset({
+    "if", "then", "elif", "else", "while", "until", "do", "!", "time", "eval",
+})
 
 # A `case` keyword at a statement position inside an arm body.
 #
@@ -720,30 +859,63 @@ ARM = re.compile(r"^[ \t]*([a-z-]+)\)(.*?);;", re.M | re.S)
 # `unseen['prose']` was `None`, no refusal fired and the real trailing command
 # was dropped at exit 0. The `\b` is gone and the keywords carry their own
 # boundary, which they need and `!` does not: `!` cannot be the tail of a word.
+#
+# The alternation is BUILT from `SHELL_INTRODUCERS` above rather than written
+# out a second time, which is the ninth pass's fix. A word introducer needs a
+# `\b` in front of it and a punctuation one must not have it, so the set is
+# split on that property here rather than hand-sorted into two literals.
+_WORD_INTRODUCERS = sorted(w for w in SHELL_INTRODUCERS if w[:1].isalpha())
+_PUNCT_INTRODUCERS = sorted(w for w in SHELL_INTRODUCERS if not w[:1].isalpha())
 NESTED_CASE = re.compile(
-    r"(?:^|[\n;{}()&|]|(?:\b(?:then|do|else|elif)|!)[ \t])[ \t]*case[ \t]")
+    r"(?:^|[\n;{}()&|]|(?:"
+    + "|".join([r"\b(?:" + "|".join(re.escape(w) for w in _WORD_INTRODUCERS)
+                + r")"]
+               + [re.escape(w) for w in _PUNCT_INTRODUCERS])
+    + r")[ \t])[ \t]*case[ \t]")
 
 # Where one shell statement ends and the next begins, for the unseen-command
 # scan. `{` and `}` are separators here and never statement heads.
+#
+# Applied by `_split_statements` below rather than by `re.split`, because a
+# separator inside a QUOTED STRING does not separate anything. `echo "a ;; b"`
+# is one statement whose head is a builtin, and split blindly it became `echo
+# "a`, ` b"` and a refusal naming `b"` as a command CI does not run. That is a
+# guard refusing a legitimate state, which is the runbook's own sentence, and
+# it is the same defect as the `;;` this pass fixed in the arm parser: shell
+# read with a regex that does not know about quotes.
 STATEMENT_BREAK = re.compile(r"[\n;{}()]|&&|\|\||\|")
 
-# Keywords that INTRODUCE a statement rather than being one. What follows one
-# of these is the work, so the head is dropped and the REST OF THE STATEMENT IS
-# RE-SCANNED rather than discarded with it.
-#
-# Discarding it was a fail-open, and the S03 review's seventh pass measured the
-# outcome exactly. `STATEMENT_BREAK` splits on `[\n;{}()]|&&|\|\||\|`, so
-# `if node --test ...; then true; fi` is one statement whose head is `if`,
-# and `if` sat in the noise list below. Wrapping the `bench` arm's `node --test`
-# line that way and replacing the `gate bench` step with its two `python3`
-# commands gave `unseen bench: None` and exit 0, which is five node suites out
-# of CI. That is byte for byte the outcome the sixth pass measured and made a
-# rule.
-#
-# `eval` is here and not below, because `eval python3 x` runs the command.
-SHELL_INTRODUCERS = frozenset({
-    "if", "then", "elif", "else", "while", "until", "do", "!", "time", "eval",
-})
+
+def _split_statements(text: str) -> list[str]:
+    """`text` split on `STATEMENT_BREAK`, quoted spans left whole."""
+    pieces: list[str] = []
+    current: list[str] = []
+    quote = ""
+    index = 0
+    while index < len(text):
+        if quote:
+            char = text[index]
+            if quote == '"' and char == "\\":
+                current.append(text[index:index + 2])
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+            current.append(char)
+            index += 1
+            continue
+        separator = STATEMENT_BREAK.match(text, index)
+        if separator is not None:
+            pieces.append("".join(current))
+            current = []
+            index = separator.end()
+            continue
+        step, opened = _quote_spans(text, index)
+        current.append(text[index:step])
+        quote = opened
+        index = step
+    pieces.append("".join(current))
+    return pieces
 
 # Statement heads that are not the work a gate does, and whose REMAINDER is
 # arguments rather than a command. A builtin decides whether the real command
@@ -810,17 +982,27 @@ def arm_bodies(runner: str) -> dict[str, str]:
     An arm ends at its `;;`. Nothing here can read a command out of prose. See
     the docstring's "Where an arm ENDS" section for what that cost.
 
-    **The stripping happens BEFORE `ARM` runs, and doing it after was a
-    fail-open the S03 review's eighth pass measured.** `ARM` stops at the first
-    `;;`, and a `;;` inside a shell comment is not the end of an arm, so the
-    body was truncated at the comment and only then were comments removed from
-    what survived. MEASURED on a synthetic `prose` arm whose comment line read
-    `# the voice rules, then the second pass ;; see the LLD` with a real
+    **The stripping happens BEFORE any `;;` is looked for, and doing it after
+    was a fail-open the S03 review's eighth pass measured.** The arm ends at the
+    first `;;`, and a `;;` inside a shell comment is not the end of an arm, so
+    the body was truncated at the comment and only then were comments removed
+    from what survived. MEASURED on a synthetic `prose` arm whose comment line
+    read `# the voice rules, then the second pass ;; see the LLD` with a real
     `python3 scripts/prose_check.py --extra` after it: `arms['prose']` held one
     command, `unseen['prose']` was `None`, no refusal fired and the trailing
     command was dropped at exit 0. Over the whole region the comment is gone
     before any `;;` is looked for, and the comment blocks BETWEEN arms go with
     it, which the previous order also had to handle one arm at a time.
+
+    **A `;;` inside a QUOTED STRING is not the end of an arm either, and that
+    is the ninth pass.** Stripping comments first cannot help there, because a
+    string is not strippable. MEASURED on the one-line `fmt` arm rewritten as
+    `fmt) cargo fmt --all --check && echo "a ;; b" && python3
+    scripts/prose_check.py --extra ;;`, which `sh -n` accepts: this check
+    exited 0 with `arms['fmt']` holding one command, `unseen['fmt']` `None` and
+    the real trailing command dropped. `_arm_end` scans for the first `;;`
+    outside a quoted span now, and REFUSES when a quote is never closed rather
+    than guessing which `;;` was meant.
     """
     try:
         region = runner[runner.index("run_gate() {"):runner.index("skip() {")]
@@ -831,10 +1013,25 @@ def arm_bodies(runner: str) -> dict[str, str]:
             "restructured, in which case this parser has to be restructured "
             "with it, or the arms are gone. Both need a person, and neither "
             "may be read as agreement.") from error
-    body = SHELL_COMMENT.sub("", CONTINUATION.sub(" ", region))
+    body = _strip_shell_comments(CONTINUATION.sub(" ", region))
     bodies: dict[str, str] = {}
-    for match in ARM.finditer(body):
-        text = match.group(2)
+    index = 0
+    while True:
+        match = ARM_LABEL.search(body, index)
+        if match is None:
+            break
+        end, unreadable = _arm_end(body, match.end())
+        if unreadable:
+            raise RuntimeError(
+                f"the `{match.group(1)}` arm in bin/ocelli.sh's `run_gate` "
+                f"cannot be read to its end: {unreadable}. An arm this parser "
+                f"cannot delimit is an arm whose commands it would report as "
+                f"whatever it happened to stop at, and a `;;` inside a quoted "
+                f"string was MEASURED to leave this check at exit 0 with the "
+                f"rest of the arm dropped. Both need a person, and neither may "
+                f"be read as agreement.")
+        text = body[match.end():end]
+        index = end + 2
         if NESTED_CASE.search(text):
             raise RuntimeError(
                 f"the `{match.group(1)}` arm in bin/ocelli.sh's `run_gate` "
@@ -887,7 +1084,7 @@ def unseen_commands(runner: str) -> dict[str, list[str]]:
     unseen: dict[str, list[str]] = {}
     for gate, text in arm_bodies(runner).items():
         found: list[str] = []
-        for raw in STATEMENT_BREAK.split(text):
+        for raw in _split_statements(text):
             statement = re.sub(r"\s+", " ", raw).strip()
             # `if node --test x` is one statement and `node --test x` is the
             # work in it. Looped, because `while ! python3 x` is two heads.

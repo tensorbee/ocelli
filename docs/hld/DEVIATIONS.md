@@ -88,7 +88,7 @@ simply does not use the shader. One arithmetic implementation, three
 presentation paths, and the oracle can diff tier C against tier A to prove they
 agree rather than assuming it.
 
-**What it does not claim.** Interactive volume ray-casting on the CPU. F-X004
+**What it does not claim.** Interactive volume ray-casting on the CPU. F-X005
 decides between a slow path and reporting the feature unavailable, against a
 measurement. It must not decide the third thing, which is a CPU path that
 quietly produces a different image from the GPU one. §31's rule generalises:

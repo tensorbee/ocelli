@@ -93,6 +93,30 @@ pub struct Caps {
     pub tier: Tier,
 }
 
+/// Whether a compute kernel may run against these capabilities at all.
+///
+/// **Both terms are required and the conjunction is the whole content.**
+/// `caps.compute` is what the adapter reports and `caps.tier` is what this
+/// project resolved to, and the two disagree in the case that matters: an
+/// adapter can report compute support while D-07's combination rule has
+/// already put the session on tier B or tier C because the adapter is a
+/// software rasteriser. HLD section 5: "Anything wanting compute - GPU
+/// segmentation, histogram passes, compute-based resampling - is tier A only
+/// and must degrade, not fail." An `||` here reports compute available on a
+/// tier that cannot run it, a kernel is dispatched, and the failure arrives
+/// somewhere other than the decision.
+///
+/// **This lives in `caps` and not in `gpu` because it is a decision.**
+/// `lib.rs` states the split: "Everything that can be WRONG about a tier is in
+/// `caps`, which needs no adapter to test." The same predicate on
+/// `GpuContext` needed a real device to reach and was therefore reachable by
+/// no test at all, which is how the `&&` survived a mutation to `||` through
+/// nine sprint-review passes. `GpuContext::supports_compute` forwards here.
+#[must_use]
+pub fn compute_available(caps: &Caps) -> bool {
+    caps.compute && caps.tier.supports_compute()
+}
+
 // ---------------------------------------------------------------------------
 // F-004, the detection half.
 //
@@ -779,7 +803,60 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
 
 #[cfg(test)]
 mod tests {
-    use super::{Caps, Tier};
+    use super::{Caps, Tier, compute_available};
+
+    /// Build a `Caps` for the compute-availability truth table.
+    fn caps_with(compute: bool, tier: Tier) -> Caps {
+        Caps {
+            compute,
+            max_tex_3d: 2048,
+            max_buffer: 268_435_456,
+            tier,
+        }
+    }
+
+    /// The full truth table for [`compute_available`], all six combinations.
+    ///
+    /// **This is written to kill the `||` mutation and nothing else would.**
+    /// Enumerating it exhaustively rather than asserting the true case means
+    /// every row that must be `false` is named. `(false, Tier::A)` is the row
+    /// an `||` breaks in one direction and `(true, Tier::B)` and
+    /// `(true, Tier::Cpu)` are the rows it breaks in the other, and the latter
+    /// two are the ones that matter in production: an adapter reporting
+    /// compute while D-07's combination rule has resolved a lower tier,
+    /// because the adapter is a software rasteriser.
+    ///
+    /// HLD section 5, compute is "tier A only and must degrade, not fail", so
+    /// exactly one row is `true`.
+    #[test]
+    fn compute_is_available_on_tier_a_with_adapter_support_and_nowhere_else() {
+        assert!(compute_available(&caps_with(true, Tier::A)));
+
+        assert!(!compute_available(&caps_with(false, Tier::A)));
+        assert!(!compute_available(&caps_with(true, Tier::B)));
+        assert!(!compute_available(&caps_with(false, Tier::B)));
+        assert!(!compute_available(&caps_with(true, Tier::Cpu)));
+        assert!(!compute_available(&caps_with(false, Tier::Cpu)));
+    }
+
+    /// The predicate reads both fields, stated as a count rather than as a
+    /// pair of cases.
+    ///
+    /// Over the six combinations exactly one is `true`. A predicate that
+    /// ignored `caps.compute` would report two, one that ignored the tier
+    /// would report three, and an `||` would report five. The count separates
+    /// all four implementations, which the single-row assertion above does
+    /// not.
+    #[test]
+    fn exactly_one_of_the_six_combinations_permits_compute() {
+        let rows = [Tier::A, Tier::B, Tier::Cpu]
+            .into_iter()
+            .flat_map(|tier| [false, true].into_iter().map(move |c| (c, tier)));
+        let permitted = rows
+            .filter(|(compute, tier)| compute_available(&caps_with(*compute, *tier)))
+            .count();
+        assert_eq!(permitted, 1);
+    }
 
     /// Only tier A supports compute.
     ///
@@ -1942,6 +2019,78 @@ mod detection_tests {
             Some(count(calibration))
         );
         assert_eq!(json_u64(FILE, "full_pixels"), Some(count(full)));
+    }
+
+    /// The other three `workload` fields, which are the same claim as the
+    /// three pixel counts and were guarded by nothing.
+    ///
+    /// The file's own note is the specification: "A figure taken with a
+    /// different workload is a different measurement and does not belong in
+    /// this file." That makes all five fields the provenance of the
+    /// 400,000,000 hardware floor, not three of them, and
+    /// `probe::FILL_RATE_ALU_STEPS` says the same thing from the other side:
+    /// "Recorded here so `ci/tier-thresholds.json` can name the workload its
+    /// figures were taken with." Nothing compared the two. Measured in the S03
+    /// sprint review's ninth pass: `alu_steps_per_fragment` 64 to 32,
+    /// `target_format` `Rgba8Unorm` to `Bgra8Unorm` and `shader` to a path
+    /// that does not exist all survived the whole suite.
+    ///
+    /// **The shader is compared by content and not by existence.** A path that
+    /// resolves is a weaker claim than a path naming the file the probe
+    /// actually compiles, and the failure this guards is the workload moving
+    /// while the recorded figure stays, which a renamed or forked shader is
+    /// exactly.
+    #[test]
+    fn the_recorded_workload_names_the_shader_the_probe_compiles() {
+        const FILE: &str = include_str!("../../../ci/tier-thresholds.json");
+
+        assert_eq!(
+            json_u64(FILE, "alu_steps_per_fragment"),
+            Some(u64::from(crate::probe::FILL_RATE_ALU_STEPS))
+        );
+
+        // `TextureFormat`'s `Debug` is the WebGPU spelling, which is what the
+        // file records. Comparing the rendered name rather than a second
+        // literal means the file is checked against the constant the probe
+        // passes to wgpu, and not against a copy of it made here.
+        assert_eq!(
+            json_str(FILE, "target_format").as_deref(),
+            Some(format!("{:?}", crate::probe::TARGET_FORMAT).as_str())
+        );
+
+        let recorded = json_str(FILE, "shader").unwrap_or_default();
+        assert!(
+            !recorded.is_empty(),
+            "ci/tier-thresholds.json records no workload.shader"
+        );
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..");
+        let read = std::fs::read_to_string(root.join(&recorded));
+        assert!(
+            read.is_ok(),
+            "ci/tier-thresholds.json names {recorded}, which cannot be read from the repository root"
+        );
+        assert_eq!(
+            read.unwrap_or_default(),
+            crate::probe::WORKLOAD_WGSL,
+            "ci/tier-thresholds.json names {recorded}, which is not the shader probe.rs compiles"
+        );
+    }
+
+    /// The string sibling of [`json_u64`], and the same deliberately small
+    /// reader for the same reason: this test needs no serde.
+    ///
+    /// It finds the key, steps past the colon and the opening quote, and takes
+    /// to the closing quote. The three values it reads carry no escapes, and a
+    /// value that grew one would fail loudly here rather than quietly, because
+    /// the comparison is against a constant.
+    fn json_str(text: &str, key: &str) -> Option<String> {
+        let after_key = text.split_once(&format!("\"{key}\""))?.1;
+        let after_colon = after_key.split_once(':')?.1;
+        let opened = after_colon.trim_start().strip_prefix('"')?;
+        let (value, _) = opened.split_once('"')?;
+        Some(value.to_owned())
     }
 
     /// A deliberately small reader, so the test needs no serde and no

@@ -1,7 +1,7 @@
 {
   "constants": {
     "Cargo.toml:workspace.lints": {
-      "digest": "adf2cb2237be28da",
+      "digest": "319e61ab2cda36f4",
       "guard": "lint-policy",
       "tunable": false
     },
@@ -173,10 +173,10 @@
     "bench.state": 3,
     "bindgen": 3,
     "bootstrap-importer": 5,
-    "catalogue": 59,
+    "catalogue": 60,
     "census": 35,
     "census-runbook": 3,
-    "ci-floor": 13,
+    "ci-floor": 14,
     "content": 7,
     "corpus": 28,
     "corpus-synth": 5,
@@ -188,7 +188,7 @@
     "hooks.commit-msg": 3,
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
-    "lint-policy": 20,
+    "lint-policy": 24,
     "nostd": 5,
     "oracle.faults": 22,
     "oracle.faults-declaration": 2,
@@ -233,7 +233,7 @@
     "sweep_complete": false
   },
   "wall_clock_seconds": {
-    "deep": 27.0,
-    "floor": 19.0
+    "deep": 27.2,
+    "floor": 18.3
   }
 }

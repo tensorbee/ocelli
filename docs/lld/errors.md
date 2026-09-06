@@ -1,7 +1,7 @@
 # The error model, the panic path and structured logging
 
 **Area**: `crates/ocelli-core/src/error.rs`, `crates/ocelli-wasm/src/panic.rs`,
-`packages/core/src/{errors,panic,fatal}.ts`, `ci/error-codes.json`
+`packages/core/src/{errors,panic,fatal,bulk,ring}.ts`, `ci/error-codes.json`
 **Normative source**: `docs/hld/20-errors-and-panics.md` section 23, with
 `docs/hld/14-the-boundary-in-code.md` sections 17.2, 17.3 and 17.4
 **F-IDs that contributed:** F-005
@@ -339,6 +339,58 @@ the production allowance does not read as three files when it is two:
 `panic.test.ts` builds a view over a `WebAssembly.Memory` it constructed
 itself, which nothing can grow, and the rule is syntactic and cannot tell that
 memory from the core's.
+
+### The two guards cancelled each other, and what closed the gap
+
+**Until the S03 review's ninth pass, HLD 17.2's ordering rule was guarded by
+nothing at all.** The lint is the guard for the whole tree, and `bulk.ts` is in
+`ALLOWED_TO_DISABLE` because it is one of the two files permitted to build the
+view, so the one file whose ordering the rule is ABOUT is the one file the lint
+cannot speak about. There was no `bulk.test.ts` and none of the five test files
+covered `bulk` or `ring`, so nothing else looked. Measured: `writeFrame` was
+rewritten into the shape its own header quotes as the classic failure,
+
+```js
+const heap = new Uint8Array(wasm.memory.buffer);
+const ptr = session.alloc(bytes.byteLength);
+heap.set(bytes, ptr);
+```
+
+and `npx eslint .` and `npx vitest run` both exited 0, on a function exported
+from `@ocelli/core`'s published index.
+
+`packages/core/src/bulk.test.ts` closes it, and the mechanism is the one thing
+that makes the ordering observable from outside: **a `BulkSink` stand-in whose
+`alloc` grows linear memory.** `WebAssembly.Memory.prototype.grow` detaches the
+previous `ArrayBuffer`, so a view hoisted above the `alloc` is a view over a
+buffer that no longer exists, and it throws or writes where nothing reads. The
+stand-in grows by a whole page and returns the first byte of the new page, so
+the returned pointer does not exist in the pre-growth buffer at all. Every
+assertion runs against that sink, because a sink that does not grow passes
+under both shapes and is evidence of nothing.
+
+The ordering against `commit_frame` is asserted from INSIDE the sink: the
+stand-in copies `[ptr, ptr + len)` at the moment ownership passes, so a shape
+that committed first and copied afterwards fails while satisfying every
+after-the-fact assertion. Seven of the eight cases go red against the hoisted
+shape and two against the commit-first shape.
+
+`packages/core/src/ring.test.ts` covers `readEvent`, which was exported and
+untested, with three surviving offset mutations. **Its fixture is laid out from
+HLD 17.3's struct definitions and never from `EVENT_STRIDE` or
+`HEADER_BYTES`**, because a fixture built with the constants moves the writer
+and the reader together and stays green when the constant moves. The ring is
+placed at a non-zero offset inside its buffer for the same reason: `readEvent`
+adds `view.byteOffset` when it slices, a `DataView` starting at byte 0 makes
+that term zero, and the real ring never starts at the beginning of linear
+memory.
+
+**The wire contract half remains uncheckable and that is honest rather than
+covered.** `HEADER_BYTES` and `EVENT_STRIDE` are documented against
+`crates/ocelli-wasm/src/ring.rs`, which does not exist, so nothing can compare
+these numbers to the producer. What is now checked is the arithmetic against
+the layout HLD 17.3 specifies. F-101 lands the Rust side, and a fixture
+generated from it is what closes the other half.
 
 The comment above `RESTRICTED` and `BAN` in `eslint.config.js` carries a
 MEASURED list of shapes that escape the ban, taken with a probe file and

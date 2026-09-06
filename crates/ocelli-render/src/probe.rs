@@ -26,7 +26,7 @@ use crate::caps::{
 
 /// The format the workload renders into. Mandatorily renderable on every
 /// backend, so the measurement is the same shape everywhere.
-const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+pub(crate) const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// The ALU steps per fragment in `fill_rate.wgsl`. Recorded here so
 /// `ci/tier-thresholds.json` can name the workload its figures were taken
@@ -76,7 +76,7 @@ pub(crate) const RUN_PLAN: [(u32, u32); 3] = [
     (FULL_EDGE, FULL_PASSES),
 ];
 
-const WORKLOAD_WGSL: &str = include_str!("fill_rate.wgsl");
+pub(crate) const WORKLOAD_WGSL: &str = include_str!("fill_rate.wgsl");
 
 /// Resolve the session's tier.
 ///
@@ -295,6 +295,25 @@ fn measure(
 /// which deviation D-04 leaves without an adapter. It is a `&mut dyn FnMut` for
 /// the same reason `clock` is one on [`resolve`]: the alternative is a generic
 /// parameter with one instantiation, and `AGENTS.md` refuses that shape.
+///
+/// **What the injection does NOT close, stated because the shape of this
+/// function otherwise reads as if it closed everything.** `edge` and `passes`
+/// are both `u32` and adjacent, and the closure in [`measure`] forwards them
+/// positionally. Transposing them there,
+/// `run(device, queue, &pipeline, passes, edge, clock)`, compiles and passes
+/// the whole suite, because every test here supplies its own `issue` and never
+/// reaches that call. The calibration then shades a 1 by 1 target 256 times
+/// and the fragment count is unchanged, so [`fragments`] agrees with itself
+/// and only a real adapter's timing would differ.
+///
+/// **That hole is residue rather than something the injection created.** The
+/// same transposition existed at each of the three call sites this function
+/// replaced, and no test reached those either, so the count of unreachable
+/// sites went from three to one. Closing the last one needs a type that makes
+/// the two arguments non-interchangeable, which is `AGENTS.md`'s "reducing
+/// cases is good even when it adds types" and is F-037's to argue when it
+/// builds the long-lived device. Until then the only thing watching it is the
+/// human check `docs/hld/24-agent-code-standards.md` section 27.3 requires.
 ///
 /// **The first run's figure is thrown away, and that discard is the whole
 /// reason this function is separately testable.** The FIRST submission on a
@@ -639,6 +658,92 @@ mod tests {
         });
         assert_eq!(result, None);
         assert_eq!(issues, 2, "the calibration's failure did not stop the plan");
+    }
+
+    /// **A full pass that reports nothing keeps the calibration figure.**
+    ///
+    /// This is `.or(Some(calibration))` at the end of [`super::measure_with`],
+    /// and nothing drove it: every other test here either fails at the
+    /// calibration or succeeds at all three, so no test reached the third run
+    /// and made it fail. Measured in the S03 sprint review's ninth pass,
+    /// dropping the `.or` left the crate green.
+    ///
+    /// The consequence of dropping it is not a wrong number, it is a discarded
+    /// one. A calibration was taken, it was affordable, and it is a real
+    /// measurement of this adapter. Returning `None` throws it away, `classify`
+    /// falls through to the adapter type and the renderer string, and D-07's
+    /// combination rule is then deciding with one signal fewer than it had.
+    /// The third run is the one most likely to fail on a slow adapter, because
+    /// it is 256 times the work and the one that can reach
+    /// [`COMPLETION_TIMEOUT_NANOS`], so this is the failure path of the
+    /// population the resolver exists for.
+    ///
+    /// The calibration is deliberately given a DIFFERENT elapsed time from the
+    /// warm-up, so a result carrying the warm-up's figure instead is caught
+    /// too.
+    #[test]
+    fn a_full_pass_that_reports_nothing_keeps_the_calibration() {
+        let mut counts = Vec::new();
+        let result = measure_with(&mut |edge, passes| {
+            let pixels_shaded = fragments(edge, passes);
+            counts.push(pixels_shaded);
+            match counts.len() {
+                1 => Some(FillRate {
+                    pixels_shaded,
+                    elapsed_nanos: 900_000,
+                }),
+                2 => Some(FillRate {
+                    pixels_shaded,
+                    elapsed_nanos: 360_000,
+                }),
+                _ => None,
+            }
+        });
+        assert_eq!(
+            counts,
+            vec![65_536, 65_536, 16_777_216],
+            "the full pass was not attempted"
+        );
+        assert_eq!(
+            result,
+            Some(FillRate {
+                pixels_shaded: 65_536,
+                elapsed_nanos: 360_000,
+            }),
+            "a calibration already taken was discarded when the full pass failed"
+        );
+    }
+
+    /// The two failures are different answers, which is the whole point of the
+    /// fallback and is not asserted by either test on its own.
+    ///
+    /// A calibration that fails yields `None`, because there is no
+    /// measurement. A full pass that fails yields the calibration, because
+    /// there is one. A `measure_with` that returned `None` for both, or the
+    /// calibration for both, satisfies exactly one of the two tests above and
+    /// this one separates them.
+    #[test]
+    fn the_two_failure_points_do_not_give_the_same_answer() {
+        let fails_at = |stage: usize| {
+            let mut issues = 0_usize;
+            measure_with(&mut |edge, passes| {
+                issues += 1;
+                if issues == stage {
+                    return None;
+                }
+                Some(FillRate {
+                    pixels_shaded: fragments(edge, passes),
+                    elapsed_nanos: 360_000,
+                })
+            })
+        };
+        assert_eq!(fails_at(2), None);
+        assert_eq!(
+            fails_at(3).map(|rate| rate.pixels_shaded),
+            Some(65_536),
+            "the full pass's failure was treated as the calibration's"
+        );
+        assert_ne!(fails_at(2), fails_at(3));
     }
 
     /// [`RUN_PLAN`] is what [`super::measure_with`] issues, and the three pairs
