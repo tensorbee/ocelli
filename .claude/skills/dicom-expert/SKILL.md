@@ -273,6 +273,31 @@ The HLD's worked fixture, soft-tissue CT, centre 40, width 400, output 0 to 255:
 | 240 | 255.000 | 255.000 | LINEAR's upper bound is `c' + w'/2 = 239`, so 240 clamps |
 | -60 | 63.910 | 63.750 | Mid-lower quarter, catches sign and slope errors |
 
+Check the corrected lower boundary independently from the tooling example.
+
+<!-- ocelli-example: id=dicom-expert-d13-linear-exact interpreter=python3 mode=assert -->
+```python
+from fractions import Fraction as F
+
+# PS3.3 C.11.2.1.2 and C.11.2.1.3.2, evaluated independently.
+lo, hi, c, w = F(-160), F(240), F(40), F(400)
+lower = (lo <= c - F(1, 2) - (w - 1) / 2, lo <= c - w / 2)
+upper = (hi > c - F(1, 2) + (w - 1) / 2, hi > c + w / 2)
+assert (lower, upper) == ((True, True), (True, False))
+rows = (
+    tuple(F(0) if hit else F(-1) for hit in lower),
+    (((F(40) - F(79, 2)) / 399 + F(1, 2)) * 255, F(255, 2)),
+    (F(255) if upper[0] else F(-1),
+     F(255) if upper[1] else ((hi - c) / w + F(1, 2)) * 255),
+    (((F(-60) - F(79, 2)) / 399 + F(1, 2)) * 255, F(255, 4)),
+)
+assert rows == ((0, 0), (F(17000, 133), F(255, 2)),
+                (255, 255), (F(8500, 133), F(255, 4)))
+assert int(float(rows[1][0]) * 1000) / 1000 == 127.819
+assert round(float(rows[3][0]), 3) == 63.910
+```
+<!-- /ocelli-example -->
+
 **CORRECTION, deviation D-13 in `docs/hld/DEVIATIONS.md`. Do not write 1.594
 into a fixture.** HLD section 18.3's own table gives 1.594 for
 `LINEAR_EXACT(-160)` and that value is wrong.

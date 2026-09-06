@@ -124,8 +124,10 @@ The minimum set the oracle needs:
 ## 3. Computing a fixture's expected value
 
 This is the part that matters. Compute from the **formula in the standard**,
-transcribed, not from anything Ocelli produces.
+transcribed, not from anything Ocelli produces. Run the marked example and
+keep its exact output beside it.
 
+<!-- ocelli-example: id=dicom-tooling-voi interpreter=python3 mode=stdout -->
 ```python
 import math
 
@@ -161,17 +163,29 @@ def voi_sigmoid(x, c, w, ymin=0.0, ymax=255.0):
 for hu in (-160, 40, 240, -60):
     print(f"{hu:6}  {voi_linear(hu, 40, 400):8.3f}  "
           f"{voi_linear_exact(hu, 40, 400):8.3f}")
-```
 
-What that block prints, verbatim, and these four rows go into the Rust suite
-**before** the shader is written:
-
+# At x = -60 the SIGMOID exponent is +1, so y = 255 / (1 + e).
+print(f"SIGMOID(-60) {voi_sigmoid(-60, 40, 400):.3f}")
+try:
+    voi_sigmoid(40, 40, 0)
+except AssertionError:
+    print("SIGMOID width 0 refused")
+else:
+    raise AssertionError("SIGMOID accepted a non-positive width")
 ```
+```text
   -160     0.000     0.000
     40   127.820   127.500
    240   255.000   255.000
    -60    63.910    63.750
+SIGMOID(-60) 68.580
+SIGMOID width 0 refused
 ```
+<!-- /ocelli-example -->
+
+Put these four rows into the Rust suite **before** writing the shader.
+The SIGMOID row independently reduces to `255 / (1 + e)`. Its positive-width
+call and zero-width refusal make the exponent sign and precondition visible.
 
 **CORRECTION, deviation D-13 in `docs/hld/DEVIATIONS.md`. Do not write 1.594
 into a fixture.** HLD section 18.3's own table gives 1.594 for the first row's
@@ -221,6 +235,7 @@ def modality_value(stored, slope, intercept):
 
 ### Unpacking a stored value, checked by hand
 
+<!-- ocelli-example: id=dicom-tooling-stored-value interpreter=python3 mode=assert -->
 ```python
 def stored_value(raw, bits_stored, high_bit, pixel_representation):
     v = (raw >> (high_bit + 1 - bits_stored)) & ((1 << bits_stored) - 1)
@@ -232,6 +247,7 @@ assert stored_value(0xF800, 12, 11, 1) == -2048   # 12-bit signed minimum
 assert stored_value(0x07FF, 12, 11, 1) == 2047    # 12-bit signed maximum
 assert stored_value(0x0FFF, 12, 11, 0) == 4095    # 12-bit unsigned maximum
 ```
+<!-- /ocelli-example -->
 
 ---
 

@@ -65,18 +65,27 @@ writes and must not be guessed into the floor gate.
    in `dicom-expert`, so the table that agents read is checked independently
    too.
 2. Add `scripts/skill_examples_check.py`. It scans every canonical
-   `.claude/skills/*/SKILL.md`, refuses malformed or unmatched markers, runs
-   each marked block in a temporary directory with a deterministic locale,
-   and byte-compares stdout with its declared output fence. No unmarked fence
-   is executed.
-3. Add unit tests for missing output, changed output, a nonzero example, a
-   duplicate id, and an empty selection. Mutate one expected digit and observe
-   the check red before claiming it.
-4. Run the new check from the existing `skills` gate after adapter sync. Add
-   its refusals and mutation probe to the guard catalogue. Regenerate the two
-   changed Codex adapters from their canonical sources.
+   `.claude/skills/*/SKILL.md` and parses all files before executing any block.
+   Refuse a marker that is not exact and at column zero. Permit only `python3`
+   through an argument vector with no shell. Run each block with a timeout in
+   its own temporary directory and minimal environment. Bound every failure
+   diagnostic. Byte-compare stdout examples with their declared output fence,
+   and require assertion examples to exit cleanly without output. Execute no
+   unmarked fence.
+3. Add adversarial parser and execution tests. Cover missing output, changed
+   output, a nonzero example, timeout, bounded diagnostics, duplicate ids,
+   empty code, empty selection, near-markers, unknown modes and interpreters,
+   parse-before-run ordering, process isolation, and arbitrary CLI selectors.
+   Mutate one expected digit and observe the check red before claiming it.
+4. Run adapter sync, the new check and its unit suite in exact order from the
+   existing `skills` gate. Invoke that named gate from CI. Assert the exact arm
+   from the already gate-reached catalogue suite, so removing the checker or
+   its unit suite cannot leave the named gate green. Add the checker's refusals
+   and expected-digit mutation probe to the guard catalogue.
+5. Regenerate the two changed Codex adapters, the guard budget and the runbook
+   table. Validate both canonical skill folders and update the LLD index.
 
-Anticipated implementation write set, exactly:
+Implementation write set, exactly 15 paths:
 
 - `.claude/skills/dicom-expert/SKILL.md`
 - `.claude/skills/dicom-tooling/SKILL.md`
@@ -85,9 +94,49 @@ Anticipated implementation write set, exactly:
 - `scripts/skill_examples_check.py`
 - `scripts/tests/test_skill_examples_check.py`
 - `bin/ocelli.sh`
+- `.github/workflows/ci.yml`
 - `scripts/guards/catalogue.py`
 - `ci/guard-probe-budget.json`
+- `scripts/tests/test_guard_catalogue.py`
+- `docs/runbooks/guard-verification.md`
 - `docs/lld/guards.md`
+- `docs/lld/README.md`
+- `.claude/plans/F-X015-design.md`
+
+The initial ten-path estimate omitted the plan correction, the named CI
+registration, the existing exact-registration holder, the generated runbook,
+and the LLD index. Those paths are required by the approved mechanism, so the
+measured write set is fifteen.
+
+Pass-1 review measured four corrections within that set:
+
+- Execute SIGMOID at a value whose exponent reduces independently to `+1`,
+  assert its static output, and exercise both a positive width and the
+  zero-width refusal. Keep exponent-sign and width-predicate mutations in the
+  catalogue so either semantic error remains observable.
+- Anchor the canonical skills root lexically to this repository before path
+  resolution. Refuse a root symlink and a child symlink escape as separate
+  cases.
+- Recognise valid blockquoted and list-nested unmarked fences as inert while
+  treating an exact column-zero declaration after either container as live.
+- Keep the independent expert table check beside the table, but express its
+  four rows as compact exact rational arithmetic instead of duplicating the
+  two verbose VOI function bodies.
+
+Pass-2 review measured three further corrections within the same mechanism:
+
+- Give an active list container precedence over the top-level fence grammar,
+  including valid two-space and three-space continuations. Dedenting from an
+  unclosed list-contained fence must make a column-zero declaration live.
+- Apply CommonMark's backtick-fence info-string restriction. A backtick in
+  that info string makes the line ordinary text and cannot hide a live marked
+  example. Tilde fences retain their separate rule.
+- Keep the expert check compact, but evaluate `-160` and `240` against both
+  LINEAR and LINEAR_EXACT boundary predicates before deriving their row
+  values.
+
+The implementation write set remains fifteen paths. The two staged review
+records bring the frozen pass-2 candidate to seventeen tracked paths.
 
 ## Boundary and tier
 
