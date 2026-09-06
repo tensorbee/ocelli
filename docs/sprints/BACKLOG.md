@@ -109,7 +109,7 @@ The workspace builds to wasm and to native, and the oracle renders the corpus th
 | F-013 | E2.5 | S04 | Metadata diff harness (LUT values, geometry, spacing) | Test | 2w | F-011 | pending |
 | F-014 | E2.6 | S05 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | F-012 | pending |
 | F-015 | E2.7 | S04 | Stable render-hash emission from the comparator | Test | 2w | F-011 | in-progress |
-| F-X001 | X1.1 | S04 | Tier C, software-adapter detection, and the feature-availability contract | Rust | 4w | F-004 | pending |
+| F-X001 | X1.1 | S04 | Tier C, software-adapter detection, and the feature-availability contract | Rust | 4w | F-004 | in-progress |
 | F-X006 | Y1.1 | S03 | Answer Appendix A gates A1 (HTJ2K) and A2 (JPEG-LS) against our own decoders | Test | 3w | F-009 | done |
 | F-X007 | Y1.2 | S03 | Oracle volume and MPR reference renders, so the spacing rows are asked something | Test | 3w | F-010 | done |
 | F-X008 | Y1.3 | S04 | One parity-target version string, and a licence in the published wasm package | Build | 1w | F-010 | pending |

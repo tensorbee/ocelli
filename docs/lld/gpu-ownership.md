@@ -1,6 +1,6 @@
 # GPU ownership
 
-**F-IDs that contributed:** F-004, F-005, F-008
+**F-IDs that contributed:** F-004, F-005, F-008, F-X001
 **Last updated:** 2026-09-06
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
@@ -154,6 +154,12 @@ because "unavailable" without them is a message nobody can act on. Deviation
 D-07's rule is unchanged by this story: a feature that cannot run on the
 resolved tier reports unavailable and never silently produces a different
 answer.
+
+The general feature result, including the difference between a declared
+fallback and no valid path, is defined once in
+[feature-availability.md](feature-availability.md). `ComputeError` is the
+in-process compute example. It is not a second availability contract and it
+does not yet map to stable boundary operands.
 
 **Both variants now have a stable number at the boundary**, added by F-005:
 `ErrorCode::Unavailable` is 700 and `ErrorCode::Workgroup` is 701, registered

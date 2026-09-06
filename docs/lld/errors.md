@@ -4,7 +4,7 @@
 `packages/core/src/{errors,panic,fatal,bulk,ring}.ts`, `ci/error-codes.json`
 **Normative source**: `docs/hld/20-errors-and-panics.md` section 23, with
 `docs/hld/14-the-boundary-in-code.md` sections 17.2, 17.3 and 17.4
-**F-IDs that contributed:** F-005
+**F-IDs that contributed:** F-005, F-X001
 **Last updated:** 2026-09-06
 
 Living current-state document. It describes what the code does today.
@@ -96,6 +96,12 @@ that claims a mechanism is how a register stops being one.
 run on the resolved tier reports unavailable and never silently produces a
 different answer, and a tier C session says so in exactly the encoding a tier A
 session would use, so the shell needs one path and not two.
+
+[feature-availability.md](feature-availability.md) defines the feature-level
+contract around that code. Code 700 has no stable operands today. F-X001 adds
+no feature identifier or numeric tier encoding, and the dependency-safe record
+conversion remains F-101's work when a real boundary producer and consumer
+exist.
 
 **Both `ComputeError` variants have their `Display` executed by a test, and
 each assertion binds an operand to the role it plays.** `Unavailable` names two

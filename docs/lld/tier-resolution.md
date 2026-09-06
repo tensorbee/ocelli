@@ -1,6 +1,6 @@
 # Tier resolution
 
-**F-IDs that contributed:** F-004, F-X016
+**F-IDs that contributed:** F-004, F-X001, F-X016
 **Last updated:** 2026-09-06
 
 How a session decides whether it is tier A, tier B or tier C, and how it
@@ -19,6 +19,11 @@ says that resolving from what the platform reports is precisely the defect:
 
 Everything below exists to make that one misdetection impossible to make
 quietly.
+
+Tier resolution answers what the session can construct. Each feature then
+turns that answer into `Available`, `Degraded` or `Unavailable` under the
+single contract in [feature-availability.md](feature-availability.md). It does
+not probe again or reinterpret the adapter evidence.
 
 ## The two halves, and why they are two files
 
