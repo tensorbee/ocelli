@@ -1,13 +1,15 @@
 # GPU ownership
 
-**F-IDs that contributed:** F-008
-**Last updated:** 2026-09-05
+**F-IDs that contributed:** F-004, F-005, F-008
+**Last updated:** 2026-09-06
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
-mechanism.
+mechanism. The quote below alters that bullet in one place, splitting its
+single semicolon into two sentences, because `docs/hld/` is exempt from this
+repository's no-prose-semicolon rule and `docs/lld/` is not.
 
 > **Shares the renderer's device.** ocelli-compute never creates a
-> wgpu::Device, it borrows the one ocelli-render owns. Two devices cannot share
+> wgpu::Device. It borrows the one ocelli-render owns. Two devices cannot share
 > textures, which would defeat the entire point.
 
 This is the Phase 1 hook of HLD section 38. Its stated alternative is "a
@@ -89,7 +91,11 @@ The weakest of the three, and it catches what the other two cannot: **a crate
 creating a device it never puts in a `GpuContext` at all.** No type is involved
 in that, so no type can refuse it.
 
-Three assertions, each proved red by mutation:
+Four assertions, each proved red by mutation. `grep -c 'fail=1'
+ci/check-device-ownership.sh` prints how many the script carries, and the table
+below has one row each. It said three over a four-row table from S02 until the
+S03 review's ninth pass, which is what a count written beside the thing it
+counts does.
 
 | Assertion | Mutation that proves it |
 |-----------|------------------------|
@@ -110,21 +116,68 @@ exactly one crate holding it, so deleting the contract has to fail too.
 | B, WebGL2 | The contract holds and no kernel runs, because tier B has no compute shaders. A kernel whose `tier()` is A with no declared fallback marks its feature unavailable |
 | C, CPU | Not constructible. A tier C session has no device, so it has no `GpuContext` and no `ComputeCtx`. Every kernel resolves through its section 31 fallback or reports unavailable |
 
+**Whether a kernel may run is one predicate and it lives in `caps`.**
+`ocelli_render::caps::compute_available` requires BOTH
+`caps.compute`, which is what the adapter reports, and
+`caps.tier.supports_compute()`, which is what this project resolved to. It is a
+conjunction, and `GpuContext::supports_compute` forwards to it and does nothing
+else. The conjunction is the content: an
+adapter can report compute support while D-07's combination rule has already
+resolved tier B or tier C because that adapter is a software rasteriser, so an
+`||` in that expression reports compute available on a tier that cannot run it. It was
+written out on `GpuContext`, where `new` needs a real device and the CI floor
+has none, so nothing could reach it and the `||` mutation survived nine review
+passes. `lib.rs` states the split it now obeys: everything that can be wrong
+about a tier is in `caps`, which needs no adapter to test. The six-row truth
+table is `caps::tests`.
+
+**The forwarder itself is still reachable by no test, and the move made the
+residue smaller rather than zero.** `GpuContext::supports_compute` needs a
+`GpuContext`, `GpuContext::new` needs a real `Device` and `Queue`, and
+deviation D-04 leaves the floor without an adapter to make either. Measured for
+the S03 review's tenth pass: negating the forwarder's body leaves
+`bin/ocelli.sh test ocelli-render` at exit 0 with 63 passed and 0 failed, and
+the method has no other caller in the workspace. A wrong forwarder answers
+`true` on a tier B context, which is the section 31 failure the predicate
+exists to prevent. What closes it is a `GpuContext` a test can build, which is
+F-037's long-lived device or F-X002's software-adapter path, and until one of
+them lands the only thing watching the line is the human check
+`docs/hld/24-agent-code-standards.md` section 27.3 requires.
+
+Which of the three a session gets is F-004's, and the rule is in
+[tier-resolution.md](tier-resolution.md). The short version: three signals,
+the fill-rate benchmark decides where it decided, and a candidate the evidence
+calls a software rasteriser resolves tier C rather than tier B.
+
 `ComputeError::Unavailable` names both the required and the resolved tier,
 because "unavailable" without them is a message nobody can act on. Deviation
 D-07's rule is unchanged by this story: a feature that cannot run on the
 resolved tier reports unavailable and never silently produces a different
 answer.
 
+**Both variants now have a stable number at the boundary**, added by F-005:
+`ErrorCode::Unavailable` is 700 and `ErrorCode::Workgroup` is 701, registered
+in `ci/error-codes.json` inside `ocelli-compute`'s declared range of 700 to
+799. The Rust types are unchanged and no conversion is written yet, because
+nothing crosses the boundary until F-101. What the numbers buy today is that a
+tier C session reports a tier A feature unavailable in exactly the encoding a
+tier A session would use to report a device loss, so the shell needs one path
+for that situation and not two. See `docs/lld/errors.md`.
+
 ## What this story deliberately does not do
 
 - **It does not create a device.** `GpuContext::new` takes one that already
-  exists. Adapter enumeration and tier resolution are F-004, device creation
-  and loss recovery are F-039. Doing them here would be a second copy of a
-  decision the project wants exactly once.
-- **It does not detect `Caps`.** `caps.rs` defines the type because section
+  exists. Device creation and loss recovery are F-037, which is E6.1 in S11,
+  "ocelli-render: device init, capability tiering, device-lost recovery".
+  F-039 is E6.3 in S13 and is OffscreenCanvas. Doing them here would be
+  a second copy of a decision the project wants exactly once.
+- **It does not detect `Caps`.** `caps.rs` defined the type because section
   31's `Kernel::workgroup` takes a `&Caps` and a hook expressed in types needs
-  the types. Filling it from an adapter is F-004.
+  the types. **F-004 has since filled it**, in the same file plus
+  `probe.rs`, and [tier-resolution.md](tier-resolution.md) is where that lives.
+  F-004's probe device is transient: created, measured on and dropped inside
+  `resolve`, so it never becomes a `GpuContext` and there is never a moment
+  when two devices exist.
 - **It supplies no `Kernel` implementer.** The trait is declared with none, and
   `AGENTS.md` forbids that shape. The rule exists to stop invented
   abstractions, and this one is prescribed: HLD Part II says a given signature
@@ -160,11 +213,16 @@ and server targets entry points rather than rewrites.
 
 ### D-10, wgpu two sprints early
 
-`ocelli-render` and `ocelli-compute` link wgpu from F-008 rather than F-039,
+`ocelli-render` and `ocelli-compute` link wgpu from F-008 rather than F-037,
 and both drop `#![cfg_attr(not(test), no_std)]` because wgpu needs `std`. The
-pin is untouched. `scripts/no_std_check.py` reads the attribute from each
-crate's source rather than carrying an exemption list, so these two left the
-check by construction.
+pin is untouched. **F-037 and not F-039**, for the reason the section above
+gives twice: F-037 is E6.1 in S11, device init and capability tiering, and
+F-039 is E6.3 in S13 and is OffscreenCanvas. The root `Cargo.toml` comment
+D-10 is written against said F-039 until the S03 review's fifth pass, and
+D-10's row in `docs/hld/DEVIATIONS.md` quotes that spelling rather than
+endorsing it. `scripts/no_std_check.py` reads the attribute from each crate's
+source rather than carrying an exemption list, so these two left the check by
+construction.
 
 `ocelli-wasm` does not depend on `ocelli-render`, so **the wasm size budget is
 unaffected by this story**. The first story that makes the wasm module reach

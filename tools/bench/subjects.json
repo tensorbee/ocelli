@@ -1,0 +1,152 @@
+{
+  "$about": [
+    "The benchmark harness's subject registry. One row per thing this project will ever measure, and the row exists from the moment the measurement is DEFINED rather than from the moment it becomes possible.",
+    "HLD section 26's last rule is 'Measure with the benchmark harness before optimising anything.' The rule names an instrument and the HLD gives it no shape, so this file is the shape. See docs/lld/benchmarks.md.",
+    "THE DEFECT THIS FILE EXISTS TO PREVENT is a plausible number recorded for a subject that does not exist. Most of the rows below have no subject in the tree today, because decision D7 puts the oracle and the instruments before the port code. A row with a `subject_story` that is not `done` is reported `unavailable`, it names the story a reader should go and read, and scripts/bench_check.py refuses both a runner file and a ci/bench-baseline.json entry for it. NO COUNT IS WRITTEN HERE, because a written count goes stale the first time a story lands, and this one already has. `node tools/bench/run.mjs --list` prints the split and reads the backlog to do it.",
+    "The definition is fixed NOW, from the specification, for every row including the ones with no subject. That is what stops the story that lands the runner from redefining the measurement into something easier to take.",
+    "Every `subject_story` was resolved through docs/sprints/allocation.json rather than copied from a comment. That is not a formality: comments across this tree once named F-096 as the boundary story, and F-096 is E15.3, measurement persistence, in S36, while E16.2 is F-101 in S16. Those comments were corrected in S03, by commit d74ad3a, and now name F-101. Resolving through the allocation is what stops the registry inheriting the next mistake of that shape."
+  ],
+  "$fields": {
+    "id": "Stable identifier. The runner file, when one exists, is src/runners/<id with dots replaced by underscores>.mjs",
+    "title": "One line, what is timed",
+    "definition_hld": "The specification sections that fix the definition",
+    "definition": "Where the measurement starts and where it stops, in words, so that a later story cannot move either end",
+    "unit": "The unit of the recorded figure",
+    "dimensions": "What a figure has to be broken down by before it means anything",
+    "tiers": "Which of tier A (WebGPU), B (WebGL2) and C (CPU) the subject applies to. `n/a` is a legitimate answer and an omitted row is not, per deviation D-07",
+    "subject_story": "The F-ID that gives this subject something to measure, or null when the subject exists today",
+    "feeds": "The gate, kill criterion or spike question the figure answers",
+    "note": "Anything a reader needs that the fields above cannot carry"
+  },
+  "subjects": [
+    {
+      "id": "wasm.cold_start",
+      "title": "Fetch, compile, instantiate and first call on the release wasm artefact",
+      "definition_hld": "A-spike-gates.md gate A4, 12-workspace-and-build.md section 15.2",
+      "definition": "Starts when the page begins loading the wasm-pack glue and ends when the first ocelli_version() call returns. Five phases are recorded separately: glue module script, fetch of ocelli_wasm_bg.wasm, WebAssembly.compile, instantiate, first call. Timed with performance.now() in the page, outside the module, so nothing is added to the boundary.",
+      "unit": "ms",
+      "dimensions": ["browser", "artefact_bytes", "profile"],
+      "tiers": ["n/a"],
+      "subject_story": null,
+      "feeds": ["A4"],
+      "note": "Release profile only. HLD 15.2's opt-level z, fat LTO, codegen-units 1, panic abort and strip apply to release, so a dev-profile cold start is a different number and not a smaller one. This is the second half of gate A4, whose first half F-002 measured as a byte count. It is NOT an answer to A4: the module holds four exported functions, no wgpu and no Naga, and A4 estimates 3 to 8 MB uncompressed with Naga dominating. A4 stays open."
+    },
+    {
+      "id": "decode.frame",
+      "title": "One Decoder::decode call over one corpus frame",
+      "definition_hld": "18-codec-registry.md section 21, 21-worker-protocol.md section 24",
+      "definition": "One call to Decoder::decode over one frame, inside a decode worker, into a caller-provided buffer. Excludes the fetch that produced the bytes and excludes every GPU operation, because section 24 says the decode worker never touches the GPU. Decode time therefore has nothing to do with a tier and everything to do with a transfer syntax.",
+      "unit": "ms",
+      "dimensions": ["transfer_syntax", "rows", "columns", "bits_stored"],
+      "tiers": ["n/a"],
+      "subject_story": "F-023",
+      "feeds": ["A1", "A2", "F-027", "F-028"],
+      "note": "docs/sprints/allocation.json's note on F-006 is 'Numbers feed the P0 kill criteria'. The two stories carrying that marker are F-027 and F-028, and both are decode questions, so this row and the two below are the ones that marker points at."
+    },
+    {
+      "id": "decode.transfer_syntax.htj2k",
+      "title": "Decode of one HTJ2K frame, the P0 kill criterion's number",
+      "definition_hld": "18-codec-registry.md section 21, A-spike-gates.md gate A1",
+      "definition": "As decode.frame, restricted to the three HTJ2K transfer syntaxes the codec registry claims. Reported per syntax and never as one average, because a lossless and a lossy codestream are different work.",
+      "unit": "ms",
+      "dimensions": ["transfer_syntax", "rows", "columns", "bits_stored"],
+      "tiers": ["n/a"],
+      "subject_story": "F-027",
+      "feeds": ["A1", "P0-kill-criterion"],
+      "note": "F-027 (E4.5) is marked 'P0 KILL CRITERION, unverified in Rust today' in docs/sprints/allocation.json. F-X006 answered gate A1 against our own decoders in S03, and that answer is a feasibility answer rather than a timing one."
+    },
+    {
+      "id": "decode.transfer_syntax.jpegls",
+      "title": "Decode of one JPEG-LS frame, the P0 kill criterion's number",
+      "definition_hld": "18-codec-registry.md section 21, A-spike-gates.md gate A2",
+      "definition": "As decode.frame, restricted to the JPEG-LS transfer syntaxes the codec registry claims.",
+      "unit": "ms",
+      "dimensions": ["transfer_syntax", "rows", "columns", "bits_stored"],
+      "tiers": ["n/a"],
+      "subject_story": "F-028",
+      "feeds": ["A2", "P0-kill-criterion"],
+      "note": "F-028 (E4.6) is marked 'P0 KILL CRITERION, no credible pure-Rust path' in docs/sprints/allocation.json."
+    },
+    {
+      "id": "render.first_frame",
+      "title": "Typed command to the first presented-frame event",
+      "definition_hld": "05-rendering.md section 7, 04-boundary-and-data-path.md section 5.3",
+      "definition": "Starts at the typed command that asks for the first render and ends at the first presented-frame event drained from the event ring. It is NOT a pixel read-back: decision D3 says pixels never cross the boundary, and a read-back would also measure something no user experiences.",
+      "unit": "ms",
+      "dimensions": ["tier", "viewport_type", "rows", "columns"],
+      "tiers": ["A", "B", "C"],
+      "subject_story": "F-038",
+      "feeds": [],
+      "note": "Blocked on F-037 (E6.1, device init, S11) as well as on F-038 (E6.2, the render graph and frame scheduler, S12). `subject_story` names the later of the two because that is the one whose landing makes the measurement possible."
+    },
+    {
+      "id": "interaction.window_level_drag",
+      "title": "Pointer event to the ring drain that carries its result",
+      "definition_hld": "04-boundary-and-data-path.md sections 5.1 and 5.3",
+      "definition": "Starts at a pointer event on the main thread and ends when the resulting event is drained from the ring in a later frame. Section 5.1 forbids one call per pointer move and section 5.3 drains the ring once per frame, so the measured quantity includes the batching those two rules impose and must not be taken per event.",
+      "unit": "ms",
+      "dimensions": ["tier", "viewport_type", "events_per_frame"],
+      "tiers": ["A", "B", "C"],
+      "subject_story": "F-101",
+      "feeds": [],
+      "note": "F-101 is E16.2, S16. Resolved through docs/sprints/allocation.json, not from a comment: comments here once named F-096 for this work, and F-096 is E15.3, measurement persistence, in S36. They were corrected in S03, by commit d74ad3a."
+    },
+    {
+      "id": "interaction.scroll",
+      "title": "Scroll event to the ring drain that carries its result",
+      "definition_hld": "04-boundary-and-data-path.md sections 5.1 and 5.3",
+      "definition": "As interaction.window_level_drag, for stack scrolling. Kept as its own row because a scroll changes which frame is resident and a window-level drag does not, so they exercise different work and averaging them hides that.",
+      "unit": "ms",
+      "dimensions": ["tier", "viewport_type", "cache_state"],
+      "tiers": ["A", "B", "C"],
+      "subject_story": "F-101",
+      "feeds": []
+    },
+    {
+      "id": "session.cpu_interactive",
+      "title": "CPU cost of one interactive session, as a fraction of one vCPU",
+      "definition_hld": "A-spike-gates.md gate A7, docs/spikes/A7-tier-c.md section A7.3",
+      "definition": "The mean CPU time consumed by one session while a user is interacting, divided by wall-clock time, on a representative GPU-less session. A7.3 sets the budget relative to the incumbent viewer measured the same way, and states 'Do not invent a number.'",
+      "unit": "fraction_of_one_vcpu",
+      "dimensions": ["tier", "viewport_type", "rows", "columns"],
+      "tiers": ["C"],
+      "subject_story": "F-X003",
+      "feeds": ["A7.3"],
+      "note": "docs/spikes/A7-tier-c.md says F-006 must measure tier C from the start, including CPU cost per session, so the row is defined here. docs/spikes/GATES.md makes the two remaining A7 figures acceptance criteria on F-X002 and F-X003, so the MEASUREMENT is taken there and not here. Reported separately from session.cpu_idle because A7.3 says they answer to different people and only one is negotiable."
+    },
+    {
+      "id": "session.cpu_idle",
+      "title": "CPU cost of one idle session, as a fraction of one vCPU",
+      "definition_hld": "A-spike-gates.md gate A7, docs/spikes/A7-tier-c.md section A7.3",
+      "definition": "The mean CPU time consumed by one open session while nobody touches it, divided by wall-clock time. A7.3: 'Ocelli's idle cost must be indistinguishable from zero', because it multiplies by every open session on the host.",
+      "unit": "fraction_of_one_vcpu",
+      "dimensions": ["tier", "viewport_type"],
+      "tiers": ["C"],
+      "subject_story": "F-X003",
+      "feeds": ["A7.3"]
+    },
+    {
+      "id": "cine.frame_change_rate",
+      "title": "Changed frames per second under a cine loop",
+      "definition_hld": "A-spike-gates.md gate A7, docs/spikes/A7-tier-c.md section A7.3",
+      "definition": "The rate at which the presented image actually changes while a cine loop runs. A7.3 asks for it because on a remoted session every changed frame has to be encoded and shipped, so the cost lands on the remoting stack rather than on the viewer.",
+      "unit": "changed_frames_per_second",
+      "dimensions": ["tier", "viewport_type", "rows", "columns"],
+      "tiers": ["C"],
+      "subject_story": "F-X003",
+      "feeds": ["A7.3"]
+    },
+    {
+      "id": "tier.startup_microbenchmark",
+      "title": "The fill rate F-004's tier probe measures, recorded rather than re-taken",
+      "definition_hld": "A-spike-gates.md gate A7, docs/spikes/A7-tier-c.md section A7.2",
+      "definition": "Pixels shaded per second by the workload ci/tier-thresholds.json describes: a full-viewport triangle into an offscreen texture, a fixed ALU count per fragment, one submission, no readback, the warm-up figure discarded. A figure taken with a different workload is a different measurement and does not belong here.",
+      "unit": "pixels_per_second",
+      "dimensions": ["backend", "adapter", "device_type"],
+      "tiers": ["A", "B", "C"],
+      "subject_story": "F-004",
+      "feeds": ["A7.2"],
+      "note": "F-004 OWNS this micro-benchmark and F-006 only records it. They are two artefacts sharing a word: F-004's runs on every production session and returns a tier, this one is a development instrument that returns a recorded number. The runner, when it is written, invokes F-004's own instrument, `cargo test -p ocelli-render --release -- --ignored --nocapture measures_a_fill_rate_on_this_machine`, and reads crates/ocelli-render/src/probe.rs's output. It reimplements nothing. F-004 has since landed and its BACKLOG.md row is `done`, so this row is no longer blocked by a pending story. It stays without a runner until one is written, and the gate does not demand one, which is a gap this note records rather than hides."
+    }
+  ]
+}

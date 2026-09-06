@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-007, F-008
-**Last updated:** 2026-09-05
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008
+**Last updated:** 2026-09-06
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -68,8 +68,10 @@ That is the same defect class as widening a tolerance to make a test pass.
 
 ### The exported surface
 
-One function, `ocelli_version()`, returning the workspace version. It is the
-module's entire export until F-096 (E16.2) builds the boundary.
+Four functions, listed in the table under "The exported surface, and the panic
+probe" below. `ocelli_version()` returns the workspace version and the other
+three are the panic record of HLD section 23. The boundary itself arrives with
+F-101 (E16.2).
 
 It exists for measurement rather than for features. Fat LTO with `strip =
 true` lets the linker discard anything unreachable, so a module with no
@@ -103,14 +105,15 @@ Four steps, each exit code read from the command itself.
 that flag pulls in dev-dependencies, and `proptest` reaches `wait-timeout`,
 which does not compile for wasm32 and is not meant to. What ships to a browser
 is the lib. Running the test suite under wasm32 needs `wasm-bindgen-test` and a
-browser runner, which is the oracle's and F-096's ground. A native build does
+browser runner, which is the oracle's and F-101's ground. A native build does
 run its tests, so step 3 has to compile them.
 
 ### The two entry points
 
 `crates/ocelli-native/src/bin/ocelli-desktop.rs` and `ocelli-server.rs`. Both
-are stubs that print `entry_point_banner()`, which names the binary and the
-four extension points of HLD section 13 that Phase 2 and Phase 3 will fill.
+print `entry_point_banner()`, which names the binary and the four extension
+points of HLD section 13 that Phase 2 and Phase 3 will fill, and then, since
+F-004, the tier they resolved to and the evidence for it.
 
 They are two binaries rather than one with a subcommand because section 13
 names two entry points, and because the server one is what the render-target
@@ -159,7 +162,7 @@ reported `ocelli-native` present under wasm32 and could not tell that from a
 real violation. The table is enforced where it can be: the `compile_error!` in
 `ocelli-native`, and steps 1 to 3 building each target for real.
 
-## The size budget## The size budget
+## The size budget
 
 `ci/wasm-size-budget.json` holds a recorded measurement and a 5% tolerance.
 `scripts/pin_and_size_check.py --with-size` compares the built module against
@@ -168,10 +171,48 @@ first measurement would be either meaningless or immediately wrong.
 
 **First measurement: 14,104 bytes**, on 2026-09-04.
 
+**Current baseline: 16,388 bytes**, re-baselined by F-005 on 2026-09-05. The
+delta is 2,284 bytes, which is 16.2 per cent and therefore over the tolerance,
+and it was declared rather than discovered. `ci/wasm-size-budget.json` carries
+the attribution and the two measurements it rests on:
+
+- Base commit `d74ad3a` rebuilt on the same toolchain reproduces 14,104 bytes
+  exactly, so the delta is F-005's and not drift.
+- Raising the panic record's `MESSAGE_CAPACITY` from 512 to 1,536 bytes leaves
+  the module **byte-identical** at 16,388, because a zeroed static needs no
+  data segment. So the 528-byte record costs the module nothing, and
+  `ocelli-core` becoming a dependency of `ocelli-wasm` for the first time costs
+  nothing measurable either, since the only thing reached is one enum
+  discriminant and fat LTO drops the rest.
+
+**What the delta actually is** is the panic hook's code:
+`std::panic::set_hook`, the boxed closure it takes, the `core::fmt` machinery
+that formats the panic location, and the `Any` downcast that reads the payload.
+It has no bearing on gate A4, whose estimate is three orders of magnitude
+larger and dominated by Naga.
+
 **That number is not an answer to Appendix A gate A4 and must not be read as
 one.** A4 asks whether binary size and cold start land within budget and
 estimates 3 to 8 MB uncompressed with Naga dominating. This module contains
-one function, no wgpu and no Naga. A4 stays open.
+four exported functions, no wgpu and no Naga. A4 stays open.
+
+### The other half of A4, cold start
+
+A4 names two figures and the paragraphs above are only the first. **Cold start
+was never measured at all until F-006**, which recorded **2.3 ms** on
+2026-09-05 for the release artefact: fetch, `WebAssembly.compile`, instantiate
+and the first `ocelli_version()` call, timed in headless Chromium from the page
+rather than from inside the module, so `crates/` gained not one line. The figure
+and everything about how it was taken are in `ci/bench-baseline.json`, and the
+design is `docs/lld/benchmarks.md`.
+
+**The same caveat applies to it, unchanged, and it is the reason both halves
+live in one place rather than in two documents.** A module holding four exported
+functions, no wgpu and no Naga tells you nothing about the cold start of a
+feature-complete module, exactly as its 16 KB tells you nothing about A4's 3 to
+8 MB. Separating the two numbers is how one of them eventually gets read as
+answering the gate. **A4 stays open**, and 2.3 ms is a regression baseline for
+the build-out phase.
 
 **Re-baselining is expected, repeatedly, for the whole build-out phase.** A 5%
 tolerance on a 14 KB module is blown by the first story that adds anything
@@ -180,6 +221,37 @@ gate does not mean "you exceeded a budget", it means **"the module changed
 size and the change was not declared"**. `--accept-size` is the declaration,
 and the design plan that used it says why. The gate only starts meaning the
 other thing once the module is feature-complete.
+
+## The exported surface, and the panic probe
+
+The module exports four functions of ours, up from one. wasm-bindgen
+adds its own, and `memory`, which are the glue's and not this table's.
+
+| Export | Called |
+|--------|--------|
+| `ocelli_version()` | Any time. F-002's measurement root |
+| `install_panic_hook()` | Once, by a worker, before any other call |
+| `panic_record_ptr()` | Once, straight after instantiation. Cached |
+| `panic_record_len()` | Once, straight after instantiation. Cached |
+
+The last three are F-005's, and `docs/lld/errors.md` is where they are
+specified. The property that matters for this file is that **none of them is
+called after a trap**, so the panic path adds no post-trap requirement on the
+module.
+
+**`wasm32-unknown-unknown` is `panic = "abort"` in every profile**, not only in
+the release profile HLD section 15.2 sets it in, because it is the target's own
+default. `rustc --print cfg --target wasm32-unknown-unknown` reports
+`panic="abort"` with no profile involved. That is worth stating here because
+this file describes the build, and the obvious reading of section 15.2 is that
+a dev wasm build unwinds. It does not.
+
+`bin/ocelli.sh gate panic` builds a **second** module, carrying the
+`panic-probe` cargo feature, into `crates/ocelli-wasm/target/panic-probe`,
+which is gitignored. That feature adds one export that panics on purpose, and
+the shipped artefact does not carry it, so the module `bin/ocelli.sh wasm`
+measures has no way to be asked to panic. `AGENTS.md` forbids a feature flag
+without a named user, and the named user is `scripts/panic_probe.mjs`.
 
 ## The isolation invariant
 
@@ -219,15 +291,57 @@ not run" and "the check ran and was happy" must not look the same.
 | `wgpu` | HLD section 15.2. Agents reliably emit wgpu 0.19-era pipeline code, and a range lets that compile against something subtly different from what the shader expects |
 | `wasm-bindgen` | `wasm-pack` runs a CLI whose version must match the crate version. A range lets the two drift, and the mismatch reads as a build break rather than as a resolution change |
 
+### `ocelli-render` adds one wgpu feature, and it is deviation D-14
+
+`wgpu = { workspace = true, features = ["webgl"] }`. The pin and the workspace
+entry are untouched and only the consuming crate's feature set changes, which
+is the shape D-09 set for glam.
+
+wgpu 30.0.1's default set is `std, parking_lot, dx12, metal, gles, vulkan,
+wgsl, webgpu`, read from the pinned crate's own manifest. `webgl` is a real
+feature and is not among them, and `gles` is the **native** GL backend rather
+than the browser one. Without the feature the crate reaches WebGPU on wasm32
+and cannot reach WebGL2 at all, so HLD section 7's tier B could never resolve
+in a browser, and a tier the resolver can never return is not a tier.
+
+**Step 4 is unaffected and that was checked rather than assumed.** The feature
+is enabled unconditionally, so both targets resolve it, and the packages it
+pulls in on wasm32 are already target-gated inside wgpu's own manifest.
+`ci/check-bindgen-isolation.sh` part 1 is unaffected for the same reason:
+`wasm-bindgen`, `js-sys` and `web-sys` sit under wgpu's
+`cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))` tables, so
+the host tree does not reach them.
+
+**Measured cost today is zero bytes**, because `ocelli-wasm` does not depend on
+`ocelli-render` and so never reaches wgpu, whatever else it depends on. It had
+an empty `[dependencies]` table when this was written and F-005 has since added
+`ocelli-core`, which changes the premise and not the conclusion. The size budget
+moves only when the render path is wired in from S11.
+
+### `ocelli-native` now depends on `ocelli-render`
+
+F-004 gives the two entry points a real job: read `OCELLI_TIER`, resolve a
+tier, and print the evidence. That is the operator override's named user, and
+`AGENTS.md` forbids a flag without one.
+
+The cost is that **step 1 of the cross-target proof starts linking wgpu**,
+which is a real build-time increase to a gate in the floor. It is accepted
+because the alternative is shipping an override nobody can observe. See
+[tier-resolution.md](tier-resolution.md).
+
 ## Known gaps
 
 - **wasm-pack warns that `crates/ocelli-wasm/` carries no LICENSE file.** The
   licences are at the repository root. The generated `pkg/` is not published
-  by anything today, and whether it is published at all is F-096's and
+  by anything today, and whether it is published at all is F-101's and
   `/release`'s question, not this one.
-- **Step 4 starts vacuous.** Eleven crates that are currently scaffolds with
-  one dependency between them show no feature difference at all, so the guard
-  proves a negative over a small graph. It was built anyway, and proved red by
+- **Step 4 starts vacuous.** It compares the dependencies this workspace
+  declares directly, not the workspace's own crates, and today not one of them
+  resolves a different feature set on the two targets, so `allowed` in
+  `ci/target-feature-baseline.json` is empty. That file's
+  `checked_dependencies` is the list being watched and
+  `python3 -c "import json;print(len(json.load(open('ci/target-feature-baseline.json'))['checked_dependencies']))"`
+  prints how long it is. It was built anyway, and proved red by
   construction, because its value is entirely in the moment a dependency is
   added and nobody is looking, which is precisely the moment nobody would
   build it.

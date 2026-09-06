@@ -8,7 +8,15 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-/** How far above a package's main entry its own manifest may sit. */
+/**
+ * How many directories the walk examines, `start` itself included.
+ *
+ * So a manifest may sit at `start` or up to `MAX_WALK - 1` directories above
+ * it, which is seven and not eight. The loop tests `start` at depth 0, and
+ * both this comment and the refusal below said "8 directories above" until the
+ * eighth review pass, which overstated the reach by one in a message an
+ * operator reads while working out why a pin failed.
+ */
 const MAX_WALK = 8;
 
 /**
@@ -51,8 +59,8 @@ export function versionFromPackageRoot(start, name) {
     directory = parent;
   }
   throw new Error(
-    `no package.json naming ${name} within ${MAX_WALK} directories above ` +
-      `${start}`,
+    `no package.json naming ${name} in ${start} or the ${MAX_WALK - 1} ` +
+      `directories above it`,
   );
 }
 

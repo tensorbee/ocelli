@@ -9,6 +9,23 @@ reshape the work it gates.**
 
 ---
 
+## Where A1's and A2's pass criteria live
+
+**A1 and A2 are Appendix A gates, so their questions live in
+`docs/hld/A-spike-gates.md`, which is not hand-edited.** Their pass and fail
+criteria are written in `.claude/plans/F-X006-design.md`, approved and
+committed before any measurement was taken, and are transcribed above the
+results in each answer file the way `A7-tier-c.md` does it. So `/spike` step 1
+is checkable against a committed artefact that predates the work, without this
+file carrying gates it was not written for.
+
+| Gate | Answer | Outcome |
+|------|--------|---------|
+| **A1** | `docs/spikes/A1-htj2k-openjp2.md` | **`Fail`.** `openjp2` 0.6.1 does not decode at all on `wasm32-unknown-unknown`, and is exact natively. Appendix A's consequence is in force and the fallback is an S04 story |
+| **A2** | `docs/spikes/A2-jpeg-ls.md` | **`Pure Rust`.** `pure_jpegls` 2.0.0, one implementation on every target. The architecture change the gate warned about does not happen |
+
+---
+
 ## A7, is tier C worth building, and where does its value actually come from?
 
 **Created by**: deviation D-07, `docs/hld/DEVIATIONS.md`.

@@ -20,6 +20,21 @@
 export const SUBJECT = "syntax/reference_mono12.dcm";
 
 /**
+ * The rows a volume fault selects: the ten uniform synthetic slices.
+ *
+ * One complete subject and the smallest one, so a volume fault costs one
+ * volume build of ten 20 by 12 slices rather than twenty-seven full-resolution
+ * CT instances. It is a `--rows` substring, so it matches exactly those ten and
+ * no other manifest row.
+ *
+ * `SUBJECT` above touches NO series row, which is what keeps the twelve stack
+ * faults from attempting a volume at all: no subject is completely selected and
+ * none is partially selected either, so the volume pass is declared skipped in
+ * `run.json` rather than silently absent.
+ */
+export const VOLUME_SUBJECT = "synthetic/ct_series_uniform/";
+
+/**
  * Rewrite the Transfer Syntax UID to one no decoder claims.
  *
  * `1.2.840.10008.1.9.9` is the same nineteen characters as Explicit VR Little
@@ -168,7 +183,167 @@ export const FAULTS = {
     what: "an unexpected throw inside the page, which must arrive as a boundary and not as an evaluation error",
     mutateParams: (params) => ({ ...params, voi: { source: "whatever" } }),
   },
+
+  // -------------------------------------------------------------------------
+  // The volume pass, F-X007
+  //
+  // Four more boundaries, and every refusal the volume page or the volume half
+  // of the driver makes is aimed at by exactly one of these. They select a
+  // whole series directory rather than one row, which the runner needs no
+  // change for because `--rows` is already a substring.
+  //
+  // The hooks are DIFFERENT NAMES from the stack pass's on purpose.
+  // `mutateBytes`, `mutateParams` and `pageFault` are read by `renderPass` and
+  // would fire during the stack pass over the same ten rows, which would leave
+  // the run red at a stack boundary and prove nothing about the guard the fault
+  // is aimed at. `mutateMemberBytes`, `mutateVolumeRequest`, `mutateVolumeResult`
+  // and `pageVolumeFault` are read only by the volume pass, so the ten stack
+  // frames of the selected rows come out normally and the failure is where it
+  // is claimed to be.
+  // -------------------------------------------------------------------------
+
+  "volume-member-unparseable": {
+    boundary: "volume-loaded",
+    row: VOLUME_SUBJECT,
+    expect: "did not parse",
+    what: "one member's bytes are cut to 256, so the volume cannot read its geometry",
+    // Only what the VOLUME pass sends. The same row's stack frame is rendered
+    // from the untouched corpus bytes and comes out normally.
+    mutateMemberBytes: (bytes) => bytes.subarray(0, 256),
+  },
+  "no-volume-load-event": {
+    boundary: "volume-loaded",
+    row: VOLUME_SUBJECT,
+    expect: "no CORNERSTONE_IMAGE_VOLUME_LOADING_COMPLETED within",
+    what: "the page creates the volume and never calls load(), so no frame is ever assembled",
+    pageVolumeFault: true,
+    // The ONE thing this fault breaks is that `load()` is never called. The
+    // timeout is shortened as well, and that is not a second thing broken, it
+    // is what makes the guard affordable to watch: `volume-params.json`
+    // declares five minutes for a twenty-seven slice real CT series under
+    // SwiftShader, and waiting that out on every oracle gate to prove a
+    // timeout fires would cost five minutes to learn nothing extra. The guard
+    // is "the completion event did not fire within the DECLARED timeout", and
+    // it is the same guard at two seconds.
+    mutateVolumeRequest: (request) => ({ ...request, loadTimeoutMs: 2_000 }),
+  },
+  "volume-short-load": {
+    boundary: "volume-loaded",
+    row: VOLUME_SUBJECT,
+    expect: "and the subject declares",
+    what: "one member is dropped, so the built volume has fewer slices than the subject has members",
+    pageVolumeFault: true,
+  },
+  "volume-repeat-slice": {
+    boundary: "volume-loaded",
+    row: VOLUME_SUBJECT,
+    // The permutation check specifically, which the slice-count check cannot
+    // reach: replacing one member with a copy of another keeps the count.
+    expect: "is not a permutation of",
+    what: "the built volume's sorted image id list carries one member twice and another not at all",
+    pageVolumeFault: true,
+  },
+  "volume-z-profile": {
+    boundary: "volume-loaded",
+    row: VOLUME_SUBJECT,
+    // "steps by" and not "the z profile", which both branches of that guard
+    // say. This injection changes the STEP and leaves the first value alone,
+    // so the fragment names the branch it actually reaches. The first-value
+    // branch is a pure function and is covered by tests/volume_test.mjs.
+    expect: "steps by",
+    what: "one slice of the assembled volume carries another slice's value, so the ramp is not a step of 16",
+    pageVolumeFault: true,
+  },
+  "volume-geometry-drift": {
+    boundary: "volume-geometry",
+    row: VOLUME_SUBJECT,
+    // The tolerance that acted, named. 2e-6 is over HLD 25.1's 1e-6 and
+    // `tests/volume_test.mjs` shows 5e-7 passing, so this proves 1e-6 decided
+    // and not some looser default.
+    expect: "volume-truth.json declares",
+    what: "one member's projected position is moved 2e-6 mm, which is over HLD 25.1's 1e-6 mm",
+    mutateVolumeResult: driftOneProjectedPosition,
+  },
+  "bad-orientation": {
+    boundary: "reformat-presented",
+    row: VOLUME_SUBJECT,
+    // `constructor` and not a nonsense word, for `bad-interpolation`'s reason:
+    // `Enums.OrientationAxis` is a plain object on Object.prototype, so a guard
+    // that looked the name up rather than checking a list would accept this.
+    expect: "and this page implements",
+    what: "volume-params.json asks for an orientation resolved from Object.prototype",
+    mutateVolumeRequest: (request) => ({ ...request, orientations: ["constructor"] }),
+  },
+  "no-reformat-render-event": {
+    boundary: "reformat-presented",
+    row: VOLUME_SUBJECT,
+    expect: "reformat-presented: no CORNERSTONE_IMAGE_RENDERED within",
+    what: "the volume viewport is set up and never calls render()",
+    pageVolumeFault: true,
+  },
+  "reformat-stale-frame": {
+    boundary: "reformat-read-back",
+    row: VOLUME_SUBJECT,
+    expect: "is still the sentinel colour",
+    what: "the page fires IMAGE_RENDERED without drawing the reformat",
+    pageVolumeFault: true,
+  },
+  "reformat-uniform-canvas": {
+    boundary: "reformat-read-back",
+    row: VOLUME_SUBJECT,
+    expect: "every pixel of the reformat is rgba(9,9,9,255)",
+    what: "the reformat is overwritten with one value after a real render",
+    pageVolumeFault: true,
+  },
+  "wrong-reformat-canvas-size": {
+    boundary: "reformat-read-back",
+    row: VOLUME_SUBJECT,
+    expect: "is not comparable with one at the declared size",
+    what: "the reformat is read back against a canvas size nobody declared",
+    mutateVolumeRequest: (request) => ({
+      ...request,
+      params: {
+        ...request.params,
+        canvas: { ...request.params.canvas, width: 256, height: 256 },
+      },
+    }),
+  },
 };
+
+/**
+ * Move one member 2e-6 mm along the slice normal, in the result the page
+ * returned.
+ *
+ * Node-side and on the RESULT rather than on the bytes, because the geometry
+ * the driver measures comes from the attributes `page/app.mjs` read during the
+ * stack pass, and perturbing the file itself would break that pass first and
+ * fail at a boundary this fault is not aimed at.
+ *
+ * 2e-6 specifically. HLD 25.1 gives geometry as "world coordinates within 1e-6
+ * mm", so this is just over it, and `tests/volume_test.mjs` shows 5e-7 passing.
+ * A fault at 1 mm would have gone red against any tolerance at all, including
+ * none.
+ */
+function driftOneProjectedPosition(result) {
+  const members = result.members.map((member) => ({ ...member }));
+  const target = members[4] ?? members[0];
+  const position = target.attributes?.imagePositionPatient;
+  if (!Array.isArray(position) || position.length !== 3) {
+    throw new Error(
+      `the volume-geometry-drift fault needs a member carrying a ` +
+        `three-element ImagePositionPatient, and ${target.path} has ` +
+        `${JSON.stringify(position)}`,
+    );
+  }
+  // Along the slice normal (-0.6, 0.8, 0), so the whole 2e-6 mm lands on the
+  // projection rather than being partly in-plane and invisible to it.
+  const normal = [-0.6, 0.8, 0.0];
+  target.attributes = {
+    ...target.attributes,
+    imagePositionPatient: position.map((value, index) => value + 2e-6 * normal[index]),
+  };
+  return { ...result, members };
+}
 
 /** The bytes a fault hands to the page, mutated or not. */
 export function faultedBytes(name, bytes) {
@@ -188,4 +363,24 @@ export function pageFaultName(name) {
 /** Whether this fault makes the driver skip the row entirely. */
 export function skipsRow(name) {
   return FAULTS[name]?.skipRow === true;
+}
+
+/** The bytes a fault hands the VOLUME page for one member, mutated or not. */
+export function faultedMemberBytes(name, bytes) {
+  return FAULTS[name]?.mutateMemberBytes?.(bytes) ?? bytes;
+}
+
+/** The request a fault hands the volume page, mutated or not. */
+export function faultedVolumeRequest(name, request) {
+  return FAULTS[name]?.mutateVolumeRequest?.(request) ?? request;
+}
+
+/** The result a fault hands the driver's geometry check, mutated or not. */
+export function faultedVolumeResult(name, result) {
+  return FAULTS[name]?.mutateVolumeResult?.(result) ?? result;
+}
+
+/** The fault name the VOLUME page is told about, or null. */
+export function pageVolumeFaultName(name) {
+  return FAULTS[name]?.pageVolumeFault ? name : null;
 }

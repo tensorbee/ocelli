@@ -21,7 +21,11 @@ exempt", which is what an earlier version of this docstring implied and what
 sit under an INCLUDE_PREFIXES directory, so `## Unreleased` is unchecked too.
 S01 found a stale gate count there that nothing would have caught.
 
-Code, identifiers and fenced blocks are exempt everywhere.
+Fenced blocks, inline code spans, link targets and markdown table rows are
+exempt, the last because a row's cells are data rather than sentences. Indentation is
+not a code signal this checker honours, because a four-space indent under a
+list bullet is a continuation paragraph rather than code and exempting it would
+let real prose past both rules.
 
 Usage:
   python3 scripts/prose_check.py
@@ -67,7 +71,7 @@ def scan(text: str, label: str) -> list[str]:
         if FENCE.match(raw):
             fenced = not fenced
             continue
-        if fenced or raw.lstrip().startswith(("    ", "\t")):
+        if fenced:
             continue
         line = LINK_TARGET.sub("", INLINE_CODE.sub("", raw))
         # A markdown table row is structure and its cells are DATA, not

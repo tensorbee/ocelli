@@ -1,0 +1,61 @@
+# THROWAWAY SPIKE CODE. F-X006, Appendix A gate A1.
+#
+# `[workspace]` is EMPTY and PRESENT on purpose. The root manifest declares
+# `members = ["crates/*", "tools/oracle"]`, so this directory is already outside
+# it, and an empty table makes cargo treat this crate as its own workspace
+# rather than walking up and failing. The root `Cargo.toml` is not edited by
+# this story. The consequence is intended and is recorded in the answer file:
+# `gate clippy` and `gate test` run `--workspace` and never see this code,
+# while `unsafe`, `provenance` and `content` read `git ls-files` and do, and
+# `lint` reaches `run.mjs`. `prose` does not reach this directory at all: it
+# covers `.md` under a fixed prefix list that `tools/spikes/` is not on.
+[workspace]
+
+[package]
+name = "a1-htj2k"
+version = "0.0.0"
+publish = false
+# EDITION 2021 IS A DECISION, NOT AN INHERITANCE, and the root workspace is on
+# 2024. Rust 2024 requires `#[unsafe(no_mangle)]` on an exported symbol, and
+# `scripts/unsafe_allowlist_check.py` matches the bare token `unsafe` over every
+# tracked `.rs` file. A tracked spike file containing no unsafe code at all
+# would therefore fail `gate unsafe` on an attribute. Edition 2021 spells the
+# same attribute `#[no_mangle]`, with no token to match.
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "a1_htj2k"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "a1-htj2k"
+path = "src/main.rs"
+
+[dependencies]
+# THE LIBRARY UNDER TEST IS `openjp2` 0.6.1, BSD-2-Clause, a C2Rust port of
+# OpenJPEG's `src/lib/openjp2`. OpenJPEG is in `docs/SOURCE-POLICY.md`'s yes
+# column.
+#
+# It is reached through `jpeg2k`, MIT/Apache-2.0, because `openjp2` 0.6.1 has no
+# safe in-memory stream constructor: `Stream::new_file` needs its `file-io`
+# feature, `libc` and a filesystem, and `Stream::new_custom` needs `extern "C"`
+# callbacks over a `*mut c_void`, which cannot be used without `unsafe` in a
+# tracked file. `jpeg2k` with `default-features = false` and
+# `features = ["openjp2"]` pulls in exactly `openjp2 = 0.6.1` and nothing else
+# that decodes, and it is what `dicom-transfer-syntax-registry` 0.10's own
+# `openjp2` feature resolves to. Reasoned in full in `src/lib.rs`.
+#
+# Both pins are exact. A1 is a claim about specific versions and a caret range
+# would make the recorded answer unreproducible.
+jpeg2k = { version = "=0.10.1", default-features = false, features = ["openjp2"] }
+openjp2 = { version = "=0.6.1", default-features = false, features = ["std"] }
+
+# HLD section 15.2, verbatim, so the wasm measurement is taken under the profile
+# that ships rather than a default one.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

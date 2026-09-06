@@ -10,9 +10,10 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
-- The Cargo workspace and the thirteen crates of HLD section 15.1, with
-  `wasm-bindgen` confined to `ocelli-wasm` and enforced by
-  `ci/check-bindgen-isolation.sh`.
+- The Cargo workspace and the crates of HLD section 4's crate table, which
+  `ls crates | wc -l` counts. Section 15.1's layout block is not that table and
+  omits `ocelli-compute`. `wasm-bindgen` is confined to `ocelli-wasm` and
+  enforced by `ci/check-bindgen-isolation.sh`.
 - The npm workspaces `@ocelli/core` and `@ocelli/react`, and the example
   viewer at `examples/viewer-react`.
 - Strongly typed canvas, world and voxel-index points, composable transforms,
@@ -21,9 +22,12 @@ Repository bootstrap. Nothing is published.
   transfer-syntax conformance checks, metadata auditing and digest verification.
 - The authoritative Markdown specification under `docs/hld/`, sanitized during
   bootstrap so no external source-document bundle is needed by the workflow.
-- `docs/sprints/`, with 190 F-IDs imported from the backlog spreadsheet, 12
-  added since as `F-X` stories, and 169 of the 202 allocated across 72 sprints
-  and 18 milestones.
+- `docs/sprints/`, with 190 F-IDs imported from the backlog spreadsheet and
+  `F-X` stories added since. This line deliberately does not repeat the totals.
+  `python3 scripts/backlog_check.py` prints how many F-IDs there are and how
+  many are done, and `python3 scripts/gen_sprint_plan.py --check` prints how
+  many carry a sprint. The allocation spans 72 sprints and 18 milestones, which
+  `docs/sprints/BACKLOG.md`'s summary section names the command for.
 - The gate set behind `bin/ocelli.sh gate`, and a CI floor that runs every one
   of them that needs no GPU and no corpus. `bin/ocelli.sh gate --list` is the
   list, and this line deliberately does not repeat the count, because a number
@@ -34,10 +38,11 @@ Repository bootstrap. Nothing is published.
 - The wasm build pipeline. `bin/ocelli.sh wasm` produces
   `crates/ocelli-wasm/pkg` through `wasm-pack` under HLD section 15.2's release
   profile, and the `wasm` gate measures that artefact against a recorded size
-  budget in `ci/wasm-size-budget.json`. The module exports `ocelli_version()`
-  and nothing else until the boundary lands. First measurement 14,104 bytes,
-  which is a baseline for regression detection and not an answer to Appendix A
-  gate A4.
+  budget in `ci/wasm-size-budget.json`. First measurement 14,104 bytes, and
+  16,388 after F-005 added the panic hook, with the delta and its cause
+  attributed in that file. Both are baselines for regression detection and
+  neither is an answer to Appendix A gate A4, whose estimate is a little over
+  two orders of magnitude larger, 183x at its low end and 488x at its high one.
 - The cross-target build proof, `bin/ocelli.sh native` and the `native` gate.
   It links the `ocelli-desktop` and `ocelli-server` entry points, builds every
   shared crate for both wasm32 and the host, and compares resolved features
@@ -60,4 +65,92 @@ Repository bootstrap. Nothing is published.
   on SwiftShader and writes reference pixels plus a metadata sidecar, or a
   precise failure at one of four named boundaries. 89 of 91 rows render
   deterministically, and the two that do not are recorded with their reason in
-  `tools/oracle/unsupported.json`. It compares nothing yet, which is F-011.
+  `tools/oracle/unsupported.json`.
+- The oracle's volume and reformat pass. Four series directories declared in
+  `tools/oracle/volume-params.json` are attempted, three are assembled into
+  cornerstone3D volumes and rendered as three orthogonal reformats each, and the
+  fourth, `real/ct_cmb_mml`, is refused as declared because two of its members
+  project to the same position on the slice normal. Twelve reformats are
+  declared and nine are written, which `tools/oracle/out/run.json` records in
+  its run-level `boundaries` object. Its `volumes` key is the four per-subject
+  records, whose reformat counters are attempted rather than achieved. They
+  render on their own page opened only
+  after the stack page has closed, so the existing stack frames are provably
+  untouched. Series geometry is measured from the files themselves through
+  PS3.3 C.7.6.2.1.1 rather than from any cornerstone3D module, which is what
+  makes the reference's own through-plane spacing something the harness can
+  contradict. It does: the reference derives spacing from the endpoints alone
+  and so renders two deliberately non-uniform synthetic series identically, and
+  a real MR series with gaps running 5 to 50 mm gets a uniform 10 mm grid with
+  no warning. `tools/oracle/volume-truth.json` asserts both, so the day the
+  reference stops averaging, the assertion goes red and names the reason.
+- The differential oracle's comparator half, which is what makes it an oracle.
+  `bin/ocelli.sh gate oracle` is now `oracle && compare`: it renders the corpus
+  through cornerstone3D and then diffs it, returning one record per view
+  against HLD 25.1 with the tolerance class resolved from the manifest's
+  category tokens rather than from the modality. Class-two views publish their
+  measurement and claim no verdict, because 25.1 states no threshold for them
+  and a `pass` against a bound nobody wrote is exactly what decision D14
+  forbids. 25.1's maximum-difference rule passes a whole-frame swap between VOI
+  `LINEAR` and `LINEAR_EXACT` everywhere, which is this project's own headline
+  defect, so a signed-mean bias bound was added to 25.1 by operator decision and
+  is evaluated over the informative region rather than the image rectangle. A
+  mutation catalogue is replayed on every oracle gate, and a mutation that goes
+  undetected fails the gate.
+- Runtime tier resolution. `Caps` now has a detection procedure that resolves
+  tier A, B or C from an adapter enumeration, a startup fill-rate measurement,
+  the reported adapter type and the renderer string, in that order of trust,
+  with an operator override through `OCELLI_TIER`. A software rasteriser
+  presents a conforming WebGL2 context, so the benchmark decides and the
+  strings are only a hint. `ocelli-render` now takes wgpu's `webgl` feature,
+  without which tier B could not resolve in a browser at all.
+- A stable error model. `ocelli-core` carries a versioned `u16` error code and
+  a 32-byte record that fits the event ring's payload exactly, and
+  `@ocelli/core` exports the decoder, the human-readable messages and the panic
+  reader. A Rust panic is written to a fixed location in linear memory and read
+  back by the shell after the trap without calling into the module, because
+  `wasm32-unknown-unknown` is `panic = "abort"` in every profile and a trapped
+  instance must not be reused.
+- The benchmark harness, `tools/bench`, which is an instrument rather than a
+  report. A tracked subject registry lists the things this project will ever
+  measure, each with its normative definition, its unit, its tier dimensions
+  and the F-ID of the story that will give it a subject. The driver resolves
+  each subject at run time to `measured`, to `unavailable` naming the blocking
+  story, or to `incomparable` on a host-class mismatch, and a recorded number
+  for a subject whose story has not landed is refused by the `bench` gate
+  rather than left to discipline. **Most subjects had nothing to measure when
+  this landed and the harness says so**, which is decision D7 holding rather
+  than a shortfall. No proxy workload was substituted, no stub was timed and no
+  number was invented. `bin/ocelli.sh bench --list` is the authority on the
+  split, because it reads the backlog and a count written here goes stale the
+  first time a story lands. **The HLD states no performance target of any
+  kind**, which was searched rather than assumed, so every subject's definition
+  is fixed now from the specification and a later story adds a runner into a
+  slot with no latitude to redefine the measurement into something easier.
+- Answers to Appendix A gates A1 and A2, in `docs/spikes/`. **JPEG-LS resolves
+  to a single pure-Rust decoder on every target.** **HTJ2K does not resolve**:
+  `openjp2` does not link for `wasm32-unknown-unknown` and traps on every
+  codestream when forced to, so HTJ2K reports unavailable until F-X013 prices a
+  route. HLD section 15.2 names `openjp2` as the wasm choice, and that is
+  measured not to work.
+- A standing probe harness for the repository's guards, and **not for every
+  guard**, which is what this line claimed for four sentences before qualifying
+  itself until the S03 review's seventh pass. `python3 scripts/guard_census.py`
+  prints the bucket watched by nothing and it is not empty.
+  `bin/ocelli.sh gate guards`
+  drives each probed refusal into its rejected state in a disposable repository
+  and requires it to fire, and a probe whose guard exits zero is a failure of
+  the harness rather than a pass. The census refuses in both directions, so a
+  refusal no entry claims and an entry claiming no refusal both fail. It sorts
+  every discovered refusal into four buckets, and the fourth is the refusals
+  watched by nothing. **That bucket is not empty**, and the number in it is a
+  ratchet that may only go down, so a refusal added without a watcher fails the
+  floor. `python3 scripts/guard_census.py` prints the buckets and names each
+  uncovered entry, each declared limit and each open hole with its owner. Those
+  are entry-level buckets summed over refusal sites rather than a count of
+  refusals driven red, which the census says on the line that prints them. Holes
+  in existing guards are declared rather than hidden, and a declared hole whose
+  probe starts passing also fails, so the record cannot go stale in either
+  direction. Two of the four declared in S03 were closed inside the same sprint
+  and their declarations went with them, which is that ratchet working.
+  `docs/lld/guards.md` is the design.

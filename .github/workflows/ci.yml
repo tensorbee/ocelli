@@ -83,6 +83,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # The `bench` gate runs the node:test suites that `ls tools/bench/tests/*.mjs`
+      # lists, beside its Python guard. That count has gone stale twice, so the
+      # command that prints it is named here rather than a number. The
+      # runner image ships a node, and pinning it means this job does not depend
+      # on that staying true. Same reason python is pinned above.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # The one third-party Python dependency the CI floor has, deviation D-17.
+      # `scripts/ci_floor_check.py` reads THIS FILE with a YAML parser since
+      # the S03 review's twelfth pass, which measured four fail-open routes and
+      # five refusals of legitimate workflows at the reader it replaced. It
+      # also reaches the census, which imports that module, and the guard
+      # probes, which run it inside a disposable clone with this same
+      # interpreter, so it is installed here rather than per step.
+      #
+      # The version is READ out of pyproject.toml and not copied. Two copies
+      # of a version that must agree are one thing to get wrong, which is the
+      # rule this repository already applies to the probe count and the
+      # recorded timings.
+      - name: PyYAML, which scripts/ci_floor_check.py reads this file with
+        run: python3 -m pip install "$(grep -om1 'pyyaml==[0-9.]*' pyproject.toml)"
 
       # Decision D2. The one that is worthless unless enforced.
       - run: ci/check-bindgen-isolation.sh
@@ -97,6 +119,19 @@ jobs:
       - run: python3 scripts/pin_and_size_check.py
       # D-09. A wasm32 build still succeeds when a no_std crate reaches std.
       - run: python3 scripts/no_std_check.py
+      # HLD section 23, "error codes are stable and versioned". The words are
+      # in the specification and the mechanism is not, so this is it. Runs
+      # through the gate, which also runs the guard's own negative cases.
+      - run: bin/ocelli.sh gate errors
+      # HLD section 26's last rule names a benchmark harness and gives it no
+      # shape, so F-006 is the shape and this is the gate over it. It asserts
+      # the INSTRUMENT and never a duration: no subject whose story has not
+      # landed may have a runner or a recorded number. That costs no GPU and no
+      # browser. The duration comparison runs through
+      # `bin/ocelli.sh bench --compare` on the machine that owns the baseline,
+      # deliberately not here, because a duration on a shared runner is noise
+      # and a skipped gate is not a pass.
+      - run: bin/ocelli.sh gate bench
       # docs/SOURCE-POLICY.md and HLD gate A6. No allowlist.
       - run: python3 scripts/source_provenance_check.py
       - run: python3 scripts/staged_content_check.py --tracked
@@ -110,6 +145,61 @@ jobs:
       # true. S02 added three gates to the floor and each needed a hand-written
       # step here, and nothing would have noticed a missed one.
       - run: python3 scripts/ci_floor_check.py
+      # F-X009. A green run of these gates is not evidence that they work, it
+      # is evidence that nothing was wrong or that nothing was checked, and
+      # only this tells those apart. It drives every declared refusal red
+      # inside a disposable repository under the runner's temporary directory,
+      # requires each guard to pass an UNMUTATED control first, and reports a
+      # probe whose guard exited 0 as a failure of the harness rather than as
+      # a pass.
+      #
+      # It also runs the census, which refuses a refusal site no catalogue
+      # entry claims. That is the mechanism that makes a guard added next
+      # month arrive with its test: the author sees this red in CI on the push
+      # that adds the refusal, rather than discovering it later by hand.
+      #
+      # The probes needing a toolchain are in `guards-deep`, the step below,
+      # and it runs here on every event since the S03 review's ninth pass.
+      - run: bin/ocelli.sh gate guards
+      # `guards-deep` WAS a separate job at the end of this file, gated to
+      # push-to-main and workflow_dispatch, and both reasons written for that
+      # gate were false. The first said npm and wasm-pack, which pass 8
+      # corrected. The second said "a runner has to install the toolchain",
+      # and this job installs `dtolnay/rust-toolchain@1.97.1`,
+      # `Swatinem/rust-cache@v2`, python and node four steps above. The deleted
+      # job added `targets: wasm32-unknown-unknown` and nothing else, and no
+      # deep probe needs it: every one of them declares `needs="cargo"`, which
+      # `python3 scripts/guard_probe.py --list --profile deep` prints.
+      #
+      # THE COUNT IS NOT WRITTEN HERE, for the reason Cargo.toml's dependency
+      # comment gives one table over. It said 41, which was the number at
+      # `828037e`, written by the commit that took it to 50, and the
+      # substantive half, that all of them declare `needs="cargo"`, was right
+      # the whole time. The PROFILE is written into the command above because
+      # it filters the listing to the probes this sentence is about. It was
+      # load-bearing until the tenth pass, when bare `--list` printed the floor
+      # set alone, every row marked `floor`, so a reader checking this sentence
+      # against it would have found none of the probes it names.
+      #
+      # What that cost bought was the wrong way round. Every `lint-policy`
+      # probe is a deep probe, the review keeps finding holes in exactly those,
+      # and they were unwatched on the pull request that would weaken them.
+      #
+      # The price is in `ci/guard-probe-budget.json` under
+      # `wall_clock_seconds` and is NOT written here, for the reason the probe
+      # count is not written here either. The deep profile is a strict
+      # SUPERSET of the floor one, so this step re-runs the probes the step
+      # above already ran, and the difference between the two recorded numbers
+      # is what the extra coverage costs. A quoted pair went stale twice: deep
+      # 23.8s against floor 15.9s until the tenth pass, then 27.2 against 18.3
+      # in four files while the recorded pair said 28.4 and 18.6, because the
+      # recording run moved them in the same commit that quoted them. The
+      # duplication is kept
+      # deliberately: removing it would mean `gate guards` running a different
+      # probe set here from the one a developer gets, and a gate that does
+      # different things in different places is the failure this whole harness
+      # exists to catch.
+      - run: bin/ocelli.sh gate guards-deep
       # The manifest's shape AND its coverage, neither of which needs the
       # corpus itself. `--coverage` calls load() first, so it subsumes
       # `--manifest-only` rather than replacing it. This is the half of the
@@ -177,9 +267,10 @@ jobs:
       # proof and the conformance assertions.
       #
       # NOT `bin/ocelli.sh gate corpus-tests`, deliberately. The gate runner
-      # returns 0 when a gate skips, which is right for `docs` and `wasm`
-      # whose skips are permanent, and wrong here: the three steps above exist
-      # precisely to remove every reason to skip, so a skip in this job means
+      # returns 0 when a gate skips, which is right for `lint`, `types` and
+      # `packages` whose only skip is an absent `node_modules`, and wrong here:
+      # the three steps above exist precisely to remove every reason to skip,
+      # so a skip in this job means
       # an install half-succeeded and the fixture did not run. That must be
       # red, not a green tick. `--require-prerequisites` says so, and it is
       # the same runner a developer gets through the gate.
@@ -238,3 +329,17 @@ jobs:
       # directly, so that the size check and the build stay one definition
       # that CI and a developer both get.
       - run: bin/ocelli.sh gate wasm
+
+      # F-005, HLD section 23. The panic hook running under `panic = "abort"`
+      # on wasm32 is a property no native test can observe, and the whole
+      # error design rests on it. Node instantiates the module directly, so
+      # this needs no browser and no new dependency, and it sits in this job
+      # because it is the one with wasm-pack.
+      - run: bin/ocelli.sh gate panic
+
+# The `guards-deep` JOB used to sit here, gated to push-to-main and
+# workflow_dispatch. The S03 review's ninth pass moved its one step into the
+# `guards` job above, where the toolchain it needs is already installed, and
+# the reasoning is written at that step. A deep guard that has been weakened
+# is now caught on the pull request that weakened it, which is what the story
+# wanted and what neither of the two recorded reasons was buying.

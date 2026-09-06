@@ -10,7 +10,7 @@ import { OcelliViewport } from "@ocelli/react";
  *
  * A clean clone has no built wasm module, so the honest state is "core not
  * built" rather than a crash. F-002 (`bin/ocelli.sh wasm`) produces the
- * module, F-096 makes this panel show a frame.
+ * module, F-101 makes this panel show a frame.
  */
 export function App() {
   const ready = coreAvailable();
@@ -34,7 +34,7 @@ export function App() {
             <code>crates/ocelli-wasm/pkg</code>, then reload.
           </p>
           <p>
-            Until F-096 lands there is no boundary to attach to, so the
+            Until F-101 lands there is no boundary to attach to, so the
             viewport below mounts its host element and reports its state and
             does nothing else. That is the whole of the current milestone.
           </p>

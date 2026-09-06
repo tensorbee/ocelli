@@ -268,15 +268,31 @@ The HLD's worked fixture, soft-tissue CT, centre 40, width 400, output 0 to 255:
 
 | Input (HU) | LINEAR | LINEAR_EXACT | Why this row |
 |------------|--------|--------------|--------------|
-| -160 | 0.000 | 1.594 | LINEAR's boundary is `c' - w'/2 = -160` exactly, and the comparison is `<=`, so it clamps |
+| -160 | 0.000 | 0.000 | Both lower boundaries land on -160 and both comparisons are `<=`, so both clamp. See the correction below |
 | 40 | 127.819 | 127.500 | The window centre. A 0.32 divergence no reviewer sees by eye |
 | 240 | 255.000 | 255.000 | LINEAR's upper bound is `c' + w'/2 = 239`, so 240 clamps |
 | -60 | 63.910 | 63.750 | Mid-lower quarter, catches sign and slope errors |
 
-**These four rows must be in the test suite before the shader is written.** At
-the window centre the two functions differ by 0.32 of 255, which is invisible
-in a screenshot and immediate in a pixel diff. That is the entire argument for
-building the oracle first.
+**CORRECTION, deviation D-13 in `docs/hld/DEVIATIONS.md`. Do not write 1.594
+into a fixture.** HLD section 18.3's own table gives 1.594 for
+`LINEAR_EXACT(-160)` and that value is wrong.
+Section 18.2's formula clamps at `x <= c - w/2`, which is 40 - 200 = -160,
+and -160 is not greater than -160, so the result is `ymin`.
+The formula body evaluates to 0.000 there in any case, from
+`((-160 - 40) / 400 + 0.5) * 255`,
+so no boundary convention produces 1.594. That figure is the value at
+x = -157.5. Section 18.2 is the formula and section 18.3 is a worked value,
+and where they disagree the formula is the specification.
+Rows 2, 3 and 4 reproduce exactly and the 0.32 headline figure is unaffected.
+
+**The asymmetry this row was reaching for lives at the UPPER bound**, where
+LINEAR clamps at 239 and LINEAR_EXACT at 240. The two lower bounds coincide, so
+no input can show one clamping while the other does not.
+
+**These four rows must be in the test suite before the shader is written**, with
+the corrected value in row one. At the window centre the two functions differ by
+0.32 of 255, which is invisible in a screenshot and immediate in a pixel diff.
+That is the entire argument for building the oracle first.
 
 **TRAP: the comparison operators are asymmetric.** Lower bound is `<=`, upper
 bound is `>`. Writing both as `<` and `>` moves one boundary pixel value, which

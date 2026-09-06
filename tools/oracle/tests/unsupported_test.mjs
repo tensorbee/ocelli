@@ -15,6 +15,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   claimedRows,
@@ -181,9 +183,14 @@ test("the committed record validates and names the version it describes", () => 
   }
 });
 
-test("the committed record is what readUnsupported returns", () => {
-  assert.deepEqual(
-    readUnsupported(),
-    JSON.parse(readFileSync(UNSUPPORTED_PATH, "utf8")),
-  );
+// Read through a path this file derives itself, from its own location, rather
+// than through `UNSUPPORTED_PATH`. Comparing the reader's output to
+// `JSON.parse(readFileSync(UNSUPPORTED_PATH))` restates the reader's body and
+// holds wherever that constant points, so it said nothing about WHICH file the
+// run validates. This says the record it validates is the committed
+// `tools/oracle/unsupported.json`, and the constant is asserted to name it.
+test("the committed record is the file in tools/oracle", () => {
+  const committed = join(dirname(dirname(fileURLToPath(import.meta.url))), "unsupported.json");
+  assert.equal(UNSUPPORTED_PATH, committed, "the reader reads another file");
+  assert.deepEqual(readUnsupported(), JSON.parse(readFileSync(committed, "utf8")));
 });

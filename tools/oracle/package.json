@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Headless cornerstone3D reference renderer over the golden corpus (F-010, HLD section 11).",
+  "description": "Headless cornerstone3D reference renderer over the golden corpus, stack and volume (F-010 and F-X007, HLD section 11).",
   "license": "MIT OR Apache-2.0",
   "$pins": [
     "Every version here is exact, with no caret and no tilde, for HLD 15.2's reason applied to the reference rather than to wgpu: an oracle that drifts is not an oracle.",
@@ -16,7 +16,7 @@
   "scripts": {
     "build:page": "node build-page.mjs",
     "start": "node run.mjs",
-    "test": "node --test tests/args_test.mjs tests/manifest_test.mjs tests/output_test.mjs tests/params_test.mjs tests/paths_test.mjs tests/pins_test.mjs tests/registration_test.mjs tests/server_test.mjs tests/sidecar_test.mjs tests/unsupported_test.mjs"
+    "test": "node --test tests/args_test.mjs tests/geometry_test.mjs tests/manifest_test.mjs tests/output_test.mjs tests/params_test.mjs tests/paths_test.mjs tests/pins_test.mjs tests/registration_test.mjs tests/server_test.mjs tests/sidecar_test.mjs tests/unsupported_test.mjs tests/volume_test.mjs"
   },
   "dependencies": {
     "@cornerstonejs/codec-charls": "1.2.5",

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ocelli oracle, cornerstone3D volume and MPR reference renderer</title>
+    <style>
+      /* The page is never looked at by a person. The element is sized from
+         render-params.json by the driver, and everything else is kept out of
+         the way so no stylesheet can move a pixel. Identical to index.html on
+         purpose: the volume pass renders into the same declared canvas as the
+         stack pass, so a difference here would be a difference in the frame. */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+      }
+      #viewport {
+        position: absolute;
+        top: 0;
+        left: 0;
+        line-height: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="viewport"></div>
+    <script type="module" src="./volume.js"></script>
+  </body>
+</html>

@@ -31,6 +31,16 @@ export const CORPUS_DATA = repoPath("corpus", "data");
 const SHA256 = /^[0-9a-f]{64}$/;
 
 /**
+ * The output-name prefix reserved for the volume pass (F-X007).
+ *
+ * Declared here rather than in `src/volume.mjs`, where it is used, because
+ * here is where it is ENFORCED and this module must not import that one. A
+ * volume frame and a corpus row write their three files into the same flat
+ * directory, so the two name spaces are one name space.
+ */
+export const RESERVED_VOLUME_PREFIX = "volume__";
+
+/**
  * Parse the manifest text into rows.
  *
  * @param {string} text the whole file
@@ -170,6 +180,20 @@ export function rowId(path) {
   if (!/^[A-Za-z0-9_.-]+$/.test(id)) {
     throw new Error(
       `corpus path ${path} does not reduce to a safe output name (${id})`,
+    );
+  }
+  // `volume__` is reserved for the volume pass's own frames (F-X007), which
+  // are written into this same flat directory. A corpus row reducing to that
+  // prefix would collide with one, and the second writer would silently
+  // overwrite the first, which is the reason the duplicate-id refusal above
+  // exists spelled one level up. No current row does, which is exactly why it
+  // needs the check rather than the observation.
+  if (id.startsWith(RESERVED_VOLUME_PREFIX)) {
+    throw new Error(
+      `corpus path ${path} reduces to the output name ${id}, and ` +
+        `${JSON.stringify(RESERVED_VOLUME_PREFIX)} is reserved for the volume ` +
+        `pass's own frames. A row and a volume frame writing one set of files ` +
+        `would leave the second silently overwriting the first.`,
     );
   }
   return id;

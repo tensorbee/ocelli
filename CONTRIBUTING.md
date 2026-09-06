@@ -27,8 +27,8 @@ Translating source into Rust is a translation, which is an exclusive right of
 the copyright holder, so a copyleft licence constrains reading and not only
 linking.
 
-**Two well-regarded projects are out of bounds to open**, purely on licence
-grounds. If you have recently read either, say so rather than contributing to
+**Three projects are out of bounds to open**, purely on licence grounds. If you
+have recently read any of them, say so rather than contributing to
 the affected area. That is not an accusation, it is how a clean-room position
 stays defensible.
 

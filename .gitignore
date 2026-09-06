@@ -49,6 +49,38 @@ corpus/data
 # Oracle output: rendered frames, diffs, hashes for one run.
 tools/oracle/out/
 tools/oracle/node_modules/
+
+# Comparator output, F-011. `<id>.diff.raw` is the per-lane absolute difference
+# between two frames of a corpus row, so it is derived from that row exactly as
+# a reference frame is, and every real row carries `burned-in-unchecked`. The
+# report beside it names every view.
+#
+# `.gitignore` alone is NOT the guard, because `git add -f` exists, so
+# `scripts/staged_content_check.py` refuses this prefix by path as well. Same
+# pairing as tools/oracle/out/ and tools/spikes/out/.
+tools/oracle/compare-out/
+
+# Benchmark output: one run's record, and the page directory it serves, which
+# holds a copy of the built wasm artefact. The RECORDED baseline is
+# ci/bench-baseline.json and IS committed, the way ci/wasm-size-budget.json is.
+# tools/bench/package-lock.json is committed too, per the note at the top of
+# this file.
+tools/bench/out/
+tools/bench/node_modules/
+
+# Spike working output, F-X006 and Appendix A gates A1 and A2. Raw codestreams
+# and decoded pixel buffers extracted from corpus rows, and the throwaway
+# harnesses' build trees. Their lockfiles ARE committed, per the note at the
+# top of this file, because a spike answer that cannot be re-run is an opinion.
+#
+# `.gitignore` alone is NOT the guard for `out/`. `git add -f` exists, and a
+# codestream extracted from a corpus row is derived from that row, so
+# `scripts/staged_content_check.py` refuses this prefix by path as well. Same
+# reasoning as tools/oracle/out/, and the same pairing of an ignore with a
+# mechanism.
+tools/spikes/out/
+tools/spikes/*/target/
+tools/spikes/*/node_modules/
 .playwright/
 playwright-report/
 test-results/

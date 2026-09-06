@@ -5,12 +5,16 @@ one goal, not a fixed calendar box. The sprint clock starts at the first
 `/start-feature` of that sprint.
 
 **Phase 1 is S01 to S41**, 118 stories and 397 engineer-weeks, feature parity
-with cornerstone3D v5.8.9. **Phase 1.5 is S42 to S72**, 39 stories and 352
+with cornerstone3D. **Phase 1.5 is S42 to S72**, 39 stories and 352
 engineer-weeks, the eight differentiating capabilities of HLD Part III. Phase 2
 and Phase 3 carry F-IDs in `BACKLOG.md` and no sprint, deliberately.
 
-Those two totals agree with HLD section 38 and the Part III preamble. The
-tracked backlog and allocation are now the authoritative planning data.
+Those two totals agree with HLD section 38 and the Part III preamble, and they
+count the IMPORTED rows only. Every `F-X` story added since the import lands in
+Phase 1 and is outside them, so the allocation's Phase 1 total is larger than
+397 and both numbers are correct. `docs/sprints/BACKLOG.md`'s Summary section
+names the command that prints each. The parity target itself is 5.8.2 and not
+the HLD's v5.8.9, which does not exist, and that is deviation **D-11**.
 
 ## How sprints were allocated
 
@@ -28,6 +32,45 @@ because that story alone is ten to fourteen engineer-weeks.
 for a team. Treat them as relative size, and let the sprint clock measure the
 real thing.
 
+## Capacity calibration
+
+Recalculated at the S03 close, which is the first of the two points this
+project committed to, the other being S06.
+
+**The result is that there is nothing to recalibrate from, and that is the
+finding rather than a gap in the record.** Every one of S03's seven rows in
+`docs/sprints/SPRINT_TRACKER.md` reads `not measured`, each with its reason in
+the cell: three stories ran concurrently in worker worktrees whose implementing
+agents terminated on a session rate limit, two ran beside each other with one
+story's oracle runs inside the other's wall clock, one overlapped the sprint
+review's remediation, and one ran serial with several full oracle runs inside
+its wall clock. A wall clock covering an interruption or another story's work
+is not a measurement of this story, and writing a plausible figure into that
+column would destroy the only re-planning evidence the plan has.
+
+The measured rows that do exist are all S01 and S02. This prints the split,
+and the two patterns are anchored on the row because a bare `measured` matches
+`not measured` as well, which would count every row twice:
+
+```bash
+grep -cE '^\| F-.*\| [0-9.]+d measured' docs/sprints/SPRINT_TRACKER.md
+grep -cE '^\| F-.*\| not measured' docs/sprints/SPRINT_TRACKER.md
+```
+
+**Those rows must not be used to forecast the port work**, for the reason this
+project wrote down before it had any of them: S01 to S03 are foundations and
+the oracle, and M2 onward is the volume port. A ratio taken from building a
+corpus and a differential harness says nothing about porting the LUT chain
+against that harness. The next calibration point is S06, and it is the first
+one whose input could be representative.
+
+**What the S03 close changes about how to measure**, and this is the actionable
+part: the estimate column stays as it is, and the instrument that failed was
+attribution, not estimation. Concurrent workers in separate worktrees produce a
+wall clock that belongs to no single story. Either a story runs alone when its
+duration is wanted, or the column keeps reading `not measured` honestly and the
+calibration keeps having no input.
+
 ## What re-planning looks like
 
 Phase 1.5 sizing is provisional by the HLD's own statement, 352 engineer-weeks
@@ -42,8 +85,17 @@ weeks, which means during M1 and M2.
 ## The five Part III hooks inside Phase 1
 
 Each costs a few weeks now and a rewrite later. They are the only reason
-Part III work appears in a parity plan. This table is generated from
-`allocation.json`, so it cannot drift from the backlog.
+Part III work appears in a parity plan. This table was WRITTEN from
+`allocation.json` by `scripts/gen_sprint_plan.py`, and it can drift, which this
+paragraph used to deny. The generator runs once at bootstrap and after that
+this file is hand-curated, so nothing rewrites a row when the allocation moves.
+What holds it is `python3 scripts/gen_sprint_plan.py --check`, which asserts
+every planned F-ID's sprint and estimate against the allocation. It reads the
+`**Goal**:` lines and the `_SNN to SNN, N stories, N engineer-weeks._` lines
+too, and it did not until the S03 review's fourth pass, which found both
+stale: an S04 goal line still carrying F-X014's old title, and M1's summary
+line one week behind its own table. **What it still does not read is every
+other sentence in this file**, all of which is hand-curated prose.
 
 | Hook | F-ID | Epic ref | Sprint | Now |
 |------|------|----------|--------|-----|
@@ -59,7 +111,7 @@ Part III work appears in a parity plan. This table is generated from
 
 The workspace builds to wasm and to native, and the oracle renders the corpus through cornerstone3D before any port code exists.
 
-_S01 to S05, 23 stories, 56 engineer-weeks._
+_S01 to S05, 31 stories, 68 engineer-weeks._
 
 #### Sprint S01
 
@@ -98,7 +150,7 @@ _S01 to S05, 23 stories, 56 engineer-weeks._
 
 #### Sprint S04
 
-**Goal**: CI gate: every PR renders the full corpus, Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract, One parity-target version string, and a licence in the published wasm package, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it, The reference's own SIGMOID width divergence, and what D14's bound says about it.
+**Goal**: CI gate: every PR renders the full corpus, Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract, One parity-target version string, and a licence in the published wasm package, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it, The reference's own SIGMOID width divergence, and what D14's bound says about it, Price the HTJ2K decoder route after gate A1 failed, Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing, Execute the skills' worked examples, because the skills gate asserts nothing about their numbers, Try the next adapter when the best candidate cannot open a device, and record what was attempted, Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting, Make close-preflight see the sprint review, and key its verification on the tree it is about, Decide whether a CI step that is not guaranteed to run counts as CI running the gate, Stop gen_sprint_plan.py's write mode silently overwriting a hand-curated SPRINT_PLAN.md.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
@@ -110,6 +162,14 @@ _S01 to S05, 23 stories, 56 engineer-weeks._
 | F-X010 | Y1.5 | CI floor equivalence, and the identical --sprint and --all gate profiles | Build | 2w |
 | F-X011 | Y1.6 | Cross-machine reference determinism, and what the oracle claims about it | Test | 2w |
 | F-X012 | Y1.7 | The reference's own SIGMOID width divergence, and what D14's bound says about it | Test | 2w |
+| F-X013 | Y1.8 | Price the HTJ2K decoder route after gate A1 failed | Test | 3w |
+| F-X014 | Y1.9 | Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing | Build | 2w |
+| F-X015 | Y1.10 | Execute the skills' worked examples, because the skills gate asserts nothing about their numbers | Build | 1w |
+| F-X016 | Y1.11 | Try the next adapter when the best candidate cannot open a device, and record what was attempted | Rust | 1w |
+| F-X017 | Y1.12 | Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting | Build | 2w |
+| F-X018 | Y1.13 | Make close-preflight see the sprint review, and key its verification on the tree it is about | Build | 1w |
+| F-X019 | Y1.14 | Decide whether a CI step that is not guaranteed to run counts as CI running the gate | Build | 1w |
+| F-X020 | Y1.15 | Stop gen_sprint_plan.py's write mode silently overwriting a hand-curated SPRINT_PLAN.md | Build | 1w |
 
 #### Sprint S05
 

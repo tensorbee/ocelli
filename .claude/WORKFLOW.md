@@ -142,7 +142,7 @@ exactly that reason. If the unreleased section should be covered, that needs
 section-aware logic in `scripts/prose_check.py`, and it is a change to this
 file rather than a one-line include.
 
-## Source provenance, and the two projects nobody may open
+## Source provenance, and the three projects nobody may open
 
 This is `docs/SOURCE-POLICY.md` and it is sharper here than in an ordinary project:
 
@@ -151,8 +151,9 @@ This is `docs/SOURCE-POLICY.md` and it is sharper here than in an ordinary proje
 > depending. Agent-assisted development sharpens this: exposure cannot be shown
 > to be absent after the fact.
 
-**dwv** and **Horos** must not be opened by a person or an agent on this
-project, and **Grok** must not be depended on. Where their ideas are worth
+**dwv**, **Horos** and **Grok** must not be opened by a person or an agent
+on this project, and **Grok** must not be depended on either.
+`scripts/source_provenance_check.py` enforces all three. Where their ideas are worth
 having, take them from the standard. dwv's annotations-as-SR is in DICOM PS3.3
 and PS3.16, which is where dwv took it from.
 

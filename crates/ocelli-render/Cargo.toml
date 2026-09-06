@@ -12,7 +12,9 @@ authors.workspace = true
 workspace = true
 
 # Deviation D-10. HLD section 15.2 lists wgpu among the workspace dependencies
-# and this repository's Cargo.toml said the entry activates with F-039. F-008
+# and this repository's Cargo.toml said the entry activates with F-039, which is
+# itself a misattribution for F-037, E6.1 in S11, device init and capability
+# tiering. F-039 is E6.3 in S13 and is OffscreenCanvas. F-008
 # activates it two sprints earlier, because section 38's device-sharing hook is
 # stated in wgpu types and a contract expressed only in prose is not a
 # mechanism. The pin is untouched.
@@ -21,5 +23,23 @@ workspace = true
 # request_adapter and request_device appear here and nowhere else, and
 # `ci/check-device-ownership.sh` asserts it on every push. Section 31: "Two
 # devices cannot share textures, which would defeat the entire point."
+#
+# THE `webgl` FEATURE IS DEVIATION D-14. Section 15.2 gives
+# `wgpu = "=30.0.1"` and this crate takes it with one feature added. wgpu
+# 30.0.1's default set is `std, parking_lot, dx12, metal, gles, vulkan, wgsl,
+# webgpu`, read from the pinned crate's own manifest, and `webgl` is not among
+# them. `gles` is the NATIVE GL backend rather than the browser one. So without
+# this line the crate reaches WebGPU on wasm32 and cannot reach WebGL2 at all,
+# and HLD section 7's tier B could never resolve in a browser. A tier the
+# resolver can never return is not a tier. The pin and the workspace entry are
+# untouched, which is the shape D-09 set for glam.
 [dependencies]
-wgpu = { workspace = true }
+wgpu = { workspace = true, features = ["webgl"] }
+
+# `resolve` is `async fn`, because `request_adapter` and `request_device` are
+# futures in the pinned wgpu, and a native test needs something to drive it.
+# Dev-only, so it never enters the shipped surface, which is the same argument
+# the workspace entry already makes for proptest and trybuild.
+[dev-dependencies]
+pollster = { workspace = true }
+proptest = { workspace = true }

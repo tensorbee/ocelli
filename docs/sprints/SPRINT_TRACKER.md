@@ -21,12 +21,32 @@ measured, write `not measured`. A plausible-looking `<1d` written to fill a
 cell is invented evidence, and it is worse than a gap, because a gap is
 visibly a gap and an invented figure is not.
 
-## Capacity calibration
+## Capacity calibration, and why there is nothing to calibrate from
 
-Recalculate after S03 and again after S06, and write the result into
-`SPRINT_PLAN.md` under "Capacity calibration". Do not recalculate off one
-sprint. S01 to S03 are foundations and the oracle, which is not representative
-of the volume port work in M2 onward.
+The plan was to recalculate after S03 and again after S06, off the `Days
+actual` column, and not off one sprint, because S01 to S03 are foundations and
+the oracle rather than the volume port work of M2 onward.
+
+**S03 produced no measurement to recalculate from.** All seven of its rows read
+`not measured`, each with the reason recorded in the cell: three stories ran
+concurrently in worker worktrees whose agents terminated on a session rate
+limit, two ran beside each other with one story's oracle runs inside the other's
+wall clock, one overlapped the sprint review's remediation, and one ran serial
+in the canonical worktree with several full oracle runs inside its wall clock.
+Most rows in this file read `not measured` and the measured ones are all S01 and
+S02. No count is transcribed into this sentence, because the table below is the
+count:
+
+```bash
+grep -E '^\| F-' docs/sprints/SPRINT_TRACKER.md | grep -c 'not measured'
+```
+
+**This section used to direct the reader to write the result into a "Capacity
+calibration" section of `SPRINT_PLAN.md`. That section does not exist**, and
+naming a destination that was never created is how an instruction survives
+without ever being followed. Nothing is written there until a sprint produces at
+least three measured rows, at which point the section is created by the change
+that has something to put in it.
 
 | F-ID | Title | Sprint | Est | Days actual | Completed |
 |------|-------|--------|-----|-------------|-----------|
@@ -37,3 +57,10 @@ of the volume port work in M2 onward.
 | F-008 | ocelli-compute crate skeleton and GPU device-sharing contract | S02 | 2w | not measured, three review passes, and it also corrected F-007's feature guard | 2026-09-05 |
 | F-003 | TS package scaffold, bundling, npm publish pipeline | S02 | 2w | not measured, two review passes | 2026-09-05 |
 | F-010 | Headless cornerstone3D reference renderer | S02 | 4w | 0.31d measured, 7h29m wall clock from the design commit to the worker commit, across thirteen review passes and a strategy change, then integrated and reviewed once more | 2026-09-05 |
+| F-004 | Runtime capability detection and tiering | S03 | 2w | not measured, three of the sprint's stories ran concurrently in worker worktrees and their implementing agents terminated on a session rate limit, so wall clock covers an interruption and is not attributable | 2026-09-05 |
+| F-005 | Error model, panic-to-JS mapping, structured logging | S03 | 2w | not measured, three of the sprint's stories ran concurrently in worker worktrees and their implementing agents terminated on a session rate limit, so wall clock covers an interruption and is not attributable | 2026-09-05 |
+| F-X006 | Answer Appendix A gates A1 and A2 against our own decoders | S03 | 3w | not measured, three of the sprint's stories ran concurrently in worker worktrees and their implementing agents terminated on a session rate limit, so wall clock covers an interruption and is not attributable | 2026-09-05 |
+| F-006 | Benchmark harness: decode, first frame, interaction latency | S03 | 2w | not measured, it ran concurrently with F-X007 in a worker worktree and the wall clock covers the other story's oracle runs | 2026-09-05 |
+| F-X007 | Oracle volume and MPR reference renders | S03 | 3w | not measured, it ran concurrently with F-006 and its wall clock includes several full oracle runs plus one remediation round after the integrator's review | 2026-09-05 |
+| F-011 | Pixel-diff comparator with per-modality tolerance policy | S03 | 3w | not measured, it ran serial in the canonical worktree and its wall clock includes several full oracle runs | 2026-09-05 |
+| F-X009 | A standing test for every repository guard | S03 | 3w | not measured, it ran concurrently with the sprint review's remediation and its wall clock includes waiting on that | 2026-09-05 |

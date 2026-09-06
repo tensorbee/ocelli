@@ -21,7 +21,21 @@ import { isInside, sameDirectory } from "../src/output.mjs";
 
 test("with no arguments, every check is on and the output is canonical", () => {
   const options = parseArgs([]);
-  assert.equal(options.out, DEFAULT_OUT);
+  // Not `assert.equal(options.out, DEFAULT_OUT)`. That is the constant
+  // `parseArgs` initialises from compared with itself, and it holds whatever
+  // the constant is.
+  //
+  // **And going through the guard does not fix that**, which the S03 review's
+  // ninth pass measured. `--rows` into `options.out` reaches
+  // `isInside(options.out, DEFAULT_OUT)`, and `options.out` IS `DEFAULT_OUT`
+  // here, so `isInside(x, x)` holds for every `x` and the refusal fires
+  // whatever the constant says. Pointing `DEFAULT_OUT` at `oraclePath(
+  // "outputs")` left that `assert.throws` green and reddened only the line
+  // below. `args_test.mjs`'s own "--rows into the canonical output is
+  // refused, absolutely spelled" covers the guard, so this test asserts the
+  // one thing that is about the DEFAULT: that it names the directory the
+  // guard protects, spelled out rather than taken from the constant.
+  assert.ok(options.out.endsWith(join("tools", "oracle", "out")));
   assert.equal(options.rows, null);
   assert.equal(options.inject, null);
   assert.equal(options.once, false);
@@ -112,10 +126,15 @@ function namesTheSameDirectory(left, right) {
   }
 }
 
-test("--rows into the canonical output is refused, case-only variant", () => {
+test("--rows into the canonical output is refused, case-only variant", (t) => {
   const shouted = `${DEFAULT_OUT.slice(0, -3)}OUT`;
   if (!namesTheSameDirectory(DEFAULT_OUT, shouted)) {
-    // A case-sensitive filesystem, where the two really are two directories.
+    // A case-sensitive filesystem, or no canonical output to ask about. Both
+    // are honest boundaries and neither is a pass, so this reports as SKIPPED
+    // rather than returning green. Until the eighth review pass it returned,
+    // and the gate runs this suite after `prepareOutput` has been near that
+    // directory, so a skip and a pass were the same observation.
+    t.skip(`${shouted} is not the same directory as ${DEFAULT_OUT}`);
     return;
   }
   assert.throws(
@@ -141,10 +160,11 @@ test("--rows into a subdirectory of the canonical output is refused", () => {
 // PARENT. These are the same case-only and symlink spellings the whole-
 // directory tests cover, one level up, and they were accepted until the
 // containment test started asking `sameDirectory` about every ancestor.
-test("--rows into a subdirectory of a case-only spelling is refused", () => {
+test("--rows into a subdirectory of a case-only spelling is refused", (t) => {
   const shouted = `${DEFAULT_OUT.slice(0, -3)}OUT`;
   if (!namesTheSameDirectory(DEFAULT_OUT, shouted)) {
-    // A case-sensitive filesystem, where the two really are two directories.
+    // Skipped, not passed, for the reason given on the whole-directory case.
+    t.skip(`${shouted} is not the same directory as ${DEFAULT_OUT}`);
     return;
   }
   assert.throws(
@@ -153,8 +173,9 @@ test("--rows into a subdirectory of a case-only spelling is refused", () => {
   );
 });
 
-test("--rows into a subdirectory of a symlink is refused", async () => {
+test("--rows into a subdirectory of a symlink is refused", async (t) => {
   if (!existsSync(DEFAULT_OUT)) {
+    t.skip("a symlink needs a target, and there is no canonical output here");
     return;
   }
   const base = await mkdtemp(join(tmpdir(), "ocelli-args-test-"));
@@ -195,8 +216,9 @@ test("--rows into a directory of its own is allowed", () => {
 // `prepareOutput` has emptied the directory, so on a gate run this returns
 // early, which is why the boundary is written down here and in
 // `sameDirectory`'s own comment rather than discovered later.
-test("--rows into a symlink to the canonical output is refused", async () => {
+test("--rows into a symlink to the canonical output is refused", async (t) => {
   if (!existsSync(DEFAULT_OUT)) {
+    t.skip("a symlink needs a target, and there is no canonical output here");
     return;
   }
   const base = await mkdtemp(join(tmpdir(), "ocelli-args-test-"));

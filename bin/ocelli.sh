@@ -32,7 +32,10 @@ Targets
   native                 the cross-target proof: both targets, and features
 
 Validation
+  bench [args]           the benchmark harness (E1.6, HLD 26). --help for flags.
+                         Records durations. It compares nothing unless asked
   oracle [args]          the differential harness against cornerstone3D (GPU)
+  compare [args]         the pixel-diff comparator over the oracle's output
   corpus                 verify corpus/data against corpus/manifest.tsv
   corpus-tests           the corpus tooling suites (see OCELLI_PYTHON below)
 
@@ -59,6 +62,9 @@ GATES=(
   "unsafe|no|no unsafe outside the two permitted files (HLD 27.2 R5)"
   "pins|no|wgpu pinned exactly (HLD 15.2, 27.2 R4)"
   "nostd|no|no_std crates reach no dependency std feature (D-09)"
+  "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
+  "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
+  "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "prose|no|voice rules over operator-facing prose"
   "content|no|no DICOM and no build artefacts tracked"
@@ -72,18 +78,20 @@ GATES=(
   "device|no|only ocelli-render creates a GPU device (E1.8, HLD 31)"
   "packages|no|npm tarball contents, exports and a consumer install (E1.3)"
   "ci|no|every floor gate is actually invoked by .github/workflows/ci.yml"
+  "guards|no|every declared guard still refuses what it is for (F-X009)"
+  "guards-deep|no|the guard probes needing a cargo toolchain (F-X009)"
   "corpus-tests|no|the corpus generator and coverage suites, a skip fails it"
   "corpus|no|corpus coverage over the codec registry, then presence and digests"
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
 )
 
-gate_needs_gpu() {
-  local entry
-  for entry in "${GATES[@]}"; do
-    [ "${entry%%|*}" = "$1" ] && { [ "$(echo "$entry" | cut -d'|' -f2)" = "YES" ]; return; }
-  done
-  return 1
-}
+# `gate_needs_gpu()` used to sit here and was called by nothing. It is REMOVED
+# rather than wired in, because the GPU column already has a reader that
+# matters: `scripts/ci_floor_check.py`'s `gpu_gates()` parses this array and
+# uses `YES` to decide which excluded gate CI is not supposed to run at all,
+# which is deviation D-04. A second reader nothing calls is a place to look
+# that answers no question, and its absence would never have been noticed,
+# which is the same argument that removed `s01_pre_oracle` below.
 
 run_gate() {
   local name=$1
@@ -95,6 +103,57 @@ run_gate() {
     unsafe)      python3 scripts/unsafe_allowlist_check.py ;;
     pins)        python3 scripts/pin_and_size_check.py ;;
     nostd)       python3 scripts/no_std_check.py ;;
+    # F-005. The guard, then its own negative cases. Chained on `&&` for the
+    # reason the backlog arm gives: a case arm returns the status of its LAST
+    # command, so an unchained first command can fail and be reported green.
+    errors)      python3 scripts/error_code_check.py &&
+                 python3 -m unittest discover -s scripts/tests \
+                   -p test_error_code_check.py ;;
+    # F-005, HLD section 23. wasm32-unknown-unknown is `panic = "abort"` in
+    # every profile, so nothing on the host can observe what a real trap leaves
+    # behind. This builds a SECOND module carrying the `panic-probe` feature,
+    # into its own out-dir under the gitignored crates/ocelli-wasm/target, so
+    # the artefact `wasm` measures never carries a way to be asked to panic.
+    panic)       command -v wasm-pack >/dev/null || {
+                   echo "wasm-pack is not installed. See docs/DEVELOPER_SETUP.md" >&2
+                   return 1
+                 }
+                 wasm-pack build crates/ocelli-wasm --target web \
+                   --out-dir target/panic-probe -- --features panic-probe &&
+                 node scripts/panic_probe.mjs ;;
+    # F-006, HLD section 26. The gate asserts the INSTRUMENT and never a
+    # duration: the registry parses, every subject_story resolves in
+    # allocation.json, no subject whose story is pending has a runner or a
+    # recorded number, and the two harnesses' playwright pins are equal. That
+    # is deterministic, needs no GPU and no browser, and so it is in the floor.
+    #
+    # The DURATION COMPARISON is deliberately not here and not in --sprint.
+    # `bin/ocelli.sh bench --compare` runs it on the machine that owns the
+    # baseline. A duration taken on a machine that did not record the baseline
+    # is either noise or a skip, a skipped gate is not a pass here, and a
+    # permanently amber gate is a gate that gets disabled.
+    #
+    # Three commands, chained on `&&` for the reason the backlog arm gives: a
+    # case arm returns the status of its LAST command.
+    #
+    # tests/cold_start_test.mjs IS here, and it was not until the S03 review's
+    # fourth pass. Six of its seven tests need no browser, and the whole file
+    # was excluded because the runner it imports pulled in `playwright` at
+    # module scope, so the file could not load without an install. The runner
+    # now imports playwright inside `run()`, and the one test that does launch
+    # a browser is opted into with OCELLI_BENCH_BROWSER=1, which
+    # `npm run test:browser` in tools/bench sets. So this stays a no-browser
+    # gate and gains workspaceVersion, median, atClockPrecision and
+    # resolveServedPath.
+    bench)       python3 scripts/bench_check.py &&
+                 python3 -m unittest discover -s scripts/tests \
+                   -p test_bench_check.py &&
+                 node --test tools/bench/tests/hostclass_test.mjs \
+                   tools/bench/tests/paths_test.mjs \
+                   tools/bench/tests/record_test.mjs \
+                   tools/bench/tests/registry_test.mjs \
+                   tools/bench/tests/state_test.mjs \
+                   tools/bench/tests/cold_start_test.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py ;;
     prose)       python3 scripts/prose_check.py ;;
     content)     python3 scripts/staged_content_check.py --tracked ;;
@@ -120,6 +179,60 @@ run_gate() {
     native)      "$0" native ;;
     device)      ci/check-device-ownership.sh ;;
     ci)          python3 scripts/ci_floor_check.py ;;
+    # F-X009. A green run of the gates is not evidence that the gates work, it
+    # is evidence that nothing was wrong or that nothing was checked, and only
+    # this tells those apart (docs/runbooks/guard-verification.md).
+    #
+    # Three commands, chained on `&&` for the reason the backlog arm gives: a
+    # case arm returns the status of its LAST command. The census proves the
+    # catalogue is complete and no guard has been widened, the probe runner
+    # drives each declared refusal red inside a disposable repository, and the
+    # new lint-policy guard asserts HLD 27.1's deny list is still denied.
+    #
+    # Every probe here runs with no cargo, no npm, no wasm-pack, no browser,
+    # no corpus and no GPU, which is what puts it in the floor. The census
+    # REFUSES an entry that declares otherwise and sits in the floor anyway.
+    #
+    # The GATE is not under that rule and one command in this arm needs cargo.
+    # scripts/lint_policy_check.py reads the workspace member set from
+    # `cargo metadata --no-deps`, because `[workspace] members` is not that set
+    # and a crate reached as a path dependency was measured linted by cargo and
+    # never walked by the guard. `nostd` is in the floor on the same footing
+    # and has been since it started running `cargo tree`, and the CI job that
+    # runs this gate installs the pinned toolchain. What follows for the
+    # PROBES is that every `lint-policy` one declares `needs="cargo"` and runs
+    # in `guards-deep` below.
+    guards)      python3 scripts/lint_policy_check.py &&
+                 python3 scripts/guard_census.py &&
+                 python3 scripts/guard_probe.py --self-test &&
+                 python3 scripts/guard_probe.py --profile floor &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_guard_catalogue.py &&
+                 # The two readers that stopped being regexes in the S03
+                 # review's eleventh pass, checked against bash and against
+                 # TOML rather than against themselves. Named rather than
+                 # globbed, so a file added under scripts/tests/ does not
+                 # silently join or leave this gate.
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_guard_readers.py ;;
+    # The level-3 runs that need a toolchain. NOT in the floor, and excluded
+    # by name in the --floor arm below and in scripts/ci_floor_check.py's
+    # NOT_IN_FLOOR. The two lists are compared for set equality there, so
+    # missing either is refused rather than being a matter of care.
+    #
+    # scripts/ci_floor_check.py also refuses the case where the CI step goes
+    # away entirely: a gate outside the floor that needs no GPU must still
+    # be run by some CI step.
+    #
+    # It is a STEP in the `guards` job since the S03 review's ninth pass, and
+    # it was a separate job gated to push-to-main and workflow_dispatch
+    # before that. So a weakened deep guard is caught on the pull request that
+    # weakened it, which matters most for the `lint-policy` probes: every one
+    # of them is here, and the sprint review has found a route past that guard
+    # on every pass since the fifth. The two reasons the old trigger carried
+    # were both false, and .github/workflows/ci.yml records which.
+    guards-deep) python3 scripts/guard_census.py --profile deep &&
+                 python3 scripts/guard_probe.py --profile deep ;;
     packages)    [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
                  npm run test &&
                  python3 scripts/package_check.py ;;
@@ -138,7 +251,11 @@ run_gate() {
     corpus)      python3 scripts/corpus_check.py --coverage &&
                  python3 scripts/corpus_check.py &&
                  python3 scripts/corpus_tests.py --metadata-check ;;
-    oracle)      "$0" oracle ;;
+    # F-011. The reference half renders and the comparator judges, and the gate
+    # means both. Chained on `&&` for the reason the corpus arm gives above: a
+    # case arm returns the status of its LAST command, so an unchained
+    # `"$0" oracle` could fail and be reported green by a passing comparison.
+    oracle)      "$0" oracle && "$0" compare ;;
     *)           echo "unknown gate: $name" >&2; return 2 ;;
   esac
 }
@@ -174,10 +291,53 @@ gates_cmd() {
       for entry in "${GATES[@]}"; do
         IFS='|' read -r name gpu desc <<<"$entry"
         # The CI floor. `oracle` needs a GPU and a browser. `corpus` needs the
-        # corpus, which is not in git and so is not in CI. Everything else
-        # runs, INCLUDING `wasm`: story E1.2's note is "CI fails if the module
-        # exceeds the agreed budget", and a wasm-pack build costs no GPU.
-        case "$name" in oracle|corpus) continue ;; esac
+        # corpus, which is not in git and so is not in CI.
+        #
+        # `guards-deep` is here for a reason that has now been written three
+        # ways and was false twice. It is not npm or wasm-pack, which the
+        # eighth pass corrected. It is not the clock, and it is not "a runner
+        # has to install the toolchain" either, which is what this comment said
+        # until the S03 review's ninth pass: the `guards` CI job installs the
+        # pinned toolchain for `gate guards` itself, so the runner that would
+        # run the deep probes already has one. That job RUNS `gate guards-deep`
+        # on every event since the ninth pass, so the trigger is no longer a
+        # difference between the two at all.
+        #
+        # What is left, and it is the whole of it: `--profile deep` is a strict
+        # SUPERSET of `--profile floor`, so a `gate --floor` that included this
+        # would run every floor probe twice. THE TIMINGS ARE NOT WRITTEN
+        # HERE. They are in ci/guard-probe-budget.json under
+        # `wall_clock_seconds` and `--record-budget` writes them. This comment
+        # carried deep 23.8s against floor 15.9s while the recorded pair said
+        # otherwise, the tenth pass fixed that by copying the recorded pair
+        # into four files, and the eleventh pass found all four saying 27.2
+        # and 18.3 while the file said 28.4 and 18.6, because the recording
+        # run moved them in the same commit that quoted them. A copy of a
+        # measurement goes stale the next time the measurement is taken, so
+        # read the file. CI pays that duplication deliberately,
+        # because the alternative is `gate guards` running a different probe
+        # set there from the one a developer gets. `gate --sprint` and
+        # `gate --all` run both and so does the `guards` CI job.
+        # `python3 scripts/guard_probe.py --list --profile deep` prints each
+        # probe's profile and what it needs, and reading that beats reading
+        # this. The PROFILE filters the listing to the probes this paragraph
+        # is about. It was load-bearing until the tenth pass, when bare
+        # `--list` printed the floor set alone and showed none of them.
+        # Everything else runs, INCLUDING `wasm`: story E1.2's note is "CI
+        # fails if the module exceeds the agreed budget", and a wasm-pack
+        # build costs no GPU.
+        #
+        # This list and scripts/ci_floor_check.py's NOT_IN_FLOOR must agree,
+        # and since the S03 review's fourth pass something joins them: that
+        # file PARSES the `case` line below and refuses a set that differs
+        # from NOT_IN_FLOOR in either direction. This comment used to say a
+        # name in one list and not the other "makes the `ci` gate demand a
+        # CI step for a gate the floor never runs", and the reviewer
+        # measured that adding `prose` here alone left the `ci` gate at 0
+        # while `gate --floor` silently stopped running `prose`. A gate
+        # leaving the floor removes work rather than adding a demand, so
+        # that direction had no detection at all. Now it does.
+        case "$name" in oracle|corpus|guards-deep) continue ;; esac
         selected+=("$name")
       done ;;
     --sprint)
@@ -269,7 +429,7 @@ case "$command" in
     #    `wait-timeout`, which does not compile for wasm32 and is not supposed
     #    to. What ships to a browser is the lib, so that is what is proved.
     #    Running the tests under wasm32 needs wasm-bindgen-test and a browser
-    #    runner, which is F-096's and the oracle's ground, not this gate's.
+    #    runner, which is F-101's and the oracle's ground, not this gate's.
     echo "  2/4 eleven shared crates plus ocelli-wasm build for wasm32"
     cargo check --workspace --exclude ocelli-native \
       --target wasm32-unknown-unknown
@@ -287,6 +447,38 @@ case "$command" in
     #    red on its own.
     echo "  4/4 resolved features agree across targets"
     python3 scripts/target_feature_check.py
+    ;;
+
+  bench)
+    # The benchmark harness HLD section 26 names. F-006.
+    #
+    # It refuses an absent install the way `oracle` does, and for a sharper
+    # reason: the ONE subject that has a subject today is timed in a browser,
+    # so a missing playwright is not a degraded run, it is no run at all. The
+    # harness would then report its single measurable subject as a runner
+    # failure, which is correct output and is not what anyone typing this
+    # wanted.
+    #
+    # tools/bench keeps its own install rather than sharing the oracle's, and
+    # scripts/bench_check.py asserts the two playwright pins are equal so the
+    # separation cannot become a drift.
+    #
+    # `--help` and `--list` are exempt, because neither loads a runner and
+    # neither touches playwright. Refusing them would mean a developer could
+    # not read what the harness measures without first installing a browser,
+    # and the registry is the part most worth reading.
+    case " $* " in
+      *" --help "*|*" -h "*|*" --list "*) ;;
+      *)
+        if [ ! -d tools/bench/node_modules ]; then
+          echo "The benchmark harness's browser is not installed." >&2
+          echo "Run: (cd tools/bench && npm ci && npx playwright install chromium)" >&2
+          echo "See docs/lld/benchmarks.md for what it measures and what it does not." >&2
+          echo "\`bench --list\` and \`bench --help\` work without it." >&2
+          exit 1
+        fi ;;
+    esac
+    node tools/bench/run.mjs "$@"
     ;;
 
   oracle)
@@ -310,6 +502,42 @@ case "$command" in
       exit 1
     fi
     node tools/oracle/run.mjs "$@"
+    ;;
+
+  compare)
+    # The comparator, F-011. It reads two directories of reference-half output
+    # and returns a verdict per view against HLD 25.1. See
+    # docs/lld/comparator.md.
+    #
+    # Two exercises with no arguments, and both are needed. `identity` proves
+    # the loader, the identifier mapping, the class resolution, the sidecar
+    # contract and the report shape over every view, and it proves NOTHING
+    # about detection. `mutations` replays the declared catalogue and requires
+    # each entry to produce the verdict written beside it, which is the half
+    # that proves detection. Chained on `&&` for the reason the corpus gate arm
+    # gives.
+    #
+    # RELEASE, and not for speed alone. A debug build of a comparison over
+    # ninety-eight frames plus twenty-one mutation replays is minutes rather
+    # than seconds, and a check nobody wants to wait for is a check that stops
+    # being run.
+    #
+    # An argument is passed straight through, so
+    # `bin/ocelli.sh compare identity --candidate DIR` is the form the port
+    # will use when there is a second side to compare.
+    if [ ! -d tools/oracle/out ]; then
+      echo "There is no oracle output to compare." >&2
+      echo "Run: bin/ocelli.sh oracle" >&2
+      echo "See docs/lld/comparator.md for what this compares and what it does not." >&2
+      exit 1
+    fi
+    cargo build --release -p ocelli-oracle --bin ocelli-compare
+    if [ "$#" -gt 0 ]; then
+      ./target/release/ocelli-compare "$@"
+    else
+      ./target/release/ocelli-compare identity &&
+      ./target/release/ocelli-compare mutations
+    fi
     ;;
 
   corpus)  python3 scripts/corpus_check.py "$@" ;;

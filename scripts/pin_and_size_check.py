@@ -14,10 +14,41 @@ R4 adds: "treat GPU code that compiles first try with suspicion". A caret or
 tilde range on wgpu re-opens exactly the gap the pin closes, so the range form
 is refused, not just a wrong version.
 
+**`=` is not the pin. `=` and a full version is.** The S03 sprint review's
+third pass measured the residue: this check tested only that the spec starts
+with `=`, and `wgpu = "=30"` passed. Cargo reads a partial version after `=`
+as a whole band, which is demonstrable rather than a reading of the
+documentation:
+
+    wgpu = "=30.0.0"   cargo metadata  -> Downgrading wgpu v30.0.1 -> v30.0.0
+    wgpu = "=30"       cargo metadata  -> resolves against 30.0.1, no change
+    wgpu = "=30"       cargo update -p wgpu --precise 30.0.0  -> exit 0
+    wgpu = "=30.0.1"   cargo update -p wgpu --precise 30.0.0  -> exit 101,
+                       "failed to select a version for the requirement"
+
+A spec that both resolves 30.0.1 and permits 30.0.0 is `=30.*`, and two
+versions is a range. So an exact pin is `=` followed by a major, a minor and a
+patch, and `=30` and `=30.0` are refused with the rest.
+
 **The wasm-bindgen pin.** Added by F-002 and not in section 15.2's list, which
 predates the build pipeline story. `wasm-pack` runs a wasm-bindgen CLI whose
 version must match the crate version, so a range lets the two drift and the
 mismatch reads as a build break rather than as a resolution change.
+
+**How the entry is read, and why it is not a regex.** Cargo accepts two forms,
+`wgpu = "=30.0.1"` and `wgpu = { version = "=30.0.1", features = [...] }`.
+The first version of this script took the FIRST quoted string in the entry as
+the version, which is positional rather than structural, and the S03 sprint
+review measured what that costs:
+
+    wgpu = { default-features = false, features = ["=noop"], version = "30" }
+
+printed `OK: wgpu pinned exactly`. The version read was `=noop`, which starts
+with `=`, and the real version was a caret range nobody looked at. A hard rule
+in CLAUDE.md, "wgpu is pinned exactly", was defeated by the ORDER of the keys.
+So the file is parsed with `tomllib` and the version is taken from the
+`version` key. A table that declares no version at all is refused rather than
+guessed at.
 
 **The size budget.** Story E1.2 is "wasm-pack build pipeline with a hard size
 budget gate", and Appendix A gate A4 asks whether binary size and cold start
@@ -41,6 +72,7 @@ import argparse
 import json
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -70,32 +102,72 @@ EXACT_PINNED = {
 # A binary that grows 5% in one story is a story that should say why.
 TOLERANCE = 0.05
 
+# An exact pin: `=`, optional whitespace Cargo allows after the operator, then
+# all three of major, minor and patch, then the optional pre-release and build
+# metadata semver permits. One version and no band. `=30` and `=30.0` are
+# comparators over a whole minor or patch band and are refused here.
+EXACT_PIN = re.compile(
+    r"^=\s*\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+
+
+def declared_version(entry: object) -> str | None:
+    """The version a `[workspace.dependencies]` entry declares.
+
+    A bare string IS the version. A table declares it under the `version`
+    key, and the rest of the table is features, a path or a
+    `default-features` flag, any of which may hold a string that starts with
+    `=`. `None` means the entry declares no version this check can read, and
+    that is refused rather than assumed to be exact.
+    """
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        version = entry.get("version")
+        return version if isinstance(version, str) else None
+    return None
+
 
 def check_pins() -> list[str]:
-    text = CARGO.read_text()
-    block = re.search(r"^\[workspace\.dependencies\]$(.*?)(?=^\[|\Z)",
-                      text, re.M | re.S)
-    if block is None:
+    try:
+        cargo = tomllib.loads(CARGO.read_text())
+    except tomllib.TOMLDecodeError as error:
+        return [f"Cargo.toml does not parse as TOML: {error}"]
+    declared = cargo.get("workspace", {}).get("dependencies")
+    if not isinstance(declared, dict):
         return ["Cargo.toml has no [workspace.dependencies] section"]
 
     problems = []
     for crate, reason in sorted(EXACT_PINNED.items()):
-        entry = re.search(rf'^\s*{re.escape(crate)}\s*=\s*(.+)$',
-                          block.group(1), re.M)
-        if entry is None:
+        if crate not in declared:
             problems.append(
                 f"{crate} is not declared in [workspace.dependencies], "
                 f"and it must be, pinned exactly. {reason}")
             continue
-        value = entry.group(1)
-        version = re.search(r'"([^"]+)"', value)
-        if version is None:
-            problems.append(f"{crate}: cannot read a version from {value!r}")
+        spec = declared_version(declared[crate])
+        if spec is None:
+            problems.append(
+                f"{crate}: cannot read a version from "
+                f"{declared[crate]!r}. An entry with no `version` key is "
+                f"not an exact pin, whatever else the table holds. {reason}")
             continue
-        spec = version.group(1)
-        if not spec.startswith("="):
+        if not spec.strip().startswith("="):
             problems.append(
                 f"{crate} = \"{spec}\" is a RANGE, not an exact pin. {reason}")
+            continue
+        if "," in spec:
+            problems.append(
+                f"{crate} = \"{spec}\" declares MORE THAN ONE comparator, "
+                f"which is a range whatever the first one says. An exact pin "
+                f"is one `=` and one full major.minor.patch. {reason}")
+            continue
+        if not EXACT_PIN.match(spec.strip()):
+            problems.append(
+                f"{crate} = \"{spec}\" pins with `=` and a PARTIAL version, "
+                f"which Cargo reads as a whole band. Measured on wgpu: `=30` "
+                f"resolves against 30.0.1, and under it "
+                f"`cargo update -p wgpu --precise 30.0.0` exits 0 where "
+                f"`=30.0.1` refuses that version. Two versions is a range. "
+                f"Write `=` and a full major.minor.patch. {reason}")
     return problems
 
 

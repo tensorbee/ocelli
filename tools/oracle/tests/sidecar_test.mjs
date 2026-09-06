@@ -11,7 +11,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
-import { assertFrameIntegrity, buildSidecar } from "../src/sidecar.mjs";
+import {
+  STACK_KIND,
+  VOLUME_KIND,
+  assertFrameIntegrity,
+  buildSidecar,
+  buildVolumeSidecar,
+} from "../src/sidecar.mjs";
 
 const ROW = {
   path: "synthetic/ct_unsigned_16.dcm",
@@ -46,7 +52,13 @@ const RESULT = {
   camera: { parallelScale: 16 },
   attributes: { rescaleSlope: 1, rescaleIntercept: -1024 },
   attributesError: null,
-  cornerstoneMetadata: { modalityLutModule: { rescaleSlope: 1 } },
+  cornerstoneMetadata: {
+    modalityLutModule: { rescaleSlope: 1 },
+    // docs/lld/oracle.md's worked case: 64 by 96 at spacing [0.5, 0.25] with
+    // parallelScale 16 on a 512-high canvas gives 8 canvas pixels per source
+    // pixel vertically and 4 horizontally.
+    imagePlaneModule: { rowPixelSpacing: 0.5, columnPixelSpacing: 0.25 },
+  },
   image: { minPixelValue: 0, maxPixelValue: 4095 },
   frame: {
     width: 512,
@@ -166,6 +178,29 @@ test("the sidecar names its own frame files", () => {
   });
 });
 
+// F-011 dispatches on this field and must not infer a shape from a filename.
+test("every sidecar says which shape it is", () => {
+  assert.equal(build().kind, STACK_KIND);
+  assert.equal(STACK_KIND, "stack");
+  assert.equal(VOLUME_KIND, "volume-reformat");
+});
+
+// For EVERY row and not only for the two the run lists under `downsampled`.
+// The derivation lives once, in `canvasScale`, and publishing it here is what
+// stops F-011 writing a second copy of it in Rust.
+//
+// docs/lld/oracle.md's worked case, hand-computed from the numbers above:
+//   millimetres per canvas pixel = 2 * 16 / 512 = 0.0625
+//   vertical   = rowPixelSpacing    / 0.0625 = 0.5  / 0.0625 = 8
+//   horizontal = columnPixelSpacing / 0.0625 = 0.25 / 0.0625 = 4
+// A pixel-count model would have answered 5.333 for both axes.
+test("the canvas scale travels on every frame, per axis", () => {
+  assert.deepEqual(build().canvasPixelsPerSourcePixel, {
+    vertical: 8,
+    horizontal: 4,
+  });
+});
+
 test("the raw format is stated, because F-011 reads the raw bytes", () => {
   const sidecar = build();
   assert.match(sidecar.frame.format, /RGBA8/);
@@ -186,4 +221,186 @@ test("a frame that did not survive the trip out of the browser is refused", () =
     () => assertFrameIntegrity(ROW.path, bytes, { frame: { sha256: "c".repeat(64) } }),
     /did not survive/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// The volume reformat sidecar, F-X007
+// ---------------------------------------------------------------------------
+
+const SUBJECT = {
+  id: "volume__synthetic__ct_series_nonuniform",
+  seriesDirectory: "synthetic/ct_series_nonuniform",
+  why: "the subject this story exists for",
+  members: [
+    "synthetic/ct_series_nonuniform/slice_000.dcm",
+    "synthetic/ct_series_nonuniform/slice_001.dcm",
+  ],
+};
+
+const VOLUME_RECORD = {
+  ok: true,
+  members: [
+    {
+      path: "synthetic/ct_series_nonuniform/slice_000.dcm",
+      sha256: "d".repeat(64),
+      stackSidecar: "synthetic__ct_series_nonuniform__slice_000.json",
+      attributes: {
+        imagePositionPatient: [0, 0, 0],
+        imageOrientationPatient: [0.8, 0.6, 0, 0, 0, -1],
+        pixelSpacing: [0.5, 0.25],
+        sliceThickness: 2.5,
+      },
+    },
+    {
+      path: "synthetic/ct_series_nonuniform/slice_001.dcm",
+      sha256: "e".repeat(64),
+      stackSidecar: "synthetic__ct_series_nonuniform__slice_001.json",
+      attributes: {
+        imagePositionPatient: [-1.5, 2, 0],
+        imageOrientationPatient: [0.8, 0.6, 0, 0, 0, -1],
+        pixelSpacing: [0.5, 0.25],
+        sliceThickness: 2.5,
+      },
+    },
+  ],
+  memberImageIds: ["dicomfile:0", "dicomfile:1"],
+  referenceSortedImageIds: ["dicomfile:0", "dicomfile:1"],
+  referenceGeometry: { dimensions: [20, 12, 2], spacing: [0.25, 0.5, 2.5] },
+  zProfile: { voxel: [10, 6], values: [1056, 1072] },
+  voi: { source: "file", windowCenter: 40, windowWidth: 400, voiLutFunction: "LINEAR", member: SUBJECT.members[0] },
+  memberWindows: [{ path: SUBJECT.members[0] }, { path: SUBJECT.members[1] }],
+  voiMembersAgree: true,
+  frames: [],
+};
+
+const VOLUME_FRAME = {
+  orientation: "SAGITTAL",
+  camera: { parallelScale: 12, viewPlaneNormal: [1, 0, 0] },
+  reformat: {
+    orientation: "SAGITTAL",
+    viewportType: "orthographic",
+    blendMode: "COMPOSITE",
+    slabThicknessMm: null,
+    millimetresPerCanvasPixel: 0.046875,
+    cameraMode: "reset",
+  },
+  frame: {
+    width: 512,
+    height: 512,
+    sha256: "f".repeat(64),
+    statistics: { pixels: 262144, black: 1, white: 2, opaque: 262144, blackFraction: 0.1, whiteFraction: 0.2 },
+  },
+};
+
+function buildVolume(orientation = "SAGITTAL") {
+  return buildVolumeSidecar({
+    subject: SUBJECT,
+    record: VOLUME_RECORD,
+    frame: {
+      ...VOLUME_FRAME,
+      orientation,
+      reformat: { ...VOLUME_FRAME.reformat, orientation },
+    },
+    measured: {
+      normal: [-0.6, 0.8, 0],
+      order: SUBJECT.members.map((path) => ({ path })),
+      projectionsMm: [0, 2.5],
+      gapsMm: [2.5],
+      meanGapMm: 2.5,
+      medianGapMm: 2.5,
+      minGapMm: 2.5,
+      maxGapMm: 2.5,
+      maxDeviationFromMeanMm: 0,
+      voxelAxes: {
+        columnStepMm: [0.2, 0.15, 0],
+        rowStepMm: [0, 0, -0.5],
+        sliceStepMm: [-1.5, 2, 0],
+      },
+    },
+    comparison: {
+      truth: { source: "volume-truth.json", uniform: false, citation: "PS3.3 C.7.6.2.1.1", toleranceMm: 1e-6 },
+      uniform: false,
+      referenceAgreesWithTruth: false,
+      referenceDivergence: { field: "spacing[2]", reference: 2.5, truth: null },
+    },
+    volumeParams: {
+      orientations: ["AXIAL", "SAGITTAL", "CORONAL"],
+      blendMode: "COMPOSITE",
+      slabThicknessMm: null,
+      cameraMode: "reset",
+      loadTimeoutMs: 300000,
+    },
+    renderParams: PARAMS,
+    environment: ENVIRONMENT,
+    installed: INSTALLED,
+  });
+}
+
+test("a volume sidecar says which shape it is and names its own frame files", () => {
+  const sidecar = buildVolume();
+  assert.equal(sidecar.kind, VOLUME_KIND);
+  assert.deepEqual(sidecar.files, {
+    raw: "volume__synthetic__ct_series_nonuniform__SAGITTAL.raw",
+    png: "volume__synthetic__ct_series_nonuniform__SAGITTAL.png",
+  });
+});
+
+// Two readings of the same geometry, exactly as the stack sidecar carries two
+// readings of the same pixel metadata, and for the same reason: a sidecar that
+// transcribed only the reference's own answer could not show the reference
+// getting a series wrong.
+test("both readings of the geometry travel with the reformat", () => {
+  const sidecar = buildVolume();
+  assert.deepEqual(sidecar.volume.referenceGeometry.spacing, [0.25, 0.5, 2.5]);
+  assert.deepEqual(sidecar.volume.measuredGeometry.gapsMm, [2.5]);
+  assert.equal(sidecar.volume.measuredGeometry.citation, "PS3.3 C.7.6.2.1.1");
+  assert.equal(sidecar.volume.referenceAgreesWithTruth, false);
+  assert.equal(sidecar.volume.referenceDivergence.field, "spacing[2]");
+});
+
+// A reformat is meaningless without the view plane normal, and the stack
+// sidecar does not carry it.
+test("a reformat carries the view plane normal the stack sidecar has no use for", () => {
+  assert.deepEqual(buildVolume().camera.viewPlaneNormal, [1, 0, 0]);
+});
+
+// Every member's geometry, so `check_sidecars.py` can cross-read it against
+// pydicom and so F-011 can join a reformat to the stack frames of the same
+// instances.
+test("every member's own geometry and its stack sidecar travel with the reformat", () => {
+  const [first] = buildVolume().volume.members;
+  assert.deepEqual(first.imagePositionPatient, [0, 0, 0]);
+  assert.deepEqual(first.pixelSpacing, [0.5, 0.25]);
+  assert.equal(first.sliceThickness, 2.5);
+  assert.equal(first.stackSidecar, "synthetic__ct_series_nonuniform__slice_000.json");
+});
+
+// Deliberate. The existing design's rule is that a frame never travels alone,
+// and a comparator that had to join two files to explain one frame would break
+// it.
+test("the volume block is identical in all three orientation sidecars", () => {
+  const axial = buildVolume("AXIAL");
+  const sagittal = buildVolume("SAGITTAL");
+  assert.deepEqual(axial.volume, sagittal.volume);
+  assert.notDeepEqual(axial.reformat, sagittal.reformat);
+});
+
+// `downsampled` and `canvasPixelsPerSourcePixel` stay stack concepts. A
+// reformat plane has no source pixel grid to be a magnification of, and
+// publishing a number that means something else under the same name is the
+// defect this project calls quietly wrong.
+test("a reformat publishes its own scale and not the stack's", () => {
+  const sidecar = buildVolume();
+  assert.equal(sidecar.canvasPixelsPerSourcePixel, undefined);
+  assert.equal(sidecar.reformat.millimetresPerCanvasPixel, 0.046875);
+});
+
+// One volume viewport carries one voiRange. `real/mr_eay131` carries fifteen
+// different windows, one per instance, so a sidecar publishing only the window
+// that acted would read as though they all agreed.
+test("the window that acted names the member it came from", () => {
+  const sidecar = buildVolume();
+  assert.equal(sidecar.voiMembers.member, SUBJECT.members[0]);
+  assert.equal(sidecar.voiMembers.agree, true);
+  assert.equal(sidecar.voiMembers.windows.length, 2);
 });

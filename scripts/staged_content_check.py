@@ -40,6 +40,30 @@ MAX_BYTES = 2 * 1024 * 1024
 # The guard belongs here, as a mechanism, and not there, as a habit.
 ORACLE_OUTPUT_PREFIXES = ("tools/oracle/out/",)
 
+# Spike output (F-X006, Appendix A gates A1 and A2). The same reasoning as
+# above, applied to a different derived artefact. The throwaway harnesses write
+# raw JPEG 2000 and JPEG-LS codestreams and decoded pixel buffers, all extracted
+# from corpus rows, into this directory. A `.j2c` or a `.jls` is not DICOM by
+# magic bytes, so the refusal below would not catch it, and at a kilobyte or two
+# neither would the size limit.
+#
+# Separate from ORACLE_OUTPUT_PREFIXES rather than folded into it, because the
+# two carry different remedies and a guard that names the wrong one wastes the
+# time of the person who trips it.
+SPIKE_OUTPUT_PREFIXES = ("tools/spikes/out/",)
+
+# Comparator output (F-011). The same reasoning again, applied to the third
+# derived artefact. `<id>.diff.raw` is the per-lane absolute difference between
+# two frames of a corpus row, so it is derived from that row exactly as a
+# reference frame is, and `compare.json` names every view. A `.raw` is not
+# DICOM by magic bytes and a difference image of a 512 by 512 frame is a
+# megabyte, which is under the size limit.
+#
+# Separate from ORACLE_OUTPUT_PREFIXES for the reason the spike block gives:
+# the remedy is a different command, and a guard that names the wrong one
+# wastes the time of the person who trips it.
+COMPARE_OUTPUT_PREFIXES = ("tools/oracle/compare-out/",)
+
 # DICOM Part 10 preamble: 128 zero bytes then "DICM". A file with no suffix
 # is checked by magic, because `anon001` is a very normal way to receive one.
 DICM_OFFSET = 128
@@ -86,6 +110,24 @@ def main() -> int:
                 f"row is marked burned-in-unchecked. Nothing under "
                 f"tools/oracle/out/ is ever committed. Regenerate it with "
                 f"`bin/ocelli.sh oracle`.")
+            continue
+
+        if name.startswith(COMPARE_OUTPUT_PREFIXES):
+            problems.append(
+                f"{name}: comparator output. A difference image under "
+                f"tools/oracle/compare-out/ is derived from a corpus row the "
+                f"same way a reference frame is, and every real row is marked "
+                f"burned-in-unchecked. Nothing here is ever committed. "
+                f"Regenerate it with `bin/ocelli.sh compare`.")
+            continue
+
+        if name.startswith(SPIKE_OUTPUT_PREFIXES):
+            problems.append(
+                f"{name}: spike output. Raw codestreams and decoded pixel "
+                f"buffers under tools/spikes/out/ are extracted from corpus "
+                f"rows and are derived from them, so nothing here is ever "
+                f"committed. Regenerate it with "
+                f"`uv run tools/spikes/common/extract.py`.")
             continue
 
         if looks_like_dicom(path):

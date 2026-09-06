@@ -1,7 +1,7 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003
-**Last updated:** 2026-09-05
+**F-IDs that contributed:** F-003, F-004, F-005
+**Last updated:** 2026-09-06
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
@@ -12,8 +12,55 @@ What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 | `@ocelli/core` | The TypeScript shell of HLD section 10 | none |
 | `@ocelli/react` | The React binding | `@ocelli/core` at an exact version |
 
-Both are scaffolds. The public API is designed in F-095 and the boundary is
-built in F-096.
+Both are scaffolds. The public API is designed in F-100 and the boundary is
+built in F-101.
+
+### What is in the `@ocelli/core` tarball today
+
+Everything under `packages/core/src` compiles into `dist` and is re-exported
+from `index.ts`. F-005 added three modules to the four files that were there,
+and F-004 then added `capabilities.ts`.
+
+| Module | Holds |
+|--------|-------|
+| `bulk.ts` | The bulk channel down into linear memory |
+| `ring.ts` | The event ring's consumer side |
+| `errors.ts` | The error-code mirror, the message table, `decodeRecord` |
+| `panic.ts` | `readPanicRecord`, and the panic record's layout |
+| `fatal.ts` | `CoreStatus` and the never-returns-to-ok latch |
+| `capabilities.ts` | The shell-side probes `wasmSimd128Supported` and `sharedMemoryAvailable`, and the committed SIMD module they validate |
+
+`docs/lld/errors.md` specifies `errors.ts`, `panic.ts` and `fatal.ts`, and
+`docs/lld/tier-resolution.md` specifies `capabilities.ts`. What belongs to
+this file is that they ship, that they add no runtime dependency, and that
+`errors.ts` is where the human text for an error code lives, which is HLD
+section 23's "the message is for humans and may change" taken literally.
+
+## `panic.ts` is the second file permitted a view over linear memory
+
+`eslint.config.js` bans building any typed array or `DataView` over anything
+ending `.memory.buffer`, and `ALLOWED_TO_DISABLE` turns that off through three
+path patterns and not two. The first list is the production allowance,
+`bulk.ts` and `panic.ts`. The second is `packages/core/src/*.test.ts`, kept as
+a separate list precisely so the production allowance does not read as more
+files than the two it grants.
+
+HLD section 17.2 says "outside the two functions that are allowed to do it".
+ESLint scopes overrides by file rather than by function, so the allowance is
+file-scoped, and the specification already expected two. This repository had
+one only because nothing else needed linear memory yet.
+
+`bulk.ts` writes bytes down, between an `alloc` and the `commit` that takes
+ownership back. `panic.ts` reads the panic record up, after the instance has
+trapped, which is the safest possible instance of the hazard the rule guards:
+no wasm code can run, so memory cannot grow between the view's construction and
+its last use. The discipline is kept anyway. The view is built inside the
+function, used immediately, and neither stored nor returned.
+
+**Widening the list is a design-plan decision** and `.claude/plans/
+F-005-design.md` item F is the one that added the second entry. **A third
+production file is not granted.** `packages/core/src/ring.ts` will need one
+when F-101 gives it a real ring to drain, and that is F-101's plan to argue.
 
 ## There is no bundler, and that is a decision rather than an omission
 
@@ -29,7 +76,7 @@ property of the tarball's `exports` map and its emitted module syntax, not of a
 build step in this repository, so the pipeline proves the property directly
 instead of adding a tool that would hide it.
 
-Revisit this when the wasm consumption path lands in F-096. `wasm-pack --target
+Revisit this when the wasm consumption path lands in F-101. `wasm-pack --target
 web` emits an ESM module plus a `.wasm` asset, and bundlers treat that asset
 specially. If a bundler is needed then, it is added then, with a named reason.
 
@@ -99,7 +146,7 @@ state.
 It stays literally true after F-002, which produces
 `crates/ocelli-wasm/pkg` on a machine that ran the build. What changed is that
 the function now has a real question to answer. **Answering it belongs to
-F-096**, and a test asserts the current answer so that the change is visible in
+F-101**, and a test asserts the current answer so that the change is visible in
 a diff rather than happening quietly.
 
 `VERSION` is asserted against a literal for the same reason

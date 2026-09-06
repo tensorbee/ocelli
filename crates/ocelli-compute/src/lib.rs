@@ -140,6 +140,16 @@ mod tests {
 
     /// `Unavailable` names both tiers, because "unavailable" without the two
     /// tiers is a message nobody can act on.
+    ///
+    /// **Each tier is asserted with the role it plays, not on its own.**
+    /// Deviation D-07's rule is that a feature which cannot run on the resolved
+    /// tier reports that honestly, and a message naming the wrong side as the
+    /// deficient one is that report inverted: a tier C session refusing a tier
+    /// A kernel would say "kernel requires tier Cpu, session resolved tier A",
+    /// which sends a reader looking for a broken kernel instead of a machine
+    /// without a GPU. Asserting `contains("tier A")` and `contains("tier Cpu")`
+    /// separately holds either way round, so the substrings below carry the
+    /// noun that binds each tier to its side.
     #[test]
     fn unavailable_names_the_required_and_resolved_tiers() {
         let error = ComputeError::Unavailable {
@@ -147,8 +157,45 @@ mod tests {
             resolved: Tier::Cpu,
         };
         let text = error.to_string();
-        assert!(text.contains("tier A"), "{text}");
-        assert!(text.contains("tier Cpu"), "{text}");
+        assert!(text.contains("requires tier A"), "{text}");
+        assert!(text.contains("resolved tier Cpu"), "{text}");
         assert!(text.contains("no fallback"), "{text}");
+    }
+
+    /// The same message with the tiers the other way round, so neither
+    /// direction can be satisfied by a formatter that prints one tier twice.
+    #[test]
+    fn unavailable_does_not_read_the_same_with_the_tiers_swapped() {
+        let one = ComputeError::Unavailable {
+            required: Tier::A,
+            resolved: Tier::Cpu,
+        }
+        .to_string();
+        let other = ComputeError::Unavailable {
+            required: Tier::Cpu,
+            resolved: Tier::A,
+        }
+        .to_string();
+        assert_ne!(one, other);
+        assert!(other.contains("requires tier Cpu"), "{other}");
+        assert!(other.contains("resolved tier A"), "{other}");
+    }
+
+    /// `Workgroup` names the workgroup it refused.
+    ///
+    /// Its sibling above has a test and this variant's `Display` was executed
+    /// by nothing, so blanking its `#[error(...)]` string left this crate
+    /// green. HLD section 31 makes the workgroup the one number that must never
+    /// be hardcoded, which is precisely why the refusal has to print the number
+    /// that was asked for. The sibling's reason applies unchanged: a message
+    /// without its operands is a message nobody can act on.
+    #[test]
+    fn workgroup_names_the_size_it_refused() {
+        let text = ComputeError::Workgroup {
+            requested: [512, 2, 1],
+        }
+        .to_string();
+        assert!(text.contains("workgroup"), "{text}");
+        assert!(text.contains("[512, 2, 1]"), "{text}");
     }
 }

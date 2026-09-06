@@ -57,8 +57,14 @@ From `docs/hld/11-decision-log.md`. Raise a deviation in
 | D14 | Claim MEASURED divergence, never bit-exact reproducibility. |
 
 **Two numbering namespaces, and they nearly collide.** `D1` to `D14` above are
-the HLD's own decisions. `D-01` to `D-12` in `docs/hld/DEVIATIONS.md` are
-places this repository departs from the HLD. **`D7` and `D-07` are different
+the HLD's own decisions. The hyphenated `D-NN` rows in
+`docs/hld/DEVIATIONS.md` are places this repository departs from the HLD, and
+that register is the count rather than any number written here, because a range
+written here goes stale the first time a deviation lands. `python3
+scripts/deviation_check.py` prints how many there are. **The two namespaces now
+overlap in full**, since the register has passed `D-14`, so the hyphen is the
+only thing telling `D-14` from decision `D14` and it is load-bearing rather than
+a convention. **`D7` and `D-07` are different
 things**: D7 is the oracle-before-port-code decision, D-07 is the CPU tier.
 Always write the hyphen for a deviation.
 
@@ -77,8 +83,20 @@ Tier C reuses `ocelli-pixel` rather than reimplementing the LUT chain. §18
 requires that arithmetic to exist exactly once, and a second copy behind a tier
 check is the same defect as a second copy anywhere else, except that it only
 runs on hardware nobody develops on. Spike gate **A7** (`docs/spikes/GATES.md`)
-decides whether tier C is worth building at all, and F-X001 to F-X004 are the
-stories.
+asked whether tier C is worth building at all and is resolved, outcome `Pass`,
+so it is built. F-X001 to F-X005 are the stories, and
+`grep -n '| X1\.' docs/sprints/BACKLOG.md` lists exactly those five, because X1
+is the epic and the epic column is what identifies them. **Do not
+grep the F-IDs.** `grep -c 'F-X00[0-9]' docs/sprints/BACKLOG.md` returns more
+than five and the number RISES every time a story is filed: F-X006 to F-X009
+are Y1 stories matching the same pattern, and further rows match through their
+`Depends on` cell. Run both commands rather than trusting a number written
+here. **This paragraph carried the number until the S03 review's fifteenth
+pass**, and it went stale twice inside the single pass that rewrote the lines
+around it, once for F-X019 and again for F-X020. A count in prose beside the
+command that prints it is the shape this file keeps having to correct. This said F-X004 while `docs/spikes/A7-tier-c.md` said "see F-X004 and
+F-X005", so the range here excluded the story that decides CPU volume
+rendering.
 
 ## Hard rules
 
@@ -86,10 +104,11 @@ stories.
   `corpus/data`
   behind `corpus/manifest.tsv`. The pre-commit hook refuses staged DICOM by
   magic bytes as well as by suffix. No allowlist.
-- **dwv and Horos must not be opened**, by a person or an agent. GPL-3 and
-  LGPL-3-plus-AGPL-3 respectively, and translating source into Rust is a
-  translation. Take their ideas from DICOM PS3.3 and PS3.16 instead. Grok must
-  not be depended on. `scripts/source_provenance_check.py` enforces this.
+- **dwv, Horos and Grok must not be opened**, by a person or an agent. GPL-3,
+  LGPL-3-plus-AGPL-3 and AGPL-3 respectively, and translating source into Rust
+  is a translation. Take their ideas from DICOM PS3.3 and PS3.16 instead. Grok
+  must not be depended on either, and
+  `scripts/source_provenance_check.py` enforces all three.
 - **No `unsafe`** outside `ocelli-wasm/src/ring.rs` and
   `ocelli-core/src/cast.rs`.
 - **wgpu is pinned exactly.** Treat GPU code that compiles first try with
@@ -137,17 +156,26 @@ no GPU and no browser and Ocelli needs both.
 ## Current state
 
 Early. S01 delivered the `ocelli-core` types and the corpus. S02 delivered the
-build and packaging paths and the reference half of the oracle. See
+build and packaging paths and the reference half of the oracle. S03 gave the
+oracle a verdict, resolved the runtime tier, answered Appendix A gates A1 and
+A2, and gave the repository's refusals a standing harness. That last one is
+not "every guard": `python3 scripts/guard_census.py` prints the bucket watched
+by nothing, and it is not empty. See
 `docs/sprints/CURRENT_SPRINT.md` and `docs/lld/`.
 
 What exists, in the order it matters:
 
-- **The oracle's reference half.** `tools/oracle` renders every applicable
-  corpus row through cornerstone3D 5.8.2 under headless Chromium on
-  SwiftShader and writes reference pixels plus a metadata sidecar. It compares
-  nothing yet, which is F-011.
+- **The oracle, both halves.** `tools/oracle` renders every applicable corpus
+  row through cornerstone3D 5.8.2 under headless Chromium on SwiftShader and
+  writes reference pixels plus a metadata sidecar. F-011 added the comparator,
+  so it now returns a per-view verdict against section 25.1's tolerances and
+  can attribute a divergence to a side. There is still no Ocelli renderer to
+  compare against, so detection is proved by a declared mutation catalogue
+  applied to real reference frames. `bin/ocelli.sh gate oracle` runs both
+  halves, and the bare `bin/ocelli.sh oracle` is the reference half alone.
 - **The corpus**, 91 rows behind `corpus/manifest.tsv`, covering all sixteen
-  transfer syntaxes the codec registry claims.
+  transfer syntaxes the codec registry will claim, which are listed in
+  `scripts/corpus_check.py` because the crate is still a scaffold.
 - **`ocelli-core`**, the coordinate and value spaces, entries 1 and 2 of the
   first-ten-files list.
 - **Every build target.** wasm through `wasm-pack` with a recorded size
@@ -160,5 +188,8 @@ What exists, in the order it matters:
 
 Most of `docs/hld/` Part II is still unimplemented, so where this file and that
 directory disagree about what exists, that directory is describing the target
-and this one is describing today. **No port code has been written**, which is
-decision D7 holding: the oracle exists first.
+and this one is describing today. **No pixel, LUT or geometry port code has
+been written**, which is decision D7 holding: the oracle exists first. S03 did
+add Rust that HLD Part II specifies, the tier resolution of section 7 and the
+error model of section 23, so the unqualified form of that sentence stopped
+being true and the qualified one is the claim.

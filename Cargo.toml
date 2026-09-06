@@ -31,9 +31,21 @@ expect_used = "deny"
 panic = "deny"
 
 # HLD section 15.2's dependency list, no longer verbatim. Section 15.2 gives
-# five entries and this block has seven: `glam` differs under D-09, and
-# `proptest` and `trybuild` are dev-only tools section 15.2 does not cover.
-# Every departure is commented at the entry it belongs to. The `[profile.release]`
+# five entries and this block has more.
+#
+# THE COUNT IS NOT WRITTEN HERE, DELIBERATELY. It said seven while the block
+# held eight from the day it was written, because `wasm-bindgen` is a departure
+# the sentence never named, and S03 took it to twelve without the sentence
+# moving: `pollster` in 9df8539, then `serde`, `serde_json` and `sha2` in
+# 2ffabe3. Eight review passes read past it. A number in a comment beside a
+# list is stale the next time the list grows, and this list grows every sprint.
+#
+#   awk '/^\[workspace.dependencies\]/{f=1;next} /^\[/{f=0} f' Cargo.toml \
+#     | grep -cE '^[a-z0-9_-]+ ='
+#
+# prints how many there are. The rule that carries the weight instead is that
+# EVERY DEPARTURE IS COMMENTED AT THE ENTRY IT BELONGS TO, which is checkable
+# by reading down this block and needs no arithmetic. The `[profile.release]`
 # block further down is still verbatim and still says so.
 #
 # The exact wgpu pin is not fussiness: agents reliably emit wgpu 0.19-era
@@ -45,9 +57,13 @@ panic = "deny"
 # F-016 for dicom and F-008 for wgpu. F-001 activates glam, for the
 # `Transform<A, B>` matrix of HLD section 16, and F-002 activates wasm-bindgen.
 #
-# wgpu moved from F-039 to F-008 under deviation D-10: HLD section 38's
+# wgpu moved from F-037 to F-008 under deviation D-10: HLD section 38's
 # device-sharing hook is stated in wgpu types, and a contract expressed only in
-# prose is not a mechanism.
+# prose is not a mechanism. This comment said F-039 until the S03 review's
+# fifth pass, and D-10's row in docs/hld/DEVIATIONS.md quotes that spelling
+# rather than endorsing it. F-037 is E6.1 in S11, device init and capability
+# tiering, and it is the story that would otherwise have needed wgpu first.
+# F-039 is E6.3 in S13 and is OffscreenCanvas.
 [workspace.dependencies]
 wgpu = "=30.0.1"
 # Pinned EXACTLY for the same reason as wgpu and one more that is specific to
@@ -65,15 +81,41 @@ dicom = { version = "0.10", default-features = false }
 # declare.
 glam = { version = "0.30", default-features = false, features = ["libm"] }
 bytemuck = { version = "1", features = ["derive"] }
-thiserror = "2"
+# HLD section 15.2 writes `thiserror = "2"`. The version is untouched and
+# only the feature set differs, which is deviation D-15: section 4 puts the
+# error model in `ocelli-core`, which carries
+# `#![cfg_attr(not(test), no_std)]`, thiserror's default feature is `std`,
+# and `cargo tree -e normal,features` then reports `thiserror feature "std"`,
+# which is the exact string `scripts/no_std_check.py` searches for. Setting
+# `default-features = false` at the MEMBER is ignored by Cargo with a
+# warning when the workspace entry does not set it, so the fix has to be
+# here. Activated by F-005, and already used by `ocelli-compute`.
+thiserror = { version = "2", default-features = false }
 
 # Dev-dependencies, not part of HLD section 15.2's list, which covers what
 # ships. `proptest` is the harness section 25's round-trip listing is written
 # against. `trybuild` is what asserts that a section 16 space mismatch fails
 # to COMPILE, which is the payoff section 16 claims and which no runtime test
-# can observe.
+# can observe. `pollster` drives the one `async fn` this workspace has,
+# `ocelli_render::probe::resolve`, inside a native `#[test]`: wgpu's adapter
+# and device requests are futures in the pinned version, and F-004 needs a
+# test to be able to await one. All three are dev-only and none reaches the
+# shipped surface, so none of them is a section 15.2 deviation.
+pollster = "0.4"
 proptest = "1"
 trybuild = "1"
+# F-011. The comparator in `tools/oracle` reads `run.json` and ninety-eight
+# sidecars, and re-hashes every `.raw` it reads so a file edited after the run
+# cannot be compared as though somebody had rendered it. None of the three is
+# in HLD section 15.2's list, and none needs a deviation row: `ocelli-oracle`
+# is `publish = false` test infrastructure, so none of them enters the shipped
+# surface or the wasm size budget. Same precedent as `proptest` and `trybuild`
+# above. `sha2` is not in F-011's plan, which named only `serde` and
+# `serde_json`, and it is here because the plan's own input contract requires
+# the third hash.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
 
 # DICOM-RS FEATURES, HLD section 15.2. Disable default features. The defaults
 # are rayon and simd, and the gdcm feature is native-only. On wasm you want

@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "$notes": [
+    "The volume subjects and the parameters of the volume pass (F-X007). Read tools/oracle/render-params.json beside this: the canvas, the background, the interpolation and the VOI policy are declared THERE and read from there, so there is one declaration of each and not two that could drift. tools/oracle/src/volume.mjs refuses a key here that render-params.json already owns.",
+    "A subject is one corpus directory rendered as one volume. Its id is `volume__` plus the directory with `/` replaced by `__`, and a frame id is that plus `__` and the orientation. `volume__` is a reserved output-name prefix and src/manifest.mjs refuses a corpus path that would reduce to one.",
+    "Strict in both directions, the way unsupported.json is. Every declared member must be a manifest row, every manifest row carrying the `series` category token must belong to exactly one subject, and a subject whose members are only partly selected by --rows is refused by name rather than skipped.",
+    "A change here changes every volume reference frame. Treat it the way docs/hld/22-testing-and-tolerance.md section 25.1 treats a tolerance: a pull request with a rationale, reviewed like code.",
+    "This file declares what to render. tools/oracle/volume-truth.json declares what is true. They are two files because they are reviewed by different people for different reasons."
+  ],
+  "loadTimeoutMs": 300000,
+  "loadTimeoutWhy": "Five minutes, declared here rather than inherited from run.mjs's 30 second RENDER_TIMEOUT_MS, because a volume load is a different unit of work from a single frame. real/ct_cmb_mml is twenty-seven full-resolution CT instances decoded and assembled under SwiftShader, which is the slowest thing this harness attempts. A timeout is a FAILURE and never a retry, and a subject that cannot complete is declared and named with its reason, never silently dropped.",
+  "orientations": [
+    "AXIAL",
+    "SAGITTAL",
+    "CORONAL"
+  ],
+  "orientationsWhy": "The three planes cornerstone3D 5.8.2 fixes in patient LPS axes in constants/mprCameraValues.js. All three are informative on these subjects rather than completionist: the two synthetic series are OBLIQUE, with slice normal (-0.6, 0.8, 0) lying in the patient XY plane, so none of the three is the acquisition plane and all three cut across the slice normal. The page refuses an orientation it does not implement rather than passing it through.",
+  "blendMode": "COMPOSITE",
+  "blendModeWhy": "cornerstone3D's own default for an ORTHOGRAPHIC viewport, recorded rather than assumed. A maximum-intensity or average blend over a slab would fold several slices into one pixel and hide exactly the through-plane placement this story exists to expose.",
+  "slabThicknessMm": null,
+  "slabThicknessWhy": "Not set, so the viewport keeps cornerstone3D's own default and the reformat is a single-plane cut. Recorded as null rather than omitted, because a slab thickness nobody declared is a parameter a reader would have to go and find.",
+  "cameraMode": "reset",
+  "cameraModeWhy": "cornerstone3D's own resetCamera after setOrientation, which is the same choice render-params.json makes for the stack pass and the only mode either page implements.",
+  "subjects": [
+    {
+      "id": "volume__synthetic__ct_series_uniform",
+      "seriesDirectory": "synthetic/ct_series_uniform",
+      "why": "Ten oblique CT slices at exactly 2.5 mm, written by scripts/corpus_synth.py case_series. The control against which the non-uniform subject is read.",
+      "members": [
+        "synthetic/ct_series_uniform/slice_000.dcm",
+        "synthetic/ct_series_uniform/slice_001.dcm",
+        "synthetic/ct_series_uniform/slice_002.dcm",
+        "synthetic/ct_series_uniform/slice_003.dcm",
+        "synthetic/ct_series_uniform/slice_004.dcm",
+        "synthetic/ct_series_uniform/slice_005.dcm",
+        "synthetic/ct_series_uniform/slice_006.dcm",
+        "synthetic/ct_series_uniform/slice_007.dcm",
+        "synthetic/ct_series_uniform/slice_008.dcm",
+        "synthetic/ct_series_uniform/slice_009.dcm"
+      ]
+    },
+    {
+      "id": "volume__synthetic__ct_series_nonuniform",
+      "seriesDirectory": "synthetic/ct_series_nonuniform",
+      "why": "The same ten slices with slice 7 displaced by half a gap, so the gaps are 2.5 six times, then 3.75, 1.25, 2.5. This is the subject the story exists for.",
+      "members": [
+        "synthetic/ct_series_nonuniform/slice_000.dcm",
+        "synthetic/ct_series_nonuniform/slice_001.dcm",
+        "synthetic/ct_series_nonuniform/slice_002.dcm",
+        "synthetic/ct_series_nonuniform/slice_003.dcm",
+        "synthetic/ct_series_nonuniform/slice_004.dcm",
+        "synthetic/ct_series_nonuniform/slice_005.dcm",
+        "synthetic/ct_series_nonuniform/slice_006.dcm",
+        "synthetic/ct_series_nonuniform/slice_007.dcm",
+        "synthetic/ct_series_nonuniform/slice_008.dcm",
+        "synthetic/ct_series_nonuniform/slice_009.dcm"
+      ]
+    },
+    {
+      "id": "volume__real__ct_cmb_mml",
+      "seriesDirectory": "real/ct_cmb_mml",
+      "why": "Twenty-seven real CT instances, so F-011 has a volume reference that is not a generated ramp. Its uniformity is measured and not judged, see volume-truth.json.",
+      "members": [
+        "real/ct_cmb_mml/00000001.dcm",
+        "real/ct_cmb_mml/00000002.dcm",
+        "real/ct_cmb_mml/00000003.dcm",
+        "real/ct_cmb_mml/00000004.dcm",
+        "real/ct_cmb_mml/00000005.dcm",
+        "real/ct_cmb_mml/00000006.dcm",
+        "real/ct_cmb_mml/00000007.dcm",
+        "real/ct_cmb_mml/00000008.dcm",
+        "real/ct_cmb_mml/00000009.dcm",
+        "real/ct_cmb_mml/00000010.dcm",
+        "real/ct_cmb_mml/00000011.dcm",
+        "real/ct_cmb_mml/00000012.dcm",
+        "real/ct_cmb_mml/00000013.dcm",
+        "real/ct_cmb_mml/00000014.dcm",
+        "real/ct_cmb_mml/00000015.dcm",
+        "real/ct_cmb_mml/00000016.dcm",
+        "real/ct_cmb_mml/00000017.dcm",
+        "real/ct_cmb_mml/00000018.dcm",
+        "real/ct_cmb_mml/00000019.dcm",
+        "real/ct_cmb_mml/00000020.dcm",
+        "real/ct_cmb_mml/00000021.dcm",
+        "real/ct_cmb_mml/00000022.dcm",
+        "real/ct_cmb_mml/00000023.dcm",
+        "real/ct_cmb_mml/00000024.dcm",
+        "real/ct_cmb_mml/00000025.dcm",
+        "real/ct_cmb_mml/00000026.dcm",
+        "real/ct_cmb_mml/00000027.dcm"
+      ]
+    },
+    {
+      "id": "volume__real__mr_eay131",
+      "seriesDirectory": "real/mr_eay131",
+      "why": "Fifteen real MR instances, for the same reason, at a different modality and a different in-plane resolution.",
+      "members": [
+        "real/mr_eay131/00000001.dcm",
+        "real/mr_eay131/00000002.dcm",
+        "real/mr_eay131/00000003.dcm",
+        "real/mr_eay131/00000004.dcm",
+        "real/mr_eay131/00000005.dcm",
+        "real/mr_eay131/00000006.dcm",
+        "real/mr_eay131/00000007.dcm",
+        "real/mr_eay131/00000008.dcm",
+        "real/mr_eay131/00000009.dcm",
+        "real/mr_eay131/00000010.dcm",
+        "real/mr_eay131/00000011.dcm",
+        "real/mr_eay131/00000012.dcm",
+        "real/mr_eay131/00000013.dcm",
+        "real/mr_eay131/00000014.dcm",
+        "real/mr_eay131/00000015.dcm"
+      ]
+    }
+  ]
+}

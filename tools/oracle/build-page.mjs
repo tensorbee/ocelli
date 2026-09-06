@@ -4,9 +4,13 @@
 // run, rather than served by a dev server, so the bytes the browser executes
 // are a file on disk that can be inspected after a divergence.
 //
-// Three things have to end up in `page/dist`:
+// Three kinds of thing have to end up in `page/dist`, beside the two HTML
+// documents that load them:
 //
-// 1. `app.js`, the bundled page entry.
+// 1. `app.js`, the bundled stack page entry, and `volume.js`, the bundled
+//    volume and MPR page entry (F-X007). Two pages and one bundler run: the
+//    volume pass loads its own page after the stack page has been closed, so
+//    the stack render is provably the same program it was.
 // 2. `decodeImageFrameWorker.js`, under exactly that name and beside `app.js`.
 //    `@cornerstonejs/dicom-image-loader`'s `init` starts its decode worker with
 //    `new Worker(new URL('./decodeImageFrameWorker.js', import.meta.url))`, and
@@ -32,6 +36,16 @@ const require = createRequire(import.meta.url);
 
 export const PAGE_SOURCE = oraclePath("page");
 export const PAGE_DIST = oraclePath("page", "dist");
+
+/**
+ * The two pages, each of which loads the bundle of the same base name.
+ *
+ * `index.html` is the stack render and `volume.html` is the volume and MPR
+ * render. They are separate documents in separate browser contexts rather than
+ * two viewports in one, so a change to the volume pass cannot move a stack
+ * frame. That is a property F-011 depends on while both stories are in flight.
+ */
+export const PAGE_HTML = ["index.html", "volume.html"];
 
 /**
  * Codec wasm binaries, keyed by the file name `locateFile` is asked for.
@@ -161,6 +175,7 @@ export async function buildPage() {
   await esbuild.build({
     entryPoints: [
       { in: join(PAGE_SOURCE, "app.mjs"), out: "app" },
+      { in: join(PAGE_SOURCE, "volume.mjs"), out: "volume" },
       { in: WORKER_ENTRY, out: "decodeImageFrameWorker" },
     ],
     outdir: PAGE_DIST,
@@ -181,16 +196,20 @@ export async function buildPage() {
     await copyFile(require.resolve(specifier), join(PAGE_DIST, "wasm", name));
   }
 
-  await copyFile(
-    join(PAGE_SOURCE, "index.html"),
-    join(PAGE_DIST, "index.html"),
-  );
+  for (const name of PAGE_HTML) {
+    await copyFile(join(PAGE_SOURCE, name), join(PAGE_DIST, name));
+  }
 
   return PAGE_DIST;
 }
 
 if (isEntryPoint(import.meta.url)) {
   const dist = await buildPage();
-  const html = await readFile(join(dist, "index.html"), "utf8");
-  process.stdout.write(`built ${dist} (${html.length} bytes of html)\n`);
+  let bytes = 0;
+  for (const name of PAGE_HTML) {
+    bytes += (await readFile(join(dist, name), "utf8")).length;
+  }
+  process.stdout.write(
+    `built ${dist} (${PAGE_HTML.length} pages, ${bytes} bytes of html)\n`,
+  );
 }

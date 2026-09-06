@@ -15,7 +15,7 @@ release, and it publishes nothing.
 |-----------|---------|----------------|
 | M1 | 0.1.0 | The namespace is reserved and the oracle exists. Nothing is ported. |
 | M2 to M12 | 0.2.0 to 0.12.0 | One minor per milestone. Anything may change. |
-| M13 | **1.0.0** | Parity with cornerstone3D v5.8.9, and semver starts meaning something. |
+| M13 | **1.0.0** | Parity with cornerstone3D 5.8.2 and not the HLD's v5.8.9, which does not exist, and that is deviation **D-11**. Semver starts meaning something. |
 | M14 to M18 | 1.1.0 to 1.5.0 | Phase 1.5, the differentiating capabilities. |
 
 **0.x carries no stability promise and says so.** The first publish at M1 is
@@ -24,7 +24,7 @@ section 1 records as free and worth claiming. Publishing early is cheap and
 losing a namespace is not recoverable.
 
 **1.0.0 is gated on M13, not on a date.** M13 is where the browser matrix is
-certified, binary size lands inside budget, and story F-118 (E19.4) sets the
+certified, binary size lands inside budget, and story F-117 (E19.4) sets the
 semver, changelog and deprecation policy. Calling something 1.0 before that
 story lands would be claiming a stability guarantee no policy exists to honour.
 
@@ -41,8 +41,13 @@ milestone.
 
 **Never published:** `ocelli-wasm` is `publish = false`. It is a `cdylib` whose
 artefact ships inside `@ocelli/core`, so publishing it to crates.io would offer
-a crate nobody can use from Rust. `ocelli-oracle` is test infrastructure and
-`@ocelli/example-viewer` is private.
+a crate nobody can use from Rust. `ocelli-native` is `publish = false` for as
+long as it stays stubbed, because publishing it would claim Phase 2 and Phase 3
+entry points that do not exist yet. The milestone that ships them lifts the
+flag and adds it to the crates.io list above. `ocelli-oracle` is
+`publish = false` too, being test infrastructure, and
+`@ocelli/example-viewer` is private. `grep -rn '^publish' crates/*/Cargo.toml
+tools/oracle/Cargo.toml` prints the whole set.
 
 npm publishes **after** crates.io, because the npm package embeds the wasm
 module and a failed crate publish should stop the release before anything

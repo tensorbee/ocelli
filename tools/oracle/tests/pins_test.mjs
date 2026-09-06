@@ -113,6 +113,46 @@ test("a manifest with the right name and no version is not an answer", async () 
   }
 });
 
+// **The reach itself, which nothing measured until the eighth review pass.**
+// The loop tests `start` at depth 0, so it examines `MAX_WALK` directories and
+// climbs `MAX_WALK - 1` of them. Both the constant's comment and the refusal
+// said "8 directories above", one more than the walk reaches, and a walk that
+// stopped one short would report an installed package as unpinnable rather
+// than record a wrong version, so nothing else would have shown it.
+//
+// Built by hand at each depth rather than asserted from the constant: the
+// manifest is placed exactly 7 directories above `start`, which must be found,
+// and exactly 8 above, which must not.
+async function treeAtDepth(depth) {
+  const base = await mkdtemp(join(tmpdir(), "ocelli-pins-test-"));
+  const start = join(base, ...Array.from({ length: depth }, (_, index) => `d${index}`));
+  await mkdir(start, { recursive: true });
+  await writeFile(
+    join(base, "package.json"),
+    JSON.stringify({ name: "deep-thing", version: "4.5.6" }),
+  );
+  return { base, start };
+}
+
+test("the walk reaches seven directories above its start and not eight", async () => {
+  const near = await treeAtDepth(7);
+  try {
+    assert.equal(versionFromPackageRoot(near.start, "deep-thing"), "4.5.6");
+  } finally {
+    await rm(near.base, { recursive: true, force: true });
+  }
+  const far = await treeAtDepth(8);
+  try {
+    assert.throws(
+      () => versionFromPackageRoot(far.start, "deep-thing"),
+      /no package.json naming deep-thing in .* or the 7 directories above it/,
+      "the walk climbed further than MAX_WALK - 1, or the message misstates it",
+    );
+  } finally {
+    await rm(far.base, { recursive: true, force: true });
+  }
+});
+
 test("a walk that reaches nothing terminates rather than looping", async () => {
   const base = await mkdtemp(join(tmpdir(), "ocelli-pins-test-"));
   try {

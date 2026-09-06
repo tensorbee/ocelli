@@ -7,6 +7,8 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+# Never published. The policy and its reasoning live in docs/RELEASE.md.
+publish = false
 
 [lints]
 workspace = true
@@ -33,7 +35,7 @@ crate-type = ["cdylib", "rlib"]
 #
 # Only --enable-bulk-memory is needed to build TODAY, because this module is
 # one function and emits nothing else. The other five are here because the
-# module they will have to validate is the one F-096 and the render stories
+# module they will have to validate is the one F-101 and the render stories
 # build, and discovering each missing flag one failed build at a time is worse
 # than reading them off rustc once.
 [package.metadata.wasm-pack.profile.release]
@@ -58,11 +60,30 @@ wasm-opt = [
 # Activated by F-002 (E1.2), the build-pipeline story, and not by F-096 as an
 # earlier comment here said. The reason is mechanical: `wasm-pack` refuses to
 # build a crate that does not depend on wasm-bindgen, so the pipeline and the
-# size budget cannot exist at all until the dependency does. F-096 (E16.2)
+# size budget cannot exist at all until the dependency does. F-101 (E16.2)
 # still builds the boundary that uses it.
 #
 # Pinned exactly in [workspace.dependencies]. `scripts/pin_and_size_check.py`
 # refuses a range form here for the same reason it refuses one for wgpu.
 wasm-bindgen = { workspace = true }
 
+[features]
+# HLD section 23's panic behaviour cannot be observed from a native test:
+# wasm32-unknown-unknown is `panic = "abort"` in every profile, so nothing
+# catches, and the only way to see what a trap leaves behind is to trap a real
+# module. `panic-probe` adds one export that panics on purpose.
+#
+# AGENTS.md forbids a feature flag without a named user. The named user is
+# `scripts/panic_probe.mjs`, driven by `bin/ocelli.sh gate panic`, which builds
+# a SECOND module into `target/panic-probe` and probes that. The shipped
+# artefact that `bin/ocelli.sh wasm` measures does not carry the feature and
+# therefore has no way to be asked to panic.
+panic-probe = []
+
 [dependencies]
+# HLD section 4's crate table puts the error model in ocelli-core, and F-005's
+# panic record writes ErrorCode::Panicked's number into linear memory. This is
+# the first time ocelli-wasm depends on another crate in the workspace, and it
+# is the larger half of the size-budget move recorded in
+# ci/wasm-size-budget.json.
+ocelli-core = { path = "../ocelli-core" }

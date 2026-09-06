@@ -7,7 +7,7 @@ package is the React framework binding, which HLD section 10 keeps in
 TypeScript deliberately rather than as a compromise.
 
 **This package is a scaffold.** Its viewport component is built alongside the
-boundary in F-095 and F-096.
+boundary in F-100 and F-101.
 
 ## Licence
 

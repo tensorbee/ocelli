@@ -8,13 +8,25 @@ section in an LLD file is a defect: the history is in `AS_BUILT.md` and in
 `git log`, and mixing the two produces a document nobody trusts as either.
 
 Each file carries a `**F-IDs that contributed:**` line and a
-`**Last updated:**` date. Both are maintained mechanically at completion.
+`**Last updated:**` date, and so does the F-IDs column of the index below.
+**Nothing maintains any of the three mechanically.** This paragraph used to say
+they were maintained mechanically at completion, which was a claim about a
+check that does not exist: `/complete-feature` step 9 asks the agent closing the
+story to write them, no gate reads them, and by the S03 review's seventh pass
+the index row for `corpus.md` had drifted from the file's own line, the one
+mismatch of eleven rows. If you edit an LLD file, edit its header line and its
+row here in the same hand.
 
 | File | Area | F-IDs |
 |------|------|-------|
-| [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001 |
-| [corpus.md](corpus.md) | Golden corpus layout, generation and verification | F-009 |
-| [build-targets.md](build-targets.md) | The wasm pipeline, the size budget, the cross-target proof and the isolation invariant | F-002, F-007, F-008 |
-| [gpu-ownership.md](gpu-ownership.md) | One device, one queue, one owner. The section 31 contract | F-008 |
-| [typescript-packaging.md](typescript-packaging.md) | What the npm packages publish, and what proves it | F-003 |
-| [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010 |
+| [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001, F-005 |
+| [corpus.md](corpus.md) | Golden corpus layout, generation and verification | F-009, F-X006, F-X007 |
+| [build-targets.md](build-targets.md) | The wasm pipeline, the size budget, the cross-target proof and the isolation invariant | F-002, F-004, F-005, F-007, F-008 |
+| [gpu-ownership.md](gpu-ownership.md) | One device, one queue, one owner. The section 31 contract | F-004, F-005, F-008 |
+| [tier-resolution.md](tier-resolution.md) | How a session resolves tier A, B or C, the fill-rate probe and the operator override | F-004 |
+| [errors.md](errors.md) | The error model, the code registry, the panic record and structured logging | F-005 |
+| [typescript-packaging.md](typescript-packaging.md) | What the npm packages publish, and what proves it | F-003, F-004, F-005 |
+| [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010, F-X006, F-X007, F-X009 |
+| [comparator.md](comparator.md) | The harness's judging half: the tolerance predicate, the verdict vocabulary, the attribution ladder and the census | F-011 |
+| [benchmarks.md](benchmarks.md) | The benchmark harness of HLD section 26, its subject registry, the host class and the `bench` gate | F-006 |
+| [guards.md](guards.md) | The guard harness: discovery, the catalogue, the sandbox, the probe runner and the census | F-X009 |

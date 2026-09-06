@@ -35,13 +35,14 @@ Why the bar is higher here than in an ordinary project:
 | **Horos** | LGPL-3 with a linked AGPL-3 component (Grok) | **NO** | no |
 | **Grok JPEG 2000** | AGPL-3 | **NO** | no |
 
-**Two entries are read-blocked: dwv and Horos.** Both are architecturally
-interesting and neither may be opened by a person or an agent on this project.
+**Three entries are read-blocked: dwv, Horos and Grok**, as the table's "Read?"
+column says and as `scripts/source_provenance_check.py` enforces. None may be
+opened by a person or an agent on this project.
 Where their ideas are worth having, and dwv's annotations-as-DICOM-SR certainly
 is, take them from the standard, which is where those projects took them from.
-Grok is listed because Horos links it, and an AGPL component in a
-browser-delivered product would trigger network-use disclosure, which is close
-to a worst case.
+Grok is blocked to read as well as to depend on because Horos links it, and an
+AGPL component in a browser-delivered product would trigger network-use
+disclosure, which is close to a worst case.
 
 ## Third-party obligations
 

@@ -22,9 +22,10 @@ Before changing code or tracked documentation, read `CLAUDE.md` and
 - **No patient data** in prompts, source, fixtures, logs, errors, documentation
   or commits. The corpus is under ignored `corpus/data` behind
   `corpus/manifest.tsv`.
-- **Do not open dwv or Horos**, and do not depend on Grok. Reading a copyleft
-  source and translating it into Rust is a translation, an exclusive right of
-  the copyright holder, and agent exposure cannot be disproved after the fact.
+- **Do not open dwv, Horos or Grok**, and do not depend on Grok. Reading a
+  copyleft source and translating it into Rust is a translation, an exclusive
+  right of the copyright holder, and agent exposure cannot be disproved after
+  the fact.
   Take the ideas from DICOM PS3.3 and PS3.16.
 - **No `unsafe`** outside `crates/ocelli-wasm/src/ring.rs` and
   `crates/ocelli-core/src/cast.rs`.
@@ -50,12 +51,13 @@ bin/ocelli.sh cargo <anything>       # raw passthrough
 
 bin/ocelli.sh wasm                   # wasm-pack build + size budget
 bin/ocelli.sh native                 # the cross-target proof (E1.7)
+bin/ocelli.sh bench                  # the benchmark harness (E1.6, HLD 26)
 bin/ocelli.sh oracle                 # differential harness, needs a GPU
 bin/ocelli.sh corpus                 # verify the corpus against its manifest
 
 bin/ocelli.sh gate --list            # what each gate covers
 bin/ocelli.sh gate --floor           # what CI runs
-bin/ocelli.sh gate --sprint          # sprint profile, including bootstrap policy
+bin/ocelli.sh gate --sprint          # every gate, no exception
 bin/ocelli.sh gate --all             # everything
 
 npm run lint | typecheck | test | dev
@@ -120,9 +122,9 @@ Increasing places to look is not:
 - No feature flag without a named user.
 
 Two deliberate exceptions, both from the HLD: the `Decoder` trait
-(section 21) and the `SeriesSource` and render-target traits (section 13) exist
-with one implementer each, because they are the declared extension points that
-make Phases 2 and 3 entry points rather than rewrites.
+(section 21) and the `SeriesSource` and render-target traits (section 13) may
+land with one implementer each, because they are the declared extension points
+that make Phases 2 and 3 entry points rather than rewrites.
 
 ## Performance rules
 
@@ -135,11 +137,18 @@ this project's hot path.
   bytes, not a re-upload.
 - Batch pointer events into one command buffer per animation frame. Never cross
   the boundary per event.
-- **Measure before optimising. The intuitions that work in JavaScript do not
-  transfer.**
+- **Measure with the benchmark harness before optimising anything. The
+  intuitions that work in JavaScript do not transfer.** The harness is
+  `bin/ocelli.sh bench` and the subjects it will ever measure are listed in
+  `tools/bench/subjects.json`. Most of them report `unavailable` today and name
+  the story that gives them a subject, which is decision D7 holding. See
+  `docs/lld/benchmarks.md`. The instrument is half of section 26's rule, and an
+  earlier paraphrase here dropped it, leaving a habit where the specification
+  put a dependency.
 
 ## Skills
 
-Skills under `.agents/skills/` are generated from `.claude/commands/` by
-`scripts/sync_agent_skills.py`. Do not edit a generated adapter. Change the
-canonical command file and re-run the sync, then `--check`.
+One workflow, two hosts. `.claude/commands/*.md` and `.claude/skills/*/SKILL.md`
+stay canonical, and `scripts/sync_agent_skills.py` generates the adapters Codex
+discovers under `.agents/skills/`. Do not edit a generated adapter. Change the
+canonical file and re-run the sync, then `--check`.
