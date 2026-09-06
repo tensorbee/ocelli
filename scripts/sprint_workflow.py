@@ -41,7 +41,7 @@ CHANGELOG = ROOT / "CHANGELOG.md"
 PHASES = ["design", "implementation", "integration", "verification",
           "review", "ready_to_close", "blocked"]
 STATES = ["pending", "claimed", "in-progress", "reviewed", "prepared",
-          "integrated", "completed", "blocked"]
+          "integrated", "completed", "carried", "blocked"]
 
 FID = re.compile(r"^F-X?\d{3}[a-z]?$")
 TAG = re.compile(r"^v\d+\.\d+\.\d+$")
@@ -89,6 +89,25 @@ def active_sprint() -> str:
     if match is None:
         sys.exit("CURRENT_SPRINT.md does not name a sprint in its title")
     return match.group(1)
+
+
+def carried_forward_reasons(text: str, sprint: str) -> dict[str, str]:
+    """Return same-line reasons from this sprint's carry-forward section."""
+    section = re.search(
+        rf"^## Carried forward from {re.escape(sprint)}\s*$\n(.*?)(?=^## |\Z)",
+        text,
+        re.M | re.S,
+    )
+    if section is None:
+        return {}
+    return {
+        match.group(1): match.group(2).strip()
+        for match in re.finditer(
+            r"^- \*\*(F-X?\d{3}[a-z]?)\*\*\s+(\S.*)$",
+            section.group(1),
+            re.M,
+        )
+    }
 
 
 def load(sprint: str | None = None) -> dict:
@@ -175,7 +194,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print("  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
 
     remaining = [fid for fid, f in data["features"].items()
-                 if f["state"] != "completed"]
+                 if f["state"] not in {"completed", "carried"}]
     if remaining and data["phase"] != "blocked":
         print(f"\n{len(remaining)} stories are not complete. The run is not "
               f"finished: {', '.join(sorted(remaining))}")
@@ -339,12 +358,24 @@ def cmd_close_preflight(args: argparse.Namespace) -> int:
     data = load(sprint)
     problems = []
 
+    closure_states = {"completed", "carried"}
     incomplete = sorted(fid for fid, f in data["features"].items()
-                        if f["state"] != "completed")
+                        if f["state"] not in closure_states)
     if incomplete:
-        problems.append(f"not completed: {', '.join(incomplete)}")
+        problems.append(f"neither completed nor carried: {', '.join(incomplete)}")
+
+    current_sprint_text = (SPRINTS / "CURRENT_SPRINT.md").read_text()
+    carry_reasons = carried_forward_reasons(current_sprint_text, sprint)
+    for fid, feature in sorted(data["features"].items()):
+        if feature["state"] == "carried" and fid not in carry_reasons:
+            problems.append(
+                f"{fid} is carried but has no recorded carry-forward reason "
+                f"under 'Carried forward from {sprint}' in CURRENT_SPRINT.md"
+            )
 
     for fid, feature in sorted(data["features"].items()):
+        if feature["state"] == "carried":
+            continue
         if not feature["reviews"]:
             problems.append(f"{fid} has no recorded review pass")
             continue

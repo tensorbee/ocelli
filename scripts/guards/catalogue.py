@@ -1010,6 +1010,49 @@ def _close_tree_changed_after_evidence(box: Sandbox) -> None:
     box.stage_all()
 
 
+def _close_carried(box: Sandbox, *, recorded: bool) -> None:
+    """Put one story in carried state, with or without a tracked reason."""
+    _write_close_state(box)
+    sprint = re.search(r"^#\s+Current sprint,\s*(S[\d.]+)",
+                       box.read("docs/sprints/CURRENT_SPRINT.md"), re.M)
+    if sprint is None:
+        raise AssertionError("CURRENT_SPRINT.md names no sprint")
+    section = re.search(
+        rf"^## Carried forward from {re.escape(sprint.group(1))}\s*$\n"
+        r"(.*?)(?=^## |\Z)",
+        box.read("docs/sprints/CURRENT_SPRINT.md"),
+        re.M | re.S,
+    )
+    recorded_fids = set() if section is None else set(re.findall(
+        r"^- \*\*(F-X?\d{3}[a-z]?)\*\*\s+\S.*$",
+        section.group(1),
+        re.M,
+    ))
+    state_path = (box.path / ".claude" / "scratch" /
+                  f"{sprint.group(1)}-run.json")
+    data = json.loads(state_path.read_text())
+    candidates = sorted(
+        fid for fid in data["features"]
+        if (fid in recorded_fids) == recorded
+    )
+    if not candidates:
+        kind = "recorded" if recorded else "unrecorded"
+        raise AssertionError(f"sprint has no {kind} carry-forward candidate")
+    data["features"][candidates[0]]["state"] = "carried"
+    box.write(
+        str(state_path.relative_to(box.path)),
+        json.dumps(data, indent=1) + "\n",
+    )
+
+
+def _close_unrecorded_carry(box: Sandbox) -> None:
+    _close_carried(box, recorded=False)
+
+
+def _close_recorded_carry(box: Sandbox) -> None:
+    _close_carried(box, recorded=True)
+
+
 def _handoff(box: Sandbox, branch: str) -> None:
     fid = sprint_state(box)
     box.write(f".claude/handoffs/{fid}-ready.md",
@@ -6899,6 +6942,16 @@ GUARDS: tuple[Guard, ...] = (
                   note="The evidence is recorded first, then a tracked file "
                        "is staged. This proves both records are identities of "
                        "one tree rather than durable booleans."),
+            Probe("sprint-lifecycle.close-unrecorded-carry",
+                  _close_unrecorded_carry,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "is carried but has no recorded carry-forward reason"),
+            Probe("sprint-lifecycle.close-recorded-carry",
+                  _close_recorded_carry,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "is ready to close", polarity="accept"),
             Probe("sprint-lifecycle.close-current-evidence",
                   None,
                   Invoke("sprint_workflow close-preflight",
@@ -6909,8 +6962,8 @@ GUARDS: tuple[Guard, ...] = (
               "state transitions and release notes. The close probes build "
               "ignored sprint state from allocation.json and use the "
               "sandbox's real staged tree, so legacy, missing, dirty, stale, "
-              "failed and current evidence are exercised without touching "
-              "the developer's run state.",
+              "failed, carried and current evidence are exercised without "
+              "touching the developer's run state.",
     ),
 
     # -- the error registry, the benchmarks and the corpus -----------------

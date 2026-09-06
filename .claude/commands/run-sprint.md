@@ -188,6 +188,11 @@ evidence.
 
 ## 7. Finish
 
+For each story the operator explicitly parks, record a non-empty reason under
+`## Carried forward from SNN` in `CURRENT_SPRINT.md`, then mark it with
+`python3 scripts/sprint_workflow.py mark-feature F-XXX --state carried`.
+Carrying a story does not claim implementation or require a feature review.
+
 Push the sprint branch once, when verification and the review loop are clean.
 Report the sprint state, every story's status, the gate results and the review
 history. Then stop, and tell the operator that `/close-sprint SNN --next SMM`

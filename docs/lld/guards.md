@@ -433,6 +433,12 @@ evidence was recorded. The accept control supplies clean current evidence in a
 disposable repository. These cases make the review and verification records
 claims about immutable content rather than reusable booleans.
 
+Close also distinguishes completed work from an explicit carry-forward. A
+`carried` story needs a non-empty bullet under `## Carried forward from SNN` in
+`CURRENT_SPRINT.md`. It does not need a feature review, because the state makes
+no implementation claim. A refusal covers an unrecorded carry-forward and an
+accept control covers a carried story whose tracked reason is present.
+
 ### Explicit sets and handoff grammar
 
 `scripts/no_std_check.py` owns an explicit `EXPECTED_NO_STD_CRATES` set. It

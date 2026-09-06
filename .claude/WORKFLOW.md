@@ -48,6 +48,12 @@ latest review and a passing latest verification for the current HEAD tree, with
 no staged, unstaged or untracked changes. Any remediation therefore requires a
 new verification and a new whole-sprint review.
 
+A story that cannot finish for an external or dependency reason is `carried`,
+not `completed`. The close preflight accepts that state only when the story has
+a non-empty reason under `## Carried forward from SNN` in
+`CURRENT_SPRINT.md`. Carried stories do not require a feature review because no
+implementation is being claimed.
+
 ## Atomic feature rhythm
 
 ```text

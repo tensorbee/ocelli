@@ -67,12 +67,17 @@ current evidence.
 5. Add guard probes for an absent sprint review, a dirty review, a stale review
    tree, a stale verification tree, and current clean evidence. The probes use
    disposable run state and a staged tree, never the real scratch file.
+6. Represent an explicit carry-forward as `carried`, distinct from
+   `completed`. Accept it at close only when `CURRENT_SPRINT.md` records a
+   non-empty reason under this sprint's carry-forward heading. Do not require a
+   feature review for work whose state makes no implementation claim.
 
 Anticipated implementation write set, exactly. The authoritative workflow,
 generated runbook and LLD index are included because the implementation changes
 the close process, probe inventory and `guards.md` contributor line:
 
 - `scripts/sprint_workflow.py`
+- `scripts/tests/test_sprint_workflow.py`
 - `.claude/WORKFLOW.md`
 - `.claude/commands/run-sprint.md`
 - `.claude/commands/microscope.md`
@@ -108,6 +113,8 @@ implementation write. The first new review or verification record upgrades it.
 | unit | A passing verification for another tree refuses close-preflight | sprint-lifecycle probes |
 | unit | Current clean per-feature reviews, sprint review and verification pass together | accept control in the guard catalogue |
 | mutation | Changing the index after recording review or verification makes preflight red | guard probes using a disposable repository |
+| unit | Only non-empty same-line reasons in the named sprint section count as carry-forward records | `scripts/tests/test_sprint_workflow.py` |
+| mutation | A carried story without a tracked reason is refused, while one with a reason is accepted | sprint-lifecycle probes |
 
 No pixel or geometry arithmetic is added, so no DICOM fixture applies.
 

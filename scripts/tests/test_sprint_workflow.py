@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from sprint_workflow import handoff_field  # noqa: E402
+from sprint_workflow import carried_forward_reasons, handoff_field  # noqa: E402
 
 
 class HandoffFieldGrammar(unittest.TestCase):
@@ -44,6 +44,30 @@ class HandoffFieldGrammar(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,
                                     r"duplicate \*\*Head\*\* fields"):
             handoff_field("**Head**: first\n**Head**: second\n", "Head")
+
+
+class CarryForwardGrammar(unittest.TestCase):
+    def test_reads_only_the_named_sprint_section(self) -> None:
+        text = (
+            "## Carried forward from S03\n\n"
+            "- **F-001** old reason\n\n"
+            "## Carried forward from S04\n\n"
+            "- **F-012** candidate renderer does not exist\n"
+            "- **F-X011** second physical machine is unavailable\n\n"
+            "## Next section\n\n"
+            "- **F-999** not a carry-forward row\n"
+        )
+        self.assertEqual(
+            carried_forward_reasons(text, "S04"),
+            {
+                "F-012": "candidate renderer does not exist",
+                "F-X011": "second physical machine is unavailable",
+            },
+        )
+
+    def test_empty_or_missing_reason_is_not_a_record(self) -> None:
+        text = "## Carried forward from S04\n\n- **F-012**\n"
+        self.assertEqual(carried_forward_reasons(text, "S04"), {})
 
 
 if __name__ == "__main__":
