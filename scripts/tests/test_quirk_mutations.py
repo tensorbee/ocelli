@@ -70,6 +70,18 @@ class MutationHarness(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "executable contracts"):
             quirk_mutations.require_registry_contract(document, declared)
 
+    def test_regression_is_the_executed_attribution_mutation(self) -> None:
+        document = json.loads((ROOT / "corpus" / "quirks.json").read_text())
+        declared = quirk_mutations.mutations(Path(sys.executable))
+        regression = document["quirks"][0]["regression"]
+        self.assertEqual(regression["command"], " ".join(declared[2].argv))
+        self.assertEqual(
+            regression["failureSignature"], declared[2].failure_signature
+        )
+        document["quirks"][0]["regression"]["command"] = "unrelated"
+        with self.assertRaisesRegex(RuntimeError, "executable attribution"):
+            quirk_mutations.require_registry_contract(document, declared)
+
     def test_the_focused_boundary_remains_named_and_owned(self) -> None:
         path = ROOT / "scripts" / "quirk_mutation_boundaries.py"
         tree = ast.parse(path.read_text(), filename=str(path))

@@ -112,6 +112,12 @@ def comparison_evidence(path: str) -> dict:
         sys.exit("comparison report has invalid pass or fail counts")
     if passed + failed != claimed:
         sys.exit("comparison report claimed count is not pass plus fail")
+    if failed != 0:
+        sys.exit("comparison report is green but has failed views")
+
+    coverage_problems = report.get("coverageProblems")
+    if coverage_problems not in (None, []):
+        sys.exit("comparison report is green but has coverage problems")
 
     coverage = report.get("coverage")
     if not isinstance(coverage, dict):

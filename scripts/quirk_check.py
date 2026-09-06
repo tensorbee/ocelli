@@ -35,14 +35,14 @@ ATTRIBUTION_BOUNDARY = (
     "attribution::tests::"
     "an_inverted_sigmoid_reference_is_attributed_only_when_pixels_differ"
 )
+REGRESSION_COMMAND = (
+    f"cargo test -p ocelli-oracle {ATTRIBUTION_BOUNDARY} -- --exact"
+)
 REGRESSION_CONTRACTS = {
     "sigmoid-width-below-one": {
-        "kind": "oracle-comparator",
-        "command": "bin/ocelli.sh gate oracle",
-        "failureSignature": (
-            "the SIGMOID divergence is attributed to the reference only for "
-            "the declared monochrome inversion"
-        ),
+        "kind": "oracle-comparator-test",
+        "command": REGRESSION_COMMAND,
+        "failureSignature": "left: Fail",
     },
 }
 MUTATION_KINDS = {

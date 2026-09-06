@@ -868,6 +868,7 @@ def _comparison_report(box: Sandbox, *, verdict: str = "pass",
         "gateVerdict": verdict,
         "green": green,
         "coverage": {"absent": 0},
+        "coverageProblems": [],
     }) + "\n")
 
 
@@ -888,6 +889,21 @@ def _red_comparison_report(box: Sandbox) -> None:
 
 def _zero_judgement_comparison_report(box: Sandbox) -> None:
     _comparison_report(box, claimed=0)
+
+
+def _failed_count_in_green_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["pass"] = 0
+    report["fail"] = 1
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _coverage_problem_in_green_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["coverageProblems"] = ["a controlled coverage problem"]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
 
 def _ledger_without_comparison(box: Sandbox) -> None:
@@ -6563,8 +6579,9 @@ GUARDS: tuple[Guard, ...] = (
         spec="deviation D-04 mechanism 1, and HLD 27.2 R6",
         refuses="A staged tree with no recorded gate run, a tree whose "
                 "recorded corpus is red, a corpus state outside the declared "
-                "set, malformed or red comparison evidence, zero judged "
-                "views, and a required comparison record that is absent.",
+                "set, malformed or red comparison evidence, a green report "
+                "with failed views or coverage problems, zero judged views, "
+                "and a required comparison record that is absent.",
         claims=(r"no verification recorded", r"the corpus is RED",
                 r"corpus is ' ' for tree", r"--corpus must be one of",
                 r"comparison report",
@@ -6611,6 +6628,18 @@ GUARDS: tuple[Guard, ...] = (
                          "--comparison-report",
                          ".claude/probe-comparison.json"),
                   "comparison report judged zero views"),
+            Probe("ledger.comparison-failed-count",
+                  _failed_count_in_green_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report is green but has failed views"),
+            Probe("ledger.comparison-coverage-problem",
+                  _coverage_problem_in_green_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report is green but has coverage problems"),
             Probe("ledger.require-comparison", _ledger_without_comparison,
                   script("python3", "scripts/verify_ledger.py", "assert",
                          "--require-comparison"),
@@ -7233,9 +7262,10 @@ GUARDS: tuple[Guard, ...] = (
                 "edit stays green, whose failure has the wrong signature, or "
                 "whose registry row, kind, signature or replacement differs "
                 "from the executable contract, including a fixture symbol "
-                "with no live mutation target.",
+                "with no live mutation target or a regression row that differs "
+                "from the executable attribution mutation.",
         claims=("*",),
-        covered_by=("scripts/tests/test_quirk_mutations.py (8 cases, run by "
+        covered_by=("scripts/tests/test_quirk_mutations.py (9 cases, run by "
                     "the `quirks` gate), plus the three live mutations run by "
                     "the `quirk-mutations` gate",),
     ),

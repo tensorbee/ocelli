@@ -365,9 +365,10 @@ The permanent capture is one entry in `corpus/quirks.json`. Follow this order:
    hand calculation. Name the edition, part, section, inputs and fixture test
    in the record. Ocelli output and cornerstone3D output are not expectation
    authorities.
-4. Name the production regression and each controlled mutation. Record the
-   failure boundary and signature observed when the mutation makes the
-   regression red. A digest mismatch is not regression evidence.
+4. Name the executable regression boundary and each controlled mutation.
+   Record the failure signature observed when the mutation makes that boundary
+   red. A digest mismatch is not regression evidence. The full oracle remains
+   the production integration proof in step 5.
 5. Run `bin/ocelli.sh gate quirks`, `bin/ocelli.sh gate quirk-mutations`,
    `bin/ocelli.sh gate corpus` and `bin/ocelli.sh gate oracle`. The first gate
    needs neither corpus nor GPU and therefore runs in the CI floor. The second
@@ -379,11 +380,12 @@ The permanent capture is one entry in `corpus/quirks.json`. Follow this order:
 the exact paths in its generator-owned `QUIRK_CASES` literal, the manifest row
 and the independent fixture literals used by the named test. It accepts only
 known regression and mutation contracts and never executes a command read from
-JSON. The full production-regression row is an exact checker-owned contract,
-including its failure signature. `scripts/quirk_mutations.py` owns the three
-recorded edits and commands,
-applies them only in a disposable repository, and compares each observed red
-with the registry signature. Six further checker-owned mutations alter every
+JSON. The regression row names the focused oracle-comparator test that the
+attribution mutation actually runs, and the live harness binds its command and
+failure signature to that mutation. `scripts/quirk_mutations.py` owns the three
+recorded edits and commands, applies them only in a disposable repository, and
+compares each observed red with the registry signature. Six further
+checker-owned mutations alter every
 fixture input and expected-value literal in turn. Each must make the declared
 fixture boundary red, which proves those names are not merely irrelevant reads
 inside a passing test. The staged-content guard remains the byte-level refusal

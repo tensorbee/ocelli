@@ -57,9 +57,9 @@
         ]
       },
       "regression": {
-        "kind": "oracle-comparator",
-        "command": "bin/ocelli.sh gate oracle",
-        "failureSignature": "the SIGMOID divergence is attributed to the reference only for the declared monochrome inversion"
+        "kind": "oracle-comparator-test",
+        "command": "cargo test -p ocelli-oracle attribution::tests::an_inverted_sigmoid_reference_is_attributed_only_when_pixels_differ -- --exact",
+        "failureSignature": "left: Fail"
       },
       "mutations": [
         {

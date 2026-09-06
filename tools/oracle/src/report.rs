@@ -567,15 +567,15 @@ impl RunReport {
 
     #[must_use]
     pub fn gate_verdict(&self) -> GateVerdict {
-        if self.count(Outcome::Fail) > 0 || !self.absorbed_divergences().is_empty() {
+        if !self.problems.is_empty() {
+            GateVerdict::Refusal
+        } else if self.count(Outcome::Fail) > 0 || !self.absorbed_divergences().is_empty() {
             GateVerdict::ComparisonFailure
         } else if self.claimed_verdict_views() == 0
             || self.absent_count() > 0
             || !self.coverage_problems.is_empty()
         {
             GateVerdict::CoverageLoss
-        } else if !self.problems.is_empty() {
-            GateVerdict::Refusal
         } else {
             GateVerdict::Pass
         }

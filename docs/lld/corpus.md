@@ -55,7 +55,7 @@ independently and pins display values 4.586483540333347, 30.396745115639977,
 
 `corpus/quirks.json` is the one tracked registry connecting a field defect's
 non-sensitive shape to its synthetic generator case, exact manifest paths,
-independent expected-value fixture, production regression and observed
+independent expected-value fixture, executable regression and observed
 mutation failures. It contains no field input or derivative of one. A report
 that cannot be reduced without retaining patient data has no repository
 capture.

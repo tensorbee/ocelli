@@ -187,13 +187,12 @@ nothing else asserted anything about it. The reviewer deleted the whole
 and the floor probes all exited 0. `guards-deep` is what runs the cargo probes
 and `census --profile deep`, which is the sweep-complete rule.
 
-The three excluded gates are not excluded for the same reason, and the runner
+The four excluded gates are not excluded for the same reason, and the runner
 says which is which without a second literal here. `oracle` is the one gate
 `bin/ocelli.sh` marks `YES` in its GPU column, and deviation D-04 is that CI
-has no GPU, so nothing in CI may run it. The other two are excluded for cost or
-for the corpus, and CI does run part of each: `corpus_check.py --coverage` for
-`corpus`, and a `gate guards-deep` step inside the `guards` job for
-`guards-deep`.
+has no GPU, so nothing in CI may run it. The other three are excluded for cost
+or for the corpus, and CI runs each through the corpus-tooling or guards jobs:
+`corpus`, `guards-deep` and `quirk-mutations`.
 
 So the rule is: **a gate outside the floor that does not need a GPU must still
 be run by some CI step, provably reachable on at least one event the workflow

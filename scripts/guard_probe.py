@@ -175,6 +175,7 @@ def _prepare_control(box: sb.Sandbox, probe: Probe) -> None:
             "gateVerdict": "pass",
             "green": True,
             "coverage": {"absent": 0},
+            "coverageProblems": [],
         }) + "\n")
 
     key = (probe.control or probe.invoke).key

@@ -1925,7 +1925,7 @@ worked SIGMOID width-below-one case exercises the full path.
 **Deviations.** D-04 and D-05 retained.
 **Crates / packages modified.** Corpus tooling, quirk guards, CI wiring and the
 oracle mutation checker.
-**Tests added.** Thirty-three Python contract tests, three controlled live
+**Tests added.** Thirty-four Python contract tests, three controlled live
 mutations, six fixture-binding live mutations and one Rust regression for
 coverage-problem mutation detection.
 **Fixture provenance.** The synthetic SIGMOID case and its expected display

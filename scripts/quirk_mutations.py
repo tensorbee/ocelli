@@ -40,15 +40,7 @@ FIXTURE_BOUNDARY = (
     f"from {FIXTURE_MODULE} import {quirk_check.EXPECTATION_BOUNDARY}; "
     f"{quirk_check.EXPECTATION_BOUNDARY}()",
 )
-RUST_BOUNDARY = (
-    "cargo",
-    "test",
-    "-p",
-    "ocelli-oracle",
-    quirk_check.ATTRIBUTION_BOUNDARY,
-    "--",
-    "--exact",
-)
+RUST_BOUNDARY = tuple(quirk_check.REGRESSION_COMMAND.split())
 
 
 def mutations(python: Path) -> tuple[Mutation, ...]:
@@ -218,6 +210,16 @@ def require_registry_contract(
     if actual != expected:
         raise RuntimeError(
             "registry mutation evidence differs from the executable contracts"
+        )
+    attribution = executable["disable-reference-attribution"]
+    executable_regression = {
+        "kind": "oracle-comparator-test",
+        "command": " ".join(attribution.argv),
+        "failureSignature": attribution.failure_signature,
+    }
+    if record.get("regression") != executable_regression:
+        raise RuntimeError(
+            "registry regression differs from the executable attribution mutation"
         )
 
 

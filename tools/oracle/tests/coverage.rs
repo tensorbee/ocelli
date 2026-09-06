@@ -97,6 +97,15 @@ fn an_input_refusal_is_distinct_from_comparison_and_coverage() {
 }
 
 #[test]
+fn an_input_refusal_precedes_a_pixel_failure() {
+    let mut report = report(vec![record("failed", Outcome::Fail)]);
+    report.problems.push("input digest disagrees".to_owned());
+
+    assert_eq!(report.count(Outcome::Fail), 1);
+    assert_eq!(report.gate_verdict(), GateVerdict::Refusal);
+}
+
+#[test]
 fn the_json_names_every_coverage_class_and_the_gate_verdict() {
     let report = report(vec![
         record("pass", Outcome::Pass),

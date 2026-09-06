@@ -173,6 +173,73 @@ fn validate_gate_directories(arguments: &Arguments) -> Result<(), String> {
             "`gate` reference and candidate must resolve to different directories".to_owned(),
         );
     }
+    validate_output_directory(&arguments.out, &reference, &candidate)?;
+    Ok(())
+}
+
+/// Resolve an output path even when its final components do not exist yet.
+///
+/// The nearest existing ancestor is canonicalized so symlinks in the part the
+/// filesystem can resolve do not hide a relationship with either input.
+fn resolve_output_directory(path: &Path) -> Result<PathBuf, String> {
+    if path.exists() {
+        return path.canonicalize().map_err(|error| {
+            format!(
+                "{}: cannot resolve output directory: {error}",
+                path.display()
+            )
+        });
+    }
+
+    let mut ancestor = path.to_path_buf();
+    let mut missing = Vec::new();
+    while !ancestor.exists() {
+        if ancestor.as_os_str().is_empty() {
+            ancestor.push(".");
+            continue;
+        }
+        let name = ancestor.file_name().ok_or_else(|| {
+            format!(
+                "{}: cannot resolve output directory through a missing parent",
+                path.display()
+            )
+        })?;
+        missing.push(name.to_os_string());
+        if !ancestor.pop() {
+            return Err(format!(
+                "{}: output directory has no existing ancestor",
+                path.display()
+            ));
+        }
+    }
+
+    let mut resolved = ancestor.canonicalize().map_err(|error| {
+        format!(
+            "{}: cannot resolve output directory: {error}",
+            path.display()
+        )
+    })?;
+    for component in missing.iter().rev() {
+        resolved.push(component);
+    }
+    Ok(resolved)
+}
+
+fn validate_output_directory(out: &Path, reference: &Path, candidate: &Path) -> Result<(), String> {
+    let out = resolve_output_directory(out)?;
+    for (role, input) in [("reference", reference), ("candidate", candidate)] {
+        let input = input.canonicalize().map_err(|error| {
+            format!(
+                "{}: cannot resolve {role} directory: {error}",
+                input.display()
+            )
+        })?;
+        if out == input || out.starts_with(&input) || input.starts_with(&out) {
+            return Err(format!(
+                "`--out` must be separate from the {role} directory and neither may contain the other"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -390,18 +457,6 @@ fn compare_runs(
         ));
     }
 
-    for record in &records {
-        if record.outcome == Outcome::Fail {
-            problems.push(format!(
-                "{}: {} at rung {}, attributed to {}",
-                record.id,
-                record.outcome,
-                record.rung,
-                record.side.label()
-            ));
-        }
-    }
-
     Ok(RunReport {
         records,
         problems,
@@ -575,6 +630,7 @@ fn write_output(
     out: &Path,
     operation: &str,
 ) -> Result<(), String> {
+    validate_output_directory(out, &reference.directory, &candidate.directory)?;
     if out.exists() {
         std::fs::remove_dir_all(out).map_err(|error| format!("{}: {error}", out.display()))?;
     }
@@ -1060,6 +1116,88 @@ mod argument_tests {
         std::fs::remove_dir(&reference).map_err(|error| error.to_string())?;
         std::fs::remove_dir(&candidate).map_err(|error| error.to_string())?;
         std::fs::remove_dir(&root).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn gate_refuses_output_equal_to_an_input_directory() -> Result<(), String> {
+        let root = std::env::temp_dir().join(format!(
+            "ocelli-f012-gate-output-equal-{}",
+            std::process::id()
+        ));
+        let reference = root.join("reference");
+        let candidate = root.join("candidate");
+        std::fs::create_dir_all(&reference).map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(&candidate).map_err(|error| error.to_string())?;
+        let arguments = parse_arguments_from([
+            "gate".into(),
+            "--reference".into(),
+            reference.as_os_str().to_owned(),
+            "--candidate".into(),
+            candidate.as_os_str().to_owned(),
+            "--out".into(),
+            reference.as_os_str().to_owned(),
+        ])?;
+        let Err(error) = validate_gate_directories(&arguments) else {
+            return Err("an output equal to the reference was accepted".to_owned());
+        };
+        assert!(error.contains("`--out` must be separate from the reference"));
+        std::fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn gate_refuses_output_inside_an_input_directory() -> Result<(), String> {
+        let root = std::env::temp_dir().join(format!(
+            "ocelli-f012-gate-output-inside-{}",
+            std::process::id()
+        ));
+        let reference = root.join("reference");
+        let candidate = root.join("candidate");
+        std::fs::create_dir_all(&reference).map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(&candidate).map_err(|error| error.to_string())?;
+        let out = candidate.join("reports").join("latest");
+        let arguments = parse_arguments_from([
+            "gate".into(),
+            "--reference".into(),
+            reference.as_os_str().to_owned(),
+            "--candidate".into(),
+            candidate.as_os_str().to_owned(),
+            "--out".into(),
+            out.as_os_str().to_owned(),
+        ])?;
+        let Err(error) = validate_gate_directories(&arguments) else {
+            return Err("an output inside the candidate was accepted".to_owned());
+        };
+        assert!(error.contains("`--out` must be separate from the candidate"));
+        std::fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn gate_refuses_output_containing_an_input_directory() -> Result<(), String> {
+        let root = std::env::temp_dir().join(format!(
+            "ocelli-f012-gate-output-ancestor-{}",
+            std::process::id()
+        ));
+        let reference = root.join("reference");
+        let candidate = root.join("candidate");
+        std::fs::create_dir_all(&reference).map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(&candidate).map_err(|error| error.to_string())?;
+        let arguments = parse_arguments_from([
+            "gate".into(),
+            "--reference".into(),
+            reference.as_os_str().to_owned(),
+            "--candidate".into(),
+            candidate.as_os_str().to_owned(),
+            "--out".into(),
+            root.as_os_str().to_owned(),
+        ])?;
+        let Err(error) = validate_gate_directories(&arguments) else {
+            return Err("an output containing both inputs was accepted".to_owned());
+        };
+        assert!(error.contains("neither may contain the other"));
+        std::fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
         Ok(())
     }
 

@@ -99,9 +99,10 @@ tree.
 1. Add `corpus/quirks.json` as the single tracked registry. Each entry has a
    stable quirk ID, a non-sensitive symptom description, one generator recipe,
    its exact manifest path, an independently written expected-value
-   fixture, a normative authority, the production regression command, the
+   fixture, a normative authority, the executable regression command, the
    controlled mutation and the failure signature observed from it. The record
-   never contains any field input or any value copied from one.
+   never contains any field input or any value copied from one. The full oracle
+   remains the production integration proof and runs separately.
 2. Restrict expectation provenance to structured authority kinds. The initial
    kinds are `dicom-standard` with part, section and edition, and
    `hand-calculation` with named inputs and literal steps. Neither Ocelli nor
@@ -127,8 +128,9 @@ tree.
    by the normal oracle.
 6. Make F-X012's three controlled mutations standing evidence in the capture
    record: change the function to LINEAR, change width to 1, and disable the
-   reference attribution. Each named regression must fail at its declared
-   boundary, then pass with the mutation absent. A checker-owned executable
+   reference attribution. Each named mutation must fail its executable
+   regression boundary, then pass with the mutation absent. A checker-owned
+   executable
    harness applies the fixed edits in a disposable repository and compares the
    observed failures with the registry. It also mutates each independently
    declared fixture literal so the named test cannot retain an irrelevant read
