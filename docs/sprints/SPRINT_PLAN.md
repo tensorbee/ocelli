@@ -32,6 +32,45 @@ because that story alone is ten to fourteen engineer-weeks.
 for a team. Treat them as relative size, and let the sprint clock measure the
 real thing.
 
+## Capacity calibration
+
+Recalculated at the S03 close, which is the first of the two points this
+project committed to, the other being S06.
+
+**The result is that there is nothing to recalibrate from, and that is the
+finding rather than a gap in the record.** Every one of S03's seven rows in
+`docs/sprints/SPRINT_TRACKER.md` reads `not measured`, each with its reason in
+the cell: three stories ran concurrently in worker worktrees whose implementing
+agents terminated on a session rate limit, two ran beside each other with one
+story's oracle runs inside the other's wall clock, one overlapped the sprint
+review's remediation, and one ran serial with several full oracle runs inside
+its wall clock. A wall clock covering an interruption or another story's work
+is not a measurement of this story, and writing a plausible figure into that
+column would destroy the only re-planning evidence the plan has.
+
+The measured rows that do exist are all S01 and S02. This prints the split,
+and the two patterns are anchored on the row because a bare `measured` matches
+`not measured` as well, which would count every row twice:
+
+```bash
+grep -cE '^\| F-.*\| [0-9.]+d measured' docs/sprints/SPRINT_TRACKER.md
+grep -cE '^\| F-.*\| not measured' docs/sprints/SPRINT_TRACKER.md
+```
+
+**Those rows must not be used to forecast the port work**, for the reason this
+project wrote down before it had any of them: S01 to S03 are foundations and
+the oracle, and M2 onward is the volume port. A ratio taken from building a
+corpus and a differential harness says nothing about porting the LUT chain
+against that harness. The next calibration point is S06, and it is the first
+one whose input could be representative.
+
+**What the S03 close changes about how to measure**, and this is the actionable
+part: the estimate column stays as it is, and the instrument that failed was
+attribution, not estimation. Concurrent workers in separate worktrees produce a
+wall clock that belongs to no single story. Either a story runs alone when its
+duration is wanted, or the column keeps reading `not measured` honestly and the
+calibration keeps having no input.
+
 ## What re-planning looks like
 
 Phase 1.5 sizing is provisional by the HLD's own statement, 352 engineer-weeks
