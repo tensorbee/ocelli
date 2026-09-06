@@ -1207,6 +1207,7 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["predicatePasses"] = False
         statistics["biasPasses"] = False
         statistics["signedMeanDiff"] = 255.0
+        _set_dimensions(statistics, 40, 50, 40, 50)
     elif variant == "negative-zero":
         for region in regions:
             statistics[region][0]["signedMeanDiff"] = -0.0
@@ -1240,6 +1241,7 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["predicatePasses"] = False
         statistics["biasPasses"] = False
         statistics["signedMeanDiff"] = 129.0
+        _set_dimensions(statistics, 1, 2, 1, 2)
     elif variant == "mono-pass-no-informative":
         statistics["informative"] = []
         statistics["informativePixels"] = 0
@@ -1264,6 +1266,7 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["predicatePasses"] = False
         statistics["biasPasses"] = False
         statistics["signedMeanDiff"] = 3.0
+        _set_dimensions(statistics, 1, 2, 1, 1)
     elif variant == "full-without-background":
         for region, signed_mean in (("full", 1.0), ("image", -1.0),
                                     ("informative", -1.0)):
@@ -1293,6 +1296,29 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["informativeFraction"] = 0.001
         statistics["rowsTouched"] = 1
         statistics["columnsTouched"] = 1
+        _set_dimensions(statistics, 20, 50, 20, 50)
+    elif variant == "empty-informative-with-difference":
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        record["monochromeFrame"] = False
+        statistics["channels"] = 3
+        for region in ("full", "image"):
+            _set_one_difference(statistics[region][0], 1.0)
+            statistics[region] = [dict(statistics[region][0]) for _ in range(3)]
+        statistics["informative"] = []
+        statistics["informativePixels"] = 0
+        statistics["informativeFraction"] = 0.0
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 1.0
+    elif variant == "frame-dimensions-contradict-regions":
+        _set_prime_touched_case(statistics)
+        _set_dimensions(statistics, 2, 2, 1, 7)
+    elif variant == "touched-exceeds-frame-dimensions":
+        _set_prime_touched_case(statistics)
     elif variant == "touched-presence":
         for region in regions:
             _set_one_difference(statistics[region][0], 1.0)
@@ -1306,6 +1332,7 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["rowsTouched"] = 1
         statistics["columnsTouched"] = 1
         statistics["signedMeanDiff"] = 1.0
+        _set_dimensions(statistics, 1, 2, 1, 2)
     elif variant == "top-signed-mean-source":
         for region in regions:
             _set_one_difference(statistics[region][0], 1.0)
@@ -1358,6 +1385,31 @@ def _set_signed_distribution(
     })
 
 
+def _set_dimensions(
+        statistics: dict, frame_rows: int, frame_columns: int,
+        image_rows: int, image_columns: int) -> None:
+    statistics.update({
+        "frameRows": frame_rows,
+        "frameColumns": frame_columns,
+        "imageRows": image_rows,
+        "imageColumns": image_columns,
+    })
+
+
+def _set_prime_touched_case(statistics: dict) -> None:
+    for region in ("full", "image"):
+        _set_signed_distribution(
+            statistics[region][0], [(-1, 1), (0, 5), (1, 1)]
+        )
+    _set_signed_distribution(statistics["informative"][0], [(-1, 1), (1, 1)])
+    statistics["imagePixels"] = 7
+    statistics["informativePixels"] = 2
+    statistics["informativeFraction"] = 2 / 7
+    statistics["rowsTouched"] = 2
+    statistics["columnsTouched"] = 2
+    _set_dimensions(statistics, 1, 7, 1, 7)
+
+
 def _set_one_difference(channel: dict, signed_mean: float) -> None:
     _set_signed_distribution(channel, [(int(signed_mean), 1)])
 
@@ -1370,6 +1422,7 @@ def _add_zero_background(statistics: dict) -> None:
     full = statistics["full"][0]
     _set_signed_distribution(full, [(0, 2)])
     statistics["background"] = [dict(statistics["image"][0])]
+    _set_dimensions(statistics, 1, 2, 1, 1)
 
 
 def _add_opposed_background(statistics: dict) -> None:
@@ -1382,6 +1435,7 @@ def _add_opposed_background(statistics: dict) -> None:
     statistics["rowsTouched"] = 1
     statistics["columnsTouched"] = 1
     statistics["signedMeanDiff"] = 1.0
+    _set_dimensions(statistics, 1, 2, 1, 1)
 
 
 def _ledger_from_parent_directory(box: Sandbox) -> subprocess.CompletedProcess:
@@ -1579,6 +1633,9 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("informative-histogram-exceeds-image", "informative signed histogram exceeds image"),
         ("informative-maximum-exceeds-image", "informative signed histogram exceeds image"),
         ("informative-omits-difference", "informative signed histogram omits image differences"),
+        ("empty-informative-with-difference", "informative signed histogram omits image differences"),
+        ("frame-dimensions-contradict-regions", "frame and image dimensions contradict regions"),
+        ("touched-exceeds-frame-dimensions", "touched counts exceed frame dimensions"),
         ("touched-presence", "touched counts contradict differences"),
         ("touched-count", "touched counts contradict differing pixels"),
         ("top-signed-mean-source", "signed mean contradicts its source region"),

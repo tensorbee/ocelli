@@ -437,6 +437,18 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
                     maximum=U32_MAX)
     columns = _integer(statistics["columnsTouched"],
                        f"{label}.columnsTouched", maximum=U32_MAX)
+    frame_rows = _integer(
+        statistics["frameRows"], f"{label}.frameRows", maximum=U32_MAX
+    )
+    frame_columns = _integer(
+        statistics["frameColumns"], f"{label}.frameColumns", maximum=U32_MAX
+    )
+    image_rows = _integer(
+        statistics["imageRows"], f"{label}.imageRows", maximum=U32_MAX
+    )
+    image_columns = _integer(
+        statistics["imageColumns"], f"{label}.imageColumns", maximum=U32_MAX
+    )
     image_pixels = _integer(
         statistics["imagePixels"], f"{label}.imagePixels", maximum=U32_MAX
     )
@@ -465,7 +477,14 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
     informative_region_pixels = {entry["pixels"] for entry in regions["informative"]}
     if len(full_pixels) != 1 or image_region_pixels != {image_pixels}:
         sys.exit(f"comparison report {label} region totals contradict channel reports")
-    expected_background = next(iter(full_pixels)) - image_pixels
+    full_pixel_count = next(iter(full_pixels))
+    if (frame_rows == 0 or frame_columns == 0
+            or image_rows == 0 or image_columns == 0
+            or frame_rows * frame_columns != full_pixel_count
+            or image_rows * image_columns != image_pixels
+            or image_rows > frame_rows or image_columns > frame_columns):
+        sys.exit(f"comparison report {label} frame and image dimensions contradict regions")
+    expected_background = full_pixel_count - image_pixels
     if expected_background < 0:
         sys.exit(f"comparison report {label} image exceeds the full frame")
     if background_pixels not in (set(), {expected_background}):
@@ -475,8 +494,8 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
     expected_informative = set() if informative_pixels == 0 else {informative_pixels}
     if informative_region_pixels != expected_informative:
         sys.exit(f"comparison report {label} informative total is inconsistent")
-    if rows > next(iter(full_pixels)) or columns > next(iter(full_pixels)):
-        sys.exit(f"comparison report {label} touched counts exceed the frame")
+    if rows > frame_rows or columns > frame_columns:
+        sys.exit(f"comparison report {label} touched counts exceed frame dimensions")
     if regions["background"]:
         for channel_index in range(channels):
             full = regions["full"][channel_index]
@@ -504,12 +523,17 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
                 sys.exit(
                     f"comparison report {label} full region is not the whole image"
                 )
-    if regions["informative"]:
-        for channel_index in range(channels):
-            image = regions["image"][channel_index]
-            informative = regions["informative"][channel_index]
-            image_histogram = dict(image["signedHistogram"])
-            informative_histogram = dict(informative["signedHistogram"])
+    for channel_index in range(channels):
+        image = regions["image"][channel_index]
+        informative = (
+            regions["informative"][channel_index]
+            if regions["informative"] else None
+        )
+        image_histogram = dict(image["signedHistogram"])
+        informative_histogram = (
+            dict(informative["signedHistogram"]) if informative else {}
+        )
+        if informative:
             if any(
                 count > image_histogram.get(difference, 0)
                 for difference, count in informative["signedHistogram"]
@@ -517,14 +541,14 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
                 sys.exit(
                     f"comparison report {label} informative signed histogram exceeds image"
                 )
-            if any(
-                difference != 0
-                and informative_histogram.get(difference, 0) != count
-                for difference, count in image["signedHistogram"]
-            ):
-                sys.exit(
-                    f"comparison report {label} informative signed histogram omits image differences"
-                )
+        if any(
+            difference != 0
+            and informative_histogram.get(difference, 0) != count
+            for difference, count in image["signedHistogram"]
+        ):
+            sys.exit(
+                f"comparison report {label} informative signed histogram omits image differences"
+            )
     any_difference = any(
         channel["countAtZero"] != channel["pixels"] for channel in regions["full"]
     )

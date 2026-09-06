@@ -401,6 +401,10 @@ pub struct FrameDifference {
     /// distinction is the useful signal on a decimated frame.
     pub rows_touched: u32,
     pub columns_touched: u32,
+    pub frame_rows: u32,
+    pub frame_columns: u32,
+    pub image_rows: u32,
+    pub image_columns: u32,
     pub image_pixels: u64,
     pub informative_pixels: u64,
 }
@@ -704,6 +708,10 @@ pub fn difference(
         },
         rows_touched: count_true(&rows_touched),
         columns_touched: count_true(&columns_touched),
+        frame_rows: reference.height,
+        frame_columns: reference.width,
+        image_rows: image.height,
+        image_columns: image.width,
         image_pixels,
         informative_pixels,
     })
@@ -872,6 +880,8 @@ mod tests {
             return;
         };
         assert_eq!(informative.signed_count_at(1), image.signed_count_at(1));
+        assert_eq!((diff.frame_rows, diff.frame_columns), (1, 4));
+        assert_eq!((diff.image_rows, diff.image_columns), (1, 2));
         assert_eq!(diff.image_pixels, 2);
     }
 

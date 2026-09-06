@@ -292,8 +292,9 @@ for class one and three for class two.
 Per view: the sample count, `maxAbsDiff`, the counts at difference 0, 1 and 2
 and over 2, `fractionWithinOneLsb`, `signedMeanDiff` as candidate minus
 reference, `differingFraction`, the 99.9th percentile of the absolute
-difference, `rowsTouched` and `columnsTouched`, and all of it four times over:
-the full frame, the image rectangle, the letterbox, and the informative subset.
+difference, the frame and image-rectangle dimensions, `rowsTouched` and
+`columnsTouched`, and all of it four times over: the full frame, the image
+rectangle, the letterbox, and the informative subset.
 Every one of those falls out of one 256-bucket absolute histogram per lane,
 computed in a single pass, so no two regions can be taken over different
 readings of the same buffers. The JSON report also carries the same samples as
@@ -304,6 +305,9 @@ Full histograms must be the exact sum of image and background. Every nonzero
 image bin must also appear unchanged in the informative histogram, because a
 nonzero lane difference cannot be clipped to the same extreme on both sides.
 Only zero-difference samples may be omitted from the informative region.
+`frameRows * frameColumns` must equal the full channel pixel count, and
+`imageRows * imageColumns` must equal the image count within those bounds.
+Touched rows and columns are bounded by those exact frame dimensions.
 
 **The gating predicate for class one, and only this:**
 

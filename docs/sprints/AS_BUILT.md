@@ -1951,6 +1951,14 @@ informative histogram. Only zero-difference samples may be excluded as pixels
 clipped to the same extreme on both sides. A standing probe proves that a
 forged zero-mean informative region cannot turn a producer bias failure green.
 
+The tenth review closed the zero-informative boundary of that same rule and
+bound touched counts to explicit producer geometry. Reports now carry frame and
+image-rectangle rows and columns. Their products must match the corresponding
+pixel totals, the image rectangle must fit the frame, and touched rows and
+columns must fit those exact frame dimensions. Two standing probes cover an
+empty informative array with a nonzero difference and a prime-sized frame with
+impossible touched dimensions.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured
