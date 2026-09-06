@@ -1,6 +1,6 @@
 # The guard harness
 
-**F-IDs that contributed:** F-X009, F-X020
+**F-IDs that contributed:** F-X008, F-X009, F-X020
 **Last updated:** 2026-09-06
 
 A guard is any refusal this repository can produce: a script that exits 1, a
@@ -164,7 +164,7 @@ the declaration is now a lie. The ratchet points in the direction that matters.
 made by construction rather than by cleanup.
 
 1. `tempfile.mkdtemp(prefix="ocelli-guard-")`
-2. copy the WORKING TREE content of every path in `git ls-files`, mode bit kept
+2. copy the WORKING TREE content and shape of every path in `git ls-files`
 3. in the copy, `git init`, `git add -A`, `git commit`
 4. every git call runs with a scrubbed environment
 
@@ -181,9 +181,27 @@ would probe the previous version and report success.
 Using `ls-files` rather than a directory walk also excludes `corpus/data`,
 `node_modules`, `target`, `tools/oracle/out` and `.claude/verify-ledger.json`
 by construction, so no patient data, no rendered reference frame and no local
-evidence file is ever copied anywhere. A tracked path that is not a regular
-file is refused rather than skipped, because a silent divergence between the
-copy and the original is the one thing the control run assumes away.
+evidence file is ever copied anywhere. A tracked relative symlink is recreated
+as the same relative symlink, including the package-local licence links used by
+the wasm gate, only after its target resolves inside both the source repository
+and the destination sandbox. Absolute links and relative links escaping either
+root are refused. Regular files keep their executable bit. Any other tracked
+file shape is refused rather than skipped, because a silent divergence between
+the copy and the original is the one thing the control run assumes away.
+
+F-X008 moves the sandbox catch-all census because the shape check now lives in
+the copy helper, the caller adds path context, and escaping symlinks have their
+own refusals. The focused catalogue suite watches all branches: a contained
+relative symlink must remain a symlink, absolute and escaping relative links
+must be refused, and an unrepresentable shape must raise the refusal. The two
+relative-escape fixtures put their links at different depths under the source
+and destination roots. One escapes only the source and the other escapes only
+the destination, so either containment condition is independently watched.
+The same story moves the pin catch-all for an absent repository grant, an
+absent packaged grant, a packaged symlink and differing bytes. The
+package-licence unit suite watches all four outcomes. Catalogue probes drive
+the packaged-grant absence and a resolving packaged symlink through the real
+`--with-size` command.
 
 ### The safety argument, and where a reviewer checks it
 

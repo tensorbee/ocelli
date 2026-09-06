@@ -42,9 +42,11 @@ one goal, not a fixed calendar box. The sprint clock starts at the first
 `/start-feature` of that sprint.
 
 **Phase 1 is S01 to S41**, 118 stories and 397 engineer-weeks, feature parity
-with cornerstone3D v5.8.9. **Phase 1.5 is S42 to S72**, 39 stories and 352
-engineer-weeks, the eight differentiating capabilities of HLD Part III. Phase 2
-and Phase 3 carry F-IDs in `BACKLOG.md` and no sprint, deliberately.
+with cornerstone3D 5.8.2. The HLD's v5.8.9 does not exist, and deviation D-11
+selects the nearest installable 5.8.x instead. **Phase 1.5 is S42 to S72**, 39
+stories and 352 engineer-weeks, the eight differentiating capabilities of HLD
+Part III. Phase 2 and Phase 3 carry F-IDs in `BACKLOG.md` and no sprint,
+deliberately.
 
 Those two totals agree with HLD section 38 and the Part III preamble. The
 tracked backlog and allocation are now the authoritative planning data.

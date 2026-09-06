@@ -14,11 +14,14 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { versionFromPackageRoot } from "../src/pins.mjs";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 /**
  * A package tree shaped like the ones this actually walks:
@@ -162,5 +165,43 @@ test("a walk that reaches nothing terminates rather than looping", async () => {
     );
   } finally {
     await rm(base, { recursive: true, force: true });
+  }
+});
+
+test("operational parity consumers name the pinned 5.8.2 target and D-11", async () => {
+  const manifest = JSON.parse(
+    await readFile(join(ROOT, "tools", "oracle", "package.json"), "utf8"),
+  );
+  const target = manifest.dependencies["@cornerstonejs/core"];
+  assert.equal(target, "5.8.2", "D-11 selects the nearest installable 5.8.x");
+  assert.equal(manifest.dependencies["@cornerstonejs/tools"], target);
+  assert.equal(
+    manifest.dependencies["@cornerstonejs/dicom-image-loader"],
+    target,
+  );
+
+  const consumers = new Map([
+    [
+      ".claude/commands/parity.md",
+      /Phase 1's effective target is feature parity with cornerstone3D 5\.8\.2/,
+    ],
+    [
+      "scripts/gen_sprint_plan.py",
+      /feature parity\s+with cornerstone3D 5\.8\.2/,
+    ],
+    [
+      "docs/sprints/SPRINT_PLAN.md",
+      /parity target itself is 5\.8\.2 and not\s+the HLD's v5\.8\.9/,
+    ],
+  ]);
+  for (const [relative, operationalClaim] of consumers) {
+    const text = await readFile(join(ROOT, relative), "utf8");
+    assert.match(text, operationalClaim, `${relative} does not name the oracle pin`);
+    assert.match(text, /D-11/, `${relative} does not explain the effective target`);
+    assert.doesNotMatch(
+      text,
+      /definition of done is feature parity with cornerstone3D v5\.8\.9/,
+      `${relative} still presents the unavailable version as the target`,
+    );
   }
 });

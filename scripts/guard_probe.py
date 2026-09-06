@@ -218,6 +218,9 @@ def _prepare_control(box: sb.Sandbox, probe: Probe) -> None:
         box.write("tools/oracle/out/run.json", "{}\n")
     elif key == "python3 scripts/pin_and_size_check.py --with-size":
         box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
+        for name in ("LICENSE-MIT", "LICENSE-APACHE"):
+            box.write(f"crates/ocelli-wasm/pkg/{name}",
+                      (box.path / name).read_bytes())
     elif key == "python3 scripts/corpus_check.py":
         # A healthy corpus is present and matches. The real one is not in git
         # and is absent in CI, so the control builds the smallest one that is.

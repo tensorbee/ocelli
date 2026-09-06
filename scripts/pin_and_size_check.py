@@ -50,6 +50,12 @@ So the file is parsed with `tomllib` and the version is taken from the
 `version` key. A table that declares no version at all is refused rather than
 guessed at.
 
+**The published package licences.** The workspace declares `MIT OR
+Apache-2.0`, so the generated wasm package must carry both grants. The crate
+uses relative symlinks to the repository originals, and this check compares
+the generated package bytes with those originals. A copied or stale legal text
+is refused rather than treated as equivalent.
+
 **The size budget.** Story E1.2 is "wasm-pack build pipeline with a hard size
 budget gate", and Appendix A gate A4 asks whether binary size and cold start
 land within budget at all, estimating 3 to 8 MB uncompressed before tuning with
@@ -79,6 +85,8 @@ ROOT = Path(__file__).resolve().parent.parent
 CARGO = ROOT / "Cargo.toml"
 BUDGET = ROOT / "ci" / "wasm-size-budget.json"
 PKG = ROOT / "crates" / "ocelli-wasm" / "pkg"
+
+PACKAGE_LICENCES = ("LICENSE-MIT", "LICENSE-APACHE")
 
 # Crates whose version must be an EXACT `=` pin, with the reason a range is
 # refused. The reason is printed on failure, because "pin it exactly" without
@@ -180,6 +188,38 @@ def wasm_bytes() -> int | None:
     return max(m.stat().st_size for m in modules)
 
 
+def check_package_licences(pkg: Path = PKG,
+                           source_root: Path = ROOT) -> list[str]:
+    """Require both generated grants to match the repository originals."""
+    problems = []
+    for name in PACKAGE_LICENCES:
+        source = source_root / name
+        packaged = pkg / name
+        if not source.is_file():
+            problems.append(
+                f"repository licence {name} is absent, so the generated "
+                f"package cannot be checked against its legal source")
+            continue
+        if packaged.is_symlink():
+            problems.append(
+                f"generated package licence {name} is a symlink, not a "
+                f"regular file under {pkg}. A published package must contain "
+                f"both grants rather than links to bytes outside it.")
+            continue
+        if not packaged.is_file():
+            problems.append(
+                f"generated package licence {name} is absent under "
+                f"{pkg}. The package declares MIT OR Apache-2.0 and must "
+                f"ship both grants.")
+            continue
+        if packaged.read_bytes() != source.read_bytes():
+            problems.append(
+                f"generated package licence {name} is not byte-identical to "
+                f"the repository original. Rebuild from the package-local "
+                f"relative symlink rather than copying legal text.")
+    return problems
+
+
 def check_size(accept: bool) -> list[str]:
     size = wasm_bytes()
     if size is None:
@@ -214,15 +254,16 @@ def check_size(accept: bool) -> list[str]:
     return []
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--with-size", action="store_true")
     parser.add_argument("--accept-size", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     problems = check_pins()
     if args.with_size or args.accept_size:
         problems += check_size(args.accept_size)
+        problems += check_package_licences()
 
     if problems:
         print("FAIL: pin or size gate")
@@ -231,7 +272,8 @@ def main() -> int:
         return 1
 
     print(f"OK: {', '.join(sorted(EXACT_PINNED))} pinned exactly" +
-          (", wasm size within budget" if args.with_size else ""))
+          (", wasm size within budget, package licences match"
+           if args.with_size else ""))
     return 0
 
 

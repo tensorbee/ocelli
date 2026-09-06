@@ -7,7 +7,7 @@ description: "Report progress against the cornerstone3D parity surface, from the
 
 Canonical source: `.claude/commands/parity.md`.
 
-Source SHA-256: `b945cea056da84b097fb4c4d27f3d3a960a4396850b011ce4155b657a9fd7dbf`.
+Source SHA-256: `7cc4793c4e6ea7ea8381e1a1ad3b4872e4ccb0059ebf1e857517511621247d25`.
 
 Before acting, read the canonical source completely and follow it using this
 host's available tools. Treat invocation arguments as arguments to that
