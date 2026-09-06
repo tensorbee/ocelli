@@ -49,7 +49,9 @@ from syntax alone.
 
 Anticipated write set: `scripts/ci_floor_check.py`,
 `scripts/tests/test_guard_readers.py`, `scripts/guards/catalogue.py`,
-`ci/guard-probe-budget.json`, and `docs/lld/guards.md`.
+`ci/guard-probe-budget.json`, `docs/lld/guards.md`, `docs/lld/README.md`, and
+`docs/runbooks/guard-verification.md`. The LLD index and generated runbook move
+with the contributor line and probe inventory they describe.
 
 ## Boundary and tier
 

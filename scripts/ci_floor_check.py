@@ -832,10 +832,12 @@ def _tolerates_failure(value: object) -> bool:
 
 @dataclass(frozen=True)
 class Command:
-    """One statement CI executes, and what decides whether it can fail the run.
+    """One statement CI may execute, and whether it proves a gate runs.
 
-    `tolerated` is the reason this command's FAILURE cannot fail the workflow,
-    and "" when nothing takes it away. **It exists because `continue-on-error`
+    `tolerated` is the reason this command cannot supply that proof. Its failure
+    may be discarded, or an earlier condition may skip it while a later command
+    leaves the step green. It is "" when nothing takes the proof away.
+    **It exists because `continue-on-error`
     was in the parsed tree and nothing read it, which the S03 review's
     thirteenth pass measured three ways**, each valid YAML, each leaving this
     check at exit 0 with the `guards` gate covered: the key on the `gate
@@ -846,7 +848,7 @@ class Command:
     tolerating flakiness.
 
     A tolerated command is kept in the list rather than dropped, so that `main`
-    can say WHICH of the three shapes took the gate away. Every consumer asks
+    can say which shell shape took the gate away. Every consumer asks
     `runs_on` first and a tolerated command answers no on every event.
     """
 
@@ -2198,8 +2200,9 @@ def _tolerated_statements(text: str) -> dict[int, str]:
       AFTER`. errexit is suppressed for a command in an AND-OR list, and the
       short circuit means the command after the final `&&` never runs, so
       nothing fires it and the list's status is discarded. **A failing left
-      side of `&&` is therefore swallowed, which is the opposite of what this
-      function asserted when it was first written.**
+      side of `&&` is therefore swallowed. The right side is skipped, so it
+      cannot prove a gate ran either. Both lose their status when a later list
+      succeeds.**
     - `false && true` ALONE exits 1. The last list in the body decides the
       script's status, so the same statement is not swallowed there.
     - `false || false\\necho AFTER` exits 1 and `true | false\\necho AFTER`
@@ -2253,11 +2256,18 @@ def _tolerated_statements(text: str) -> dict[int, str]:
                 # false` exits 0 because the right side never ran, so `true ||
                 # bin/ocelli.sh gate guards` satisfied `guards` at exit 0 with
                 # the gate never executed. Found by the generated-input bash
-                # oracle. The right side of `&&` is the same shape and is NOT
-                # closed here, which the module docstring declares as a limit.
+                # oracle. The right side of `&&` is handled below because its
+                # skipped status is safe only when the AND-list ends the body.
                 tolerated[index] = ("a `||` before it means it runs only when "
                                     "the left-hand side failed, so nothing "
                                     "here says the shell runs it at all")
+                continue
+            if (not final and any(pairs[i][1] == "&&"
+                                  for i in segment[:position])):
+                tolerated[index] = (
+                    "an earlier `&&` means it runs only when the left-hand "
+                    "side succeeds, and a later statement can leave the step "
+                    "green when it does not run")
                 continue
             if position == len(segment) - 1:
                 continue
@@ -2558,8 +2568,8 @@ def main() -> int:
     for gate in [g for g in declared if g not in NOT_IN_FLOOR]:
         touching = steps_running(gate, arms, commands)
         running = [c for c in touching if not c.tolerated]
-        # The step is IN the file, it names the gate, and its failure cannot
-        # fail the workflow. Without this the refusal below would fire on
+        # The step is in the file and mentions the gate, but does not prove the
+        # gate runs and reports failure. Without this the refusal below fires on
         # `blocked` and quote an empty condition, sending its reader to look
         # for an `if:` that is not there. `Command.tolerated` records why, and
         # the three shapes it distinguishes are the thirteenth pass's three
@@ -2568,11 +2578,12 @@ def main() -> int:
                             if command.tolerated})
         note = ""
         if tolerated:
-            note = (f" A step in {WORKFLOW.relative_to(ROOT)} does run this "
-                    f"gate and is not counted, because its failure cannot "
-                    f"fail the workflow: {'; '.join(tolerated)}. `--floor` "
-                    f"claims to be what CI runs, and a check whose red is "
-                    f"discarded is not a check CI runs.")
+            note = (f" A step in {WORKFLOW.relative_to(ROOT)} mentions this "
+                    f"gate and is not counted, because it is not guaranteed "
+                    f"to run it and report its failure: "
+                    f"{'; '.join(tolerated)}. `--floor` claims to be what CI "
+                    f"runs, and a skipped check or a discarded red is not a "
+                    f"check CI runs.")
         # Per event, not per step. Two steps with complementary conditions
         # cover the floor between them, and asking one step to cover every
         # event refuses that arrangement while naming no missing event, which
@@ -2699,8 +2710,8 @@ def main() -> int:
                             if command.tolerated})
         note = ""
         if tolerated:
-            note = (f" A step does run it and is not counted, because its "
-                    f"failure cannot fail the workflow: "
+            note = (f" A step mentions it and is not counted, because it is "
+                    f"not guaranteed to run and report its failure: "
                     f"{'; '.join(tolerated)}.")
         problems.append(
             f"the `{gate}` gate is excluded from the floor and needs no GPU, "

@@ -1,6 +1,6 @@
 # The guard harness
 
-**F-IDs that contributed:** F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X020
+**F-IDs that contributed:** F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020
 **Last updated:** 2026-09-06
 
 A guard is any refusal this repository can produce: a script that exits 1, a
@@ -982,7 +982,13 @@ because the short circuit means the command after the final `&&` never runs, so
 nothing fires errexit and the list's status is discarded. The same statement
 alone in a body exits 1, because the last list decides the script's status. Ten
 such measurements are a table in the suite and the reader is asserted against
-that table row by row.
+that table row by row. The flat-shape oracle also exhausts every success and
+failure assignment for the other commands in each accepted AND-list. A gate on
+the right of `&&` does not count when a failed prefix can skip it and a later
+successful statement can leave the step green. A terminal `cd x && gate`
+continues to count, because failure to reach the gate makes the step itself
+fail. The standing mutation plants the swallowed non-final form and requires
+the CI guard to reject it.
 
 `scripts/lint_policy_check.py` is in the `guards` gate rather than in `clippy`
 because it is check c's class of problem rather than clippy's. The `clippy`

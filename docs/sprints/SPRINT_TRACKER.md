@@ -66,3 +66,4 @@ that has something to put in it.
 | F-X009 | A standing test for every repository guard | S03 | 3w | not measured, it ran concurrently with the sprint review's remediation and its wall clock includes waiting on that | 2026-09-05 |
 | F-X017 | Close the measured escapes from the wasm linear memory view ban | S04 | 2w | not measured, work overlapped F-013 verification and included repeated full floor runs | 2026-09-06 |
 | F-X018 | Bind sprint review and verification evidence to the current tree | S04 | 1w | not measured, work ran serially during a whole-sprint execution with repeated floor probe and gate runs | 2026-09-06 |
+| F-X019 | Require CI gates to run or make their step fail | S04 | 1w | not measured, work ran serially during a whole-sprint execution and included exhaustive bash cross-checks plus full floor runs | 2026-09-06 |

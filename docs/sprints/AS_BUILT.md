@@ -1609,3 +1609,35 @@ the authoritative workflow, generated guard runbook and LLD index. Review pass
 **Notes for future sessions.** A successful verification or clean review is
 not closure evidence after the index changes. Stage first, then record both
 forms of evidence for the same tree.
+
+## F-X019, Guaranteed CI execution through AND-lists, completed 2026-09-06
+
+**What was built.** The CI floor reader now discredits a gate on the right of
+`&&` when a failed prefix can skip it and a later successful statement can
+leave the step green. A terminal AND-list still counts because failure to reach
+the gate makes the step fail.
+
+**HLD sections implemented.** `docs/hld/08-validation-architecture.md` section
+11, `docs/hld/12-workspace-and-build.md` section 15.3, and
+`docs/hld/24-agent-code-standards.md` section 27.2 R6.
+**Deviations.** D-04 retained. No new deviation.
+**Crates / packages modified.** No crate or package source changed. The CI
+floor reader, its bash differential tests and guard catalogue changed.
+**Tests added.** The accepted flat-shape oracle now exhausts every success and
+failure assignment of the other commands for each target. Focused tests cover
+the swallowed non-final right side and the terminal `cd x && gate` control. A
+standing mutation requires the CI guard to reject the swallowed form.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** The feature profile ran all floor gates and the corpus gate
+on 2026-09-06. The commit's hook-generated `Ocelli-Verify` trailer names the
+exact staged tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A (WebGPU): n/a. B (WebGL2 downlevel): n/a. C (CPU): n/a.
+This is a repository CI control.
+**LLD updated.** `docs/lld/guards.md`, indexed in `docs/lld/README.md`.
+**Deviations from the design plan.** The write set was corrected to include
+the LLD index and generated guard runbook required by their own maintenance
+rules.
+**Notes for future sessions.** A visible gate command is not sufficient. For
+every possible result before it, either the gate must run or the step must be
+red.

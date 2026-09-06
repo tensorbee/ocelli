@@ -4057,6 +4057,22 @@ def _a_gate_step_whose_failure_is_swallowed(box: Sandbox) -> None:
     box.substitute(WORKFLOW_PATH, line, f"{indent}- {body} || true")
 
 
+def _a_gate_after_a_swallowed_and_condition(box: Sandbox) -> None:
+    """Put the gate on the conditional right side of a non-final AND-list.
+
+    MEASURED under `bash -e`: `false && GATE` followed by a successful command
+    exits 0 without running the gate. The final command is load-bearing. With
+    the AND-list last, the failed left side makes the step fail and the gate
+    need not run for the step to remain a valid CI control.
+    """
+    _, line, indent, body = _gate_step_pieces(box)
+    command = body.removeprefix("run: ").strip()
+    box.substitute(WORKFLOW_PATH, line,
+                   f"{indent}- run: |\n"
+                   f"{indent}    false && {command}\n"
+                   f'{indent}    echo "later success"')
+
+
 # The `run:` body of the step `_gate_step_pieces` picks, without the YAML key.
 # Five builders below rewrite that ONE command into a shape whose failure the
 # shell discards or plainly does not, and each needs the command rather than
@@ -5806,7 +5822,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.continue-on-error-on-a-gate-step",
                   _continue_on_error_on_a_gate_step,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "because its failure cannot fail the workflow",
+                  "because it is not guaranteed to run it and report its failure",
                   note="`continue-on-error` was in the parsed tree and nothing "
                        "read it. The string occurred nowhere in `scripts/`, in "
                        "`docs/lld/guards.md` or in the runbook. MEASURED as "
@@ -5819,7 +5835,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.continue-on-error-on-the-job",
                   _continue_on_error_on_the_job,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "because its failure cannot fail the workflow",
+                  "because it is not guaranteed to run it and report its failure",
                   note="The same key one level up, where a reader looking at "
                        "the STEP sees nothing at all, and it takes every step "
                        "in the job with it. Both levels are read now, which is "
@@ -5829,7 +5845,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("ci-floor.gate-step-failure-swallowed",
                   _a_gate_step_whose_failure_is_swallowed,
                   script("python3", "scripts/ci_floor_check.py"),
-                  "because its failure cannot fail the workflow",
+                  "because it is not guaranteed to run it and report its failure",
                   note="`|| true` appended to the run, the third route to the "
                        "same end. The step is there, it names the gate, bash "
                        "runs the gate and the step's exit status is `true`'s. "
@@ -5841,6 +5857,15 @@ GUARDS: tuple[Guard, ...] = (
                        "paragraph, because the obvious reading of that "
                        "paragraph is wrong: `false && true` followed by "
                        "another line exits 0."),
+            Probe("ci-floor.gate-after-swallowed-and-condition",
+                  _a_gate_after_a_swallowed_and_condition,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "an earlier `&&` means it runs only when the left-hand side succeeds",
+                  note="The gate is the right side of `false && gate`, with "
+                       "a later successful statement. bash exits 0 without "
+                       "running the gate. The scanner must discredit the "
+                       "invocation without also rejecting a terminal `cd x "
+                       "&& gate`, whose failed prefix makes the step red."),
             Probe("ci-floor.custom-shell-template-on-a-gate-step",
                   _a_custom_shell_template_on_a_gate_step,
                   script("python3", "scripts/ci_floor_check.py"),

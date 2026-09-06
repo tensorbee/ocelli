@@ -22,6 +22,7 @@ machine that runs the gate has one.
 
 from __future__ import annotations
 
+import itertools
 import re
 import shutil
 import subprocess
@@ -745,7 +746,7 @@ class WhatCiRunsInAStepBody(unittest.TestCase):
         `x` succeeding its own status never reaches the step.
         """
         for body, tolerated in (("x\ny", set()),
-                                ("x && y\nz", {0}),
+                                ("x && y\nz", {0, 1}),
                                 ("x && y", set()),
                                 ("x || y\nz", {0, 1}),
                                 ("x || y", {0, 1}),
@@ -873,6 +874,29 @@ def _body_and_index(shape: str, target: int) -> tuple[str, int] | None:
     return (body, found[0]) if len(found) == 1 else None
 
 
+def bash_guarantees_failure(shape: str, target: int) -> bool | None:
+    """Does target failure make every assignment of earlier commands red."""
+    count = _slot_count(shape)
+    others = [index for index in range(count) if index != target]
+    for values in itertools.product((False, True), repeat=len(others)):
+        succeeds = dict(zip(others, values, strict=True))
+        words = [
+            ("false" if index == target or not succeeds[index] else "true")
+            + f" M{index}"
+            if index != target else f"false M{index}"
+            for index in range(count)
+        ]
+        body = shape.format(*words)
+        if subprocess.run([BASH, "-n"], input=body, text=True,
+                          capture_output=True).returncode != 0:
+            return None
+        done = subprocess.run([BASH, "-ec", body], capture_output=True,
+                              text=True, timeout=10)
+        if done.returncode == 0:
+            return False
+    return True
+
+
 class WhatThisFileRefusesToModel(unittest.TestCase):
     """The whitelist that replaced three successive readers of bash.
 
@@ -968,20 +992,20 @@ class WhatThisFileRefusesToModel(unittest.TestCase):
 
     @unittest.skipUnless(BASH, "no bash on this machine")
     def test_no_flat_shape_is_a_fail_open(self) -> None:
-        """On the shapes it DOES accept, it must agree with bash exactly."""
+        """Every accepted flat shape must agree with bash for all outcomes."""
         checked = 0
         for shape in FLAT_SHAPES:
             for target in range(_slot_count(shape)):
                 made = _body_and_index(shape, target)
                 self.assertIsNotNone(made, f"ambiguous marker in {shape!r}")
                 body, index = made
-                reaches = bash_fails(body)
-                self.assertIsNotNone(reaches, f"bash refused {body!r}")
+                guaranteed = bash_guarantees_failure(shape, target)
+                self.assertIsNotNone(guaranteed, f"bash refused {body!r}")
                 tolerated = index in ci_floor_check._tolerated_statements(
                     ci_floor_check.shell_source(body))
                 checked += 1
                 self.assertEqual(
-                    tolerated, not reaches,
+                    tolerated, not guaranteed,
                     f"bash and the scanner disagree about statement {index} "
                     f"of {body!r}")
         self.assertGreaterEqual(checked, 20)
@@ -1008,33 +1032,22 @@ class WhatThisFileRefusesToModel(unittest.TestCase):
         self.assertIn("guards", ci_floor_check.invoked_gates(commands))
 
     @unittest.skipUnless(BASH, "no bash on this machine")
-    def test_the_right_hand_side_of_and_is_the_remaining_residue(self) -> None:
-        """F-X019, the one hole the whitelist does not close.
-
-        `&&` is a SEPARATOR rather than a compound construct, so a body of
-        `a && GATE` carries nothing `_refuse_unmodelled_shell` refuses, and
-        the gate runs only when `a` succeeds. `false && GATE` therefore exits
-        0 with the gate never run and this file still counts it.
-
-        It is left open because `invoked_gates`' own docstring documents
-        `cd x && bin/ocelli.sh gate y` as a legitimate invocation, so refusing
-        it contradicts a declared behaviour rather than repairing a reader.
-        That is a decision with an owner.
-
-        **This test asserts the hole is still OPEN.** It goes red when F-X019
-        closes it, which is the signal to delete it rather than a regression.
-        It exists because the review's fifteenth pass wrote exactly this test,
-        the sixteenth pass rewrote the class around it and lost it, and a hole
-        nothing records is a hole the next pass finds again from scratch.
-        """
+    def test_a_swallowed_and_condition_does_not_count_its_right_side(self) -> None:
+        """A later success can hide both failure and non-execution."""
         body = "false M0 && false M1\necho tail\n"
         self.assertFalse(bash_fails(body), "bash must exit 0 for this body")
         source = ci_floor_check.shell_source(body)
         ci_floor_check._refuse_unmodelled_shell(source, "this body")
         pairs = ci_floor_check._statement_separators(source)
         index = next(i for i, (s, _) in enumerate(pairs) if "M1" in s)
-        self.assertNotIn(index, ci_floor_check._tolerated_statements(source),
-                         "F-X019 appears to be closed. Delete this test.")
+        self.assertIn(index, ci_floor_check._tolerated_statements(source))
+
+    def test_a_terminal_and_list_counts_its_right_side(self) -> None:
+        """If the right side is skipped, the left failure makes the step red."""
+        commands = ci_floor_check.run_commands(workflow_with(
+            "      - run: cd tools && bin/ocelli.sh gate guards\n"))
+        runner = [c for c in commands if "gate guards" in c.text]
+        self.assertEqual([c.tolerated for c in runner], [""])
 
     def test_the_real_workflow_carries_none_of_this(self) -> None:
         """The measurement that makes the whitelist affordable."""
