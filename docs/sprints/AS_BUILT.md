@@ -1915,6 +1915,14 @@ explicit operation field so identity output cannot satisfy ledger evidence.
 **Notes for future sessions.** Enable `--require-comparison` only when F-X021
 connects every current oracle view to real Ocelli output.
 
+**Sprint review remediation.** The ledger now resolves both input directories,
+validates every serialized object through the tracked oracle report contract,
+reconstructs green attribution states and derives histogram, region, predicate
+and bias consistency from the published measurements. The Rust serializer test,
+Python verifier and standing mutation controls all consume
+`tools/oracle/report-contract.json`, so the cross-language contract has one
+tracked projection and cannot drift behind a hand-built green fixture.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured

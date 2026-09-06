@@ -70,7 +70,8 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from guards import sandbox as sb  # noqa: E402
-from guards.catalogue import DEFECTS, GUARDS, Probe  # noqa: E402
+from guards.catalogue import (DEFECTS, GUARDS, Probe,  # noqa: E402
+                              green_comparison_document)
 from guards.census import (BUDGET, BUDGET_NOTE, ROOT,  # noqa: E402
                            load_budget)
 
@@ -167,82 +168,8 @@ def _prepare_control(box: sb.Sandbox, probe: Probe) -> None:
     invoke needs nothing prepared, so it has no branch.
     """
     def write_green_comparison_report() -> None:
-        channel = {
-            "pixels": 1,
-            "maxAbsDiff": 0,
-            "countAtZero": 1,
-            "countAtOne": 0,
-            "countAtTwo": 0,
-            "countOverTwo": 0,
-            "fractionWithinOneLsb": 1.0,
-            "differingFraction": 0.0,
-            "signedMeanDiff": 0.0,
-            "percentile999AbsDiff": 0,
-        }
-        record = {
-            "id": "probe-view",
-            "kind": "stack",
-            "toleranceClass": "mono16",
-            "outcome": "pass",
-            "qualifiers": [],
-            "attributedTo": "none",
-            "rung": "pixels",
-            "notes": [],
-            "parameterDivergences": [],
-            "geometryDivergences": [],
-            "referenceDivergenceEntry": None,
-            "renderHashes": {
-                "algorithm": "sha256-rgba8-v1",
-                "reference": "0" * 64,
-                "candidate": "0" * 64,
-            },
-            "monochromeFrame": True,
-            "statistics": {
-                "channels": 1,
-                "full": [dict(channel)],
-                "image": [dict(channel)],
-                "background": [],
-                "informative": [dict(channel)],
-                "rowsTouched": 0,
-                "columnsTouched": 0,
-                "imagePixels": 1,
-                "informativePixels": 1,
-                "informativeFraction": 1.0,
-                "predicatePasses": True,
-                "biasPasses": True,
-                "signedMeanDiff": 0.0,
-            },
-        }
-        box.write(".claude/probe-comparison.json", json.dumps({
-            "story": "F-011, F-012, F-015",
-            "reference": "reference",
-            "candidate": "candidate",
-            "views": 1,
-            "operation": "gate",
-            "pass": 1,
-            "fail": 0,
-            "claimedVerdictViews": 1,
-            "gateVerdict": "pass",
-            "green": True,
-            "coverage": {
-                "unmeasured": 0,
-                "absent": 0,
-                "unsupportedSourceRows": 0,
-                "declaredVolumeRefusals": 0,
-            },
-            "unmeasured": 0,
-            "absent": 0,
-            "problems": [],
-            "coverageProblems": [],
-            "absorbedDivergences": [],
-            "qualifiers": {},
-            "renderHashes": {
-                "algorithm": "sha256-rgba8-v1",
-                "reference": "311c307457058b6cfefff79bdeb407dfb6056185b81937159771e4d998a9de3b",
-                "candidate": "311c307457058b6cfefff79bdeb407dfb6056185b81937159771e4d998a9de3b",
-            },
-            "records": [record],
-        }) + "\n")
+        report = green_comparison_document(box)
+        box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
     key = (probe.control or probe.invoke).key
     if key.startswith("git commit:"):

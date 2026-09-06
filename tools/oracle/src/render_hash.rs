@@ -18,6 +18,8 @@ use crate::sidecar::ViewKind;
 
 /// The public version token written beside every hash.
 pub const ALGORITHM: &str = "sha256-rgba8-v1";
+/// The public version token whose NUL-terminated form domains the run hash.
+pub const RUN_ALGORITHM: &str = "sha256-rgba8-run-v1";
 
 const VIEW_DOMAIN: &[u8] = b"sha256-rgba8-v1\0";
 const RUN_DOMAIN: &[u8] = b"sha256-rgba8-run-v1\0";

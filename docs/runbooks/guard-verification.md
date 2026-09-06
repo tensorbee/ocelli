@@ -393,184 +393,195 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 180 | `scripts/verify_ledger.py` | `ledger.comparison-shape-channel-unknown`, level 3 | must refuse, output carries `statistics.full[0] has invalid keys` | floor | `bin/ocelli.sh gate guards` |
 | 181 | `scripts/verify_ledger.py` | `ledger.comparison-shape-parameter-divergence-missing`, level 3 | must refuse, output carries `parameterDivergences[0] has invalid keys` | floor | `bin/ocelli.sh gate guards` |
 | 182 | `scripts/verify_ledger.py` | `ledger.comparison-shape-geometry-divergence-unknown`, level 3 | must refuse, output carries `geometryDivergences[0] has invalid keys` | floor | `bin/ocelli.sh gate guards` |
-| 183 | `scripts/verify_ledger.py` | `ledger.comparison-duplicate-top-level-key`, level 3 | must refuse, output carries `duplicate JSON key 'fail'` | floor | `bin/ocelli.sh gate guards` |
-| 184 | `scripts/verify_ledger.py` | `ledger.comparison-duplicate-nested-key`, level 3 | must refuse, output carries `duplicate JSON key 'id'` | floor | `bin/ocelli.sh gate guards` |
-| 185 | `scripts/verify_ledger.py` | `ledger.comparison-nonfinite-number`, level 3 | must refuse, output carries `non-finite JSON number NaN` | floor | `bin/ocelli.sh gate guards` |
-| 186 | `scripts/verify_ledger.py` | `ledger.require-comparison`, level 3 | must refuse, output carries `comparison evidence is required` | floor | `bin/ocelli.sh gate guards` |
-| 187 | `scripts/verify_ledger.py` | `ledger.trailer-silent`, level 3 | must refuse, output is SILENT | floor | `bin/ocelli.sh gate guards` |
-| 188 | `scripts/verify_ledger.py` | `ledger.no-trailer`, level 3 | must refuse, output carries `carries no Ocelli-Verify trailer` | floor | `bin/ocelli.sh gate guards` |
-| 189 | `scripts/verify_ledger.py` | `ledger.tree-mismatch`, level 3 | must refuse, output carries `but the commit's tree is` | floor | `bin/ocelli.sh gate guards` |
-| 190 | `scripts/verify_ledger.py` | `ledger.commit-require-comparison`, level 3 | must refuse, output carries `comparison evidence is required` | floor | `bin/ocelli.sh gate guards` |
-| 191 | `.githooks/pre-commit` | `hooks.pre-commit.dicom`, level 3 | must refuse, output carries `Commit refused` | floor | `bin/ocelli.sh gate guards` |
-| 192 | `.githooks/commit-msg` | `hooks.commit-msg.forged-trailer`, level 3 | must refuse, output carries `written by this hook from the verify ledger` | floor | `bin/ocelli.sh gate guards` |
-| 193 | `.githooks/commit-msg` | `hooks.commit-msg.agent-coauthor`, level 3 | must refuse, output carries `no agent co-author trailer` | floor | `bin/ocelli.sh gate guards` |
-| 194 | `.githooks/commit-msg` | `hooks.commit-msg.prose`, level 3 | must refuse, output carries `semicolon in prose` | floor | `bin/ocelli.sh gate guards` |
-| 195 | `.githooks/pre-push` | `hooks.pre-push.unverified`, level 3 | must refuse, output carries `Push refused` | floor | `bin/ocelli.sh gate guards` |
-| 196 | `ci/check-bindgen-isolation.sh` | `bindgen.reaches`, level 3 | must refuse, output carries `reaches wasm-bindgen` | deep | `bin/ocelli.sh gate guards-deep` |
-| 197 | `ci/check-bindgen-isolation.sh` | `bindgen.declares`, level 3 | must refuse, output carries `declares wasm-bindgen as a direct dependency` | deep | `bin/ocelli.sh gate guards-deep` |
-| 198 | `ci/check-bindgen-isolation.sh` | `bindgen.in-source`, level 3 | must refuse, output carries `names wasm_bindgen in source` | deep | `bin/ocelli.sh gate guards-deep` |
-| 199 | `ci/check-device-ownership.sh` | `device.creator`, level 3 | must refuse, output carries `creates a GPU device or surface` | floor | `bin/ocelli.sh gate guards` |
-| 200 | `ci/check-device-ownership.sh` | `device.contract-gone`, level 3 | must refuse, output carries `no longer defines GpuContext` | floor | `bin/ocelli.sh gate guards` |
-| 201 | `ci/check-device-ownership.sh` | `device.owned-accessor`, level 3 | must refuse, output carries `hands out an owned device` | floor | `bin/ocelli.sh gate guards` |
-| 202 | `ci/check-device-ownership.sh` | `device.derives-clone`, level 3 | must refuse, output carries `derives Clone` | floor | `bin/ocelli.sh gate guards` |
-| 203 | `scripts/backlog_check.py` | `backlog.done-without-record`, level 3 | must refuse, output carries `is done with no SPRINT_TRACKER.md row` | floor | `bin/ocelli.sh gate guards` |
-| 204 | `scripts/backlog_check.py` | `backlog.bad-status`, level 3 | must refuse, output carries `expected one of` | floor | `bin/ocelli.sh gate guards` |
-| 205 | `scripts/backlog_check.py` | `backlog.hook-out-of-phase`, level 3 | must refuse, output carries `not P1` | floor | `bin/ocelli.sh gate guards` |
-| 206 | `scripts/gen_sprint_plan.py` | `sprint-plan.existing-refuses-write`, level 3 | must refuse, output carries `refuses to overwrite` | floor | `bin/ocelli.sh gate guards` |
-| 207 | `scripts/gen_sprint_plan.py` | `sprint-plan.two-sprint-tables`, level 3 | must refuse, output carries `SPRINT_PLAN.md sprint tables` | floor | `bin/ocelli.sh gate guards` |
-| 208 | `scripts/gen_sprint_plan.py` | `sprint-plan.milestone-summary-absent`, level 3 | must refuse, output carries `carries no summary line for it` | floor | `bin/ocelli.sh gate guards` |
-| 209 | `scripts/gen_sprint_plan.py` | `sprint-plan.milestone-summary-spurious`, level 3 | must refuse, output carries `has no milestone spanning those sprints` | floor | `bin/ocelli.sh gate guards` |
-| 210 | `scripts/gen_sprint_plan.py` | `sprint-plan.two-goal-lines`, level 3 | must refuse, output carries `**Goal** lines` | floor | `bin/ocelli.sh gate guards` |
-| 211 | `scripts/gen_sprint_plan.py` | `sprint-plan.absent`, level 3 | must refuse, output carries `does not exist` | floor | `bin/ocelli.sh gate guards` |
-| 212 | `scripts/gen_sprint_plan.py` | `sprint-plan.wrong-sprint`, level 3 | must refuse, output carries `is in sprint` | floor | `bin/ocelli.sh gate guards` |
-| 213 | `scripts/gen_sprint_plan.py` | `sprint-plan.wrong-estimate`, level 3 | must refuse, output carries `is estimated` | floor | `bin/ocelli.sh gate guards` |
-| 214 | `scripts/gen_sprint_plan.py` | `sprint-plan.wrong-milestone-summary`, level 3 | must refuse, output carries `milestone summary line` | floor | `bin/ocelli.sh gate guards` |
-| 215 | `scripts/gen_sprint_plan.py` | `sprint-plan.stale-goal-line`, level 3 | must refuse, output carries `**Goal** line` | floor | `bin/ocelli.sh gate guards` |
-| 216 | `scripts/sync_agent_skills.py` | `skills.stale-adapter`, level 3 | must refuse, output carries `is stale, its source changed` | floor | `bin/ocelli.sh gate guards` |
-| 217 | `scripts/skill_examples_check.py` | `skill-examples.changed-expected-digit`, level 3 | must refuse, output carries `stdout differs` | floor | `bin/ocelli.sh gate guards` |
-| 218 | `scripts/skill_examples_check.py` | `skill-examples.reversed-sigmoid-exponent`, level 3 | must refuse, output carries `stdout differs` | floor | `bin/ocelli.sh gate guards` |
-| 219 | `scripts/skill_examples_check.py` | `skill-examples.reversed-sigmoid-width-precondition`, level 3 | must refuse, output carries `exited 1` | floor | `bin/ocelli.sh gate guards` |
-| 220 | `scripts/sprint_workflow.py` | `handoff.wrong-branch`, level 3 | must refuse, output carries `does not start with` | floor | `bin/ocelli.sh gate guards` |
-| 221 | `scripts/sprint_workflow.py` | `handoff.backticked-branch`, level 3 | must ACCEPT, output carries `validates` | floor | `bin/ocelli.sh gate guards` |
-| 222 | `scripts/sprint_workflow.py` | `handoff.missing-files-touched`, level 3 | must refuse, output carries `handoff has no **Files touched** field` | floor | `bin/ocelli.sh gate guards` |
-| 223 | `scripts/sprint_workflow.py` | `handoff.multiple-code-spans`, level 3 | must refuse, output carries `**Branch** value must be non-empty plain text or exactly one Markdown code span` | floor | `bin/ocelli.sh gate guards` |
-| 224 | `scripts/sprint_workflow.py` | `handoff.unmatched-code-span`, level 3 | must refuse, output carries `**Files touched** value must be non-empty plain text or exactly one Markdown code span` | floor | `bin/ocelli.sh gate guards` |
-| 225 | `scripts/sprint_workflow.py` | `handoff.embedded-code-span`, level 3 | must refuse, output carries `**Head** value must be non-empty plain text or exactly one Markdown code span` | floor | `bin/ocelli.sh gate guards` |
-| 226 | `scripts/sprint_workflow.py` | `handoff.empty-code-span`, level 3 | must refuse, output carries `**Review** value must be non-empty plain text or exactly one Markdown code span` | floor | `bin/ocelli.sh gate guards` |
-| 227 | `scripts/sprint_workflow.py` | `handoff.forged-suffix`, level 3 | must refuse, output carries `**Base** value must be non-empty plain text or exactly one Markdown code span` | floor | `bin/ocelli.sh gate guards` |
-| 228 | `scripts/sprint_workflow.py` | `handoff.duplicate-head`, level 3 | must refuse, output carries `handoff has duplicate **Head** fields` | floor | `bin/ocelli.sh gate guards` |
-| 229 | `scripts/sprint_workflow.py` | `sprint-lifecycle.not-in-sprint`, level 3 | must refuse, output carries `is not in sprint` | floor | `bin/ocelli.sh gate guards` |
-| 230 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-legacy-state`, level 3 | must refuse, output carries `no sprint-scope review recorded` | floor | `bin/ocelli.sh gate guards` |
-| 231 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-dirty-review`, level 3 | must refuse, output carries `latest sprint review pass 2 reports 1 defects and 0 smells` | floor | `bin/ocelli.sh gate guards` |
-| 232 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-stale-review`, level 3 | must refuse, output carries `latest sprint review tree 000000000000 is stale` | floor | `bin/ocelli.sh gate guards` |
-| 233 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-stale-verification`, level 3 | must refuse, output carries `latest sprint-profile verification tree 000000000000 is stale` | floor | `bin/ocelli.sh gate guards` |
-| 234 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-latest-verification-failed`, level 3 | must refuse, output carries `latest sprint-profile verification did not pass` | floor | `bin/ocelli.sh gate guards` |
-| 235 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-tree-changed`, level 3 | must refuse, output carries `latest sprint review tree` | floor | `bin/ocelli.sh gate guards` |
-| 236 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-unrecorded-carry`, level 3 | must refuse, output carries `is carried but has no recorded carry-forward reason` | floor | `bin/ocelli.sh gate guards` |
-| 237 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-recorded-carry`, level 3 | must ACCEPT, output carries `is ready to close` | floor | `bin/ocelli.sh gate guards` |
-| 238 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-current-evidence`, level 3 | must ACCEPT, output carries `is ready to close` | floor | `bin/ocelli.sh gate guards` |
-| 239 | `scripts/error_code_check.py` | `errors.renumbered`, level 3 | must refuse, output carries `so this is a renumbering` | floor | `bin/ocelli.sh gate guards` |
-| 240 | `scripts/bench_check.py` | none in this harness | A benchmark registry whose subject stories do not resolve, a subject whose story has not landed carrying a runner or a recorded number, and a playwright pin that has drifted between the two harnesses. | - | scripts/tests/test_bench_check.py (25 cases, run by the `bench` gate, which is in the floor) |
-| 241 | `scripts/quirk_check.py` | `quirks.missing-authority`, level 3 | must refuse, output carries `missing expectation authority` | floor | `bin/ocelli.sh gate guards` |
-| 242 | `scripts/quirk_check.py` | `quirks.ocelli-derived-expectation`, level 3 | must refuse, output carries `expectation authority kind 'ocelli-output' is not independent` | floor | `bin/ocelli.sh gate guards` |
-| 243 | `scripts/quirk_check.py` | `quirks.absent-manifest-row`, level 3 | must refuse, output carries `needs exactly one manifest row` | floor | `bin/ocelli.sh gate guards` |
-| 244 | `scripts/quirk_check.py` | `quirks.missing-mutation-evidence`, level 3 | must refuse, output carries `mutation evidence must be a non-empty array` | floor | `bin/ocelli.sh gate guards` |
-| 245 | `scripts/quirk_check.py` | `quirks.missing-voi-function-mutation`, level 3 | must refuse, output carries `required mutation generator-voi-function is missing` | floor | `bin/ocelli.sh gate guards` |
-| 246 | `scripts/quirk_check.py` | `quirks.missing-window-width-mutation`, level 3 | must refuse, output carries `required mutation generator-window-width is missing` | floor | `bin/ocelli.sh gate guards` |
-| 247 | `scripts/quirk_check.py` | `quirks.missing-attribution-mutation`, level 3 | must refuse, output carries `required mutation disable-reference-attribution is missing` | floor | `bin/ocelli.sh gate guards` |
-| 248 | `scripts/quirk_check.py` | `quirks.tracked-generated-dicom`, level 3 | must refuse, output carries `generated path is a tracked DICOM` | floor | `bin/ocelli.sh gate guards` |
-| 249 | `scripts/quirk_mutation_boundaries.py` | none in this harness | A generated SIGMOID quirk case whose function or width no longer matches the independently declared boundary. | - | scripts/tests/test_quirk_mutations.py opens and checks the named boundary, and `bin/ocelli.sh gate quirk-mutations` executes it green then under both checker-owned generator mutations |
-| 250 | `scripts/quirk_mutations.py` | none in this harness | Mutation evidence whose healthy control is red, whose fixed edit stays green, whose failure has the wrong signature, or whose registry row, kind, signature or replacement differs from the executable contract, including a fixture symbol with no live mutation target or a regression row that differs from the executable attribution mutation. | - | scripts/tests/test_quirk_mutations.py (9 cases, run by the `quirks` gate), plus the three live mutations run by the `quirk-mutations` gate |
-| 251 | `scripts/corpus_check.py` | `corpus.digest-mismatch`, level 3 | must refuse, output carries `does not match its manifest digest` | floor | `bin/ocelli.sh gate guards` |
-| 252 | `scripts/corpus_check.py` | `corpus.absent`, level 3 | must refuse, output carries `corpus cases are absent` | floor | `bin/ocelli.sh gate guards` |
-| 253 | `scripts/corpus_check.py` | `corpus.unrecorded-licence`, level 3 | must refuse, output carries `cannot be redistributed or cited` | floor | `bin/ocelli.sh gate guards` |
-| 254 | `scripts/corpus_tests.py` | `corpus-tests.skip-is-not-a-pass`, level 3 | must refuse, output carries `FAIL: a prerequisite` | floor | `bin/ocelli.sh gate guards` |
-| 255 | `scripts/corpus_synth.py` | none in this harness | A manifest whose header is not the recorded column set. | - | scripts/tests/test_corpus_synth.py (run by the `corpus-tests` gate) |
-| 256 | `scripts/target_feature_check.py` | `target-features.cannot-run`, level 3 | must refuse, output carries `could not run` | deep | `bin/ocelli.sh gate guards-deep` |
-| 257 | `scripts/package_check.py` | `packages.exports-not-in-tarball`, level 1 | must refuse, output carries `advertises` | floor | `bin/ocelli.sh gate guards` |
-| 258 | `scripts/package_check.py` | `packages.version-skew`, level 1 | must refuse, output carries `the Rust workspace is` | floor | `bin/ocelli.sh gate guards` |
-| 259 | `bin/ocelli.sh` | `runner.absent-prerequisite`, level 3 | must refuse, output carries `reference stack is not installed` | floor | `bin/ocelli.sh gate guards` |
-| 260 | `scripts/source_dir.py` | `source-dir.unconfigured`, level 3 | must refuse, output carries `are not configured` | floor | `bin/ocelli.sh gate guards` |
-| 261 | `scripts/split_hld.py` | `split-hld.cannot-run`, level 3 | must refuse, output carries `A check that cannot run is NOT a check that` | floor | `bin/ocelli.sh gate guards` |
-| 262 | `scripts/lint_policy_check.py` | `lint-policy.weakened`, level 3 | must refuse, output carries `is 'allow' and HLD 27.1 requires` | deep | `bin/ocelli.sh gate guards-deep` |
-| 263 | `scripts/lint_policy_check.py` | `lint-policy.uninherited`, level 3 | must refuse, output carries `does not inherit the workspace lint table` | deep | `bin/ocelli.sh gate guards-deep` |
-| 264 | `scripts/lint_policy_check.py` | `lint-policy.group-allow`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 265 | `scripts/lint_policy_check.py` | `lint-policy.expect-attribute`, level 3 | must refuse, output carries `re-allows` | deep | `bin/ocelli.sh gate guards-deep` |
-| 266 | `scripts/lint_policy_check.py` | `lint-policy.manifest-not-utf8`, level 3 | must refuse, output carries `cannot be read as UTF-8 text` | floor | `bin/ocelli.sh gate guards` |
-| 267 | `scripts/lint_policy_check.py` | `lint-policy.nothing-scanned`, level 3 | must refuse, output carries `not one `.rs` file was read` | deep | `bin/ocelli.sh gate guards-deep` |
-| 268 | `scripts/lint_policy_check.py` | `lint-policy.allow-outside-the-crate-root`, level 3 | must refuse, output carries `re-allows `cast_possible_truncation`` | deep | `bin/ocelli.sh gate guards-deep` |
-| 269 | `scripts/lint_policy_check.py` | `lint-policy.item-allow-is-permitted`, level 3 | must ACCEPT, output carries `carry no inner allow or expect of a denied lint` | deep | `bin/ocelli.sh gate guards-deep` |
-| 270 | `scripts/lint_policy_check.py` | `lint-policy.outer-allow-on-a-module`, level 3 | must refuse, output carries `an outer attribute on a `mod` item covers the whole module tree` | deep | `bin/ocelli.sh gate guards-deep` |
-| 271 | `scripts/lint_policy_check.py` | `lint-policy.whitespace-in-the-lint-path`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 272 | `scripts/lint_policy_check.py` | `lint-policy.member-outside-crates-uninherited`, level 3 | must refuse, output carries `does not inherit the workspace lint table` | deep | `bin/ocelli.sh gate guards-deep` |
-| 273 | `scripts/lint_policy_check.py` | `lint-policy.member-outside-crates-group-allow`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 274 | `scripts/lint_policy_check.py` | `lint-policy.member-unresolvable`, level 3 | must refuse, output carries `resolves to no directory carrying a Cargo.toml` | deep | `bin/ocelli.sh gate guards-deep` |
-| 275 | `scripts/lint_policy_check.py` | `lint-policy.no-members-declared`, level 3 | must refuse, output carries `declares no `members` this parser can read` | deep | `bin/ocelli.sh gate guards-deep` |
-| 276 | `scripts/lint_policy_check.py` | `lint-policy.group-row-in-the-workspace-table`, level 3 | must refuse, output carries `carries the lint GROUP` | deep | `bin/ocelli.sh gate guards-deep` |
-| 277 | `scripts/lint_policy_check.py` | `lint-policy.group-row-with-a-trailing-comment`, level 3 | must refuse, output carries `carries the lint GROUP` | deep | `bin/ocelli.sh gate guards-deep` |
-| 278 | `scripts/lint_policy_check.py` | `lint-policy.quoted-group-row`, level 3 | must refuse, output carries `carries the lint GROUP` | deep | `bin/ocelli.sh gate guards-deep` |
-| 279 | `scripts/lint_policy_check.py` | `lint-policy.two-line-group-row`, level 3 | must refuse, output carries `cannot be parsed as TOML` | deep | `bin/ocelli.sh gate guards-deep` |
-| 280 | `scripts/lint_policy_check.py` | `lint-policy.unparseable-member-manifest`, level 3 | must refuse, output carries `is a workspace member cargo reports and its Cargo.toml cannot be parsed as TOML` | deep | `bin/ocelli.sh gate guards-deep` |
-| 281 | `scripts/lint_policy_check.py` | `lint-policy.quoted-required-row-is-permitted`, level 3 | must ACCEPT, output carries `clippy lint(s) at or above HLD 27.1's level` | deep | `bin/ocelli.sh gate guards-deep` |
-| 282 | `scripts/lint_policy_check.py` | `lint-policy.dotted-required-row-is-permitted`, level 3 | must ACCEPT, output carries `clippy lint(s) at or above HLD 27.1's level` | deep | `bin/ocelli.sh gate guards-deep` |
-| 283 | `scripts/lint_policy_check.py` | `lint-policy.commented-required-row-is-permitted`, level 3 | must ACCEPT, output carries `clippy lint(s) at or above HLD 27.1's level` | deep | `bin/ocelli.sh gate guards-deep` |
-| 284 | `scripts/lint_policy_check.py` | `lint-policy.excluded-named-member`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 285 | `scripts/lint_policy_check.py` | `lint-policy.comment-in-the-lint-path`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 286 | `scripts/lint_policy_check.py` | `lint-policy.unreadable-lint-argument`, level 3 | must refuse, output carries `could not read to its end` | deep | `bin/ocelli.sh gate guards-deep` |
-| 287 | `scripts/lint_policy_check.py` | `lint-policy.rustflags-allow`, level 3 | must refuse, output carries `in `rustflags`` | deep | `bin/ocelli.sh gate guards-deep` |
-| 288 | `scripts/lint_policy_check.py` | `lint-policy.cargo-config-is-permitted`, level 3 | must ACCEPT, output carries `cargo config(s) lower no denied lint through rustflags` | deep | `bin/ocelli.sh gate guards-deep` |
-| 289 | `scripts/lint_policy_check.py` | `lint-policy.path-dependency-member`, level 3 | must refuse, output carries `does not inherit the workspace lint table` | deep | `bin/ocelli.sh gate guards-deep` |
-| 290 | `scripts/lint_policy_check.py` | `lint-policy.module-outside-the-member`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 291 | `scripts/lint_policy_check.py` | `lint-policy.clean-module-outside-the-member`, level 3 | must ACCEPT, output carries `1 `#[path]` module(s) followed` | deep | `bin/ocelli.sh gate guards-deep` |
-| 292 | `scripts/lint_policy_check.py` | `lint-policy.cfg-attr-module-path`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 293 | `scripts/lint_policy_check.py` | `lint-policy.raw-string-module-path`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 294 | `scripts/lint_policy_check.py` | `lint-policy.clean-cfg-attr-module-path`, level 3 | must ACCEPT, output carries `1 `#[path]` module(s) followed` | deep | `bin/ocelli.sh gate guards-deep` |
-| 295 | `scripts/lint_policy_check.py` | `lint-policy.required-row-with-a-tail`, level 3 | must refuse, output carries `cannot be parsed as TOML` | deep | `bin/ocelli.sh gate guards-deep` |
-| 296 | `scripts/lint_policy_check.py` | `lint-policy.crate-root-outside-the-member`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 297 | `scripts/lint_policy_check.py` | `lint-policy.clean-crate-root-outside-the-member`, level 3 | must ACCEPT, output carries `cargo target root(s) seeded` | deep | `bin/ocelli.sh gate guards-deep` |
-| 298 | `scripts/lint_policy_check.py` | `lint-policy.unreadable-crate-root`, level 3 | must refuse, output carries `as a compilation root of the workspace member` | deep | `bin/ocelli.sh gate guards-deep` |
-| 299 | `scripts/lint_policy_check.py` | `lint-policy.cap-lints-allow`, level 3 | must refuse, output carries `caps EVERY lint` | deep | `bin/ocelli.sh gate guards-deep` |
-| 300 | `scripts/lint_policy_check.py` | `lint-policy.cap-lints-warn`, level 3 | must refuse, output carries `caps EVERY lint` | deep | `bin/ocelli.sh gate guards-deep` |
-| 301 | `scripts/lint_policy_check.py` | `lint-policy.cap-lints-deny-is-permitted`, level 3 | must ACCEPT, output carries `cargo config(s) lower no denied lint through rustflags` | deep | `bin/ocelli.sh gate guards-deep` |
-| 302 | `scripts/lint_policy_check.py` | `lint-policy.force-warn-a-denied-lint`, level 3 | must refuse, output carries `in `rustflags`` | deep | `bin/ocelli.sh gate guards-deep` |
-| 303 | `scripts/lint_policy_check.py` | `lint-policy.deny-a-group-is-permitted`, level 3 | must ACCEPT, output carries `cargo config(s) lower no denied lint through rustflags` | deep | `bin/ocelli.sh gate guards-deep` |
-| 304 | `scripts/lint_policy_check.py` | `lint-policy.empty-rustflags-is-permitted`, level 3 | must ACCEPT, output carries `cargo config(s) lower no denied lint through rustflags` | deep | `bin/ocelli.sh gate guards-deep` |
-| 305 | `scripts/lint_policy_check.py` | `lint-policy.dotted-lints-inheritance-is-permitted`, level 3 | must ACCEPT, output carries `workspace member(s) from` | deep | `bin/ocelli.sh gate guards-deep` |
-| 306 | `scripts/lint_policy_check.py` | `lint-policy.include-macro`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 307 | `scripts/lint_policy_check.py` | `lint-policy.clean-include-macro`, level 3 | must ACCEPT, output carries `1 `include!`(s) followed` | deep | `bin/ocelli.sh gate guards-deep` |
-| 308 | `scripts/lint_policy_check.py` | `lint-policy.unresolvable-include-macro`, level 3 | must refuse, output carries `did not read the source it pastes in` | deep | `bin/ocelli.sh gate guards-deep` |
-| 309 | `scripts/lint_policy_check.py` | `lint-policy.computed-include-macro`, level 3 | must refuse, output carries `could not read a file name out of it` | deep | `bin/ocelli.sh gate guards-deep` |
-| 310 | `scripts/lint_policy_check.py` | `lint-policy.unreadable-member-source`, level 3 | must refuse, output carries `is reached by this check's walk of the workspace member` | deep | `bin/ocelli.sh gate guards-deep` |
-| 311 | `scripts/lint_policy_check.py` | `lint-policy.dotted-rustflags-key`, level 3 | must refuse, output carries `in `rustflags`` | deep | `bin/ocelli.sh gate guards-deep` |
-| 312 | `scripts/lint_policy_check.py` | `lint-policy.quoted-rustflags-key`, level 3 | must refuse, output carries `in `rustflags`` | deep | `bin/ocelli.sh gate guards-deep` |
-| 313 | `scripts/lint_policy_check.py` | `lint-policy.cargo-config-unparseable`, level 3 | must refuse, output carries `does not parse as TOML` | deep | `bin/ocelli.sh gate guards-deep` |
-| 314 | `scripts/lint_policy_check.py` | `lint-policy.dotted-cargo-config-is-permitted`, level 3 | must ACCEPT, output carries `cargo config(s) lower no denied lint through rustflags` | deep | `bin/ocelli.sh gate guards-deep` |
-| 315 | `scripts/lint_policy_check.py` | `lint-policy.runner-not-utf8`, level 3 | must refuse, output carries `Whether the `unsafe` gate still runs` | deep | `bin/ocelli.sh gate guards-deep` |
-| 316 | `scripts/lint_policy_check.py` | `lint-policy.runner-arms-unreadable`, level 3 | must refuse, output carries `cannot be read for its gate arms` | deep | `bin/ocelli.sh gate guards-deep` |
-| 317 | `scripts/lint_policy_check.py` | `lint-policy.unsafe-gate-named-only-in-a-comment`, level 3 | must refuse, output carries `neither mechanism is present` | deep | `bin/ocelli.sh gate guards-deep` |
-| 318 | `scripts/guards/census.py` | `census.constants-count-shrunk`, level 3 | must refuse, output carries `Narrowing the declared-constant ratchet` | floor | `bin/ocelli.sh gate guards` |
-| 319 | `scripts/guards/census.py` | `census.impossible-wall-clock-pair`, level 3 | must refuse, output carries `cannot be the faster of the two` | floor | `bin/ocelli.sh gate guards` |
-| 320 | `scripts/guards/census.py` | `census.unclaimed-executable-hook`, level 3 | must refuse, output carries `is executable in a clone that opts in` | floor | `bin/ocelli.sh gate guards` |
-| 321 | `scripts/guards/census.py` | `census.oracle-runner-gone`, level 3 | must refuse, output carries `so the `oracle` gate has no runner` | floor | `bin/ocelli.sh gate guards` |
-| 322 | `scripts/guards/census.py` | `census.unrecognised-kind`, level 3 | must refuse, output carries `which is not one of` | floor | `bin/ocelli.sh gate guards` |
-| 323 | `scripts/guards/census.py` | `census.no-entry-site-count`, level 3 | must refuse, output carries `records no per-entry site count` | floor | `bin/ocelli.sh gate guards` |
-| 324 | `scripts/guards/census.py` | `census.refusal-in-a-claimed-file`, level 3 | must refuse, output carries `refusal site(s) to` | floor | `bin/ocelli.sh gate guards` |
-| 325 | `scripts/guards/census.py` | `census.unclaimed-site`, level 3 | must refuse, output carries `no catalogue entry claims` | floor | `bin/ocelli.sh gate guards` |
-| 326 | `scripts/guards/census.py` | `census.changed-constant`, level 3 | must refuse, output carries `changed without its recorded value` | floor | `bin/ocelli.sh gate guards` |
-| 327 | `scripts/guards/census.py` | `census.no-std-set-shrunk`, level 3 | must refuse, output carries `changed without its recorded value` | floor | `bin/ocelli.sh gate guards` |
-| 328 | `scripts/guards/census.py` | `census.uncovered-grew`, level 3 | must refuse, output carries `The ratchet may only decrease` | floor | `bin/ocelli.sh gate guards` |
-| 329 | `scripts/guards/census.py` | `census.no-ceiling`, level 3 | must refuse, output carries `records no uncovered ceiling` | floor | `bin/ocelli.sh gate guards` |
-| 330 | `scripts/guards/census.py` | `census.orphan-recorded-constant`, level 3 | must refuse, output carries `is not declared in the catalogue's CONSTANTS` | floor | `bin/ocelli.sh gate guards` |
-| 331 | `scripts/guards/census.py` | `census.gate-without-an-entry`, level 3 | must refuse, output carries `has no catalogue entry and no `delegated` reason` | floor | `bin/ocelli.sh gate guards` |
-| 332 | `scripts/guards/census.py` | `census.gate-name-with-a-digit`, level 3 | must refuse, output carries `has no catalogue entry and no `delegated` reason` | floor | `bin/ocelli.sh gate guards` |
-| 333 | `scripts/guards/census.py` | `census.floor-needing-a-gpu`, level 1 | must refuse, output carries `no GPU, no browser and no corpus` | floor | `bin/ocelli.sh gate guards` |
-| 334 | `scripts/guard_census.py` | `census-runbook.markers-gone`, level 3 | must refuse, output carries `carries no generated-table markers` | floor | `bin/ocelli.sh gate guards` |
-| 335 | `scripts/guard_probe.py` | `probe-runner.self-test`, level 3 | must ACCEPT, output carries `OK` | floor | `bin/ocelli.sh gate guards` |
-| 336 | `scripts/guard_probe.py` | `probe-runner.a-guard-that-refuses-nothing`, level 3 | must ACCEPT, output carries `did not fire, so it is a guard nobody has watched fail` | floor | `bin/ocelli.sh gate guards` |
-| 337 | `scripts/guards/sandbox.py` | none in this harness | A git call outside the sandbox, a git call in a directory this harness did not create, and the `rm --cached` and `checkout --` pair the runbook records as a false-green trap. | - | scripts/guard_probe.py --self-test; scripts/tests/test_guard_catalogue.py |
-| 338 | `scripts/guards/discover.py` | none in this harness | Nothing on its own. It is the scanner the census refuses from. | - | scripts/tests/test_guard_catalogue.py |
-| 339 | `scripts/guards/catalogue.py` | none in this harness | A probe builder that mutated nothing, and a fixture drawn from a citation that has gone away. | - | scripts/tests/test_guard_catalogue.py |
-| 340 | `tools/oracle/run.mjs` | none in this harness | A run that reached no row, a decode that produced nothing, a frame that never presented, a read-back still showing the sentinel, a volume that did not load, and the environment refusals that keep the rasteriser honest. | - | tools/oracle/src/faults.mjs (23 injected faults, replayed by tools/oracle/tests/faults.mjs on every `oracle` gate); tools/oracle/tests/args_test.mjs; tools/oracle/tests/paths_test.mjs; tools/oracle/tests/pins_test.mjs |
-| 341 | `tools/oracle/page/app.mjs` | none in this harness | A render that did not present, a read-back that is not comparable, and a frame the page cannot attribute. | - | tools/oracle/src/faults.mjs |
-| 342 | `tools/oracle/page/volume.mjs` | none in this harness | A volume that did not load, a geometry that is not a permutation of the declared one, and a reformat that never presented. | - | tools/oracle/src/faults.mjs |
-| 343 | `tools/oracle/src/volume.mjs` | none in this harness | A volume subject whose members disagree, a spacing or orientation that does not resolve, and a declared truth the reference does not reproduce. | - | tools/oracle/tests/volume_test.mjs (run inside `bin/ocelli.sh oracle`'s unit pass) |
-| 344 | `tools/oracle/src/manifest.mjs` | none in this harness | A manifest the reference half cannot read, and a row it cannot resolve to a case. | - | tools/oracle/tests/manifest_test.mjs |
-| 345 | `tools/oracle/src/geometry.mjs` | none in this harness | A geometry the reference cannot express, and one that does not round-trip. | - | tools/oracle/tests/geometry_test.mjs |
-| 346 | `tools/oracle/src/voi.mjs` | none in this harness | A VOI declaration the reference cannot apply, and a window the row does not carry. | - | tools/oracle/tests/params_test.mjs |
-| 347 | `tools/oracle/src/params.mjs` | none in this harness | A render parameter the page does not implement, and a parameter set that does not resolve for a row. | - | tools/oracle/tests/params_test.mjs |
-| 348 | `tools/oracle/src/unsupported.mjs` | none in this harness | A row declared unsupported that renders, and a row that fails without a declaration. | - | tools/oracle/tests/unsupported_test.mjs |
-| 349 | `tools/oracle/src/output.mjs` | none in this harness | An output directory that is not the harness's own. | - | tools/oracle/tests/output_test.mjs |
-| 350 | `tools/oracle/src/pins.mjs` | none in this harness | A reference stack installed at a version nobody pinned. | - | tools/oracle/tests/pins_test.mjs |
-| 351 | `tools/oracle/src/sidecar.mjs` | none in this harness | A sidecar the comparator cannot read. | - | tools/oracle/tests/sidecar_test.mjs |
-| 352 | `tools/oracle/check_sidecars.py` | none in this harness | A cross-read mismatch reported without redacting a real row's values, and a sidecar pydicom and the reference disagree about. | - | tools/oracle/check_sidecars.py --self-test, run by tools/oracle/run.mjs under both interpreters |
-| 353 | `tools/oracle/src/faults.mjs` | none in this harness | A fault name nothing declares, and a filter that selected nothing reading as success. | - | tools/oracle/tests/faults.mjs |
-| 354 | `tools/bench/src/registry.mjs` | none in this harness | A registry entry with no subject story, a duplicate subject, and a runner for a subject whose story has not landed. | - | tools/bench/tests/registry_test.mjs (run by the `bench` gate) |
-| 355 | `tools/bench/src/record.mjs` | none in this harness | A record written against a host class it was not measured on, and a malformed baseline. | - | tools/bench/tests/record_test.mjs; tools/bench/tests/hostclass_test.mjs |
-| 356 | `tools/bench/src/state.mjs` | none in this harness | A run state the harness cannot resume from. | - | tools/bench/tests/state_test.mjs |
-| 357 | `tools/bench/run.mjs` | none in this harness | An argument the harness does not accept, and a runner for a subject whose story is not done. | - | tools/bench/tests/run_test.mjs (run by the `bench` gate) |
-| 358 | `tools/bench/src/runners/wasm_cold_start.mjs` | none in this harness | A cold-start measurement taken against a stub, an incomplete artefact copy, and a page that never reported. | - | tools/bench/tests/cold_start_test.mjs |
-| 359 | `tools/bench/page/app.mjs` | none in this harness | A page serving an incomplete copy of the wasm artefact, and a mark count that does not match the phase list. | - | tools/bench/tests/cold_start_test.mjs |
-| 360 | `scripts/panic_probe.mjs` | none in this harness | A run that measured the probe's stub rather than the module. | - | bin/ocelli.sh gate panic, which builds a second module carrying the panic-probe feature and runs this file on every floor gate |
+| 183 | `scripts/verify_ledger.py` | `ledger.comparison-semantic-resolved-input-alias`, level 3 | must refuse, output carries `directories are equal` | floor | `bin/ocelli.sh gate guards` |
+| 184 | `scripts/verify_ledger.py` | `ledger.comparison-semantic-mono-not-monochrome`, level 3 | must refuse, output carries `is not monochrome` | floor | `bin/ocelli.sh gate guards` |
+| 185 | `scripts/verify_ledger.py` | `ledger.comparison-semantic-class-two-pass`, level 3 | must refuse, output carries `pass record 'probe-view' is inconsistent` | floor | `bin/ocelli.sh gate guards` |
+| 186 | `scripts/verify_ledger.py` | `ledger.comparison-semantic-weak-with-decimated-rung`, level 3 | must refuse, output carries `has the wrong rung` | floor | `bin/ocelli.sh gate guards` |
+| 187 | `scripts/verify_ledger.py` | `ledger.comparison-semantic-mono-with-class-two-rung`, level 3 | must refuse, output carries `contradicts its class` | floor | `bin/ocelli.sh gate guards` |
+| 188 | `scripts/verify_ledger.py` | `ledger.comparison-semantic-maximum-contradicts-counts`, level 3 | must refuse, output carries `maximum contradicts counts` | floor | `bin/ocelli.sh gate guards` |
+| 189 | `scripts/verify_ledger.py` | `ledger.comparison-semantic-percentile-contradicts-counts`, level 3 | must refuse, output carries `percentile contradicts counts` | floor | `bin/ocelli.sh gate guards` |
+| 190 | `scripts/verify_ledger.py` | `ledger.comparison-semantic-signed-mean-exceeds-maximum`, level 3 | must refuse, output carries `signed mean exceeds its maximum` | floor | `bin/ocelli.sh gate guards` |
+| 191 | `scripts/verify_ledger.py` | `ledger.comparison-semantic-predicate-contradicts-statistics`, level 3 | must refuse, output carries `predicate contradicts statistics` | floor | `bin/ocelli.sh gate guards` |
+| 192 | `scripts/verify_ledger.py` | `ledger.comparison-semantic-bias-contradicts-statistics`, level 3 | must refuse, output carries `bias verdict contradicts statistics` | floor | `bin/ocelli.sh gate guards` |
+| 193 | `scripts/verify_ledger.py` | `ledger.comparison-semantic-count-exceeds-producer-limit`, level 3 | must refuse, output carries `invalid record 'probe-view' statistics.full[0].pixels` | floor | `bin/ocelli.sh gate guards` |
+| 194 | `scripts/verify_ledger.py` | `ledger.comparison-duplicate-top-level-key`, level 3 | must refuse, output carries `duplicate JSON key 'fail'` | floor | `bin/ocelli.sh gate guards` |
+| 195 | `scripts/verify_ledger.py` | `ledger.comparison-duplicate-nested-key`, level 3 | must refuse, output carries `duplicate JSON key 'id'` | floor | `bin/ocelli.sh gate guards` |
+| 196 | `scripts/verify_ledger.py` | `ledger.comparison-nonfinite-number`, level 3 | must refuse, output carries `non-finite JSON number NaN` | floor | `bin/ocelli.sh gate guards` |
+| 197 | `scripts/verify_ledger.py` | `ledger.require-comparison`, level 3 | must refuse, output carries `comparison evidence is required` | floor | `bin/ocelli.sh gate guards` |
+| 198 | `scripts/verify_ledger.py` | `ledger.trailer-silent`, level 3 | must refuse, output is SILENT | floor | `bin/ocelli.sh gate guards` |
+| 199 | `scripts/verify_ledger.py` | `ledger.no-trailer`, level 3 | must refuse, output carries `carries no Ocelli-Verify trailer` | floor | `bin/ocelli.sh gate guards` |
+| 200 | `scripts/verify_ledger.py` | `ledger.tree-mismatch`, level 3 | must refuse, output carries `but the commit's tree is` | floor | `bin/ocelli.sh gate guards` |
+| 201 | `scripts/verify_ledger.py` | `ledger.commit-require-comparison`, level 3 | must refuse, output carries `comparison evidence is required` | floor | `bin/ocelli.sh gate guards` |
+| 202 | `.githooks/pre-commit` | `hooks.pre-commit.dicom`, level 3 | must refuse, output carries `Commit refused` | floor | `bin/ocelli.sh gate guards` |
+| 203 | `.githooks/commit-msg` | `hooks.commit-msg.forged-trailer`, level 3 | must refuse, output carries `written by this hook from the verify ledger` | floor | `bin/ocelli.sh gate guards` |
+| 204 | `.githooks/commit-msg` | `hooks.commit-msg.agent-coauthor`, level 3 | must refuse, output carries `no agent co-author trailer` | floor | `bin/ocelli.sh gate guards` |
+| 205 | `.githooks/commit-msg` | `hooks.commit-msg.prose`, level 3 | must refuse, output carries `semicolon in prose` | floor | `bin/ocelli.sh gate guards` |
+| 206 | `.githooks/pre-push` | `hooks.pre-push.unverified`, level 3 | must refuse, output carries `Push refused` | floor | `bin/ocelli.sh gate guards` |
+| 207 | `ci/check-bindgen-isolation.sh` | `bindgen.reaches`, level 3 | must refuse, output carries `reaches wasm-bindgen` | deep | `bin/ocelli.sh gate guards-deep` |
+| 208 | `ci/check-bindgen-isolation.sh` | `bindgen.declares`, level 3 | must refuse, output carries `declares wasm-bindgen as a direct dependency` | deep | `bin/ocelli.sh gate guards-deep` |
+| 209 | `ci/check-bindgen-isolation.sh` | `bindgen.in-source`, level 3 | must refuse, output carries `names wasm_bindgen in source` | deep | `bin/ocelli.sh gate guards-deep` |
+| 210 | `ci/check-device-ownership.sh` | `device.creator`, level 3 | must refuse, output carries `creates a GPU device or surface` | floor | `bin/ocelli.sh gate guards` |
+| 211 | `ci/check-device-ownership.sh` | `device.contract-gone`, level 3 | must refuse, output carries `no longer defines GpuContext` | floor | `bin/ocelli.sh gate guards` |
+| 212 | `ci/check-device-ownership.sh` | `device.owned-accessor`, level 3 | must refuse, output carries `hands out an owned device` | floor | `bin/ocelli.sh gate guards` |
+| 213 | `ci/check-device-ownership.sh` | `device.derives-clone`, level 3 | must refuse, output carries `derives Clone` | floor | `bin/ocelli.sh gate guards` |
+| 214 | `scripts/backlog_check.py` | `backlog.done-without-record`, level 3 | must refuse, output carries `is done with no SPRINT_TRACKER.md row` | floor | `bin/ocelli.sh gate guards` |
+| 215 | `scripts/backlog_check.py` | `backlog.bad-status`, level 3 | must refuse, output carries `expected one of` | floor | `bin/ocelli.sh gate guards` |
+| 216 | `scripts/backlog_check.py` | `backlog.hook-out-of-phase`, level 3 | must refuse, output carries `not P1` | floor | `bin/ocelli.sh gate guards` |
+| 217 | `scripts/gen_sprint_plan.py` | `sprint-plan.existing-refuses-write`, level 3 | must refuse, output carries `refuses to overwrite` | floor | `bin/ocelli.sh gate guards` |
+| 218 | `scripts/gen_sprint_plan.py` | `sprint-plan.two-sprint-tables`, level 3 | must refuse, output carries `SPRINT_PLAN.md sprint tables` | floor | `bin/ocelli.sh gate guards` |
+| 219 | `scripts/gen_sprint_plan.py` | `sprint-plan.milestone-summary-absent`, level 3 | must refuse, output carries `carries no summary line for it` | floor | `bin/ocelli.sh gate guards` |
+| 220 | `scripts/gen_sprint_plan.py` | `sprint-plan.milestone-summary-spurious`, level 3 | must refuse, output carries `has no milestone spanning those sprints` | floor | `bin/ocelli.sh gate guards` |
+| 221 | `scripts/gen_sprint_plan.py` | `sprint-plan.two-goal-lines`, level 3 | must refuse, output carries `**Goal** lines` | floor | `bin/ocelli.sh gate guards` |
+| 222 | `scripts/gen_sprint_plan.py` | `sprint-plan.absent`, level 3 | must refuse, output carries `does not exist` | floor | `bin/ocelli.sh gate guards` |
+| 223 | `scripts/gen_sprint_plan.py` | `sprint-plan.wrong-sprint`, level 3 | must refuse, output carries `is in sprint` | floor | `bin/ocelli.sh gate guards` |
+| 224 | `scripts/gen_sprint_plan.py` | `sprint-plan.wrong-estimate`, level 3 | must refuse, output carries `is estimated` | floor | `bin/ocelli.sh gate guards` |
+| 225 | `scripts/gen_sprint_plan.py` | `sprint-plan.wrong-milestone-summary`, level 3 | must refuse, output carries `milestone summary line` | floor | `bin/ocelli.sh gate guards` |
+| 226 | `scripts/gen_sprint_plan.py` | `sprint-plan.stale-goal-line`, level 3 | must refuse, output carries `**Goal** line` | floor | `bin/ocelli.sh gate guards` |
+| 227 | `scripts/sync_agent_skills.py` | `skills.stale-adapter`, level 3 | must refuse, output carries `is stale, its source changed` | floor | `bin/ocelli.sh gate guards` |
+| 228 | `scripts/skill_examples_check.py` | `skill-examples.changed-expected-digit`, level 3 | must refuse, output carries `stdout differs` | floor | `bin/ocelli.sh gate guards` |
+| 229 | `scripts/skill_examples_check.py` | `skill-examples.reversed-sigmoid-exponent`, level 3 | must refuse, output carries `stdout differs` | floor | `bin/ocelli.sh gate guards` |
+| 230 | `scripts/skill_examples_check.py` | `skill-examples.reversed-sigmoid-width-precondition`, level 3 | must refuse, output carries `exited 1` | floor | `bin/ocelli.sh gate guards` |
+| 231 | `scripts/sprint_workflow.py` | `handoff.wrong-branch`, level 3 | must refuse, output carries `does not start with` | floor | `bin/ocelli.sh gate guards` |
+| 232 | `scripts/sprint_workflow.py` | `handoff.backticked-branch`, level 3 | must ACCEPT, output carries `validates` | floor | `bin/ocelli.sh gate guards` |
+| 233 | `scripts/sprint_workflow.py` | `handoff.missing-files-touched`, level 3 | must refuse, output carries `handoff has no **Files touched** field` | floor | `bin/ocelli.sh gate guards` |
+| 234 | `scripts/sprint_workflow.py` | `handoff.multiple-code-spans`, level 3 | must refuse, output carries `**Branch** value must be non-empty plain text or exactly one Markdown code span` | floor | `bin/ocelli.sh gate guards` |
+| 235 | `scripts/sprint_workflow.py` | `handoff.unmatched-code-span`, level 3 | must refuse, output carries `**Files touched** value must be non-empty plain text or exactly one Markdown code span` | floor | `bin/ocelli.sh gate guards` |
+| 236 | `scripts/sprint_workflow.py` | `handoff.embedded-code-span`, level 3 | must refuse, output carries `**Head** value must be non-empty plain text or exactly one Markdown code span` | floor | `bin/ocelli.sh gate guards` |
+| 237 | `scripts/sprint_workflow.py` | `handoff.empty-code-span`, level 3 | must refuse, output carries `**Review** value must be non-empty plain text or exactly one Markdown code span` | floor | `bin/ocelli.sh gate guards` |
+| 238 | `scripts/sprint_workflow.py` | `handoff.forged-suffix`, level 3 | must refuse, output carries `**Base** value must be non-empty plain text or exactly one Markdown code span` | floor | `bin/ocelli.sh gate guards` |
+| 239 | `scripts/sprint_workflow.py` | `handoff.duplicate-head`, level 3 | must refuse, output carries `handoff has duplicate **Head** fields` | floor | `bin/ocelli.sh gate guards` |
+| 240 | `scripts/sprint_workflow.py` | `sprint-lifecycle.not-in-sprint`, level 3 | must refuse, output carries `is not in sprint` | floor | `bin/ocelli.sh gate guards` |
+| 241 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-legacy-state`, level 3 | must refuse, output carries `no sprint-scope review recorded` | floor | `bin/ocelli.sh gate guards` |
+| 242 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-dirty-review`, level 3 | must refuse, output carries `latest sprint review pass 2 reports 1 defects and 0 smells` | floor | `bin/ocelli.sh gate guards` |
+| 243 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-stale-review`, level 3 | must refuse, output carries `latest sprint review tree 000000000000 is stale` | floor | `bin/ocelli.sh gate guards` |
+| 244 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-stale-verification`, level 3 | must refuse, output carries `latest sprint-profile verification tree 000000000000 is stale` | floor | `bin/ocelli.sh gate guards` |
+| 245 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-latest-verification-failed`, level 3 | must refuse, output carries `latest sprint-profile verification did not pass` | floor | `bin/ocelli.sh gate guards` |
+| 246 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-tree-changed`, level 3 | must refuse, output carries `latest sprint review tree` | floor | `bin/ocelli.sh gate guards` |
+| 247 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-unrecorded-carry`, level 3 | must refuse, output carries `is carried but has no recorded carry-forward reason` | floor | `bin/ocelli.sh gate guards` |
+| 248 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-recorded-carry`, level 3 | must ACCEPT, output carries `is ready to close` | floor | `bin/ocelli.sh gate guards` |
+| 249 | `scripts/sprint_workflow.py` | `sprint-lifecycle.close-current-evidence`, level 3 | must ACCEPT, output carries `is ready to close` | floor | `bin/ocelli.sh gate guards` |
+| 250 | `scripts/error_code_check.py` | `errors.renumbered`, level 3 | must refuse, output carries `so this is a renumbering` | floor | `bin/ocelli.sh gate guards` |
+| 251 | `scripts/bench_check.py` | none in this harness | A benchmark registry whose subject stories do not resolve, a subject whose story has not landed carrying a runner or a recorded number, and a playwright pin that has drifted between the two harnesses. | - | scripts/tests/test_bench_check.py (25 cases, run by the `bench` gate, which is in the floor) |
+| 252 | `scripts/quirk_check.py` | `quirks.missing-authority`, level 3 | must refuse, output carries `missing expectation authority` | floor | `bin/ocelli.sh gate guards` |
+| 253 | `scripts/quirk_check.py` | `quirks.ocelli-derived-expectation`, level 3 | must refuse, output carries `expectation authority kind 'ocelli-output' is not independent` | floor | `bin/ocelli.sh gate guards` |
+| 254 | `scripts/quirk_check.py` | `quirks.absent-manifest-row`, level 3 | must refuse, output carries `needs exactly one manifest row` | floor | `bin/ocelli.sh gate guards` |
+| 255 | `scripts/quirk_check.py` | `quirks.missing-mutation-evidence`, level 3 | must refuse, output carries `mutation evidence must be a non-empty array` | floor | `bin/ocelli.sh gate guards` |
+| 256 | `scripts/quirk_check.py` | `quirks.missing-voi-function-mutation`, level 3 | must refuse, output carries `required mutation generator-voi-function is missing` | floor | `bin/ocelli.sh gate guards` |
+| 257 | `scripts/quirk_check.py` | `quirks.missing-window-width-mutation`, level 3 | must refuse, output carries `required mutation generator-window-width is missing` | floor | `bin/ocelli.sh gate guards` |
+| 258 | `scripts/quirk_check.py` | `quirks.missing-attribution-mutation`, level 3 | must refuse, output carries `required mutation disable-reference-attribution is missing` | floor | `bin/ocelli.sh gate guards` |
+| 259 | `scripts/quirk_check.py` | `quirks.tracked-generated-dicom`, level 3 | must refuse, output carries `generated path is a tracked DICOM` | floor | `bin/ocelli.sh gate guards` |
+| 260 | `scripts/quirk_mutation_boundaries.py` | none in this harness | A generated SIGMOID quirk case whose function or width no longer matches the independently declared boundary. | - | scripts/tests/test_quirk_mutations.py opens and checks the named boundary, and `bin/ocelli.sh gate quirk-mutations` executes it green then under both checker-owned generator mutations |
+| 261 | `scripts/quirk_mutations.py` | none in this harness | Mutation evidence whose healthy control is red, whose fixed edit stays green, whose failure has the wrong signature, or whose registry row, kind, signature or replacement differs from the executable contract, including a fixture symbol with no live mutation target or a regression row that differs from the executable attribution mutation. | - | scripts/tests/test_quirk_mutations.py (9 cases, run by the `quirks` gate), plus the three live mutations run by the `quirk-mutations` gate |
+| 262 | `scripts/corpus_check.py` | `corpus.digest-mismatch`, level 3 | must refuse, output carries `does not match its manifest digest` | floor | `bin/ocelli.sh gate guards` |
+| 263 | `scripts/corpus_check.py` | `corpus.absent`, level 3 | must refuse, output carries `corpus cases are absent` | floor | `bin/ocelli.sh gate guards` |
+| 264 | `scripts/corpus_check.py` | `corpus.unrecorded-licence`, level 3 | must refuse, output carries `cannot be redistributed or cited` | floor | `bin/ocelli.sh gate guards` |
+| 265 | `scripts/corpus_tests.py` | `corpus-tests.skip-is-not-a-pass`, level 3 | must refuse, output carries `FAIL: a prerequisite` | floor | `bin/ocelli.sh gate guards` |
+| 266 | `scripts/corpus_synth.py` | none in this harness | A manifest whose header is not the recorded column set. | - | scripts/tests/test_corpus_synth.py (run by the `corpus-tests` gate) |
+| 267 | `scripts/target_feature_check.py` | `target-features.cannot-run`, level 3 | must refuse, output carries `could not run` | deep | `bin/ocelli.sh gate guards-deep` |
+| 268 | `scripts/package_check.py` | `packages.exports-not-in-tarball`, level 1 | must refuse, output carries `advertises` | floor | `bin/ocelli.sh gate guards` |
+| 269 | `scripts/package_check.py` | `packages.version-skew`, level 1 | must refuse, output carries `the Rust workspace is` | floor | `bin/ocelli.sh gate guards` |
+| 270 | `bin/ocelli.sh` | `runner.absent-prerequisite`, level 3 | must refuse, output carries `reference stack is not installed` | floor | `bin/ocelli.sh gate guards` |
+| 271 | `scripts/source_dir.py` | `source-dir.unconfigured`, level 3 | must refuse, output carries `are not configured` | floor | `bin/ocelli.sh gate guards` |
+| 272 | `scripts/split_hld.py` | `split-hld.cannot-run`, level 3 | must refuse, output carries `A check that cannot run is NOT a check that` | floor | `bin/ocelli.sh gate guards` |
+| 273 | `scripts/lint_policy_check.py` | `lint-policy.weakened`, level 3 | must refuse, output carries `is 'allow' and HLD 27.1 requires` | deep | `bin/ocelli.sh gate guards-deep` |
+| 274 | `scripts/lint_policy_check.py` | `lint-policy.uninherited`, level 3 | must refuse, output carries `does not inherit the workspace lint table` | deep | `bin/ocelli.sh gate guards-deep` |
+| 275 | `scripts/lint_policy_check.py` | `lint-policy.group-allow`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
+| 276 | `scripts/lint_policy_check.py` | `lint-policy.expect-attribute`, level 3 | must refuse, output carries `re-allows` | deep | `bin/ocelli.sh gate guards-deep` |
+| 277 | `scripts/lint_policy_check.py` | `lint-policy.manifest-not-utf8`, level 3 | must refuse, output carries `cannot be read as UTF-8 text` | floor | `bin/ocelli.sh gate guards` |
+| 278 | `scripts/lint_policy_check.py` | `lint-policy.nothing-scanned`, level 3 | must refuse, output carries `not one `.rs` file was read` | deep | `bin/ocelli.sh gate guards-deep` |
+| 279 | `scripts/lint_policy_check.py` | `lint-policy.allow-outside-the-crate-root`, level 3 | must refuse, output carries `re-allows `cast_possible_truncation`` | deep | `bin/ocelli.sh gate guards-deep` |
+| 280 | `scripts/lint_policy_check.py` | `lint-policy.item-allow-is-permitted`, level 3 | must ACCEPT, output carries `carry no inner allow or expect of a denied lint` | deep | `bin/ocelli.sh gate guards-deep` |
+| 281 | `scripts/lint_policy_check.py` | `lint-policy.outer-allow-on-a-module`, level 3 | must refuse, output carries `an outer attribute on a `mod` item covers the whole module tree` | deep | `bin/ocelli.sh gate guards-deep` |
+| 282 | `scripts/lint_policy_check.py` | `lint-policy.whitespace-in-the-lint-path`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
+| 283 | `scripts/lint_policy_check.py` | `lint-policy.member-outside-crates-uninherited`, level 3 | must refuse, output carries `does not inherit the workspace lint table` | deep | `bin/ocelli.sh gate guards-deep` |
+| 284 | `scripts/lint_policy_check.py` | `lint-policy.member-outside-crates-group-allow`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
+| 285 | `scripts/lint_policy_check.py` | `lint-policy.member-unresolvable`, level 3 | must refuse, output carries `resolves to no directory carrying a Cargo.toml` | deep | `bin/ocelli.sh gate guards-deep` |
+| 286 | `scripts/lint_policy_check.py` | `lint-policy.no-members-declared`, level 3 | must refuse, output carries `declares no `members` this parser can read` | deep | `bin/ocelli.sh gate guards-deep` |
+| 287 | `scripts/lint_policy_check.py` | `lint-policy.group-row-in-the-workspace-table`, level 3 | must refuse, output carries `carries the lint GROUP` | deep | `bin/ocelli.sh gate guards-deep` |
+| 288 | `scripts/lint_policy_check.py` | `lint-policy.group-row-with-a-trailing-comment`, level 3 | must refuse, output carries `carries the lint GROUP` | deep | `bin/ocelli.sh gate guards-deep` |
+| 289 | `scripts/lint_policy_check.py` | `lint-policy.quoted-group-row`, level 3 | must refuse, output carries `carries the lint GROUP` | deep | `bin/ocelli.sh gate guards-deep` |
+| 290 | `scripts/lint_policy_check.py` | `lint-policy.two-line-group-row`, level 3 | must refuse, output carries `cannot be parsed as TOML` | deep | `bin/ocelli.sh gate guards-deep` |
+| 291 | `scripts/lint_policy_check.py` | `lint-policy.unparseable-member-manifest`, level 3 | must refuse, output carries `is a workspace member cargo reports and its Cargo.toml cannot be parsed as TOML` | deep | `bin/ocelli.sh gate guards-deep` |
+| 292 | `scripts/lint_policy_check.py` | `lint-policy.quoted-required-row-is-permitted`, level 3 | must ACCEPT, output carries `clippy lint(s) at or above HLD 27.1's level` | deep | `bin/ocelli.sh gate guards-deep` |
+| 293 | `scripts/lint_policy_check.py` | `lint-policy.dotted-required-row-is-permitted`, level 3 | must ACCEPT, output carries `clippy lint(s) at or above HLD 27.1's level` | deep | `bin/ocelli.sh gate guards-deep` |
+| 294 | `scripts/lint_policy_check.py` | `lint-policy.commented-required-row-is-permitted`, level 3 | must ACCEPT, output carries `clippy lint(s) at or above HLD 27.1's level` | deep | `bin/ocelli.sh gate guards-deep` |
+| 295 | `scripts/lint_policy_check.py` | `lint-policy.excluded-named-member`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
+| 296 | `scripts/lint_policy_check.py` | `lint-policy.comment-in-the-lint-path`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
+| 297 | `scripts/lint_policy_check.py` | `lint-policy.unreadable-lint-argument`, level 3 | must refuse, output carries `could not read to its end` | deep | `bin/ocelli.sh gate guards-deep` |
+| 298 | `scripts/lint_policy_check.py` | `lint-policy.rustflags-allow`, level 3 | must refuse, output carries `in `rustflags`` | deep | `bin/ocelli.sh gate guards-deep` |
+| 299 | `scripts/lint_policy_check.py` | `lint-policy.cargo-config-is-permitted`, level 3 | must ACCEPT, output carries `cargo config(s) lower no denied lint through rustflags` | deep | `bin/ocelli.sh gate guards-deep` |
+| 300 | `scripts/lint_policy_check.py` | `lint-policy.path-dependency-member`, level 3 | must refuse, output carries `does not inherit the workspace lint table` | deep | `bin/ocelli.sh gate guards-deep` |
+| 301 | `scripts/lint_policy_check.py` | `lint-policy.module-outside-the-member`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
+| 302 | `scripts/lint_policy_check.py` | `lint-policy.clean-module-outside-the-member`, level 3 | must ACCEPT, output carries `1 `#[path]` module(s) followed` | deep | `bin/ocelli.sh gate guards-deep` |
+| 303 | `scripts/lint_policy_check.py` | `lint-policy.cfg-attr-module-path`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
+| 304 | `scripts/lint_policy_check.py` | `lint-policy.raw-string-module-path`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
+| 305 | `scripts/lint_policy_check.py` | `lint-policy.clean-cfg-attr-module-path`, level 3 | must ACCEPT, output carries `1 `#[path]` module(s) followed` | deep | `bin/ocelli.sh gate guards-deep` |
+| 306 | `scripts/lint_policy_check.py` | `lint-policy.required-row-with-a-tail`, level 3 | must refuse, output carries `cannot be parsed as TOML` | deep | `bin/ocelli.sh gate guards-deep` |
+| 307 | `scripts/lint_policy_check.py` | `lint-policy.crate-root-outside-the-member`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
+| 308 | `scripts/lint_policy_check.py` | `lint-policy.clean-crate-root-outside-the-member`, level 3 | must ACCEPT, output carries `cargo target root(s) seeded` | deep | `bin/ocelli.sh gate guards-deep` |
+| 309 | `scripts/lint_policy_check.py` | `lint-policy.unreadable-crate-root`, level 3 | must refuse, output carries `as a compilation root of the workspace member` | deep | `bin/ocelli.sh gate guards-deep` |
+| 310 | `scripts/lint_policy_check.py` | `lint-policy.cap-lints-allow`, level 3 | must refuse, output carries `caps EVERY lint` | deep | `bin/ocelli.sh gate guards-deep` |
+| 311 | `scripts/lint_policy_check.py` | `lint-policy.cap-lints-warn`, level 3 | must refuse, output carries `caps EVERY lint` | deep | `bin/ocelli.sh gate guards-deep` |
+| 312 | `scripts/lint_policy_check.py` | `lint-policy.cap-lints-deny-is-permitted`, level 3 | must ACCEPT, output carries `cargo config(s) lower no denied lint through rustflags` | deep | `bin/ocelli.sh gate guards-deep` |
+| 313 | `scripts/lint_policy_check.py` | `lint-policy.force-warn-a-denied-lint`, level 3 | must refuse, output carries `in `rustflags`` | deep | `bin/ocelli.sh gate guards-deep` |
+| 314 | `scripts/lint_policy_check.py` | `lint-policy.deny-a-group-is-permitted`, level 3 | must ACCEPT, output carries `cargo config(s) lower no denied lint through rustflags` | deep | `bin/ocelli.sh gate guards-deep` |
+| 315 | `scripts/lint_policy_check.py` | `lint-policy.empty-rustflags-is-permitted`, level 3 | must ACCEPT, output carries `cargo config(s) lower no denied lint through rustflags` | deep | `bin/ocelli.sh gate guards-deep` |
+| 316 | `scripts/lint_policy_check.py` | `lint-policy.dotted-lints-inheritance-is-permitted`, level 3 | must ACCEPT, output carries `workspace member(s) from` | deep | `bin/ocelli.sh gate guards-deep` |
+| 317 | `scripts/lint_policy_check.py` | `lint-policy.include-macro`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
+| 318 | `scripts/lint_policy_check.py` | `lint-policy.clean-include-macro`, level 3 | must ACCEPT, output carries `1 `include!`(s) followed` | deep | `bin/ocelli.sh gate guards-deep` |
+| 319 | `scripts/lint_policy_check.py` | `lint-policy.unresolvable-include-macro`, level 3 | must refuse, output carries `did not read the source it pastes in` | deep | `bin/ocelli.sh gate guards-deep` |
+| 320 | `scripts/lint_policy_check.py` | `lint-policy.computed-include-macro`, level 3 | must refuse, output carries `could not read a file name out of it` | deep | `bin/ocelli.sh gate guards-deep` |
+| 321 | `scripts/lint_policy_check.py` | `lint-policy.unreadable-member-source`, level 3 | must refuse, output carries `is reached by this check's walk of the workspace member` | deep | `bin/ocelli.sh gate guards-deep` |
+| 322 | `scripts/lint_policy_check.py` | `lint-policy.dotted-rustflags-key`, level 3 | must refuse, output carries `in `rustflags`` | deep | `bin/ocelli.sh gate guards-deep` |
+| 323 | `scripts/lint_policy_check.py` | `lint-policy.quoted-rustflags-key`, level 3 | must refuse, output carries `in `rustflags`` | deep | `bin/ocelli.sh gate guards-deep` |
+| 324 | `scripts/lint_policy_check.py` | `lint-policy.cargo-config-unparseable`, level 3 | must refuse, output carries `does not parse as TOML` | deep | `bin/ocelli.sh gate guards-deep` |
+| 325 | `scripts/lint_policy_check.py` | `lint-policy.dotted-cargo-config-is-permitted`, level 3 | must ACCEPT, output carries `cargo config(s) lower no denied lint through rustflags` | deep | `bin/ocelli.sh gate guards-deep` |
+| 326 | `scripts/lint_policy_check.py` | `lint-policy.runner-not-utf8`, level 3 | must refuse, output carries `Whether the `unsafe` gate still runs` | deep | `bin/ocelli.sh gate guards-deep` |
+| 327 | `scripts/lint_policy_check.py` | `lint-policy.runner-arms-unreadable`, level 3 | must refuse, output carries `cannot be read for its gate arms` | deep | `bin/ocelli.sh gate guards-deep` |
+| 328 | `scripts/lint_policy_check.py` | `lint-policy.unsafe-gate-named-only-in-a-comment`, level 3 | must refuse, output carries `neither mechanism is present` | deep | `bin/ocelli.sh gate guards-deep` |
+| 329 | `scripts/guards/census.py` | `census.constants-count-shrunk`, level 3 | must refuse, output carries `Narrowing the declared-constant ratchet` | floor | `bin/ocelli.sh gate guards` |
+| 330 | `scripts/guards/census.py` | `census.impossible-wall-clock-pair`, level 3 | must refuse, output carries `cannot be the faster of the two` | floor | `bin/ocelli.sh gate guards` |
+| 331 | `scripts/guards/census.py` | `census.unclaimed-executable-hook`, level 3 | must refuse, output carries `is executable in a clone that opts in` | floor | `bin/ocelli.sh gate guards` |
+| 332 | `scripts/guards/census.py` | `census.oracle-runner-gone`, level 3 | must refuse, output carries `so the `oracle` gate has no runner` | floor | `bin/ocelli.sh gate guards` |
+| 333 | `scripts/guards/census.py` | `census.unrecognised-kind`, level 3 | must refuse, output carries `which is not one of` | floor | `bin/ocelli.sh gate guards` |
+| 334 | `scripts/guards/census.py` | `census.no-entry-site-count`, level 3 | must refuse, output carries `records no per-entry site count` | floor | `bin/ocelli.sh gate guards` |
+| 335 | `scripts/guards/census.py` | `census.refusal-in-a-claimed-file`, level 3 | must refuse, output carries `refusal site(s) to` | floor | `bin/ocelli.sh gate guards` |
+| 336 | `scripts/guards/census.py` | `census.unclaimed-site`, level 3 | must refuse, output carries `no catalogue entry claims` | floor | `bin/ocelli.sh gate guards` |
+| 337 | `scripts/guards/census.py` | `census.changed-constant`, level 3 | must refuse, output carries `changed without its recorded value` | floor | `bin/ocelli.sh gate guards` |
+| 338 | `scripts/guards/census.py` | `census.no-std-set-shrunk`, level 3 | must refuse, output carries `changed without its recorded value` | floor | `bin/ocelli.sh gate guards` |
+| 339 | `scripts/guards/census.py` | `census.uncovered-grew`, level 3 | must refuse, output carries `The ratchet may only decrease` | floor | `bin/ocelli.sh gate guards` |
+| 340 | `scripts/guards/census.py` | `census.no-ceiling`, level 3 | must refuse, output carries `records no uncovered ceiling` | floor | `bin/ocelli.sh gate guards` |
+| 341 | `scripts/guards/census.py` | `census.orphan-recorded-constant`, level 3 | must refuse, output carries `is not declared in the catalogue's CONSTANTS` | floor | `bin/ocelli.sh gate guards` |
+| 342 | `scripts/guards/census.py` | `census.gate-without-an-entry`, level 3 | must refuse, output carries `has no catalogue entry and no `delegated` reason` | floor | `bin/ocelli.sh gate guards` |
+| 343 | `scripts/guards/census.py` | `census.gate-name-with-a-digit`, level 3 | must refuse, output carries `has no catalogue entry and no `delegated` reason` | floor | `bin/ocelli.sh gate guards` |
+| 344 | `scripts/guards/census.py` | `census.floor-needing-a-gpu`, level 1 | must refuse, output carries `no GPU, no browser and no corpus` | floor | `bin/ocelli.sh gate guards` |
+| 345 | `scripts/guard_census.py` | `census-runbook.markers-gone`, level 3 | must refuse, output carries `carries no generated-table markers` | floor | `bin/ocelli.sh gate guards` |
+| 346 | `scripts/guard_probe.py` | `probe-runner.self-test`, level 3 | must ACCEPT, output carries `OK` | floor | `bin/ocelli.sh gate guards` |
+| 347 | `scripts/guard_probe.py` | `probe-runner.a-guard-that-refuses-nothing`, level 3 | must ACCEPT, output carries `did not fire, so it is a guard nobody has watched fail` | floor | `bin/ocelli.sh gate guards` |
+| 348 | `scripts/guards/sandbox.py` | none in this harness | A git call outside the sandbox, a git call in a directory this harness did not create, and the `rm --cached` and `checkout --` pair the runbook records as a false-green trap. | - | scripts/guard_probe.py --self-test; scripts/tests/test_guard_catalogue.py |
+| 349 | `scripts/guards/discover.py` | none in this harness | Nothing on its own. It is the scanner the census refuses from. | - | scripts/tests/test_guard_catalogue.py |
+| 350 | `scripts/guards/catalogue.py` | none in this harness | A probe builder that mutated nothing, and a fixture drawn from a citation that has gone away. | - | scripts/tests/test_guard_catalogue.py |
+| 351 | `tools/oracle/run.mjs` | none in this harness | A run that reached no row, a decode that produced nothing, a frame that never presented, a read-back still showing the sentinel, a volume that did not load, and the environment refusals that keep the rasteriser honest. | - | tools/oracle/src/faults.mjs (23 injected faults, replayed by tools/oracle/tests/faults.mjs on every `oracle` gate); tools/oracle/tests/args_test.mjs; tools/oracle/tests/paths_test.mjs; tools/oracle/tests/pins_test.mjs |
+| 352 | `tools/oracle/page/app.mjs` | none in this harness | A render that did not present, a read-back that is not comparable, and a frame the page cannot attribute. | - | tools/oracle/src/faults.mjs |
+| 353 | `tools/oracle/page/volume.mjs` | none in this harness | A volume that did not load, a geometry that is not a permutation of the declared one, and a reformat that never presented. | - | tools/oracle/src/faults.mjs |
+| 354 | `tools/oracle/src/volume.mjs` | none in this harness | A volume subject whose members disagree, a spacing or orientation that does not resolve, and a declared truth the reference does not reproduce. | - | tools/oracle/tests/volume_test.mjs (run inside `bin/ocelli.sh oracle`'s unit pass) |
+| 355 | `tools/oracle/src/manifest.mjs` | none in this harness | A manifest the reference half cannot read, and a row it cannot resolve to a case. | - | tools/oracle/tests/manifest_test.mjs |
+| 356 | `tools/oracle/src/geometry.mjs` | none in this harness | A geometry the reference cannot express, and one that does not round-trip. | - | tools/oracle/tests/geometry_test.mjs |
+| 357 | `tools/oracle/src/voi.mjs` | none in this harness | A VOI declaration the reference cannot apply, and a window the row does not carry. | - | tools/oracle/tests/params_test.mjs |
+| 358 | `tools/oracle/src/params.mjs` | none in this harness | A render parameter the page does not implement, and a parameter set that does not resolve for a row. | - | tools/oracle/tests/params_test.mjs |
+| 359 | `tools/oracle/src/unsupported.mjs` | none in this harness | A row declared unsupported that renders, and a row that fails without a declaration. | - | tools/oracle/tests/unsupported_test.mjs |
+| 360 | `tools/oracle/src/output.mjs` | none in this harness | An output directory that is not the harness's own. | - | tools/oracle/tests/output_test.mjs |
+| 361 | `tools/oracle/src/pins.mjs` | none in this harness | A reference stack installed at a version nobody pinned. | - | tools/oracle/tests/pins_test.mjs |
+| 362 | `tools/oracle/src/sidecar.mjs` | none in this harness | A sidecar the comparator cannot read. | - | tools/oracle/tests/sidecar_test.mjs |
+| 363 | `tools/oracle/check_sidecars.py` | none in this harness | A cross-read mismatch reported without redacting a real row's values, and a sidecar pydicom and the reference disagree about. | - | tools/oracle/check_sidecars.py --self-test, run by tools/oracle/run.mjs under both interpreters |
+| 364 | `tools/oracle/src/faults.mjs` | none in this harness | A fault name nothing declares, and a filter that selected nothing reading as success. | - | tools/oracle/tests/faults.mjs |
+| 365 | `tools/bench/src/registry.mjs` | none in this harness | A registry entry with no subject story, a duplicate subject, and a runner for a subject whose story has not landed. | - | tools/bench/tests/registry_test.mjs (run by the `bench` gate) |
+| 366 | `tools/bench/src/record.mjs` | none in this harness | A record written against a host class it was not measured on, and a malformed baseline. | - | tools/bench/tests/record_test.mjs; tools/bench/tests/hostclass_test.mjs |
+| 367 | `tools/bench/src/state.mjs` | none in this harness | A run state the harness cannot resume from. | - | tools/bench/tests/state_test.mjs |
+| 368 | `tools/bench/run.mjs` | none in this harness | An argument the harness does not accept, and a runner for a subject whose story is not done. | - | tools/bench/tests/run_test.mjs (run by the `bench` gate) |
+| 369 | `tools/bench/src/runners/wasm_cold_start.mjs` | none in this harness | A cold-start measurement taken against a stub, an incomplete artefact copy, and a page that never reported. | - | tools/bench/tests/cold_start_test.mjs |
+| 370 | `tools/bench/page/app.mjs` | none in this harness | A page serving an incomplete copy of the wasm artefact, and a mark count that does not match the phase list. | - | tools/bench/tests/cold_start_test.mjs |
+| 371 | `scripts/panic_probe.mjs` | none in this harness | A run that measured the probe's stub rather than the module. | - | bin/ocelli.sh gate panic, which builds a second module carrying the panic-probe feature and runs this file on every floor gate |
 
 Known defects this table names, in full:
 

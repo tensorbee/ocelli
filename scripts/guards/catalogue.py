@@ -858,88 +858,22 @@ def _ledger_absent_corpus(box: Sandbox) -> None:
     _ledger_record(box, "absent")
 
 
-def _green_comparison_document() -> dict:
-    channel = {
-        "pixels": 1,
-        "maxAbsDiff": 0,
-        "countAtZero": 1,
-        "countAtOne": 0,
-        "countAtTwo": 0,
-        "countOverTwo": 0,
-        "fractionWithinOneLsb": 1.0,
-        "differingFraction": 0.0,
-        "signedMeanDiff": 0.0,
-        "percentile999AbsDiff": 0,
-    }
-    record = {
-        "id": "probe-view",
-        "kind": "stack",
-        "toleranceClass": "mono16",
-        "outcome": "pass",
-        "qualifiers": [],
-        "attributedTo": "none",
-        "rung": "pixels",
-        "notes": [],
-        "parameterDivergences": [],
-        "geometryDivergences": [],
-        "referenceDivergenceEntry": None,
-        "renderHashes": {
-            "algorithm": "sha256-rgba8-v1",
-            "reference": "0" * 64,
-            "candidate": "0" * 64,
-        },
-        "monochromeFrame": True,
-        "statistics": {
-            "channels": 1,
-            "full": [dict(channel)],
-            "image": [dict(channel)],
-            "background": [],
-            "informative": [dict(channel)],
-            "rowsTouched": 0,
-            "columnsTouched": 0,
-            "imagePixels": 1,
-            "informativePixels": 1,
-            "informativeFraction": 1.0,
-            "predicatePasses": True,
-            "biasPasses": True,
-            "signedMeanDiff": 0.0,
-        },
-    }
-    return {
-        "story": "F-011, F-012, F-015",
-        "reference": "reference",
-        "candidate": "candidate",
-        "views": 1,
-        "operation": "gate",
-        "pass": 1,
-        "fail": 0,
-        "claimedVerdictViews": 1,
-        "gateVerdict": "pass",
-        "green": True,
-        "coverage": {
-            "unmeasured": 0,
-            "absent": 0,
-            "unsupportedSourceRows": 0,
-            "declaredVolumeRefusals": 0,
-        },
-        "unmeasured": 0,
-        "absent": 0,
-        "problems": [],
-        "coverageProblems": [],
-        "absorbedDivergences": [],
-        "qualifiers": {},
-        "renderHashes": {
-            "algorithm": "sha256-rgba8-v1",
-            "reference": "311c307457058b6cfefff79bdeb407dfb6056185b81937159771e4d998a9de3b",
-            "candidate": "311c307457058b6cfefff79bdeb407dfb6056185b81937159771e4d998a9de3b",
-        },
-        "records": [record],
-    }
+def green_comparison_document(box: Sandbox) -> dict:
+    """The serializer-owned green fixture with two real, distinct inputs."""
+    contract = json.loads(box.read("tools/oracle/report-contract.json"))
+    report = contract["greenReport"]
+    reference = ".claude/probe-reference"
+    candidate = ".claude/probe-candidate"
+    box.write(f"{reference}/.keep", "reference\n")
+    box.write(f"{candidate}/.keep", "candidate\n")
+    report["reference"] = reference
+    report["candidate"] = candidate
+    return report
 
 
 def _comparison_report(box: Sandbox, *, verdict: str = "pass",
                        claimed: int = 1, green: bool = True) -> None:
-    report = _green_comparison_document()
+    report = green_comparison_document(box)
     report["claimedVerdictViews"] = claimed
     report["gateVerdict"] = verdict
     report["green"] = green
@@ -1073,7 +1007,7 @@ def _coverage_count_probes() -> tuple[Probe, ...]:
 
 
 def _report_shape_mutation(box: Sandbox, variant: str) -> None:
-    report = _green_comparison_document()
+    report = green_comparison_document(box)
     record = report["records"][0]
     if variant == "records-missing":
         del report["records"]
@@ -1152,7 +1086,7 @@ def _report_shape_mutation(box: Sandbox, variant: str) -> None:
 
 
 def _duplicate_report_key(box: Sandbox, fragment: str) -> None:
-    report = json.dumps(_green_comparison_document())
+    report = json.dumps(green_comparison_document(box))
     box.write(
         ".claude/probe-comparison.json",
         report.replace(fragment, f"{fragment}, {fragment}", 1) + "\n",
@@ -1160,11 +1094,109 @@ def _duplicate_report_key(box: Sandbox, fragment: str) -> None:
 
 
 def _nonfinite_report_number(box: Sandbox) -> None:
-    report = json.dumps(_green_comparison_document())
+    report = json.dumps(green_comparison_document(box))
     box.write(
         ".claude/probe-comparison.json",
         report.replace('"signedMeanDiff": 0.0',
                        '"signedMeanDiff": NaN', 1) + "\n",
+    )
+
+
+def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
+    report = green_comparison_document(box)
+    record = report["records"][0]
+    statistics = record["statistics"]
+    regions = ("full", "image", "informative")
+    if variant == "resolved-input-alias":
+        report["candidate"] = "./.claude/probe-reference"
+    elif variant == "mono-not-monochrome":
+        record["monochromeFrame"] = False
+    elif variant == "class-two-pass":
+        record["toleranceClass"] = "colour-or-us"
+        statistics["channels"] = 3
+        for region in regions:
+            statistics[region] = [dict(statistics[region][0]) for _ in range(3)]
+    elif variant == "weak-with-decimated-rung":
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["weak"]
+        record["rung"] = "decimated"
+        record["notes"] = ["controlled impossible attribution"]
+    elif variant == "mono-with-class-two-rung":
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled impossible class"]
+    elif variant == "maximum-contradicts-counts":
+        statistics["full"][0]["maxAbsDiff"] = 255
+    elif variant == "percentile-contradicts-counts":
+        statistics["full"][0]["percentile999AbsDiff"] = 255
+    elif variant == "signed-mean-exceeds-maximum":
+        statistics["full"][0]["signedMeanDiff"] = 256.0
+    elif variant == "predicate-contradicts-statistics":
+        for region in regions:
+            channel = statistics[region][0]
+            channel.update({
+                "maxAbsDiff": 3,
+                "countAtZero": 0,
+                "countOverTwo": 1,
+                "fractionWithinOneLsb": 0.0,
+                "differingFraction": 1.0,
+                "signedMeanDiff": 3.0,
+                "percentile999AbsDiff": 3,
+            })
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 3.0
+    elif variant == "bias-contradicts-statistics":
+        for region in regions:
+            channel = statistics[region][0]
+            channel.update({
+                "maxAbsDiff": 1,
+                "countAtZero": 0,
+                "countAtOne": 1,
+                "fractionWithinOneLsb": 1.0,
+                "differingFraction": 1.0,
+                "signedMeanDiff": 1.0,
+                "percentile999AbsDiff": 1,
+            })
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 1.0
+    elif variant == "count-exceeds-producer-limit":
+        too_many = 1 << 32
+        for region in regions:
+            channel = statistics[region][0]
+            channel["pixels"] = too_many
+            channel["countAtZero"] = too_many
+        statistics["imagePixels"] = too_many
+        statistics["informativePixels"] = too_many
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _report_semantic_probes() -> tuple[Probe, ...]:
+    cases = (
+        ("resolved-input-alias", "directories are equal"),
+        ("mono-not-monochrome", "is not monochrome"),
+        ("class-two-pass", "pass record 'probe-view' is inconsistent"),
+        ("weak-with-decimated-rung", "has the wrong rung"),
+        ("mono-with-class-two-rung", "contradicts its class"),
+        ("maximum-contradicts-counts", "maximum contradicts counts"),
+        ("percentile-contradicts-counts", "percentile contradicts counts"),
+        ("signed-mean-exceeds-maximum", "signed mean exceeds its maximum"),
+        ("predicate-contradicts-statistics", "predicate contradicts statistics"),
+        ("bias-contradicts-statistics", "bias verdict contradicts statistics"),
+        ("count-exceeds-producer-limit", "invalid record 'probe-view' statistics.full[0].pixels"),
+    )
+    invoke = script("python3", "scripts/verify_ledger.py", "record",
+                    "--comparison-report", ".claude/probe-comparison.json")
+    return tuple(
+        Probe(
+            f"ledger.comparison-semantic-{variant}",
+            lambda box, variant=variant: _report_semantic_mutation(box, variant),
+            invoke,
+            expected,
+        )
+        for variant, expected in cases
     )
 
 
@@ -6909,8 +6941,11 @@ GUARDS: tuple[Guard, ...] = (
                 "contradictory unmeasured counts, any object outside the "
                 "serializer's closed schema, duplicate JSON keys or record "
                 "identifiers, a summary or aggregate hash that disagrees "
-                "with the records, zero judged views, and a required "
-                "comparison record that is absent.",
+                "with the records, canonically identical input directories, "
+                "impossible green attribution states, statistics that "
+                "contradict their histograms or tolerance verdicts, zero "
+                "judged views, and a required comparison record that is "
+                "absent.",
         claims=(r"no verification recorded", r"the corpus is RED",
                 r"corpus is ' ' for tree", r"--corpus must be one of",
                 r"comparison report", r"non-finite JSON number",
@@ -7002,6 +7037,7 @@ GUARDS: tuple[Guard, ...] = (
                          ".claude/probe-comparison.json"),
                   "comparison report unmeasured count disagrees with coverage"),
             *_report_shape_probes(),
+            *_report_semantic_probes(),
             Probe("ledger.comparison-duplicate-top-level-key",
                   lambda box: _duplicate_report_key(box, '"fail": 0'),
                   script("python3", "scripts/verify_ledger.py", "record",

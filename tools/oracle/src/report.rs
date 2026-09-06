@@ -691,9 +691,17 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{Census, Outcome, Qualifier, RunReport, Side, ViewRecord};
+    use super::{
+        Census, ChannelReport, Outcome, ParameterDivergence, Qualifier, RunReport, Side,
+        ViewRecord, ViewStatistics,
+    };
+    use crate::geometry::Divergence;
+    use crate::render_hash::{ALGORITHM as RENDER_HASH_ALGORITHM, RUN_ALGORITHM};
     use crate::sidecar::ViewKind;
-    use crate::tolerance::ToleranceClass;
+    use crate::tolerance::{
+        INFORMATIVE_FRACTION_FLOOR, MONOCHROME_MAX_ABS_DIFF, MONOCHROME_SIGNED_MEAN_BIAS,
+        MONOCHROME_WITHIN_ONE_LSB_FRACTION, ToleranceClass,
+    };
 
     fn record(id: &str, outcome: Outcome, qualifiers: &[Qualifier]) -> ViewRecord {
         ViewRecord {
@@ -715,6 +723,228 @@ mod tests {
             monochrome_frame: true,
             photometric_interpretation: Some("MONOCHROME2".to_owned()),
         }
+    }
+
+    fn zero_channel() -> ChannelReport {
+        ChannelReport {
+            pixels: 1,
+            max_abs_diff: 0,
+            count_at_zero: 1,
+            count_at_one: 0,
+            count_at_two: 0,
+            count_over_two: 0,
+            fraction_within_one_lsb: 1.0,
+            differing_fraction: 0.0,
+            signed_mean_diff: 0.0,
+            percentile_999_abs_diff: 0,
+        }
+    }
+
+    fn object_keys(value: &serde_json::Value) -> BTreeSet<String> {
+        value
+            .as_object()
+            .map(|object| object.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    fn object_keys_at(value: &serde_json::Value, pointer: &str) -> BTreeSet<String> {
+        value.pointer(pointer).map(object_keys).unwrap_or_default()
+    }
+
+    fn declared_keys(contract: &serde_json::Value, name: &str) -> BTreeSet<String> {
+        contract
+            .pointer(&format!("/schemas/{name}"))
+            .and_then(serde_json::Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The tracked contract is the only cross-language schema and fixture.
+    /// Rust proves it is an exact serializer product, and the Python ledger
+    /// and its refusal probes consume the same file.
+    #[test]
+    fn tracked_report_contract_matches_the_serializer() {
+        let contract: serde_json::Value =
+            serde_json::from_str(include_str!("../report-contract.json")).unwrap_or_default();
+        let mut green = record("probe-view", Outcome::Pass, &[]);
+        green.reference_render_hash = "0".repeat(64);
+        green.candidate_render_hash = "0".repeat(64);
+        green.statistics = Some(ViewStatistics {
+            channels: 1,
+            full: vec![zero_channel()],
+            image: vec![zero_channel()],
+            background: Vec::new(),
+            informative: vec![zero_channel()],
+            rows_touched: 0,
+            columns_touched: 0,
+            image_pixels: 1,
+            informative_pixels: 1,
+            informative_fraction: 1.0,
+            predicate_passes: true,
+            bias_passes: true,
+            signed_mean_diff: 0.0,
+        });
+        let mut serialized = report(vec![green], Vec::new()).to_json();
+        if let Some(object) = serialized.as_object_mut() {
+            object.insert("operation".to_owned(), json!("gate"));
+        }
+        assert_eq!(contract.pointer("/greenReport"), Some(&serialized));
+        assert_eq!(contract.pointer("/version"), Some(&json!(1)));
+        assert_eq!(object_keys(&serialized), declared_keys(&contract, "report"));
+        assert_eq!(
+            object_keys_at(&serialized, "/coverage"),
+            declared_keys(&contract, "coverage")
+        );
+        assert_eq!(
+            object_keys_at(&serialized, "/records/0"),
+            declared_keys(&contract, "record")
+        );
+        assert_eq!(
+            object_keys_at(&serialized, "/records/0/statistics"),
+            declared_keys(&contract, "statistics")
+        );
+        assert_eq!(
+            object_keys_at(&serialized, "/records/0/statistics/full/0"),
+            declared_keys(&contract, "channel")
+        );
+        assert_eq!(
+            object_keys_at(&serialized, "/renderHashes"),
+            declared_keys(&contract, "renderHashes")
+        );
+
+        let mut divergence = record("divergence", Outcome::Fail, &[]);
+        divergence.parameter_divergences.push(ParameterDivergence {
+            pointer: "/field".to_owned(),
+            reference: json!(1),
+            candidate: json!(2),
+            side: Side::Ours,
+            why: "controlled".to_owned(),
+        });
+        divergence.geometry_divergences.push(Divergence {
+            field: "camera.position[0]".to_owned(),
+            reference: 0.0,
+            candidate: 1.0,
+            difference: 1.0,
+            bound: 0.25,
+        });
+        let divergence = divergence.to_json();
+        assert_eq!(
+            object_keys_at(&divergence, "/parameterDivergences/0"),
+            declared_keys(&contract, "parameterDivergence")
+        );
+        assert_eq!(
+            object_keys_at(&divergence, "/geometryDivergences/0"),
+            declared_keys(&contract, "geometryDivergence")
+        );
+
+        assert_eq!(
+            contract.pointer("/vocabularies/kinds"),
+            Some(&json!([
+                ViewKind::Stack.label(),
+                ViewKind::VolumeReformat.label(),
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/vocabularies/toleranceClasses"),
+            Some(&json!([
+                ToleranceClass::MonochromeSixteenBit.label(),
+                ToleranceClass::ColourOrUltrasound.label(),
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/vocabularies/outcomes"),
+            Some(&json!([
+                Outcome::Pass.label(),
+                Outcome::Fail.label(),
+                Outcome::Unmeasured.label(),
+                Outcome::Absent.label(),
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/vocabularies/sides"),
+            Some(&json!([
+                Side::Inputs.label(),
+                Side::Reference.label(),
+                Side::Ours.label(),
+                Side::Fit.label(),
+                Side::None.label(),
+                Side::Unattributed.label(),
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/vocabularies/qualifiers"),
+            Some(&json!([
+                Qualifier::Weak.label(),
+                Qualifier::Decimated.label(),
+                Qualifier::UnstatedThreshold.label(),
+                Qualifier::ParameterDivergence.label(),
+                Qualifier::MetadataTruth.label(),
+                Qualifier::GeometryDivergence.label(),
+                Qualifier::ReferenceDivergence.label(),
+                Qualifier::Bias.label(),
+                Qualifier::LetterboxOnly.label(),
+                Qualifier::DivergentWhileUnmeasured.label(),
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/vocabularies/rungs"),
+            Some(&json!([
+                "metadata-truth",
+                "parameters",
+                "register",
+                "volume-divergence",
+                "geometry",
+                "class-two",
+                "letterbox",
+                "pixels",
+                "decimated",
+                "weak",
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/channelCountByClass"),
+            Some(&json!({
+                ToleranceClass::MonochromeSixteenBit.label(): 1,
+                ToleranceClass::ColourOrUltrasound.label(): 3,
+            }))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/greenUnmeasuredQualifiers"),
+            Some(&json!([
+                Qualifier::Weak.label(),
+                Qualifier::Decimated.label(),
+                Qualifier::UnstatedThreshold.label(),
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/hashAlgorithms"),
+            Some(&json!({
+                "view": RENDER_HASH_ALGORITHM,
+                "run": RUN_ALGORITHM,
+            }))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/monochromeWithinOneLsbFraction"),
+            Some(&json!(MONOCHROME_WITHIN_ONE_LSB_FRACTION))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/monochromeMaxAbsDiff"),
+            Some(&json!(MONOCHROME_MAX_ABS_DIFF))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/monochromeSignedMeanBias"),
+            Some(&json!(MONOCHROME_SIGNED_MEAN_BIAS))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/informativeFractionFloor"),
+            Some(&json!(INFORMATIVE_FRACTION_FLOOR))
+        );
     }
 
     #[test]

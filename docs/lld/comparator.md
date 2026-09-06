@@ -1240,9 +1240,18 @@ Named, because each is somebody's story.
 
 `scripts/verify_ledger.py record --comparison-report OUT/compare.json` accepts
 only a green `gate` report with a positive judged-view count, zero absent views
-and internally consistent pass and fail counts. It records the report's exact
-SHA-256 digest, judged count and verdict. The commit hook carries those values
-in `Ocelli-Verify` when present.
+and a complete record set whose paths, attribution states, histograms,
+predicates and aggregate hashes are internally consistent. It records the
+report's exact SHA-256 digest, judged count and verdict. The commit hook carries
+those values in `Ocelli-Verify` when present.
+
+`tools/oracle/report-contract.json` is the cross-language contract for the
+closed object schemas, vocabularies, hash domains and green control report.
+The Rust report test rebuilds that control through `RunReport::to_json()` and
+checks its schemas and constants against production types. The Python ledger
+and guard harness read the same file. A serializer change therefore cannot be
+copied into a hand-built Python control while leaving validation semantics
+behind.
 
 `assert --require-comparison` and `check-commit --require-comparison` are the
 local and CI readers. F-012 deliberately leaves them dormant in the ordinary

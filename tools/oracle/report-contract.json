@@ -1,0 +1,265 @@
+{
+  "version": 1,
+  "schemas": {
+    "report": [
+      "story",
+      "reference",
+      "candidate",
+      "views",
+      "pass",
+      "fail",
+      "unmeasured",
+      "absent",
+      "claimedVerdictViews",
+      "coverage",
+      "gateVerdict",
+      "qualifiers",
+      "problems",
+      "coverageProblems",
+      "absorbedDivergences",
+      "green",
+      "renderHashes",
+      "records",
+      "operation"
+    ],
+    "coverage": [
+      "unmeasured",
+      "absent",
+      "unsupportedSourceRows",
+      "declaredVolumeRefusals"
+    ],
+    "record": [
+      "id",
+      "kind",
+      "toleranceClass",
+      "outcome",
+      "qualifiers",
+      "attributedTo",
+      "rung",
+      "notes",
+      "parameterDivergences",
+      "geometryDivergences",
+      "referenceDivergenceEntry",
+      "renderHashes",
+      "monochromeFrame",
+      "statistics"
+    ],
+    "statistics": [
+      "channels",
+      "full",
+      "image",
+      "background",
+      "informative",
+      "rowsTouched",
+      "columnsTouched",
+      "imagePixels",
+      "informativePixels",
+      "informativeFraction",
+      "predicatePasses",
+      "biasPasses",
+      "signedMeanDiff"
+    ],
+    "channel": [
+      "pixels",
+      "maxAbsDiff",
+      "countAtZero",
+      "countAtOne",
+      "countAtTwo",
+      "countOverTwo",
+      "fractionWithinOneLsb",
+      "differingFraction",
+      "signedMeanDiff",
+      "percentile999AbsDiff"
+    ],
+    "parameterDivergence": [
+      "field",
+      "reference",
+      "candidate",
+      "attributedTo",
+      "why"
+    ],
+    "geometryDivergence": [
+      "field",
+      "reference",
+      "candidate",
+      "difference",
+      "bound"
+    ],
+    "renderHashes": [
+      "algorithm",
+      "reference",
+      "candidate"
+    ]
+  },
+  "vocabularies": {
+    "kinds": [
+      "stack",
+      "volume-reformat"
+    ],
+    "toleranceClasses": [
+      "mono16",
+      "colour-or-us"
+    ],
+    "outcomes": [
+      "pass",
+      "fail",
+      "unmeasured",
+      "absent"
+    ],
+    "sides": [
+      "inputs",
+      "reference",
+      "ours",
+      "fit",
+      "none",
+      "unattributed"
+    ],
+    "rungs": [
+      "metadata-truth",
+      "parameters",
+      "register",
+      "volume-divergence",
+      "geometry",
+      "class-two",
+      "letterbox",
+      "pixels",
+      "decimated",
+      "weak"
+    ],
+    "qualifiers": [
+      "weak",
+      "decimated",
+      "unstated-threshold",
+      "parameter-divergence",
+      "metadata-truth",
+      "geometry-divergence",
+      "reference-divergence",
+      "bias",
+      "letterbox-only",
+      "divergent-while-unmeasured"
+    ]
+  },
+  "semantics": {
+    "channelCountByClass": {
+      "mono16": 1,
+      "colour-or-us": 3
+    },
+    "greenUnmeasuredQualifiers": [
+      "weak",
+      "decimated",
+      "unstated-threshold"
+    ],
+    "monochromeWithinOneLsbFraction": 0.999,
+    "monochromeMaxAbsDiff": 2,
+    "monochromeSignedMeanBias": 0.1,
+    "informativeFractionFloor": 0.1
+  },
+  "hashAlgorithms": {
+    "view": "sha256-rgba8-v1",
+    "run": "sha256-rgba8-run-v1"
+  },
+  "greenReport": {
+    "story": "F-011, F-012, F-015",
+    "reference": "reference",
+    "candidate": "candidate",
+    "views": 1,
+    "pass": 1,
+    "fail": 0,
+    "unmeasured": 0,
+    "absent": 0,
+    "claimedVerdictViews": 1,
+    "coverage": {
+      "unmeasured": 0,
+      "absent": 0,
+      "unsupportedSourceRows": 0,
+      "declaredVolumeRefusals": 0
+    },
+    "gateVerdict": "pass",
+    "qualifiers": {},
+    "problems": [],
+    "coverageProblems": [],
+    "absorbedDivergences": [],
+    "green": true,
+    "renderHashes": {
+      "algorithm": "sha256-rgba8-v1",
+      "reference": "311c307457058b6cfefff79bdeb407dfb6056185b81937159771e4d998a9de3b",
+      "candidate": "311c307457058b6cfefff79bdeb407dfb6056185b81937159771e4d998a9de3b"
+    },
+    "records": [
+      {
+        "id": "probe-view",
+        "kind": "stack",
+        "toleranceClass": "mono16",
+        "outcome": "pass",
+        "qualifiers": [],
+        "attributedTo": "none",
+        "rung": "pixels",
+        "notes": [],
+        "parameterDivergences": [],
+        "geometryDivergences": [],
+        "referenceDivergenceEntry": null,
+        "renderHashes": {
+          "algorithm": "sha256-rgba8-v1",
+          "reference": "0000000000000000000000000000000000000000000000000000000000000000",
+          "candidate": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "monochromeFrame": true,
+        "statistics": {
+          "channels": 1,
+          "full": [
+            {
+              "pixels": 1,
+              "maxAbsDiff": 0,
+              "countAtZero": 1,
+              "countAtOne": 0,
+              "countAtTwo": 0,
+              "countOverTwo": 0,
+              "fractionWithinOneLsb": 1.0,
+              "differingFraction": 0.0,
+              "signedMeanDiff": 0.0,
+              "percentile999AbsDiff": 0
+            }
+          ],
+          "image": [
+            {
+              "pixels": 1,
+              "maxAbsDiff": 0,
+              "countAtZero": 1,
+              "countAtOne": 0,
+              "countAtTwo": 0,
+              "countOverTwo": 0,
+              "fractionWithinOneLsb": 1.0,
+              "differingFraction": 0.0,
+              "signedMeanDiff": 0.0,
+              "percentile999AbsDiff": 0
+            }
+          ],
+          "background": [],
+          "informative": [
+            {
+              "pixels": 1,
+              "maxAbsDiff": 0,
+              "countAtZero": 1,
+              "countAtOne": 0,
+              "countAtTwo": 0,
+              "countOverTwo": 0,
+              "fractionWithinOneLsb": 1.0,
+              "differingFraction": 0.0,
+              "signedMeanDiff": 0.0,
+              "percentile999AbsDiff": 0
+            }
+          ],
+          "rowsTouched": 0,
+          "columnsTouched": 0,
+          "imagePixels": 1,
+          "informativePixels": 1,
+          "informativeFraction": 1.0,
+          "predicatePasses": true,
+          "biasPasses": true,
+          "signedMeanDiff": 0.0
+        }
+      }
+    ],
+    "operation": "gate"
+  }
+}

@@ -57,61 +57,48 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LEDGER = ROOT / ".claude" / "verify-ledger.json"
+REPORT_CONTRACT_PATH = ROOT / "tools" / "oracle" / "report-contract.json"
 
 TRAILER_VERIFY = "Ocelli-Verify"
 TRAILER_AGENT = "Ocelli-Generated-By"
 CORPUS_STATES = {"pass", "fail", "absent", "skipped"}
 
-REPORT_KEYS = {
-    "story", "reference", "candidate", "views", "pass", "fail",
-    "unmeasured", "absent", "claimedVerdictViews", "coverage",
-    "gateVerdict", "qualifiers", "problems", "coverageProblems",
-    "absorbedDivergences", "green", "renderHashes", "records", "operation",
-}
-COVERAGE_KEYS = {
-    "unmeasured", "absent", "unsupportedSourceRows", "declaredVolumeRefusals",
-}
-RECORD_KEYS = {
-    "id", "kind", "toleranceClass", "outcome", "qualifiers",
-    "attributedTo", "rung", "notes", "parameterDivergences",
-    "geometryDivergences", "referenceDivergenceEntry", "renderHashes",
-    "monochromeFrame", "statistics",
-}
-STATISTICS_KEYS = {
-    "channels", "full", "image", "background", "informative",
-    "rowsTouched", "columnsTouched", "imagePixels", "informativePixels",
-    "informativeFraction", "predicatePasses", "biasPasses", "signedMeanDiff",
-}
-CHANNEL_KEYS = {
-    "pixels", "maxAbsDiff", "countAtZero", "countAtOne", "countAtTwo",
-    "countOverTwo", "fractionWithinOneLsb", "differingFraction",
-    "signedMeanDiff", "percentile999AbsDiff",
-}
-PARAMETER_DIVERGENCE_KEYS = {
-    "field", "reference", "candidate", "attributedTo", "why",
-}
-GEOMETRY_DIVERGENCE_KEYS = {
-    "field", "reference", "candidate", "difference", "bound",
-}
-RENDER_HASH_KEYS = {"algorithm", "reference", "candidate"}
-HASH_ALGORITHM = "sha256-rgba8-v1"
+REPORT_CONTRACT = json.loads(REPORT_CONTRACT_PATH.read_text())
+REPORT_SCHEMAS = REPORT_CONTRACT["schemas"]
+REPORT_VOCABULARIES = REPORT_CONTRACT["vocabularies"]
+REPORT_SEMANTICS = REPORT_CONTRACT["semantics"]
+REPORT_HASH_ALGORITHMS = REPORT_CONTRACT["hashAlgorithms"]
+
+REPORT_KEYS = set(REPORT_SCHEMAS["report"])
+COVERAGE_KEYS = set(REPORT_SCHEMAS["coverage"])
+RECORD_KEYS = set(REPORT_SCHEMAS["record"])
+STATISTICS_KEYS = set(REPORT_SCHEMAS["statistics"])
+CHANNEL_KEYS = set(REPORT_SCHEMAS["channel"])
+PARAMETER_DIVERGENCE_KEYS = set(REPORT_SCHEMAS["parameterDivergence"])
+GEOMETRY_DIVERGENCE_KEYS = set(REPORT_SCHEMAS["geometryDivergence"])
+RENDER_HASH_KEYS = set(REPORT_SCHEMAS["renderHashes"])
+HASH_ALGORITHM = REPORT_HASH_ALGORITHMS["view"]
+RUN_HASH_ALGORITHM = REPORT_HASH_ALGORITHMS["run"]
 HASH_PATTERN = re.compile(r"[0-9a-f]{64}")
-KINDS = {"stack": 0, "volume-reformat": 1}
-CLASSES = {"mono16": 1, "colour-or-us": 3}
-OUTCOMES = {"pass", "fail", "unmeasured", "absent"}
-SIDES = {"inputs", "reference", "ours", "fit", "none", "unattributed"}
-RUNGS = {
-    "metadata-truth", "parameters", "register", "volume-divergence",
-    "geometry", "class-two", "letterbox", "pixels", "decimated", "weak",
-}
-QUALIFIERS = (
-    "weak", "decimated", "unstated-threshold", "parameter-divergence",
-    "metadata-truth", "geometry-divergence", "reference-divergence", "bias",
-    "letterbox-only", "divergent-while-unmeasured",
+KINDS = {label: index for index, label in enumerate(REPORT_VOCABULARIES["kinds"])}
+CLASSES = REPORT_SEMANTICS["channelCountByClass"]
+OUTCOMES = set(REPORT_VOCABULARIES["outcomes"])
+SIDES = set(REPORT_VOCABULARIES["sides"])
+RUNGS = set(REPORT_VOCABULARIES["rungs"])
+QUALIFIERS = tuple(REPORT_VOCABULARIES["qualifiers"])
+GREEN_UNMEASURED_QUALIFIERS = set(
+    REPORT_SEMANTICS["greenUnmeasuredQualifiers"]
 )
-GREEN_UNMEASURED_QUALIFIERS = {"weak", "decimated", "unstated-threshold"}
+MONOCHROME_WITHIN_ONE_LSB_FRACTION = REPORT_SEMANTICS[
+    "monochromeWithinOneLsbFraction"
+]
+MONOCHROME_MAX_ABS_DIFF = REPORT_SEMANTICS["monochromeMaxAbsDiff"]
+MONOCHROME_SIGNED_MEAN_BIAS = REPORT_SEMANTICS["monochromeSignedMeanBias"]
+INFORMATIVE_FRACTION_FLOOR = REPORT_SEMANTICS["informativeFractionFloor"]
 U64_MAX = (1 << 64) - 1
 U32_MAX = (1 << 32) - 1
+I32_MIN = -(1 << 31)
+I32_MAX = (1 << 31) - 1
 
 
 def git(*args: str) -> str:
@@ -207,26 +194,59 @@ def _hash(value: object, label: str) -> str:
 
 def _channel_report(value: object, label: str) -> dict:
     channel = _schema(value, label, CHANNEL_KEYS)
-    pixels = _integer(channel["pixels"], f"{label}.pixels")
+    pixels = _integer(channel["pixels"], f"{label}.pixels", maximum=U32_MAX)
     counts = [
-        _integer(channel[key], f"{label}.{key}")
+        _integer(channel[key], f"{label}.{key}", maximum=U32_MAX)
         for key in ("countAtZero", "countAtOne", "countAtTwo", "countOverTwo")
     ]
     if sum(counts) != pixels:
         sys.exit(f"comparison report {label} channel counts do not total pixels")
-    for key in ("maxAbsDiff", "percentile999AbsDiff"):
-        _integer(channel[key], f"{label}.{key}", maximum=255)
+    maximum = _integer(channel["maxAbsDiff"], f"{label}.maxAbsDiff", maximum=255)
+    percentile = _integer(
+        channel["percentile999AbsDiff"],
+        f"{label}.percentile999AbsDiff",
+        maximum=255,
+    )
     within = _number(channel["fractionWithinOneLsb"],
                      f"{label}.fractionWithinOneLsb")
     differing = _number(channel["differingFraction"],
                         f"{label}.differingFraction")
-    _number(channel["signedMeanDiff"], f"{label}.signedMeanDiff")
+    signed_mean = _number(channel["signedMeanDiff"], f"{label}.signedMeanDiff")
     if pixels == 0 or not 0.0 <= within <= 1.0 or not 0.0 <= differing <= 1.0:
         sys.exit(f"comparison report has invalid {label} channel fractions")
     expected_within = (counts[0] + counts[1]) / pixels
     expected_differing = (pixels - counts[0]) / pixels
     if within != expected_within or differing != expected_differing:
         sys.exit(f"comparison report {label} channel fractions contradict counts")
+    if counts[3] > 0:
+        maximum_is_consistent = maximum > 2
+    elif counts[2] > 0:
+        maximum_is_consistent = maximum == 2
+    elif counts[1] > 0:
+        maximum_is_consistent = maximum == 1
+    else:
+        maximum_is_consistent = maximum == 0
+    if not maximum_is_consistent:
+        sys.exit(f"comparison report {label} maximum contradicts counts")
+    cumulative = 0
+    expected_percentile = None
+    for difference, count in enumerate(counts[:3]):
+        cumulative += count
+        if cumulative / pixels >= MONOCHROME_WITHIN_ONE_LSB_FRACTION:
+            expected_percentile = difference
+            break
+    if expected_percentile is not None:
+        percentile_is_consistent = percentile == expected_percentile
+    else:
+        percentile_is_consistent = 3 <= percentile <= maximum
+    if not percentile_is_consistent:
+        sys.exit(f"comparison report {label} percentile contradicts counts")
+    if abs(signed_mean) > maximum:
+        sys.exit(f"comparison report {label} signed mean exceeds its maximum")
+    signed_sum = signed_mean * pixels
+    if (not I32_MIN <= signed_sum <= I32_MAX
+            or not math.isclose(signed_sum, round(signed_sum), abs_tol=1e-6)):
+        sys.exit(f"comparison report {label} signed mean is not pixel-derived")
     return channel
 
 
@@ -253,9 +273,14 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
                     maximum=U32_MAX)
     columns = _integer(statistics["columnsTouched"],
                        f"{label}.columnsTouched", maximum=U32_MAX)
-    image_pixels = _integer(statistics["imagePixels"], f"{label}.imagePixels")
+    image_pixels = _integer(
+        statistics["imagePixels"], f"{label}.imagePixels", maximum=U32_MAX
+    )
     informative_pixels = _integer(
-        statistics["informativePixels"], f"{label}.informativePixels")
+        statistics["informativePixels"],
+        f"{label}.informativePixels",
+        maximum=U32_MAX,
+    )
     informative_fraction = _number(
         statistics["informativeFraction"], f"{label}.informativeFraction")
     if image_pixels == 0 or informative_pixels > image_pixels:
@@ -266,7 +291,7 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
         sys.exit(f"comparison report has invalid {label}.predicatePasses")
     if not isinstance(statistics["biasPasses"], bool):
         sys.exit(f"comparison report has invalid {label}.biasPasses")
-    _number(statistics["signedMeanDiff"], f"{label}.signedMeanDiff")
+    signed_mean = _number(statistics["signedMeanDiff"], f"{label}.signedMeanDiff")
 
     full_pixels = {entry["pixels"] for entry in regions["full"]}
     image_region_pixels = {entry["pixels"] for entry in regions["image"]}
@@ -286,6 +311,92 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
         sys.exit(f"comparison report {label} informative total is inconsistent")
     if rows > next(iter(full_pixels)) or columns > next(iter(full_pixels)):
         sys.exit(f"comparison report {label} touched counts exceed the frame")
+    bucket_keys = ("countAtZero", "countAtOne", "countAtTwo", "countOverTwo")
+    if regions["background"]:
+        for channel_index in range(channels):
+            full = regions["full"][channel_index]
+            image = regions["image"][channel_index]
+            background = regions["background"][channel_index]
+            if any(full[key] != image[key] + background[key] for key in bucket_keys):
+                sys.exit(
+                    f"comparison report {label} full histogram is not image plus background"
+                )
+            combined_sum = (
+                image["signedMeanDiff"] * image["pixels"]
+                + background["signedMeanDiff"] * background["pixels"]
+            )
+            if not math.isclose(
+                full["signedMeanDiff"] * full["pixels"],
+                combined_sum,
+                abs_tol=1e-6,
+            ):
+                sys.exit(
+                    f"comparison report {label} full mean is not image plus background"
+                )
+            if full["maxAbsDiff"] != max(
+                image["maxAbsDiff"], background["maxAbsDiff"]
+            ):
+                sys.exit(
+                    f"comparison report {label} full maximum is not image plus background"
+                )
+    else:
+        for channel_index in range(channels):
+            full = regions["full"][channel_index]
+            image = regions["image"][channel_index]
+            if full != image:
+                sys.exit(
+                    f"comparison report {label} full region is not the whole image"
+                )
+    if regions["informative"]:
+        for channel_index in range(channels):
+            image = regions["image"][channel_index]
+            informative = regions["informative"][channel_index]
+            if any(informative[key] > image[key] for key in bucket_keys):
+                sys.exit(
+                    f"comparison report {label} informative histogram exceeds image"
+                )
+            if informative["maxAbsDiff"] > image["maxAbsDiff"]:
+                sys.exit(
+                    f"comparison report {label} informative maximum exceeds image"
+                )
+            if informative_pixels == image_pixels and informative != image:
+                sys.exit(
+                    f"comparison report {label} whole-image informative statistics disagree"
+                )
+    any_difference = any(
+        channel["countAtZero"] != channel["pixels"] for channel in regions["full"]
+    )
+    if any_difference != (rows > 0 and columns > 0):
+        sys.exit(f"comparison report {label} touched counts contradict differences")
+    differing_counts = [
+        channel["pixels"] - channel["countAtZero"] for channel in regions["full"]
+    ]
+    if (rows > sum(differing_counts) or columns > sum(differing_counts)
+            or rows * columns < max(differing_counts)):
+        sys.exit(f"comparison report {label} touched counts contradict differing pixels")
+
+    if tolerance_class == "mono16":
+        full = regions["full"][0]
+        expected_predicate = (
+            full["fractionWithinOneLsb"] >= MONOCHROME_WITHIN_ONE_LSB_FRACTION
+            and full["countOverTwo"] == 0
+        )
+        if regions["informative"]:
+            expected_signed_mean = regions["informative"][0]["signedMeanDiff"]
+            expected_bias = abs(expected_signed_mean) <= MONOCHROME_SIGNED_MEAN_BIAS
+        else:
+            expected_signed_mean = 0.0
+            expected_bias = True
+    else:
+        expected_predicate = True
+        expected_bias = True
+        expected_signed_mean = regions["image"][0]["signedMeanDiff"]
+    if statistics["predicatePasses"] != expected_predicate:
+        sys.exit(f"comparison report {label} predicate contradicts statistics")
+    if statistics["biasPasses"] != expected_bias:
+        sys.exit(f"comparison report {label} bias verdict contradicts statistics")
+    if signed_mean != expected_signed_mean:
+        sys.exit(f"comparison report {label} signed mean contradicts its source region")
     return statistics
 
 
@@ -362,18 +473,34 @@ def _record(value: object, index: int) -> dict:
         sys.exit(f"comparison report green record {record_id!r} has a failed predicate")
     if parameters or geometry or register_entry is not None:
         sys.exit(f"comparison report green record {record_id!r} has divergence details")
+    if tolerance_class == "mono16" and not record["monochromeFrame"]:
+        sys.exit(f"comparison report mono16 record {record_id!r} is not monochrome")
     if outcome == "pass":
-        if qualifiers or record["attributedTo"] != "none" or record["rung"] != "pixels" or notes:
+        if (tolerance_class != "mono16" or qualifiers
+                or record["attributedTo"] != "none"
+                or record["rung"] != "pixels" or notes):
             sys.exit(f"comparison report pass record {record_id!r} is inconsistent")
     elif outcome == "unmeasured":
         if (not qualifiers or not set(qualifiers) <= GREEN_UNMEASURED_QUALIFIERS
                 or record["attributedTo"] != "none" or not notes):
             sys.exit(f"comparison report unmeasured record {record_id!r} is inconsistent")
-        expected_rung = "class-two" if "unstated-threshold" in qualifiers else None
-        if expected_rung is not None and record["rung"] != expected_rung:
+        class_two = tolerance_class == "colour-or-us"
+        if class_two != ("unstated-threshold" in qualifiers):
+            sys.exit(
+                f"comparison report unmeasured record {record_id!r} contradicts its class"
+            )
+        if "unstated-threshold" in qualifiers:
+            expected_rung = "class-two"
+        elif "decimated" in qualifiers:
+            expected_rung = "decimated"
+        else:
+            expected_rung = "weak"
+        if record["rung"] != expected_rung:
             sys.exit(f"comparison report unmeasured record {record_id!r} has the wrong rung")
-        if expected_rung is None and record["rung"] not in ("weak", "decimated"):
-            sys.exit(f"comparison report unmeasured record {record_id!r} has the wrong rung")
+        weak = "weak" in qualifiers
+        below_floor = record["statistics"]["informativeFraction"] < INFORMATIVE_FRACTION_FLOOR
+        if weak and not below_floor:
+            sys.exit(f"comparison report weak record {record_id!r} is not low-information")
     else:
         sys.exit(f"comparison report green record {record_id!r} has outcome {outcome}")
     return record
@@ -387,7 +514,7 @@ def _run_hash(records: list[dict], side: str) -> str:
         ),
     )
     digest = hashlib.sha256()
-    digest.update(b"sha256-rgba8-run-v1\0")
+    digest.update(RUN_HASH_ALGORITHM.encode() + b"\0")
     digest.update(len(entries).to_bytes(8, "little"))
     for record in entries:
         for field in (record["kind"], record["id"], record["renderHashes"][side]):
@@ -395,6 +522,17 @@ def _run_hash(records: list[dict], side: str) -> str:
             digest.update(len(encoded).to_bytes(8, "little"))
             digest.update(encoded)
     return digest.hexdigest()
+
+
+def _resolved_directory(value: object, label: str) -> Path:
+    text = _text(value, label)
+    try:
+        resolved = Path(text).resolve(strict=True)
+    except OSError as error:
+        sys.exit(f"comparison report {label} cannot be resolved: {error}")
+    if not resolved.is_dir():
+        sys.exit(f"comparison report {label} is not a directory")
+    return resolved
 
 
 def comparison_evidence(path: str) -> dict:
@@ -419,8 +557,8 @@ def comparison_evidence(path: str) -> dict:
 
     if report["story"] != "F-011, F-012, F-015":
         sys.exit("comparison report has an invalid story set")
-    reference = _text(report["reference"], "reference directory")
-    candidate = _text(report["candidate"], "candidate directory")
+    reference = _resolved_directory(report["reference"], "reference directory")
+    candidate = _resolved_directory(report["candidate"], "candidate directory")
     if reference == candidate:
         sys.exit("comparison report reference and candidate directories are equal")
 
