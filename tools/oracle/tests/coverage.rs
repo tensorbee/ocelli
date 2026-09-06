@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use ocelli_oracle::report::{GateVerdict, Outcome, RunReport, Side, ViewRecord};
+use ocelli_oracle::report::{GateVerdict, Outcome, RunReport, Rung, Side, ViewRecord};
 use ocelli_oracle::sidecar::ViewKind;
 use ocelli_oracle::tolerance::ToleranceClass;
 
@@ -12,7 +12,7 @@ fn record(id: &str, outcome: Outcome) -> ViewRecord {
         outcome,
         qualifiers: BTreeSet::new(),
         side: Side::None,
-        rung: "pixels",
+        rung: Rung::Pixels,
         notes: Vec::new(),
         parameter_divergences: Vec::new(),
         parameter_values_withheld: false,

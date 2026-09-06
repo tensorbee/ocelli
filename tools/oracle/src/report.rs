@@ -148,6 +148,94 @@ impl Qualifier {
     }
 }
 
+macro_rules! define_rungs {
+    ($($variant:ident => $label:literal),+ $(,)?) => {
+        /// Which rung of the attribution ladder answered for a view.
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub enum Rung {
+            $($variant),+
+        }
+
+        impl Rung {
+            /// Every rung the production comparator can emit, in ladder order.
+            pub const ALL: &[Self] = &[$(Self::$variant),+];
+
+            #[must_use]
+            pub const fn label(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $label),+
+                }
+            }
+        }
+    };
+}
+
+define_rungs! {
+    MetadataTruth => "metadata-truth",
+    Parameters => "parameters",
+    Register => "register",
+    VolumeDivergence => "volume-divergence",
+    Geometry => "geometry",
+    ClassTwo => "class-two",
+    Letterbox => "letterbox",
+    Pixels => "pixels",
+    Decimated => "decimated",
+    Weak => "weak",
+}
+
+/// One qualifier and rung combination that can be green while unmeasured.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GreenUnmeasuredState {
+    pub class: ToleranceClass,
+    pub qualifiers: &'static [Qualifier],
+    pub rung: Rung,
+}
+
+impl GreenUnmeasuredState {
+    /// Every green unmeasured state production attribution can emit.
+    pub const ALL: &[Self] = &[
+        Self {
+            class: ToleranceClass::MonochromeSixteenBit,
+            qualifiers: &[Qualifier::Weak],
+            rung: Rung::Weak,
+        },
+        Self {
+            class: ToleranceClass::MonochromeSixteenBit,
+            qualifiers: &[Qualifier::Decimated],
+            rung: Rung::Decimated,
+        },
+        Self {
+            class: ToleranceClass::MonochromeSixteenBit,
+            qualifiers: &[Qualifier::Weak, Qualifier::Decimated],
+            rung: Rung::Decimated,
+        },
+        Self {
+            class: ToleranceClass::ColourOrUltrasound,
+            qualifiers: &[Qualifier::UnstatedThreshold],
+            rung: Rung::ClassTwo,
+        },
+        Self {
+            class: ToleranceClass::ColourOrUltrasound,
+            qualifiers: &[Qualifier::Weak, Qualifier::UnstatedThreshold],
+            rung: Rung::ClassTwo,
+        },
+        Self {
+            class: ToleranceClass::ColourOrUltrasound,
+            qualifiers: &[Qualifier::Decimated, Qualifier::UnstatedThreshold],
+            rung: Rung::ClassTwo,
+        },
+        Self {
+            class: ToleranceClass::ColourOrUltrasound,
+            qualifiers: &[
+                Qualifier::Weak,
+                Qualifier::Decimated,
+                Qualifier::UnstatedThreshold,
+            ],
+            rung: Rung::ClassTwo,
+        },
+    ];
+}
+
 /// Which side a divergence is attributed to.
 ///
 /// Rung 6's default is `Ours`, and that direction is the conservative one:
@@ -281,7 +369,7 @@ pub struct ViewRecord {
     pub qualifiers: BTreeSet<Qualifier>,
     pub side: Side,
     /// Which rung of the attribution ladder answered.
-    pub rung: &'static str,
+    pub rung: Rung,
     pub notes: Vec<String>,
     pub parameter_divergences: Vec<ParameterDivergence>,
     /// Real-row parameter values are compared in memory but never serialized.
@@ -349,7 +437,7 @@ impl ViewRecord {
             "outcome": self.outcome.label(),
             "qualifiers": self.qualifier_labels(),
             "attributedTo": self.side.label(),
-            "rung": self.rung,
+            "rung": self.rung.label(),
             "notes": self.notes,
             "parameterDivergences": Value::Array(
                 self.parameter_divergences
@@ -688,12 +776,14 @@ impl RunReport {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::fmt;
 
+    use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
     use serde_json::json;
 
     use super::{
-        Census, ChannelReport, Outcome, ParameterDivergence, Qualifier, RunReport, Side,
-        ViewRecord, ViewStatistics,
+        Census, ChannelReport, GreenUnmeasuredState, Outcome, ParameterDivergence, Qualifier,
+        RunReport, Rung, Side, ViewRecord, ViewStatistics,
     };
     use crate::geometry::Divergence;
     use crate::render_hash::{ALGORITHM as RENDER_HASH_ALGORITHM, RUN_ALGORITHM};
@@ -711,7 +801,7 @@ mod tests {
             outcome,
             qualifiers: qualifiers.iter().copied().collect::<BTreeSet<_>>(),
             side: Side::None,
-            rung: "pixels",
+            rung: Rung::Pixels,
             notes: Vec::new(),
             parameter_divergences: Vec::new(),
             parameter_values_withheld: false,
@@ -751,6 +841,113 @@ mod tests {
         value.pointer(pointer).map(object_keys).unwrap_or_default()
     }
 
+    fn expected_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    struct UniqueValue;
+
+    impl<'de> DeserializeSeed<'de> for UniqueValue {
+        type Value = serde_json::Value;
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(UniqueValueVisitor)
+        }
+    }
+
+    struct UniqueValueVisitor;
+
+    impl<'de> Visitor<'de> for UniqueValueVisitor {
+        type Value = serde_json::Value;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a JSON value without duplicate object keys")
+        }
+
+        fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Bool(value))
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Number(value.into()))
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Number(value.into()))
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            serde_json::Number::from_f64(value)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| E::custom("a JSON number must be finite"))
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            self.visit_string(value.to_owned())
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::String(value))
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Null)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Null)
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut values = Vec::new();
+            while let Some(value) = sequence.next_element_seed(UniqueValue)? {
+                values.push(value);
+            }
+            Ok(serde_json::Value::Array(values))
+        }
+
+        fn visit_map<A>(self, mut entries: A) -> Result<Self::Value, A::Error>
+        where
+            A: MapAccess<'de>,
+        {
+            let mut object = serde_json::Map::new();
+            while let Some(key) = entries.next_key::<String>()? {
+                if object.contains_key(&key) {
+                    return Err(<A::Error as serde::de::Error>::custom(format!(
+                        "duplicate JSON key {key:?}"
+                    )));
+                }
+                object.insert(key, entries.next_value_seed(UniqueValue)?);
+            }
+            Ok(serde_json::Value::Object(object))
+        }
+    }
+
+    fn parse_unique_json(source: &str) -> Result<serde_json::Value, serde_json::Error> {
+        let mut deserializer = serde_json::Deserializer::from_str(source);
+        let value = UniqueValue.deserialize(&mut deserializer)?;
+        deserializer.end()?;
+        Ok(value)
+    }
+
+    #[test]
+    fn contract_reader_refuses_duplicate_keys_at_any_depth() {
+        assert!(parse_unique_json(r#"{"version":1,"version":1}"#).is_err());
+        assert!(parse_unique_json(r#"{"schemas":{"report":[],"report":[]}}"#).is_err());
+    }
+
     fn declared_keys(contract: &serde_json::Value, name: &str) -> BTreeSet<String> {
         contract
             .pointer(&format!("/schemas/{name}"))
@@ -769,9 +966,73 @@ mod tests {
     /// Rust proves it is an exact serializer product, and the Python ledger
     /// and its refusal probes consume the same file.
     #[test]
-    fn tracked_report_contract_matches_the_serializer() {
-        let contract: serde_json::Value =
-            serde_json::from_str(include_str!("../report-contract.json")).unwrap_or_default();
+    fn tracked_report_contract_matches_the_serializer() -> Result<(), Box<dyn std::error::Error>> {
+        let contract = parse_unique_json(include_str!("../report-contract.json"))?;
+        assert_eq!(
+            object_keys(&contract),
+            expected_keys(&[
+                "version",
+                "schemas",
+                "vocabularies",
+                "semantics",
+                "hashAlgorithms",
+                "greenReport",
+            ])
+        );
+        assert_eq!(
+            object_keys_at(&contract, "/schemas"),
+            expected_keys(&[
+                "report",
+                "coverage",
+                "record",
+                "statistics",
+                "channel",
+                "parameterDivergence",
+                "geometryDivergence",
+                "renderHashes",
+                "greenUnmeasuredState",
+            ])
+        );
+        assert_eq!(
+            object_keys_at(&contract, "/vocabularies"),
+            expected_keys(&[
+                "kinds",
+                "toleranceClasses",
+                "outcomes",
+                "sides",
+                "rungs",
+                "qualifiers",
+            ])
+        );
+        assert_eq!(
+            object_keys_at(&contract, "/semantics"),
+            expected_keys(&[
+                "channelCountByClass",
+                "greenUnmeasuredQualifiers",
+                "greenUnmeasuredStates",
+                "monochromeWithinOneLsbFraction",
+                "monochromeMaxAbsDiff",
+                "monochromeSignedMeanBias",
+                "informativeFractionFloor",
+            ])
+        );
+        assert_eq!(
+            object_keys_at(&contract, "/semantics/channelCountByClass"),
+            expected_keys(&["mono16", "colour-or-us"])
+        );
+        assert_eq!(
+            object_keys_at(&contract, "/hashAlgorithms"),
+            expected_keys(&["view", "run"])
+        );
+        for (index, _) in GreenUnmeasuredState::ALL.iter().enumerate() {
+            assert_eq!(
+                object_keys_at(
+                    &contract,
+                    &format!("/semantics/greenUnmeasuredStates/{index}")
+                ),
+                declared_keys(&contract, "greenUnmeasuredState")
+            );
+        }
         let mut green = record("probe-view", Outcome::Pass, &[]);
         green.reference_render_hash = "0".repeat(64);
         green.candidate_render_hash = "0".repeat(64);
@@ -894,18 +1155,13 @@ mod tests {
         );
         assert_eq!(
             contract.pointer("/vocabularies/rungs"),
-            Some(&json!([
-                "metadata-truth",
-                "parameters",
-                "register",
-                "volume-divergence",
-                "geometry",
-                "class-two",
-                "letterbox",
-                "pixels",
-                "decimated",
-                "weak",
-            ]))
+            Some(&json!(
+                Rung::ALL
+                    .iter()
+                    .copied()
+                    .map(Rung::label)
+                    .collect::<Vec<_>>()
+            ))
         );
         assert_eq!(
             contract.pointer("/semantics/channelCountByClass"),
@@ -921,6 +1177,25 @@ mod tests {
                 Qualifier::Decimated.label(),
                 Qualifier::UnstatedThreshold.label(),
             ]))
+        );
+        let green_unmeasured_states = GreenUnmeasuredState::ALL
+            .iter()
+            .map(|state| {
+                json!({
+                    "toleranceClass": state.class.label(),
+                    "qualifiers": state
+                        .qualifiers
+                        .iter()
+                        .copied()
+                        .map(Qualifier::label)
+                        .collect::<Vec<_>>(),
+                    "rung": state.rung.label(),
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            contract.pointer("/semantics/greenUnmeasuredStates"),
+            Some(&json!(green_unmeasured_states))
         );
         assert_eq!(
             contract.pointer("/hashAlgorithms"),
@@ -945,6 +1220,7 @@ mod tests {
             contract.pointer("/semantics/informativeFractionFloor"),
             Some(&json!(INFORMATIVE_FRACTION_FLOOR))
         );
+        Ok(())
     }
 
     #[test]

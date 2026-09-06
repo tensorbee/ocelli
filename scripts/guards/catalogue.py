@@ -1170,6 +1170,337 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
             channel["countAtZero"] = too_many
         statistics["imagePixels"] = too_many
         statistics["informativePixels"] = too_many
+    elif variant == "signed-mean-not-pixel-derived":
+        for region in regions:
+            channel = statistics[region][0]
+            channel.update({
+                "maxAbsDiff": 1,
+                "countAtZero": 0,
+                "countAtOne": 1,
+                "fractionWithinOneLsb": 1.0,
+                "differingFraction": 1.0,
+                "signedMeanDiff": 0.5,
+                "percentile999AbsDiff": 1,
+            })
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 0.5
+    elif variant == "signed-mean-contradicts-buckets":
+        for region in regions:
+            channel = statistics[region][0]
+            channel.update({
+                "maxAbsDiff": 1,
+                "countAtZero": 0,
+                "countAtOne": 1,
+                "fractionWithinOneLsb": 1.0,
+                "differingFraction": 1.0,
+                "signedMeanDiff": 0.0,
+                "percentile999AbsDiff": 1,
+            })
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+    elif variant == "negative-zero":
+        for region in regions:
+            statistics[region][0]["signedMeanDiff"] = -0.0
+        statistics["signedMeanDiff"] = -0.0
+    elif variant == "single-tail-percentile":
+        for region in regions:
+            channel = statistics[region][0]
+            channel.update({
+                "maxAbsDiff": 255,
+                "countAtZero": 0,
+                "countOverTwo": 1,
+                "fractionWithinOneLsb": 0.0,
+                "differingFraction": 1.0,
+                "signedMeanDiff": 255.0,
+                "percentile999AbsDiff": 3,
+            })
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["predicatePasses"] = False
+        statistics["biasPasses"] = False
+        statistics["signedMeanDiff"] = 255.0
+    elif variant == "mono-pass-no-informative":
+        statistics["informative"] = []
+        statistics["informativePixels"] = 0
+        statistics["informativeFraction"] = 0.0
+    elif variant == "full-histogram-composition":
+        _add_zero_background(statistics)
+        statistics["full"][0].update({
+            "maxAbsDiff": 1,
+            "countAtZero": 1,
+            "countAtOne": 1,
+            "fractionWithinOneLsb": 1.0,
+            "differingFraction": 0.5,
+            "signedMeanDiff": 0.5,
+            "percentile999AbsDiff": 1,
+        })
+    elif variant == "full-mean-composition":
+        _add_opposed_background(statistics)
+        statistics["full"][0]["signedMeanDiff"] = 1.0
+    elif variant == "full-without-background":
+        for region, signed_mean in (("full", 1.0), ("image", -1.0),
+                                    ("informative", -1.0)):
+            _set_one_difference(statistics[region][0], signed_mean)
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = -1.0
+    elif variant == "informative-histogram-exceeds-image":
+        _set_one_difference(statistics["informative"][0], 1.0)
+    elif variant == "informative-maximum-exceeds-image":
+        for region, maximum in (("full", 3), ("image", 3),
+                                ("informative", 4)):
+            _set_tail_difference(statistics[region][0], maximum)
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["predicatePasses"] = False
+        statistics["biasPasses"] = False
+        statistics["signedMeanDiff"] = 4.0
+    elif variant == "whole-image-informative-disagrees":
+        for region, signed_mean in (("full", 1.0), ("image", 1.0),
+                                    ("informative", -1.0)):
+            _set_one_difference(statistics[region][0], signed_mean)
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = -1.0
+    elif variant == "touched-presence":
+        for region in regions:
+            _set_one_difference(statistics[region][0], 1.0)
+        statistics["signedMeanDiff"] = 1.0
+    elif variant == "touched-count":
+        for region in regions:
+            channel = statistics[region][0]
+            channel.update({
+                "pixels": 2,
+                "maxAbsDiff": 1,
+                "countAtZero": 0,
+                "countAtOne": 2,
+                "fractionWithinOneLsb": 1.0,
+                "differingFraction": 1.0,
+                "signedMeanDiff": 1.0,
+                "percentile999AbsDiff": 1,
+            })
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 1.0
+    elif variant == "top-signed-mean-source":
+        for region in regions:
+            _set_one_difference(statistics[region][0], 1.0)
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["biasPasses"] = False
+    elif variant == "weak-above-floor":
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["weak"]
+        record["rung"] = "weak"
+        record["notes"] = ["controlled impossible weak attribution"]
+    elif variant == "input-cannot-resolve":
+        report["candidate"] = ".claude/probe-missing"
+    elif variant == "input-is-file":
+        report["candidate"] = ".claude/probe-reference/.keep"
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _set_one_difference(channel: dict, signed_mean: float) -> None:
+    channel.update({
+        "maxAbsDiff": 1,
+        "countAtZero": 0,
+        "countAtOne": 1,
+        "fractionWithinOneLsb": 1.0,
+        "differingFraction": 1.0,
+        "signedMeanDiff": signed_mean,
+        "percentile999AbsDiff": 1,
+    })
+
+
+def _set_tail_difference(channel: dict, maximum: int) -> None:
+    channel.update({
+        "maxAbsDiff": maximum,
+        "countAtZero": 0,
+        "countOverTwo": 1,
+        "fractionWithinOneLsb": 0.0,
+        "differingFraction": 1.0,
+        "signedMeanDiff": float(maximum),
+        "percentile999AbsDiff": maximum,
+    })
+
+
+def _add_zero_background(statistics: dict) -> None:
+    full = statistics["full"][0]
+    full["pixels"] = 2
+    full["countAtZero"] = 2
+    statistics["background"] = [dict(statistics["image"][0])]
+
+
+def _add_opposed_background(statistics: dict) -> None:
+    for region, signed_mean in (("full", 0.0), ("image", 1.0),
+                                ("informative", 1.0)):
+        _set_one_difference(statistics[region][0], signed_mean)
+    statistics["full"][0]["pixels"] = 2
+    statistics["full"][0]["countAtOne"] = 2
+    background = dict(statistics["image"][0])
+    background["signedMeanDiff"] = -1.0
+    statistics["background"] = [background]
+    statistics["rowsTouched"] = 1
+    statistics["columnsTouched"] = 1
+    statistics["signedMeanDiff"] = 1.0
+
+
+def _ledger_from_parent_directory(box: Sandbox) -> subprocess.CompletedProcess:
+    body = (
+        "from pathlib import Path; import os, runpy, sys; "
+        "root = Path.cwd(); os.chdir(root.parent); "
+        "sys.argv = [str(root / 'scripts/verify_ledger.py'), 'record', "
+        "'--comparison-report', str(root / '.claude/probe-comparison.json')]; "
+        "runpy.run_path(str(root / 'scripts/verify_ledger.py'), "
+        "run_name='__main__')"
+    )
+    return box.run(["python3", "-c", body])
+
+
+def _report_contract_mutation(box: Sandbox, variant: str) -> None:
+    report = green_comparison_document(box)
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+    path = "tools/oracle/report-contract.json"
+    raw = box.read(path)
+    if variant == "unknown-root":
+        contract = json.loads(raw)
+        contract["unusedAuthority"] = 0
+        raw = json.dumps(contract)
+    elif variant == "unknown-schemas":
+        contract = json.loads(raw)
+        contract["schemas"]["unused"] = []
+        raw = json.dumps(contract)
+    elif variant == "unknown-vocabularies":
+        contract = json.loads(raw)
+        contract["vocabularies"]["unused"] = []
+        raw = json.dumps(contract)
+    elif variant == "unknown-semantics":
+        contract = json.loads(raw)
+        contract["semantics"]["unused"] = 0
+        raw = json.dumps(contract)
+    elif variant == "unknown-hash-algorithms":
+        contract = json.loads(raw)
+        contract["hashAlgorithms"]["unused"] = "sha256"
+        raw = json.dumps(contract)
+    elif variant == "duplicate-root":
+        raw = raw.replace('"version": 1', '"version": 1, "version": 1', 1)
+    elif variant == "duplicate-nested":
+        raw = raw.replace('"report": [', '"report": [], "report": [', 1)
+    elif variant == "wrong-version":
+        contract = json.loads(raw)
+        contract["version"] = 2
+        raw = json.dumps(contract)
+    elif variant == "empty-hash-algorithm":
+        contract = json.loads(raw)
+        contract["hashAlgorithms"]["view"] = ""
+        raw = json.dumps(contract)
+    elif variant == "green-report-not-object":
+        contract = json.loads(raw)
+        contract["greenReport"] = []
+        raw = json.dumps(contract)
+    elif variant == "invalid-schema-array":
+        contract = json.loads(raw)
+        contract["schemas"]["report"].append("story")
+        raw = json.dumps(contract)
+    elif variant == "invalid-vocabulary-array":
+        contract = json.loads(raw)
+        contract["vocabularies"]["kinds"].append("stack")
+        raw = json.dumps(contract)
+    elif variant == "invalid-channel-count":
+        contract = json.loads(raw)
+        contract["semantics"]["channelCountByClass"]["mono16"] = 0
+        raw = json.dumps(contract)
+    elif variant == "invalid-green-qualifier":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredQualifiers"].append("invented")
+        raw = json.dumps(contract)
+    elif variant == "invalid-semantic-number":
+        contract = json.loads(raw)
+        contract["semantics"]["informativeFractionFloor"] = -1
+        raw = json.dumps(contract)
+    elif variant == "states-not-array":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"] = None
+        raw = json.dumps(contract)
+    elif variant == "state-unknown-key":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"][0]["invented"] = 0
+        raw = json.dumps(contract)
+    elif variant == "state-duplicate-qualifier":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"][0]["qualifiers"].append("weak")
+        raw = json.dumps(contract)
+    elif variant == "state-invalid-class":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"][0]["toleranceClass"] = "invented"
+        raw = json.dumps(contract)
+    elif variant == "state-invalid-qualifier":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"][0]["qualifiers"] = ["bias"]
+        raw = json.dumps(contract)
+    elif variant == "state-invalid-rung":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"][0]["rung"] = "invented"
+        raw = json.dumps(contract)
+    elif variant == "duplicate-state":
+        contract = json.loads(raw)
+        states = contract["semantics"]["greenUnmeasuredStates"]
+        states.append(dict(states[0]))
+        raw = json.dumps(contract)
+    box.write(path, raw + ("" if raw.endswith("\n") else "\n"))
+
+
+def _comparison_run_hash(report: dict, side: str) -> str:
+    algorithm = "sha256-rgba8-run-v1"
+    records = sorted(
+        report["records"],
+        key=lambda record: (record["kind"], record["id"],
+                            record["renderHashes"][side]),
+    )
+    digest = hashlib.sha256()
+    digest.update(algorithm.encode() + b"\0")
+    digest.update(len(records).to_bytes(8, "little"))
+    for record in records:
+        for field in (record["kind"], record["id"],
+                      record["renderHashes"][side]):
+            encoded = field.encode()
+            digest.update(len(encoded).to_bytes(8, "little"))
+            digest.update(encoded)
+    return digest.hexdigest()
+
+
+def _green_unmeasured_state_report(box: Sandbox, index: int) -> None:
+    report = green_comparison_document(box)
+    contract = json.loads(box.read("tools/oracle/report-contract.json"))
+    state = contract["semantics"]["greenUnmeasuredStates"][index]
+    record = json.loads(json.dumps(report["records"][0]))
+    record["id"] = f"probe-unmeasured-{index}"
+    record["toleranceClass"] = state["toleranceClass"]
+    record["outcome"] = "unmeasured"
+    record["qualifiers"] = state["qualifiers"]
+    record["rung"] = state["rung"]
+    record["notes"] = ["controlled green unmeasured state"]
+    if state["toleranceClass"] == "colour-or-us":
+        record["monochromeFrame"] = False
+        record["statistics"]["channels"] = 3
+        for region in ("full", "image", "informative"):
+            channel = record["statistics"][region][0]
+            record["statistics"][region] = [dict(channel) for _ in range(3)]
+    if "weak" in state["qualifiers"]:
+        record["statistics"]["informative"] = []
+        record["statistics"]["informativePixels"] = 0
+        record["statistics"]["informativeFraction"] = 0.0
+    report["records"].append(record)
+    report["records"].sort(key=lambda item: item["id"])
+    report["views"] = 2
+    report["unmeasured"] = 1
+    report["coverage"]["unmeasured"] = 1
+    report["qualifiers"] = {qualifier: 1 for qualifier in state["qualifiers"]}
+    for side in ("reference", "candidate"):
+        report["renderHashes"][side] = _comparison_run_hash(report, side)
     box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
 
@@ -1186,10 +1517,27 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("predicate-contradicts-statistics", "predicate contradicts statistics"),
         ("bias-contradicts-statistics", "bias verdict contradicts statistics"),
         ("count-exceeds-producer-limit", "invalid record 'probe-view' statistics.full[0].pixels"),
+        ("signed-mean-not-pixel-derived", "signed mean is not pixel-derived"),
+        ("signed-mean-contradicts-buckets", "signed mean contradicts buckets"),
+        ("negative-zero", "signedMeanDiff is negative zero"),
+        ("single-tail-percentile", "percentile contradicts counts"),
+        ("mono-pass-no-informative", "pass record 'probe-view' is inconsistent"),
+        ("full-histogram-composition", "full histogram is not image plus background"),
+        ("full-mean-composition", "full mean is not image plus background"),
+        ("full-without-background", "full region is not the whole image"),
+        ("informative-histogram-exceeds-image", "informative histogram exceeds image"),
+        ("informative-maximum-exceeds-image", "informative maximum exceeds image"),
+        ("whole-image-informative-disagrees", "whole-image informative statistics disagree"),
+        ("touched-presence", "touched counts contradict differences"),
+        ("touched-count", "touched counts contradict differing pixels"),
+        ("top-signed-mean-source", "signed mean contradicts its source region"),
+        ("weak-above-floor", "is not low-information"),
+        ("input-cannot-resolve", "candidate directory cannot be resolved"),
+        ("input-is-file", "candidate directory is not a directory"),
     )
     invoke = script("python3", "scripts/verify_ledger.py", "record",
                     "--comparison-report", ".claude/probe-comparison.json")
-    return tuple(
+    refusal_probes = tuple(
         Probe(
             f"ledger.comparison-semantic-{variant}",
             lambda box, variant=variant: _report_semantic_mutation(box, variant),
@@ -1197,6 +1545,74 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
             expected,
         )
         for variant, expected in cases
+    )
+    caller_directory = Probe(
+        "ledger.comparison-relative-path-from-parent",
+        lambda box: box.write(
+            ".claude/probe-comparison.json",
+            json.dumps(green_comparison_document(box)) + "\n",
+        ),
+        Invoke(
+            "python3 scripts/verify_ledger.py record --comparison-report "
+            ".claude/probe-comparison.json from parent",
+            _ledger_from_parent_directory,
+        ),
+        "recorded tree",
+        polarity="accept",
+    )
+    return refusal_probes + (caller_directory,)
+
+
+def _report_contract_probes() -> tuple[Probe, ...]:
+    cases = (
+        ("unknown-root", "root has invalid keys"),
+        ("unknown-schemas", "schemas has invalid keys"),
+        ("unknown-vocabularies", "vocabularies has invalid keys"),
+        ("unknown-semantics", "semantics has invalid keys"),
+        ("unknown-hash-algorithms", "hashAlgorithms has invalid keys"),
+        ("duplicate-root", "duplicate JSON key 'version'"),
+        ("duplicate-nested", "duplicate JSON key 'report'"),
+        ("wrong-version", "version is not the integer 1"),
+        ("empty-hash-algorithm", "hashAlgorithms values are not non-empty strings"),
+        ("green-report-not-object", "greenReport is not an object"),
+        ("invalid-schema-array", "schemas.report is not a unique non-empty string array"),
+        ("invalid-vocabulary-array", "vocabularies.kinds is not a unique non-empty string array"),
+        ("invalid-channel-count", "channelCountByClass values are not positive integers"),
+        ("invalid-green-qualifier", "greenUnmeasuredQualifiers contains an invalid value"),
+        ("invalid-semantic-number", "semantics.informativeFractionFloor is not a finite non-negative number"),
+        ("states-not-array", "semantics.greenUnmeasuredStates is not an array"),
+        ("state-unknown-key", "greenUnmeasuredStates[0] has invalid keys"),
+        ("state-duplicate-qualifier", "greenUnmeasuredStates[0].qualifiers is not a unique"),
+        ("state-invalid-class", "green unmeasured state has an invalid class"),
+        ("state-invalid-qualifier", "green unmeasured state has invalid qualifiers"),
+        ("state-invalid-rung", "green unmeasured state has an invalid rung"),
+        ("duplicate-state", "green unmeasured states contain a duplicate"),
+    )
+    invoke = script("python3", "scripts/verify_ledger.py", "record",
+                    "--comparison-report", ".claude/probe-comparison.json")
+    return tuple(
+        Probe(
+            f"ledger.report-contract-{variant}",
+            lambda box, variant=variant: _report_contract_mutation(box, variant),
+            invoke,
+            expected,
+        )
+        for variant, expected in cases
+    )
+
+
+def _green_unmeasured_state_probes() -> tuple[Probe, ...]:
+    invoke = script("python3", "scripts/verify_ledger.py", "record",
+                    "--comparison-report", ".claude/probe-comparison.json")
+    return tuple(
+        Probe(
+            f"ledger.comparison-green-unmeasured-state-{index}",
+            lambda box, index=index: _green_unmeasured_state_report(box, index),
+            invoke,
+            "recorded tree",
+            polarity="accept",
+        )
+        for index in range(7)
     )
 
 
@@ -6949,6 +7365,17 @@ GUARDS: tuple[Guard, ...] = (
         claims=(r"no verification recorded", r"the corpus is RED",
                 r"corpus is ' ' for tree", r"--corpus must be one of",
                 r"comparison report", r"non-finite JSON number",
+                r"has invalid keys",
+                r"is not a unique non-empty string array",
+                r"version is not the integer 1",
+                r"hashAlgorithms values are not non-empty strings",
+                r"greenReport is not an object",
+                r"channelCountByClass values are not positive integers",
+                r"greenUnmeasuredQualifiers contains an invalid value",
+                r"is not a finite non-negative number",
+                r"semantics.greenUnmeasuredStates is not an array",
+                r"green unmeasured state",
+                r"report contract is invalid",
                 r"comparison evidence is required for tree"),
         probes=(
             Probe("ledger.no-record", None,
@@ -7038,6 +7465,8 @@ GUARDS: tuple[Guard, ...] = (
                   "comparison report unmeasured count disagrees with coverage"),
             *_report_shape_probes(),
             *_report_semantic_probes(),
+            *_report_contract_probes(),
+            *_green_unmeasured_state_probes(),
             Probe("ledger.comparison-duplicate-top-level-key",
                   lambda box: _duplicate_report_key(box, '"fail": 0'),
                   script("python3", "scripts/verify_ledger.py", "record",

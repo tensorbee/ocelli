@@ -1097,6 +1097,16 @@ worth reading.
   nobody stated, and the statistics are the evidence. The image is for locating
   a difference and not for judging one. No PNG encoder is pulled in for it.
 
+The tracked `tools/oracle/report-contract.json` closes the Rust-to-Python
+evidence boundary. It names the exact object schemas, serializer vocabularies,
+green unmeasured class and qualifier states, tolerance constants and render
+hash domains. Relative input directories are interpreted from the repository
+root. The ledger rejects a contract with unknown or duplicate declarations and
+rejects statistics whose fractions, signed sums, percentiles, regions or
+informative state cannot be emitted by the comparator. Standing guard probes
+exercise each refusal and also prove that a genuine relative-path report is
+accepted when the ledger is launched from another directory.
+
 **Nothing under `tools/oracle/compare-out/` is ever committed.** A difference
 image of a real corpus row is derived from that row exactly as a reference frame
 is, and every real row carries `burned-in-unchecked` because HLD story E22.3 is

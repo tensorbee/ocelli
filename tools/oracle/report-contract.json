@@ -89,6 +89,11 @@
       "algorithm",
       "reference",
       "candidate"
+    ],
+    "greenUnmeasuredState": [
+      "toleranceClass",
+      "qualifiers",
+      "rung"
     ]
   },
   "vocabularies": {
@@ -148,6 +153,62 @@
       "weak",
       "decimated",
       "unstated-threshold"
+    ],
+    "greenUnmeasuredStates": [
+      {
+        "toleranceClass": "mono16",
+        "qualifiers": [
+          "weak"
+        ],
+        "rung": "weak"
+      },
+      {
+        "toleranceClass": "mono16",
+        "qualifiers": [
+          "decimated"
+        ],
+        "rung": "decimated"
+      },
+      {
+        "toleranceClass": "mono16",
+        "qualifiers": [
+          "weak",
+          "decimated"
+        ],
+        "rung": "decimated"
+      },
+      {
+        "toleranceClass": "colour-or-us",
+        "qualifiers": [
+          "unstated-threshold"
+        ],
+        "rung": "class-two"
+      },
+      {
+        "toleranceClass": "colour-or-us",
+        "qualifiers": [
+          "weak",
+          "unstated-threshold"
+        ],
+        "rung": "class-two"
+      },
+      {
+        "toleranceClass": "colour-or-us",
+        "qualifiers": [
+          "decimated",
+          "unstated-threshold"
+        ],
+        "rung": "class-two"
+      },
+      {
+        "toleranceClass": "colour-or-us",
+        "qualifiers": [
+          "weak",
+          "decimated",
+          "unstated-threshold"
+        ],
+        "rung": "class-two"
+      }
     ],
     "monochromeWithinOneLsbFraction": 0.999,
     "monochromeMaxAbsDiff": 2,

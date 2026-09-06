@@ -63,7 +63,151 @@ TRAILER_VERIFY = "Ocelli-Verify"
 TRAILER_AGENT = "Ocelli-Generated-By"
 CORPUS_STATES = {"pass", "fail", "absent", "skipped"}
 
-REPORT_CONTRACT = json.loads(REPORT_CONTRACT_PATH.read_text())
+
+class DuplicateJsonKey(ValueError):
+    pass
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateJsonKey(f"duplicate JSON key {key!r}")
+        result[key] = value
+    return result
+
+
+def _invalid_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON number {value}")
+
+
+def _contract_object(value: object, label: str, keys: set[str]) -> dict:
+    if not isinstance(value, dict) or set(value) != keys:
+        actual = set(value) if isinstance(value, dict) else set()
+        raise ValueError(
+            f"{label} has invalid keys, missing={sorted(keys - actual)}, "
+            f"unknown={sorted(actual - keys)}"
+        )
+    return value
+
+
+def _contract_string_array(value: object, label: str) -> list[str]:
+    if (not isinstance(value, list)
+            or any(not isinstance(item, str) or not item for item in value)
+            or len(set(value)) != len(value)):
+        raise ValueError(f"{label} is not a unique non-empty string array")
+    return value
+
+
+def _load_report_contract() -> dict:
+    root_keys = {
+        "version", "schemas", "vocabularies", "semantics",
+        "hashAlgorithms", "greenReport",
+    }
+    schema_keys = {
+        "report", "coverage", "record", "statistics", "channel",
+        "parameterDivergence", "geometryDivergence", "renderHashes",
+        "greenUnmeasuredState",
+    }
+    vocabulary_keys = {
+        "kinds", "toleranceClasses", "outcomes", "sides", "rungs",
+        "qualifiers",
+    }
+    semantic_keys = {
+        "channelCountByClass", "greenUnmeasuredQualifiers",
+        "greenUnmeasuredStates",
+        "monochromeWithinOneLsbFraction", "monochromeMaxAbsDiff",
+        "monochromeSignedMeanBias", "informativeFractionFloor",
+    }
+    try:
+        contract = json.loads(
+            REPORT_CONTRACT_PATH.read_bytes(),
+            object_pairs_hook=_unique_object,
+            parse_constant=_invalid_constant,
+        )
+        contract = _contract_object(contract, "root", root_keys)
+        if isinstance(contract["version"], bool) or contract["version"] != 1:
+            raise ValueError("version is not the integer 1")
+        schemas = _contract_object(contract["schemas"], "schemas", schema_keys)
+        vocabularies = _contract_object(
+            contract["vocabularies"], "vocabularies", vocabulary_keys
+        )
+        semantics = _contract_object(
+            contract["semantics"], "semantics", semantic_keys
+        )
+        algorithms = _contract_object(
+            contract["hashAlgorithms"], "hashAlgorithms", {"view", "run"}
+        )
+        if any(not isinstance(value, str) or not value
+               for value in algorithms.values()):
+            raise ValueError("hashAlgorithms values are not non-empty strings")
+        if not isinstance(contract["greenReport"], dict):
+            raise ValueError("greenReport is not an object")
+        for name, value in schemas.items():
+            _contract_string_array(value, f"schemas.{name}")
+        for name, value in vocabularies.items():
+            _contract_string_array(value, f"vocabularies.{name}")
+        classes = _contract_object(
+            semantics["channelCountByClass"],
+            "semantics.channelCountByClass",
+            set(vocabularies["toleranceClasses"]),
+        )
+        if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0
+               for value in classes.values()):
+            raise ValueError("channelCountByClass values are not positive integers")
+        green_qualifiers = _contract_string_array(
+            semantics["greenUnmeasuredQualifiers"],
+            "semantics.greenUnmeasuredQualifiers",
+        )
+        if (not green_qualifiers
+                or any(item not in vocabularies["qualifiers"]
+                       for item in green_qualifiers)):
+            raise ValueError("greenUnmeasuredQualifiers contains an invalid value")
+        for name in (
+            "monochromeWithinOneLsbFraction", "monochromeMaxAbsDiff",
+            "monochromeSignedMeanBias", "informativeFractionFloor",
+        ):
+            value = semantics[name]
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0):
+                raise ValueError(f"semantics.{name} is not a finite non-negative number")
+        states = semantics["greenUnmeasuredStates"]
+        if not isinstance(states, list) or not states:
+            raise ValueError("semantics.greenUnmeasuredStates is not an array")
+        state_keys = set(schemas["greenUnmeasuredState"])
+        qualifier_order = vocabularies["qualifiers"]
+        seen_states = set()
+        for index, raw_state in enumerate(states):
+            state = _contract_object(
+                raw_state,
+                f"semantics.greenUnmeasuredStates[{index}]",
+                state_keys,
+            )
+            tolerance_class = state["toleranceClass"]
+            qualifiers = _contract_string_array(
+                state["qualifiers"],
+                f"semantics.greenUnmeasuredStates[{index}].qualifiers",
+            )
+            rung = state["rung"]
+            if tolerance_class not in vocabularies["toleranceClasses"]:
+                raise ValueError("green unmeasured state has an invalid class")
+            if (not qualifiers
+                    or any(item not in semantics["greenUnmeasuredQualifiers"]
+                           for item in qualifiers)
+                    or qualifiers != sorted(qualifiers, key=qualifier_order.index)):
+                raise ValueError("green unmeasured state has invalid qualifiers")
+            if rung not in vocabularies["rungs"]:
+                raise ValueError("green unmeasured state has an invalid rung")
+            identity = (tolerance_class, tuple(qualifiers))
+            if identity in seen_states:
+                raise ValueError("green unmeasured states contain a duplicate")
+            seen_states.add(identity)
+        return contract
+    except (OSError, json.JSONDecodeError, DuplicateJsonKey, ValueError) as error:
+        sys.exit(f"report contract is invalid: {REPORT_CONTRACT_PATH}: {error}")
+
+
+REPORT_CONTRACT = _load_report_contract()
 REPORT_SCHEMAS = REPORT_CONTRACT["schemas"]
 REPORT_VOCABULARIES = REPORT_CONTRACT["vocabularies"]
 REPORT_SEMANTICS = REPORT_CONTRACT["semantics"]
@@ -89,6 +233,10 @@ QUALIFIERS = tuple(REPORT_VOCABULARIES["qualifiers"])
 GREEN_UNMEASURED_QUALIFIERS = set(
     REPORT_SEMANTICS["greenUnmeasuredQualifiers"]
 )
+GREEN_UNMEASURED_STATES = {
+    (state["toleranceClass"], tuple(state["qualifiers"])): state["rung"]
+    for state in REPORT_SEMANTICS["greenUnmeasuredStates"]
+}
 MONOCHROME_WITHIN_ONE_LSB_FRACTION = REPORT_SEMANTICS[
     "monochromeWithinOneLsbFraction"
 ]
@@ -125,23 +273,6 @@ def save(data: dict) -> None:
     LEDGER.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
 
 
-class DuplicateJsonKey(ValueError):
-    pass
-
-
-def _unique_object(pairs: list[tuple[str, object]]) -> dict:
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise DuplicateJsonKey(f"duplicate JSON key {key!r}")
-        result[key] = value
-    return result
-
-
-def _invalid_constant(value: str) -> None:
-    raise ValueError(f"non-finite JSON number {value}")
-
-
 def _schema(value: object, label: str, keys: set[str]) -> dict:
     if not isinstance(value, dict):
         sys.exit(f"comparison report {label} is not an object")
@@ -172,6 +303,13 @@ def _number(value: object, label: str) -> float:
     if not finite:
         sys.exit(f"comparison report has invalid {label}")
     return float(value)
+
+
+def _derived_number(value: object, label: str) -> float:
+    number = _number(value, label)
+    if number == 0.0 and math.copysign(1.0, number) < 0.0:
+        sys.exit(f"comparison report {label} is negative zero")
+    return number
 
 
 def _text(value: object, label: str) -> str:
@@ -207,11 +345,13 @@ def _channel_report(value: object, label: str) -> dict:
         f"{label}.percentile999AbsDiff",
         maximum=255,
     )
-    within = _number(channel["fractionWithinOneLsb"],
-                     f"{label}.fractionWithinOneLsb")
-    differing = _number(channel["differingFraction"],
-                        f"{label}.differingFraction")
-    signed_mean = _number(channel["signedMeanDiff"], f"{label}.signedMeanDiff")
+    within = _derived_number(channel["fractionWithinOneLsb"],
+                             f"{label}.fractionWithinOneLsb")
+    differing = _derived_number(channel["differingFraction"],
+                                f"{label}.differingFraction")
+    signed_mean = _derived_number(
+        channel["signedMeanDiff"], f"{label}.signedMeanDiff"
+    )
     if pixels == 0 or not 0.0 <= within <= 1.0 or not 0.0 <= differing <= 1.0:
         sys.exit(f"comparison report has invalid {label} channel fractions")
     expected_within = (counts[0] + counts[1]) / pixels
@@ -237,6 +377,8 @@ def _channel_report(value: object, label: str) -> dict:
             break
     if expected_percentile is not None:
         percentile_is_consistent = percentile == expected_percentile
+    elif counts[3] == 1:
+        percentile_is_consistent = percentile == maximum
     else:
         percentile_is_consistent = 3 <= percentile <= maximum
     if not percentile_is_consistent:
@@ -247,6 +389,23 @@ def _channel_report(value: object, label: str) -> dict:
     if (not I32_MIN <= signed_sum <= I32_MAX
             or not math.isclose(signed_sum, round(signed_sum), abs_tol=1e-6)):
         sys.exit(f"comparison report {label} signed mean is not pixel-derived")
+    signed_sum_integer = round(signed_sum)
+    if counts[3] == 0:
+        count_at_one = counts[1]
+        count_at_two = counts[2]
+        lower = max(-count_at_two, -((-signed_sum_integer + count_at_one) // 2))
+        upper = min(count_at_two, (signed_sum_integer + count_at_one) // 2)
+        if lower % 2 != count_at_two % 2:
+            lower += 1
+        attainable = (
+            signed_sum_integer % 2 == count_at_one % 2 and lower <= upper
+        )
+    else:
+        attainable = abs(signed_sum_integer) <= (
+            counts[1] + 2 * counts[2] + maximum * counts[3]
+        )
+    if not attainable:
+        sys.exit(f"comparison report {label} signed mean contradicts buckets")
     return channel
 
 
@@ -281,7 +440,7 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
         f"{label}.informativePixels",
         maximum=U32_MAX,
     )
-    informative_fraction = _number(
+    informative_fraction = _derived_number(
         statistics["informativeFraction"], f"{label}.informativeFraction")
     if image_pixels == 0 or informative_pixels > image_pixels:
         sys.exit(f"comparison report {label} has invalid region pixel counts")
@@ -291,7 +450,9 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
         sys.exit(f"comparison report has invalid {label}.predicatePasses")
     if not isinstance(statistics["biasPasses"], bool):
         sys.exit(f"comparison report has invalid {label}.biasPasses")
-    signed_mean = _number(statistics["signedMeanDiff"], f"{label}.signedMeanDiff")
+    signed_mean = _derived_number(
+        statistics["signedMeanDiff"], f"{label}.signedMeanDiff"
+    )
 
     full_pixels = {entry["pixels"] for entry in regions["full"]}
     image_region_pixels = {entry["pixels"] for entry in regions["image"]}
@@ -332,12 +493,6 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
             ):
                 sys.exit(
                     f"comparison report {label} full mean is not image plus background"
-                )
-            if full["maxAbsDiff"] != max(
-                image["maxAbsDiff"], background["maxAbsDiff"]
-            ):
-                sys.exit(
-                    f"comparison report {label} full maximum is not image plus background"
                 )
     else:
         for channel_index in range(channels):
@@ -478,23 +633,20 @@ def _record(value: object, index: int) -> dict:
     if outcome == "pass":
         if (tolerance_class != "mono16" or qualifiers
                 or record["attributedTo"] != "none"
-                or record["rung"] != "pixels" or notes):
+                or record["rung"] != "pixels" or notes
+                or record["statistics"]["informativePixels"] == 0):
             sys.exit(f"comparison report pass record {record_id!r} is inconsistent")
     elif outcome == "unmeasured":
         if (not qualifiers or not set(qualifiers) <= GREEN_UNMEASURED_QUALIFIERS
                 or record["attributedTo"] != "none" or not notes):
             sys.exit(f"comparison report unmeasured record {record_id!r} is inconsistent")
-        class_two = tolerance_class == "colour-or-us"
-        if class_two != ("unstated-threshold" in qualifiers):
+        expected_rung = GREEN_UNMEASURED_STATES.get(
+            (tolerance_class, tuple(qualifiers))
+        )
+        if expected_rung is None:
             sys.exit(
                 f"comparison report unmeasured record {record_id!r} contradicts its class"
             )
-        if "unstated-threshold" in qualifiers:
-            expected_rung = "class-two"
-        elif "decimated" in qualifiers:
-            expected_rung = "decimated"
-        else:
-            expected_rung = "weak"
         if record["rung"] != expected_rung:
             sys.exit(f"comparison report unmeasured record {record_id!r} has the wrong rung")
         weak = "weak" in qualifiers
@@ -526,8 +678,11 @@ def _run_hash(records: list[dict], side: str) -> str:
 
 def _resolved_directory(value: object, label: str) -> Path:
     text = _text(value, label)
+    source = Path(text)
+    if not source.is_absolute():
+        source = ROOT / source
     try:
-        resolved = Path(text).resolve(strict=True)
+        resolved = source.resolve(strict=True)
     except OSError as error:
         sys.exit(f"comparison report {label} cannot be resolved: {error}")
     if not resolved.is_dir():

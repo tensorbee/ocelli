@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::report::{Outcome, ParameterDivergence, Qualifier, Side, ViewRecord};
+use crate::report::{Outcome, ParameterDivergence, Qualifier, Rung, Side, ViewRecord};
 use crate::sidecar::Sidecar;
 use crate::tolerance::ToleranceClass;
 
@@ -79,7 +79,7 @@ impl TruthComparison {
             outcome: Outcome::Fail,
             qualifiers: std::collections::BTreeSet::new(),
             side: Side::Unattributed,
-            rung: "metadata-truth",
+            rung: Rung::MetadataTruth,
             notes: vec![
                 "frame bytes were not read because committed metadata truth answered first"
                     .to_owned(),
@@ -121,7 +121,7 @@ impl TruthComparison {
         } else {
             Side::Unattributed
         };
-        record.rung = "metadata-truth";
+        record.rung = Rung::MetadataTruth;
         if self.shared_problem {
             record.notes.push(
                 "both producers disagree with committed synthetic truth. This is an instrument or shared-reference problem, not agreement"
@@ -517,7 +517,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{MetadataTruth, exact_equal};
-    use crate::report::{Outcome, Qualifier, Side, ViewRecord};
+    use crate::report::{Outcome, Qualifier, Rung, Side, ViewRecord};
     use crate::sidecar::{Sidecar, ViewKind};
     use crate::tolerance::ToleranceClass;
     use serde_json::json;
@@ -573,7 +573,7 @@ mod tests {
             outcome: Outcome::Pass,
             qualifiers: BTreeSet::new(),
             side: Side::None,
-            rung: "pixels",
+            rung: Rung::Pixels,
             notes: Vec::new(),
             parameter_divergences: Vec::new(),
             parameter_values_withheld: false,
@@ -630,7 +630,7 @@ mod tests {
         let mut record = pixel_record();
         candidate.apply_to(&mut record);
         assert_eq!(record.outcome, Outcome::Fail);
-        assert_eq!(record.rung, "metadata-truth");
+        assert_eq!(record.rung, Rung::MetadataTruth);
         assert_eq!(record.side, Side::Ours);
         assert!(record.qualifiers.contains(&Qualifier::MetadataTruth));
         Ok(())
@@ -673,7 +673,7 @@ mod tests {
                 ToleranceClass::MonochromeSixteenBit,
             )
             .ok_or("metadata failure did not produce a record")?;
-        assert_eq!(record.rung, "metadata-truth");
+        assert_eq!(record.rung, Rung::MetadataTruth);
         assert!(record.statistics.is_none());
         assert_eq!(
             record.reference_render_hash,

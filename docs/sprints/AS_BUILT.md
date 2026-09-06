@@ -1923,6 +1923,13 @@ Python verifier and standing mutation controls all consume
 `tools/oracle/report-contract.json`, so the cross-language contract has one
 tracked projection and cannot drift behind a hand-built green fixture.
 
+The sixth sprint review closed the remaining producer-shape gaps. Relative
+input paths are anchored to the repository regardless of the ledger caller's
+directory. Derived zero values, signed sums, tail percentiles and informative
+denominators must now be values the comparator can emit. Exact green
+unmeasured states and the production rung vocabulary are part of the same
+closed contract, and each semantic refusal has a targeted standing probe.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured
