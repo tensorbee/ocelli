@@ -1945,6 +1945,12 @@ This rejects approximate means and reports whose percentile and signed sum
 could not come from one producer histogram. Standing green-state probes now
 take their count and run-hash algorithm from the tracked report contract.
 
+The ninth review closed the remaining informative-region composition gap.
+Every nonzero image difference must now appear with the same count in the
+informative histogram. Only zero-difference samples may be excluded as pixels
+clipped to the same extreme on both sides. A standing probe proves that a
+forged zero-mean informative region cannot turn a producer bias failure green.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured

@@ -867,6 +867,11 @@ mod tests {
         assert_eq!(image.signed_count_at(-1), 0);
         assert_eq!(background.signed_count_at(0), 1);
         assert_eq!(background.signed_count_at(5), 1);
+        let Some(informative) = diff.informative.channel(0) else {
+            assert!(core::hint::black_box(false), "no informative channel 0");
+            return;
+        };
+        assert_eq!(informative.signed_count_at(1), image.signed_count_at(1));
         assert_eq!(diff.image_pixels, 2);
     }
 

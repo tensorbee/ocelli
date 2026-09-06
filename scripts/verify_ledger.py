@@ -509,12 +509,21 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
             image = regions["image"][channel_index]
             informative = regions["informative"][channel_index]
             image_histogram = dict(image["signedHistogram"])
+            informative_histogram = dict(informative["signedHistogram"])
             if any(
                 count > image_histogram.get(difference, 0)
                 for difference, count in informative["signedHistogram"]
             ):
                 sys.exit(
                     f"comparison report {label} informative signed histogram exceeds image"
+                )
+            if any(
+                difference != 0
+                and informative_histogram.get(difference, 0) != count
+                for difference, count in image["signedHistogram"]
+            ):
+                sys.exit(
+                    f"comparison report {label} informative signed histogram omits image differences"
                 )
     any_difference = any(
         channel["countAtZero"] != channel["pixels"] for channel in regions["full"]

@@ -300,6 +300,10 @@ readings of the same buffers. The JSON report also carries the same samples as
 a sparse `signedHistogram` of `[difference, count]` pairs. The ledger derives
 every published channel statistic from that one exact distribution instead of
 trying to prove separately summarized values can share an unseen histogram.
+Full histograms must be the exact sum of image and background. Every nonzero
+image bin must also appear unchanged in the informative histogram, because a
+nonzero lane difference cannot be clipped to the same extreme on both sides.
+Only zero-difference samples may be omitted from the informative region.
 
 **The gating predicate for class one, and only this:**
 

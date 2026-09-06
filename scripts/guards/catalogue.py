@@ -1282,6 +1282,17 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["predicatePasses"] = False
         statistics["biasPasses"] = False
         statistics["signedMeanDiff"] = 4.0
+    elif variant == "informative-omits-difference":
+        for region in ("full", "image"):
+            _set_signed_distribution(
+                statistics[region][0], [(0, 999), (1, 1)]
+            )
+        _set_signed_distribution(statistics["informative"][0], [(0, 1)])
+        statistics["imagePixels"] = 1000
+        statistics["informativePixels"] = 1
+        statistics["informativeFraction"] = 0.001
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
     elif variant == "touched-presence":
         for region in regions:
             _set_one_difference(statistics[region][0], 1.0)
@@ -1567,6 +1578,7 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("full-without-background", "full region is not the whole image"),
         ("informative-histogram-exceeds-image", "informative signed histogram exceeds image"),
         ("informative-maximum-exceeds-image", "informative signed histogram exceeds image"),
+        ("informative-omits-difference", "informative signed histogram omits image differences"),
         ("touched-presence", "touched counts contradict differences"),
         ("touched-count", "touched counts contradict differing pixels"),
         ("top-signed-mean-source", "signed mean contradicts its source region"),
