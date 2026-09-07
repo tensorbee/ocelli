@@ -2009,6 +2009,12 @@ forced, plus both partitions mixed. Refusal probes cover both forced with the
 same sign or opposite signs. A background-only, image-only, any-partition or
 other asymmetric rewrite therefore changes at least one expected result.
 
+The eighteenth review fixed the numeric and multiplicity edges of that matrix.
+Uniform `+254` and `-254` acceptance probes preserve the adjacent non-forced
+values, where more than one byte pair can realize a coloured frame. Two-pixel
+uniform `+255` and `-255` refusal probes prove that forced regions are not
+limited to a single sample.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured
