@@ -669,7 +669,12 @@ def _statistics(
             )
 
         minimum_covering_pixels = row_count + column_count - maximum_matching
-        maximum_union_pixels = min(allowed_cells, sum(channel_differences))
+        support_upper = sum(channel_differences)
+        if region_name == "image":
+            support_upper = min(support_upper, informative_pixels)
+        if monochrome_frame:
+            support_upper = min(support_upper, max(channel_differences))
+        maximum_union_pixels = min(allowed_cells, support_upper)
         if (max(channel_differences) > allowed_cells
                 or maximum_union_pixels < minimum_covering_pixels):
             sys.exit(

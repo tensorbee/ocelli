@@ -1459,6 +1459,38 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["rowsTouched"] = 1
         statistics["columnsTouched"] = 2
         _set_dimensions(statistics, 1, 2, 1, 2)
+    elif variant in ("informative-touched-support", "monochrome-touched-support"):
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        record["monochromeFrame"] = variant == "monochrome-touched-support"
+        statistics["channels"] = 3
+        for region in ("full", "image"):
+            _set_signed_distribution(statistics[region][0], [(0, 3), (1, 1)])
+            statistics[region] = [dict(statistics[region][0]) for _ in range(3)]
+        informative_entries = (
+            [(0, 3), (1, 1)]
+            if variant == "monochrome-touched-support"
+            else [(1, 1)]
+        )
+        _set_signed_distribution(statistics["informative"][0], informative_entries)
+        statistics["informative"] = [
+            dict(statistics["informative"][0]) for _ in range(3)
+        ]
+        statistics["imagePixels"] = 4
+        statistics["informativePixels"] = (
+            1 if variant == "informative-touched-support" else 4
+        )
+        statistics["informativeFraction"] = statistics["informativePixels"] / 4
+        statistics["rowsTouched"] = 2
+        statistics["columnsTouched"] = 2
+        statistics["signedMeanDiff"] = 0.25
+        _set_dimensions(statistics, 2, 2, 2, 2)
+        _set_touched_indices(
+            statistics, image_rows=[0, 1], image_columns=[0, 1]
+        )
     elif variant == "partial-volume-reformat-image":
         record["kind"] = "volume-reformat"
         _add_zero_background(statistics)
@@ -1492,6 +1524,32 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
     elif variant == "input-is-file":
         report["candidate"] = ".claude/probe-reference/.keep"
     _supply_image_touched_indices(statistics)
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _valid_nonzero_background_report(box: Sandbox) -> None:
+    report = green_comparison_document(box)
+    statistics = report["records"][0]["statistics"]
+    _set_signed_distribution(
+        statistics["image"][0], [(-1, 1), (0, 2), (1, 1)]
+    )
+    statistics["informative"][0] = dict(statistics["image"][0])
+    background = dict(statistics["image"][0])
+    _set_signed_distribution(background, [(0, 2), (1, 3)])
+    statistics["background"] = [background]
+    _set_signed_distribution(
+        statistics["full"][0], [(-1, 1), (0, 4), (1, 4)]
+    )
+    statistics["imagePixels"] = 4
+    statistics["informativePixels"] = 4
+    statistics["informativeFraction"] = 1.0
+    statistics["rowsTouched"] = 3
+    statistics["columnsTouched"] = 3
+    _set_dimensions(statistics, 3, 3, 2, 2)
+    _set_touched_indices(
+        statistics, image_rows=[0, 1], image_columns=[0, 1],
+        background_rows=[0, 2], background_columns=[0, 2],
+    )
     box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
 
@@ -1794,6 +1852,8 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("background-touched-isolated", "background touched indices contain an isolated row or column"),
         ("background-joint-capacity", "background touched indices contradict region geometry"),
         ("monochrome-lanes-disagree", "channels contradict monochrome frame"),
+        ("informative-touched-support", "image touched indices contradict region geometry"),
+        ("monochrome-touched-support", "image touched indices contradict region geometry"),
         ("partial-volume-reformat-image", "volume reformat is not a full-frame image"),
         ("touched-presence", "touched counts contradict differences"),
         ("touched-count", "touched counts contradict differing pixels"),
@@ -1827,7 +1887,14 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         "recorded tree",
         polarity="accept",
     )
-    return refusal_probes + (caller_directory,)
+    nonzero_background = Probe(
+        "ledger.comparison-nonzero-background-is-permitted",
+        _valid_nonzero_background_report,
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
+    return refusal_probes + (caller_directory, nonzero_background)
 
 
 def _report_contract_probes() -> tuple[Probe, ...]:

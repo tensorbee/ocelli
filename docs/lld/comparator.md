@@ -315,7 +315,11 @@ image rectangle removed for the background. This prevents the separate row
 and column marginals from describing a spatial shape the producer cannot
 emit. A volume reformat must use the full frame as its image rectangle. When
 `monochromeFrame` is true, every reported RGB channel distribution must be
-identical because each source pixel has equal red, green and blue lanes.
+identical because each source pixel has equal red, green and blue lanes. The
+image difference union cannot exceed `informativePixels`, since every nonzero
+image difference is informative. For a monochrome RGB frame the union is also
+bounded by one lane's difference count because all three lanes have the same
+pixel support.
 
 **The gating predicate for class one, and only this:**
 

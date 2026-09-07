@@ -1974,6 +1974,14 @@ volume reformat to use the full frame and requires all RGB distributions to
 match when `monochromeFrame` is true. Standing probes cover the L-shaped
 background, unequal monochrome lanes and a partial reformat image.
 
+The thirteenth review closed two shared-support limits in that feasibility
+proof. The union of image differences is now capped by the shared informative
+pixel count. A monochrome RGB region is capped by one lane's difference count
+because equal red, green and blue values make all three lane supports the same
+pixel set. Two refusal probes preserve those boundaries, and a positive probe
+passes simultaneous image and background differences through the full Python
+evidence reader to guard against false refusals in the complement calculation.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured
