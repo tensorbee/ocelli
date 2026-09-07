@@ -148,6 +148,106 @@ impl Qualifier {
     }
 }
 
+macro_rules! define_rungs {
+    ($($variant:ident => $label:literal),+ $(,)?) => {
+        /// Which rung of the attribution ladder answered for a view.
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub enum Rung {
+            $($variant),+
+        }
+
+        impl Rung {
+            /// Every rung the production comparator can emit, in ladder order.
+            pub const ALL: &[Self] = &[$(Self::$variant),+];
+
+            #[must_use]
+            pub const fn label(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $label),+
+                }
+            }
+        }
+    };
+}
+
+define_rungs! {
+    MetadataTruth => "metadata-truth",
+    Parameters => "parameters",
+    Register => "register",
+    VolumeDivergence => "volume-divergence",
+    Geometry => "geometry",
+    ClassTwo => "class-two",
+    Letterbox => "letterbox",
+    Pixels => "pixels",
+    Decimated => "decimated",
+    Weak => "weak",
+}
+
+/// One qualifier and rung combination that can be green while unmeasured.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GreenUnmeasuredState {
+    pub class: ToleranceClass,
+    pub qualifiers: &'static [Qualifier],
+    pub rung: Rung,
+}
+
+impl GreenUnmeasuredState {
+    /// Every green unmeasured state production attribution can emit.
+    pub const ALL: &[Self] = &[
+        Self {
+            class: ToleranceClass::MonochromeSixteenBit,
+            qualifiers: &[Qualifier::Weak],
+            rung: Rung::Weak,
+        },
+        Self {
+            class: ToleranceClass::MonochromeSixteenBit,
+            qualifiers: &[Qualifier::Decimated],
+            rung: Rung::Decimated,
+        },
+        Self {
+            class: ToleranceClass::MonochromeSixteenBit,
+            qualifiers: &[Qualifier::Weak, Qualifier::Decimated],
+            rung: Rung::Decimated,
+        },
+        Self {
+            class: ToleranceClass::ColourOrUltrasound,
+            qualifiers: &[Qualifier::UnstatedThreshold],
+            rung: Rung::ClassTwo,
+        },
+        Self {
+            class: ToleranceClass::ColourOrUltrasound,
+            qualifiers: &[Qualifier::Weak, Qualifier::UnstatedThreshold],
+            rung: Rung::ClassTwo,
+        },
+        Self {
+            class: ToleranceClass::ColourOrUltrasound,
+            qualifiers: &[Qualifier::Decimated, Qualifier::UnstatedThreshold],
+            rung: Rung::ClassTwo,
+        },
+        Self {
+            class: ToleranceClass::ColourOrUltrasound,
+            qualifiers: &[
+                Qualifier::Weak,
+                Qualifier::Decimated,
+                Qualifier::UnstatedThreshold,
+            ],
+            rung: Rung::ClassTwo,
+        },
+    ];
+
+    fn permits(record: &ViewRecord) -> bool {
+        Self::ALL.iter().any(|state| {
+            state.class == record.class
+                && state.rung == record.rung
+                && state.qualifiers.len() == record.qualifiers.len()
+                && state
+                    .qualifiers
+                    .iter()
+                    .all(|qualifier| record.qualifiers.contains(qualifier))
+        })
+    }
+}
+
 /// Which side a divergence is attributed to.
 ///
 /// Rung 6's default is `Ours`, and that direction is the conservative one:
@@ -208,6 +308,16 @@ pub struct ViewStatistics {
     pub informative: Vec<ChannelReport>,
     pub rows_touched: u32,
     pub columns_touched: u32,
+    pub image_x: u32,
+    pub image_y: u32,
+    pub image_rows_touched: Vec<u32>,
+    pub image_columns_touched: Vec<u32>,
+    pub background_rows_touched: Vec<u32>,
+    pub background_columns_touched: Vec<u32>,
+    pub frame_rows: u32,
+    pub frame_columns: u32,
+    pub image_rows: u32,
+    pub image_columns: u32,
     pub image_pixels: u64,
     pub informative_pixels: u64,
     pub informative_fraction: f64,
@@ -220,6 +330,7 @@ pub struct ViewStatistics {
 #[derive(Clone, Debug)]
 pub struct ChannelReport {
     pub pixels: u64,
+    pub signed_histogram: Vec<(i16, u64)>,
     pub max_abs_diff: u8,
     pub count_at_zero: u64,
     pub count_at_one: u64,
@@ -238,6 +349,12 @@ impl ChannelReport {
     pub fn of(stats: &crate::frame::ChannelStats) -> Result<Self, StatsError> {
         Ok(Self {
             pixels: stats.pixels(),
+            signed_histogram: (-255_i16..=255_i16)
+                .filter_map(|difference| {
+                    let count = stats.signed_count_at(difference);
+                    (count > 0).then_some((difference, count))
+                })
+                .collect(),
             max_abs_diff: stats.max_abs_diff(),
             count_at_zero: stats.count_at(0),
             count_at_one: stats.count_at(1),
@@ -254,6 +371,7 @@ impl ChannelReport {
     fn to_json(&self) -> Value {
         json!({
             "pixels": self.pixels,
+            "signedHistogram": self.signed_histogram,
             "maxAbsDiff": self.max_abs_diff,
             "countAtZero": self.count_at_zero,
             "countAtOne": self.count_at_one,
@@ -281,7 +399,7 @@ pub struct ViewRecord {
     pub qualifiers: BTreeSet<Qualifier>,
     pub side: Side,
     /// Which rung of the attribution ladder answered.
-    pub rung: &'static str,
+    pub rung: Rung,
     pub notes: Vec<String>,
     pub parameter_divergences: Vec<ParameterDivergence>,
     /// Real-row parameter values are compared in memory but never serialized.
@@ -334,6 +452,16 @@ impl ViewRecord {
                 "informative": channels_to_json(&stats.informative),
                 "rowsTouched": stats.rows_touched,
                 "columnsTouched": stats.columns_touched,
+                "imageX": stats.image_x,
+                "imageY": stats.image_y,
+                "imageRowsTouched": stats.image_rows_touched,
+                "imageColumnsTouched": stats.image_columns_touched,
+                "backgroundRowsTouched": stats.background_rows_touched,
+                "backgroundColumnsTouched": stats.background_columns_touched,
+                "frameRows": stats.frame_rows,
+                "frameColumns": stats.frame_columns,
+                "imageRows": stats.image_rows,
+                "imageColumns": stats.image_columns,
                 "imagePixels": stats.image_pixels,
                 "informativePixels": stats.informative_pixels,
                 "informativeFraction": stats.informative_fraction,
@@ -349,7 +477,7 @@ impl ViewRecord {
             "outcome": self.outcome.label(),
             "qualifiers": self.qualifier_labels(),
             "attributedTo": self.side.label(),
-            "rung": self.rung,
+            "rung": self.rung.label(),
             "notes": self.notes,
             "parameterDivergences": Value::Array(
                 self.parameter_divergences
@@ -483,11 +611,36 @@ fn labels(set: &BTreeSet<Qualifier>) -> String {
         .join(", ")
 }
 
+/// Machine-readable classification of a whole comparison run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GateVerdict {
+    Pass,
+    ComparisonFailure,
+    CoverageLoss,
+    Refusal,
+}
+
+impl GateVerdict {
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::ComparisonFailure => "comparison-failure",
+            Self::CoverageLoss => "coverage-loss",
+            Self::Refusal => "refusal",
+        }
+    }
+}
+
 /// The whole run's result.
 #[derive(Clone, Debug)]
 pub struct RunReport {
     pub records: Vec<ViewRecord>,
     pub problems: Vec<String>,
+    pub coverage_problems: Vec<String>,
+    pub absent_views: usize,
+    pub unsupported_source_rows: usize,
+    pub declared_volume_refusals: usize,
     pub reference_directory: String,
     pub candidate_directory: String,
 }
@@ -526,6 +679,39 @@ impl RunReport {
             .iter()
             .filter(|record| record.outcome == outcome)
             .count()
+    }
+
+    /// Views for which the written pixel predicate produced a verdict.
+    /// `unmeasured`, `absent` and source-level refusals are named separately.
+    #[must_use]
+    pub fn claimed_verdict_views(&self) -> usize {
+        self.count(Outcome::Pass) + self.count(Outcome::Fail)
+    }
+
+    #[must_use]
+    pub fn absent_count(&self) -> usize {
+        self.absent_views + self.count(Outcome::Absent)
+    }
+
+    #[must_use]
+    pub fn gate_verdict(&self) -> GateVerdict {
+        if !self.problems.is_empty() {
+            GateVerdict::Refusal
+        } else if self.count(Outcome::Fail) > 0
+            || !self.absorbed_divergences().is_empty()
+            || self.records.iter().any(|record| {
+                record.outcome == Outcome::Unmeasured && !GreenUnmeasuredState::permits(record)
+            })
+        {
+            GateVerdict::ComparisonFailure
+        } else if self.claimed_verdict_views() == 0
+            || self.absent_count() > 0
+            || !self.coverage_problems.is_empty()
+        {
+            GateVerdict::CoverageLoss
+        } else {
+            GateVerdict::Pass
+        }
     }
 
     /// The qualifier histogram over EVERY record, which is the number the
@@ -585,28 +771,33 @@ impl RunReport {
     /// `divergent-while-unmeasured`, the census matches exactly in both
     /// directions, and no register entry marked unreachable fired.
     ///
-    /// Three of those five are `problems`, which the caller collects. The
-    /// other two are counted and read here, so the whole rule holds whatever a
-    /// caller does or forgets.
+    /// Structural and input refusals are `problems`. Census changes are
+    /// `coverage_problems`. Outcomes and absorbed divergences are read from
+    /// the records here, so one category cannot be reported as another.
     #[must_use]
     pub fn green(&self) -> bool {
-        self.problems.is_empty()
-            && self.absorbed_divergences().is_empty()
-            && self.count(Outcome::Fail) == 0
-            && self.count(Outcome::Absent) == 0
+        self.gate_verdict() == GateVerdict::Pass
     }
 
     #[must_use]
     pub fn to_json(&self) -> Value {
         json!({
-            "story": "F-011, F-015",
+            "story": "F-011, F-012, F-015",
             "reference": self.reference_directory,
             "candidate": self.candidate_directory,
             "views": self.records.len(),
             "pass": self.count(Outcome::Pass),
             "fail": self.count(Outcome::Fail),
             "unmeasured": self.count(Outcome::Unmeasured),
-            "absent": self.count(Outcome::Absent),
+            "absent": self.absent_count(),
+            "claimedVerdictViews": self.claimed_verdict_views(),
+            "coverage": {
+                "unmeasured": self.count(Outcome::Unmeasured),
+                "absent": self.absent_count(),
+                "unsupportedSourceRows": self.unsupported_source_rows,
+                "declaredVolumeRefusals": self.declared_volume_refusals,
+            },
+            "gateVerdict": self.gate_verdict().label(),
             "qualifiers": Value::Object(
                 self.qualifier_counts()
                     .into_iter()
@@ -614,6 +805,7 @@ impl RunReport {
                     .collect()
             ),
             "problems": self.problems,
+            "coverageProblems": self.coverage_problems,
             "absorbedDivergences": self.absorbed_divergences(),
             "green": self.green(),
             "renderHashes": {
@@ -629,12 +821,22 @@ impl RunReport {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::fmt;
 
+    use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
     use serde_json::json;
 
-    use super::{Census, Outcome, Qualifier, RunReport, Side, ViewRecord};
+    use super::{
+        Census, ChannelReport, GreenUnmeasuredState, Outcome, ParameterDivergence, Qualifier,
+        RunReport, Rung, Side, ViewRecord, ViewStatistics,
+    };
+    use crate::geometry::Divergence;
+    use crate::render_hash::{ALGORITHM as RENDER_HASH_ALGORITHM, RUN_ALGORITHM};
     use crate::sidecar::ViewKind;
-    use crate::tolerance::ToleranceClass;
+    use crate::tolerance::{
+        INFORMATIVE_FRACTION_FLOOR, MONOCHROME_MAX_ABS_DIFF, MONOCHROME_SIGNED_MEAN_BIAS,
+        MONOCHROME_WITHIN_ONE_LSB_FRACTION, ToleranceClass,
+    };
 
     fn record(id: &str, outcome: Outcome, qualifiers: &[Qualifier]) -> ViewRecord {
         ViewRecord {
@@ -644,7 +846,7 @@ mod tests {
             outcome,
             qualifiers: qualifiers.iter().copied().collect::<BTreeSet<_>>(),
             side: Side::None,
-            rung: "pixels",
+            rung: Rung::Pixels,
             notes: Vec::new(),
             parameter_divergences: Vec::new(),
             parameter_values_withheld: false,
@@ -656,6 +858,425 @@ mod tests {
             monochrome_frame: true,
             photometric_interpretation: Some("MONOCHROME2".to_owned()),
         }
+    }
+
+    fn zero_channel() -> ChannelReport {
+        ChannelReport {
+            pixels: 1,
+            signed_histogram: vec![(0, 1)],
+            max_abs_diff: 0,
+            count_at_zero: 1,
+            count_at_one: 0,
+            count_at_two: 0,
+            count_over_two: 0,
+            fraction_within_one_lsb: 1.0,
+            differing_fraction: 0.0,
+            signed_mean_diff: 0.0,
+            percentile_999_abs_diff: 0,
+        }
+    }
+
+    fn object_keys(value: &serde_json::Value) -> BTreeSet<String> {
+        value
+            .as_object()
+            .map(|object| object.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    fn object_keys_at(value: &serde_json::Value, pointer: &str) -> BTreeSet<String> {
+        value.pointer(pointer).map(object_keys).unwrap_or_default()
+    }
+
+    fn expected_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    struct UniqueValue;
+
+    impl<'de> DeserializeSeed<'de> for UniqueValue {
+        type Value = serde_json::Value;
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(UniqueValueVisitor)
+        }
+    }
+
+    struct UniqueValueVisitor;
+
+    impl<'de> Visitor<'de> for UniqueValueVisitor {
+        type Value = serde_json::Value;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a JSON value without duplicate object keys")
+        }
+
+        fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Bool(value))
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Number(value.into()))
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Number(value.into()))
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            serde_json::Number::from_f64(value)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| E::custom("a JSON number must be finite"))
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            self.visit_string(value.to_owned())
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::String(value))
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Null)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E> {
+            Ok(serde_json::Value::Null)
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut values = Vec::new();
+            while let Some(value) = sequence.next_element_seed(UniqueValue)? {
+                values.push(value);
+            }
+            Ok(serde_json::Value::Array(values))
+        }
+
+        fn visit_map<A>(self, mut entries: A) -> Result<Self::Value, A::Error>
+        where
+            A: MapAccess<'de>,
+        {
+            let mut object = serde_json::Map::new();
+            while let Some(key) = entries.next_key::<String>()? {
+                if object.contains_key(&key) {
+                    return Err(<A::Error as serde::de::Error>::custom(format!(
+                        "duplicate JSON key {key:?}"
+                    )));
+                }
+                object.insert(key, entries.next_value_seed(UniqueValue)?);
+            }
+            Ok(serde_json::Value::Object(object))
+        }
+    }
+
+    fn parse_unique_json(source: &str) -> Result<serde_json::Value, serde_json::Error> {
+        let mut deserializer = serde_json::Deserializer::from_str(source);
+        let value = UniqueValue.deserialize(&mut deserializer)?;
+        deserializer.end()?;
+        Ok(value)
+    }
+
+    #[test]
+    fn contract_reader_refuses_duplicate_keys_at_any_depth() {
+        assert!(parse_unique_json(r#"{"version":1,"version":1}"#).is_err());
+        assert!(parse_unique_json(r#"{"schemas":{"report":[],"report":[]}}"#).is_err());
+    }
+
+    fn declared_keys(contract: &serde_json::Value, name: &str) -> BTreeSet<String> {
+        contract
+            .pointer(&format!("/schemas/{name}"))
+            .and_then(serde_json::Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The tracked contract is the only cross-language schema and fixture.
+    /// Rust proves it is an exact serializer product, and the Python ledger
+    /// and its refusal probes consume the same file.
+    #[test]
+    fn tracked_report_contract_matches_the_serializer() -> Result<(), Box<dyn std::error::Error>> {
+        let contract = parse_unique_json(include_str!("../report-contract.json"))?;
+        assert_eq!(
+            object_keys(&contract),
+            expected_keys(&[
+                "version",
+                "schemas",
+                "vocabularies",
+                "semantics",
+                "hashAlgorithms",
+                "greenReport",
+            ])
+        );
+        assert_eq!(
+            object_keys_at(&contract, "/schemas"),
+            expected_keys(&[
+                "report",
+                "coverage",
+                "record",
+                "statistics",
+                "channel",
+                "parameterDivergence",
+                "geometryDivergence",
+                "renderHashes",
+                "greenUnmeasuredState",
+            ])
+        );
+        assert_eq!(
+            object_keys_at(&contract, "/vocabularies"),
+            expected_keys(&[
+                "kinds",
+                "toleranceClasses",
+                "outcomes",
+                "sides",
+                "rungs",
+                "qualifiers",
+            ])
+        );
+        assert_eq!(
+            object_keys_at(&contract, "/semantics"),
+            expected_keys(&[
+                "channelCountByClass",
+                "greenUnmeasuredQualifiers",
+                "greenUnmeasuredStates",
+                "monochromeWithinOneLsbFraction",
+                "monochromeMaxAbsDiff",
+                "monochromeSignedMeanBias",
+                "informativeFractionFloor",
+            ])
+        );
+        assert_eq!(
+            object_keys_at(&contract, "/semantics/channelCountByClass"),
+            expected_keys(&["mono16", "colour-or-us"])
+        );
+        assert_eq!(
+            object_keys_at(&contract, "/hashAlgorithms"),
+            expected_keys(&["view", "run"])
+        );
+        for (index, _) in GreenUnmeasuredState::ALL.iter().enumerate() {
+            assert_eq!(
+                object_keys_at(
+                    &contract,
+                    &format!("/semantics/greenUnmeasuredStates/{index}")
+                ),
+                declared_keys(&contract, "greenUnmeasuredState")
+            );
+        }
+        let mut green = record("probe-view", Outcome::Pass, &[]);
+        green.reference_render_hash = "0".repeat(64);
+        green.candidate_render_hash = "0".repeat(64);
+        green.statistics = Some(ViewStatistics {
+            channels: 1,
+            full: vec![zero_channel()],
+            image: vec![zero_channel()],
+            background: Vec::new(),
+            informative: vec![zero_channel()],
+            rows_touched: 0,
+            columns_touched: 0,
+            image_x: 0,
+            image_y: 0,
+            image_rows_touched: Vec::new(),
+            image_columns_touched: Vec::new(),
+            background_rows_touched: Vec::new(),
+            background_columns_touched: Vec::new(),
+            frame_rows: 1,
+            frame_columns: 1,
+            image_rows: 1,
+            image_columns: 1,
+            image_pixels: 1,
+            informative_pixels: 1,
+            informative_fraction: 1.0,
+            predicate_passes: true,
+            bias_passes: true,
+            signed_mean_diff: 0.0,
+        });
+        let mut serialized = report(vec![green], Vec::new()).to_json();
+        if let Some(object) = serialized.as_object_mut() {
+            object.insert("operation".to_owned(), json!("gate"));
+        }
+        assert_eq!(contract.pointer("/greenReport"), Some(&serialized));
+        assert_eq!(contract.pointer("/version"), Some(&json!(1)));
+        assert_eq!(object_keys(&serialized), declared_keys(&contract, "report"));
+        assert_eq!(
+            object_keys_at(&serialized, "/coverage"),
+            declared_keys(&contract, "coverage")
+        );
+        assert_eq!(
+            object_keys_at(&serialized, "/records/0"),
+            declared_keys(&contract, "record")
+        );
+        assert_eq!(
+            object_keys_at(&serialized, "/records/0/statistics"),
+            declared_keys(&contract, "statistics")
+        );
+        assert_eq!(
+            object_keys_at(&serialized, "/records/0/statistics/full/0"),
+            declared_keys(&contract, "channel")
+        );
+        assert_eq!(
+            object_keys_at(&serialized, "/renderHashes"),
+            declared_keys(&contract, "renderHashes")
+        );
+
+        let mut divergence = record("divergence", Outcome::Fail, &[]);
+        divergence.parameter_divergences.push(ParameterDivergence {
+            pointer: "/field".to_owned(),
+            reference: json!(1),
+            candidate: json!(2),
+            side: Side::Ours,
+            why: "controlled".to_owned(),
+        });
+        divergence.geometry_divergences.push(Divergence {
+            field: "camera.position[0]".to_owned(),
+            reference: 0.0,
+            candidate: 1.0,
+            difference: 1.0,
+            bound: 0.25,
+        });
+        let divergence = divergence.to_json();
+        assert_eq!(
+            object_keys_at(&divergence, "/parameterDivergences/0"),
+            declared_keys(&contract, "parameterDivergence")
+        );
+        assert_eq!(
+            object_keys_at(&divergence, "/geometryDivergences/0"),
+            declared_keys(&contract, "geometryDivergence")
+        );
+
+        assert_eq!(
+            contract.pointer("/vocabularies/kinds"),
+            Some(&json!([
+                ViewKind::Stack.label(),
+                ViewKind::VolumeReformat.label(),
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/vocabularies/toleranceClasses"),
+            Some(&json!([
+                ToleranceClass::MonochromeSixteenBit.label(),
+                ToleranceClass::ColourOrUltrasound.label(),
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/vocabularies/outcomes"),
+            Some(&json!([
+                Outcome::Pass.label(),
+                Outcome::Fail.label(),
+                Outcome::Unmeasured.label(),
+                Outcome::Absent.label(),
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/vocabularies/sides"),
+            Some(&json!([
+                Side::Inputs.label(),
+                Side::Reference.label(),
+                Side::Ours.label(),
+                Side::Fit.label(),
+                Side::None.label(),
+                Side::Unattributed.label(),
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/vocabularies/qualifiers"),
+            Some(&json!([
+                Qualifier::Weak.label(),
+                Qualifier::Decimated.label(),
+                Qualifier::UnstatedThreshold.label(),
+                Qualifier::ParameterDivergence.label(),
+                Qualifier::MetadataTruth.label(),
+                Qualifier::GeometryDivergence.label(),
+                Qualifier::ReferenceDivergence.label(),
+                Qualifier::Bias.label(),
+                Qualifier::LetterboxOnly.label(),
+                Qualifier::DivergentWhileUnmeasured.label(),
+            ]))
+        );
+        assert_eq!(
+            contract.pointer("/vocabularies/rungs"),
+            Some(&json!(
+                Rung::ALL
+                    .iter()
+                    .copied()
+                    .map(Rung::label)
+                    .collect::<Vec<_>>()
+            ))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/channelCountByClass"),
+            Some(&json!({
+                ToleranceClass::MonochromeSixteenBit.label(): 1,
+                ToleranceClass::ColourOrUltrasound.label(): 3,
+            }))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/greenUnmeasuredQualifiers"),
+            Some(&json!([
+                Qualifier::Weak.label(),
+                Qualifier::Decimated.label(),
+                Qualifier::UnstatedThreshold.label(),
+            ]))
+        );
+        let green_unmeasured_states = GreenUnmeasuredState::ALL
+            .iter()
+            .map(|state| {
+                json!({
+                    "toleranceClass": state.class.label(),
+                    "qualifiers": state
+                        .qualifiers
+                        .iter()
+                        .copied()
+                        .map(Qualifier::label)
+                        .collect::<Vec<_>>(),
+                    "rung": state.rung.label(),
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            contract.pointer("/semantics/greenUnmeasuredStates"),
+            Some(&json!(green_unmeasured_states))
+        );
+        assert_eq!(
+            contract.pointer("/hashAlgorithms"),
+            Some(&json!({
+                "view": RENDER_HASH_ALGORITHM,
+                "run": RUN_ALGORITHM,
+            }))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/monochromeWithinOneLsbFraction"),
+            Some(&json!(MONOCHROME_WITHIN_ONE_LSB_FRACTION))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/monochromeMaxAbsDiff"),
+            Some(&json!(MONOCHROME_MAX_ABS_DIFF))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/monochromeSignedMeanBias"),
+            Some(&json!(MONOCHROME_SIGNED_MEAN_BIAS))
+        );
+        assert_eq!(
+            contract.pointer("/semantics/informativeFractionFloor"),
+            Some(&json!(INFORMATIVE_FRACTION_FLOOR))
+        );
+        Ok(())
     }
 
     #[test]
@@ -754,6 +1375,10 @@ mod tests {
         RunReport {
             records,
             problems,
+            coverage_problems: Vec::new(),
+            absent_views: 0,
+            unsupported_source_rows: 0,
+            declared_volume_refusals: 0,
             reference_directory: "reference".to_owned(),
             candidate_directory: "candidate".to_owned(),
         }
@@ -763,8 +1388,10 @@ mod tests {
     /// below about the qualifier rather than about the constructor.
     #[test]
     fn a_clean_run_is_green() {
+        let mut unmeasured = record("a", Outcome::Unmeasured, &[Qualifier::Weak]);
+        unmeasured.rung = Rung::Weak;
         let clean = report(
-            vec![record("a", Outcome::Unmeasured, &[Qualifier::Weak])],
+            vec![record("judged", Outcome::Pass, &[]), unmeasured],
             Vec::new(),
         );
         assert!(clean.green());
@@ -778,6 +1405,28 @@ mod tests {
             json.pointer("/records/0/renderHashes/reference"),
             Some(&json!("reference-hash"))
         );
+    }
+
+    #[test]
+    fn every_declared_green_unmeasured_state_reaches_the_gate_verdict() {
+        for state in GreenUnmeasuredState::ALL {
+            let mut unmeasured = record("unmeasured", Outcome::Unmeasured, state.qualifiers);
+            unmeasured.class = state.class;
+            unmeasured.rung = state.rung;
+            let run = report(
+                vec![record("judged", Outcome::Pass, &[]), unmeasured],
+                Vec::new(),
+            );
+            assert!(run.green(), "declared state {state:?} was not green");
+        }
+
+        let mut undeclared = record("unmeasured", Outcome::Unmeasured, &[Qualifier::Weak]);
+        undeclared.rung = Rung::Decimated;
+        let run = report(
+            vec![record("judged", Outcome::Pass, &[]), undeclared],
+            Vec::new(),
+        );
+        assert!(!run.green(), "an undeclared state reached a green verdict");
     }
 
     /// `divergent-while-unmeasured` fails the run BY ITSELF. Zero fails, zero

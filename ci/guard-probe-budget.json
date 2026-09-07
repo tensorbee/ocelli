@@ -61,7 +61,7 @@
       "tunable": false
     },
     "scripts/ci_floor_check.py:NOT_IN_FLOOR": {
-      "digest": "cef018d7322ad7e1",
+      "digest": "e0d43f4b8f955164",
       "guard": "ci-floor",
       "tunable": false
     },
@@ -188,7 +188,7 @@
     "bench.state": 3,
     "bindgen": 3,
     "bootstrap-importer": 5,
-    "catalogue": 72,
+    "catalogue": 73,
     "census": 35,
     "census-runbook": 3,
     "ci-floor": 25,
@@ -226,6 +226,9 @@
     "probe-runner": 20,
     "prose": 3,
     "provenance": 4,
+    "quirk-mutation-boundaries": 2,
+    "quirk-mutations": 9,
+    "quirks": 4,
     "runner": 1,
     "sandbox": 13,
     "skill-examples": 15,
@@ -241,7 +244,7 @@
     "target-features": 6,
     "unsafe": 2
   },
-  "gates_declared": 28,
+  "gates_declared": 30,
   "note": "Recorded measurements, not guesses. `wall_clock_seconds` is what the harness took on the machine that recorded it. `constants` is the declared-constant ratchet, `constants_count` and `gates_declared` are the counts that catch one of those being removed rather than changed, `entry_sites` is the per-entry refusal count for the catalogue entries claiming their file with `\"*\"`, so a refusal added to an already claimed file moves a number when it takes one of the shapes scripts/guards/discover.py scans, `oracle_faults` is the fault-count ratchet and `uncovered` is the uncovered-refusal ratchet, all written by scripts/guard_census.py --record.",
   "oracle_faults": 23,
   "uncovered": {

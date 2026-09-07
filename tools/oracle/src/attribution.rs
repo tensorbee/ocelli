@@ -51,7 +51,7 @@ use crate::geometry::{
 };
 use crate::render_hash::render_hash;
 use crate::report::{
-    ChannelReport, Outcome, ParameterDivergence, Qualifier, Side, ViewRecord, ViewStatistics,
+    ChannelReport, Outcome, ParameterDivergence, Qualifier, Rung, Side, ViewRecord, ViewStatistics,
 };
 use crate::sidecar::{LoadError, Run, Sidecar, ViewKind};
 use crate::tolerance::{
@@ -842,7 +842,7 @@ pub fn compare_view(
             .map(|divergence| divergence.side)
             .find(|side| *side != Side::Unattributed)
             .unwrap_or(Side::Unattributed);
-        (Outcome::Fail, attributed, "parameters")
+        (Outcome::Fail, attributed, Rung::Parameters)
     } else if let Some(entry) = effect_entry {
         qualifiers.insert(Qualifier::ReferenceDivergence);
         register_entry = Some(entry.id.clone());
@@ -850,7 +850,7 @@ pub fn compare_view(
             "register entry {} ({}) matches this view: {}",
             entry.id, entry.citation, entry.reference_does
         ));
-        (Outcome::Unmeasured, Side::Reference, "register")
+        (Outcome::Unmeasured, Side::Reference, Rung::Register)
     // **`!geometry.is_empty()` is load-bearing and was added by the S03 sprint
     // review.** F-X007's `referenceDivergence` names a FIELD, and every
     // entry that exists names a geometry field, `spacing[2]`. A divergence in
@@ -877,10 +877,10 @@ pub fn compare_view(
                 .and_then(Value::as_str)
                 .unwrap_or("unnamed field")
         ));
-        (Outcome::Unmeasured, Side::Reference, "volume-divergence")
+        (Outcome::Unmeasured, Side::Reference, Rung::VolumeDivergence)
     } else if !geometry.is_empty() {
         qualifiers.insert(Qualifier::GeometryDivergence);
-        (Outcome::Fail, Side::Fit, "geometry")
+        (Outcome::Fail, Side::Fit, Rung::Geometry)
     } else if class == ToleranceClass::ColourOrUltrasound {
         qualifiers.insert(Qualifier::UnstatedThreshold);
         notes.push(
@@ -900,7 +900,7 @@ pub fn compare_view(
                     .to_owned(),
             );
         }
-        (Outcome::Unmeasured, Side::None, "class-two")
+        (Outcome::Unmeasured, Side::None, Rung::ClassTwo)
     } else if gate_failed {
         let letterbox_only = diff
             .image
@@ -917,12 +917,12 @@ pub fn compare_view(
         }
         if letterbox_only {
             qualifiers.insert(Qualifier::LetterboxOnly);
-            (Outcome::Fail, Side::Fit, "letterbox")
+            (Outcome::Fail, Side::Fit, Rung::Letterbox)
         } else {
-            (Outcome::Fail, Side::Ours, "pixels")
+            (Outcome::Fail, Side::Ours, Rung::Pixels)
         }
     } else {
-        (Outcome::Pass, Side::None, "pixels")
+        (Outcome::Pass, Side::None, Rung::Pixels)
     };
 
     // The two overlays. They never turn a `pass` into a `fail`, and they never
@@ -940,10 +940,10 @@ pub fn compare_view(
              component still gates, at 25.1's written bound"
                 .to_owned(),
         );
-        if outcome == Outcome::Pass || rung == "pixels" || rung == "letterbox" {
+        if outcome == Outcome::Pass || rung == Rung::Pixels || rung == Rung::Letterbox {
             outcome = Outcome::Unmeasured;
             side = Side::None;
-            rung = "decimated";
+            rung = Rung::Decimated;
         }
     }
     if context.low_information.contains(id)
@@ -957,10 +957,10 @@ pub fn compare_view(
              clipped values could not show in a pixel diff",
             statistics.informative_fraction
         ));
-        if outcome == Outcome::Pass || rung == "pixels" || rung == "letterbox" {
+        if outcome == Outcome::Pass || rung == Rung::Pixels || rung == Rung::Letterbox {
             outcome = Outcome::Unmeasured;
             side = Side::None;
-            rung = "weak";
+            rung = Rung::Weak;
         }
     }
     if outcome == Outcome::Unmeasured && gate_failed {
@@ -1108,6 +1108,16 @@ fn build_statistics(
         informative,
         rows_touched: diff.rows_touched,
         columns_touched: diff.columns_touched,
+        image_x: diff.image_x,
+        image_y: diff.image_y,
+        image_rows_touched: diff.image_rows_touched.clone(),
+        image_columns_touched: diff.image_columns_touched.clone(),
+        background_rows_touched: diff.background_rows_touched.clone(),
+        background_columns_touched: diff.background_columns_touched.clone(),
+        frame_rows: diff.frame_rows,
+        frame_columns: diff.frame_columns,
+        image_rows: diff.image_rows,
+        image_columns: diff.image_columns,
         image_pixels: diff.image_pixels,
         informative_pixels: diff.informative_pixels,
         informative_fraction,
@@ -1365,7 +1375,7 @@ mod tests {
 
     use super::{CompareError, Context, compare_view, parameter_values_are_sensitive};
     use crate::frame::Frame;
-    use crate::report::{Outcome, Qualifier, Side};
+    use crate::report::{Outcome, Qualifier, Rung, Side};
     use crate::sidecar::{DeclaredView, Run, Sidecar, ViewKind};
 
     const SUBJECT: &str = "subject-under-test";
@@ -1684,7 +1694,7 @@ mod tests {
         )?;
         assert_eq!(attributed.outcome, Outcome::Unmeasured);
         assert_eq!(attributed.side, Side::Reference);
-        assert_eq!(attributed.rung, "register");
+        assert_eq!(attributed.rung, Rung::Register);
         assert_eq!(
             attributed.register_entry.as_deref(),
             Some("sigmoid-width-below-one")
@@ -1714,7 +1724,7 @@ mod tests {
         )?;
         assert_eq!(disabled.outcome, Outcome::Fail);
         assert_eq!(disabled.side, Side::Ours);
-        assert_eq!(disabled.rung, "pixels");
+        assert_eq!(disabled.rung, Rung::Pixels);
 
         let mut one_bad_pixel = candidate_frame.clone();
         one_bad_pixel.set_pixel(0, 0, [3, 3, 3, u8::MAX])?;
@@ -1732,7 +1742,7 @@ mod tests {
         )?;
         assert_eq!(unrelated_pixel.outcome, Outcome::Fail);
         assert_eq!(unrelated_pixel.side, Side::Ours);
-        assert_eq!(unrelated_pixel.rung, "pixels");
+        assert_eq!(unrelated_pixel.rung, Rung::Pixels);
         assert_eq!(unrelated_pixel.register_entry, None);
         assert!(
             !unrelated_pixel
@@ -1764,7 +1774,7 @@ mod tests {
         )?;
         assert_eq!(unrelated_parameter.outcome, Outcome::Fail);
         assert_eq!(unrelated_parameter.side, Side::Ours);
-        assert_eq!(unrelated_parameter.rung, "parameters");
+        assert_eq!(unrelated_parameter.rung, Rung::Parameters);
         assert_eq!(unrelated_parameter.register_entry, None);
         assert!(
             !unrelated_parameter
@@ -1796,7 +1806,7 @@ mod tests {
         )?;
         assert_eq!(unrelated_geometry.outcome, Outcome::Fail);
         assert_eq!(unrelated_geometry.side, Side::Fit);
-        assert_eq!(unrelated_geometry.rung, "geometry");
+        assert_eq!(unrelated_geometry.rung, Rung::Geometry);
         assert_eq!(unrelated_geometry.register_entry, None);
         assert!(
             unrelated_geometry
@@ -1824,7 +1834,7 @@ mod tests {
         )?;
         assert_eq!(identical.outcome, Outcome::Pass);
         assert_eq!(identical.side, Side::None);
-        assert_eq!(identical.rung, "pixels");
+        assert_eq!(identical.rung, Rung::Pixels);
         assert_eq!(identical.register_entry, None);
         assert!(
             !identical
@@ -1885,7 +1895,7 @@ mod tests {
             record.photometric_interpretation.as_deref(),
             Some("MONOCHROME2")
         );
-        assert_eq!(record.rung, "parameters");
+        assert_eq!(record.rung, Rung::Parameters);
         assert_eq!(record.outcome, Outcome::Fail);
         assert!(record.qualifiers.contains(&Qualifier::ParameterDivergence));
         assert!(
@@ -1992,7 +2002,7 @@ mod tests {
         assert!(!statistics.bias_passes);
         assert_eq!(record.outcome, Outcome::Fail);
         assert_eq!(record.side, Side::Ours);
-        assert_eq!(record.rung, "pixels");
+        assert_eq!(record.rung, Rung::Pixels);
         assert!(record.qualifiers.contains(&Qualifier::Bias));
         Ok(())
     }
@@ -2042,7 +2052,7 @@ mod tests {
         assert_eq!(statistics.informative_pixels, 0);
         assert_eq!(statistics.informative_fraction.to_bits(), 0.0_f64.to_bits());
         assert_eq!(record.outcome, Outcome::Unmeasured);
-        assert_eq!(record.rung, "weak");
+        assert_eq!(record.rung, Rung::Weak);
         assert!(record.qualifiers.contains(&Qualifier::Weak));
         Ok(())
     }
@@ -2064,7 +2074,7 @@ mod tests {
              nothing should have been measured: {:?}",
             record.geometry_divergences
         );
-        assert_eq!(record.rung, "pixels");
+        assert_eq!(record.rung, Rung::Pixels);
         assert_eq!(record.outcome, Outcome::Fail);
         assert_eq!(record.side, Side::Ours);
         assert!(!record.qualifiers.contains(&Qualifier::ReferenceDivergence));
@@ -2081,7 +2091,7 @@ mod tests {
     fn the_same_divergence_does_explain_a_geometry_difference() -> Result<(), CompareError> {
         let record = compare_reformat(100.001, true)?;
         assert!(!record.geometry_divergences.is_empty());
-        assert_eq!(record.rung, "volume-divergence");
+        assert_eq!(record.rung, Rung::VolumeDivergence);
         assert_eq!(record.outcome, Outcome::Unmeasured);
         assert_eq!(record.side, Side::Reference);
         assert!(record.qualifiers.contains(&Qualifier::ReferenceDivergence));
@@ -2100,7 +2110,7 @@ mod tests {
     #[test]
     fn a_geometry_difference_with_no_declared_divergence_is_the_fit() -> Result<(), CompareError> {
         let record = compare_reformat(100.001, false)?;
-        assert_eq!(record.rung, "geometry");
+        assert_eq!(record.rung, Rung::Geometry);
         assert_eq!(record.outcome, Outcome::Fail);
         assert_eq!(record.side, Side::Fit);
         assert!(record.qualifiers.contains(&Qualifier::GeometryDivergence));

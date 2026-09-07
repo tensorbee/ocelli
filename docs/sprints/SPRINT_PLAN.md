@@ -150,11 +150,10 @@ _S01 to S05, 31 stories, 68 engineer-weeks._
 
 #### Sprint S04
 
-**Goal**: CI gate: every PR renders the full corpus, Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract, One parity-target version string, and a licence in the published wasm package, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it, The reference's own SIGMOID width divergence, and what D14's bound says about it, Price the HTJ2K decoder route after gate A1 failed, Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing, Execute the skills' worked examples, because the skills gate asserts nothing about their numbers, Try the next adapter when the best candidate cannot open a device, and record what was attempted, Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting, Make close-preflight see the sprint review, and key its verification on the tree it is about, Decide whether a CI step that is not guaranteed to run counts as CI running the gate, Stop gen_sprint_plan.py's write mode silently overwriting a hand-curated SPRINT_PLAN.md.
+**Goal**: Metadata diff harness (LUT values, geometry, spacing), Stable render-hash emission from the comparator, Tier C, software-adapter detection, and the feature-availability contract, One parity-target version string, and a licence in the published wasm package, CI floor equivalence, and the identical --sprint and --all gate profiles, Cross-machine reference determinism, and what the oracle claims about it, The reference's own SIGMOID width divergence, and what D14's bound says about it, Price the HTJ2K decoder route after gate A1 failed, Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing, Execute the skills' worked examples, because the skills gate asserts nothing about their numbers, Try the next adapter when the best candidate cannot open a device, and record what was attempted, Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting, Make close-preflight see the sprint review, and key its verification on the tree it is about, Decide whether a CI step that is not guaranteed to run counts as CI running the gate, Stop gen_sprint_plan.py's write mode silently overwriting a hand-curated SPRINT_PLAN.md.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
-| F-012 | E2.4 | CI gate: every PR renders the full corpus | Test | 3w |
 | F-013 | E2.5 | Metadata diff harness (LUT values, geometry, spacing) | Test | 2w |
 | F-015 | E2.7 | Stable render-hash emission from the comparator | Test | 2w |
 | F-X001 | X1.1 | Tier C, software-adapter detection, and the feature-availability contract | Rust | 4w |
@@ -173,10 +172,11 @@ _S01 to S05, 31 stories, 68 engineer-weeks._
 
 #### Sprint S05
 
-**Goal**: Quirk-capture workflow: every field bug becomes a fixture.
+**Goal**: Candidate comparison gate contract and verification plumbing, Quirk-capture workflow: every field bug becomes a fixture.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
+| F-012 | E2.4 | Candidate comparison gate contract and verification plumbing | Test | 3w |
 | F-014 | E2.6 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w |
 
 ### M2, DICOM ingest and the pixel pipeline
@@ -327,7 +327,7 @@ _S15 to S17, 12 stories, 44 engineer-weeks._
 
 Volumes assemble progressively, reslice obliquely and ray-cast on both tiers.
 
-_S18 to S21, 14 stories, 50 engineer-weeks._
+_S18 to S21, 15 stories, 53 engineer-weeks._
 
 #### Sprint S18
 
@@ -350,7 +350,7 @@ _S18 to S21, 14 stories, 50 engineer-weeks._
 
 #### Sprint S20
 
-**Goal**: Oblique / arbitrary-plane reslicing, Thick slab with composite, MIP, MinIP and average blend modes, Slice-position sync and frame-of-reference handling, Multi-volume fusion with per-volume opacity and colormap (PET-CT).
+**Goal**: Oblique / arbitrary-plane reslicing, Thick slab with composite, MIP, MinIP and average blend modes, Slice-position sync and frame-of-reference handling, Multi-volume fusion with per-volume opacity and colormap (PET-CT), Activate the full-corpus candidate-render gate against Ocelli output.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
@@ -358,6 +358,7 @@ _S18 to S21, 14 stories, 50 engineer-weeks._
 | F-054 | E8.4 | Thick slab with composite, MIP, MinIP and average blend modes | Rust | 4w |
 | F-055 | E8.5 | Slice-position sync and frame-of-reference handling | Rust | 3w |
 | F-056 | E8.6 | Multi-volume fusion with per-volume opacity and colormap (PET-CT) | Rust | 4w |
+| F-X021 | Y1.16 | Activate the full-corpus candidate-render gate against Ocelli output | Test | 3w |
 
 #### Sprint S21
 
@@ -895,4 +896,3 @@ _S66 to S72, 7 stories, 74 engineer-weeks._
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
 | F-149 | E35.7 | Multi-server data sources within one study | Rust | 8w |
-

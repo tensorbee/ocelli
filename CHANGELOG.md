@@ -20,6 +20,9 @@ Repository bootstrap. Nothing is published.
   and pixel-value newtypes in `ocelli-core`.
 - A manifest-backed DICOM corpus with deterministic synthetic fixtures,
   transfer-syntax conformance checks, metadata auditing and digest verification.
+- A quirk-capture registry and checker that bind a synthetic generator recipe,
+  manifest row, independently computed expectation, regression test and active
+  mutation evidence into one reviewed record.
 - The authoritative Markdown specification under `docs/hld/`, sanitized during
   bootstrap so no external source-document bundle is needed by the workflow.
 - `docs/sprints/`, with 190 F-IDs imported from the backlog spreadsheet and

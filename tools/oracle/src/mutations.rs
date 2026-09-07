@@ -1608,7 +1608,7 @@ mod tests {
             outcome: ViewOutcome::Pass,
             qualifiers: BTreeSet::new(),
             side: Side::None,
-            rung: "pixels",
+            rung: crate::report::Rung::Pixels,
             notes: Vec::new(),
             parameter_divergences: Vec::new(),
             parameter_values_withheld: false,

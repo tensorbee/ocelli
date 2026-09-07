@@ -1,6 +1,6 @@
 # The golden corpus
 
-**F-IDs that contributed:** F-009, F-013, F-X006, F-X007, F-X012, F-X013
+**F-IDs that contributed:** F-009, F-013, F-014, F-X006, F-X007, F-X012, F-X013
 **Last updated:** 2026-09-06
 
 The corpus is the input every later correctness claim is measured on. It lives
@@ -50,6 +50,43 @@ legal under PS3.3 C.11.2.1.3.1. The fixture transcribes that section's formula
 independently and pins display values 4.586483540333347, 30.396745115639977,
 127.5, 224.60325488436 and 250.41351645966665 at modality values 39.5 through
 40.5. No renderer supplies those answers.
+
+## Permanent quirk captures
+
+`corpus/quirks.json` is the one tracked registry connecting a field defect's
+non-sensitive shape to its synthetic generator case, exact manifest paths,
+independent expected-value fixture, executable regression and observed
+mutation failures. It contains no field input or derivative of one. A report
+that cannot be reduced without retaining patient data has no repository
+capture.
+
+`scripts/quirk_check.py` parses source instead of importing the DICOM generator,
+so its `quirks` gate needs only the Python standard library and runs in the CI
+floor. The checker requires each case to be called by `generate`, requires its
+paths to equal the generator-owned `QUIRK_CASES` literal, and requires each
+path to have exactly one generator-owned manifest row. It compares every
+recorded formula input and expected output with the named fixture literals and
+proves the named test reads them. Expectation authorities are closed to
+`dicom-standard` and `hand-calculation`. Regression and mutation contracts are
+closed too, and the checker never executes a command stored in the registry.
+
+The worked record is the F-X012 SIGMOID width-half case. Its five display
+values come from PS3.3 C.11.2.1.3.1, edition 2026a. Its three standing
+mutations change the function to LINEAR, change width to 1, and remove the
+reference attribution. They exercise the declaration, numeric fixture and
+attribution boundary rather than only the manifest digest.
+
+`scripts/quirk_mutations.py` is the executable half of that evidence. Its edit
+sites, commands and expected failure text are fixed in code. It first proves
+each unmodified boundary green, applies each mutation in the guard harness's
+disposable repository, and requires a non-zero exit carrying the registry's
+failure signature. It separately changes all six fixture literals one at a
+time and requires the declared expectation boundary to fail. The named
+unittest consists of that boundary call, so a literal retained only as an
+irrelevant read cannot satisfy the checker. `bin/ocelli.sh gate
+quirk-mutations` runs outside the floor because it needs both the locked DICOM
+environment and cargo. The CI corpus-tooling job installs both and runs the
+gate on every event.
 
 ## The `category` column is a token list, and a check reads it
 

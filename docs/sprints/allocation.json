@@ -362,15 +362,15 @@
       "phase": "P1",
       "epic": "E2 Differential oracle & corpus",
       "epic_key": "E2",
-      "story": "CI gate: every PR renders the full corpus",
+      "story": "Candidate comparison gate contract and verification plumbing",
       "layer": "Test",
       "weeks": 3,
       "depends_eids": [
         "E2.3"
       ],
-      "notes": "The gate that makes agent-generated code safe to merge",
+      "notes": "Split in S05 because no Ocelli candidate renderer exists yet. F-X021 activates the required full-corpus candidate gate after F-052.",
       "milestone": "M1",
-      "sprint": "S04",
+      "sprint": "S05",
       "depends_fids": [
         "F-011"
       ]
@@ -4159,6 +4159,29 @@
       "added": true,
       "depends_fids": [
         "F-X009"
+      ]
+    },
+    {
+      "fid": "F-X021",
+      "eid": "Y1.16",
+      "phase": "P1",
+      "epic": "EY Sprint follow-ups",
+      "epic_key": "EY",
+      "story": "Activate the full-corpus candidate-render gate against Ocelli output",
+      "layer": "Test",
+      "weeks": 3,
+      "depends_eids": [],
+      "depends_fids_declared": [
+        "F-012",
+        "F-052"
+      ],
+      "notes": "F-012 deliberately lands the candidate-directory, coverage and ledger contract before an Ocelli renderer exists. This follow-up connects every current oracle view to real Ocelli output, makes --require-comparison binding in local verification and pre-push evidence, and preserves D-04's rule that CI validates the submitted tree's local corpus record rather than pretending CI owns the ignored corpus or a GPU.",
+      "milestone": "M5",
+      "sprint": "S20",
+      "added": true,
+      "depends_fids": [
+        "F-012",
+        "F-052"
       ]
     }
   ]

@@ -1,178 +1,103 @@
-# Current sprint, S04
+# Current sprint, S05
 
 **Milestone**: M1, foundations and the differential oracle.
-**Branch**: `sprint/s04`
+**Branch**: `sprint/s05`
 **Opened**: 2026-09-06
-**Goal**: Turn the comparator's verdict into a gate every pull request must
-pass, extend the diff beyond pixels to metadata and geometry, and clear the
-follow-up debt S03 declared rather than carrying it into the port.
+**Goal**: Land the candidate-comparison evidence contract, then build the
+quirk-capture workflow that turns each field bug into a permanent,
+independently checkable corpus fixture.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-012 | E2.4 | CI gate: every PR renders the full corpus | Test | 3w | pending |
-| F-013 | E2.5 | Metadata diff harness (LUT values, geometry, spacing) | Test | 2w | pending |
-| F-015 | E2.7 | Stable render-hash emission from the comparator | Test | 2w | pending |
-| F-X001 | X1.1 | Tier C, software-adapter detection, and the feature-availability contract | Rust | 4w | pending |
-| F-X008 | Y1.3 | One parity-target version string, and a licence in the published wasm package | Build | 1w | pending |
-| F-X010 | Y1.5 | CI floor equivalence, and the identical --sprint and --all gate profiles | Build | 2w | pending |
-| F-X011 | Y1.6 | Cross-machine reference determinism, and what the oracle claims about it | Test | 2w | pending |
-| F-X012 | Y1.7 | The reference's own SIGMOID width divergence, and what D14's bound says about it | Test | 2w | pending |
-| F-X013 | Y1.8 | Price the HTJ2K decoder route after gate A1 failed | Test | 3w | pending |
-| F-X014 | Y1.9 | Close the two guard holes F-X009 declared, and watch the refusals its census leaves to nothing | Build | 2w | pending |
-| F-X015 | Y1.10 | Execute the skills' worked examples, because the skills gate asserts nothing about their numbers | Build | 1w | pending |
-| F-X016 | Y1.11 | Try the next adapter when the best candidate cannot open a device, and record what was attempted | Rust | 1w | pending |
-| F-X017 | Y1.12 | Close the measured escapes from the wasm linear memory view ban, which needs type-aware linting | Build | 2w | pending |
-| F-X018 | Y1.13 | Make close-preflight see the sprint review, and key its verification on the tree it is about | Build | 1w | pending |
-| F-X019 | Y1.14 | Decide whether a CI step that is not guaranteed to run counts as CI running the gate | Build | 1w | pending |
-| F-X020 | Y1.15 | Stop gen_sprint_plan.py's write mode silently overwriting a hand-curated SPRINT_PLAN.md | Build | 1w | pending |
+| F-012 | E2.4 | Candidate comparison gate contract and verification plumbing | Test | 3w | done |
+| F-014 | E2.6 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
-stale.** No script reads this file's table: `scripts/backlog_check.py` never
-opens it, and `scripts/sprint_workflow.py` reads only the sprint name from the
-title. `docs/sprints/BACKLOG.md` is the authority on status. Read the two
-together rather than trusting either sentence:
+stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:
 
 ```bash
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S04 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S05 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S03 made the oracle answer. **S04 makes its answer binding.** F-012 puts a full
-corpus render behind every pull request, F-013 extends the diff from pixels to
-the metadata and geometry the pixels are derived from, and F-015 emits a stable
-hash so a change in output is detectable without storing every frame. F-X001
-builds tier C, which is deviation D-07's CPU path and the reason a machine with
-no GPU renders anything at all.
+S04 made the oracle's pixel, metadata and geometry claims mechanically
+checkable. S05 first makes a real candidate comparison representable and
+attestable without claiming a renderer exists today. It then gives a newly
+discovered field bug one path into that evidence base. F-014 must capture the
+triggering shape as a reproducible corpus recipe, record the independent
+expected result, and make the relevant gate fail when the bug returns. The
+fixture is evidence for development and for a future regulatory submission.
+It is not a copy of production data.
 
-**This sprint is packed well past the stated caps and that is deliberate but
-worth seeing.** The allocation's own rule at `docs/sprints/SPRINT_PLAN.md` is
-at most six stories and at most sixteen estimated engineer-weeks per sprint.
-S04 carries sixteen stories and thirty weeks, because eight of them are `F-X`
-follow-ups S03 declared rather than hid. Run the commands above rather than
-trusting these numbers. **An operator splitting this sprint is making a
-reasonable call, not overriding the plan.** The nine debt stories are
-individually small, mostly one or two weeks, and none blocks the four that
-carry the milestone forward.
+This is the final planned sprint in M1, but completing it does not complete the
+milestone. F-012 landed first and F-014 now supplies the permanent quirk
+capture path.
 
 ## What is carried in
 
-Nothing is carried forward incomplete. S03 closed all seven of its stories and
-`gate --sprint` was green over 28 gates with corpus=pass.
-
-Three things arrive as knowledge rather than as code:
-
-- **Gate A1 failed.** `openjp2` does not link for `wasm32-unknown-unknown` and
-  traps on every codestream when forced to, so HTJ2K reports unavailable. HLD
-  section 15.2 names `openjp2` as the wasm choice and that is measured not to
-  work. **F-X013** prices a route.
-- **The reference is wrong about SIGMOID.** cornerstone3D 5.8.2 applies
-  LINEAR's `(w - 1) / 2` to SIGMOID, where PS3.3 C.11.2.1.3.1 gives SIGMOID its
-  own constraint. Unreachable while every windowed corpus row resolves LINEAR.
-  **F-X012.**
-- **The guard harness has declared holes.** `python3 scripts/guard_census.py`
-  prints the bucket watched by nothing, and two guards are declared defective
-  rather than fixed. **F-X014.**
+- **F-012** landed as the explicit candidate-directory contract, coverage
+  result and verification-ledger plumbing that can be claimed truthfully. The
+  renderer activation is preserved as F-X021 after F-052 supplies the final
+  current oracle view kind. A gate around only the reference still proves no
+  candidate result and is explicitly refused.
+- **F-X011** remains pending because its acceptance evidence requires a second
+  physical machine and none is available. It does not block F-014, but its
+  cross-machine determinism claim remains unmade.
 
 ## The defect class this sprint is exposed to
 
-**The danger changes shape this sprint. Until now the question was whether a
-measurement is right. From F-012 onward it is whether a GREEN GATE MEANS
-ANYTHING.**
+**A fixture can permanently preserve the implementation's mistake instead of
+the bug.** If expected values are copied from Ocelli output, the reference
+renderer, or the failing report, the new case will stay green when both the
+implementation and its fixture are wrong in the same way. Every expectation
+must instead derive from DICOM PS3.3, PS3.16, a hand-computed construction, or
+another independently reviewed authority, and the review must name which.
 
-That is not generic. S03 already produced the exact shape: the comparator
-reports `99 views: 71 pass, 0 fail, 28 unmeasured`. A gate that reads `0 fail`
-as success is claiming a verdict over 99 views when it has one for 71. The 28
-are class two, where HLD 25.1 states no threshold, and decision D14 forbids a
-pass against a bound nobody wrote. **F-012 must fail when coverage drops, not
-only when a comparison fails**, or it becomes a gate that passes because it
-measured nothing. The same trap sank F-010's first sweep, where a broken
-mutation harness gave every "all refusals red" result a red baseline.
+The second danger is specific to capture work. A field bug often arrives with
+a clinical file, but this repository permits no patient data in prompts,
+source, fixtures, logs, errors, documentation or commits. The permanent
+artefact is a synthetic generator recipe and its manifest digest, never the
+input that exposed the bug. A copied DICOM with a reassuring filename is still
+patient data and still forbidden.
 
-Three more, each specific:
-
-- **F-X001 is exposed to a second copy of the LUT chain.** HLD section 18
-  requires that arithmetic to exist exactly once, and tier C must reuse
-  `ocelli-pixel` rather than reimplement it. A second copy behind a tier check
-  is the same defect as a second copy anywhere else, except that it only runs
-  on hardware nobody develops on, so no reviewer will see it fail.
-- **F-013 is exposed to the transposed spacing index.** `PixelSpacing[0]` is
-  the spacing between ROWS and multiplies the COLUMN direction cosine, per
-  PS3.3 C.7.6.2.1.1. Getting it backwards is invisible on the square-pixel
-  studies that are most of any corpus and wrong on every non-square one. The
-  corpus carries non-square rows precisely so this cannot pass unnoticed.
-- **F-015 is exposed to a hash that is stable for the wrong reason.** A hash
-  taken after quantisation, or over a buffer whose padding is not deterministic,
-  is stable and says nothing. It must change when the pixels change, and the
-  proof of that is a mutation observed red, not an argument.
-
-## Carried forward from S04
-
-- **F-012** remains pending because Ocelli does not yet have the candidate
-  renderer that the per-pull-request differential gate would execute. Building
-  a gate around only the reference would claim comparison coverage while
-  comparing nothing. Resume it when the candidate render path exists.
-- **F-X011** remains pending because its acceptance evidence requires a second
-  physical machine and none is available. Resume it when that independent host
-  can run the recorded determinism procedure.
-
-These are explicit carry-forwards, not completed stories. Their backlog rows
-remain pending.
+The third danger is a fixture that never drives the boundary it claims. A new
+manifest row and a green corpus check prove only that bytes exist and match a
+digest. The capture is complete only when a controlled mutation of the named
+field or interpretation makes the relevant test or oracle comparison red for
+the declared reason.
 
 ## What done means
 
-- **F-012** fails a pull request when a comparison fails AND when coverage
-  drops, and its output distinguishes the two. It states how many views it
-  claimed a verdict over rather than how many it looked at.
-- **F-013** compares LUT parameters, geometry and spacing against values
-  computed independently from PS3.3, not against anything Ocelli produces, and
-  its fixtures cite their section.
-- **F-015** emits a hash whose change is demonstrated by a mutation observed
-  red before the story is claimed.
-- **F-X001** produces a written answer on the feature-availability contract,
-  and tier C reuses `ocelli-pixel`. A feature that cannot run on the resolved
-  tier reports unavailable and never quietly produces a different result.
-- **F-X013** produces a written decision in `docs/spikes/`, priced, not a
-  passing test. Gate A1 is answered `Fail` and this story says what replaces
-  the route.
-- **F-X014** closes G-02 and G-04 by making their declared-defect probes start
-  passing, and the census's uncovered count goes DOWN. The ratchet fails until
-  each declaration is removed in the same change that closes it.
-- **F-X019** requires a gate on the right-hand side of `&&` either to run or to
-  leave the step red when an earlier command prevents it from running.
+- There is one documented capture path from a field-bug report to a synthetic
+  corpus generator case, manifest row, independent expected values and a
+  standing regression check.
+- The workflow refuses missing provenance, an expectation derived from Ocelli
+  itself, an unregistered manifest row, and any tracked DICOM or patient data.
+- A worked synthetic example demonstrates the full path and records the DICOM
+  section or hand calculation from which its expectation follows.
+- The relevant test is observed red under a mutation that recreates the bug,
+  then green after the fix. A digest-only check does not satisfy this claim.
+- The corpus, oracle and guard documentation agree on where the fixture recipe,
+  generated bytes, expected values and review evidence live.
 
 ## Dependency order
 
-Every declared dependency is `done`, so nothing in this sprint is blocked at
-its start. F-012, F-013 and F-015 depend on F-011. F-X001 and F-X016 depend on
-F-004. F-X008, F-X010, F-X011 and F-X012 depend on F-010. F-X013 depends on
-F-X006. F-X014, F-X015, F-X018, F-X019 and F-X020 depend on F-X009. F-X017
-depends on F-005.
+F-014 depended on F-012, and both are done. F-X021 depends on F-012 and F-052,
+and later makes real Ocelli full-corpus candidate evidence binding under the
+retained D-04 local-verification model.
 
-F-012 and F-015 both read the comparator's output and F-013 adds a second
-comparison beside it, so those three share `tools/oracle` and must not run
-concurrently in separate worktrees without a plan for the collision.
-
-**The oracle is a serial resource.** Two workers running WebGPU or headless
-Chromium tests concurrently on one machine contend for the device and produce
-timeouts that read exactly like rendering failures.
+F-X011 is also carried from S04 but is not a dependency of F-014.
 
 ## Standing expectations
 
-Read the tracked Markdown under `docs/hld/` before implementation. It is the
-normative source. Record an implementation departure in
-`docs/hld/DEVIATIONS.md` rather than changing a gate or tolerance to make a
-check pass.
+The HLD is authoritative. A design-plan departure is recorded in
+`docs/hld/DEVIATIONS.md`, never improvised in implementation.
 
-**A tolerance change is a pull request with a rationale, reviewed like code.**
-S03 added a signed-mean bias bound to section 25.1 by operator decision, and
-that is the shape such a change takes.
+No patient data enters a prompt, tracked file, fixture, log, error or commit.
+The ignored corpus remains behind `corpus/manifest.tsv` and its generators.
 
-Every new guard is observed red before it is claimed, and the mutation that
-proves it must not be run in the same command that adds it.
-
-**A count written in prose is a claim with no owner.** Sixteen review passes in
-S03 falsified counts in this repository's own records repeatedly, including in
-the paragraph warning against them. Where a number matters, write the command
-that prints it.
+A tolerance is never widened to make a captured case pass. Every new guard is
+observed red before it is claimed, and the red run must name the boundary the
+story says it protects.

@@ -1883,3 +1883,162 @@ completion gates passed on 2026-09-06.
 **Deviations from the design plan.** None.
 **Notes for future sessions.** The allocation cannot reconstruct hand-curated
 goals and summaries, so bare generation is bootstrap-only.
+
+## F-012, Candidate comparison gate contract, completed 2026-09-06
+
+**What was built.** `ocelli-compare gate` requires explicit reference and
+candidate directories and refuses when they resolve to the same location. Its
+report separates judged, unmeasured, absent, unsupported-source and declared
+volume-refusal counts. The verification ledger can attest a green gate report
+by exact digest and positive judged count.
+**HLD sections implemented.** Sections 11, 25.1 and 27.2 R6 under deviation
+D-04.
+**Deviations.** D-04 retained. Real Ocelli renderer activation is F-X021 after
+F-052, rather than an identity comparison presented as candidate evidence.
+**Crates / packages modified.** Oracle comparator, verification ledger, guard
+harness and sprint allocation.
+**Tests added.** Candidate argument refusals, verdict and coverage accounting,
+zero-judgement refusal and six standing ledger probes.
+**Fixture provenance.** No new DICOM fixture or pixel expectation. The
+corpus-scale contract run used two controlled copies of existing ignored
+oracle output and made no Ocelli-renderer claim.
+**Verification.** All 25 floor gates and the corpus gate passed on the exact
+staged feature tree. A controlled 99-view gate judged 71 views and separately
+reported 28 unmeasured, 0 absent, 2 unsupported source rows and 1 declared
+volume refusal.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. No renderer is part of this story.
+**LLD updated.** `docs/lld/comparator.md` and `docs/lld/oracle.md`.
+**Deviations from the design plan.** The plan was narrowed before
+implementation and F-X021 records the deferred activation. Review added the
+explicit operation field so identity output cannot satisfy ledger evidence.
+**Notes for future sessions.** Enable `--require-comparison` only when F-X021
+connects every current oracle view to real Ocelli output.
+
+**Sprint review remediation.** The ledger now resolves both input directories,
+validates every serialized object through the tracked oracle report contract,
+reconstructs green attribution states and derives histogram, region, predicate
+and bias consistency from the published measurements. The Rust serializer test,
+Python verifier and standing mutation controls all consume
+`tools/oracle/report-contract.json`, so the cross-language contract has one
+tracked projection and cannot drift behind a hand-built green fixture.
+
+The sixth sprint review closed the remaining producer-shape gaps. Relative
+input paths are anchored to the repository regardless of the ledger caller's
+directory. Derived zero values, signed sums, tail percentiles and informative
+denominators must now be values the comparator can emit. Exact green
+unmeasured states and the production rung vocabulary are part of the same
+closed contract, and each semantic refusal has a targeted standing probe.
+The seventh review extended signed-sum feasibility through the over-two bucket,
+made percentile-at-maximum checks follow the producer's exact rank rule and
+restored maximum composition across image and background regions. The allowed
+green unmeasured states now participate in the production run verdict, so an
+undeclared class, qualifier and rung combination makes the comparator red.
+Verification also removed a scheduler-dependent output-order assertion from
+the shell grammar test while retaining its requirement that both commands run.
+
+The eighth review replaced inference over separately published summaries with
+one compact sparse signed-difference histogram per channel. The ledger now
+derives the buckets, maximum, percentile, fractions and signed mean from that
+exact distribution, then checks exact distribution composition across regions.
+This rejects approximate means and reports whose percentile and signed sum
+could not come from one producer histogram. Standing green-state probes now
+take their count and run-hash algorithm from the tracked report contract.
+
+The ninth review closed the remaining informative-region composition gap.
+Every nonzero image difference must now appear with the same count in the
+informative histogram. Only zero-difference samples may be excluded as pixels
+clipped to the same extreme on both sides. A standing probe proves that a
+forged zero-mean informative region cannot turn a producer bias failure green.
+
+The tenth review closed the zero-informative boundary of that same rule and
+bound touched counts to explicit producer geometry. Reports now carry frame and
+image-rectangle rows and columns. Their products must match the corresponding
+pixel totals, the image rectangle must fit the frame, and touched rows and
+columns must fit those exact frame dimensions. Two standing probes cover an
+empty informative array with a nonzero difference and a prime-sized frame with
+impossible touched dimensions.
+
+The eleventh review coupled those touched counts to the region distributions.
+The ledger now bounds how many rows and columns the image and background can
+touch separately before combining their extents. An unchanged background can
+no longer lend an extra row or column to differences confined to the image
+rectangle. A standing probe preserves the exact one-row-image reproduction.
+
+The twelfth review replaced those marginal bounds with producer-owned spatial
+evidence. Each report now carries the image origin and the exact sorted row and
+column index sets touched in the image and background. The ledger reconstructs
+the global counts from their unions and checks the joint cell capacity of each
+region, including the image-shaped hole in the background. It also requires a
+volume reformat to use the full frame and requires all RGB distributions to
+match when `monochromeFrame` is true. Standing probes cover the L-shaped
+background, unequal monochrome lanes and a partial reformat image.
+
+The thirteenth review closed two shared-support limits in that feasibility
+proof. The union of image differences is now capped by the shared informative
+pixel count. A monochrome RGB region is capped by one lane's difference count
+because equal red, green and blue values make all three lane supports the same
+pixel set. Two refusal probes preserve those boundaries, and a positive probe
+passes simultaneous image and background differences through the full Python
+evidence reader to guard against false refusals in the complement calculation.
+
+The fourteenth review closed the exactly decidable false direction of
+`monochromeFrame`. A signed byte difference of `+255` or `-255` uniquely fixes
+both source values. When every sample in every RGB lane has the same extreme,
+both frames are necessarily monochrome and the ledger refuses a false flag.
+Two probes preserve the positive and negative extremes, while an acceptance
+probe preserves the realizable mixed-extreme case. A fourth probe exercises
+shared monochrome lane support in a nonempty background region.
+
+The fifteenth review moved that false-direction proof from the combined full
+histogram to the image and background partitions. Opposite forced signs in
+one pixel of each partition still make both source frames monochrome. A
+standing probe preserves this measured case, while the mixed-extreme
+acceptance probe continues to show that two signs within one partition may be
+assigned across lanes to realize a non-monochrome frame.
+
+The sixteenth review added the complementary two-partition acceptance proof.
+A forced image does not force the whole frame when a mixed-sign background can
+permute those signs between RGB lanes. The standing acceptance probe prevents
+the regional conjunction from narrowing to the image or changing to an
+any-partition refusal.
+
+The seventeenth review completed the two-partition forced-or-mixed matrix.
+Standing acceptance probes now cover either partition mixed while the other is
+forced, plus both partitions mixed. Refusal probes cover both forced with the
+same sign or opposite signs. A background-only, image-only, any-partition or
+other asymmetric rewrite therefore changes at least one expected result.
+
+The eighteenth review fixed the numeric and multiplicity edges of that matrix.
+Uniform `+254` and `-254` acceptance probes preserve the adjacent non-forced
+values, where more than one byte pair can realize a coloured frame. Two-pixel
+uniform `+255` and `-255` refusal probes prove that forced regions are not
+limited to a single sample.
+
+## F-014, Quirk-capture workflow, completed 2026-09-06
+
+**What was built.** A closed-schema quirk registry now binds each captured
+field bug to its synthetic generator recipe, exact manifest row, independent
+expectation, named regression boundary and active mutation evidence. The
+worked SIGMOID width-below-one case exercises the full path.
+**HLD sections implemented.** Sections 11, 25.1 and 27.2 R2 and R6.
+**Deviations.** D-04 and D-05 retained.
+**Crates / packages modified.** Corpus tooling, quirk guards, CI wiring and the
+oracle mutation checker.
+**Tests added.** Thirty-five Python contract tests, three controlled live
+mutations, six fixture-binding live mutations and one Rust regression for
+coverage-problem mutation detection.
+**Fixture provenance.** The synthetic SIGMOID case and its expected display
+values are derived from DICOM PS3.3 C.11.2.1.3.1. No patient data is tracked.
+**Verification.** All floor gates, the active quirk-mutation gate, the 92-case
+corpus gate and the full browser oracle passed on the staged feature tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a.
+**LLD updated.** `docs/lld/corpus.md` and `docs/lld/oracle.md`.
+**Deviations from the design plan.** Review tightened literal, source and
+executable boundary binding. Final verification also repaired the oracle
+self-test so a missing view's coverage problem satisfies its declared
+run-problem expectation.
+**Notes for future sessions.** A captured quirk is evidence only when the
+recipe, expectation and regression boundary are exact, and controlled damage
+makes that boundary fail for the declared reason.

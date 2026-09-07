@@ -108,6 +108,19 @@ SYNTAX_ROWS, SYNTAX_COLS = 64, 96
 # PS3.3 C.7.6.2.1.1 makes PixelSpacing[0] the spacing BETWEEN ROWS.
 NON_SQUARE_SPACING = ["0.5", "0.25"]
 
+# Generator-owned coordinates for cases retained in the permanent quirk
+# registry. The generator consumes these values and scripts/quirk_check.py
+# parses the same literal without importing this module, so a registry path or
+# parameter cannot silently point at a different recipe.
+QUIRK_CASES = {
+    "case_sigmoid_width_half": {
+        "paths": ("synthetic/ct_sigmoid_width_half.dcm",),
+        "windowCentre": "40",
+        "windowWidth": "0.5",
+        "voiLutFunction": "SIGMOID",
+    },
+}
+
 CT_STORAGE = "1.2.840.10008.5.1.4.1.1.2"
 ENHANCED_CT_STORAGE = "1.2.840.10008.5.1.4.1.1.2.1"
 CR_STORAGE = "1.2.840.10008.5.1.4.1.1.1"
@@ -403,17 +416,19 @@ def case_sigmoid_width_half(out: Path) -> None:
     ramp maps to modality values 37.75 through 42.5, crossing both shoulders
     of the window around centre 40 without relying on a real study.
     """
-    name = "ct_sigmoid_width_half"
+    case = QUIRK_CASES["case_sigmoid_width_half"]
+    path = Path(case["paths"][0])
+    name = path.stem
     ds = new_dataset(name, CT_STORAGE, "CT")
     ct_common(ds)
     ds.RescaleSlope = "0.25"
     ds.RescaleIntercept = "0"
-    ds.WindowCenter = "40"
-    ds.WindowWidth = "0.5"
-    ds.VOILUTFunction = "SIGMOID"
+    ds.WindowCenter = case["windowCentre"]
+    ds.WindowWidth = case["windowWidth"]
+    ds.VOILUTFunction = case["voiLutFunction"]
     pixels = np.tile(np.arange(151, 171, dtype=np.uint16), (TRAP_ROWS, 1))
     set_monochrome_pixels(ds, pixels, 16, 16, 15, 0)
-    write(ds, out / "synthetic" / f"{name}.dcm")
+    write(ds, out / path)
 
 
 def case_monochrome1(out: Path) -> None:

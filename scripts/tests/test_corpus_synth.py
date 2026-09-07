@@ -121,6 +121,10 @@ LEFT_ALIGNED = (-128, 127, 255, 128, -2048, 2047, -1, -2048)
 # fixture's slope of 0.25. The expected display values are written out rather
 # than imported from the generator or read from cornerstone3D.
 SIGMOID_MODALITY_VALUES = (39.5, 39.75, 40.0, 40.25, 40.5)
+SIGMOID_CENTRE = 40.0
+SIGMOID_WIDTH = 0.5
+SIGMOID_DISPLAY_MINIMUM = 0.0
+SIGMOID_DISPLAY_MAXIMUM = 255.0
 SIGMOID_DISPLAY_VALUES = (
     4.586483540333347,
     30.396745115639977,
@@ -140,9 +144,30 @@ def stored_value(raw: int, bits_stored: int, high_bit: int,
     return value
 
 
-def sigmoid_display(value: float, centre: float, width: float) -> float:
+def sigmoid_display(value: float, centre: float, width: float,
+                    display_minimum: float, display_maximum: float) -> float:
     """PS3.3 C.11.2.1.3.1, transcribed independently of the generator."""
-    return 255.0 / (1.0 + math.exp(-4.0 * (value - centre) / width))
+    extent = display_maximum - display_minimum
+    return display_minimum + extent / (
+        1.0 + math.exp(-4.0 * (value - centre) / width)
+    )
+
+
+def sigmoid_expectation_boundary() -> None:
+    """Execute the independent literals against the transcribed formula."""
+    got = tuple(
+        sigmoid_display(
+            value,
+            SIGMOID_CENTRE,
+            SIGMOID_WIDTH,
+            SIGMOID_DISPLAY_MINIMUM,
+            SIGMOID_DISPLAY_MAXIMUM,
+        )
+        for value in SIGMOID_MODALITY_VALUES
+    )
+    for actual, expected in zip(got, SIGMOID_DISPLAY_VALUES, strict=True):
+        if round(abs(actual - expected), 12) != 0:
+            raise AssertionError("SIGMOID expectation fixture mismatch")
 
 
 def digest(path: Path) -> str:
@@ -245,13 +270,7 @@ class SigmoidFixture(unittest.TestCase):
         self.assertGreater(modality[-1], float(ds.WindowCenter))
 
     def test_selected_display_values_follow_the_sigmoid_formula(self) -> None:
-        ds = self.case()
-        got = tuple(
-            sigmoid_display(value, float(ds.WindowCenter), float(ds.WindowWidth))
-            for value in SIGMOID_MODALITY_VALUES
-        )
-        for actual, expected in zip(got, SIGMOID_DISPLAY_VALUES, strict=True):
-            self.assertAlmostEqual(actual, expected, places=12)
+        sigmoid_expectation_boundary()
 
 
 # Worst-pixel bounds for the lossy sanity check, as a fraction of full scale,

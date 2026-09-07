@@ -356,6 +356,57 @@ def _corpus_unrecorded_licence(box: Sandbox) -> None:
     _corpus_two_rows(box, ("a" * 64, "b" * 64), licences=("MIT", ""))
 
 
+def _quirk_record(box: Sandbox) -> dict:
+    return json.loads(box.read("corpus/quirks.json"))
+
+
+def _write_quirk_record(box: Sandbox, record: dict) -> None:
+    box.write("corpus/quirks.json", json.dumps(record, indent=2) + "\n")
+
+
+def _quirk_without_authority(box: Sandbox) -> None:
+    record = _quirk_record(box)
+    del record["quirks"][0]["expectation"]["authority"]
+    _write_quirk_record(box, record)
+
+
+def _quirk_with_ocelli_as_authority(box: Sandbox) -> None:
+    record = _quirk_record(box)
+    record["quirks"][0]["expectation"]["authority"] = {
+        "kind": "ocelli-output"
+    }
+    _write_quirk_record(box, record)
+
+
+def _quirk_with_absent_manifest_path(box: Sandbox) -> None:
+    record = _quirk_record(box)
+    record["quirks"][0]["generator"]["paths"] = ["synthetic/absent.dcm"]
+    _write_quirk_record(box, record)
+
+
+def _quirk_without_mutation_evidence(box: Sandbox) -> None:
+    record = _quirk_record(box)
+    record["quirks"][0]["mutations"] = []
+    _write_quirk_record(box, record)
+
+
+def _quirk_without_mutation(kind: str) -> Callable[[Sandbox], None]:
+    def mutate(box: Sandbox) -> None:
+        record = _quirk_record(box)
+        record["quirks"][0]["mutations"] = [
+            mutation for mutation in record["quirks"][0]["mutations"]
+            if mutation.get("kind") != kind
+        ]
+        _write_quirk_record(box, record)
+    return mutate
+
+
+def _quirk_with_tracked_generated_dicom(box: Sandbox) -> None:
+    path = "corpus/data/synthetic/ct_sigmoid_width_half.dcm"
+    box.write(path, DICOM_FIXTURE)
+    box.git("add", "-f", path)
+
+
 def _delete_ci_step(box: Sandbox, leave_comment: bool) -> None:
     gate = _floor_gate_with_own_step(box)
     workflow = box.read(".github/workflows/ci.yml")
@@ -807,6 +858,1495 @@ def _ledger_absent_corpus(box: Sandbox) -> None:
     _ledger_record(box, "absent")
 
 
+def green_comparison_document(box: Sandbox) -> dict:
+    """The serializer-owned green fixture with two real, distinct inputs."""
+    contract = json.loads(box.read("tools/oracle/report-contract.json"))
+    report = contract["greenReport"]
+    reference = ".claude/probe-reference"
+    candidate = ".claude/probe-candidate"
+    box.write(f"{reference}/.keep", "reference\n")
+    box.write(f"{candidate}/.keep", "candidate\n")
+    report["reference"] = reference
+    report["candidate"] = candidate
+    return report
+
+
+def _comparison_report(box: Sandbox, *, verdict: str = "pass",
+                       claimed: int = 1, green: bool = True) -> None:
+    report = green_comparison_document(box)
+    report["claimedVerdictViews"] = claimed
+    report["gateVerdict"] = verdict
+    report["green"] = green
+    if verdict == "pass":
+        report["pass"] = claimed
+    else:
+        report["pass"] = 0
+        report["fail"] = max(claimed, 1)
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _malformed_comparison_report(box: Sandbox) -> None:
+    box.write(".claude/probe-comparison.json", "{not json\n")
+
+
+def _identity_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["operation"] = "identity"
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _red_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box, verdict="comparison-failure", green=False)
+
+
+def _zero_judgement_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box, claimed=0)
+
+
+def _failed_count_in_green_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["pass"] = 0
+    report["fail"] = 1
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _coverage_problem_in_green_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["coverageProblems"] = ["a controlled coverage problem"]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _problem_in_green_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["problems"] = ["a controlled input problem"]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _absorbed_divergence_in_green_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["absorbedDivergences"] = ["a controlled absorbed divergence"]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _missing_coverage_problems_in_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    del report["coverageProblems"]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _top_level_absent_in_green_comparison_report(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["absent"] = 1
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _invalid_coverage_count(box: Sandbox, field: str, variant: str) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    coverage = report["coverage"]
+    if variant == "missing":
+        del coverage[field]
+    else:
+        values = {
+            "null": None,
+            "bool": False,
+            "negative": -1,
+            "string": "0",
+        }
+        coverage[field] = values[variant]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _contradictory_unmeasured_counts(box: Sandbox) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    report["unmeasured"] = 1
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _invalid_top_level_unmeasured(box: Sandbox, variant: str) -> None:
+    _comparison_report(box)
+    report = json.loads(box.read(".claude/probe-comparison.json"))
+    if variant == "missing":
+        del report["unmeasured"]
+    else:
+        values = {
+            "null": None,
+            "bool": False,
+            "negative": -1,
+            "string": "0",
+        }
+        report["unmeasured"] = values[variant]
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _coverage_count_probes() -> tuple[Probe, ...]:
+    probes = []
+    for field in ("unmeasured", "unsupportedSourceRows",
+                  "declaredVolumeRefusals"):
+        for variant in ("missing", "null", "bool", "negative", "string"):
+            probes.append(Probe(
+                f"ledger.comparison-coverage-{field}-{variant}",
+                lambda box, field=field, variant=variant:
+                    _invalid_coverage_count(box, field, variant),
+                script("python3", "scripts/verify_ledger.py", "record",
+                       "--comparison-report",
+                       ".claude/probe-comparison.json"),
+                (f"comparison report coverage has invalid keys, missing=['{field}']"
+                 if variant == "missing"
+                 else f"comparison report has invalid coverage count for {field}"),
+            ))
+    return tuple(probes)
+
+
+def _report_shape_mutation(box: Sandbox, variant: str) -> None:
+    report = green_comparison_document(box)
+    record = report["records"][0]
+    if variant == "records-missing":
+        del report["records"]
+    elif variant == "records-null":
+        report["records"] = None
+    elif variant == "records-empty":
+        report["records"] = []
+    elif variant == "duplicate-record":
+        report["records"].append(record)
+    elif variant == "record-fail":
+        record["outcome"] = "fail"
+    elif variant == "duplicate-record-id":
+        report["records"].append(dict(record))
+    elif variant == "views-missing":
+        del report["views"]
+    elif variant == "views-zero":
+        report["views"] = 0
+    elif variant == "counts-exceed-views":
+        report["pass"] = 1000
+        report["claimedVerdictViews"] = 1000
+    elif variant == "reference-equals-candidate":
+        report["candidate"] = report["reference"]
+    elif variant == "reference-missing":
+        del report["reference"]
+    elif variant == "candidate-missing":
+        del report["candidate"]
+    elif variant == "hashes-missing":
+        del report["renderHashes"]
+    elif variant == "aggregate-hash-invalid":
+        report["renderHashes"]["reference"] = "not-a-hash"
+    elif variant == "aggregate-hash-inconsistent":
+        report["renderHashes"]["reference"] = "f" * 64
+    elif variant == "qualifier-histogram":
+        report["qualifiers"] = {"weak": 1}
+    elif variant == "top-level-unknown":
+        report["invented"] = 0
+    elif variant == "coverage-unknown":
+        report["coverage"]["invented"] = 0
+    elif variant == "record-id-missing":
+        del record["id"]
+    elif variant == "record-id-null":
+        record["id"] = None
+    elif variant == "record-id-empty":
+        record["id"] = ""
+    elif variant == "record-unknown":
+        record["invented"] = 0
+    elif variant == "record-hash-invalid":
+        record["renderHashes"]["candidate"] = "not-a-hash"
+    elif variant == "record-hashes-unknown":
+        record["renderHashes"]["invented"] = "0" * 64
+    elif variant == "statistics-null":
+        record["statistics"] = None
+    elif variant == "statistics-unknown":
+        record["statistics"]["invented"] = 0
+    elif variant == "channel-unknown":
+        record["statistics"]["full"][0]["invented"] = 0
+    elif variant == "parameter-divergence-missing":
+        record["parameterDivergences"] = [{
+            "field": "/voi/windowWidth",
+            "reference": 1,
+            "candidate": 2,
+            "attributedTo": "ours",
+        }]
+    elif variant == "geometry-divergence-unknown":
+        record["geometryDivergences"] = [{
+            "field": "camera.position[0]",
+            "reference": 0.0,
+            "candidate": 1.0,
+            "difference": 1.0,
+            "bound": 0.1,
+            "invented": 0,
+        }]
+    else:
+        raise AssertionError(f"unknown report-shape mutation {variant}")
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _duplicate_report_key(box: Sandbox, fragment: str) -> None:
+    report = json.dumps(green_comparison_document(box))
+    box.write(
+        ".claude/probe-comparison.json",
+        report.replace(fragment, f"{fragment}, {fragment}", 1) + "\n",
+    )
+
+
+def _nonfinite_report_number(box: Sandbox) -> None:
+    report = json.dumps(green_comparison_document(box))
+    box.write(
+        ".claude/probe-comparison.json",
+        report.replace('"signedMeanDiff": 0.0',
+                       '"signedMeanDiff": NaN', 1) + "\n",
+    )
+
+
+def _set_touched_indices(
+        statistics: dict, *, image_rows: list[int], image_columns: list[int],
+        background_rows: list[int] | None = None,
+        background_columns: list[int] | None = None) -> None:
+    background_rows = background_rows or []
+    background_columns = background_columns or []
+    statistics["imageRowsTouched"] = image_rows
+    statistics["imageColumnsTouched"] = image_columns
+    statistics["backgroundRowsTouched"] = background_rows
+    statistics["backgroundColumnsTouched"] = background_columns
+
+
+def _supply_image_touched_indices(statistics: dict) -> None:
+    touched_keys = (
+        "imageRowsTouched", "imageColumnsTouched",
+        "backgroundRowsTouched", "backgroundColumnsTouched",
+    )
+    if any(statistics[key] for key in touched_keys):
+        return
+    image_differs = any(
+        channel["countAtZero"] != channel["pixels"]
+        for channel in statistics["image"]
+    )
+    background_differs = any(
+        channel["countAtZero"] != channel["pixels"]
+        for channel in statistics["background"]
+    )
+    if not image_differs or background_differs:
+        return
+    image_y = statistics["imageY"]
+    image_x = statistics["imageX"]
+    _set_touched_indices(
+        statistics,
+        image_rows=list(range(image_y, image_y + statistics["rowsTouched"])),
+        image_columns=list(
+            range(image_x, image_x + statistics["columnsTouched"])
+        ),
+    )
+
+
+def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
+    report = green_comparison_document(box)
+    record = report["records"][0]
+    statistics = record["statistics"]
+    regions = ("full", "image", "informative")
+    if variant == "resolved-input-alias":
+        report["candidate"] = "./.claude/probe-reference"
+    elif variant == "mono-not-monochrome":
+        record["monochromeFrame"] = False
+    elif variant == "class-two-pass":
+        record["toleranceClass"] = "colour-or-us"
+        statistics["channels"] = 3
+        for region in regions:
+            statistics[region] = [dict(statistics[region][0]) for _ in range(3)]
+    elif variant == "weak-with-decimated-rung":
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["weak"]
+        record["rung"] = "decimated"
+        record["notes"] = ["controlled impossible attribution"]
+    elif variant == "mono-with-class-two-rung":
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled impossible class"]
+    elif variant == "signed-histogram-not-array":
+        statistics["full"][0]["signedHistogram"] = None
+    elif variant == "signed-histogram-empty":
+        statistics["full"][0]["signedHistogram"] = []
+    elif variant == "signed-histogram-entry-shape":
+        statistics["full"][0]["signedHistogram"] = [[0]]
+    elif variant == "signed-histogram-difference":
+        statistics["full"][0]["signedHistogram"] = [[256, 1]]
+    elif variant == "signed-histogram-count":
+        statistics["full"][0]["signedHistogram"] = [[0, True]]
+    elif variant == "signed-histogram-zero-count":
+        statistics["full"][0]["signedHistogram"] = [[0, 0]]
+    elif variant == "signed-histogram-total":
+        statistics["full"][0]["signedHistogram"] = [[0, 2]]
+    elif variant == "signed-histogram-summary":
+        statistics["full"][0]["signedHistogram"] = [[1, 1]]
+    elif variant == "signed-histogram-sum-range":
+        _set_signed_distribution(statistics["full"][0], [(255, (1 << 32) - 1)])
+    elif variant == "maximum-contradicts-counts":
+        statistics["full"][0]["maxAbsDiff"] = 255
+    elif variant == "percentile-contradicts-counts":
+        statistics["full"][0]["percentile999AbsDiff"] = 255
+    elif variant == "signed-mean-exceeds-maximum":
+        statistics["full"][0]["signedMeanDiff"] = 256.0
+    elif variant == "touched-index-not-array":
+        statistics["imageRowsTouched"] = None
+    elif variant == "touched-index-invalid":
+        statistics["imageRowsTouched"] = [True]
+    elif variant == "touched-index-order":
+        statistics["imageRowsTouched"] = [0, 0]
+    elif variant == "image-touched-outside-rectangle":
+        _add_zero_background(statistics)
+        _set_dimensions(statistics, 2, 1, 1, 1)
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        _set_touched_indices(statistics, image_rows=[1], image_columns=[0])
+    elif variant == "touched-index-union":
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+    elif variant == "predicate-contradicts-statistics":
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(3, 1)])
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 3.0
+    elif variant == "bias-contradicts-statistics":
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(1, 1)])
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 1.0
+    elif variant == "count-exceeds-producer-limit":
+        too_many = 1 << 32
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(0, too_many)])
+        statistics["imagePixels"] = too_many
+        statistics["informativePixels"] = too_many
+    elif variant == "signed-mean-not-pixel-derived":
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(1, 1)])
+            channel["signedMeanDiff"] = 0.5
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 0.5
+    elif variant == "signed-mean-contradicts-buckets":
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(1, 1)])
+            channel["signedMeanDiff"] = 0.0
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+    elif variant == "fractional-pixel-derived-mean":
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(3, 1)])
+            channel["signedMeanDiff"] = 2.9999995
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["predicatePasses"] = False
+        statistics["signedMeanDiff"] = 2.9999995
+    elif variant == "percentile-sum-disagree":
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(3, 1998), (255, 2)])
+            channel["signedMeanDiff"] = 255.0
+        statistics["imagePixels"] = 2000
+        statistics["informativePixels"] = 2000
+        statistics["rowsTouched"] = 40
+        statistics["columnsTouched"] = 50
+        statistics["predicatePasses"] = False
+        statistics["biasPasses"] = False
+        statistics["signedMeanDiff"] = 255.0
+        _set_dimensions(statistics, 40, 50, 40, 50)
+    elif variant == "negative-zero":
+        for region in regions:
+            statistics[region][0]["signedMeanDiff"] = -0.0
+        statistics["signedMeanDiff"] = -0.0
+    elif variant == "single-tail-percentile":
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(255, 1)])
+            channel["percentile999AbsDiff"] = 3
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["predicatePasses"] = False
+        statistics["biasPasses"] = False
+        statistics["signedMeanDiff"] = 255.0
+    elif variant == "single-tail-unattainable-sum":
+        for region in regions:
+            _set_tail_difference(statistics[region][0], 3)
+            statistics[region][0]["signedMeanDiff"] = 0.0
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["predicatePasses"] = False
+    elif variant == "rank-at-end-percentile":
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(3, 1), (255, 1)])
+            channel["percentile999AbsDiff"] = 3
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 2
+        statistics["predicatePasses"] = False
+        statistics["biasPasses"] = False
+        statistics["signedMeanDiff"] = 129.0
+        _set_dimensions(statistics, 1, 2, 1, 2)
+    elif variant == "mono-pass-no-informative":
+        statistics["informative"] = []
+        statistics["informativePixels"] = 0
+        statistics["informativeFraction"] = 0.0
+    elif variant == "full-histogram-composition":
+        _add_zero_background(statistics)
+        _set_signed_distribution(statistics["full"][0], [(0, 1), (1, 1)])
+    elif variant == "full-mean-composition":
+        _add_opposed_background(statistics)
+        _set_signed_distribution(statistics["full"][0], [(1, 2)])
+    elif variant == "full-maximum-composition":
+        image = statistics["image"][0]
+        _set_tail_difference(image, 3)
+        statistics["informative"][0] = dict(image)
+        background = dict(image)
+        _set_tail_difference(background, 255)
+        statistics["background"] = [background]
+        full = statistics["full"][0]
+        _set_signed_distribution(full, [(129, 2)])
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 2
+        statistics["predicatePasses"] = False
+        statistics["biasPasses"] = False
+        statistics["signedMeanDiff"] = 3.0
+        _set_dimensions(statistics, 1, 2, 1, 1)
+        _set_touched_indices(
+            statistics, image_rows=[0], image_columns=[0],
+            background_rows=[0], background_columns=[1],
+        )
+    elif variant == "full-without-background":
+        for region, signed_mean in (("full", 1.0), ("image", -1.0),
+                                    ("informative", -1.0)):
+            _set_one_difference(statistics[region][0], signed_mean)
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = -1.0
+    elif variant == "informative-histogram-exceeds-image":
+        _set_one_difference(statistics["informative"][0], 1.0)
+    elif variant == "informative-maximum-exceeds-image":
+        for region, maximum in (("full", 3), ("image", 3),
+                                ("informative", 4)):
+            _set_tail_difference(statistics[region][0], maximum)
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["predicatePasses"] = False
+        statistics["biasPasses"] = False
+        statistics["signedMeanDiff"] = 4.0
+    elif variant == "informative-omits-difference":
+        for region in ("full", "image"):
+            _set_signed_distribution(
+                statistics[region][0], [(0, 999), (1, 1)]
+            )
+        _set_signed_distribution(statistics["informative"][0], [(0, 1)])
+        statistics["imagePixels"] = 1000
+        statistics["informativePixels"] = 1
+        statistics["informativeFraction"] = 0.001
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        _set_dimensions(statistics, 20, 50, 20, 50)
+    elif variant == "empty-informative-with-difference":
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        record["monochromeFrame"] = False
+        statistics["channels"] = 3
+        for region in ("full", "image"):
+            _set_one_difference(statistics[region][0], 1.0)
+            statistics[region] = [dict(statistics[region][0]) for _ in range(3)]
+        statistics["informative"] = []
+        statistics["informativePixels"] = 0
+        statistics["informativeFraction"] = 0.0
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 1.0
+    elif variant == "frame-dimensions-contradict-regions":
+        _set_prime_touched_case(statistics)
+        _set_dimensions(statistics, 2, 2, 1, 7)
+    elif variant == "touched-exceeds-frame-dimensions":
+        _set_prime_touched_case(statistics)
+    elif variant == "touched-contradicts-region-geometry":
+        for region in ("image", "informative"):
+            _set_signed_distribution(
+                statistics[region][0], [(-1, 1), (1, 1)]
+            )
+        background = dict(statistics["image"][0])
+        _set_signed_distribution(background, [(0, 2)])
+        statistics["background"] = [background]
+        _set_signed_distribution(
+            statistics["full"][0], [(-1, 1), (0, 2), (1, 1)]
+        )
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["informativeFraction"] = 1.0
+        statistics["rowsTouched"] = 2
+        statistics["columnsTouched"] = 2
+        _set_dimensions(statistics, 2, 2, 1, 2)
+        _set_touched_indices(
+            statistics, image_rows=[0], image_columns=[0, 1]
+        )
+    elif variant == "region-touched-presence":
+        for region in regions:
+            _set_one_difference(statistics[region][0], 1.0)
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 1.0
+        _set_touched_indices(
+            statistics, image_rows=[], image_columns=[],
+            background_rows=[0], background_columns=[0],
+        )
+    elif variant == "background-touched-isolated":
+        _set_signed_distribution(statistics["image"][0], [(0, 2)])
+        statistics["informative"][0] = dict(statistics["image"][0])
+        background = dict(statistics["image"][0])
+        _set_signed_distribution(background, [(0, 1), (1, 1)])
+        statistics["background"] = [background]
+        _set_signed_distribution(statistics["full"][0], [(0, 3), (1, 1)])
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        _set_dimensions(statistics, 2, 2, 1, 2)
+        _set_touched_indices(
+            statistics, image_rows=[], image_columns=[],
+            background_rows=[0], background_columns=[0],
+        )
+    elif variant == "background-joint-capacity":
+        _set_signed_distribution(statistics["image"][0], [(0, 4)])
+        statistics["informative"][0] = dict(statistics["image"][0])
+        background = dict(statistics["image"][0])
+        _set_signed_distribution(background, [(-1, 2), (0, 1), (1, 2)])
+        statistics["background"] = [background]
+        _set_signed_distribution(
+            statistics["full"][0], [(-1, 2), (0, 5), (1, 2)]
+        )
+        statistics["imagePixels"] = 4
+        statistics["informativePixels"] = 4
+        statistics["rowsTouched"] = 2
+        statistics["columnsTouched"] = 2
+        _set_dimensions(statistics, 3, 3, 2, 2)
+        _set_touched_indices(
+            statistics, image_rows=[], image_columns=[],
+            background_rows=[0, 2], background_columns=[0, 2],
+        )
+    elif variant == "monochrome-lanes-disagree":
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        statistics["channels"] = 3
+        for region in regions:
+            _set_signed_distribution(statistics[region][0], [(0, 2)])
+            statistics[region] = [dict(statistics[region][0]) for _ in range(3)]
+        for region in regions:
+            _set_signed_distribution(statistics[region][1], [(-1, 1), (1, 1)])
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 2
+        _set_dimensions(statistics, 1, 2, 1, 2)
+    elif variant in (
+        "nonmonochrome-forced-positive-extremes",
+        "nonmonochrome-forced-negative-extremes",
+        "nonmonochrome-forced-positive-multipixel",
+        "nonmonochrome-forced-negative-multipixel",
+    ):
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        record["monochromeFrame"] = False
+        statistics["channels"] = 3
+        forced_difference = (
+            255 if "positive" in variant else -255
+        )
+        forced_pixels = 2 if "multipixel" in variant else 1
+        for region in regions:
+            _set_signed_distribution(
+                statistics[region][0], [(forced_difference, forced_pixels)]
+            )
+            statistics[region] = [
+                dict(statistics[region][0]) for _ in range(3)
+            ]
+        statistics["imagePixels"] = forced_pixels
+        statistics["informativePixels"] = forced_pixels
+        statistics["informativeFraction"] = 1.0
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = forced_pixels
+        statistics["signedMeanDiff"] = float(forced_difference)
+        _set_dimensions(
+            statistics, 1, forced_pixels, 1, forced_pixels
+        )
+    elif variant in (
+        "nonmonochrome-opposite-regional-extremes",
+        "nonmonochrome-same-sign-regional-extremes",
+    ):
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        record["monochromeFrame"] = False
+        statistics["channels"] = 3
+        image = dict(statistics["image"][0])
+        _set_signed_distribution(image, [(255, 1)])
+        background = dict(image)
+        background_difference = (
+            -255
+            if variant == "nonmonochrome-opposite-regional-extremes"
+            else 255
+        )
+        _set_signed_distribution(background, [(background_difference, 1)])
+        full = dict(image)
+        full_entries = (
+            [(-255, 1), (255, 1)]
+            if background_difference == -255
+            else [(255, 2)]
+        )
+        _set_signed_distribution(full, full_entries)
+        statistics["full"] = [dict(full) for _ in range(3)]
+        statistics["image"] = [dict(image) for _ in range(3)]
+        statistics["background"] = [dict(background) for _ in range(3)]
+        statistics["informative"] = [dict(image) for _ in range(3)]
+        statistics["imagePixels"] = 1
+        statistics["informativePixels"] = 1
+        statistics["informativeFraction"] = 1.0
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 2
+        statistics["signedMeanDiff"] = 255.0
+        _set_dimensions(statistics, 1, 2, 1, 1)
+        _set_touched_indices(
+            statistics, image_rows=[0], image_columns=[0],
+            background_rows=[0], background_columns=[1],
+        )
+    elif variant in ("informative-touched-support", "monochrome-touched-support"):
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        record["monochromeFrame"] = variant == "monochrome-touched-support"
+        statistics["channels"] = 3
+        for region in ("full", "image"):
+            _set_signed_distribution(statistics[region][0], [(0, 3), (1, 1)])
+            statistics[region] = [dict(statistics[region][0]) for _ in range(3)]
+        informative_entries = (
+            [(0, 3), (1, 1)]
+            if variant == "monochrome-touched-support"
+            else [(1, 1)]
+        )
+        _set_signed_distribution(statistics["informative"][0], informative_entries)
+        statistics["informative"] = [
+            dict(statistics["informative"][0]) for _ in range(3)
+        ]
+        statistics["imagePixels"] = 4
+        statistics["informativePixels"] = (
+            1 if variant == "informative-touched-support" else 4
+        )
+        statistics["informativeFraction"] = statistics["informativePixels"] / 4
+        statistics["rowsTouched"] = 2
+        statistics["columnsTouched"] = 2
+        statistics["signedMeanDiff"] = 0.25
+        _set_dimensions(statistics, 2, 2, 2, 2)
+        _set_touched_indices(
+            statistics, image_rows=[0, 1], image_columns=[0, 1]
+        )
+    elif variant == "monochrome-background-touched-support":
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        record["monochromeFrame"] = True
+        statistics["channels"] = 3
+        _set_signed_distribution(statistics["image"][0], [(0, 2)])
+        statistics["informative"][0] = dict(statistics["image"][0])
+        background = dict(statistics["image"][0])
+        _set_signed_distribution(background, [(0, 1), (1, 1)])
+        full = dict(statistics["image"][0])
+        _set_signed_distribution(full, [(0, 3), (1, 1)])
+        statistics["full"] = [dict(full) for _ in range(3)]
+        statistics["image"] = [
+            dict(statistics["image"][0]) for _ in range(3)
+        ]
+        statistics["background"] = [dict(background) for _ in range(3)]
+        statistics["informative"] = [
+            dict(statistics["informative"][0]) for _ in range(3)
+        ]
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["informativeFraction"] = 1.0
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 2
+        statistics["signedMeanDiff"] = 0.0
+        _set_dimensions(statistics, 2, 2, 1, 2)
+        _set_touched_indices(
+            statistics, image_rows=[], image_columns=[],
+            background_rows=[1], background_columns=[0, 1],
+        )
+    elif variant == "partial-volume-reformat-image":
+        record["kind"] = "volume-reformat"
+        _add_zero_background(statistics)
+    elif variant == "touched-presence":
+        for region in regions:
+            _set_one_difference(statistics[region][0], 1.0)
+        statistics["signedMeanDiff"] = 1.0
+    elif variant == "touched-count":
+        for region in regions:
+            channel = statistics[region][0]
+            _set_signed_distribution(channel, [(1, 2)])
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 1.0
+        _set_dimensions(statistics, 1, 2, 1, 2)
+    elif variant == "top-signed-mean-source":
+        for region in regions:
+            _set_one_difference(statistics[region][0], 1.0)
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["biasPasses"] = False
+    elif variant == "weak-above-floor":
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["weak"]
+        record["rung"] = "weak"
+        record["notes"] = ["controlled impossible weak attribution"]
+    elif variant == "input-cannot-resolve":
+        report["candidate"] = ".claude/probe-missing"
+    elif variant == "input-is-file":
+        report["candidate"] = ".claude/probe-reference/.keep"
+    _supply_image_touched_indices(statistics)
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _valid_nonzero_background_report(box: Sandbox) -> None:
+    report = green_comparison_document(box)
+    statistics = report["records"][0]["statistics"]
+    _set_signed_distribution(
+        statistics["image"][0], [(-1, 1), (0, 2), (1, 1)]
+    )
+    statistics["informative"][0] = dict(statistics["image"][0])
+    background = dict(statistics["image"][0])
+    _set_signed_distribution(background, [(0, 2), (1, 3)])
+    statistics["background"] = [background]
+    _set_signed_distribution(
+        statistics["full"][0], [(-1, 1), (0, 4), (1, 4)]
+    )
+    statistics["imagePixels"] = 4
+    statistics["informativePixels"] = 4
+    statistics["informativeFraction"] = 1.0
+    statistics["rowsTouched"] = 3
+    statistics["columnsTouched"] = 3
+    _set_dimensions(statistics, 3, 3, 2, 2)
+    _set_touched_indices(
+        statistics, image_rows=[0, 1], image_columns=[0, 1],
+        background_rows=[0, 2], background_columns=[0, 2],
+    )
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _valid_nonmonochrome_mixed_extremes_report(box: Sandbox) -> None:
+    report = green_comparison_document(box)
+    contract = json.loads(box.read("tools/oracle/report-contract.json"))
+    record = json.loads(json.dumps(report["records"][0]))
+    statistics = record["statistics"]
+    record["id"] = "probe-mixed-extremes"
+    report["records"].append(record)
+    report["records"].sort(key=lambda item: item["id"])
+    report["views"] = 2
+    report["unmeasured"] = 1
+    report["coverage"]["unmeasured"] = 1
+    report["qualifiers"] = {"unstated-threshold": 1}
+    record["toleranceClass"] = "colour-or-us"
+    record["outcome"] = "unmeasured"
+    record["qualifiers"] = ["unstated-threshold"]
+    record["rung"] = "class-two"
+    record["notes"] = ["controlled class-two state"]
+    record["monochromeFrame"] = False
+    statistics["channels"] = 3
+    for region in ("full", "image", "informative"):
+        _set_signed_distribution(
+            statistics[region][0], [(-255, 1), (255, 1)]
+        )
+        statistics[region] = [
+            dict(statistics[region][0]) for _ in range(3)
+        ]
+    statistics["imagePixels"] = 2
+    statistics["informativePixels"] = 2
+    statistics["informativeFraction"] = 1.0
+    statistics["rowsTouched"] = 1
+    statistics["columnsTouched"] = 2
+    statistics["signedMeanDiff"] = 0.0
+    _set_dimensions(statistics, 1, 2, 1, 2)
+    _set_touched_indices(
+        statistics, image_rows=[0], image_columns=[0, 1]
+    )
+    for side in ("reference", "candidate"):
+        report["renderHashes"][side] = _comparison_run_hash(
+            report, side, contract["hashAlgorithms"]["run"]
+        )
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _valid_partition_extremes_report(
+    box: Sandbox, *, record_id: str,
+    image_entries: list[tuple[int, int]],
+    background_entries: list[tuple[int, int]],
+) -> None:
+    report = green_comparison_document(box)
+    contract = json.loads(box.read("tools/oracle/report-contract.json"))
+    record = json.loads(json.dumps(report["records"][0]))
+    statistics = record["statistics"]
+    record["id"] = record_id
+    report["records"].append(record)
+    report["records"].sort(key=lambda item: item["id"])
+    report["views"] = 2
+    report["unmeasured"] = 1
+    report["coverage"]["unmeasured"] = 1
+    report["qualifiers"] = {"unstated-threshold": 1}
+    record["toleranceClass"] = "colour-or-us"
+    record["outcome"] = "unmeasured"
+    record["qualifiers"] = ["unstated-threshold"]
+    record["rung"] = "class-two"
+    record["notes"] = ["controlled class-two state"]
+    record["monochromeFrame"] = False
+    statistics["channels"] = 3
+    image = dict(statistics["image"][0])
+    _set_signed_distribution(image, image_entries)
+    background = dict(image)
+    _set_signed_distribution(background, background_entries)
+    full_counts: dict[int, int] = {}
+    for difference, count in image_entries + background_entries:
+        full_counts[difference] = full_counts.get(difference, 0) + count
+    full = dict(image)
+    _set_signed_distribution(full, list(full_counts.items()))
+    statistics["full"] = [dict(full) for _ in range(3)]
+    statistics["image"] = [dict(image) for _ in range(3)]
+    statistics["background"] = [dict(background) for _ in range(3)]
+    statistics["informative"] = [dict(image) for _ in range(3)]
+    image_pixels = sum(count for _, count in image_entries)
+    background_pixels = sum(count for _, count in background_entries)
+    statistics["imagePixels"] = image_pixels
+    statistics["informativePixels"] = image_pixels
+    statistics["informativeFraction"] = 1.0
+    statistics["rowsTouched"] = 1
+    statistics["columnsTouched"] = image_pixels + background_pixels
+    statistics["signedMeanDiff"] = image["signedMeanDiff"]
+    _set_dimensions(
+        statistics, 1, image_pixels + background_pixels, 1, image_pixels
+    )
+    _set_touched_indices(
+        statistics,
+        image_rows=[0], image_columns=list(range(image_pixels)),
+        background_rows=[0],
+        background_columns=list(
+            range(image_pixels, image_pixels + background_pixels)
+        ),
+    )
+    for side in ("reference", "candidate"):
+        report["renderHashes"][side] = _comparison_run_hash(
+            report, side, contract["hashAlgorithms"]["run"]
+        )
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _valid_uniform_nonextreme_report(box: Sandbox, difference: int) -> None:
+    report = green_comparison_document(box)
+    contract = json.loads(box.read("tools/oracle/report-contract.json"))
+    record = json.loads(json.dumps(report["records"][0]))
+    statistics = record["statistics"]
+    record["id"] = f"probe-uniform-{difference}"
+    report["records"].append(record)
+    report["records"].sort(key=lambda item: item["id"])
+    report["views"] = 2
+    report["unmeasured"] = 1
+    report["coverage"]["unmeasured"] = 1
+    report["qualifiers"] = {"unstated-threshold": 1}
+    record["toleranceClass"] = "colour-or-us"
+    record["outcome"] = "unmeasured"
+    record["qualifiers"] = ["unstated-threshold"]
+    record["rung"] = "class-two"
+    record["notes"] = ["controlled class-two state"]
+    record["monochromeFrame"] = False
+    statistics["channels"] = 3
+    for region in ("full", "image", "informative"):
+        _set_signed_distribution(statistics[region][0], [(difference, 1)])
+        statistics[region] = [
+            dict(statistics[region][0]) for _ in range(3)
+        ]
+    statistics["imagePixels"] = 1
+    statistics["informativePixels"] = 1
+    statistics["informativeFraction"] = 1.0
+    statistics["rowsTouched"] = 1
+    statistics["columnsTouched"] = 1
+    statistics["signedMeanDiff"] = float(difference)
+    _set_dimensions(statistics, 1, 1, 1, 1)
+    _set_touched_indices(
+        statistics, image_rows=[0], image_columns=[0]
+    )
+    for side in ("reference", "candidate"):
+        report["renderHashes"][side] = _comparison_run_hash(
+            report, side, contract["hashAlgorithms"]["run"]
+        )
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _set_signed_distribution(
+        channel: dict, entries: list[tuple[int, int]]) -> None:
+    entries = sorted(entries)
+    pixels = sum(count for _, count in entries)
+    absolute = [0] * 256
+    signed_sum = 0
+    for difference, count in entries:
+        absolute[abs(difference)] += count
+        signed_sum += difference * count
+    cumulative = 0
+    percentile = 255
+    for difference, count in enumerate(absolute):
+        cumulative += count
+        if cumulative / pixels >= 0.999:
+            percentile = difference
+            break
+    channel.update({
+        "pixels": pixels,
+        "signedHistogram": [[difference, count] for difference, count in entries],
+        "maxAbsDiff": next(
+            difference for difference in range(255, -1, -1)
+            if absolute[difference] > 0
+        ),
+        "countAtZero": absolute[0],
+        "countAtOne": absolute[1],
+        "countAtTwo": absolute[2],
+        "countOverTwo": sum(absolute[3:]),
+        "fractionWithinOneLsb": (absolute[0] + absolute[1]) / pixels,
+        "differingFraction": (pixels - absolute[0]) / pixels,
+        "signedMeanDiff": signed_sum / pixels,
+        "percentile999AbsDiff": percentile,
+    })
+
+
+def _set_dimensions(
+        statistics: dict, frame_rows: int, frame_columns: int,
+        image_rows: int, image_columns: int) -> None:
+    statistics.update({
+        "frameRows": frame_rows,
+        "frameColumns": frame_columns,
+        "imageRows": image_rows,
+        "imageColumns": image_columns,
+    })
+
+
+def _set_prime_touched_case(statistics: dict) -> None:
+    for region in ("full", "image"):
+        _set_signed_distribution(
+            statistics[region][0], [(-1, 1), (0, 5), (1, 1)]
+        )
+    _set_signed_distribution(statistics["informative"][0], [(-1, 1), (1, 1)])
+    statistics["imagePixels"] = 7
+    statistics["informativePixels"] = 2
+    statistics["informativeFraction"] = 2 / 7
+    statistics["rowsTouched"] = 2
+    statistics["columnsTouched"] = 2
+    _set_dimensions(statistics, 1, 7, 1, 7)
+
+
+def _set_one_difference(channel: dict, signed_mean: float) -> None:
+    _set_signed_distribution(channel, [(int(signed_mean), 1)])
+
+
+def _set_tail_difference(channel: dict, maximum: int) -> None:
+    _set_signed_distribution(channel, [(maximum, 1)])
+
+
+def _add_zero_background(statistics: dict) -> None:
+    full = statistics["full"][0]
+    _set_signed_distribution(full, [(0, 2)])
+    statistics["background"] = [dict(statistics["image"][0])]
+    _set_dimensions(statistics, 1, 2, 1, 1)
+
+
+def _add_opposed_background(statistics: dict) -> None:
+    _set_signed_distribution(statistics["full"][0], [(-1, 1), (1, 1)])
+    for region in ("image", "informative"):
+        _set_one_difference(statistics[region][0], 1.0)
+    background = dict(statistics["image"][0])
+    _set_one_difference(background, -1.0)
+    statistics["background"] = [background]
+    statistics["rowsTouched"] = 1
+    statistics["columnsTouched"] = 2
+    statistics["signedMeanDiff"] = 1.0
+    _set_dimensions(statistics, 1, 2, 1, 1)
+    _set_touched_indices(
+        statistics, image_rows=[0], image_columns=[0],
+        background_rows=[0], background_columns=[1],
+    )
+
+
+def _ledger_from_parent_directory(box: Sandbox) -> subprocess.CompletedProcess:
+    body = (
+        "from pathlib import Path; import os, runpy, sys; "
+        "root = Path.cwd(); os.chdir(root.parent); "
+        "sys.argv = [str(root / 'scripts/verify_ledger.py'), 'record', "
+        "'--comparison-report', str(root / '.claude/probe-comparison.json')]; "
+        "runpy.run_path(str(root / 'scripts/verify_ledger.py'), "
+        "run_name='__main__')"
+    )
+    return box.run(["python3", "-c", body])
+
+
+def _report_contract_mutation(box: Sandbox, variant: str) -> None:
+    report = green_comparison_document(box)
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+    path = "tools/oracle/report-contract.json"
+    raw = box.read(path)
+    if variant == "unknown-root":
+        contract = json.loads(raw)
+        contract["unusedAuthority"] = 0
+        raw = json.dumps(contract)
+    elif variant == "unknown-schemas":
+        contract = json.loads(raw)
+        contract["schemas"]["unused"] = []
+        raw = json.dumps(contract)
+    elif variant == "unknown-vocabularies":
+        contract = json.loads(raw)
+        contract["vocabularies"]["unused"] = []
+        raw = json.dumps(contract)
+    elif variant == "unknown-semantics":
+        contract = json.loads(raw)
+        contract["semantics"]["unused"] = 0
+        raw = json.dumps(contract)
+    elif variant == "unknown-hash-algorithms":
+        contract = json.loads(raw)
+        contract["hashAlgorithms"]["unused"] = "sha256"
+        raw = json.dumps(contract)
+    elif variant == "duplicate-root":
+        raw = raw.replace('"version": 1', '"version": 1, "version": 1', 1)
+    elif variant == "duplicate-nested":
+        raw = raw.replace('"report": [', '"report": [], "report": [', 1)
+    elif variant == "wrong-version":
+        contract = json.loads(raw)
+        contract["version"] = 2
+        raw = json.dumps(contract)
+    elif variant == "empty-hash-algorithm":
+        contract = json.loads(raw)
+        contract["hashAlgorithms"]["view"] = ""
+        raw = json.dumps(contract)
+    elif variant == "green-report-not-object":
+        contract = json.loads(raw)
+        contract["greenReport"] = []
+        raw = json.dumps(contract)
+    elif variant == "invalid-schema-array":
+        contract = json.loads(raw)
+        contract["schemas"]["report"].append("story")
+        raw = json.dumps(contract)
+    elif variant == "invalid-vocabulary-array":
+        contract = json.loads(raw)
+        contract["vocabularies"]["kinds"].append("stack")
+        raw = json.dumps(contract)
+    elif variant == "invalid-channel-count":
+        contract = json.loads(raw)
+        contract["semantics"]["channelCountByClass"]["mono16"] = 0
+        raw = json.dumps(contract)
+    elif variant == "invalid-green-qualifier":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredQualifiers"].append("invented")
+        raw = json.dumps(contract)
+    elif variant == "invalid-semantic-number":
+        contract = json.loads(raw)
+        contract["semantics"]["informativeFractionFloor"] = -1
+        raw = json.dumps(contract)
+    elif variant == "states-not-array":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"] = None
+        raw = json.dumps(contract)
+    elif variant == "state-unknown-key":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"][0]["invented"] = 0
+        raw = json.dumps(contract)
+    elif variant == "state-duplicate-qualifier":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"][0]["qualifiers"].append("weak")
+        raw = json.dumps(contract)
+    elif variant == "state-invalid-class":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"][0]["toleranceClass"] = "invented"
+        raw = json.dumps(contract)
+    elif variant == "state-invalid-qualifier":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"][0]["qualifiers"] = ["bias"]
+        raw = json.dumps(contract)
+    elif variant == "state-invalid-rung":
+        contract = json.loads(raw)
+        contract["semantics"]["greenUnmeasuredStates"][0]["rung"] = "invented"
+        raw = json.dumps(contract)
+    elif variant == "duplicate-state":
+        contract = json.loads(raw)
+        states = contract["semantics"]["greenUnmeasuredStates"]
+        states.append(dict(states[0]))
+        raw = json.dumps(contract)
+    box.write(path, raw + ("" if raw.endswith("\n") else "\n"))
+
+
+def _comparison_run_hash(report: dict, side: str, algorithm: str) -> str:
+    records = sorted(
+        report["records"],
+        key=lambda record: (record["kind"], record["id"],
+                            record["renderHashes"][side]),
+    )
+    digest = hashlib.sha256()
+    digest.update(algorithm.encode() + b"\0")
+    digest.update(len(records).to_bytes(8, "little"))
+    for record in records:
+        for field in (record["kind"], record["id"],
+                      record["renderHashes"][side]):
+            encoded = field.encode()
+            digest.update(len(encoded).to_bytes(8, "little"))
+            digest.update(encoded)
+    return digest.hexdigest()
+
+
+def _green_unmeasured_state_report(box: Sandbox, index: int) -> None:
+    report = green_comparison_document(box)
+    contract = json.loads(box.read("tools/oracle/report-contract.json"))
+    state = contract["semantics"]["greenUnmeasuredStates"][index]
+    record = json.loads(json.dumps(report["records"][0]))
+    record["id"] = f"probe-unmeasured-{index}"
+    record["toleranceClass"] = state["toleranceClass"]
+    record["outcome"] = "unmeasured"
+    record["qualifiers"] = state["qualifiers"]
+    record["rung"] = state["rung"]
+    record["notes"] = ["controlled green unmeasured state"]
+    if state["toleranceClass"] == "colour-or-us":
+        record["monochromeFrame"] = False
+        record["statistics"]["channels"] = 3
+        for region in ("full", "image", "informative"):
+            channel = record["statistics"][region][0]
+            record["statistics"][region] = [dict(channel) for _ in range(3)]
+    if "weak" in state["qualifiers"]:
+        record["statistics"]["informative"] = []
+        record["statistics"]["informativePixels"] = 0
+        record["statistics"]["informativeFraction"] = 0.0
+    report["records"].append(record)
+    report["records"].sort(key=lambda item: item["id"])
+    report["views"] = 2
+    report["unmeasured"] = 1
+    report["coverage"]["unmeasured"] = 1
+    report["qualifiers"] = {qualifier: 1 for qualifier in state["qualifiers"]}
+    for side in ("reference", "candidate"):
+        report["renderHashes"][side] = _comparison_run_hash(
+            report, side, contract["hashAlgorithms"]["run"]
+        )
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _report_semantic_probes() -> tuple[Probe, ...]:
+    cases = (
+        ("resolved-input-alias", "directories are equal"),
+        ("mono-not-monochrome", "is not monochrome"),
+        ("class-two-pass", "pass record 'probe-view' is inconsistent"),
+        ("weak-with-decimated-rung", "has the wrong rung"),
+        ("mono-with-class-two-rung", "contradicts its class"),
+        ("signed-histogram-not-array", "has no record 'probe-view' statistics.full[0].signedHistogram array"),
+        ("signed-histogram-empty", "signedHistogram is empty"),
+        ("signed-histogram-entry-shape", "invalid record 'probe-view' statistics.full[0].signedHistogram[0]"),
+        ("signed-histogram-difference", "invalid record 'probe-view' statistics.full[0].signedHistogram[0] difference"),
+        ("signed-histogram-count", "invalid record 'probe-view' statistics.full[0].signedHistogram[0] count"),
+        ("signed-histogram-zero-count", "signedHistogram[0] count is zero"),
+        ("signed-histogram-total", "signed histogram does not total pixels"),
+        ("signed-histogram-summary", "channel counts contradict signed histogram"),
+        ("signed-histogram-sum-range", "signed sum exceeds producer range"),
+        ("maximum-contradicts-counts", "maximum contradicts signed histogram"),
+        ("percentile-contradicts-counts", "percentile contradicts signed histogram"),
+        ("signed-mean-exceeds-maximum", "signed mean contradicts signed histogram"),
+        ("touched-index-not-array", "has no record 'probe-view' statistics.imageRowsTouched array"),
+        ("touched-index-invalid", "invalid record 'probe-view' statistics.imageRowsTouched[0]"),
+        ("touched-index-order", "invalid record 'probe-view' statistics.imageRowsTouched"),
+        ("image-touched-outside-rectangle", "image touched indices leave its rectangle"),
+        ("touched-index-union", "touched counts contradict touched indices"),
+        ("predicate-contradicts-statistics", "predicate contradicts statistics"),
+        ("bias-contradicts-statistics", "bias verdict contradicts statistics"),
+        ("count-exceeds-producer-limit", "invalid record 'probe-view' statistics.full[0].pixels"),
+        ("signed-mean-not-pixel-derived", "signed mean contradicts signed histogram"),
+        ("signed-mean-contradicts-buckets", "signed mean contradicts signed histogram"),
+        ("fractional-pixel-derived-mean", "signed mean contradicts signed histogram"),
+        ("percentile-sum-disagree", "signed mean contradicts signed histogram"),
+        ("negative-zero", "signedMeanDiff is negative zero"),
+        ("single-tail-percentile", "percentile contradicts signed histogram"),
+        ("single-tail-unattainable-sum", "signed mean contradicts signed histogram"),
+        ("rank-at-end-percentile", "percentile contradicts signed histogram"),
+        ("mono-pass-no-informative", "pass record 'probe-view' is inconsistent"),
+        ("full-histogram-composition", "full signed histogram is not image plus background"),
+        ("full-mean-composition", "full signed histogram is not image plus background"),
+        ("full-maximum-composition", "full signed histogram is not image plus background"),
+        ("full-without-background", "full region is not the whole image"),
+        ("informative-histogram-exceeds-image", "informative signed histogram exceeds image"),
+        ("informative-maximum-exceeds-image", "informative signed histogram exceeds image"),
+        ("informative-omits-difference", "informative signed histogram omits image differences"),
+        ("empty-informative-with-difference", "informative signed histogram omits image differences"),
+        ("frame-dimensions-contradict-regions", "frame and image dimensions contradict regions"),
+        ("touched-exceeds-frame-dimensions", "touched counts exceed frame dimensions"),
+        ("touched-contradicts-region-geometry", "touched counts contradict touched indices"),
+        ("region-touched-presence", "image touched indices contradict differences"),
+        ("background-touched-isolated", "background touched indices contain an isolated row or column"),
+        ("background-joint-capacity", "background touched indices contradict region geometry"),
+        ("monochrome-lanes-disagree", "channels contradict monochrome frame"),
+        ("nonmonochrome-forced-positive-extremes", "non-monochrome frame is impossible from forced regional RGB extremes"),
+        ("nonmonochrome-forced-negative-extremes", "non-monochrome frame is impossible from forced regional RGB extremes"),
+        ("nonmonochrome-forced-positive-multipixel", "non-monochrome frame is impossible from forced regional RGB extremes"),
+        ("nonmonochrome-forced-negative-multipixel", "non-monochrome frame is impossible from forced regional RGB extremes"),
+        ("nonmonochrome-opposite-regional-extremes", "non-monochrome frame is impossible from forced regional RGB extremes"),
+        ("nonmonochrome-same-sign-regional-extremes", "non-monochrome frame is impossible from forced regional RGB extremes"),
+        ("informative-touched-support", "image touched indices contradict region geometry"),
+        ("monochrome-touched-support", "image touched indices contradict region geometry"),
+        ("monochrome-background-touched-support", "background touched indices contradict region geometry"),
+        ("partial-volume-reformat-image", "volume reformat is not a full-frame image"),
+        ("touched-presence", "touched counts contradict differences"),
+        ("touched-count", "touched counts contradict differing pixels"),
+        ("top-signed-mean-source", "signed mean contradicts its source region"),
+        ("weak-above-floor", "is not low-information"),
+        ("input-cannot-resolve", "candidate directory cannot be resolved"),
+        ("input-is-file", "candidate directory is not a directory"),
+    )
+    invoke = script("python3", "scripts/verify_ledger.py", "record",
+                    "--comparison-report", ".claude/probe-comparison.json")
+    refusal_probes = tuple(
+        Probe(
+            f"ledger.comparison-semantic-{variant}",
+            lambda box, variant=variant: _report_semantic_mutation(box, variant),
+            invoke,
+            expected,
+        )
+        for variant, expected in cases
+    )
+    caller_directory = Probe(
+        "ledger.comparison-relative-path-from-parent",
+        lambda box: box.write(
+            ".claude/probe-comparison.json",
+            json.dumps(green_comparison_document(box)) + "\n",
+        ),
+        Invoke(
+            "python3 scripts/verify_ledger.py record --comparison-report "
+            ".claude/probe-comparison.json from parent",
+            _ledger_from_parent_directory,
+        ),
+        "recorded tree",
+        polarity="accept",
+    )
+    nonzero_background = Probe(
+        "ledger.comparison-nonzero-background-is-permitted",
+        _valid_nonzero_background_report,
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
+    mixed_extremes = Probe(
+        "ledger.comparison-nonmonochrome-mixed-extremes-is-permitted",
+        _valid_nonmonochrome_mixed_extremes_report,
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
+    mixed_background = Probe(
+        "ledger.comparison-forced-image-mixed-background-is-permitted",
+        lambda box: _valid_partition_extremes_report(
+            box,
+            record_id="probe-forced-image-mixed-background",
+            image_entries=[(255, 1)],
+            background_entries=[(-255, 1), (255, 1)],
+        ),
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
+    mixed_image = Probe(
+        "ledger.comparison-mixed-image-forced-background-is-permitted",
+        lambda box: _valid_partition_extremes_report(
+            box,
+            record_id="probe-mixed-image-forced-background",
+            image_entries=[(-255, 1), (255, 1)],
+            background_entries=[(255, 1)],
+        ),
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
+    both_mixed = Probe(
+        "ledger.comparison-mixed-image-mixed-background-is-permitted",
+        lambda box: _valid_partition_extremes_report(
+            box,
+            record_id="probe-mixed-image-mixed-background",
+            image_entries=[(-255, 1), (255, 1)],
+            background_entries=[(-255, 1), (255, 1)],
+        ),
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
+    positive_adjacent = Probe(
+        "ledger.comparison-uniform-positive-254-is-permitted",
+        lambda box: _valid_uniform_nonextreme_report(box, 254),
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
+    negative_adjacent = Probe(
+        "ledger.comparison-uniform-negative-254-is-permitted",
+        lambda box: _valid_uniform_nonextreme_report(box, -254),
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
+    return refusal_probes + (
+        caller_directory, nonzero_background, mixed_extremes, mixed_background,
+        mixed_image, both_mixed, positive_adjacent, negative_adjacent,
+    )
+
+
+def _report_contract_probes() -> tuple[Probe, ...]:
+    cases = (
+        ("unknown-root", "root has invalid keys"),
+        ("unknown-schemas", "schemas has invalid keys"),
+        ("unknown-vocabularies", "vocabularies has invalid keys"),
+        ("unknown-semantics", "semantics has invalid keys"),
+        ("unknown-hash-algorithms", "hashAlgorithms has invalid keys"),
+        ("duplicate-root", "duplicate JSON key 'version'"),
+        ("duplicate-nested", "duplicate JSON key 'report'"),
+        ("wrong-version", "version is not the integer 1"),
+        ("empty-hash-algorithm", "hashAlgorithms values are not non-empty strings"),
+        ("green-report-not-object", "greenReport is not an object"),
+        ("invalid-schema-array", "schemas.report is not a unique non-empty string array"),
+        ("invalid-vocabulary-array", "vocabularies.kinds is not a unique non-empty string array"),
+        ("invalid-channel-count", "channelCountByClass values are not positive integers"),
+        ("invalid-green-qualifier", "greenUnmeasuredQualifiers contains an invalid value"),
+        ("invalid-semantic-number", "semantics.informativeFractionFloor is not a finite non-negative number"),
+        ("states-not-array", "semantics.greenUnmeasuredStates is not an array"),
+        ("state-unknown-key", "greenUnmeasuredStates[0] has invalid keys"),
+        ("state-duplicate-qualifier", "greenUnmeasuredStates[0].qualifiers is not a unique"),
+        ("state-invalid-class", "green unmeasured state has an invalid class"),
+        ("state-invalid-qualifier", "green unmeasured state has invalid qualifiers"),
+        ("state-invalid-rung", "green unmeasured state has an invalid rung"),
+        ("duplicate-state", "green unmeasured states contain a duplicate"),
+    )
+    invoke = script("python3", "scripts/verify_ledger.py", "record",
+                    "--comparison-report", ".claude/probe-comparison.json")
+    return tuple(
+        Probe(
+            f"ledger.report-contract-{variant}",
+            lambda box, variant=variant: _report_contract_mutation(box, variant),
+            invoke,
+            expected,
+        )
+        for variant, expected in cases
+    )
+
+
+def _green_unmeasured_state_probes() -> tuple[Probe, ...]:
+    contract_path = Path(__file__).resolve().parents[2] / "tools/oracle/report-contract.json"
+    contract = json.loads(contract_path.read_text())
+    state_count = len(contract["semantics"]["greenUnmeasuredStates"])
+    invoke = script("python3", "scripts/verify_ledger.py", "record",
+                    "--comparison-report", ".claude/probe-comparison.json")
+    return tuple(
+        Probe(
+            f"ledger.comparison-green-unmeasured-state-{index}",
+            lambda box, index=index: _green_unmeasured_state_report(box, index),
+            invoke,
+            "recorded tree",
+            polarity="accept",
+        )
+        for index in range(state_count)
+    )
+
+
+def _report_shape_probes() -> tuple[Probe, ...]:
+    cases = (
+        ("records-missing", "root has invalid keys"),
+        ("records-null", "has no records array"),
+        ("records-empty", "records array is empty"),
+        ("duplicate-record", "duplicate record identifiers"),
+        ("record-fail", "green record 'probe-view' has outcome fail"),
+        ("duplicate-record-id", "duplicate record identifiers"),
+        ("views-missing", "root has invalid keys"),
+        ("views-zero", "views count is not the record count"),
+        ("counts-exceed-views", "pass count contradicts records"),
+        ("reference-equals-candidate", "directories are equal"),
+        ("reference-missing", "root has invalid keys"),
+        ("candidate-missing", "root has invalid keys"),
+        ("hashes-missing", "root has invalid keys"),
+        ("aggregate-hash-invalid", "invalid aggregate reference render hash"),
+        ("aggregate-hash-inconsistent", "aggregate reference render hash contradicts records"),
+        ("qualifier-histogram", "qualifier histogram contradicts records"),
+        ("top-level-unknown", "root has invalid keys"),
+        ("coverage-unknown", "coverage has invalid keys"),
+        ("record-id-missing", "records[0] has invalid keys"),
+        ("record-id-null", "invalid records[0].id"),
+        ("record-id-empty", "invalid records[0].id"),
+        ("record-unknown", "records[0] has invalid keys"),
+        ("record-hash-invalid", "invalid records[0] candidate render hash"),
+        ("record-hashes-unknown", "records[0].renderHashes has invalid keys"),
+        ("statistics-null", "statistics is not an object"),
+        ("statistics-unknown", "statistics has invalid keys"),
+        ("channel-unknown", "statistics.full[0] has invalid keys"),
+        ("parameter-divergence-missing", "parameterDivergences[0] has invalid keys"),
+        ("geometry-divergence-unknown", "geometryDivergences[0] has invalid keys"),
+    )
+    invoke = script("python3", "scripts/verify_ledger.py", "record",
+                    "--comparison-report", ".claude/probe-comparison.json")
+    return tuple(
+        Probe(
+            f"ledger.comparison-shape-{variant}",
+            lambda box, variant=variant: _report_shape_mutation(box, variant),
+            invoke,
+            expected,
+        )
+        for variant, expected in cases
+    )
+
+
+def _top_level_unmeasured_probes() -> tuple[Probe, ...]:
+    probes = []
+    for variant in ("missing", "null", "bool", "negative", "string"):
+        probes.append(Probe(
+            f"ledger.comparison-unmeasured-{variant}",
+            lambda box, variant=variant:
+                _invalid_top_level_unmeasured(box, variant),
+            script("python3", "scripts/verify_ledger.py", "record",
+                   "--comparison-report", ".claude/probe-comparison.json"),
+            ("comparison report root has invalid keys, missing=['unmeasured']"
+             if variant == "missing"
+             else "comparison report has invalid unmeasured count"),
+        ))
+    return tuple(probes)
+
+
+def _ledger_without_comparison(box: Sandbox) -> None:
+    _ledger_record(box, "pass")
+
+
+def _commit_without_comparison(box: Sandbox) -> None:
+    box.enable_hooks()
+    box.write("probe-note.txt", "one\n")
+    box.stage_all()
+    _ledger_record(box, "pass")
+    box.git("commit", "-m", "F-000, a probe")
+
+
 def commit_with(message: str) -> Invoke:
     """A real `git commit`, so the hooks run when the sandbox has enabled them.
 
@@ -1012,15 +2552,23 @@ def _close_tree_changed_after_evidence(box: Sandbox) -> None:
 
 def _close_carried(box: Sandbox, *, recorded: bool) -> None:
     """Put one story in carried state, with or without a tracked reason."""
-    _write_close_state(box)
     sprint = re.search(r"^#\s+Current sprint,\s*(S[\d.]+)",
                        box.read("docs/sprints/CURRENT_SPRINT.md"), re.M)
     if sprint is None:
         raise AssertionError("CURRENT_SPRINT.md names no sprint")
+    name = sprint.group(1)
+    allocation = json.loads(box.read("docs/sprints/allocation.json"))
+    allocated_fids = sorted(
+        story["fid"] for story in allocation["stories"]
+        if story.get("sprint") == name
+    )
+    if not allocated_fids:
+        raise AssertionError(f"allocation.json puts no story in {name}")
+    current_sprint = box.read("docs/sprints/CURRENT_SPRINT.md")
     section = re.search(
-        rf"^## Carried forward from {re.escape(sprint.group(1))}\s*$\n"
+        rf"^## Carried forward from {re.escape(name)}\s*$\n"
         r"(.*?)(?=^## |\Z)",
-        box.read("docs/sprints/CURRENT_SPRINT.md"),
+        current_sprint,
         re.M | re.S,
     )
     recorded_fids = set() if section is None else set(re.findall(
@@ -1028,16 +2576,36 @@ def _close_carried(box: Sandbox, *, recorded: bool) -> None:
         section.group(1),
         re.M,
     ))
-    state_path = (box.path / ".claude" / "scratch" /
-                  f"{sprint.group(1)}-run.json")
-    data = json.loads(state_path.read_text())
+
     candidates = sorted(
-        fid for fid in data["features"]
+        fid for fid in allocated_fids
         if (fid in recorded_fids) == recorded
     )
+    if recorded and not candidates:
+        fid = allocated_fids[0]
+        heading = f"## Carried forward from {name}\n"
+        reason = f"\n- **{fid}** probe-only recorded reason\n"
+        if heading in current_sprint:
+            current_sprint = current_sprint.replace(
+                heading,
+                heading + reason,
+                1,
+            )
+        else:
+            current_sprint = current_sprint.rstrip() + (
+                f"\n\n{heading}{reason}"
+            )
+        box.write("docs/sprints/CURRENT_SPRINT.md", current_sprint)
+        box.stage_all()
+        box.git("commit", "-q", "-m", "probe recorded carry")
+        candidates = [fid]
     if not candidates:
         kind = "recorded" if recorded else "unrecorded"
         raise AssertionError(f"sprint has no {kind} carry-forward candidate")
+
+    _write_close_state(box)
+    state_path = box.path / ".claude" / "scratch" / f"{name}-run.json"
+    data = json.loads(state_path.read_text())
     data["features"][candidates[0]]["state"] = "carried"
     box.write(
         str(state_path.relative_to(box.path)),
@@ -6439,10 +8007,34 @@ GUARDS: tuple[Guard, ...] = (
         gate="-",
         spec="deviation D-04 mechanism 1, and HLD 27.2 R6",
         refuses="A staged tree with no recorded gate run, a tree whose "
-                "recorded corpus is red, and a corpus state outside the "
-                "declared set.",
+                "recorded corpus is red, a corpus state outside the declared "
+                "set, malformed or red comparison evidence, a green report "
+                "with failed views, input problems, coverage problems, "
+                "absorbed divergences or absent views, a report missing one "
+                "of those emitted fields, an invalid coverage count, "
+                "contradictory unmeasured counts, any object outside the "
+                "serializer's closed schema, duplicate JSON keys or record "
+                "identifiers, a summary or aggregate hash that disagrees "
+                "with the records, canonically identical input directories, "
+                "impossible green attribution states, statistics that "
+                "contradict their histograms or tolerance verdicts, zero "
+                "judged views, and a required comparison record that is "
+                "absent.",
         claims=(r"no verification recorded", r"the corpus is RED",
-                r"corpus is ' ' for tree", r"--corpus must be one of"),
+                r"corpus is ' ' for tree", r"--corpus must be one of",
+                r"comparison report", r"non-finite JSON number",
+                r"has invalid keys",
+                r"is not a unique non-empty string array",
+                r"version is not the integer 1",
+                r"hashAlgorithms values are not non-empty strings",
+                r"greenReport is not an object",
+                r"channelCountByClass values are not positive integers",
+                r"greenUnmeasuredQualifiers contains an invalid value",
+                r"is not a finite non-negative number",
+                r"semantics.greenUnmeasuredStates is not an array",
+                r"green unmeasured state",
+                r"report contract is invalid",
+                r"comparison evidence is required for tree"),
         probes=(
             Probe("ledger.no-record", None,
                   script("python3", "scripts/verify_ledger.py", "assert"),
@@ -6465,6 +8057,97 @@ GUARDS: tuple[Guard, ...] = (
                   "--corpus must be one of",
                   control=script("python3", "scripts/verify_ledger.py",
                                  "record", "--corpus", "absent")),
+            Probe("ledger.comparison-malformed", _malformed_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report is not valid JSON"),
+            Probe("ledger.comparison-identity", _identity_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "not produced by the explicit candidate gate"),
+            Probe("ledger.comparison-red", _red_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report is not green"),
+            Probe("ledger.comparison-zero", _zero_judgement_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report judged zero views"),
+            Probe("ledger.comparison-failed-count",
+                  _failed_count_in_green_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report is green but has failed views"),
+            Probe("ledger.comparison-coverage-problem",
+                  _coverage_problem_in_green_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                  ".claude/probe-comparison.json"),
+                  "comparison report is green but has coverage problems"),
+            Probe("ledger.comparison-input-problem",
+                  _problem_in_green_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report is green but has problems"),
+            Probe("ledger.comparison-absorbed-divergence",
+                  _absorbed_divergence_in_green_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report is green but has absorbed divergences"),
+            Probe("ledger.comparison-missing-coverage-problems",
+                  _missing_coverage_problems_in_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report root has invalid keys, missing=['coverageProblems']"),
+            Probe("ledger.comparison-top-level-absent",
+                  _top_level_absent_in_green_comparison_report,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report has absent views"),
+            *_coverage_count_probes(),
+            *_top_level_unmeasured_probes(),
+            Probe("ledger.comparison-unmeasured-contradiction",
+                  _contradictory_unmeasured_counts,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "comparison report unmeasured count disagrees with coverage"),
+            *_report_shape_probes(),
+            *_report_semantic_probes(),
+            *_report_contract_probes(),
+            *_green_unmeasured_state_probes(),
+            Probe("ledger.comparison-duplicate-top-level-key",
+                  lambda box: _duplicate_report_key(box, '"fail": 0'),
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "duplicate JSON key 'fail'"),
+            Probe("ledger.comparison-duplicate-nested-key",
+                  lambda box: _duplicate_report_key(
+                      box, '"id": "probe-view"'),
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "duplicate JSON key 'id'"),
+            Probe("ledger.comparison-nonfinite-number",
+                  _nonfinite_report_number,
+                  script("python3", "scripts/verify_ledger.py", "record",
+                         "--comparison-report",
+                         ".claude/probe-comparison.json"),
+                  "non-finite JSON number NaN"),
+            Probe("ledger.require-comparison", _ledger_without_comparison,
+                  script("python3", "scripts/verify_ledger.py", "assert",
+                         "--require-comparison"),
+                  "comparison evidence is required"),
         ),
         limit="`assert` with a real record cannot be controlled green in the "
               "sandbox without recording one first, so the control for this "
@@ -6496,10 +8179,13 @@ GUARDS: tuple[Guard, ...] = (
         gate="-",
         spec="deviation D-04 mechanism 2, the CI side",
         refuses="A head with no provenance trailer, a trailer naming a tree "
-                "that is not the commit's, and a trailer recording a red or "
-                "unrun corpus.",
+                "that is not the commit's, a trailer recording a red or "
+                "unrun corpus, and a required comparison field that is "
+                "missing or malformed.",
         claims=(r"carries no trailer", r"trailer names tree",
-                r"records a RED corpus", r"records corpus="),
+                r"records a RED corpus", r"records corpus=",
+                r"carries malformed comparison evidence",
+                r"comparison evidence is required\."),
         probes=(
             Probe("ledger.no-trailer", None,
                   script("python3", "scripts/verify_ledger.py",
@@ -6514,6 +8200,10 @@ GUARDS: tuple[Guard, ...] = (
                        "entry is written against one tree, the commit is then "
                        "amended so its tree differs, and the trailer becomes "
                        "evidence about content that is not in the commit."),
+            Probe("ledger.commit-require-comparison", _commit_without_comparison,
+                  script("python3", "scripts/verify_ledger.py",
+                         "check-commit", "HEAD", "--require-comparison"),
+                  "comparison evidence is required"),
         ),
         limit="The `records a RED corpus` and `records corpus=` branches of "
               "check-commit need a commit carrying a trailer this harness "
@@ -7007,6 +8697,83 @@ GUARDS: tuple[Guard, ...] = (
               "this guard and it runs on every floor gate, so a level-3 "
               "probe would need a second registry fixture that the suite "
               "already carries.",
+    ),
+    Guard(
+        id="quirks",
+        file="scripts/quirk_check.py",
+        gate="quirks",
+        spec="HLD sections 11 and 27.2, and deviation D-05",
+        refuses="A field quirk without independent expectation provenance, "
+                "a callable synthetic recipe, one matching generator-owned "
+                "manifest row, active mutation evidence, or with a generated "
+                "DICOM tracked in git, plus an unknown property at any "
+                "declared schema object. The 26-case checker suite mutates "
+                "every object vocabulary and watches the added refusal.",
+        claims=("*",),
+        probes=(
+            Probe("quirks.missing-authority", _quirk_without_authority,
+                  script("python3", "scripts/quirk_check.py"),
+                  "missing expectation authority"),
+            Probe("quirks.ocelli-derived-expectation",
+                  _quirk_with_ocelli_as_authority,
+                  script("python3", "scripts/quirk_check.py"),
+                  "expectation authority kind 'ocelli-output' is not independent"),
+            Probe("quirks.absent-manifest-row",
+                  _quirk_with_absent_manifest_path,
+                  script("python3", "scripts/quirk_check.py"),
+                  "needs exactly one manifest row"),
+            Probe("quirks.missing-mutation-evidence",
+                  _quirk_without_mutation_evidence,
+                  script("python3", "scripts/quirk_check.py"),
+                  "mutation evidence must be a non-empty array"),
+            Probe("quirks.missing-voi-function-mutation",
+                  _quirk_without_mutation("generator-voi-function"),
+                  script("python3", "scripts/quirk_check.py"),
+                  "required mutation generator-voi-function is missing"),
+            Probe("quirks.missing-window-width-mutation",
+                  _quirk_without_mutation("generator-window-width"),
+                  script("python3", "scripts/quirk_check.py"),
+                  "required mutation generator-window-width is missing"),
+            Probe("quirks.missing-attribution-mutation",
+                  _quirk_without_mutation("disable-reference-attribution"),
+                  script("python3", "scripts/quirk_check.py"),
+                  "required mutation disable-reference-attribution is missing"),
+            Probe("quirks.tracked-generated-dicom",
+                  _quirk_with_tracked_generated_dicom,
+                  script("python3", "scripts/quirk_check.py"),
+                  "generated path is a tracked DICOM"),
+        ),
+        covered_by=("scripts/tests/test_quirk_check.py (26 cases, run by the "
+                    "`quirks` gate)",),
+    ),
+    Guard(
+        id="quirk-mutation-boundaries",
+        file="scripts/quirk_mutation_boundaries.py",
+        gate="quirk-mutations",
+        spec="F-014's approved design and HLD section 27.2 R2",
+        refuses="A generated SIGMOID quirk case whose function or width no "
+                "longer matches the independently declared boundary.",
+        claims=("*",),
+        covered_by=("scripts/tests/test_quirk_mutations.py opens and checks "
+                    "the named boundary, and `bin/ocelli.sh gate "
+                    "quirk-mutations` executes it green then under both "
+                    "checker-owned generator mutations",),
+    ),
+    Guard(
+        id="quirk-mutations",
+        file="scripts/quirk_mutations.py",
+        gate="quirk-mutations",
+        spec="F-014's approved design and HLD section 27.2 R6",
+        refuses="Mutation evidence whose healthy control is red, whose fixed "
+                "edit stays green, whose failure has the wrong signature, or "
+                "whose registry row, kind, signature or replacement differs "
+                "from the executable contract, including a fixture symbol "
+                "with no live mutation target or a regression row that differs "
+                "from the executable attribution mutation.",
+        claims=("*",),
+        covered_by=("scripts/tests/test_quirk_mutations.py (9 cases, run by "
+                    "the `quirks` gate), plus the three live mutations run by "
+                    "the `quirk-mutations` gate",),
     ),
     Guard(
         id="corpus",

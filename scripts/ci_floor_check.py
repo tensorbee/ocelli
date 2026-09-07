@@ -187,13 +187,12 @@ nothing else asserted anything about it. The reviewer deleted the whole
 and the floor probes all exited 0. `guards-deep` is what runs the cargo probes
 and `census --profile deep`, which is the sweep-complete rule.
 
-The three excluded gates are not excluded for the same reason, and the runner
+The four excluded gates are not excluded for the same reason, and the runner
 says which is which without a second literal here. `oracle` is the one gate
 `bin/ocelli.sh` marks `YES` in its GPU column, and deviation D-04 is that CI
-has no GPU, so nothing in CI may run it. The other two are excluded for cost or
-for the corpus, and CI does run part of each: `corpus_check.py --coverage` for
-`corpus`, and a `gate guards-deep` step inside the `guards` job for
-`guards-deep`.
+has no GPU, so nothing in CI may run it. The other three are excluded for cost
+or for the corpus, and CI runs each through the corpus-tooling or guards jobs:
+`corpus`, `guards-deep` and `quirk-mutations`.
 
 So the rule is: **a gate outside the floor that does not need a GPU must still
 be run by some CI step, provably reachable on at least one event the workflow
@@ -448,9 +447,14 @@ MANUAL_EVENTS = {"workflow_dispatch", "repository_dispatch", "schedule"}
 # profile filters the listing to the probes this paragraph is about, and it was
 # load-bearing until the tenth pass, when bare `--list` printed the floor set
 # alone and showed none of them.
+#
+# `quirk-mutations` is excluded because its fixed generator boundaries need
+# the locked DICOM environment and its attribution boundary needs cargo. The
+# corpus-tooling job installs both and invokes it on every event. The separate
+# stdlib-only `quirks` gate remains in the floor.
 # Kept here so this script fails if the runner's exclusion list changes without
 # anyone thinking about CI.
-NOT_IN_FLOOR = {"oracle", "corpus", "guards-deep"}
+NOT_IN_FLOOR = {"oracle", "corpus", "guards-deep", "quirk-mutations"}
 
 
 # The `GATES=( ... )` array literal. The array is read as SHELL WORDS by

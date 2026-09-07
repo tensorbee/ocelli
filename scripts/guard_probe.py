@@ -70,7 +70,8 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from guards import sandbox as sb  # noqa: E402
-from guards.catalogue import DEFECTS, GUARDS, Probe  # noqa: E402
+from guards.catalogue import (DEFECTS, GUARDS, Probe,  # noqa: E402
+                              green_comparison_document)
 from guards.census import (BUDGET, BUDGET_NOTE, ROOT,  # noqa: E402
                            load_budget)
 
@@ -166,6 +167,10 @@ def _prepare_control(box: sb.Sandbox, probe: Probe) -> None:
     `corpus-tests` is the other probe whose control is a refusal, and its
     invoke needs nothing prepared, so it has no branch.
     """
+    def write_green_comparison_report() -> None:
+        report = green_comparison_document(box)
+        box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
     key = (probe.control or probe.invoke).key
     if key.startswith("git commit:"):
         # A healthy commit: hooks enabled and one benign change staged. The
@@ -187,18 +192,29 @@ def _prepare_control(box: sb.Sandbox, probe: Probe) -> None:
         box.run(["python3", "scripts/verify_ledger.py", "record",
                  "--gates", "fmt", "--corpus", "pass", "--profile", "sprint"])
         box.git("commit", "-m", "F-000, a probe")
+    elif key.startswith("python3 scripts/verify_ledger.py record") \
+            and "--comparison-report" in key:
+        write_green_comparison_report()
     elif key.startswith("python3 scripts/verify_ledger.py assert"):
-        box.run(["python3", "scripts/verify_ledger.py", "record",
-                 "--gates", "fmt", "--corpus", "pass", "--profile", "sprint"])
-    elif key == "python3 scripts/verify_ledger.py check-commit HEAD":
+        argv = ["python3", "scripts/verify_ledger.py", "record",
+                "--gates", "fmt", "--corpus", "pass", "--profile", "sprint"]
+        if "--require-comparison" in key:
+            write_green_comparison_report()
+            argv.extend(["--comparison-report", ".claude/probe-comparison.json"])
+        box.run(argv)
+    elif key.startswith("python3 scripts/verify_ledger.py check-commit HEAD"):
         # The record is taken AFTER staging, because it is keyed on the tree
         # the index holds. Recording first and staging afterwards produces the
         # very tree mismatch this control has to be free of.
         box.enable_hooks()
         box.write("probe-note.txt", "a benign change\n")
         box.stage_all()
-        box.run(["python3", "scripts/verify_ledger.py", "record",
-                 "--gates", "fmt", "--corpus", "pass", "--profile", "sprint"])
+        argv = ["python3", "scripts/verify_ledger.py", "record",
+                "--gates", "fmt", "--corpus", "pass", "--profile", "sprint"]
+        if "--require-comparison" in key:
+            write_green_comparison_report()
+            argv.extend(["--comparison-report", ".claude/probe-comparison.json"])
+        box.run(argv)
         box.git("commit", "-m", "F-000, a probe")
     elif key.endswith("--commit-msg probe-message.txt"):
         box.write("probe-message.txt", "F-000, a probe\n\nOne clause here.\n")

@@ -49,6 +49,10 @@ proptest! {
         prop_assert_eq!(f.max_abs_diff(), r.max_abs_diff());
         prop_assert_eq!(forward.rows_touched, backward.rows_touched);
         prop_assert_eq!(forward.columns_touched, backward.columns_touched);
+        prop_assert_eq!(&forward.image_rows_touched, &backward.image_rows_touched);
+        prop_assert_eq!(&forward.image_columns_touched, &backward.image_columns_touched);
+        prop_assert_eq!(&forward.background_rows_touched, &backward.background_rows_touched);
+        prop_assert_eq!(&forward.background_columns_touched, &backward.background_columns_touched);
         prop_assert_eq!(forward.informative_pixels, backward.informative_pixels);
 
         let (Ok(fm), Ok(rm)) = (f.signed_mean_diff(), r.signed_mean_diff()) else {
@@ -106,5 +110,10 @@ proptest! {
         prop_assert_eq!(stats.count_at(0), u64::from(SIDE) * u64::from(SIDE));
         prop_assert_eq!(diff.rows_touched, 0);
         prop_assert_eq!(diff.columns_touched, 0);
+        prop_assert_eq!((diff.image_x, diff.image_y), (0, 0));
+        prop_assert!(diff.image_rows_touched.is_empty());
+        prop_assert!(diff.image_columns_touched.is_empty());
+        prop_assert!(diff.background_rows_touched.is_empty());
+        prop_assert!(diff.background_columns_touched.is_empty());
     }
 }

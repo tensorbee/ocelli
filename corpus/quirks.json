@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "quirks": [
+    {
+      "id": "sigmoid-width-below-one",
+      "symptom": "A legal SIGMOID width below one is interpreted with LINEAR's minimum-width arithmetic.",
+      "intake": {
+        "kind": "synthetic-reconstruction",
+        "patientDataRetained": false
+      },
+      "generator": {
+        "script": "scripts/corpus_synth.py",
+        "case": "case_sigmoid_width_half",
+        "paths": [
+          "synthetic/ct_sigmoid_width_half.dcm"
+        ]
+      },
+      "expectation": {
+        "authority": {
+          "kind": "dicom-standard",
+          "part": "PS3.3",
+          "section": "C.11.2.1.3.1",
+          "edition": "2026a"
+        },
+        "fixture": {
+          "path": "scripts/tests/test_corpus_synth.py",
+          "test": "SigmoidFixture.test_selected_display_values_follow_the_sigmoid_formula",
+          "boundary": "sigmoid_expectation_boundary",
+          "symbols": {
+            "modalityValues": "SIGMOID_MODALITY_VALUES",
+            "centre": "SIGMOID_CENTRE",
+            "width": "SIGMOID_WIDTH",
+            "displayMinimum": "SIGMOID_DISPLAY_MINIMUM",
+            "displayMaximum": "SIGMOID_DISPLAY_MAXIMUM",
+            "expectedDisplayValues": "SIGMOID_DISPLAY_VALUES"
+          }
+        },
+        "inputs": {
+          "modalityValues": [
+            39.5,
+            39.75,
+            40.0,
+            40.25,
+            40.5
+          ],
+          "centre": 40.0,
+          "width": 0.5,
+          "displayMinimum": 0.0,
+          "displayMaximum": 255.0
+        },
+        "expectedDisplayValues": [
+          4.586483540333347,
+          30.396745115639977,
+          127.5,
+          224.60325488436,
+          250.41351645966665
+        ]
+      },
+      "regression": {
+        "kind": "oracle-comparator-test",
+        "command": "cargo test -p ocelli-oracle attribution::tests::an_inverted_sigmoid_reference_is_attributed_only_when_pixels_differ -- --exact",
+        "failureSignature": "left: Fail"
+      },
+      "mutations": [
+        {
+          "kind": "generator-voi-function",
+          "value": "LINEAR",
+          "boundary": "quirk_mutation_boundaries.sigmoid_generator_boundary",
+          "failureSignature": "expected SIGMOID, found LINEAR"
+        },
+        {
+          "kind": "generator-window-width",
+          "value": 1.0,
+          "boundary": "quirk_mutation_boundaries.sigmoid_generator_boundary",
+          "failureSignature": "expected width 0.5, found 1.0"
+        },
+        {
+          "kind": "disable-reference-attribution",
+          "boundary": "attribution::tests::an_inverted_sigmoid_reference_is_attributed_only_when_pixels_differ",
+          "failureSignature": "left: Fail"
+        }
+      ]
+    }
+  ]
+}
