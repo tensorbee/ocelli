@@ -1686,6 +1686,53 @@ def _valid_nonmonochrome_mixed_extremes_report(box: Sandbox) -> None:
     box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
 
+def _valid_forced_image_mixed_background_report(box: Sandbox) -> None:
+    report = green_comparison_document(box)
+    contract = json.loads(box.read("tools/oracle/report-contract.json"))
+    record = json.loads(json.dumps(report["records"][0]))
+    statistics = record["statistics"]
+    record["id"] = "probe-forced-image-mixed-background"
+    report["records"].append(record)
+    report["records"].sort(key=lambda item: item["id"])
+    report["views"] = 2
+    report["unmeasured"] = 1
+    report["coverage"]["unmeasured"] = 1
+    report["qualifiers"] = {"unstated-threshold": 1}
+    record["toleranceClass"] = "colour-or-us"
+    record["outcome"] = "unmeasured"
+    record["qualifiers"] = ["unstated-threshold"]
+    record["rung"] = "class-two"
+    record["notes"] = ["controlled class-two state"]
+    record["monochromeFrame"] = False
+    statistics["channels"] = 3
+    image = dict(statistics["image"][0])
+    _set_signed_distribution(image, [(255, 1)])
+    background = dict(image)
+    _set_signed_distribution(background, [(-255, 1), (255, 1)])
+    full = dict(image)
+    _set_signed_distribution(full, [(-255, 1), (255, 2)])
+    statistics["full"] = [dict(full) for _ in range(3)]
+    statistics["image"] = [dict(image) for _ in range(3)]
+    statistics["background"] = [dict(background) for _ in range(3)]
+    statistics["informative"] = [dict(image) for _ in range(3)]
+    statistics["imagePixels"] = 1
+    statistics["informativePixels"] = 1
+    statistics["informativeFraction"] = 1.0
+    statistics["rowsTouched"] = 1
+    statistics["columnsTouched"] = 3
+    statistics["signedMeanDiff"] = 255.0
+    _set_dimensions(statistics, 1, 3, 1, 1)
+    _set_touched_indices(
+        statistics, image_rows=[0], image_columns=[0],
+        background_rows=[0], background_columns=[1, 2],
+    )
+    for side in ("reference", "candidate"):
+        report["renderHashes"][side] = _comparison_run_hash(
+            report, side, contract["hashAlgorithms"]["run"]
+        )
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
 def _set_signed_distribution(
         channel: dict, entries: list[tuple[int, int]]) -> None:
     entries = sorted(entries)
@@ -2038,8 +2085,15 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         "recorded tree",
         polarity="accept",
     )
+    mixed_background = Probe(
+        "ledger.comparison-forced-image-mixed-background-is-permitted",
+        _valid_forced_image_mixed_background_report,
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
     return refusal_probes + (
-        caller_directory, nonzero_background, mixed_extremes,
+        caller_directory, nonzero_background, mixed_extremes, mixed_background,
     )
 
 

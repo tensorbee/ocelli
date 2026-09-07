@@ -1997,6 +1997,12 @@ standing probe preserves this measured case, while the mixed-extreme
 acceptance probe continues to show that two signs within one partition may be
 assigned across lanes to realize a non-monochrome frame.
 
+The sixteenth review added the complementary two-partition acceptance proof.
+A forced image does not force the whole frame when a mixed-sign background can
+permute those signs between RGB lanes. The standing acceptance probe prevents
+the regional conjunction from narrowing to the image or changing to an
+any-partition refusal.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured
