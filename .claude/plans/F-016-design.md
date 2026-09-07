@@ -190,9 +190,14 @@ pixel representation. Codec conformance remains with F-023 and its dependants.
    Little Endian.
 4. Classify the selected route as `ImplicitVrLittleEndian`,
    `ExplicitVrLittleEndian`, `ExplicitVrBigEndian`,
-   `DeflatedExplicitVrLittleEndian`, or `Encapsulated`. Parse the remaining
-   bytes once with `InMemDicomObject::read_dataset_with_ts` and the exact
-   resolved transfer syntax.
+   `DeflatedExplicitVrLittleEndian`, or `Encapsulated`. Adapt the remaining
+   bytes once with dicom-rs's selected data-set adapter. Run a strict structural
+   preflight and then collect once under the same resolved syntax. The
+   preflight refuses odd lengths, malformed nesting, and top-level group 0002
+   elements. Append a fixed group 0002 completion marker after preflight, then
+   require and remove it after collection so partial top-level headers remain
+   observable without a collision or private-element allocation. Do not retry
+   under an alternate syntax.
 5. Return `ParsedDicom`, which couples the dicom-rs file object with immutable
    `TransferSyntaxInfo`. The info exposes the canonical UID, registry name, and
    route. This is not a forwarding wrapper. It preserves evidence about which
@@ -222,7 +227,9 @@ pixel representation. Codec conformance remains with F-023 and its dependants.
     fixtures must fail for their declared dispatch reason, then pass after the
     mutation is reverted.
 12. Build the crate for the native host and wasm32. No wasm-only parsing branch
-    or inventory registry is introduced.
+    or inventory registry is introduced. `ocelli-dicom` leaves the repository's
+    self-selected `no_std` set because the required dicom-rs graph uses `std`.
+    D-18 records the posture and the guard's explicit set is updated with it.
 
 ## Boundary and tier
 
@@ -230,6 +237,7 @@ pixel representation. Codec conformance remains with F-023 and its dependants.
 - Pixels across the boundary: no
 - Render-loop allocation: none. Parsing is outside the render loop
 - unsafe: none
+- no_std: no. D-18 records the required dicom-rs `std` dependency graph
 - Tier A (WebGPU): n/a. Parsing is renderer-independent
 - Tier B (WebGL2): n/a. Parsing is renderer-independent
 - Tier C (CPU): n/a. The same parsed object and dispatch evidence are used on every tier
@@ -258,8 +266,9 @@ count changes.
 
 Existing D-02 applies the `ocelli-dicom` crate name. D-18 uses the dicom-rs
 component crates directly because the 0.10 umbrella does not expose the HLD's
-named codec features and enables transfer-syntax-registry defaults. No other
-new deviation is anticipated.
+named codec features and enables transfer-syntax-registry defaults. It also
+records that the required dicom-rs graph makes `ocelli-dicom` a `std` crate.
+No other new deviation is anticipated.
 
 ## LLD impact
 
@@ -287,6 +296,7 @@ new deviation is anticipated.
 - `crates/ocelli-dicom/Cargo.toml`
 - `crates/ocelli-dicom/src/lib.rs`
 - `bin/ocelli.sh`
+- `scripts/no_std_check.py`
 - `.claude/plans/F-016-design.md`
 - `docs/lld/README.md`
 - `docs/lld/build-targets.md`
@@ -305,8 +315,9 @@ None.
 
 ## Design-round decision
 
-The operator approved direct `dicom-object` and
-`dicom-transfer-syntax-registry` 0.10 dependencies with default features
-disabled and only `deflate` enabled for F-016. D-18 records the difference
-from section 15.2's umbrella dependency line. Pixel codec features remain for
-F-023 and its dependent codec stories.
+The operator approved direct dicom-rs 0.10 component dependencies with default
+features disabled and only `deflate` enabled for F-016. The selected components
+are `dicom-object`, `dicom-encoding`, `dicom-parser`, and
+`dicom-transfer-syntax-registry`. D-18 records the difference from section
+15.2's umbrella dependency line. Pixel codec features remain for F-023 and its
+dependent codec stories.

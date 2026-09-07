@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-X008
-**Last updated:** 2026-09-06
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-X008
+**Last updated:** 2026-09-07
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -178,6 +178,20 @@ because nothing in a manifest restricts a member to a target, so the assertion
 reported `ocelli-native` present under wasm32 and could not tell that from a
 real violation. The table is enforced where it can be: the `compile_error!` in
 `ocelli-native`, and steps 1 to 3 building each target for real.
+
+### The DICOM parser is shared and uses `std`
+
+`ocelli-dicom` builds in step 2 for `wasm32-unknown-unknown` and in step 3 for
+the native host. Step 4 compares its direct dicom-rs feature selection across
+both targets. The selected 0.10 components are `dicom-object`,
+`dicom-encoding`, `dicom-parser`, and `dicom-transfer-syntax-registry`, all
+with defaults disabled. Only whole-data-set deflate is enabled. Pixel codec
+features remain outside F-016.
+
+Shared does not mean no-std. The dicom-rs parser, dictionary and object graph
+require `std`, so D-18 removes `ocelli-dicom` from the repository's explicit
+no-std set. The `nostd` gate checks the remaining eight crates and the guard
+census binds that exact set to a reviewed digest.
 
 ## The size budget
 

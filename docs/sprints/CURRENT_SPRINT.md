@@ -9,7 +9,7 @@ encoding.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-016 | E3.1 | ocelli-dicom: parse and transfer-syntax dispatch over dicom-rs | Rust | 3w | pending |
+| F-016 | E3.1 | ocelli-dicom: parse and transfer-syntax dispatch over dicom-rs | Rust | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:

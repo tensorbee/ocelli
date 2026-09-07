@@ -12,3 +12,11 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# D-18 keeps dicom-rs component defaults disabled. Deflate is a data-set
+# encoding under PS3.5 A.5, so F-016 owns it. The parser component supplies the
+# strict structural preflight. Pixel codec features do not belong to F-016.
+dicom-object = { workspace = true }
+dicom-encoding = { workspace = true }
+dicom-parser = { workspace = true }
+dicom-transfer-syntax-registry = { workspace = true }
+thiserror = { workspace = true }

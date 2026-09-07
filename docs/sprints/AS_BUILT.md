@@ -2042,3 +2042,36 @@ run-problem expectation.
 **Notes for future sessions.** A captured quirk is evidence only when the
 recipe, expectation and regression boundary are exact, and controlled damage
 makes that boundary fail for the declared reason.
+
+## F-016, DICOM Part 10 parsing and transfer-syntax dispatch, completed 2026-09-07
+
+**What was built.** `ocelli-dicom` now parses in-memory DICOM Part 10 files,
+reads File Meta Information under Explicit VR Little Endian, resolves the
+declared Transfer Syntax UID once, and returns the complete dicom-rs object
+with observable dispatch evidence. A strict structural preflight and removable
+completion marker reject partial data sets that dicom-rs would otherwise read
+as a clean top-level end.
+**HLD sections implemented.** Sections 4, 15.2, 27.2 R2 and R6, and 28.
+**Deviations.** D-18 records direct dicom-rs component dependencies and the
+required `std` posture. D-04 and D-05 remain the corpus and CI handling rules.
+**Crates / packages modified.** `ocelli-dicom`, workspace dependency policy,
+the corpus gate, the no-std posture guard, and delivery documentation.
+**Tests added.** Two parser-route unit tests, nineteen Part 10 integration
+tests, and one ignored corpus integration test run by the local corpus gate.
+**Fixture provenance.** The in-memory fixtures are hand-encoded from DICOM
+PS3.10 section 7 and PS3.5 annex A. The ignored corpus remains behind its
+tracked manifest and verified digests. No patient data is tracked.
+**Verification.** All 26 floor gates and the corpus gate passed on the exact
+staged completion tree. The corpus gate parsed 92 verified rows across all 16
+declared transfer syntaxes.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Parsing is target-agnostic, native
+and wasm checks pass, and this story performs no pixel arithmetic.
+**LLD updated.** `docs/lld/dicom-ingest.md`, `docs/lld/README.md`,
+`docs/lld/build-targets.md`, and `docs/lld/corpus.md`.
+**Deviations from the design plan.** Review tightened truncation refusal with
+a strict structural preflight and fixed completion marker. Scope did not expand
+into metadata projection or pixel decoding.
+**Notes for future sessions.** F-017 can consume the retained dicom-rs value
+model. Pixel codec dispatch and compressed-frame decoding remain with F-023
+and its dependent stories.

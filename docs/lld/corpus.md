@@ -1,7 +1,7 @@
 # The golden corpus
 
-**F-IDs that contributed:** F-009, F-013, F-014, F-X006, F-X007, F-X012, F-X013
-**Last updated:** 2026-09-06
+**F-IDs that contributed:** F-009, F-013, F-014, F-016, F-X006, F-X007, F-X012, F-X013
+**Last updated:** 2026-09-07
 
 The corpus is the input every later correctness claim is measured on. It lives
 outside git under ignored `corpus/data` behind `corpus/manifest.tsv`, which is
@@ -116,6 +116,15 @@ only Modality, Transfer Syntax UID, Samples per Pixel, Photometric
 Interpretation and Bits Allocated. Those are the non-patient attributes that
 decide the manifest's modality and tolerance-class claims. It reports only a
 relative corpus path and the mismatched attribute name.
+
+F-016 adds the final local step to that same gate. After coverage, digests, and
+metadata pass, Cargo runs the ignored `ocelli-dicom` corpus integration test.
+It parses every manifest row through `parse_part10` and compares the returned
+canonical transfer-syntax UID with the manifest declaration. The ordinary
+workspace test suite leaves this test ignored because `corpus/data` is not
+tracked. The gate supplies the verified local corpus and treats a missing file,
+parse refusal, or UID mismatch as a failure. Its messages carry only the
+manifest row number and transfer-syntax identifier.
 
 ## Byte-determinism is a hard requirement
 
