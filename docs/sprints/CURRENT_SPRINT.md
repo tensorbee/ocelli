@@ -1,94 +1,97 @@
-# Current sprint, S05
+# Current sprint, S06
 
-**Milestone**: M1, foundations and the differential oracle.
-**Branch**: `sprint/s05`
-**Opened**: 2026-09-06
-**Goal**: Land the candidate-comparison evidence contract, then build the
-quirk-capture workflow that turns each field bug into a permanent,
-independently checkable corpus fixture.
+**Milestone**: M2, DICOM ingest and the pixel pipeline.
+**Branch**: `sprint/s06`
+**Opened**: 2026-09-07
+**Goal**: Make `ocelli-dicom` parse DICOM Part 10 input and dispatch from the
+declared transfer syntax over dicom-rs without silently choosing a different
+encoding.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-012 | E2.4 | Candidate comparison gate contract and verification plumbing | Test | 3w | done |
-| F-014 | E2.6 | Quirk-capture workflow: every field bug becomes a fixture | Test | 3w | done |
+| F-016 | E3.1 | ocelli-dicom: parse and transfer-syntax dispatch over dicom-rs | Rust | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:
 
 ```bash
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S05 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S06 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S04 made the oracle's pixel, metadata and geometry claims mechanically
-checkable. S05 first makes a real candidate comparison representable and
-attestable without claiming a renderer exists today. It then gives a newly
-discovered field bug one path into that evidence base. F-014 must capture the
-triggering shape as a reproducible corpus recipe, record the independent
-expected result, and make the relevant gate fail when the bug returns. The
-fixture is evidence for development and for a future regulatory submission.
-It is not a copy of production data.
-
-This is the final planned sprint in M1, but completing it does not complete the
-milestone. F-012 landed first and F-014 now supplies the permanent quirk
-capture path.
+S06 begins M2 at the first ingest boundary. F-016 turns the existing
+`ocelli-dicom` scaffold into the parser named by HLD sections 4 and 28. It
+accepts DICOM bytes, reads the Part 10 file meta information under its fixed
+Explicit VR Little Endian encoding, resolves the declared Transfer Syntax UID,
+and parses the following dataset under that syntax. This sprint establishes
+the trustworthy parsed input that the metadata model, DICOMweb providers,
+codec registry, pixel pipeline, and volume work consume later. It does not pull
+those later stories into F-016.
 
 ## What is carried in
 
-- **F-012** landed as the explicit candidate-directory contract, coverage
-  result and verification-ledger plumbing that can be claimed truthfully. The
-  renderer activation is preserved as F-X021 after F-052 supplies the final
-  current oracle view kind. A gate around only the reference still proves no
-  candidate result and is explicitly refused.
 - **F-X011** remains pending because its acceptance evidence requires a second
-  physical machine and none is available. It does not block F-014, but its
-  cross-machine determinism claim remains unmade.
+  physical machine and none is available. It is an unfinished M1 evidence
+  claim, but it is not a dependency of F-016 and does not block the start of
+  M2.
+- **F-012 and F-014** leave the comparison contract and synthetic quirk-capture
+  path available for later ingest defects. They are completed foundations, not
+  S06 story scope.
 
 ## The defect class this sprint is exposed to
 
-**A fixture can permanently preserve the implementation's mistake instead of
-the bug.** If expected values are copied from Ocelli output, the reference
-renderer, or the failing report, the new case will stay green when both the
-implementation and its fixture are wrong in the same way. Every expectation
-must instead derive from DICOM PS3.3, PS3.16, a hand-computed construction, or
-another independently reviewed authority, and the review must name which.
+**A parser can select a plausible but wrong encoding and still return a
+dataset.** The file meta group is always Explicit VR Little Endian. Its
+Transfer Syntax UID selects the encoding only for the dataset that follows.
+Applying the selected syntax to the meta group, assuming Explicit VR Little
+Endian for every dataset, or falling back after an unknown UID can all produce
+credible attributes from common files while misreading another valid syntax.
+The selected UID and the parser path must remain observable, and an unsupported
+or malformed value must be refused rather than guessed.
 
-The second danger is specific to capture work. A field bug often arrives with
-a clinical file, but this repository permits no patient data in prompts,
-source, fixtures, logs, errors, documentation or commits. The permanent
-artefact is a synthetic generator recipe and its manifest digest, never the
-input that exposed the bug. A copied DICOM with a reassuring filename is still
-patient data and still forbidden.
+The byte-order boundary is equally specific. Explicit VR Big Endian is retired
+but present in the corpus, while Implicit VR Little Endian carries no VR on the
+wire. Treating either as the common explicit little-endian case can preserve
+reasonable tag numbers while corrupting lengths, values, or the later pixel
+interpretation. Deflated Explicit VR Little Endian adds a second boundary
+where successful inflation does not by itself prove the resulting dataset was
+parsed under the right rules.
 
-The third danger is a fixture that never drives the boundary it claims. A new
-manifest row and a green corpus check prove only that bytes exist and match a
-digest. The capture is complete only when a controlled mutation of the named
-field or interpretation makes the relevant test or oracle comparison red for
-the declared reason.
+The parser also must not turn DICOM string conventions into host-language
+assumptions. UI values may have NUL padding, other text VRs use space padding,
+and DS or IS values can be multi-valued text. This story need not build the M2
+metadata model, but its parsed representation must retain enough information
+for that model to distinguish those cases later.
 
 ## What done means
 
-- There is one documented capture path from a field-bug report to a synthetic
-  corpus generator case, manifest row, independent expected values and a
-  standing regression check.
-- The workflow refuses missing provenance, an expectation derived from Ocelli
-  itself, an unregistered manifest row, and any tracked DICOM or patient data.
-- A worked synthetic example demonstrates the full path and records the DICOM
-  section or hand calculation from which its expectation follows.
-- The relevant test is observed red under a mutation that recreates the bug,
-  then green after the fix. A digest-only check does not satisfy this claim.
-- The corpus, oracle and guard documentation agree on where the fixture recipe,
-  generated bytes, expected values and review evidence live.
+- `crates/ocelli-dicom/src/parse.rs` owns the parsing entry point named by HLD
+  section 28 and uses dicom-rs without introducing `wasm-bindgen` outside
+  `ocelli-wasm`.
+- Part 10 file meta information is read as Explicit VR Little Endian, and the
+  declared Transfer Syntax UID determines the dataset parser path.
+- Supported native, deflated, and encapsulated transfer-syntax cases reach the
+  declared path. An unknown UID, malformed file meta information, truncated
+  input, and a syntax that cannot run are explicit errors rather than fallback
+  parses.
+- Tests use the synthetic and licensed corpus behind `corpus/manifest.tsv` and
+  include controlled negative cases. No patient data enters source, fixtures,
+  logs, errors, documentation, or commits.
+- A mutation that substitutes the common Explicit VR Little Endian path for a
+  different declared syntax is observed red for the dispatch reason.
+- Native and wasm checks demonstrate the same parser contract. Codec-specific
+  decode capability remains the responsibility of F-023 and its dependent
+  codec stories.
 
 ## Dependency order
 
-F-014 depended on F-012, and both are done. F-X021 depends on F-012 and F-052,
-and later makes real Ocelli full-corpus candidate evidence binding under the
-retained D-04 local-verification model.
+F-016 depends on F-001, which is done. There is no blocked story in S06.
 
-F-X011 is also carried from S04 but is not a dependency of F-014.
+F-016 then unlocks F-017, F-021, F-022, and F-023 in S07. Those stories consume
+the parsing boundary established here and do not need to be implemented to
+close S06.
 
 ## Standing expectations
 
@@ -98,6 +101,7 @@ The HLD is authoritative. A design-plan departure is recorded in
 No patient data enters a prompt, tracked file, fixture, log, error or commit.
 The ignored corpus remains behind `corpus/manifest.tsv` and its generators.
 
-A tolerance is never widened to make a captured case pass. Every new guard is
-observed red before it is claimed, and the red run must name the boundary the
-story says it protects.
+Transfer-syntax support is claimed only where a corpus case and an independent
+expected result make the path observable. An unsupported syntax is reported as
+unavailable or refused according to the design contract, never silently parsed
+as another syntax.
