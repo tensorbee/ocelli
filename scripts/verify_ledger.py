@@ -561,6 +561,48 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
             or rows * columns < max(differing_counts)):
         sys.exit(f"comparison report {label} touched counts contradict differing pixels")
 
+    # A lane difference can occupy at most one distinct pixel, while differences
+    # from different lanes may share one. Summing the lane counts is therefore a
+    # safe upper bound on distinct differing pixels in each region. Keep the
+    # regions separate here: pooling them loses the fact that an image confined
+    # to one row cannot touch two rows when the background is unchanged.
+    image_difference_samples = sum(
+        channel["pixels"] - channel["countAtZero"]
+        for channel in regions["image"]
+    )
+    background_difference_samples = sum(
+        channel["pixels"] - channel["countAtZero"]
+        for channel in regions["background"]
+    )
+    image_differing_pixels_upper = min(image_pixels, image_difference_samples)
+    background_differing_pixels_upper = min(
+        expected_background, background_difference_samples
+    )
+
+    image_rows_upper = min(image_rows, image_differing_pixels_upper)
+    image_columns_upper = min(image_columns, image_differing_pixels_upper)
+    background_rows_available = (
+        frame_rows if image_columns < frame_columns else frame_rows - image_rows
+    )
+    background_columns_available = (
+        frame_columns
+        if image_rows < frame_rows
+        else frame_columns - image_columns
+    )
+    background_rows_upper = min(
+        background_rows_available, background_differing_pixels_upper
+    )
+    background_columns_upper = min(
+        background_columns_available, background_differing_pixels_upper
+    )
+    if (rows > min(frame_rows, image_rows_upper + background_rows_upper)
+            or columns > min(
+                frame_columns, image_columns_upper + background_columns_upper
+            )):
+        sys.exit(
+            f"comparison report {label} touched counts contradict region geometry"
+        )
+
     if tolerance_class == "mono16":
         full = regions["full"][0]
         expected_predicate = (

@@ -1959,6 +1959,12 @@ columns must fit those exact frame dimensions. Two standing probes cover an
 empty informative array with a nonzero difference and a prime-sized frame with
 impossible touched dimensions.
 
+The eleventh review coupled those touched counts to the region distributions.
+The ledger now bounds how many rows and columns the image and background can
+touch separately before combining their extents. An unchanged background can
+no longer lend an extra row or column to differences confined to the image
+rectangle. A standing probe preserves the exact one-row-image reproduction.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured

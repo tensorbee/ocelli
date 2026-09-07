@@ -1319,6 +1319,23 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         _set_dimensions(statistics, 2, 2, 1, 7)
     elif variant == "touched-exceeds-frame-dimensions":
         _set_prime_touched_case(statistics)
+    elif variant == "touched-contradicts-region-geometry":
+        for region in ("image", "informative"):
+            _set_signed_distribution(
+                statistics[region][0], [(-1, 1), (1, 1)]
+            )
+        background = dict(statistics["image"][0])
+        _set_signed_distribution(background, [(0, 2)])
+        statistics["background"] = [background]
+        _set_signed_distribution(
+            statistics["full"][0], [(-1, 1), (0, 2), (1, 1)]
+        )
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["informativeFraction"] = 1.0
+        statistics["rowsTouched"] = 2
+        statistics["columnsTouched"] = 2
+        _set_dimensions(statistics, 2, 2, 1, 2)
     elif variant == "touched-presence":
         for region in regions:
             _set_one_difference(statistics[region][0], 1.0)
@@ -1636,6 +1653,7 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("empty-informative-with-difference", "informative signed histogram omits image differences"),
         ("frame-dimensions-contradict-regions", "frame and image dimensions contradict regions"),
         ("touched-exceeds-frame-dimensions", "touched counts exceed frame dimensions"),
+        ("touched-contradicts-region-geometry", "touched counts contradict region geometry"),
         ("touched-presence", "touched counts contradict differences"),
         ("touched-count", "touched counts contradict differing pixels"),
         ("top-signed-mean-source", "signed mean contradicts its source region"),

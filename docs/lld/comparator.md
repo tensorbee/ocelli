@@ -307,7 +307,11 @@ nonzero lane difference cannot be clipped to the same extreme on both sides.
 Only zero-difference samples may be omitted from the informative region.
 `frameRows * frameColumns` must equal the full channel pixel count, and
 `imageRows * imageColumns` must equal the image count within those bounds.
-Touched rows and columns are bounded by those exact frame dimensions.
+Touched rows and columns are bounded by those exact frame dimensions and by
+the number of differing samples each region can place in its available rows
+and columns. The image and background bounds are computed separately before
+they are combined. This prevents an unchanged background from lending spatial
+extent to differences confined to the image rectangle.
 
 **The gating predicate for class one, and only this:**
 
