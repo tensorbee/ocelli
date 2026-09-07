@@ -102,6 +102,12 @@ D-18 selects the dicom-rs 0.10 component crates directly:
 components that own whole-data-set deflate enable `deflate`. No pixel codec
 feature is enabled by F-016.
 
+`flate2` is a direct dependency using its Rust backend. dicom-rs uses the same
+crate for its Deflate adapter, but the erased adapter exposes only `Read` and
+cannot report how many encoded bytes the stream consumed. Ocelli uses the
+decoder directly for this one selected route so it can require the exact
+PS3.5 A.5 end of stream and mandatory NULL padding without inflating twice.
+
 The dicom-rs graph requires `std`, so `ocelli-dicom` is not in the repository's
 self-selected no-std set. It remains a shared crate that builds for native and
 `wasm32-unknown-unknown`. The `native` gate checks both targets and proves that
@@ -113,7 +119,12 @@ direct dependency features resolve identically across them.
 from PS3.10 section 7 and PS3.5 annex A. It exercises every route, padding and
 multiplicity retention, missing and unknown syntax UIDs, malformed metadata,
 odd lengths, malformed encapsulation, partial headers, truncated values, and
-completion-marker collision attempts.
+completion-marker collision attempts. It also binds top-level native versus
+encapsulated Pixel Data to the selected transfer syntax, requires OB or OW for
+Native Format, requires OB plus a Basic Offset Table and at least one nonempty
+Fragment for Encapsulated Format, and rejects missing Deflate padding or
+trailing bytes. Native Format Pixel Data nested in a Sequence Item remains
+available under an encapsulated syntax.
 
 The ordinary workspace suite remains self-contained. `bin/ocelli.sh gate
 corpus` first checks coverage, digests, and non-sensitive metadata for the

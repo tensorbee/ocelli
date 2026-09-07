@@ -76,11 +76,14 @@ wasm-bindgen = "=0.2.127"
 # 15.2 names and enables transfer-syntax-registry defaults through its own
 # dependency. Direct components keep defaults off on native and wasm. F-016
 # enables only whole-data-set deflate and uses the parser's strict lazy pass.
-# Pixel codecs remain for F-023 onward.
+# A direct flate2 handle exposes the consumed stream length that dicom-rs's
+# erased adapter does not, so mandatory A.5 padding can be validated. Pixel
+# codecs remain for F-023 onward.
 dicom-object = { version = "0.10", default-features = false, features = ["deflate"] }
 dicom-encoding = { version = "0.10", default-features = false }
 dicom-parser = { version = "0.10", default-features = false }
 dicom-transfer-syntax-registry = { version = "0.10", default-features = false, features = ["deflate"] }
+flate2 = { version = "1.0.28", default-features = false, features = ["rust_backend"] }
 # HLD section 15.2 writes `glam = "0.30"`. The version is untouched and only
 # the feature set differs, which is deviation D-09: every core crate carries
 # `#![cfg_attr(not(test), no_std)]`, glam's default feature is `std`, and glam

@@ -5,7 +5,11 @@
 //! data set that follows. Keeping those two reads separate makes it impossible
 //! to apply the selected data-set syntax to the meta group by accident.
 
-use std::io::{BufReader, Cursor, Read};
+use std::{
+    cell::Cell,
+    io::{BufReader, Cursor, Read, Seek, SeekFrom},
+    rc::Rc,
+};
 
 use dicom_encoding::transfer_syntax::{Codec, TransferSyntax};
 use dicom_object::{
@@ -28,6 +32,52 @@ const EXPLICIT_VR_LITTLE_ENDIAN: &str = "1.2.840.10008.1.2.1";
 const DEFLATED_EXPLICIT_VR_LITTLE_ENDIAN: &str = "1.2.840.10008.1.2.1.99";
 const EXPLICIT_VR_BIG_ENDIAN: &str = "1.2.840.10008.1.2.2";
 const COMPLETION_SENTINEL: Tag = Tag(0x0002, 0x0000);
+const PIXEL_DATA: Tag = Tag(0x7fe0, 0x0010);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DataSetContainer {
+    Sequence {
+        end: Option<u64>,
+    },
+    Item {
+        end: Option<u64>,
+    },
+    PixelSequence {
+        has_basic_offset_table: bool,
+        has_fragment: bool,
+    },
+    PixelItem {
+        end: u64,
+        kind: PixelItemKind,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PixelItemKind {
+    BasicOffsetTable,
+    Fragment,
+}
+
+struct PositionedCursor<'a> {
+    inner: Cursor<&'a [u8]>,
+    position: Rc<Cell<u64>>,
+}
+
+impl Read for PositionedCursor<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buffer)?;
+        self.position.set(self.inner.position());
+        Ok(read)
+    }
+}
+
+impl Seek for PositionedCursor<'_> {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        let position = self.inner.seek(position)?;
+        self.position.set(position);
+        Ok(position)
+    }
+}
 
 /// The data-set parser path selected by File Meta Information.
 ///
@@ -243,6 +293,19 @@ fn adapt_data_set(
     transfer_syntax: &'static TransferSyntax,
 ) -> Result<Vec<u8>, ParseError> {
     match transfer_syntax.codec() {
+        Codec::Dataset(Some(_)) if transfer_syntax.uid() == DEFLATED_EXPLICIT_VR_LITTLE_ENDIAN => {
+            let mut decoded = Vec::new();
+            let mut decoder = flate2::read::DeflateDecoder::new(encoded);
+            decoder.read_to_end(&mut decoded).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                    ParseError::TruncatedDataSet
+                } else {
+                    ParseError::InvalidDataSet
+                }
+            })?;
+            validate_deflated_stream_end(encoded, decoder.total_in())?;
+            Ok(decoded)
+        }
         Codec::Dataset(Some(adapter)) => {
             let mut decoded = Vec::new();
             adapter
@@ -262,6 +325,21 @@ fn adapt_data_set(
     }
 }
 
+fn validate_deflated_stream_end(encoded: &[u8], consumed: u64) -> Result<(), ParseError> {
+    let consumed = usize::try_from(consumed).map_err(|_| ParseError::InvalidDataSet)?;
+    let suffix = encoded.get(consumed..).ok_or(ParseError::InvalidDataSet)?;
+    let valid = if consumed.is_multiple_of(2) {
+        suffix.is_empty()
+    } else {
+        suffix == [0]
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(ParseError::InvalidDataSet)
+    }
+}
+
 /// Strictly walk the adapted data set before adding the completion marker.
 ///
 /// File Meta Information elements are not valid in the main data set. Refusing
@@ -274,49 +352,218 @@ fn validate_data_set_structure(
 ) -> Result<(), ParseError> {
     let mut options = LazyDataSetReaderOptions::default();
     options.odd_length = OddLengthStrategy::Fail;
-    let mut reader =
-        LazyDataSetReader::new_with_ts_options(Cursor::new(data_set), transfer_syntax, options)
-            .map_err(|error| map_data_set_error(&error))?;
-    let mut sequence_depth = 0_usize;
+    let position = Rc::new(Cell::new(0));
+    let source = PositionedCursor {
+        inner: Cursor::new(data_set),
+        position: Rc::clone(&position),
+    };
+    let mut reader = LazyDataSetReader::new_with_ts_options(source, transfer_syntax, options)
+        .map_err(|error| map_data_set_error(&error))?;
+    let mut containers = Vec::new();
+    let encapsulated = transfer_syntax.is_encapsulated_pixel_data();
 
-    while let Some(token) = reader.advance() {
+    loop {
+        let position_before = position.get();
+        let Some(token) = reader.advance() else {
+            break;
+        };
+        let position_after = position.get();
         let token = token.map_err(|error| map_data_set_error(&error))?;
         match token {
             LazyDataToken::ElementHeader(header) => {
-                if sequence_depth == 0 && header.tag.0 == 0x0002 {
+                let native_pixel_data_vr = header.vr.to_bytes();
+                if matches!(containers.last(), Some(DataSetContainer::Sequence { .. }))
+                    || header.tag.0 == 0xfffe
+                    || (containers.is_empty() && header.tag.0 == 0x0002)
+                    || (encapsulated && containers.is_empty() && header.tag == PIXEL_DATA)
+                    || (header.tag == PIXEL_DATA
+                        && native_pixel_data_vr != *b"OB"
+                        && native_pixel_data_vr != *b"OW")
+                {
                     return Err(ParseError::InvalidDataSet);
                 }
             }
-            LazyDataToken::SequenceStart { tag, .. } => {
-                if sequence_depth == 0 && tag.0 == 0x0002 {
+            LazyDataToken::SequenceStart { tag, len } => {
+                if matches!(containers.last(), Some(DataSetContainer::Sequence { .. }))
+                    || tag.0 == 0xfffe
+                    || tag == PIXEL_DATA
+                    || (containers.is_empty() && tag.0 == 0x0002)
+                {
                     return Err(ParseError::InvalidDataSet);
                 }
-                sequence_depth = sequence_depth
-                    .checked_add(1)
-                    .ok_or(ParseError::InvalidDataSet)?;
+                containers.push(DataSetContainer::Sequence {
+                    end: container_end(position_after, len.0)?,
+                });
             }
             LazyDataToken::PixelSequenceStart => {
-                sequence_depth = sequence_depth
-                    .checked_add(1)
-                    .ok_or(ParseError::InvalidDataSet)?;
+                if !encapsulated
+                    || matches!(containers.last(), Some(DataSetContainer::Sequence { .. }))
+                {
+                    return Err(ParseError::InvalidDataSet);
+                }
+                validate_encapsulated_pixel_data_header(data_set, position_before, position_after)?;
+                containers.push(DataSetContainer::PixelSequence {
+                    has_basic_offset_table: false,
+                    has_fragment: false,
+                });
             }
             LazyDataToken::SequenceEnd => {
-                sequence_depth = sequence_depth
-                    .checked_sub(1)
-                    .ok_or(ParseError::InvalidDataSet)?;
+                match containers.last().copied() {
+                    Some(DataSetContainer::Sequence { end }) => {
+                        validate_container_end(data_set, end, position_before, position_after)?;
+                    }
+                    Some(DataSetContainer::PixelSequence {
+                        has_basic_offset_table: true,
+                        has_fragment: true,
+                    }) => {
+                        validate_container_end(data_set, None, position_before, position_after)?;
+                    }
+                    _ => return Err(ParseError::InvalidDataSet),
+                };
+                containers.pop();
             }
-            token @ (LazyDataToken::LazyValue { .. } | LazyDataToken::LazyItemValue { .. }) => {
+            token @ LazyDataToken::LazyValue { .. } => {
+                if matches!(containers.last(), Some(DataSetContainer::Sequence { .. })) {
+                    return Err(ParseError::InvalidDataSet);
+                }
                 token.skip().map_err(|error| map_data_set_error(&error))?;
             }
-            LazyDataToken::ItemStart { .. } | LazyDataToken::ItemEnd => {}
+            token @ LazyDataToken::LazyItemValue { .. } => {
+                if !matches!(
+                    containers.last(),
+                    Some(DataSetContainer::Item { .. } | DataSetContainer::PixelItem { .. })
+                ) {
+                    return Err(ParseError::InvalidDataSet);
+                }
+                token.skip().map_err(|error| map_data_set_error(&error))?;
+            }
+            LazyDataToken::ItemStart { len } => {
+                let container = match containers.last().copied() {
+                    Some(DataSetContainer::Sequence { .. }) => DataSetContainer::Item {
+                        end: container_end(position_after, len.0)?,
+                    },
+                    Some(DataSetContainer::PixelSequence {
+                        has_basic_offset_table,
+                        ..
+                    }) if !has_basic_offset_table
+                        && len.0 != u32::MAX
+                        && len.0.is_multiple_of(4) =>
+                    {
+                        DataSetContainer::PixelItem {
+                            end: position_after
+                                .checked_add(u64::from(len.0))
+                                .ok_or(ParseError::InvalidDataSet)?,
+                            kind: PixelItemKind::BasicOffsetTable,
+                        }
+                    }
+                    Some(DataSetContainer::PixelSequence {
+                        has_basic_offset_table: true,
+                        ..
+                    }) if len.0 != u32::MAX && len.0 >= 2 && len.0.is_multiple_of(2) => {
+                        DataSetContainer::PixelItem {
+                            end: position_after
+                                .checked_add(u64::from(len.0))
+                                .ok_or(ParseError::InvalidDataSet)?,
+                            kind: PixelItemKind::Fragment,
+                        }
+                    }
+                    _ => return Err(ParseError::InvalidDataSet),
+                };
+                containers.push(container);
+            }
+            LazyDataToken::ItemEnd => {
+                let pixel_item_kind = match containers.last().copied() {
+                    Some(DataSetContainer::Item { end }) => {
+                        validate_container_end(data_set, end, position_before, position_after)?;
+                        None
+                    }
+                    Some(DataSetContainer::PixelItem { end, kind }) => {
+                        validate_container_end(
+                            data_set,
+                            Some(end),
+                            position_before,
+                            position_after,
+                        )?;
+                        Some(kind)
+                    }
+                    _ => return Err(ParseError::InvalidDataSet),
+                };
+                containers.pop();
+                if let Some(kind) = pixel_item_kind {
+                    let Some(DataSetContainer::PixelSequence {
+                        has_basic_offset_table,
+                        has_fragment,
+                    }) = containers.last_mut()
+                    else {
+                        return Err(ParseError::InvalidDataSet);
+                    };
+                    match kind {
+                        PixelItemKind::BasicOffsetTable => *has_basic_offset_table = true,
+                        PixelItemKind::Fragment => *has_fragment = true,
+                    }
+                }
+            }
             _ => return Err(ParseError::InvalidDataSet),
         }
     }
 
-    if sequence_depth == 0 {
+    if containers.is_empty() {
         Ok(())
     } else {
         Err(ParseError::TruncatedDataSet)
+    }
+}
+
+fn validate_encapsulated_pixel_data_header(
+    data_set: &[u8],
+    position_before: u64,
+    position_after: u64,
+) -> Result<(), ParseError> {
+    let start = usize::try_from(position_before).map_err(|_| ParseError::InvalidDataSet)?;
+    let end = usize::try_from(position_after).map_err(|_| ParseError::InvalidDataSet)?;
+    let header = data_set.get(start..end).ok_or(ParseError::InvalidDataSet)?;
+    if header.get(4..12) == Some(&[b'O', b'B', 0, 0, 0xff, 0xff, 0xff, 0xff]) {
+        Ok(())
+    } else {
+        Err(ParseError::InvalidDataSet)
+    }
+}
+
+fn container_end(value_start: u64, length: u32) -> Result<Option<u64>, ParseError> {
+    if length == u32::MAX {
+        Ok(None)
+    } else {
+        value_start
+            .checked_add(u64::from(length))
+            .map(Some)
+            .ok_or(ParseError::InvalidDataSet)
+    }
+}
+
+fn validate_container_end(
+    data_set: &[u8],
+    expected_end: Option<u64>,
+    position_before: u64,
+    position_after: u64,
+) -> Result<(), ParseError> {
+    let valid = match expected_end {
+        Some(expected_end) => position_before == expected_end && position_after == expected_end,
+        None => {
+            let length_start = position_before
+                .checked_add(4)
+                .and_then(|position| usize::try_from(position).ok());
+            let delimiter_end = usize::try_from(position_after).ok();
+            position_after.checked_sub(position_before) == Some(8)
+                && length_start
+                    .zip(delimiter_end)
+                    .and_then(|(start, end)| data_set.get(start..end))
+                    == Some([0_u8; 4].as_slice())
+        }
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(ParseError::InvalidDataSet)
     }
 }
 

@@ -186,7 +186,9 @@ the native host. Step 4 compares its direct dicom-rs feature selection across
 both targets. The selected 0.10 components are `dicom-object`,
 `dicom-encoding`, `dicom-parser`, and `dicom-transfer-syntax-registry`, all
 with defaults disabled. Only whole-data-set deflate is enabled. Pixel codec
-features remain outside F-016.
+features remain outside F-016. A direct `flate2` dependency uses the Rust
+backend on both targets and exposes the consumed stream length needed for
+strict PS3.5 A.5 padding validation.
 
 Shared does not mean no-std. The dicom-rs parser, dictionary and object graph
 require `std`, so D-18 removes `ocelli-dicom` from the repository's explicit

@@ -977,6 +977,7 @@ dependencies = [
  "dicom-object",
  "dicom-parser",
  "dicom-transfer-syntax-registry",
+ "flate2",
  "thiserror",
 ]
 

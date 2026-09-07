@@ -191,11 +191,17 @@ pixel representation. Codec conformance remains with F-023 and its dependants.
 4. Classify the selected route as `ImplicitVrLittleEndian`,
    `ExplicitVrLittleEndian`, `ExplicitVrBigEndian`,
    `DeflatedExplicitVrLittleEndian`, or `Encapsulated`. Adapt the remaining
-   bytes once with dicom-rs's selected data-set adapter. Run a strict structural
-   preflight and then collect once under the same resolved syntax. The
-   preflight refuses odd lengths, malformed nesting, and top-level group 0002
-   elements. Append a fixed group 0002 completion marker after preflight, then
-   require and remove it after collection so partial top-level headers remain
+   bytes once. The selected dicom-rs codec supplies ordinary data-set adapters.
+   Deflate uses the same flate2 implementation directly because the erased
+   adapter does not expose its consumed input count, which is required to
+   validate PS3.5 A.5 stream termination and NULL padding. Run a strict
+   structural preflight and then collect once under the same resolved syntax.
+   The preflight refuses odd lengths, malformed nesting, mismatched top-level
+   Pixel Data representation, invalid encapsulation, and top-level group 0002
+   elements. Native Format Pixel Data nested in a Sequence Item remains valid
+   under an encapsulated transfer syntax.
+   Append a fixed group 0002 completion marker after preflight, then require
+   and remove it after collection so partial top-level headers remain
    observable without a collision or private-element allocation. Do not retry
    under an alternate syntax.
 5. Return `ParsedDicom`, which couples the dicom-rs file object with immutable
@@ -318,6 +324,8 @@ None.
 The operator approved direct dicom-rs 0.10 component dependencies with default
 features disabled and only `deflate` enabled for F-016. The selected components
 are `dicom-object`, `dicom-encoding`, `dicom-parser`, and
-`dicom-transfer-syntax-registry`. D-18 records the difference from section
-15.2's umbrella dependency line. Pixel codec features remain for F-023 and its
+`dicom-transfer-syntax-registry`. `flate2` is also direct so Ocelli can validate
+the consumed Deflate stream boundary and required padding, which the erased
+dicom-rs adapter cannot report. D-18 records the difference from section 15.2's
+umbrella dependency line. Pixel codec features remain for F-023 and its
 dependent codec stories.

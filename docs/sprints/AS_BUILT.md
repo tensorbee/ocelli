@@ -2075,3 +2075,14 @@ into metadata projection or pixel decoding.
 **Notes for future sessions.** F-017 can consume the retained dicom-rs value
 model. Pixel codec dispatch and compressed-frame decoding remain with F-023
 and its dependent stories.
+
+## F-016 sprint-review correction, recorded 2026-09-07
+
+The F-016 completion entry above remains byte-for-byte as it was committed.
+Later whole-sprint review added direct flate2 stream-boundary validation to
+D-18 and expanded the Part 10 integration suite from nineteen to forty-one
+tests. The added cases cover exact Deflate termination, container delimiters,
+top-level Pixel Data representation, Encapsulated Format VR, the Basic Offset
+Table, required nonempty Fragments, and valid nested Native Format Pixel Data.
+The sprint review and verification ledgers bind this correction to their exact
+staged tree.
