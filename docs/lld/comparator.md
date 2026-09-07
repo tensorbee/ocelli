@@ -321,8 +321,10 @@ image difference is informative. For a monochrome RGB frame the union is also
 bounded by one lane's difference count because all three lanes have the same
 pixel support. The false direction is checked where the distributions determine
 it exactly. If every sample in every RGB lane has the same `+255` or `-255`
-difference, both byte values are forced and both frames are necessarily
-monochrome, so `monochromeFrame` cannot be false.
+difference within each nonempty image or background partition, both byte
+values are forced and both frames are necessarily monochrome. The two
+partitions may force opposite signs, but `monochromeFrame` still cannot be
+false.
 
 **The gating predicate for class one, and only this:**
 

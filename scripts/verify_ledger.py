@@ -607,19 +607,26 @@ def _statistics(
                     "monochrome frame"
                 )
     if not monochrome_frame and channels == 3:
-        full_histograms = [
-            channel["signedHistogram"] for channel in regions["full"]
-        ]
-        forced_extremes = (
-            [[-255, full_pixel_count]],
-            [[255, full_pixel_count]],
-        )
-        if (full_histograms[0] in forced_extremes
-                and all(histogram == full_histograms[0]
-                        for histogram in full_histograms[1:])):
+        spatial_regions = [regions["image"]]
+        if regions["background"]:
+            spatial_regions.append(regions["background"])
+        forced_monochrome = True
+        for channel_reports in spatial_regions:
+            region_pixels = channel_reports[0]["pixels"]
+            first_histogram = channel_reports[0]["signedHistogram"]
+            forced_extremes = (
+                [[-255, region_pixels]],
+                [[255, region_pixels]],
+            )
+            if (first_histogram not in forced_extremes
+                    or any(channel["signedHistogram"] != first_histogram
+                           for channel in channel_reports[1:])):
+                forced_monochrome = False
+                break
+        if forced_monochrome:
             sys.exit(
                 f"comparison report {label} non-monochrome frame is impossible "
-                "from forced RGB extremes"
+                "from forced regional RGB extremes"
             )
     if kind == "volume-reformat" and (
         image_x != 0 or image_y != 0

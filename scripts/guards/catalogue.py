@@ -1487,6 +1487,35 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["columnsTouched"] = 1
         statistics["signedMeanDiff"] = float(forced_difference)
         _set_dimensions(statistics, 1, 1, 1, 1)
+    elif variant == "nonmonochrome-opposite-regional-extremes":
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        record["monochromeFrame"] = False
+        statistics["channels"] = 3
+        image = dict(statistics["image"][0])
+        _set_signed_distribution(image, [(255, 1)])
+        background = dict(image)
+        _set_signed_distribution(background, [(-255, 1)])
+        full = dict(image)
+        _set_signed_distribution(full, [(-255, 1), (255, 1)])
+        statistics["full"] = [dict(full) for _ in range(3)]
+        statistics["image"] = [dict(image) for _ in range(3)]
+        statistics["background"] = [dict(background) for _ in range(3)]
+        statistics["informative"] = [dict(image) for _ in range(3)]
+        statistics["imagePixels"] = 1
+        statistics["informativePixels"] = 1
+        statistics["informativeFraction"] = 1.0
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 2
+        statistics["signedMeanDiff"] = 255.0
+        _set_dimensions(statistics, 1, 2, 1, 1)
+        _set_touched_indices(
+            statistics, image_rows=[0], image_columns=[0],
+            background_rows=[0], background_columns=[1],
+        )
     elif variant in ("informative-touched-support", "monochrome-touched-support"):
         record["toleranceClass"] = "colour-or-us"
         record["outcome"] = "unmeasured"
@@ -1956,8 +1985,9 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("background-touched-isolated", "background touched indices contain an isolated row or column"),
         ("background-joint-capacity", "background touched indices contradict region geometry"),
         ("monochrome-lanes-disagree", "channels contradict monochrome frame"),
-        ("nonmonochrome-forced-positive-extremes", "non-monochrome frame is impossible from forced RGB extremes"),
-        ("nonmonochrome-forced-negative-extremes", "non-monochrome frame is impossible from forced RGB extremes"),
+        ("nonmonochrome-forced-positive-extremes", "non-monochrome frame is impossible from forced regional RGB extremes"),
+        ("nonmonochrome-forced-negative-extremes", "non-monochrome frame is impossible from forced regional RGB extremes"),
+        ("nonmonochrome-opposite-regional-extremes", "non-monochrome frame is impossible from forced regional RGB extremes"),
         ("informative-touched-support", "image touched indices contradict region geometry"),
         ("monochrome-touched-support", "image touched indices contradict region geometry"),
         ("monochrome-background-touched-support", "background touched indices contradict region geometry"),

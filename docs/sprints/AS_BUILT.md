@@ -1990,6 +1990,13 @@ Two probes preserve the positive and negative extremes, while an acceptance
 probe preserves the realizable mixed-extreme case. A fourth probe exercises
 shared monochrome lane support in a nonempty background region.
 
+The fifteenth review moved that false-direction proof from the combined full
+histogram to the image and background partitions. Opposite forced signs in
+one pixel of each partition still make both source frames monochrome. A
+standing probe preserves this measured case, while the mixed-extreme
+acceptance probe continues to show that two signs within one partition may be
+assigned across lanes to realize a non-monochrome frame.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured
