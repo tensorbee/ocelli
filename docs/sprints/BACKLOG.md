@@ -132,7 +132,7 @@ A frame parses, decodes and passes the hand-computed LUT fixtures of HLD section
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-016 | E3.1 | S06 | ocelli-dicom: parse and transfer-syntax dispatch over dicom-rs | Rust | 3w | F-001 | pending |
+| F-016 | E3.1 | S06 | ocelli-dicom: parse and transfer-syntax dispatch over dicom-rs | Rust | 3w | F-001 | done |
 | F-017 | E3.2 | S07 | Metadata model and provider registry | Rust | 4w | F-016 | pending |
 | F-018 | E3.3 | S08 | Image plane, pixel, modality-LUT and VOI-LUT modules | Rust | 3w | F-017 | pending |
 | F-019 | E3.4 | S08 | Multiframe and enhanced SOP class handling | Rust | 4w | F-017 | pending |

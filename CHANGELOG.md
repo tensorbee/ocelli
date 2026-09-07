@@ -20,6 +20,9 @@ Repository bootstrap. Nothing is published.
   and pixel-value newtypes in `ocelli-core`.
 - A manifest-backed DICOM corpus with deterministic synthetic fixtures,
   transfer-syntax conformance checks, metadata auditing and digest verification.
+- A DICOM Part 10 parser that dispatches from the declared Transfer Syntax UID,
+  retains the complete dicom-rs object and selected route, and refuses malformed
+  or truncated input without an alternate-syntax fallback.
 - A quirk-capture registry and checker that bind a synthetic generator recipe,
   manifest row, independently computed expectation, regression test and active
   mutation evidence into one reviewed record.

@@ -280,7 +280,8 @@ run_gate() {
     # first command can fail and be reported green.
     corpus)      python3 scripts/corpus_check.py --coverage &&
                  python3 scripts/corpus_check.py &&
-                 python3 scripts/corpus_tests.py --metadata-check ;;
+                 python3 scripts/corpus_tests.py --metadata-check &&
+                 cargo test -p ocelli-dicom --test corpus -- --ignored ;;
     # F-011. The reference half renders and the comparator judges, and the gate
     # means both. Chained on `&&` for the reason the corpus arm gives above: a
     # case arm returns the status of its LAST command, so an unchained

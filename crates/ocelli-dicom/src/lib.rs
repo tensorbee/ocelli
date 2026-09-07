@@ -2,9 +2,12 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
-//! Scaffold only. F-001 creates the crate, later stories fill it.
+//! F-016 adds the Part 10 parser and observable transfer-syntax dispatch.
 
-#![cfg_attr(not(test), no_std)]
+mod parse;
+
+pub use dicom_object::{DefaultDicomObject, Tag};
+pub use parse::{DispatchPath, ParseError, ParsedDicom, TransferSyntaxInfo, parse_part10};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.

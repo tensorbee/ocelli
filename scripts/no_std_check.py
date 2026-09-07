@@ -8,12 +8,14 @@ Most crates under `crates/` declare
 and deviation D-09 disables glam's default `std` feature to keep that true.
 Nothing checked it. This does.
 
-**Four crates do not declare it, and each absence is deliberate.**
+**Five crates do not declare it, and each absence is deliberate.**
 `ocelli-wasm` and `ocelli-native` are the two entry points. `ocelli-render` and
 `ocelli-compute` link wgpu, which needs `std`, and that is part of deviation
-D-10 rather than an oversight. The expected set below is explicit, because a
-crate that silently enters or leaves a self-selected set makes the check agree
-with the defect. Any posture change therefore moves a named value in review.
+D-10 rather than an oversight. `ocelli-dicom` links dicom-rs, whose parser,
+dictionary and object crates require `std`, under D-18. The expected set below
+is explicit, because a crate that silently enters or leaves a self-selected
+set makes the check agree with the defect. Any posture change therefore moves
+a named value in review.
 
 ## Why the obvious check does not work
 
@@ -66,7 +68,6 @@ EXPECTED_NO_STD_CRATES = frozenset({
     "ocelli-cache",
     "ocelli-codec",
     "ocelli-core",
-    "ocelli-dicom",
     "ocelli-geom",
     "ocelli-pixel",
     "ocelli-seg",

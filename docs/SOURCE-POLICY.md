@@ -100,6 +100,7 @@ form as the table above, with the date it was decided.
 | TCIA collection CMB-CRC | CC BY 4.0 | yes | yes | 2026-09-04 |
 | pydicom bundled test files | not stated | yes | **NO** | 2026-09-04 |
 | openjph-core 0.1.0 | BSD-2-Clause in registry metadata | yes | yes | 2026-09-06 |
+| flate2 | MIT OR Apache-2.0 in registry metadata | yes | yes | 2026-09-07 |
 
 ### openjph-core 0.1.0, and the missing packaged licence text
 
