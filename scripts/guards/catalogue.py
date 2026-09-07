@@ -1459,6 +1459,34 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["rowsTouched"] = 1
         statistics["columnsTouched"] = 2
         _set_dimensions(statistics, 1, 2, 1, 2)
+    elif variant in (
+        "nonmonochrome-forced-positive-extremes",
+        "nonmonochrome-forced-negative-extremes",
+    ):
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        record["monochromeFrame"] = False
+        statistics["channels"] = 3
+        forced_difference = (
+            255 if variant == "nonmonochrome-forced-positive-extremes" else -255
+        )
+        for region in regions:
+            _set_signed_distribution(
+                statistics[region][0], [(forced_difference, 1)]
+            )
+            statistics[region] = [
+                dict(statistics[region][0]) for _ in range(3)
+            ]
+        statistics["imagePixels"] = 1
+        statistics["informativePixels"] = 1
+        statistics["informativeFraction"] = 1.0
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = float(forced_difference)
+        _set_dimensions(statistics, 1, 1, 1, 1)
     elif variant in ("informative-touched-support", "monochrome-touched-support"):
         record["toleranceClass"] = "colour-or-us"
         record["outcome"] = "unmeasured"
@@ -1490,6 +1518,39 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         _set_dimensions(statistics, 2, 2, 2, 2)
         _set_touched_indices(
             statistics, image_rows=[0, 1], image_columns=[0, 1]
+        )
+    elif variant == "monochrome-background-touched-support":
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        record["monochromeFrame"] = True
+        statistics["channels"] = 3
+        _set_signed_distribution(statistics["image"][0], [(0, 2)])
+        statistics["informative"][0] = dict(statistics["image"][0])
+        background = dict(statistics["image"][0])
+        _set_signed_distribution(background, [(0, 1), (1, 1)])
+        full = dict(statistics["image"][0])
+        _set_signed_distribution(full, [(0, 3), (1, 1)])
+        statistics["full"] = [dict(full) for _ in range(3)]
+        statistics["image"] = [
+            dict(statistics["image"][0]) for _ in range(3)
+        ]
+        statistics["background"] = [dict(background) for _ in range(3)]
+        statistics["informative"] = [
+            dict(statistics["informative"][0]) for _ in range(3)
+        ]
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["informativeFraction"] = 1.0
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 2
+        statistics["signedMeanDiff"] = 0.0
+        _set_dimensions(statistics, 2, 2, 1, 2)
+        _set_touched_indices(
+            statistics, image_rows=[], image_columns=[],
+            background_rows=[1], background_columns=[0, 1],
         )
     elif variant == "partial-volume-reformat-image":
         record["kind"] = "volume-reformat"
@@ -1550,6 +1611,49 @@ def _valid_nonzero_background_report(box: Sandbox) -> None:
         statistics, image_rows=[0, 1], image_columns=[0, 1],
         background_rows=[0, 2], background_columns=[0, 2],
     )
+    box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
+
+
+def _valid_nonmonochrome_mixed_extremes_report(box: Sandbox) -> None:
+    report = green_comparison_document(box)
+    contract = json.loads(box.read("tools/oracle/report-contract.json"))
+    record = json.loads(json.dumps(report["records"][0]))
+    statistics = record["statistics"]
+    record["id"] = "probe-mixed-extremes"
+    report["records"].append(record)
+    report["records"].sort(key=lambda item: item["id"])
+    report["views"] = 2
+    report["unmeasured"] = 1
+    report["coverage"]["unmeasured"] = 1
+    report["qualifiers"] = {"unstated-threshold": 1}
+    record["toleranceClass"] = "colour-or-us"
+    record["outcome"] = "unmeasured"
+    record["qualifiers"] = ["unstated-threshold"]
+    record["rung"] = "class-two"
+    record["notes"] = ["controlled class-two state"]
+    record["monochromeFrame"] = False
+    statistics["channels"] = 3
+    for region in ("full", "image", "informative"):
+        _set_signed_distribution(
+            statistics[region][0], [(-255, 1), (255, 1)]
+        )
+        statistics[region] = [
+            dict(statistics[region][0]) for _ in range(3)
+        ]
+    statistics["imagePixels"] = 2
+    statistics["informativePixels"] = 2
+    statistics["informativeFraction"] = 1.0
+    statistics["rowsTouched"] = 1
+    statistics["columnsTouched"] = 2
+    statistics["signedMeanDiff"] = 0.0
+    _set_dimensions(statistics, 1, 2, 1, 2)
+    _set_touched_indices(
+        statistics, image_rows=[0], image_columns=[0, 1]
+    )
+    for side in ("reference", "candidate"):
+        report["renderHashes"][side] = _comparison_run_hash(
+            report, side, contract["hashAlgorithms"]["run"]
+        )
     box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
 
@@ -1852,8 +1956,11 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("background-touched-isolated", "background touched indices contain an isolated row or column"),
         ("background-joint-capacity", "background touched indices contradict region geometry"),
         ("monochrome-lanes-disagree", "channels contradict monochrome frame"),
+        ("nonmonochrome-forced-positive-extremes", "non-monochrome frame is impossible from forced RGB extremes"),
+        ("nonmonochrome-forced-negative-extremes", "non-monochrome frame is impossible from forced RGB extremes"),
         ("informative-touched-support", "image touched indices contradict region geometry"),
         ("monochrome-touched-support", "image touched indices contradict region geometry"),
+        ("monochrome-background-touched-support", "background touched indices contradict region geometry"),
         ("partial-volume-reformat-image", "volume reformat is not a full-frame image"),
         ("touched-presence", "touched counts contradict differences"),
         ("touched-count", "touched counts contradict differing pixels"),
@@ -1894,7 +2001,16 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         "recorded tree",
         polarity="accept",
     )
-    return refusal_probes + (caller_directory, nonzero_background)
+    mixed_extremes = Probe(
+        "ledger.comparison-nonmonochrome-mixed-extremes-is-permitted",
+        _valid_nonmonochrome_mixed_extremes_report,
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
+    return refusal_probes + (
+        caller_directory, nonzero_background, mixed_extremes,
+    )
 
 
 def _report_contract_probes() -> tuple[Probe, ...]:

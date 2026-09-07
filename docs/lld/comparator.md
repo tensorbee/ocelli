@@ -319,7 +319,10 @@ identical because each source pixel has equal red, green and blue lanes. The
 image difference union cannot exceed `informativePixels`, since every nonzero
 image difference is informative. For a monochrome RGB frame the union is also
 bounded by one lane's difference count because all three lanes have the same
-pixel support.
+pixel support. The false direction is checked where the distributions determine
+it exactly. If every sample in every RGB lane has the same `+255` or `-255`
+difference, both byte values are forced and both frames are necessarily
+monochrome, so `monochromeFrame` cannot be false.
 
 **The gating predicate for class one, and only this:**
 

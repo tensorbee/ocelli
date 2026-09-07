@@ -1982,6 +1982,14 @@ pixel set. Two refusal probes preserve those boundaries, and a positive probe
 passes simultaneous image and background differences through the full Python
 evidence reader to guard against false refusals in the complement calculation.
 
+The fourteenth review closed the exactly decidable false direction of
+`monochromeFrame`. A signed byte difference of `+255` or `-255` uniquely fixes
+both source values. When every sample in every RGB lane has the same extreme,
+both frames are necessarily monochrome and the ledger refuses a false flag.
+Two probes preserve the positive and negative extremes, while an acceptance
+probe preserves the realizable mixed-extreme case. A fourth probe exercises
+shared monochrome lane support in a nonempty background region.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured
