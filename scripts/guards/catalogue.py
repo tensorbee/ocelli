@@ -1487,7 +1487,10 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["columnsTouched"] = 1
         statistics["signedMeanDiff"] = float(forced_difference)
         _set_dimensions(statistics, 1, 1, 1, 1)
-    elif variant == "nonmonochrome-opposite-regional-extremes":
+    elif variant in (
+        "nonmonochrome-opposite-regional-extremes",
+        "nonmonochrome-same-sign-regional-extremes",
+    ):
         record["toleranceClass"] = "colour-or-us"
         record["outcome"] = "unmeasured"
         record["qualifiers"] = ["unstated-threshold"]
@@ -1498,9 +1501,19 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         image = dict(statistics["image"][0])
         _set_signed_distribution(image, [(255, 1)])
         background = dict(image)
-        _set_signed_distribution(background, [(-255, 1)])
+        background_difference = (
+            -255
+            if variant == "nonmonochrome-opposite-regional-extremes"
+            else 255
+        )
+        _set_signed_distribution(background, [(background_difference, 1)])
         full = dict(image)
-        _set_signed_distribution(full, [(-255, 1), (255, 1)])
+        full_entries = (
+            [(-255, 1), (255, 1)]
+            if background_difference == -255
+            else [(255, 2)]
+        )
+        _set_signed_distribution(full, full_entries)
         statistics["full"] = [dict(full) for _ in range(3)]
         statistics["image"] = [dict(image) for _ in range(3)]
         statistics["background"] = [dict(background) for _ in range(3)]
@@ -1686,12 +1699,16 @@ def _valid_nonmonochrome_mixed_extremes_report(box: Sandbox) -> None:
     box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
 
-def _valid_forced_image_mixed_background_report(box: Sandbox) -> None:
+def _valid_partition_extremes_report(
+    box: Sandbox, *, record_id: str,
+    image_entries: list[tuple[int, int]],
+    background_entries: list[tuple[int, int]],
+) -> None:
     report = green_comparison_document(box)
     contract = json.loads(box.read("tools/oracle/report-contract.json"))
     record = json.loads(json.dumps(report["records"][0]))
     statistics = record["statistics"]
-    record["id"] = "probe-forced-image-mixed-background"
+    record["id"] = record_id
     report["records"].append(record)
     report["records"].sort(key=lambda item: item["id"])
     report["views"] = 2
@@ -1706,25 +1723,36 @@ def _valid_forced_image_mixed_background_report(box: Sandbox) -> None:
     record["monochromeFrame"] = False
     statistics["channels"] = 3
     image = dict(statistics["image"][0])
-    _set_signed_distribution(image, [(255, 1)])
+    _set_signed_distribution(image, image_entries)
     background = dict(image)
-    _set_signed_distribution(background, [(-255, 1), (255, 1)])
+    _set_signed_distribution(background, background_entries)
+    full_counts: dict[int, int] = {}
+    for difference, count in image_entries + background_entries:
+        full_counts[difference] = full_counts.get(difference, 0) + count
     full = dict(image)
-    _set_signed_distribution(full, [(-255, 1), (255, 2)])
+    _set_signed_distribution(full, list(full_counts.items()))
     statistics["full"] = [dict(full) for _ in range(3)]
     statistics["image"] = [dict(image) for _ in range(3)]
     statistics["background"] = [dict(background) for _ in range(3)]
     statistics["informative"] = [dict(image) for _ in range(3)]
-    statistics["imagePixels"] = 1
-    statistics["informativePixels"] = 1
+    image_pixels = sum(count for _, count in image_entries)
+    background_pixels = sum(count for _, count in background_entries)
+    statistics["imagePixels"] = image_pixels
+    statistics["informativePixels"] = image_pixels
     statistics["informativeFraction"] = 1.0
     statistics["rowsTouched"] = 1
-    statistics["columnsTouched"] = 3
-    statistics["signedMeanDiff"] = 255.0
-    _set_dimensions(statistics, 1, 3, 1, 1)
+    statistics["columnsTouched"] = image_pixels + background_pixels
+    statistics["signedMeanDiff"] = image["signedMeanDiff"]
+    _set_dimensions(
+        statistics, 1, image_pixels + background_pixels, 1, image_pixels
+    )
     _set_touched_indices(
-        statistics, image_rows=[0], image_columns=[0],
-        background_rows=[0], background_columns=[1, 2],
+        statistics,
+        image_rows=[0], image_columns=list(range(image_pixels)),
+        background_rows=[0],
+        background_columns=list(
+            range(image_pixels, image_pixels + background_pixels)
+        ),
     )
     for side in ("reference", "candidate"):
         report["renderHashes"][side] = _comparison_run_hash(
@@ -2035,6 +2063,7 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("nonmonochrome-forced-positive-extremes", "non-monochrome frame is impossible from forced regional RGB extremes"),
         ("nonmonochrome-forced-negative-extremes", "non-monochrome frame is impossible from forced regional RGB extremes"),
         ("nonmonochrome-opposite-regional-extremes", "non-monochrome frame is impossible from forced regional RGB extremes"),
+        ("nonmonochrome-same-sign-regional-extremes", "non-monochrome frame is impossible from forced regional RGB extremes"),
         ("informative-touched-support", "image touched indices contradict region geometry"),
         ("monochrome-touched-support", "image touched indices contradict region geometry"),
         ("monochrome-background-touched-support", "background touched indices contradict region geometry"),
@@ -2087,13 +2116,43 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
     )
     mixed_background = Probe(
         "ledger.comparison-forced-image-mixed-background-is-permitted",
-        _valid_forced_image_mixed_background_report,
+        lambda box: _valid_partition_extremes_report(
+            box,
+            record_id="probe-forced-image-mixed-background",
+            image_entries=[(255, 1)],
+            background_entries=[(-255, 1), (255, 1)],
+        ),
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
+    mixed_image = Probe(
+        "ledger.comparison-mixed-image-forced-background-is-permitted",
+        lambda box: _valid_partition_extremes_report(
+            box,
+            record_id="probe-mixed-image-forced-background",
+            image_entries=[(-255, 1), (255, 1)],
+            background_entries=[(255, 1)],
+        ),
+        invoke,
+        "recorded tree",
+        polarity="accept",
+    )
+    both_mixed = Probe(
+        "ledger.comparison-mixed-image-mixed-background-is-permitted",
+        lambda box: _valid_partition_extremes_report(
+            box,
+            record_id="probe-mixed-image-mixed-background",
+            image_entries=[(-255, 1), (255, 1)],
+            background_entries=[(-255, 1), (255, 1)],
+        ),
         invoke,
         "recorded tree",
         polarity="accept",
     )
     return refusal_probes + (
         caller_directory, nonzero_background, mixed_extremes, mixed_background,
+        mixed_image, both_mixed,
     )
 
 

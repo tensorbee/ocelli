@@ -2003,6 +2003,12 @@ permute those signs between RGB lanes. The standing acceptance probe prevents
 the regional conjunction from narrowing to the image or changing to an
 any-partition refusal.
 
+The seventeenth review completed the two-partition forced-or-mixed matrix.
+Standing acceptance probes now cover either partition mixed while the other is
+forced, plus both partitions mixed. Refusal probes cover both forced with the
+same sign or opposite signs. A background-only, image-only, any-partition or
+other asymmetric rewrite therefore changes at least one expected result.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured
