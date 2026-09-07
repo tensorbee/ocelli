@@ -21,32 +21,22 @@ measured, write `not measured`. A plausible-looking `<1d` written to fill a
 cell is invented evidence, and it is worse than a gap, because a gap is
 visibly a gap and an invented figure is not.
 
-## Capacity calibration, and why there is nothing to calibrate from
+## Capacity calibration, and why there is no port ratio yet
 
-The plan was to recalculate after S03 and again after S06, off the `Days
-actual` column, and not off one sprint, because S01 to S03 are foundations and
-the oracle rather than the volume port work of M2 onward.
-
-**S03 produced no measurement to recalculate from.** All seven of its rows read
-`not measured`, each with the reason recorded in the cell: three stories ran
-concurrently in worker worktrees whose agents terminated on a session rate
-limit, two ran beside each other with one story's oracle runs inside the other's
-wall clock, one overlapped the sprint review's remediation, and one ran serial
-in the canonical worktree with several full oracle runs inside its wall clock.
-Most rows in this file read `not measured` and the measured ones are all S01 and
-S02. No count is transcribed into this sentence, because the table below is the
-count:
+The plan recalculates after S03 and S06 from the `Days actual` column. Both
+points are now recorded in `SPRINT_PLAN.md`. S03 produced no measurement, and
+S06's only story is also `not measured` for the reason in its row. The three
+measured rows are all foundations and oracle work from S01 and S02, so their
+ratio is descriptive evidence and not a forecast for the M2 port. The table
+below remains the authority, and this command prints the unmeasured set:
 
 ```bash
 grep -E '^\| F-' docs/sprints/SPRINT_TRACKER.md | grep -c 'not measured'
 ```
 
-**This section used to direct the reader to write the result into a "Capacity
-calibration" section of `SPRINT_PLAN.md`. That section does not exist**, and
-naming a destination that was never created is how an instruction survives
-without ever being followed. Nothing is written there until a sprint produces at
-least three measured rows, at which point the section is created by the change
-that has something to put in it.
+The S06 close leaves the measurement rule unchanged. Run a port story alone
+when its duration is wanted and attribute review and verification separately.
+Otherwise record `not measured` rather than inventing a capacity input.
 
 | F-ID | Title | Sprint | Est | Days actual | Completed |
 |------|-------|--------|-----|-------------|-----------|

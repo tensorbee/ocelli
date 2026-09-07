@@ -34,42 +34,35 @@ real thing.
 
 ## Capacity calibration
 
-Recalculated at the S03 close, which is the first of the two points this
-project committed to, the other being S06.
+Recalculated at the S03 and S06 closes, the two points this project committed
+to.
 
-**The result is that there is nothing to recalibrate from, and that is the
-finding rather than a gap in the record.** Every one of S03's seven rows in
-`docs/sprints/SPRINT_TRACKER.md` reads `not measured`, each with its reason in
-the cell: three stories ran concurrently in worker worktrees whose implementing
-agents terminated on a session rate limit, two ran beside each other with one
-story's oracle runs inside the other's wall clock, one overlapped the sprint
-review's remediation, and one ran serial with several full oracle runs inside
-its wall clock. A wall clock covering an interruption or another story's work
-is not a measurement of this story, and writing a plausible figure into that
-column would destroy the only re-planning evidence the plan has.
+**Neither point produced a representative measurement, so there is still no
+capacity factor with which to re-plan the port.** Every S03 row reads `not
+measured` for its recorded attribution reason. The only S06 row, F-016, also
+reads `not measured` because its wall clock includes a design decision, five
+implementation review passes, and repeated full feature verification runs.
+Writing a plausible duration into either sprint would destroy the evidence
+rather than complete it.
 
-The measured rows that do exist are all S01 and S02. This prints the split,
-and the two patterns are anchored on the row because a bare `measured` matches
-`not measured` as well, which would count every row twice:
+The three measured rows remain F-001, F-009, and F-010 from S01 and S02. They
+total 9 estimated engineer-weeks and 1.44 measured days, a descriptive ratio
+of 0.16 measured days per estimated engineer-week. That ratio describes
+foundations and oracle work. It does not describe the M2 port and must not be
+used to forecast it. These commands reproduce the measured and unmeasured row
+sets, and the two patterns are anchored because a bare `measured` also matches
+`not measured`:
 
 ```bash
 grep -cE '^\| F-.*\| [0-9.]+d measured' docs/sprints/SPRINT_TRACKER.md
 grep -cE '^\| F-.*\| not measured' docs/sprints/SPRINT_TRACKER.md
 ```
 
-**Those rows must not be used to forecast the port work**, for the reason this
-project wrote down before it had any of them: S01 to S03 are foundations and
-the oracle, and M2 onward is the volume port. A ratio taken from building a
-corpus and a differential harness says nothing about porting the LUT chain
-against that harness. The next calibration point is S06, and it is the first
-one whose input could be representative.
-
-**What the S03 close changes about how to measure**, and this is the actionable
-part: the estimate column stays as it is, and the instrument that failed was
-attribution, not estimation. Concurrent workers in separate worktrees produce a
-wall clock that belongs to no single story. Either a story runs alone when its
-duration is wanted, or the column keeps reading `not measured` honestly and the
-calibration keeps having no input.
+**What both close points change about how to measure** is the actionable part.
+The estimate column stays as it is. A port story must run alone if its duration
+is wanted, and verification or review time must be attributed separately. If
+that isolation is not available, the row remains `not measured` and no
+capacity claim follows from it.
 
 ## What re-planning looks like
 
