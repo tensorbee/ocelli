@@ -1102,6 +1102,46 @@ def _nonfinite_report_number(box: Sandbox) -> None:
     )
 
 
+def _set_touched_indices(
+        statistics: dict, *, image_rows: list[int], image_columns: list[int],
+        background_rows: list[int] | None = None,
+        background_columns: list[int] | None = None) -> None:
+    background_rows = background_rows or []
+    background_columns = background_columns or []
+    statistics["imageRowsTouched"] = image_rows
+    statistics["imageColumnsTouched"] = image_columns
+    statistics["backgroundRowsTouched"] = background_rows
+    statistics["backgroundColumnsTouched"] = background_columns
+
+
+def _supply_image_touched_indices(statistics: dict) -> None:
+    touched_keys = (
+        "imageRowsTouched", "imageColumnsTouched",
+        "backgroundRowsTouched", "backgroundColumnsTouched",
+    )
+    if any(statistics[key] for key in touched_keys):
+        return
+    image_differs = any(
+        channel["countAtZero"] != channel["pixels"]
+        for channel in statistics["image"]
+    )
+    background_differs = any(
+        channel["countAtZero"] != channel["pixels"]
+        for channel in statistics["background"]
+    )
+    if not image_differs or background_differs:
+        return
+    image_y = statistics["imageY"]
+    image_x = statistics["imageX"]
+    _set_touched_indices(
+        statistics,
+        image_rows=list(range(image_y, image_y + statistics["rowsTouched"])),
+        image_columns=list(
+            range(image_x, image_x + statistics["columnsTouched"])
+        ),
+    )
+
+
 def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
     report = green_comparison_document(box)
     record = report["records"][0]
@@ -1150,6 +1190,21 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["full"][0]["percentile999AbsDiff"] = 255
     elif variant == "signed-mean-exceeds-maximum":
         statistics["full"][0]["signedMeanDiff"] = 256.0
+    elif variant == "touched-index-not-array":
+        statistics["imageRowsTouched"] = None
+    elif variant == "touched-index-invalid":
+        statistics["imageRowsTouched"] = [True]
+    elif variant == "touched-index-order":
+        statistics["imageRowsTouched"] = [0, 0]
+    elif variant == "image-touched-outside-rectangle":
+        _add_zero_background(statistics)
+        _set_dimensions(statistics, 2, 1, 1, 1)
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        _set_touched_indices(statistics, image_rows=[1], image_columns=[0])
+    elif variant == "touched-index-union":
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
     elif variant == "predicate-contradicts-statistics":
         for region in regions:
             channel = statistics[region][0]
@@ -1267,6 +1322,10 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["biasPasses"] = False
         statistics["signedMeanDiff"] = 3.0
         _set_dimensions(statistics, 1, 2, 1, 1)
+        _set_touched_indices(
+            statistics, image_rows=[0], image_columns=[0],
+            background_rows=[0], background_columns=[1],
+        )
     elif variant == "full-without-background":
         for region, signed_mean in (("full", 1.0), ("image", -1.0),
                                     ("informative", -1.0)):
@@ -1336,6 +1395,73 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         statistics["rowsTouched"] = 2
         statistics["columnsTouched"] = 2
         _set_dimensions(statistics, 2, 2, 1, 2)
+        _set_touched_indices(
+            statistics, image_rows=[0], image_columns=[0, 1]
+        )
+    elif variant == "region-touched-presence":
+        for region in regions:
+            _set_one_difference(statistics[region][0], 1.0)
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        statistics["signedMeanDiff"] = 1.0
+        _set_touched_indices(
+            statistics, image_rows=[], image_columns=[],
+            background_rows=[0], background_columns=[0],
+        )
+    elif variant == "background-touched-isolated":
+        _set_signed_distribution(statistics["image"][0], [(0, 2)])
+        statistics["informative"][0] = dict(statistics["image"][0])
+        background = dict(statistics["image"][0])
+        _set_signed_distribution(background, [(0, 1), (1, 1)])
+        statistics["background"] = [background]
+        _set_signed_distribution(statistics["full"][0], [(0, 3), (1, 1)])
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 1
+        _set_dimensions(statistics, 2, 2, 1, 2)
+        _set_touched_indices(
+            statistics, image_rows=[], image_columns=[],
+            background_rows=[0], background_columns=[0],
+        )
+    elif variant == "background-joint-capacity":
+        _set_signed_distribution(statistics["image"][0], [(0, 4)])
+        statistics["informative"][0] = dict(statistics["image"][0])
+        background = dict(statistics["image"][0])
+        _set_signed_distribution(background, [(-1, 2), (0, 1), (1, 2)])
+        statistics["background"] = [background]
+        _set_signed_distribution(
+            statistics["full"][0], [(-1, 2), (0, 5), (1, 2)]
+        )
+        statistics["imagePixels"] = 4
+        statistics["informativePixels"] = 4
+        statistics["rowsTouched"] = 2
+        statistics["columnsTouched"] = 2
+        _set_dimensions(statistics, 3, 3, 2, 2)
+        _set_touched_indices(
+            statistics, image_rows=[], image_columns=[],
+            background_rows=[0, 2], background_columns=[0, 2],
+        )
+    elif variant == "monochrome-lanes-disagree":
+        record["toleranceClass"] = "colour-or-us"
+        record["outcome"] = "unmeasured"
+        record["qualifiers"] = ["unstated-threshold"]
+        record["rung"] = "class-two"
+        record["notes"] = ["controlled class-two state"]
+        statistics["channels"] = 3
+        for region in regions:
+            _set_signed_distribution(statistics[region][0], [(0, 2)])
+            statistics[region] = [dict(statistics[region][0]) for _ in range(3)]
+        for region in regions:
+            _set_signed_distribution(statistics[region][1], [(-1, 1), (1, 1)])
+        statistics["imagePixels"] = 2
+        statistics["informativePixels"] = 2
+        statistics["rowsTouched"] = 1
+        statistics["columnsTouched"] = 2
+        _set_dimensions(statistics, 1, 2, 1, 2)
+    elif variant == "partial-volume-reformat-image":
+        record["kind"] = "volume-reformat"
+        _add_zero_background(statistics)
     elif variant == "touched-presence":
         for region in regions:
             _set_one_difference(statistics[region][0], 1.0)
@@ -1365,6 +1491,7 @@ def _report_semantic_mutation(box: Sandbox, variant: str) -> None:
         report["candidate"] = ".claude/probe-missing"
     elif variant == "input-is-file":
         report["candidate"] = ".claude/probe-reference/.keep"
+    _supply_image_touched_indices(statistics)
     box.write(".claude/probe-comparison.json", json.dumps(report) + "\n")
 
 
@@ -1450,9 +1577,13 @@ def _add_opposed_background(statistics: dict) -> None:
     _set_one_difference(background, -1.0)
     statistics["background"] = [background]
     statistics["rowsTouched"] = 1
-    statistics["columnsTouched"] = 1
+    statistics["columnsTouched"] = 2
     statistics["signedMeanDiff"] = 1.0
     _set_dimensions(statistics, 1, 2, 1, 1)
+    _set_touched_indices(
+        statistics, image_rows=[0], image_columns=[0],
+        background_rows=[0], background_columns=[1],
+    )
 
 
 def _ledger_from_parent_directory(box: Sandbox) -> subprocess.CompletedProcess:
@@ -1631,6 +1762,11 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("maximum-contradicts-counts", "maximum contradicts signed histogram"),
         ("percentile-contradicts-counts", "percentile contradicts signed histogram"),
         ("signed-mean-exceeds-maximum", "signed mean contradicts signed histogram"),
+        ("touched-index-not-array", "has no record 'probe-view' statistics.imageRowsTouched array"),
+        ("touched-index-invalid", "invalid record 'probe-view' statistics.imageRowsTouched[0]"),
+        ("touched-index-order", "invalid record 'probe-view' statistics.imageRowsTouched"),
+        ("image-touched-outside-rectangle", "image touched indices leave its rectangle"),
+        ("touched-index-union", "touched counts contradict touched indices"),
         ("predicate-contradicts-statistics", "predicate contradicts statistics"),
         ("bias-contradicts-statistics", "bias verdict contradicts statistics"),
         ("count-exceeds-producer-limit", "invalid record 'probe-view' statistics.full[0].pixels"),
@@ -1653,7 +1789,12 @@ def _report_semantic_probes() -> tuple[Probe, ...]:
         ("empty-informative-with-difference", "informative signed histogram omits image differences"),
         ("frame-dimensions-contradict-regions", "frame and image dimensions contradict regions"),
         ("touched-exceeds-frame-dimensions", "touched counts exceed frame dimensions"),
-        ("touched-contradicts-region-geometry", "touched counts contradict region geometry"),
+        ("touched-contradicts-region-geometry", "touched counts contradict touched indices"),
+        ("region-touched-presence", "image touched indices contradict differences"),
+        ("background-touched-isolated", "background touched indices contain an isolated row or column"),
+        ("background-joint-capacity", "background touched indices contradict region geometry"),
+        ("monochrome-lanes-disagree", "channels contradict monochrome frame"),
+        ("partial-volume-reformat-image", "volume reformat is not a full-frame image"),
         ("touched-presence", "touched counts contradict differences"),
         ("touched-count", "touched counts contradict differing pixels"),
         ("top-signed-mean-source", "signed mean contradicts its source region"),

@@ -1965,6 +1965,15 @@ touch separately before combining their extents. An unchanged background can
 no longer lend an extra row or column to differences confined to the image
 rectangle. A standing probe preserves the exact one-row-image reproduction.
 
+The twelfth review replaced those marginal bounds with producer-owned spatial
+evidence. Each report now carries the image origin and the exact sorted row and
+column index sets touched in the image and background. The ledger reconstructs
+the global counts from their unions and checks the joint cell capacity of each
+region, including the image-shaped hole in the background. It also requires a
+volume reformat to use the full frame and requires all RGB distributions to
+match when `monochromeFrame` is true. Standing probes cover the L-shaped
+background, unequal monochrome lanes and a partial reformat image.
+
 ## F-014, Quirk-capture workflow, completed 2026-09-06
 
 **What was built.** A closed-schema quirk registry now binds each captured

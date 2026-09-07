@@ -324,6 +324,17 @@ def _array(value: object, label: str) -> list:
     return value
 
 
+def _indices(value: object, label: str, *, extent: int) -> list[int]:
+    raw = _array(value, label)
+    indices = [
+        _integer(item, f"{label}[{index}]", maximum=U32_MAX)
+        for index, item in enumerate(raw)
+    ]
+    if indices != sorted(set(indices)) or any(index >= extent for index in indices):
+        sys.exit(f"comparison report has invalid {label}")
+    return indices
+
+
 def _hash(value: object, label: str) -> str:
     if not isinstance(value, str) or HASH_PATTERN.fullmatch(value) is None:
         sys.exit(f"comparison report has invalid {label} render hash")
@@ -414,7 +425,13 @@ def _channel_report(value: object, label: str) -> dict:
     return channel
 
 
-def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
+def _statistics(
+    value: object,
+    record_id: str,
+    tolerance_class: str,
+    kind: str,
+    monochrome_frame: bool,
+) -> dict:
     label = f"record {record_id!r} statistics"
     statistics = _schema(value, label, STATISTICS_KEYS)
     channels = _integer(statistics["channels"], f"{label}.channels")
@@ -449,6 +466,12 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
     image_columns = _integer(
         statistics["imageColumns"], f"{label}.imageColumns", maximum=U32_MAX
     )
+    image_x = _integer(
+        statistics["imageX"], f"{label}.imageX", maximum=U32_MAX
+    )
+    image_y = _integer(
+        statistics["imageY"], f"{label}.imageY", maximum=U32_MAX
+    )
     image_pixels = _integer(
         statistics["imagePixels"], f"{label}.imagePixels", maximum=U32_MAX
     )
@@ -482,8 +505,11 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
             or image_rows == 0 or image_columns == 0
             or frame_rows * frame_columns != full_pixel_count
             or image_rows * image_columns != image_pixels
-            or image_rows > frame_rows or image_columns > frame_columns):
+            or image_x + image_columns > frame_columns
+            or image_y + image_rows > frame_rows):
         sys.exit(f"comparison report {label} frame and image dimensions contradict regions")
+    if rows > frame_rows or columns > frame_columns:
+        sys.exit(f"comparison report {label} touched counts exceed frame dimensions")
     expected_background = full_pixel_count - image_pixels
     if expected_background < 0:
         sys.exit(f"comparison report {label} image exceeds the full frame")
@@ -494,8 +520,32 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
     expected_informative = set() if informative_pixels == 0 else {informative_pixels}
     if informative_region_pixels != expected_informative:
         sys.exit(f"comparison report {label} informative total is inconsistent")
-    if rows > frame_rows or columns > frame_columns:
-        sys.exit(f"comparison report {label} touched counts exceed frame dimensions")
+    image_rows_touched = _indices(
+        statistics["imageRowsTouched"], f"{label}.imageRowsTouched",
+        extent=frame_rows,
+    )
+    image_columns_touched = _indices(
+        statistics["imageColumnsTouched"], f"{label}.imageColumnsTouched",
+        extent=frame_columns,
+    )
+    background_rows_touched = _indices(
+        statistics["backgroundRowsTouched"], f"{label}.backgroundRowsTouched",
+        extent=frame_rows,
+    )
+    background_columns_touched = _indices(
+        statistics["backgroundColumnsTouched"],
+        f"{label}.backgroundColumnsTouched", extent=frame_columns,
+    )
+    if (any(not image_y <= index < image_y + image_rows
+            for index in image_rows_touched)
+            or any(not image_x <= index < image_x + image_columns
+                   for index in image_columns_touched)):
+        sys.exit(f"comparison report {label} image touched indices leave its rectangle")
+    if (rows != len(set(image_rows_touched) | set(background_rows_touched))
+            or columns != len(
+                set(image_columns_touched) | set(background_columns_touched)
+            )):
+        sys.exit(f"comparison report {label} touched counts contradict touched indices")
     if regions["background"]:
         for channel_index in range(channels):
             full = regions["full"][channel_index]
@@ -549,6 +599,19 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
             sys.exit(
                 f"comparison report {label} informative signed histogram omits image differences"
             )
+    if monochrome_frame and channels == 3:
+        for region_name, channel_reports in regions.items():
+            if any(channel != channel_reports[0] for channel in channel_reports[1:]):
+                sys.exit(
+                    f"comparison report {label}.{region_name} channels contradict "
+                    "monochrome frame"
+                )
+    if kind == "volume-reformat" and (
+        image_x != 0 or image_y != 0
+        or image_rows != frame_rows or image_columns != frame_columns
+        or regions["background"]
+    ):
+        sys.exit(f"comparison report {label} volume reformat is not a full-frame image")
     any_difference = any(
         channel["countAtZero"] != channel["pixels"] for channel in regions["full"]
     )
@@ -561,47 +624,63 @@ def _statistics(value: object, record_id: str, tolerance_class: str) -> dict:
             or rows * columns < max(differing_counts)):
         sys.exit(f"comparison report {label} touched counts contradict differing pixels")
 
-    # A lane difference can occupy at most one distinct pixel, while differences
-    # from different lanes may share one. Summing the lane counts is therefore a
-    # safe upper bound on distinct differing pixels in each region. Keep the
-    # regions separate here: pooling them loses the fact that an image confined
-    # to one row cannot touch two rows when the background is unchanged.
-    image_difference_samples = sum(
-        channel["pixels"] - channel["countAtZero"]
-        for channel in regions["image"]
-    )
-    background_difference_samples = sum(
-        channel["pixels"] - channel["countAtZero"]
-        for channel in regions["background"]
-    )
-    image_differing_pixels_upper = min(image_pixels, image_difference_samples)
-    background_differing_pixels_upper = min(
-        expected_background, background_difference_samples
-    )
+    def check_region_touches(
+        region_name: str, touched_rows: list[int], touched_columns: list[int]
+    ) -> None:
+        channel_differences = [
+            channel["pixels"] - channel["countAtZero"]
+            for channel in regions[region_name]
+        ]
+        has_difference = any(channel_differences)
+        if has_difference != bool(touched_rows) or has_difference != bool(touched_columns):
+            sys.exit(
+                f"comparison report {label} {region_name} touched indices "
+                "contradict differences"
+            )
+        if not has_difference:
+            return
 
-    image_rows_upper = min(image_rows, image_differing_pixels_upper)
-    image_columns_upper = min(image_columns, image_differing_pixels_upper)
-    background_rows_available = (
-        frame_rows if image_columns < frame_columns else frame_rows - image_rows
+        row_count = len(touched_rows)
+        column_count = len(touched_columns)
+        if region_name == "image":
+            allowed_cells = row_count * column_count
+            maximum_matching = min(row_count, column_count)
+        else:
+            inside_rows = sum(
+                image_y <= index < image_y + image_rows for index in touched_rows
+            )
+            inside_columns = sum(
+                image_x <= index < image_x + image_columns
+                for index in touched_columns
+            )
+            allowed_cells = (
+                row_count * column_count - inside_rows * inside_columns
+            )
+            if (inside_rows and inside_columns == column_count
+                    or inside_columns and inside_rows == row_count):
+                sys.exit(
+                    f"comparison report {label} background touched indices "
+                    "contain an isolated row or column"
+                )
+            maximum_matching = min(
+                row_count,
+                column_count,
+                row_count - inside_rows + column_count - inside_columns,
+            )
+
+        minimum_covering_pixels = row_count + column_count - maximum_matching
+        maximum_union_pixels = min(allowed_cells, sum(channel_differences))
+        if (max(channel_differences) > allowed_cells
+                or maximum_union_pixels < minimum_covering_pixels):
+            sys.exit(
+                f"comparison report {label} {region_name} touched indices "
+                "contradict region geometry"
+            )
+
+    check_region_touches("image", image_rows_touched, image_columns_touched)
+    check_region_touches(
+        "background", background_rows_touched, background_columns_touched
     )
-    background_columns_available = (
-        frame_columns
-        if image_rows < frame_rows
-        else frame_columns - image_columns
-    )
-    background_rows_upper = min(
-        background_rows_available, background_differing_pixels_upper
-    )
-    background_columns_upper = min(
-        background_columns_available, background_differing_pixels_upper
-    )
-    if (rows > min(frame_rows, image_rows_upper + background_rows_upper)
-            or columns > min(
-                frame_columns, image_columns_upper + background_columns_upper
-            )):
-        sys.exit(
-            f"comparison report {label} touched counts contradict region geometry"
-        )
 
     if tolerance_class == "mono16":
         full = regions["full"][0]
@@ -695,7 +774,10 @@ def _record(value: object, index: int) -> dict:
         sys.exit(f"comparison report has invalid {label} render hash algorithm")
     _hash(hashes["reference"], f"{label} reference")
     _hash(hashes["candidate"], f"{label} candidate")
-    _statistics(record["statistics"], record_id, tolerance_class)
+    _statistics(
+        record["statistics"], record_id, tolerance_class, kind,
+        record["monochromeFrame"],
+    )
 
     if not record["statistics"]["predicatePasses"] or not record["statistics"]["biasPasses"]:
         sys.exit(f"comparison report green record {record_id!r} has a failed predicate")

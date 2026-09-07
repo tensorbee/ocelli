@@ -306,12 +306,16 @@ image bin must also appear unchanged in the informative histogram, because a
 nonzero lane difference cannot be clipped to the same extreme on both sides.
 Only zero-difference samples may be omitted from the informative region.
 `frameRows * frameColumns` must equal the full channel pixel count, and
-`imageRows * imageColumns` must equal the image count within those bounds.
-Touched rows and columns are bounded by those exact frame dimensions and by
-the number of differing samples each region can place in its available rows
-and columns. The image and background bounds are computed separately before
-they are combined. This prevents an unchanged background from lending spatial
-extent to differences confined to the image rectangle.
+`imageRows * imageColumns` must equal the image count at the reported
+`imageX`, `imageY` origin within those bounds. The report preserves the exact
+sorted row and column index sets touched in the image and background. Their
+unions must reproduce `rowsTouched` and `columnsTouched`. Each region's lane
+counts must fit jointly in the Cartesian cells named by its two sets, with the
+image rectangle removed for the background. This prevents the separate row
+and column marginals from describing a spatial shape the producer cannot
+emit. A volume reformat must use the full frame as its image rectangle. When
+`monochromeFrame` is true, every reported RGB channel distribution must be
+identical because each source pixel has equal red, green and blue lanes.
 
 **The gating predicate for class one, and only this:**
 

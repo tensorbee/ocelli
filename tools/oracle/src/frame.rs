@@ -401,6 +401,14 @@ pub struct FrameDifference {
     /// distinction is the useful signal on a decimated frame.
     pub rows_touched: u32,
     pub columns_touched: u32,
+    /// The image rectangle's canvas origin. Touched indices below remain in
+    /// global canvas coordinates so the image and background sets compose.
+    pub image_x: u32,
+    pub image_y: u32,
+    pub image_rows_touched: Vec<u32>,
+    pub image_columns_touched: Vec<u32>,
+    pub background_rows_touched: Vec<u32>,
+    pub background_columns_touched: Vec<u32>,
     pub frame_rows: u32,
     pub frame_columns: u32,
     pub image_rows: u32,
@@ -630,8 +638,12 @@ pub fn difference(
     let lanes = channels.lanes();
     let mut accumulators: Vec<LaneAccumulators> =
         (0..lanes.len()).map(|_| LaneAccumulators::new()).collect();
-    let mut rows_touched = vec![false; usize::try_from(reference.height).unwrap_or(0)];
-    let mut columns_touched = vec![false; usize::try_from(reference.width).unwrap_or(0)];
+    let row_count = usize::try_from(reference.height).unwrap_or(0);
+    let column_count = usize::try_from(reference.width).unwrap_or(0);
+    let mut image_rows_touched = vec![false; row_count];
+    let mut image_columns_touched = vec![false; column_count];
+    let mut background_rows_touched = vec![false; row_count];
+    let mut background_columns_touched = vec![false; column_count];
     let mut image_pixels = 0_u64;
     let mut informative_pixels = 0_u64;
 
@@ -679,6 +691,14 @@ pub fn difference(
             }
 
             if differs {
+                let (rows_touched, columns_touched) = if inside {
+                    (&mut image_rows_touched, &mut image_columns_touched)
+                } else {
+                    (
+                        &mut background_rows_touched,
+                        &mut background_columns_touched,
+                    )
+                };
                 if let Some(row) = rows_touched.get_mut(usize::try_from(y).unwrap_or(0)) {
                     *row = true;
                 }
@@ -689,8 +709,17 @@ pub fn difference(
         }
     }
 
-    let count_true = |flags: &[bool]| -> u32 {
-        u32::try_from(flags.iter().filter(|flag| **flag).count()).unwrap_or(u32::MAX)
+    let union_count = |left: &[bool], right: &[bool]| -> u32 {
+        u32::try_from(left.iter().zip(right).filter(|(a, b)| **a || **b).count())
+            .unwrap_or(u32::MAX)
+    };
+    let touched_indices = |flags: &[bool]| -> Vec<u32> {
+        flags
+            .iter()
+            .enumerate()
+            .filter(|(_, touched)| **touched)
+            .map(|(index, _)| u32::try_from(index).unwrap_or(u32::MAX))
+            .collect()
     };
 
     Ok(FrameDifference {
@@ -706,8 +735,14 @@ pub fn difference(
         informative: RegionStats {
             channels: accumulators.iter().map(|a| a.informative.clone()).collect(),
         },
-        rows_touched: count_true(&rows_touched),
-        columns_touched: count_true(&columns_touched),
+        rows_touched: union_count(&image_rows_touched, &background_rows_touched),
+        columns_touched: union_count(&image_columns_touched, &background_columns_touched),
+        image_x: image.x0,
+        image_y: image.y0,
+        image_rows_touched: touched_indices(&image_rows_touched),
+        image_columns_touched: touched_indices(&image_columns_touched),
+        background_rows_touched: touched_indices(&background_rows_touched),
+        background_columns_touched: touched_indices(&background_columns_touched),
         frame_rows: reference.height,
         frame_columns: reference.width,
         image_rows: image.height,
@@ -882,7 +917,45 @@ mod tests {
         assert_eq!(informative.signed_count_at(1), image.signed_count_at(1));
         assert_eq!((diff.frame_rows, diff.frame_columns), (1, 4));
         assert_eq!((diff.image_rows, diff.image_columns), (1, 2));
+        assert_eq!((diff.image_x, diff.image_y), (1, 0));
+        assert_eq!(diff.image_rows_touched, [0]);
+        assert_eq!(diff.image_columns_touched, [2]);
+        assert_eq!(diff.background_rows_touched, [0]);
+        assert_eq!(diff.background_columns_touched, [0]);
+        assert_eq!(diff.rows_touched, 1);
+        assert_eq!(diff.columns_touched, 2);
         assert_eq!(diff.image_pixels, 2);
+    }
+
+    /// The letterbox is the complement of the image rectangle, not a second
+    /// rectangle. Publishing exact global indices preserves that shape when
+    /// separate row and column counts would admit an impossible arrangement.
+    #[test]
+    fn regional_touched_indices_preserve_the_complement_shape() {
+        let reference = [0_u8; 9];
+        let candidate = [0, 0, 1, 0, 1, 1, 1, 1, 0];
+        let (Ok(a), Ok(b), Ok(image)) = (
+            Frame::from_monochrome(3, 3, &reference),
+            Frame::from_monochrome(3, 3, &candidate),
+            Rect::new(0, 0, 2, 2),
+        ) else {
+            assert!(core::hint::black_box(false), "the fixture did not build");
+            return;
+        };
+        let Ok(diff) = difference(&a, &b, image, ChannelSet::Monochrome) else {
+            assert!(
+                core::hint::black_box(false),
+                "the difference did not compute"
+            );
+            return;
+        };
+
+        assert_eq!(diff.image_rows_touched, [1]);
+        assert_eq!(diff.image_columns_touched, [1]);
+        assert_eq!(diff.background_rows_touched, [0, 1, 2]);
+        assert_eq!(diff.background_columns_touched, [0, 1, 2]);
+        assert_eq!(diff.rows_touched, 3);
+        assert_eq!(diff.columns_touched, 3);
     }
 
     /// Pixels clipped to the same extreme on both sides carry no evidence and
@@ -907,6 +980,9 @@ mod tests {
         };
         assert_eq!(diff.informative_pixels, 1, "only the 40 carries evidence");
         assert_eq!(diff.image_pixels, 4);
+        assert_eq!((diff.image_x, diff.image_y), (0, 0));
+        assert!(diff.background_rows_touched.is_empty());
+        assert!(diff.background_columns_touched.is_empty());
         let Ok(fraction) = diff.informative_fraction() else {
             assert!(core::hint::black_box(false), "the fraction did not compute");
             return;
@@ -948,6 +1024,9 @@ mod tests {
             assert!(core::hint::black_box(false), "no channel 0");
             return;
         };
+        assert_eq!((diff.image_x, diff.image_y), (0, 0));
+        assert!(diff.background_rows_touched.is_empty());
+        assert!(diff.background_columns_touched.is_empty());
         assert_eq!(stats.percentile_abs_diff(0.99).ok(), Some(0));
         assert_eq!(stats.percentile_abs_diff(0.999).ok(), Some(1));
         assert!(matches!(
