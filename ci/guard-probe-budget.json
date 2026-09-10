@@ -81,7 +81,7 @@
       "tunable": false
     },
     "scripts/no_std_check.py:EXPECTED_NO_STD_CRATES": {
-      "digest": "c1c3cd58b3840c67",
+      "digest": "1394dad8c14d7297",
       "guard": "nostd",
       "tunable": false
     },

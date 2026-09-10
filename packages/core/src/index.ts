@@ -15,11 +15,24 @@
  *
  * What does NOT live here: anything a pixel touches.
  *
- * Scaffold. The public API is designed in F-100 (E16.1).
+ * F-021 publishes the bounded DICOMweb client and response sink API below.
+ * F-100 and F-101 own the later session-facing viewer and wasm boundary APIs.
  */
 
-export { writeFrame } from "./bulk.js";
-export type { BulkSink, WasmMemory } from "./bulk.js";
+export { writeDicomwebResponse, writeFrame } from "./bulk.js";
+export type {
+  BulkSink,
+  DicomwebResponseKind,
+  DicomwebResponseSink,
+  WasmMemory,
+} from "./bulk.js";
+
+export { DicomwebClient, DicomwebError } from "./dicomweb.js";
+export type {
+  DicomwebClientOptions,
+  DicomwebErrorCode,
+  QidoSearchOptions,
+} from "./dicomweb.js";
 
 export { readEvent, EVENT_STRIDE, HEADER_BYTES } from "./ring.js";
 export type { DrainResult, OcelliEvent } from "./ring.js";

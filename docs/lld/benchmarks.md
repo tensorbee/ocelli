@@ -1,7 +1,7 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-X014
-**Last updated:** 2026-09-06
+**F-IDs that contributed:** F-006, F-023, F-X014
+**Last updated:** 2026-09-09
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -14,13 +14,13 @@ to measure with, and a rule with no instrument is satisfied by whoever is
 confident. `tools/bench` is the instrument. This file is the design behind it.
 
 **It is an instrument and not a report.** One of its eleven subjects has a
-runner and a recorded number. Nine are blocked on a story that has not landed,
-because there is no decoder, no renderer, no worker and no boundary, which is
-decision D7 holding: the oracle and the instruments exist before the port code.
-The eleventh, `tier.startup_microbenchmark`, is the awkward one and is written
-down rather than rounded off: F-004 landed in this same sprint, so its story is
-`done` and it still has no runner. The harness says so, names the story a reader
-should go and read, and records no number for any of the ten.
+runner and a recorded number. Eight are blocked on a story that has not landed,
+because there is no renderer, no worker and no boundary, which is decision D7
+holding: the oracle and the instruments exist before the port code. Two
+subjects have landed but have no honest runner. `tier.startup_microbenchmark`
+has no runner after F-004, and `decode.frame` has no runner after F-023 because
+dispatch exists without a concrete decoder. The harness reports both as
+`unavailable` with reason `no_runner` and records no number for either.
 
 **`bin/ocelli.sh bench --list` is the authority on that split and this
 paragraph is not.** It reports each subject's blocking story and that story's
@@ -164,7 +164,7 @@ section calls the awkward eleventh row.
 | Subject | State | Blocked on |
 |---------|-------|------------|
 | `wasm.cold_start` | **measured** | nothing, this is the deliverable number |
-| `decode.frame` | unavailable | F-023 (E4.1), codec dispatch and registry, S07 |
+| `decode.frame` | unavailable, reason `no_runner` | nothing. F-023 supplies dispatch but no concrete decoder |
 | `decode.transfer_syntax.htj2k` | unavailable | F-027 (E4.5), S09, a P0 kill criterion |
 | `decode.transfer_syntax.jpegls` | unavailable | F-028 (E4.6), S09, a P0 kill criterion |
 | `render.first_frame` | unavailable | F-038 (E6.2), S12, and F-037 (E6.1), S11 |

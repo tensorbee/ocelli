@@ -4,10 +4,10 @@
 The corpus has two layers and this script is the first of them (F-009, E2.1).
 
 **Why synthetic at all.** A corpus built only from real public studies cannot be
-relied on to contain a signed 12-bit-in-16 CT with HighBit 15, a MONOCHROME1
-with a known gradient, a non-square PixelSpacing, or a deliberately non-uniform
-slice spacing. Those are the traps, and a trap you do not have a case for is a
-trap you find in production.
+relied on to contain a legacy nonconforming signed 12-bit-in-16 CT with
+HighBit 15, a MONOCHROME1 with a known gradient, a non-square PixelSpacing, or
+a deliberately non-uniform slice spacing. Those are the traps, and a trap you
+do not have a case for is a trap you find in production.
 
 **Why a script and not committed files.** `.githooks/pre-commit` refuses a
 staged DICOM by magic bytes as well as by suffix, with no allowlist, and it is
@@ -387,9 +387,11 @@ def ct_common(ds: Dataset) -> None:
 def case_signed_12in16(out: Path, high_bit: int, name: str) -> None:
     """BitsStored 12 in a 16-bit container, signed, at both alignments.
 
-    PS3.3 C.7.6.3.1.4. Real scanners produce both: HighBit 11 is right
-    aligned, HighBit 15 is left aligned. A reader that ignores HighBit gets
-    one of the two right, and both look like plausible Hounsfield numbers.
+    Current PS3.3 C.7.6.3.3 requires HighBit to equal BitsStored minus one,
+    so HighBit 11 is the conforming case. The HighBit 15 case is retained and
+    explicitly labelled as legacy nonconforming interoperability evidence. A
+    reader that ignores HighBit gets one of the two right, and both look like
+    plausible Hounsfield numbers.
     """
     ds = new_dataset(name, CT_STORAGE, "CT")
     ct_common(ds)
@@ -1013,7 +1015,8 @@ CATEGORIES = {
     "synthetic/ct_signed_12in16_right.dcm":
         ("CT", "synthetic, mono16, signed-12in16, high-bit-11"),
     "synthetic/ct_signed_12in16_left.dcm":
-        ("CT", "synthetic, mono16, signed-12in16, high-bit-15"),
+        ("CT", "synthetic, mono16, signed-12in16, high-bit-15, "
+               "legacy-nonconforming"),
     "synthetic/ct_unsigned_16.dcm": ("CT", "synthetic, mono16, unsigned-16"),
     "synthetic/ct_sigmoid_width_half.dcm":
         ("CT", "synthetic, mono16, sigmoid-width-below-one"),

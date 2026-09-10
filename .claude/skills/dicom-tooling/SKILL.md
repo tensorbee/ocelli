@@ -354,9 +354,11 @@ def synthetic_ct(path, rows=8, cols=8, bits_stored=12, signed=True):
 cannot catch a transposed spacing index, which is one of the traps this project
 is most exposed to.
 
-**HighBit is `BitsStored - 1`** here, meaning the value is right-aligned. Real
-scanners also produce left-aligned data where `HighBit` is 15, so make one of
-each.
+**Current PS3.3 C.7.6.3.3 requires `HighBit` to equal `BitsStored - 1`**, so
+the conforming value is right-aligned. The corpus retains one left-aligned
+`HighBit` 15 case as explicitly labelled `legacy-nonconforming`
+interoperability evidence. It must remain visible, but it is not an accepted
+current descriptor and does not imply decoder support.
 
 ### Do not put a synthetic fixture in git either
 

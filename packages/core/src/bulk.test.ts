@@ -1,6 +1,13 @@
 import { describe as group, expect, it } from "vitest";
 
-import { writeFrame, type BulkSink, type WasmMemory } from "./bulk.js";
+import {
+  writeDicomwebResponse,
+  writeFrame,
+  type BulkSink,
+  type DicomwebResponseKind,
+  type DicomwebResponseSink,
+  type WasmMemory,
+} from "./bulk.js";
 
 /**
  * HLD section 17.2, the bulk channel and its trap.
@@ -313,5 +320,36 @@ group("writeFrame, HLD 17.2", () => {
     writeFrame(wasm, sink, bytes, null);
 
     expect(Array.from(bytes)).toEqual(before);
+  });
+});
+
+group("writeDicomwebResponse, HLD 17.2 and PS3.18", () => {
+  it("writes once through a fresh post-allocation view and commits once", () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 4 });
+    const commits: Array<{
+      readonly bytes: Uint8Array;
+      readonly kind: DicomwebResponseKind;
+    }> = [];
+    const sink: DicomwebResponseSink = {
+      alloc(): number {
+        const ptr = memory.buffer.byteLength;
+        memory.grow(1);
+        return ptr;
+      },
+      commit_dicomweb_response(ptr, len, kind): void {
+        commits.push({
+          bytes: new Uint8Array(memory.buffer.slice(ptr, ptr + len)),
+          kind,
+        });
+      },
+    };
+    const bytes = new Uint8Array([3, 1, 4, 1, 5]);
+    const kind: DicomwebResponseKind = { type: "qido-json" };
+
+    writeDicomwebResponse({ memory }, sink, bytes, kind);
+
+    expect(commits).toHaveLength(1);
+    expect(Array.from(commits[0]?.bytes ?? [])).toEqual(Array.from(bytes));
+    expect(commits[0]?.kind).toBe(kind);
   });
 });

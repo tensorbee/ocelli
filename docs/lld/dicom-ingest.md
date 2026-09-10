@@ -1,12 +1,22 @@
 # DICOM ingest
 
-**F-IDs that contributed:** F-016
-**Last updated:** 2026-09-07
+**F-IDs that contributed:** F-016, F-017, F-021
+**Last updated:** 2026-09-09
 
 `ocelli-dicom` owns the first ingest boundary. It accepts an in-memory DICOM
 Part 10 file, resolves its declared transfer syntax, and returns the complete
 dicom-rs object together with evidence of the parser route that produced it.
-It does not project metadata and it does not decode compressed pixel frames.
+It projects metadata without collapsing absence, emptiness, value
+multiplicity, signedness, or nested data sets. It does not decode compressed
+pixel frames.
+
+`SeriesSource` is the transport-neutral response boundary above this parser.
+Its first implementation, `DicomwebSource`, consumes bytes already fetched
+and content-negotiated by TypeScript. QIDO JSON becomes ordered
+`MetadataSet` values. WADO-URI and WADO-RS instance payloads reuse
+`parse_part10`. WADO-RS frame payloads remain encoded ranges into one owned
+multipart response. The source does not perform I/O or depend on browser
+APIs.
 
 ## Public boundary
 
@@ -94,10 +104,65 @@ The variants carry no input bytes, attribute values, instance identifiers,
 paths, or upstream parser tokens. A caller can report the error class without
 placing DICOM content in logs.
 
+## Lossless metadata model
+
+`MetadataSet::from_object` projects the parsed main data set into an ordered
+map keyed by `Tag`. A missing tag is the absence of a map entry. A present
+zero-length element is `MetadataValue::Empty`, so callers cannot confuse Type
+2 emptiness with a missing optional value. Inserting the same tag twice is a
+structural error.
+
+Each `MetadataElement` retains its declared `VR`. `MetadataValue` keeps text,
+attribute tags, binary values, every signed and unsigned integer width,
+floating-point widths, partial date and time values, and nested `SQ` items in
+separate variants. dicom-rs collection uses its preserved-value path, so text
+components keep their source spelling and legal UI NULL or text space pad.
+`MetadataElement::semantic_text` uses the retained VR to compute a view without
+changing that spelling. It trims both ends only for VRs where leading spaces
+are insignificant. ST, LT, UT, and other trailing-pad-only VRs retain leading
+spaces. Ordered multi-valued DS text therefore remains ordered text rather
+than being eagerly converted to floating point.
+
+An ordinary sequence becomes `MetadataValue::Sequence(Vec<MetadataSet>)` and
+retains item order. Encapsulated Pixel Data fragments return
+`UnsupportedPixelFragments` because frame assembly and decode belong to the
+codec path.
+
+F-021 constructs the same model from DICOM JSON. Person Name component
+objects, `BulkDataURI`, and `InlineBinary` have explicit typed constructors.
+The constructors enforce the carrier VR sets in PS3.18 F.2.2. Inline binary
+must be nonempty canonical padded base64 with valid unused bits. A present
+empty DICOM JSON attribute uses `MetadataValue::Empty` as required by PS3.18
+F.2.5. Neither binary carrier is flattened into an ordinary string value.
+`MetadataElement::sequence` fixes the VR to `SQ` and retains ordered nested
+items for the DICOM JSON path without exposing a generic unchecked
+constructor.
+`MetadataElement::with_null_slots` adds a checked wrapper around an existing
+typed value for PS3.18 F.2.5. It retains total multiplicity and ordered null
+positions without weakening the existing value constructors. SQ nulls and
+binary carriers cannot use the wrapper.
+
+## Provider order
+
+`ProviderRegistry` is caller-owned and contains function pointers with stable
+`ProviderId` values. Registration order is the complete precedence rule. A
+lookup returns the first present answer together with the identity of the
+provider that supplied it. A present empty element is still an answer and
+stops fallback.
+
+Duplicate provider identities are refused. A `ProviderId` is the only
+registration identity because Rust function addresses have no reliable
+comparison semantics. The same function can be registered under distinct
+identities when the caller deliberately gives each registration a different
+place in the precedence order. The registry has no implicit provider. The two
+production functions are `data_set_provider`, which reads the parsed main data
+set, and `file_meta_provider`, which reads File Meta Information. They expose
+the same answer type while keeping the sources distinct.
+
 ## Dependencies and targets
 
 D-18 selects the dicom-rs 0.10 component crates directly:
-`dicom-object`, `dicom-encoding`, `dicom-parser`, and
+`dicom-core`, `dicom-object`, `dicom-encoding`, `dicom-parser`, and
 `dicom-transfer-syntax-registry`. Defaults are disabled. Only the two
 components that own whole-data-set deflate enable `deflate`. No pixel codec
 feature is enabled by F-016.
@@ -132,3 +197,17 @@ ignored corpus. It then runs the ignored Rust integration test in
 `crates/ocelli-dicom/tests/corpus.rs`, which parses every manifest row and
 compares the observed UID with the manifest declaration. Failures expose only
 row numbers and transfer-syntax identifiers.
+
+`crates/ocelli-dicom/tests/metadata.rs` adds hand-encoded PS3.5 fixtures for
+present empty values, legal UI and text padding, significant leading ST space,
+ordered DS components, signed SS and SL values, nested sequence items, and
+encapsulated-fragment refusal. PS3.18 fixtures enumerate every permitted VR for
+both binary carriers and reject disallowed VRs, empty Inline Binary, and
+malformed base64. Property tests exercise primitive signedness and
+multiplicity. Provider tests bind first-answer precedence, present-empty
+stopping, identity reporting, and duplicate `ProviderId` refusal.
+
+`crates/ocelli-dicom/tests/dicomweb.rs` adds PS3.18 fixtures for Annex F JSON,
+one-part and many-part instance responses, direct WADO-URI Part 10 input,
+encoded frame ranges, boundary-like payload bytes, malformed framing, media
+type refusal, and patient-safe source errors.

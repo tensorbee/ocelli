@@ -65,6 +65,7 @@ Comma separated. Two of the tokens are structural and
 | `synthetic` or `real` | Which layer the case belongs to. Exactly one |
 | `mono16` | HLD 25.1 tolerance class one, monochrome 16-bit |
 | `colour`, `us` | HLD 25.1 tolerance class two, colour and ultrasound |
+| `legacy-nonconforming` | Retained interoperability evidence that current DICOM input validation must refuse |
 | anything else | What trap the case exists for, free text |
 
 A row that declares no tolerance class is a hole rather than a case, because
@@ -72,12 +73,15 @@ the tolerance it would be compared under is undecidable.
 
 ## The two layers
 
-A corpus built only from real public studies cannot be relied on to contain a
-signed 12-bit-in-16 CT with `HighBit` 15, a `MONOCHROME1` with a known
-gradient, a non-square `PixelSpacing`, or a deliberately non-uniform slice
-spacing. A corpus built only from synthetic cases has never seen a real
-vendor's padding, private blocks or odd-length values. So there are two, and
-the `category` column records which.
+A corpus built only from real public studies cannot be relied on to contain the
+retained legacy nonconforming signed 12-bit-in-16 CT with `HighBit` 15, a
+`MONOCHROME1` with a known gradient, a non-square `PixelSpacing`, or a
+deliberately non-uniform slice spacing. Current PS3.3 C.7.6.3.3 requires
+`HighBit == BitsStored - 1`, so the exact `HighBit` 15 row is interoperability
+evidence that strict frame validation must refuse, not a conforming descriptor.
+A corpus built only from synthetic cases has never seen a real vendor's
+padding, private blocks or odd-length values. So there are two, and the
+`category` column records which.
 
 ### Layer 1, synthetic, regenerated from a committed script
 

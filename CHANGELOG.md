@@ -23,6 +23,19 @@ Repository bootstrap. Nothing is published.
 - A DICOM Part 10 parser that dispatches from the declared Transfer Syntax UID,
   retains the complete dicom-rs object and selected route, and refuses malformed
   or truncated input without an alternate-syntax fallback.
+- A lossless DICOM metadata model and ordered caller-owned provider registry
+  that preserve declared VR, empty versus absent values, multiplicity, signed
+  widths, nested sequences, VR-aware text semantics, validated binary carriers,
+  and stable provider identity.
+- A bounded DICOMweb client for QIDO-RS, WADO-RS and WADO-URI, with caller-owned
+  authentication, cancellation, strict response validation, lossless DICOM JSON
+  metadata projection and encoded frame-part ranges.
+- An explicit runtime codec registry with exact Transfer Syntax UID capability
+  states, validated DICOM frame descriptions, atomic collision-refusing
+  registration, and caller-owned decode output buffers.
+- A safe in-memory NIfTI-1.1 ingest path for little-endian single-file volumes,
+  with checked payload bounds, retained scaling and affine declarations, and
+  selected qform or sform geometry converted from RAS to LPS coordinates.
 - A quirk-capture registry and checker that bind a synthetic generator recipe,
   manifest row, independently computed expectation, regression test and active
   mutation evidence into one reviewed record.

@@ -36,6 +36,29 @@ export interface BulkSink {
   commit_frame(ptr: number, len: number, meta: unknown): void;
 }
 
+/** The Rust response parser selected for one validated HTTP response. */
+export type DicomwebResponseKind =
+  | { readonly type: "qido-json" }
+  | { readonly type: "wado-uri-part10" }
+  | { readonly type: "wado-rs-instances"; readonly boundary: string }
+  | {
+      readonly type: "wado-rs-frames";
+      readonly boundary: string;
+      readonly mediaType: string;
+    };
+
+/** The future F-101 boundary subset needed to commit a DICOMweb response. */
+export interface DicomwebResponseSink {
+  /** Reserve `len` bytes and return a pointer into linear memory. */
+  alloc(len: number): number;
+  /** Hand ownership to the response parser selected by `kind`. */
+  commit_dicomweb_response(
+    ptr: number,
+    len: number,
+    kind: DicomwebResponseKind,
+  ): void;
+}
+
 /**
  * Copy `bytes` into the core and hand ownership over.
  *
@@ -55,4 +78,25 @@ export function writeFrame(
   new Uint8Array(wasm.memory.buffer, ptr, bytes.byteLength).set(bytes);
 
   session.commit_frame(ptr, bytes.byteLength, meta);
+}
+
+/**
+ * Copy one complete validated DICOMweb response into the future core sink.
+ *
+ * F-101 supplies the live Session method. Keeping this operation against a
+ * narrow sink proves the allocation and one-write discipline without
+ * inventing that command boundary early.
+ */
+export function writeDicomwebResponse(
+  wasm: WasmMemory,
+  sink: DicomwebResponseSink,
+  bytes: Uint8Array,
+  kind: DicomwebResponseKind,
+): void {
+  const ptr = sink.alloc(bytes.byteLength);
+
+  // Build the view AFTER the allocation. Use it immediately. Let it go.
+  new Uint8Array(wasm.memory.buffer, ptr, bytes.byteLength).set(bytes);
+
+  sink.commit_dicomweb_response(ptr, bytes.byteLength, kind);
 }

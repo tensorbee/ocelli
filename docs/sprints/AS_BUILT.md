@@ -2086,3 +2086,185 @@ top-level Pixel Data representation, Encapsulated Format VR, the Basic Offset
 Table, required nonempty Fragments, and valid nested Native Format Pixel Data.
 The sprint review and verification ledgers bind this correction to their exact
 staged tree.
+
+## F-021, DICOMweb client: WADO-RS, WADO-URI, QIDO-RS, completed 2026-09-09
+
+**What was built.** `@ocelli/core` now owns bounded DICOMweb GET requests,
+authentication injection, status and content-type validation, cancellation,
+and one-write response transfer. `ocelli-dicom` consumes the transport-neutral
+response contract, projects QIDO DICOM JSON into lossless metadata, parses
+WADO instance payloads through the Part 10 path, and retains encoded frame
+parts as ranges with media-type evidence.
+**HLD sections implemented.** Sections 3, 4, 5.2, 9, 10, 13, 15.1, 17.2,
+23, 24, 26, 27.2, 27.3, and 35.
+**Deviations.** None.
+**Crates / packages modified.** `ocelli-dicom`, `@ocelli/core`, workspace
+dependency policy, DICOM ingest and build-target LLDs, and delivery records.
+**Tests added.** Eleven Rust DICOMweb fixtures, one independent typed-null
+metadata fixture, ten TypeScript DICOMweb tests, and one bulk-write fixture.
+**Fixture provenance.** Synthetic request, DICOM JSON, multipart, and Part 10
+fixtures are derived from DICOM PS3.18 2026c sections 8.3.4, 8.6, 8.7, 9.1.2,
+10.4, 10.6, and Annex F, plus PS3.10 section 7. No patient data is tracked.
+**Verification.** Every authoritative floor gate and the corpus gate passed on
+the exact staged completion tree. Focused Rust, TypeScript, mutation, native,
+content, and prose evidence also passed.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Retrieval and metadata projection
+are renderer-independent, and this story performs no pixel arithmetic.
+**LLD updated.** `docs/lld/dicomweb.md`, `docs/lld/dicom-ingest.md`,
+`docs/lld/build-targets.md`, and `docs/lld/README.md`.
+**Deviations from the design plan.** Review added strict QIDO control and
+pagination validation, full multipart resource-header validation, exact
+media-type parameter evidence, typed null-slot preservation, Group Length
+refusal, and RFC 3986 Content-Location parsing. The live Session command
+remains with F-101 as planned.
+**Notes for future sessions.** F-101 can connect the proven response sink to a
+live Session. Authentication remains caller-owned, and encoded frame payloads
+remain outside TypeScript interpretation.
+
+## F-022, NIfTI volume ingest, completed 2026-09-09
+
+**What was built.** `ocelli-dicom` now parses a bounded, uncompressed,
+little-endian NIfTI-1.1 single-file profile directly from memory. It retains
+validated header, scaling, payload-range and raw affine evidence, selects
+sform over qform, and exposes the selected geometry as a typed index-to-world
+transform after exact RAS-to-LPS conversion.
+**HLD sections implemented.** Sections 3, 4, 5, 16, 23, 25.1, 27.2 and 27.3,
+plus the tracked E3.7 sprint contract where the HLD does not specify NIfTI.
+**Deviations.** D-02 and D-08 retained.
+**Crates / packages modified.** `ocelli-dicom`, its direct dependency lock,
+NIfTI and build-target LLDs, and delivery records.
+**Tests added.** Sixteen integration tests cover all supported datatypes,
+affine selection and geometry, refusal classes, payload boundaries and a
+portable dimension property. Two private unit tests prove checked 32-bit
+payload overflow and the exact upper boundary of f32-to-u64 offset conversion.
+**Fixture provenance.** No pixel arithmetic. Synthetic header and affine
+fixtures are derived from the official NIfTI-1.1 `nifti1.h` quaternion and
+coordinate definitions. NIfTI-2 refusal fixtures use official `nifti2.h`.
+No patient data is tracked.
+**Verification.** The authoritative feature floor and corpus gate passed on
+the exact staged completion tree recorded by the verification ledger and
+commit trailer on 2026-09-09.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Parsing and coordinate conversion
+are renderer-independent and identical across native and wasm targets.
+**LLD updated.** `docs/lld/nifti-ingest.md`, `docs/lld/README.md`, and
+`docs/lld/build-targets.md`.
+**Deviations from the design plan.** Source preflight fixed the supported
+NIfTI profile before implementation. Review tightened exact offset overflow
+and signed-zero handling, exercised every mixed quaternion term, and added
+byte-swapped NIfTI-2 recognition evidence without changing the approved API
+or tolerance.
+**Notes for future sessions.** Gzip, paired files, extensions, big-endian
+NIfTI-1, NIfTI-2 parsing, additional datatypes and `Volume` construction remain
+explicitly outside this story. Scaling is retained without being applied.
+
+## F-017, Metadata model and provider registry, completed 2026-09-09
+
+**What was built.** `ocelli-dicom` now projects parsed Part 10 attributes into
+a lossless ordered `MetadataSet`. Declared VR, missing versus present-empty
+state, multiplicity, signed and unsigned widths, source text spelling, nested
+sequence items, Person Name components, and validated DICOM JSON binary
+carriers remain observable. A caller-owned provider registry applies explicit
+first-answer precedence and returns the stable `ProviderId` that supplied each
+answer.
+**HLD sections implemented.** Sections 3, 4, 11, 15, 23, 25, and 27.
+**Deviations.** Existing D-02 supplies the `ocelli-dicom` crate name. Existing
+D-18 supplies the direct dicom-rs component dependency shape and required
+`std` posture.
+**Crates / packages modified.** `ocelli-dicom`, workspace dependency policy,
+the DICOM ingest LLD, and its LLD index.
+**Tests added.** Two provider unit tests, sixteen initial metadata fixture and
+property tests, and one later fixed-VR sequence-constructor regression.
+**Fixture provenance.** Synthetic Part 10 elements and sequences are
+hand-encoded from DICOM PS3.5. Binary-carrier fixtures use PS3.18 F.2.2 and
+F.2.5. No patient data is tracked.
+**Verification.** The authoritative feature floor and corpus gate passed on
+the exact staged delivery-record tree recorded by the verification ledger and
+commit trailer on 2026-09-09.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Metadata lookup is
+renderer-independent, native and wasm checks pass, and this story performs no
+pixel arithmetic.
+**LLD updated.** `docs/lld/dicom-ingest.md` and `docs/lld/README.md`.
+**Deviations from the design plan.** Review restricted DICOM JSON carriers to
+their PS3.18 VR sets, refused empty Inline Binary, made `ProviderId` the only
+registration identity, and moved text normalization into a VR-aware semantic
+view. F-021 integration required one later F-017-owned seam, the fixed-VR
+sequence constructor.
+**Notes for future sessions.** F-018 and F-019 can consume the lossless
+metadata and provider contracts. F-021 later added the checked
+`MetadataValue::WithNullSlots` representation and its independent test. That
+addition belongs to F-021 and is not counted as F-017 work.
+
+## F-023, Codec dispatch layer and capability registry, completed 2026-09-09
+
+**What was built.** `ocelli-codec` now provides the explicit runtime
+`Decoder` extension point, a sixteen-UID known Transfer Syntax catalogue,
+three-state capability reporting, validated DICOM frame descriptions, exact
+UID dispatch, and atomic collision-refusing registration. Decode output remains
+caller-owned and no concrete codec is activated.
+**HLD sections implemented.** Sections 4, 13, 15, 21, 24, 25, 26, 27, and 28.
+**Deviations.** D-19 records the result-returning registration contract and
+atomic refusal of empty, repeated, unknown, or already registered UIDs.
+**Crates / packages modified.** `ocelli-codec`, the no-std posture guard and
+its reviewed digest, codec and build-target LLDs, and benchmark availability
+documentation.
+**Tests added.** One checked-size unit test and twelve registry integration
+tests covering capability states, exact lookup, frame validation, atomic
+registration, collision refusal, caller-owned output, and propagated decoder
+errors.
+**Fixture provenance.** Synthetic frame descriptions and decoder declarations
+derive from DICOM PS3.3 C.7.6.3.3, the PS3.6 Rows and Columns definitions, and
+the PS3.5 Annex A Transfer Syntax catalogue. No patient data is tracked.
+**Verification.** The authoritative feature floor and corpus gate passed on
+the exact staged delivery-record tree recorded by the verification ledger and
+commit trailer on 2026-09-09.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. All rendering tiers use the same
+registry, decode workers do not touch the GPU, and this story performs no pixel
+arithmetic.
+**LLD updated.** `docs/lld/codecs.md`, `docs/lld/README.md`,
+`docs/lld/benchmarks.md`, and `docs/lld/build-targets.md`.
+**Deviations from the design plan.** Review enforced the required High Bit
+equality, retained Rows and Columns as DICOM `US` values, and added a private
+32-bit checked-length proof without widening the public DICOM contract.
+**Notes for future sessions.** F-024 and later stories own concrete codec
+adapters and conformance output. `decode.frame` remains unavailable with reason
+`no_runner` until a real decoder supplies the benchmark subject.
+
+## S07 delivery-record corrections, recorded 2026-09-09
+
+### F-017 unit-test inventory correction
+
+The F-017 completion entry above remains unchanged. Its test inventory omitted
+the F-017-owned unit test
+`metadata::tests::inline_binary_requires_canonical_padding_and_unused_bits`.
+F-017 delivered three unit tests in total, two for provider registration and
+one for metadata binary-carrier validation, plus the sixteen initial metadata
+fixture and property tests and the later fixed-VR sequence regression. F-021's
+null-slot tests remain F-021 work.
+
+### F-021 deviation correction
+
+The F-021 completion entry above remains unchanged. Its `Deviations` field
+should read: existing D-02 supplies the `ocelli-dicom` crate name, and existing
+D-18 supplies the direct dicom-rs component dependency shape and required
+`std` posture. F-021 introduced no new deviation.
+
+## S07 test-inventory corrections, recorded 2026-09-10
+
+### F-021 DICOMweb integration-test correction
+
+The F-021 completion entry above remains unchanged. After sprint-review pass 1,
+the DICOMweb integration suite had twelve tests because the executable
+transfer-syntax seam across the corpus catalogue, F-016 Part 10 dispatch, and
+F-021 frame metadata added one test to the eleven delivered by F-021. The two
+duplicate-attribute tests added by pass 3 are later sprint-review work.
+
+### F-023 registry integration-test correction
+
+The F-023 completion entry above remains unchanged. The registry integration
+suite now has thirteen tests after sprint review added the exact refusal for
+the retained legacy nonconforming 16 Bits Allocated, 12 Bits Stored, High Bit
+15 descriptor.
