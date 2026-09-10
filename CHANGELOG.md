@@ -26,6 +26,9 @@ Repository bootstrap. Nothing is published.
 - A bounded DICOMweb client for QIDO-RS, WADO-RS and WADO-URI, with caller-owned
   authentication, cancellation, strict response validation, lossless DICOM JSON
   metadata projection and encoded frame-part ranges.
+- A safe in-memory NIfTI-1.1 ingest path for little-endian single-file volumes,
+  with checked payload bounds, retained scaling and affine declarations, and
+  selected qform or sform geometry converted from RAS to LPS coordinates.
 - A quirk-capture registry and checker that bind a synthetic generator recipe,
   manifest row, independently computed expectation, regression test and active
   mutation evidence into one reviewed record.

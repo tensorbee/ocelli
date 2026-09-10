@@ -21,6 +21,9 @@ dicom-encoding = { workspace = true }
 dicom-parser = { workspace = true }
 dicom-transfer-syntax-registry = { workspace = true }
 flate2 = { workspace = true }
+# F-022 constructs the validated NIfTI affine in the HLD coordinate types.
+glam = { workspace = true }
+ocelli-core = { path = "../ocelli-core" }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 uriparse = { workspace = true }

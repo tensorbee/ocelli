@@ -4,9 +4,11 @@
 //!
 //! F-016 adds the Part 10 parser and observable transfer-syntax dispatch.
 //! F-017 adds lossless metadata projection and ordered providers.
+//! F-022 adds direct NIfTI-1.1 header, affine, and payload validation.
 
 mod dicomweb;
 mod metadata;
+mod nifti;
 mod parse;
 mod provider;
 
@@ -19,6 +21,10 @@ pub use dicomweb::{
 pub use metadata::{
     BulkDataUri, InlineBinary, MetadataElement, MetadataError, MetadataSet, MetadataValue,
     NullSlots, PersonName,
+};
+pub use nifti::{
+    NiftiAffineSource, NiftiByteOrder, NiftiDataType, NiftiError, NiftiHeader, NiftiQForm,
+    NiftiSForm, NiftiScaling, NiftiSpatialUnits, ParsedNifti, parse_nifti,
 };
 pub use parse::{DispatchPath, ParseError, ParsedDicom, TransferSyntaxInfo, parse_part10};
 pub use provider::{

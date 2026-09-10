@@ -2121,3 +2121,40 @@ remains with F-101 as planned.
 **Notes for future sessions.** F-101 can connect the proven response sink to a
 live Session. Authentication remains caller-owned, and encoded frame payloads
 remain outside TypeScript interpretation.
+
+## F-022, NIfTI volume ingest, completed 2026-09-09
+
+**What was built.** `ocelli-dicom` now parses a bounded, uncompressed,
+little-endian NIfTI-1.1 single-file profile directly from memory. It retains
+validated header, scaling, payload-range and raw affine evidence, selects
+sform over qform, and exposes the selected geometry as a typed index-to-world
+transform after exact RAS-to-LPS conversion.
+**HLD sections implemented.** Sections 3, 4, 5, 16, 23, 25.1, 27.2 and 27.3,
+plus the tracked E3.7 sprint contract where the HLD does not specify NIfTI.
+**Deviations.** D-02 and D-08 retained.
+**Crates / packages modified.** `ocelli-dicom`, its direct dependency lock,
+NIfTI and build-target LLDs, and delivery records.
+**Tests added.** Sixteen integration tests cover all supported datatypes,
+affine selection and geometry, refusal classes, payload boundaries and a
+portable dimension property. Two private unit tests prove checked 32-bit
+payload overflow and the exact upper boundary of f32-to-u64 offset conversion.
+**Fixture provenance.** No pixel arithmetic. Synthetic header and affine
+fixtures are derived from the official NIfTI-1.1 `nifti1.h` quaternion and
+coordinate definitions. NIfTI-2 refusal fixtures use official `nifti2.h`.
+No patient data is tracked.
+**Verification.** The authoritative feature floor and corpus gate passed on
+the exact staged completion tree recorded by the verification ledger and
+commit trailer on 2026-09-09.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Parsing and coordinate conversion
+are renderer-independent and identical across native and wasm targets.
+**LLD updated.** `docs/lld/nifti-ingest.md`, `docs/lld/README.md`, and
+`docs/lld/build-targets.md`.
+**Deviations from the design plan.** Source preflight fixed the supported
+NIfTI profile before implementation. Review tightened exact offset overflow
+and signed-zero handling, exercised every mixed quaternion term, and added
+byte-swapped NIfTI-2 recognition evidence without changing the approved API
+or tolerance.
+**Notes for future sessions.** Gzip, paired files, extensions, big-endian
+NIfTI-1, NIfTI-2 parsing, additional datatypes and `Volume` construction remain
+explicitly outside this story. Scaling is retained without being applied.

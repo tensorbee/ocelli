@@ -11,7 +11,7 @@ network, or coordinate-system boundary.
 |------|----------|-------|-------|-----|--------|
 | F-017 | E3.2 | Metadata model and provider registry | Rust | 4w | in-progress |
 | F-021 | E3.6 | DICOMweb client: WADO-RS, WADO-URI, QIDO-RS | Rust | 3w | done |
-| F-022 | E3.7 | NIfTI volume ingest | Rust | 2w | pending |
+| F-022 | E3.7 | NIfTI volume ingest | Rust | 2w | done |
 | F-023 | E4.1 | Codec dispatch layer and capability registry | Rust | 2w | in-progress |
 
 **The Status column above is hand-typed and nothing derives it, so it goes

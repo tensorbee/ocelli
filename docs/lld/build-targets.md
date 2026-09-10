@@ -1,6 +1,6 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-021, F-023, F-X008
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-021, F-022, F-023, F-X008
 **Last updated:** 2026-09-09
 
 The wasm build pipeline, the size budget, and the invariants that keep the
@@ -216,6 +216,18 @@ targets, and `wasm-bindgen` remains declared only by `ocelli-wasm`.
 The crate allocates its known-UID set and decoder map during setup. Exact UID
 lookup and decode dispatch borrow that state, and decoded bytes are written to
 the caller's buffer. No codec dependency is active yet.
+
+### NIfTI ingest is shared and has no I/O dependency
+
+F-022 adds a direct NIfTI-1.1 parser to `ocelli-dicom`. The parser accepts an
+in-memory byte slice and uses only `ocelli-core` coordinate types plus the
+existing workspace `glam` matrix implementation. It adds no NIfTI parser,
+compression, filesystem, browser, or native-only dependency.
+
+The same code validates headers, payload ranges, and RAS-to-LPS geometry on
+native and `wasm32-unknown-unknown`. The shipped result contains only a
+`Transform<Index, World>` after conversion to DICOM LPS. `wasm-bindgen`
+remains absent from `ocelli-dicom`.
 
 ## The size budget
 

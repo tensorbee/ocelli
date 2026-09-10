@@ -979,6 +979,8 @@ dependencies = [
  "dicom-parser",
  "dicom-transfer-syntax-registry",
  "flate2",
+ "glam",
+ "ocelli-core",
  "proptest",
  "serde_json",
  "thiserror",

@@ -442,13 +442,38 @@ the official NIfTI-1.1 `nifti1.h` definition and implements a direct parser for
 uncompressed single-file `n+1` input. It refuses NIfTI-2, paired `ni1`, gzip,
 extensions, and big-endian input with distinct errors.
 
-The parser accepts three spatial dimensions and requires every higher declared
-dimension to be one. It accepts only `U8`, `I16`, `U16`, and `F32`, requires
-millimetres, and preserves `scl_slope` and `scl_inter` without applying them.
-It retains both affine declarations and codes, selects nonzero `sform` before
-nonzero `qform`, and refuses an input with neither or with a non-finite or
-singular selected affine. Differing nonzero forms are retained with visible
-selection provenance rather than refused.
+The parser accepts three spatial dimensions and requires only dimensions 4
+through `dim[0]` to be one when they are declared. Undeclared higher dimension
+slots are not interpreted. It accepts only `U8`, `I16`, `U16`, and `F32`,
+requires `(xyzt_units & 0x07) == NIFTI_UNITS_MM`, and treats temporal unit bits
+independently. It preserves `scl_slope` and `scl_inter` exactly without
+applying them or adding a finiteness refusal that the source does not require.
+
+The signed `qform_code` and `sform_code` fields are active only when greater
+than zero, as Methods 2 and 3 in the official header specify. Negative codes
+are invalid. The parser retains both affine declarations and codes, selects an
+active `sform` before an active `qform`, and refuses an input with neither. An
+unselected declaration remains raw header evidence. Finiteness and singularity
+validation apply to the selected constructed affine. Differing active forms
+are retained with visible selection provenance rather than refused.
+
+For qform construction, `b*b + c*c + d*d` greater than one is invalid and is
+not normalised or admitted through a tolerance. `pixdim[0]` accepts `-1` and
+`1`, while `0` means `1` as the official NIfTI-1 header directs. Every other
+qfac value is invalid.
+
+`vox_offset` must be finite, exactly integral, representable as the target
+range type, and at least 352. The below-352 refusal is Ocelli product scope,
+since the official NIfTI-1 text treats a smaller value as 352. Alignment to 16
+bytes is recommended by NIfTI-1 but is not required here. A zero extension
+flag permits an offset greater than 352, and bytes after the checked payload
+range are permitted. Checked length arithmetic is implemented by one private
+helper instantiated as `usize` in production and `u32` in a test that proves
+the 32-bit overflow refusal.
+
+Distinct NIfTI-2 recognition uses the official `nifti2.h` header definition,
+where `sizeof_hdr` is 540 and the eight-byte magic follows it at byte 4:
+<https://github.com/NIFTI-Imaging/nifti_clib/blob/master/nifti2/nifti2.h>.
 
 The selected RAS affine is converted explicitly to DICOM LPS and exposed only
 as `Transform<Index, World>`. The module lives in `ocelli-dicom` and returns
