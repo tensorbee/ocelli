@@ -1,12 +1,13 @@
 # Codec registry
 
-**F-IDs that contributed:** F-023, F-024
+**F-IDs that contributed:** F-023, F-024, F-025
 **Last updated:** 2026-09-10
 
 `ocelli-codec` owns decoder capability, registration, and exact Transfer
-Syntax UID dispatch. Its first concrete adapter covers JPEG Baseline `.50`,
-JPEG Extended `.51`, JPEG Lossless `.57`, and JPEG Lossless SV1 `.70`. The
-crate builds for native and `wasm32-unknown-unknown` from the same Rust
+Syntax UID dispatch. Concrete adapters cover native Implicit and Explicit VR
+Little Endian, native Explicit VR Big Endian, RLE Lossless, JPEG Baseline
+`.50`, JPEG Extended `.51`, JPEG Lossless `.57`, and JPEG Lossless SV1 `.70`.
+The crate builds for native and `wasm32-unknown-unknown` from the same Rust
 implementation.
 
 `bin/ocelli.sh gate native` proves both native and wasm compilation, and the
@@ -77,6 +78,14 @@ The public `register_jpeg_decoders` helper preflights all four exact JPEG UIDs
 before its first insertion. A collision on `.51`, `.57`, or `.70` therefore
 cannot leave an earlier JPEG capability partially registered.
 
+`register_native_and_rle_decoders` applies the same all-or-nothing preflight to
+Implicit VR Little Endian, Explicit VR Little Endian, Explicit VR Big Endian,
+and RLE Lossless. Deflated Explicit VR Little Endian is intentionally absent.
+Its compressed stream wraps the data set rather than one frame and remains an
+`ocelli-dicom` ingest responsibility. It therefore remains
+`KnownUnavailable` in the frame registry even when all F-025 adapters are
+registered.
+
 ## Frame description and output ownership
 
 `FrameDescInput` names every field before validation so adjacent DICOM integer
@@ -87,22 +96,93 @@ Pixel Representation, and Photometric Interpretation.
 Rows and Columns are `u16`, matching their DICOM PS3.6 `US` value
 representations. They are not widened to manufacture host-only test inputs.
 
-Construction refuses zero dimensions, sample containers other than 8, 16, or
-32 bits, Bits Stored outside its container, High Bit other than Bits Stored
+Construction refuses zero dimensions, sample containers other than 1, 8, 16,
+or 32 bits, Bits Stored outside its container, High Bit other than Bits Stored
 minus one, and an output byte length that cannot be represented on the target.
 The High Bit equality is required by DICOM PS3.3 C.7.6.3.3. The validated byte
 length is compared with the caller's output slice before the decoder is called.
 This is size validation, not pixel arithmetic. Stored-bit unpacking remains
 owned by later codec and pixel stories.
 
+`FrameDesc` also retains typed `PixelDataVr::Ob` or `PixelDataVr::Ow` evidence.
+The native adapter uses it to distinguish byte-order-insensitive OB bytes from
+physical 16-bit OW words. Encapsulated RLE and JPEG accept OB only.
+
 The immutable `FrameDesc` and `Result<(), CodecError>` return cannot report a
-colour layout changed by a decoder. `DecodePhotometricInterpretation` is the
-typed output description for that fact. Its default trait implementation is
-`Preserved`, so raw, RLE, and JPEG 2000 adapters keep the input description
-without new code. JPEG reports `Rgb` after its dependency converts a
-three-sample colour codestream. Registry forwards the same query by exact UID.
-This reports the conversion for a future pixel-stage consumer but does not
-enforce its use. No production consumer is wired in F-024.
+colour interpretation or sample layout changed by a decoder.
+`DecodePhotometricInterpretation` and `DecodeSampleLayout` are the typed output
+descriptions for those facts. Raw decoding reports `Preserved` layout. RLE and
+JPEG report `Interleaved`. JPEG also reports `Rgb` after its dependency
+converts a three-sample colour codestream. Registry forwards both queries by
+exact UID. This reports conversions for a future pixel-stage consumer but
+does not enforce their use. No production consumer is wired in F-025.
+
+## Native Pixel Data normalization
+
+Each native UID has a separate raw decoder value because the decode call does
+not receive the selected UID. Implicit VR Little Endian requires Pixel Data VR
+OW. Explicit VR Little Endian and Explicit VR Big Endian retain the legal
+eight-bit OB option. OB bytes are copied in source order under explicit native
+syntaxes. OW is a sequence of physical 16-bit words, so the big-endian decoder
+swaps the two bytes of every complete word. This rule also applies when Bits
+Allocated is 8 or 32. It does not swap a complete 32-bit sample as one integer.
+
+`Decoder::decode` receives exactly one logical frame. It validates the exact
+logical source and output lengths, but does not infer complete-Value padding
+from that frame. Direct OB decode copies the logical frame bytes. Direct
+big-endian OW decode normalizes complete physical words when the caller has
+already isolated a frame on a word boundary. It refuses an odd logical source
+length because those bytes cannot represent complete physical OW words. Such
+a frame must use `NativeFrameIndex`. OB with more than eight allocated bits is
+refused because it cannot carry the required word-order evidence.
+
+`NativeFrameIndex` is the fallible owner for a complete native Pixel Data
+Value. Construction through the exact-UID `RawDecoder` requires a positive
+Number of Frames, validates the descriptor once, and records only checked
+frame count, bit stride, Value Representation, and byte order evidence. The
+complete OB Value is rounded to even length and its necessary trailing byte
+must be NULL. The complete OW Value must contain whole physical 16-bit words,
+but bits and bytes outside the final Pixel Cell are insignificant and need not
+be zero.
+
+Native frames are concatenated without per-frame padding. Frame extraction
+therefore uses the checked global bit offset into the complete Value. Pixel
+Cells are read least-significant bit first, including when a later one-bit
+frame starts in the middle of a byte or word. Big-endian OW byte mapping is
+applied at the Value word boundary before each requested frame is repacked as
+canonical little-endian output. Construction and frame decode allocate
+nothing. An out-of-range frame, wrong output length, or invalid complete Value
+is refused before any caller output byte is changed.
+
+## RLE validation and output
+
+RLE Lossless parses the fixed 64-byte little-endian header and requires exactly
+one segment for every sample byte plane. Used offsets begin at 64, are even,
+strictly increase, and stay within source bounds. Unused offsets are zero.
+Segments are ordered most-significant byte plane first for each sample.
+
+The stateless decoder makes two allocation-free PackBits passes. The first
+validates every row, run, decoded byte count, segment boundary, and physical
+pad without writing. The second repeats the proven traversal and writes
+interleaved pixels in canonical little-endian sample order. A run may not cross
+an image row. Control byte `0x80` is a legal zero-output operation. A segment
+whose semantic stream length is odd has exactly one trailing zero pad, while
+an even semantic stream has none. Truncated runs, surplus output, bad padding,
+and trailing compressed bytes are structural refusals that preserve caller
+output.
+
+The decoder also enforces PS3.5 Table 8.2.2-1 before parsing input.
+MONOCHROME1 and MONOCHROME2 require one sample. PALETTE COLOR requires one
+unsigned sample. RGB and YBR_FULL accept either eight-bit or sixteen-bit
+samples, requiring three unsigned samples in both cases. Other Photometric
+Interpretation, Samples per Pixel, Bits Allocated, and Pixel Representation
+combinations are `UnsupportedPixelFormat`.
+
+Eight-bit and sixteen-bit RLE are supported. One-bit RLE is explicitly
+`UnsupportedPixelFormat` because the current RLE output contract reports
+byte-interleaved samples and has no typed bit-packed layout. Thirty-two-bit RLE
+is also explicitly unsupported, matching the standard photometric RLE
+container scope.
 
 ## JPEG validation and output
 
@@ -158,10 +238,10 @@ output length while the one-byte form remains representable.
 
 `CodecError::UnknownTransferSyntax` and `KnownUnavailable` preserve the
 capability distinction at dispatch. `OutputLength` is returned before a
-decoder sees a wrongly sized destination. JPEG additionally distinguishes an
-invalid codestream, excess or non-padding trailing data, frame metadata
-mismatch, unsupported pixel format, and dependency decode failure. Dispatch
-propagates these results unchanged.
+decoder sees a wrongly sized destination. Concrete adapters additionally
+distinguish an invalid codestream, excess or non-padding trailing data, frame
+metadata mismatch, unsupported pixel format, and dependency decode failure.
+Dispatch propagates these results unchanged.
 
 Error text contains no source bytes, metadata values, paths, or identifiers.
 
@@ -196,6 +276,17 @@ lossless fixture proves both legal A.4 padding forms. Refusal fixtures cover
 truncation, excess or non-padding trailing data, dimension and precision
 mismatch, wrong SV1 predictor, wrong output length, and dependency failure
 with an unchanged caller buffer.
+
+F-025 fixtures hand-compute native word order and RLE PackBits output. They
+cover distinct 8-bit big-endian OB and OW Values, 32-bit OW word order, signed
+containers retained as bytes, two-row literal and repeat runs, legal `0x80`,
+six-plane RGB16 and YBR_FULL16 interleaving, row boundaries, exact segment
+padding, malformed headers and runs, and permanent one-bit and 32-bit RLE
+refusal. The ignored
+corpus integration test compares native little endian, native big endian, RLE,
+and Deflate rows against one synthetic native truth. It also proves Deflate
+selects `DispatchPath::DeflatedExplicitVrLittleEndian` while the frame registry
+reports `KnownUnavailable`.
 
 The `decode.frame` benchmark begins at one real `Decoder::decode` call and ends
 when that call returns. Its first runner uses the release `.51` adapter over

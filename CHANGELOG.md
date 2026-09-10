@@ -33,6 +33,11 @@ Repository bootstrap. Nothing is published.
 - An explicit runtime codec registry with exact Transfer Syntax UID capability
   states, validated DICOM frame descriptions, atomic collision-refusing
   registration, and caller-owned decode output buffers.
+- Native DICOM Pixel Data normalization for little-endian and retired
+  big-endian transfer syntaxes, allocation-free RLE Lossless decoding, checked
+  native multiframe extraction, and typed Pixel Data VR and decoded sample
+  layout evidence. Deflated Explicit VR Little Endian remains a whole-data-set
+  ingest route rather than a frame decoder.
 - A safe in-memory NIfTI-1.1 ingest path for little-endian single-file volumes,
   with checked payload bounds, retained scaling and affine declarations, and
   selected qform or sform geometry converted from RAS to LPS coordinates.

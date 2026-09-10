@@ -1,6 +1,6 @@
 # DICOM ingest
 
-**F-IDs that contributed:** F-016, F-017, F-019, F-021
+**F-IDs that contributed:** F-016, F-017, F-019, F-021, F-025
 **Last updated:** 2026-09-10
 
 `ocelli-dicom` owns the first ingest boundary. It accepts an in-memory DICOM
@@ -68,7 +68,11 @@ fallback.
 
 The encapsulated route covers registry entries whose data-set encoding can be
 read. Codec-specific pixel capability belongs to F-023 and its dependent
-stories.
+stories. Deflated Explicit VR Little Endian remains a whole-data-set ingest
+route rather than a frame decoder. F-025 keeps its UID `KnownUnavailable` in
+`ocelli-codec` while proving this parser selects
+`DispatchPath::DeflatedExplicitVrLittleEndian` and exposes the same synthetic
+pixel truth as the native reference.
 
 ## Strict completion detection
 
@@ -187,6 +191,16 @@ Item Tag offset origin, and exact ordered boundaries. A returned Fragment view
 excludes the one trailing Item pad byte when the encoded frame length is odd.
 Frame lookup never clamps an out-of-range index.
 
+Native Pixel Data has no per-frame offset table. After ingest retains the
+complete native Value and `MultiframeMetadata` validates Number of Frames,
+`ocelli-codec::NativeFrameIndex` owns its format-specific validation and frame
+extraction. That boundary is required because native frames are concatenated
+without per-frame padding and a later one-bit frame may begin in the middle of
+a byte or word. The index validates complete-Value OB or OW physical storage,
+then uses the declared frame count and descriptor to derive checked global bit
+offsets without allocation. `Decoder::decode` itself receives one logical
+frame and does not guess whole-Value padding from a frame slice.
+
 ## Provider order
 
 `ProviderRegistry` is caller-owned and contains function pointers with stable
@@ -240,8 +254,12 @@ The ordinary workspace suite remains self-contained. `bin/ocelli.sh gate
 corpus` first checks coverage, digests, and non-sensitive metadata for the
 ignored corpus. It then runs the ignored Rust integration test in
 `crates/ocelli-dicom/tests/corpus.rs`, which parses every manifest row and
-compares the observed UID with the manifest declaration. Failures expose only
-row numbers and transfer-syntax identifiers.
+compares the observed UID with the manifest declaration. Its codec integration
+test also compares native little-endian, native big-endian, RLE, and Deflate
+syntax rows with one synthetic uncompressed reference. Native Values are read
+from their wire encoding, RLE is decoded from its sole frame Fragment, and
+Deflate is verified after the ingest-owned data-set adapter. Failures expose
+only row numbers, fixture categories, and transfer-syntax identifiers.
 
 `crates/ocelli-dicom/tests/metadata.rs` adds hand-encoded PS3.5 fixtures for
 present empty values, legal UI and text padding, significant leading ST space,

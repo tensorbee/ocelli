@@ -8,8 +8,9 @@ use std::{
 };
 
 use ocelli_codec::{
-    Capability, CodecError, DecodePhotometricInterpretation, Decoder, FrameDesc, FrameDescError,
-    FrameDescInput, KNOWN_TRANSFER_SYNTAXES, PixelRepresentation, Registry, RegistryError,
+    Capability, CodecError, DecodePhotometricInterpretation, DecodeSampleLayout, Decoder,
+    FrameDesc, FrameDescError, FrameDescInput, KNOWN_TRANSFER_SYNTAXES, PixelDataVr,
+    PixelRepresentation, Registry, RegistryError,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -61,6 +62,7 @@ fn frame_input() -> FrameDescInput {
         high_bit: 7,
         pixel_representation: PixelRepresentation::Unsigned,
         photometric_interpretation: "MONOCHROME2".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
     }
 }
 
@@ -105,6 +107,10 @@ fn decoder_output_description_preserves_the_frame_by_default() -> TestResult {
         registry.decode_photometric_interpretation(TS_A, &frame_desc()?)?,
         DecodePhotometricInterpretation::Preserved
     );
+    assert_eq!(
+        registry.decode_sample_layout(TS_A, &frame_desc()?)?,
+        DecodeSampleLayout::Preserved
+    );
     Ok(())
 }
 
@@ -128,6 +134,7 @@ fn valid_frame_description_preserves_fields_and_checked_output_length() -> TestR
     assert_eq!(desc.high_bit(), 11);
     assert_eq!(desc.pixel_representation(), PixelRepresentation::Signed);
     assert_eq!(desc.photometric_interpretation(), "MONOCHROME1");
+    assert_eq!(desc.pixel_data_vr(), PixelDataVr::Ob);
     assert_eq!(desc.output_len(), 12);
     Ok(())
 }

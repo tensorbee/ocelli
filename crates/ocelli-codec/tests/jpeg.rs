@@ -1,8 +1,9 @@
 use std::error::Error;
 
 use ocelli_codec::{
-    Capability, CodecError, DecodePhotometricInterpretation, Decoder, FrameDesc, FrameDescInput,
-    JpegDecoder, PixelRepresentation, Registry, RegistryError, register_jpeg_decoders,
+    Capability, CodecError, DecodePhotometricInterpretation, DecodeSampleLayout, Decoder,
+    FrameDesc, FrameDescInput, JpegDecoder, PixelDataVr, PixelRepresentation, Registry,
+    RegistryError, register_jpeg_decoders,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -22,6 +23,7 @@ fn monochrome_12bit_desc() -> Result<FrameDesc, Box<dyn Error>> {
         high_bit: 11,
         pixel_representation: PixelRepresentation::Unsigned,
         photometric_interpretation: "MONOCHROME2".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
     })?)
 }
 
@@ -35,6 +37,7 @@ fn baseline_colour_desc() -> Result<FrameDesc, Box<dyn Error>> {
         high_bit: 7,
         pixel_representation: PixelRepresentation::Unsigned,
         photometric_interpretation: "YBR_FULL_422".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
     })?)
 }
 
@@ -48,6 +51,7 @@ fn extended_12bit_desc() -> Result<FrameDesc, Box<dyn Error>> {
         high_bit: 11,
         pixel_representation: PixelRepresentation::Unsigned,
         photometric_interpretation: "MONOCHROME2".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
     })?)
 }
 
@@ -148,6 +152,10 @@ fn baseline_colour_reports_rgb_and_class_two_measurement_against_corpus_truth() 
     assert_eq!(
         registry.decode_photometric_interpretation(JPEG_BASELINE, &desc)?,
         DecodePhotometricInterpretation::Rgb
+    );
+    assert_eq!(
+        registry.decode_sample_layout(JPEG_BASELINE, &desc)?,
+        DecodeSampleLayout::Interleaved
     );
     let mut out = vec![0xa5; expected.len()];
     registry.decode(
@@ -407,6 +415,7 @@ fn monochrome_12bit_input() -> FrameDescInput {
         high_bit: 11,
         pixel_representation: PixelRepresentation::Unsigned,
         photometric_interpretation: "MONOCHROME2".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
     }
 }
 

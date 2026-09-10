@@ -2,7 +2,9 @@
 
 use std::{error::Error, hint::black_box, time::Instant};
 
-use ocelli_codec::{Decoder, FrameDesc, FrameDescInput, JpegDecoder, PixelRepresentation};
+use ocelli_codec::{
+    Decoder, FrameDesc, FrameDescInput, JpegDecoder, PixelDataVr, PixelRepresentation,
+};
 
 const ITERATIONS: usize = 31;
 const WARMUP_ITERATIONS: usize = 1;
@@ -22,6 +24,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         high_bit: 11,
         pixel_representation: PixelRepresentation::Unsigned,
         photometric_interpretation: "MONOCHROME2".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
     })?;
     let decoder = JpegDecoder::extended();
     let mut out = vec![0_u8; desc.output_len()];

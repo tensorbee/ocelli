@@ -56,6 +56,15 @@ pub enum PixelRepresentation {
     Signed,
 }
 
+/// Value Representation of the DICOM Pixel Data element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PixelDataVr {
+    /// Other Byte, whose value bytes are insensitive to transfer-syntax byte order.
+    Ob,
+    /// Other Word, whose physical 16-bit words follow transfer-syntax byte order.
+    Ow,
+}
+
 /// Photometric Interpretation presented by a decoder's output buffer.
 ///
 /// Most decoders preserve the interpretation in [`FrameDesc`]. JPEG colour
@@ -68,6 +77,15 @@ pub enum DecodePhotometricInterpretation {
     Preserved,
     /// The output is packed RGB, regardless of the encapsulating DICOM value.
     Rgb,
+}
+
+/// Sample ordering presented by a decoder's output buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DecodeSampleLayout {
+    /// The decoder preserves the input sample layout described by DICOM metadata.
+    Preserved,
+    /// Samples for each pixel are adjacent in the output buffer.
+    Interleaved,
 }
 
 /// Unvalidated fields used to construct a [`FrameDesc`].
@@ -92,6 +110,8 @@ pub struct FrameDescInput {
     pub pixel_representation: PixelRepresentation,
     /// The DICOM Photometric Interpretation value.
     pub photometric_interpretation: String,
+    /// Value Representation used by the Pixel Data element.
+    pub pixel_data_vr: PixelDataVr,
 }
 
 /// Validated descriptive input for one decoded frame.
@@ -108,6 +128,7 @@ pub struct FrameDesc {
     high_bit: u16,
     pixel_representation: PixelRepresentation,
     photometric_interpretation: String,
+    pixel_data_vr: PixelDataVr,
     output_len: usize,
 }
 
@@ -131,6 +152,7 @@ impl FrameDesc {
             high_bit,
             pixel_representation,
             photometric_interpretation,
+            pixel_data_vr,
         } = input;
         if rows == 0 {
             return Err(FrameDescError::ZeroRows);
@@ -141,7 +163,7 @@ impl FrameDesc {
         if samples_per_pixel == 0 {
             return Err(FrameDescError::ZeroSamplesPerPixel);
         }
-        if !matches!(bits_allocated, 8 | 16 | 32) {
+        if !matches!(bits_allocated, 1 | 8 | 16 | 32) {
             return Err(FrameDescError::UnsupportedBitsAllocated {
                 bits: bits_allocated,
             });
@@ -161,7 +183,7 @@ impl FrameDesc {
         }
 
         let output_len =
-            checked_output_len::<usize>(rows, columns, samples_per_pixel, bits_allocated / 8)
+            checked_output_len::<usize>(rows, columns, samples_per_pixel, bits_allocated)
                 .ok_or(FrameDescError::OutputLengthOverflow)?;
 
         Ok(Self {
@@ -173,6 +195,7 @@ impl FrameDesc {
             high_bit,
             pixel_representation,
             photometric_interpretation,
+            pixel_data_vr,
             output_len,
         })
     }
@@ -225,6 +248,12 @@ impl FrameDesc {
         &self.photometric_interpretation
     }
 
+    /// Value Representation used by the Pixel Data element.
+    #[must_use]
+    pub const fn pixel_data_vr(&self) -> PixelDataVr {
+        self.pixel_data_vr
+    }
+
     /// Required caller-provided output length in bytes.
     #[must_use]
     pub const fn output_len(&self) -> usize {
@@ -241,7 +270,7 @@ pub enum FrameDescError {
     ZeroColumns,
     /// Samples per pixel was zero.
     ZeroSamplesPerPixel,
-    /// Bits Allocated was not 8, 16, or 32.
+    /// Bits Allocated was not 1, 8, 16, or 32.
     UnsupportedBitsAllocated { bits: u16 },
     /// Bits Stored was zero or exceeded Bits Allocated.
     BitsStoredOutOfRange {
@@ -260,7 +289,7 @@ impl fmt::Display for FrameDescError {
             Self::ZeroRows => "frame rows must be nonzero",
             Self::ZeroColumns => "frame columns must be nonzero",
             Self::ZeroSamplesPerPixel => "frame samples per pixel must be nonzero",
-            Self::UnsupportedBitsAllocated { .. } => "frame bits allocated must be 8, 16, or 32",
+            Self::UnsupportedBitsAllocated { .. } => "frame bits allocated must be 1, 8, 16, or 32",
             Self::BitsStoredOutOfRange { .. } => {
                 "frame bits stored must fit the allocated sample container"
             }
@@ -276,15 +305,16 @@ fn checked_output_len<T>(
     rows: u16,
     columns: u16,
     samples_per_pixel: u16,
-    bytes_per_sample: u16,
+    bits_allocated: u16,
 ) -> Option<T>
 where
     T: TryFrom<u64>,
 {
-    let length = u64::from(rows)
+    let bits = u64::from(rows)
         .checked_mul(u64::from(columns))?
         .checked_mul(u64::from(samples_per_pixel))?
-        .checked_mul(u64::from(bytes_per_sample))?;
+        .checked_mul(u64::from(bits_allocated))?;
+    let length = bits.checked_add(7)?.checked_div(8)?;
     T::try_from(length).ok()
 }
 
@@ -340,6 +370,11 @@ pub trait Decoder: Send + Sync {
         _desc: &FrameDesc,
     ) -> DecodePhotometricInterpretation {
         DecodePhotometricInterpretation::Preserved
+    }
+
+    /// Describe the sample ordering produced by decoded output.
+    fn decode_sample_layout(&self, _desc: &FrameDesc) -> DecodeSampleLayout {
+        DecodeSampleLayout::Preserved
     }
 
     /// Decode one frame atomically into `out`.
@@ -515,6 +550,19 @@ impl Registry {
             .decode_photometric_interpretation(desc))
     }
 
+    /// Describe the sample ordering produced for one frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same exact-UID capability errors as [`Self::decoder`].
+    pub fn decode_sample_layout(
+        &self,
+        transfer_syntax: &str,
+        desc: &FrameDesc,
+    ) -> Result<DecodeSampleLayout, CodecError> {
+        Ok(self.decoder(transfer_syntax)?.decode_sample_layout(desc))
+    }
+
     /// Decode one frame through the decoder registered for the exact UID.
     ///
     /// # Errors
@@ -552,9 +600,9 @@ mod tests {
 
     #[test]
     fn conforming_dicom_dimensions_can_overflow_a_32_bit_output_length() {
-        assert_eq!(checked_output_len::<u32>(u16::MAX, u16::MAX, 1, 4), None);
+        assert_eq!(checked_output_len::<u32>(u16::MAX, u16::MAX, 1, 32), None);
         assert_eq!(
-            checked_output_len::<u32>(u16::MAX, u16::MAX, 1, 1),
+            checked_output_len::<u32>(u16::MAX, u16::MAX, 1, 8),
             Some(4_294_836_225)
         );
     }

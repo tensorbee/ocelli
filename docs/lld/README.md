@@ -20,11 +20,11 @@ row here in the same hand.
 | File | Area | F-IDs |
 |------|------|-------|
 | [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001, F-005 |
-| [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-021 |
+| [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-021, F-025 |
 | [pixel-pipeline.md](pixel-pipeline.md) | Image-plane evidence, stored-value extraction, modality and VOI mapping | F-018 |
 | [dicomweb.md](dicomweb.md) | TypeScript DICOMweb transport and the pure Rust response contract | F-021 |
 | [nifti-ingest.md](nifti-ingest.md) | NIfTI-1.1 header, affine, coordinate conversion, and payload validation | F-022 |
-| [codecs.md](codecs.md) | Explicit decoder registration, capability, exact Transfer Syntax UID dispatch, and JPEG decode | F-023, F-024 |
+| [codecs.md](codecs.md) | Explicit decoder registration, capability, exact Transfer Syntax UID dispatch, native normalization, RLE, and JPEG decode | F-023, F-024, F-025 |
 | [corpus.md](corpus.md) | Golden corpus layout, generation and verification | F-009, F-013, F-014, F-016, F-X006, F-X007, F-X012, F-X013 |
 | [build-targets.md](build-targets.md) | The wasm pipeline, the size budget, the cross-target proof and the isolation invariant | F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-X008 |
 | [gpu-ownership.md](gpu-ownership.md) | One device, one queue, one owner. The section 31 contract | F-004, F-005, F-008, F-X001 |

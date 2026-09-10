@@ -2268,3 +2268,51 @@ The F-023 completion entry above remains unchanged. The registry integration
 suite now has thirteen tests after sprint review added the exact refusal for
 the retained legacy nonconforming 16 Bits Allocated, 12 Bits Stored, High Bit
 15 descriptor.
+
+## F-025, RLE, Deflate, raw little- and big-endian, completed 2026-09-10
+
+**What was built.** `ocelli-codec` now registers exact-UID native little-endian,
+retired native big-endian, and RLE Lossless adapters. Typed Pixel Data VR and
+decoded sample-layout evidence preserve the byte-order and layout contract.
+A checked native Value index owns whole-Value OB and OW validation plus
+allocation-free multiframe extraction, while Deflated Explicit VR Little
+Endian remains owned by the existing whole-data-set ingest path.
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section
+4, `docs/hld/12-workspace-and-build.md` section 15.2,
+`docs/hld/18-codec-registry.md` section 21,
+`docs/hld/20-errors-and-panics.md` section 23,
+`docs/hld/21-worker-protocol.md` section 24,
+`docs/hld/22-testing-and-tolerance.md` section 25, and
+`docs/hld/24-agent-code-standards.md` section 27.
+**Deviations.** Existing D-18 retains the direct strict `flate2` Deflate path
+at the whole-data-set ingest boundary. No new deviation was introduced.
+**Crates / packages modified.** `ocelli-codec`, the `ocelli-dicom` corpus
+integration test, codec and DICOM ingest LLDs, and delivery records.
+**Tests added.** Eleven native fixtures and ten RLE fixtures cover exact UID
+and VR behavior, endian normalization, complete native Values, multiframe bit
+offsets, PackBits structure, byte-plane ordering, supported colour layouts,
+refusal atomicity, and output bounds. One ignored corpus integration test
+compares native LE, native BE, RLE, and Deflate with one synthetic truth.
+Existing JPEG and registry fixtures gained typed VR and sample-layout checks.
+**Fixture provenance.** Hand-computed native and RLE fixtures derive from DICOM
+PS3.5 sections 6.2, 8.1.1, 8.2, and 8.2.2, Table 8.2.2-1, and Annexes A, D,
+and G. No patient data is tracked.
+**Verification.** The authoritative feature floor and corpus gate passed on
+the exact staged completion tree recorded by the verification ledger and
+commit trailer on 2026-09-10.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Decode is CPU worker work before
+rendering, all tiers consume the same output, native and wasm checks pass, and
+pixels do not cross the JavaScript boundary.
+**LLD updated.** `docs/lld/codecs.md`, `docs/lld/dicom-ingest.md`, and
+`docs/lld/README.md`.
+**Deviations from the design plan.** Preflight corrected PackBits no-op, row,
+padding, typed VR, and decoded-layout requirements. Review added complete
+Table 8.2.2-1 descriptor validation, valid RGB16 and YBR_FULL16 support, exact
+native whole-Value ownership, non-byte-aligned one-bit frame extraction, the
+OB versus OW final-storage distinction, and direct big-endian OW odd-slice
+refusal.
+**Notes for future sessions.** One-bit and 32-bit RLE remain explicit
+`UnsupportedPixelFormat` outcomes under the current byte-interleaved output
+contract. F-018 owns stored-bit interpretation after decode. Deflate remains
+`KnownUnavailable` to frame dispatch because its stream wraps the data set.

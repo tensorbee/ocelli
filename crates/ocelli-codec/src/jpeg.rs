@@ -6,7 +6,8 @@ use jpeg_decoder::{CodingProcess, Decoder as ImageJpegDecoder, PixelFormat};
 use oxideav_core::{CodecId, CodecParameters, Frame, Packet, TimeBase};
 
 use crate::{
-    CodecError, DecodePhotometricInterpretation, Decoder, FrameDesc, Registry, RegistryError,
+    CodecError, DecodePhotometricInterpretation, DecodeSampleLayout, Decoder, FrameDesc,
+    PixelDataVr, Registry, RegistryError,
 };
 
 const JPEG_BASELINE_UID: &str = "1.2.840.10008.1.2.4.50";
@@ -124,12 +125,19 @@ impl Decoder for JpegDecoder {
         }
     }
 
+    fn decode_sample_layout(&self, _desc: &FrameDesc) -> DecodeSampleLayout {
+        DecodeSampleLayout::Interleaved
+    }
+
     fn decode(&self, src: &[u8], desc: &FrameDesc, out: &mut [u8]) -> Result<(), CodecError> {
         if out.len() != desc.output_len() {
             return Err(CodecError::OutputLength {
                 expected: desc.output_len(),
                 actual: out.len(),
             });
+        }
+        if desc.pixel_data_vr() != PixelDataVr::Ob {
+            return Err(CodecError::UnsupportedPixelFormat);
         }
         let (header, codestream) = inspect_jpeg(src)?;
         validate_header(self.syntax, header, desc)?;
