@@ -439,6 +439,30 @@ fn production_providers_keep_data_set_and_file_meta_distinct() {
     );
 }
 
+#[test]
+fn sequence_constructor_fixes_sq_vr_and_preserves_ordered_items() {
+    let mut first = MetadataSet::new();
+    assert!(
+        first
+            .insert(Tag(0x0008, 0x1150), MetadataElement::empty(VR::UI))
+            .is_ok()
+    );
+    let second = MetadataSet::new();
+
+    let sequence = MetadataElement::sequence(vec![first, second]);
+
+    assert_eq!(sequence.vr(), VR::SQ);
+    assert!(
+        matches!(sequence.value(), MetadataValue::Sequence(_)),
+        "the SQ constructor must retain the sequence carrier"
+    );
+    if let MetadataValue::Sequence(items) = sequence.value() {
+        assert_eq!(items.len(), 2);
+        assert_eq!(items.first().map(MetadataSet::len), Some(1));
+        assert_eq!(items.get(1).map(MetadataSet::is_empty), Some(true));
+    }
+}
+
 proptest! {
     #[test]
     fn primitive_projection_preserves_i16(values in proptest::collection::vec(any::<i16>(), 0..8)) {

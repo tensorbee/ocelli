@@ -142,6 +142,12 @@ impl MetadataElement {
         Self::new(VR::PN, MetadataValue::PersonNames(values))
     }
 
+    /// Construct an ordered DICOM JSON sequence value.
+    #[must_use]
+    pub fn sequence(items: Vec<MetadataSet>) -> Self {
+        Self::new(VR::SQ, MetadataValue::Sequence(items))
+    }
+
     /// Construct the typed DICOM JSON BulkDataURI carrier.
     ///
     /// # Errors
