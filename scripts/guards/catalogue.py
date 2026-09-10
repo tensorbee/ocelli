@@ -49,6 +49,7 @@ import json
 import os
 import re
 import subprocess
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -3143,6 +3144,31 @@ def _workspace_members(box: Sandbox) -> list[str]:
     return re.findall(r'"([^"]+)"', listing.group(1))
 
 
+def _workspace_manifest_with_exclusion(manifest: str, member: str) -> str:
+    """Add `member` to `[workspace].exclude` without duplicating the key.
+
+    The real manifest may already exclude vendored sources. Probe fixtures
+    must retain those exclusions and remain valid TOML, or the probe measures
+    the parser's refusal instead of the lint policy it declares.
+    """
+    block = re.search(r"^\[workspace\]$(.*?)(?=^\[|\Z)", manifest,
+                      re.M | re.S)
+    row = re.search(r"^[ \t]*exclude[ \t]*=[ \t]*(\[.*\])[ \t]*$",
+                    block.group(1), re.M)
+    if row is None:
+        insertion = block.start(1)
+        return (manifest[:insertion] +
+                f"\nexclude = {json.dumps([member])}" +
+                manifest[insertion:])
+
+    excluded = tomllib.loads(f"exclude = {row.group(1)}\n")["exclude"]
+
+    start = block.start(1) + row.start()
+    end = block.start(1) + row.end()
+    replacement = f"exclude = {json.dumps([*excluded, member])}"
+    return manifest[:start] + replacement + manifest[end:]
+
+
 def _member_directories(box: Sandbox) -> list[Path]:
     """Every directory the manifest's `members` globs resolve to."""
     found: list[Path] = []
@@ -3494,10 +3520,8 @@ def _exclude_a_named_workspace_member(box: Sandbox) -> None:
     the group allow planted here was in a member the walk no longer visited.
     """
     member = _a_member_outside_crates(box)
-    patterns = _workspace_members(box)
-    box.substitute("Cargo.toml", f"members = {json.dumps(patterns)}",
-                   f"members = {json.dumps(patterns)}\n"
-                   f"exclude = {json.dumps([member])}")
+    box.write("Cargo.toml", _workspace_manifest_with_exclusion(
+        box.read("Cargo.toml"), member))
     _member_outside_crates_group_allow(box)
 
 

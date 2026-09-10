@@ -33,6 +33,12 @@ Repository bootstrap. Nothing is published.
 - An explicit runtime codec registry with exact Transfer Syntax UID capability
   states, validated DICOM frame descriptions, atomic collision-refusing
   registration, and caller-owned decode output buffers.
+- Validated DICOM image-plane and stored-pixel evidence, with one modality and
+  VOI pipeline covering LUT precedence and LINEAR, LINEAR_EXACT, and SIGMOID.
+- Enhanced multiframe projection with checked frame counts, retained shared
+  and per-frame functional-group provenance, and bounded frame indexing.
+- JPEG Baseline, Extended, Lossless, and Lossless SV1 decoding with exact UID
+  registration, atomic caller-buffer output, and decoded colour evidence.
 - JPEG 2000 Part 1 decoding for lossless Transfer Syntax `.90` and general
   Transfer Syntax `.91`, with exact stored-domain validation, atomic output,
   native and WebAssembly execution, and a measured release benchmark.

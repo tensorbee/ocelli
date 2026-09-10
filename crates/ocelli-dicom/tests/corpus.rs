@@ -11,13 +11,21 @@ use ocelli_codec::{
     Capability, FrameDesc, FrameDescInput, PixelDataVr, PixelRepresentation, Registry,
     register_native_and_rle_decoders,
 };
-use ocelli_dicom::{DispatchPath, Tag, parse_part10};
+use ocelli_dicom::{
+    DispatchPath, FunctionalGroupSource, MetadataSet, MultiframeMetadata, Tag, TopLevelFallback,
+    parse_part10,
+};
 
 const IMPLICIT_VR_LE: &str = "1.2.840.10008.1.2";
 const EXPLICIT_VR_LE: &str = "1.2.840.10008.1.2.1";
 const DEFLATED_EXPLICIT_VR_LE: &str = "1.2.840.10008.1.2.1.99";
 const EXPLICIT_VR_BE: &str = "1.2.840.10008.1.2.2";
 const RLE_LOSSLESS: &str = "1.2.840.10008.1.2.5";
+const MULTIFRAME_ROW: &str = "synthetic/ct_multiframe_perframe.dcm";
+const PIXEL_SPACING: Tag = Tag(0x0028, 0x0030);
+const WINDOW_CENTER: Tag = Tag(0x0028, 0x1050);
+const PIXEL_MEASURES_SEQUENCE: Tag = Tag(0x0028, 0x9110);
+const FRAME_VOI_LUT_SEQUENCE: Tag = Tag(0x0028, 0x9132);
 
 #[test]
 #[ignore = "requires the verified local corpus through bin/ocelli.sh gate corpus"]
@@ -64,6 +72,65 @@ fn every_manifest_row_parses_under_its_declared_transfer_syntax() -> Result<(), 
 
     if parsed_count == 0 {
         return Err("the verified corpus contains no rows".to_owned());
+    }
+
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires the verified local corpus through bin/ocelli.sh gate corpus"]
+fn manifest_backed_multiframe_row_preserves_functional_group_sources() -> Result<(), String> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let manifest = fs::read_to_string(root.join("corpus/manifest.tsv"))
+        .map_err(|_| "tracked corpus manifest is unreadable".to_owned())?;
+    let row = manifest
+        .lines()
+        .skip(1)
+        .find(|line| line.split('\t').next() == Some(MULTIFRAME_ROW))
+        .ok_or_else(|| "tracked corpus manifest has no F-019 multiframe row".to_owned())?;
+    let relative_path = row
+        .split('\t')
+        .next()
+        .ok_or_else(|| "F-019 multiframe row has no path".to_owned())?;
+    let bytes = fs::read(root.join("corpus/data").join(relative_path))
+        .map_err(|_| "F-019 multiframe corpus file is unreadable".to_owned())?;
+    let parsed = parse_part10(&bytes)
+        .map_err(|_| "F-019 multiframe corpus file does not parse as Part 10".to_owned())?;
+    let metadata = MetadataSet::from_object(parsed.object())
+        .map_err(|_| "F-019 multiframe metadata projection failed".to_owned())?;
+    let projection = MultiframeMetadata::new(&metadata)
+        .map_err(|_| "F-019 multiframe structure is invalid".to_owned())?;
+
+    if projection.frame_count() != 3 {
+        return Err("F-019 multiframe row does not declare three frames".to_owned());
+    }
+    let shared = projection
+        .resolve(
+            0,
+            PIXEL_MEASURES_SEQUENCE,
+            PIXEL_SPACING,
+            TopLevelFallback::Disallowed,
+        )
+        .map_err(|_| "F-019 shared functional-group lookup failed".to_owned())?
+        .ok_or_else(|| "F-019 shared functional-group source is absent".to_owned())?;
+    let per_frame = projection
+        .resolve(
+            1,
+            FRAME_VOI_LUT_SEQUENCE,
+            WINDOW_CENTER,
+            TopLevelFallback::Disallowed,
+        )
+        .map_err(|_| "F-019 per-frame functional-group lookup failed".to_owned())?
+        .ok_or_else(|| "F-019 per-frame functional-group source is absent".to_owned())?;
+
+    if shared.source() != FunctionalGroupSource::Shared {
+        return Err("F-019 Pixel Measures did not retain its shared source".to_owned());
+    }
+    if per_frame.source() != FunctionalGroupSource::PerFrame(1) {
+        return Err("F-019 VOI did not retain its per-frame source".to_owned());
+    }
+    if shared.source() == per_frame.source() {
+        return Err("F-019 functional-group sources were conflated".to_owned());
     }
 
     Ok(())

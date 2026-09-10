@@ -282,4 +282,7 @@ per-frame precedence, explicit top-level permission, retained source evidence,
 and frame order. `crates/ocelli-dicom/tests/frame_index.rs` uses hand-computed
 Fragment Item Tag offsets to check multi-Fragment Basic Offset Table frames,
 empty-table evidence, Extended Offset Table lengths and pad removal, malformed
-boundaries, truncated tables, and final frame bounds.
+boundaries, truncated tables, and final frame bounds. The ignored corpus test
+projects the exact manifest-backed enhanced CT row through `MetadataSet` and
+`MultiframeMetadata`, then checks its frame count and distinct shared and
+per-frame source labels without reading attribute values into the assertion.

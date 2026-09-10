@@ -111,9 +111,9 @@ count. No API silently clamps an out-of-range frame.
 | fixture | Basic and Extended Offset Tables select hand-computed fragment ranges, including one frame spanning multiple fragments, citing PS3.5 Annex A | `crates/ocelli-dicom/tests/frame_index.rs` |
 | unit | Missing Number of Frames defaults to one while empty, zero, malformed, multiple, and inconsistent counts are refused | module tests |
 | unit | Out-of-range frame selection, truncated offset arrays, non-monotonic offsets, and offsets outside fragment bounds are refused | module tests |
-| conformance | The manifest-backed multiframe row is projected without patient data entering source or logs | existing ignored corpus through `bin/ocelli.sh corpus` |
+| conformance | The manifest-backed multiframe row is parsed through `MetadataSet` and `MultiframeMetadata`, retaining its declared count plus distinct shared and per-frame sources without patient values entering source or logs | `crates/ocelli-dicom/tests/corpus.rs` through `bin/ocelli.sh gate corpus` |
 | mutation | Precedence, offset base, count, and final-bound mutations make named tests fail | feature review evidence |
-| cross-target | The same types compile for native and wasm | `bin/ocelli.sh check ocelli-dicom` and `bin/ocelli.sh wasm` |
+| cross-target | The same library types compile for native and `wasm32-unknown-unknown`. Test-only host dependencies are outside the direct wasm check | `bin/ocelli.sh gate native` and `bin/ocelli.sh cargo check -p ocelli-dicom --lib --target wasm32-unknown-unknown` |
 
 ## Parity surface covered
 

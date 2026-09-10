@@ -4,8 +4,9 @@
 **Branch**: `sprint/s08`
 **Opened**: 2026-09-10
 **Goal**: Add the image-plane, pixel, modality-LUT, VOI-LUT, multiframe, and
-enhanced SOP contracts, then populate the codec registry with JPEG, RLE,
-Deflate, raw endian, and JPEG 2000 decoders validated against the corpus.
+enhanced SOP contracts, then populate the codec registry with JPEG, RLE, raw
+endian, and JPEG 2000 frame decoders validated against the corpus while
+verifying Deflate at its whole-data-set ingest boundary.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
@@ -13,7 +14,7 @@ Deflate, raw endian, and JPEG 2000 decoders validated against the corpus.
 | F-019 | E3.4 | Multiframe and enhanced SOP class handling | Rust | 4w | pending |
 | F-024 | E4.2 | JPEG baseline / extended / lossless via jpeg-decoder | Rust | 3w | pending |
 | F-025 | E4.3 | RLE, deflate, raw little- and big-endian | Rust | 2w | pending |
-| F-026 | E4.4 | JPEG 2000 via openjp2, validated against the corpus | Rust | 4w | pending |
+| F-026 | E4.4 | JPEG 2000 via ritk-codecs, validated against the corpus | Rust | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:
@@ -86,12 +87,15 @@ decoder is unavailable.
 - **F-024** registers JPEG baseline, extended, and lossless decoding through
   the F-023 `Decoder` contract. Each supported UID writes exactly one checked
   frame into caller-provided output and is compared with corpus truth.
-- **F-025** registers RLE, Deflate, and raw little-endian and big-endian paths.
-  It proves segment and stream termination, endian and signed-value handling,
-  exact output length, and refusal without partial success.
-- **F-026** registers JPEG 2000 through the approved openjp2 path and validates
-  every claimed syntax against the corpus on native and wasm. Dependency,
-  memory, and error boundaries remain explicit, with no unreviewed fallback.
+- **F-025** registers RLE and raw little-endian and big-endian frame paths, and
+  verifies Deflated Explicit VR Little Endian at the existing whole-data-set
+  ingest boundary. It proves segment and stream termination, endian and
+  signed-value handling, exact output length, and refusal without partial
+  success.
+- **F-026** registers JPEG 2000 through the approved `ritk-codecs` replacement
+  and validates every claimed syntax against the corpus on native and wasm.
+  Dependency, memory, and error boundaries remain explicit, with no
+  unreviewed fallback.
 - Every concrete decoder has a controlled mutation observed red for the
   claimed reason. The codec benchmark gains a real subject before any
   optimisation claim is made.
@@ -108,8 +112,8 @@ F-018 and F-019 both consume metadata and may touch shared DICOM module types.
 F-024, F-025, and F-026 all populate `ocelli-codec` and the same runtime
 registry. Their design plans must settle shared public types, registry
 ownership, dependency features, and test-file ownership before concurrent
-implementation. F-026 must also prove that the selected openjp2 path is viable
-on wasm before treating its decoder surface as settled.
+implementation. F-026 must also prove that the selected `ritk-codecs` path is
+viable on wasm before treating its decoder surface as settled.
 
 ## Standing expectations
 
