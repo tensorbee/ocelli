@@ -68,6 +68,20 @@ for openjp2 under wasm32 and A2 as `Pure Rust` through `pure_jpegls` 2.0.0.
 listed production gates. F-023 creates no concrete codec adapter and does not
 activate any of those dependencies.
 
+### DICOM PS3.3 C.7.6.3.3, Image Pixel Description Macro
+
+> High Bit (0028,0102) shall be one less than Bits Stored (0028,0101).
+
+`FrameDesc` enforces that equality. A stored-bit window shifted within Bits
+Allocated is not a conforming Image Pixel Description Macro.
+
+### DICOM PS3.6, Rows and Columns
+
+The data dictionary defines Rows `(0028,0010)` and Columns `(0028,0011)` with
+VR `US` and VM 1. `FrameDescInput` and `FrameDesc` therefore represent both as
+`u16`. Output-size validation must not widen the DICOM input contract merely
+to exercise a target-width overflow on a 64-bit host.
+
 ### `docs/hld/21-worker-protocol.md`, section 24
 
 > Three roles: the main thread, N decode workers each with its own WebAssembly
@@ -144,11 +158,14 @@ add the runner without redefining the subject.
    storage shape. Use `std::collections::HashMap` and `std::sync::Arc` as the
    HLD specifies. Remove the scaffold's self-selected `no_std` declaration
    because the prescribed implementation requires `std`.
-2. Define `FrameDesc` as validated descriptive input only: rows, columns,
-   samples per pixel, bits allocated, bits stored, high bit, pixel
-   representation, and photometric interpretation. Construction validates
-   nonzero dimensions, supported container widths, stored-bit bounds, high-bit
-   placement, and checked output length. It performs no pixel arithmetic.
+2. Define `FrameDesc` as validated descriptive input only: rows and columns as
+   their PS3.6 `US` and Rust `u16` values, samples per pixel, bits allocated,
+   bits stored, high bit, pixel representation, and photometric interpretation.
+   Construction validates nonzero dimensions, supported container widths,
+   stored-bit bounds, the PS3.3 C.7.6.3.3 High Bit equality, and checked output
+   length. It performs no pixel arithmetic. One private generic size helper is
+   instantiated as `usize` by production and `u32` by a host test, which proves
+   the 32-bit overflow without broadening the DICOM field types.
 3. Define `Capability` with `Available`, `KnownUnavailable`, and `Unknown`.
    `Registry::with_known` receives the build's explicit UID catalogue.
    Capability and lookup never infer a common transfer syntax.
@@ -182,6 +199,9 @@ add the runner without redefining the subject.
 |----------|----------------|-------|
 | unit | Exact UID lookup distinguishes available, known unavailable, and unknown | `crates/ocelli-codec/src/registry.rs` |
 | unit | Multi-UID registration is atomic and refuses empty, repeated, unknown, or already registered UIDs without replacing a decoder | `crates/ocelli-codec/src/registry.rs` |
+| unit | Known-catalogue construction refuses empty and repeated UIDs | `crates/ocelli-codec/tests/registry.rs` |
+| unit | Frame description refuses every invalid dimension, bit field, and High Bit equality | `crates/ocelli-codec/tests/registry.rs` |
+| unit | The production output-size calculation rejects conforming DICOM dimensions whose byte length exceeds a 32-bit target | `crates/ocelli-codec/src/registry.rs` |
 | unit | Dispatch passes the exact source, descriptor, and caller buffer to the selected decoder and propagates its error without allocating an output vector | `crates/ocelli-codec/tests/registry.rs` |
 | property | Registration order cannot change a successful mapping because every collision is refused before mutation | `crates/ocelli-codec/tests/registry.rs` |
 | cross-target | Native and wasm32 compile the same explicit registry with no inventory registration or `wasm-bindgen` | `bin/ocelli.sh check ocelli-codec` and `bin/ocelli.sh wasm` |
@@ -218,6 +238,9 @@ uses `HashMap` and `Arc` from `std`.
 - Update `docs/lld/benchmarks.md` only to replace F-023's pending-story reason
   for `decode.frame` with the honest `no_runner` state. Do not record a number.
 - Update `docs/lld/build-targets.md` with the prescribed `std` registry shape.
+- Update `scripts/no_std_check.py` and its recorded constant digest in
+  `ci/guard-probe-budget.json` so the reviewed no-std set removes only
+  `ocelli-codec`, moving from eight crates to seven.
 
 ## Write set
 
@@ -234,6 +257,8 @@ uses `HashMap` and `Arc` from `std`.
 - `docs/lld/README.md`
 - `docs/lld/benchmarks.md`
 - `docs/lld/build-targets.md`
+- `scripts/no_std_check.py`
+- `ci/guard-probe-budget.json`
 - `.claude/plans/F-023-design.md`
 - `docs/sprints/CURRENT_SPRINT.md`
 - `docs/sprints/BACKLOG.md`

@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-X008
-**Last updated:** 2026-09-07
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-023, F-X008
+**Last updated:** 2026-09-09
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -192,8 +192,21 @@ strict PS3.5 A.5 padding validation.
 
 Shared does not mean no-std. The dicom-rs parser, dictionary and object graph
 require `std`, so D-18 removes `ocelli-dicom` from the repository's explicit
-no-std set. The `nostd` gate checks the remaining eight crates and the guard
+no-std set. The `nostd` gate checks the remaining seven crates and the guard
 census binds that exact set to a reviewed digest.
+
+### The codec registry is shared and uses `std`
+
+`ocelli-codec` builds unchanged in the native and wasm legs of the cross-target
+proof. HLD section 21 prescribes `std::collections::HashMap` and
+`std::sync::Arc` for its explicit runtime registry. F-023 therefore removes the
+scaffold's self-selected `no_std` declaration. This is not a target split and
+adds no browser binding. The same registry implementation compiles for both
+targets, and `wasm-bindgen` remains declared only by `ocelli-wasm`.
+
+The crate allocates its known-UID set and decoder map during setup. Exact UID
+lookup and decode dispatch borrow that state, and decoded bytes are written to
+the caller's buffer. No codec dependency is active yet.
 
 ## The size budget
 
