@@ -2,8 +2,8 @@
 
 **Area**: `crates/ocelli-core`
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1
-**F-IDs that contributed:** F-001, F-005
-**Last updated:** 2026-09-05
+**F-IDs that contributed:** F-001, F-005, F-018
+**Last updated:** 2026-09-10
 
 Living current-state document. It describes what the code does today.
 
@@ -160,6 +160,12 @@ the modality LUT and `Modality` becomes `Display` under the VOI LUT, and HLD
 section 18 requires that arithmetic to exist exactly once, in `ocelli-pixel`.
 A `From` here would be a second copy of a LUT stage, which is the same defect
 as a second copy anywhere else except that it would look like a convenience.
+
+F-018 supplies those two transformations in `ocelli-pixel`. The free
+`modality(Stored, slope, intercept)` function has the HLD section 18 signature.
+`ModalityTransform` and `VoiTransform` add the sequence-precedence and
+descriptor-selection policy around it. See [pixel-pipeline.md](pixel-pipeline.md)
+for the implemented arithmetic and buffer contract.
 
 `value.rs` therefore contains no arithmetic at all. What it buys is that you
 cannot accidentally window a stored value, and that a reviewer can see the

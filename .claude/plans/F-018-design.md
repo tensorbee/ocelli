@@ -75,7 +75,7 @@ first `LINEAR_EXACT` value, since the formula clamps `-160` to `0.000`.
 | 240 | 255.000 | 255.000 |
 | -60 | 63.910 | 63.750 |
 
-### DICOM PS3.3 C.7.6.2.1.1 and C.7.6.3.3
+### DICOM PS3.3 C.7.6.2.1.1, C.7.6.3.3, and 10.7.1.3
 
 ```text
 P = IPP + i * PixelSpacing[1] * X + j * PixelSpacing[0] * Y
@@ -83,7 +83,10 @@ P = IPP + i * PixelSpacing[1] * X + j * PixelSpacing[0] * Y
 
 Image Position Patient is the centre of the first voxel. `X` is the row
 direction cosine, `Y` is the column direction cosine, `i` is the column index,
-and `j` is the row index. High Bit shall be one less than Bits Stored.
+and `j` is the row index. The row and column direction cosines have unit length
+and are mutually orthogonal. High Bit shall be one less than Bits Stored. Pixel
+Spacing values are positive except that row spacing may be zero for a
+single-row image and column spacing may be zero for a single-column image.
 
 ### DICOM PS3.3 C.7.6.3 and C.11
 
@@ -95,7 +98,9 @@ if PixelRepresentation == 1:
 ```
 
 Modality LUT Sequence takes precedence over rescale slope and intercept. VOI
-LUT Sequence takes precedence over Window Center and Window Width.
+LUT Sequence takes precedence over Window Center and Window Width. LUT Data
+entries are unsigned integers from zero through `2^n - 1`, where `n` is the
+descriptor's bits per entry.
 
 ## What the specification does not cover
 
@@ -116,18 +121,29 @@ Presentation LUT and palette or ICC execution remain later work.
 1. Add compact validated types in `ocelli-pixel` for image-plane geometry and
    stored-pixel description. Reuse `Pt<World>`, `Pt<Index>`, `Transform`,
    `Stored`, `Modality`, and `Display` from `ocelli-core`.
-2. Validate finite image position, finite and nonzero row and column direction
-   cosines, positive finite row and column spacing, nonzero dimensions,
-   supported sample containers, conforming High Bit, signedness, samples per
-   pixel, and planar configuration rules.
+2. Validate finite image position, finite unit-length and mutually orthogonal
+   row and column direction cosines within a dimensionless `2e-6` tolerance,
+   then normalise and orthogonalise accepted rounding noise before storage. A
+   component rounded to six decimal places differs by at most `0.5e-6`.
+   Cauchy-Schwarz bounds the accumulated dot error below
+   `2 * sqrt(3) * 0.5e-6 + 3 * (0.5e-6)^2`, about `1.733e-6`, so `2e-6` is a
+   conservative input bound. Validate finite nonnegative row and column
+   spacing, permitting zero only when its corresponding row or column
+   dimension is one. Validate nonzero dimensions, supported sample containers,
+   conforming High Bit, signedness, samples per pixel, and planar configuration
+   rules.
 3. Construct the index-to-world transform from the PS3.3 equation. Keep row
-   and column spacing named fields so equal scalar types cannot be swapped.
+   and column spacing named fields so equal scalar types cannot be swapped. A
+   legal zero singleton-axis spacing uses a unit extension along that unused
+   transform axis. Every valid index on it is zero, so this preserves all
+   represented voxel positions while retaining an invertible transform.
 4. Unpack 8, 16, and 32-bit little-endian and big-endian containers by masking
    Bits Stored and sign-extending from `BitsStored - 1`. Refuse a destination
    of the wrong length before writing it.
 5. Represent modality selection as either a descriptor-backed LUT or rescale.
-   Construction enforces sequence precedence. Apply the HLD signature for the
-   rescale case and clamped indexed lookup for a LUT descriptor.
+   Construction enforces sequence precedence and validates LUT Data as unsigned
+   integers bounded by the descriptor's bits per entry. Apply the HLD signature
+   for the rescale case and clamped indexed lookup for a LUT descriptor.
 6. Represent VOI selection as either a descriptor-backed LUT or one selected
    window pair and `LINEAR`, `LINEAR_EXACT`, or `SIGMOID`. Construction
    enforces sequence precedence and the exact width preconditions.
@@ -156,10 +172,10 @@ Presentation LUT and palette or ICC execution remain later work.
 | fixture | Rescale and Modality LUT Sequence precedence produce hand-computed values, citing PS3.3 C.11.1 | `crates/ocelli-pixel/tests/modality.rs` |
 | fixture | The four HLD section 18.3 rows, corrected by D-13, plus exact lower and upper comparisons and width refusal | `crates/ocelli-pixel/tests/voi.rs` |
 | fixture | SIGMOID at input `-60` is `255 / (1 + e)` and a non-positive width is refused, citing PS3.3 C.11.2.1.3.1 | `crates/ocelli-pixel/tests/voi.rs` |
-| unit | Malformed dimensions, bit fields, plane vectors, spacing, descriptor lengths, and mismatched window multiplicity are refused before output mutation | module tests |
+| unit | Malformed dimensions, bit fields, non-unit or skewed plane vectors, spacing outside the singleton exception, descriptor lengths, negative, fractional or overflowing LUT Data, and mismatched window multiplicity are refused before output mutation | module and fixture tests |
 | property | An invertible image-plane transform round-trips representative index points within the existing coordinate epsilon | `crates/ocelli-pixel/tests/image_plane.rs` |
 | mutation | Spacing swap, sign-bit shift, precedence reversal, VOI comparison, and exponent-sign changes make named fixtures fail | feature review evidence |
-| cross-target | The same modules compile for native and wasm without wasm-bindgen | `bin/ocelli.sh check ocelli-pixel` and `bin/ocelli.sh wasm` |
+| cross-target | The same modules compile for native and `wasm32-unknown-unknown` without wasm-bindgen | `bin/ocelli.sh gate native` and `bin/ocelli.sh cargo check -p ocelli-pixel --all-targets --target wasm32-unknown-unknown` |
 
 ## Parity surface covered
 

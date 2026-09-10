@@ -1015,6 +1015,10 @@ dependencies = [
 [[package]]
 name = "ocelli-pixel"
 version = "0.1.0"
+dependencies = [
+ "glam",
+ "ocelli-core",
+]
 
 [[package]]
 name = "ocelli-render"

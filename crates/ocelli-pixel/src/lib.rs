@@ -2,9 +2,27 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
-//! Scaffold only. F-001 creates the crate, later stories fill it.
+//! F-018 keeps image-plane evidence, stored-value extraction and the modality
+//! and VOI stages together here so pixel arithmetic has one implementation.
 
 #![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
+
+pub mod error;
+pub mod image_plane;
+pub mod lut;
+pub mod stored_pixel;
+
+pub use error::PixelError;
+pub use image_plane::{
+    ImageDimensions, ImageOrientationPatient, ImagePlane, ImagePositionPatient, PixelSpacing,
+};
+pub use lut::{LutDescriptor, ModalityTransform, VoiFunction, VoiTransform, modality};
+pub use stored_pixel::{
+    ByteOrder, PhotometricInterpretation, PixelRepresentation, PlanarConfiguration, SampleLayout,
+    StoredBits, StoredPixelDescription,
+};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.
