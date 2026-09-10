@@ -1,108 +1,115 @@
-# Current sprint, S07
+# Current sprint, S08
 
 **Milestone**: M2, DICOM ingest and the pixel pipeline.
-**Branch**: `sprint/s07`
-**Opened**: 2026-09-07
-**Goal**: Turn parsed input into typed metadata and explicit source and codec
-capabilities, while adding DICOMweb and NIfTI ingest without hiding a format,
-network, or coordinate-system boundary.
+**Branch**: `sprint/s08`
+**Opened**: 2026-09-10
+**Goal**: Add the image-plane, pixel, modality-LUT, VOI-LUT, multiframe, and
+enhanced SOP contracts, then populate the codec registry with JPEG, RLE,
+Deflate, raw endian, and JPEG 2000 decoders validated against the corpus.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-017 | E3.2 | Metadata model and provider registry | Rust | 4w | done |
-| F-021 | E3.6 | DICOMweb client: WADO-RS, WADO-URI, QIDO-RS | Rust | 3w | done |
-| F-022 | E3.7 | NIfTI volume ingest | Rust | 2w | done |
-| F-023 | E4.1 | Codec dispatch layer and capability registry | Rust | 2w | done |
+| F-018 | E3.3 | Image plane, pixel, modality-LUT and VOI-LUT modules | Rust | 3w | pending |
+| F-019 | E3.4 | Multiframe and enhanced SOP class handling | Rust | 4w | pending |
+| F-024 | E4.2 | JPEG baseline / extended / lossless via jpeg-decoder | Rust | 3w | pending |
+| F-025 | E4.3 | RLE, deflate, raw little- and big-endian | Rust | 2w | pending |
+| F-026 | E4.4 | JPEG 2000 via openjp2, validated against the corpus | Rust | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:
 
 ```bash
-grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S07 / {print $2, $9}'
+grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S08 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S07 expands the trustworthy parse boundary from S06 into the four interfaces
-that later pixel and volume stories consume. F-017 gives parsed attributes a
-typed metadata model and provider registry. F-021 defines DICOMweb retrieval
-while keeping fetch and authentication in the TypeScript shell. F-022 adds a
-second medical-image input format without pretending its geometry conventions
-are DICOM conventions. F-023 creates the explicit runtime codec registry that
-later decoder stories populate.
+S08 turns the explicit ingest and codec-dispatch contracts from S07 into the
+first usable pixel pipeline. It defines image-plane and stored-pixel evidence,
+implements the modality and VOI stages once in Rust, represents multiframe and
+enhanced objects without losing where a value came from, and registers the
+first concrete decoders behind the existing caller-provided-buffer boundary.
+The result must remain identical on native and wasm targets and must be
+measured against the existing synthetic and real corpus evidence.
 
-This sprint establishes contracts and observable dispatch. It does not pull in
-the image-plane and LUT modules of F-018, enhanced multiframe handling of
-F-019, or the concrete codec implementations beginning with F-024.
+This sprint does not add the F-020 per-frame functional-group, gantry-tilt, or
+spacing-calibration work. It does not add JPEG-LS or HTJ2K, which remain the
+separate F-028 and F-027 decisions. It also does not move LUT arithmetic into a
+shader or create a rendering API.
 
 ## What is carried in
 
 - **F-X011** remains pending because its acceptance evidence requires a second
   physical machine and none is available. It is unfinished M1 evidence, but it
-  is not a dependency of any S07 story.
-- **F-012 and F-014** provide the comparison and synthetic quirk-capture paths
-  for ingest defects. They are completed foundations, not S07 story scope.
+  is not a dependency of any S08 story.
+- S07 closed F-017 and F-023, which are the declared prerequisites for every
+  S08 story. No S07 implementation story is carried into this sprint.
 
 ## The defect class this sprint is exposed to
 
-**A plausible value can come from the wrong source or convention.** A metadata
-model that collapses absent, empty, padded, and multi-valued attributes may
-look correct on common files while losing information required by later LUT
-and geometry code. Provider selection must remain observable, and absence must
-not silently become a default supplied by another provider.
+**A decoded pixel can look plausible while being numerically or structurally
+wrong.** Stored-value extraction must respect signedness, Bits Stored, High
+Bit, byte order, samples, planar configuration, frame bounds, and exact output
+length. A decoder that produces the expected dimensions but shifts bits,
+swaps channels, accepts trailing compressed data, or partially writes its
+destination is not correct.
 
-The source boundary is equally specific. HLD sections 3, 10, and 13 keep
-DICOMweb fetch and authentication in TypeScript and declare `SeriesSource` as
-the extension point for byte sources. Moving network ownership into Rust,
-copying a retrieved instance across the boundary more than once, or exposing a
-DICOMweb-specific type above the source contract would make the later DIMSE
-entry point a rewrite.
+The LUT chain is exposed to boundary comparisons, precedence, and rounding.
+Modality LUT Sequence takes precedence over rescale slope and intercept. The
+LINEAR and LINEAR_EXACT VOI functions differ by a half and a one at their
+boundaries, so visual inspection cannot establish correctness. The
+hand-computed HLD section 18.3 values and controlled mutations must do that.
 
-NIfTI and DICOM do not name patient axes the same way. Treating a NIfTI affine
-as if it were already DICOM patient geometry can produce a well-shaped but
-mirrored or transposed volume. The input format and the coordinate conversion
-must be explicit and independently tested with a non-symmetric affine.
+Multiframe objects add a source-precedence defect class. Top-level, shared,
+and frame-specific declarations must not be silently conflated, and frame
+indices or fragments must not drift across frame boundaries. F-019 must leave
+the richer per-frame geometry and calibration rules explicitly owned by F-020
+rather than embedding an incomplete second interpretation.
 
-The codec registry has the same silent-fallback risk as transfer-syntax
-parsing. An unregistered Transfer Syntax UID must report unavailable rather
-than selecting a common decoder. Capability answers must distinguish a known
-syntax with no decoder from an unknown syntax, and registration order must not
-silently change which decoder runs.
+Codec portability is part of correctness. Native-only registration, a C
+library that cannot build for `wasm32-unknown-unknown`, or a dependency feature
+that differs silently across targets would make the same Transfer Syntax UID
+mean different things by platform. Capability must stay explicit when a
+decoder is unavailable.
 
 ## What done means
 
-- **F-017** defines the metadata types and provider lookup contract in
-  `ocelli-dicom`. Tests preserve absence, padding, multiplicity, signed values,
-  and the identity of the provider that answered.
-- **F-021** implements the declared DICOMweb source path for WADO-RS,
-  WADO-URI, and QIDO-RS. Fetch and authentication remain in TypeScript, bulk
-  bytes cross into WebAssembly once, and HTTP or content-type failures remain
-  distinct from DICOM parse failures.
-- **F-022** validates NIfTI headers and payload bounds, preserves the declared
-  affine, and converts its geometry into an explicit internal coordinate
-  contract. Truncated input, unsupported datatype or endianness, and invalid
-  dimensions are refused with synthetic fixtures.
-- **F-023** implements explicit runtime codec registration through the HLD
-  `Decoder` extension point. Lookup is by declared Transfer Syntax UID,
-  unavailable capability is observable, and decoding writes into a
-  caller-provided buffer without allocation.
-- Native and wasm checks prove the same metadata, source, NIfTI, and codec
-  contracts. `wasm-bindgen` remains confined to `ocelli-wasm`.
-- Each dispatch or convention boundary has a controlled mutation observed red
-  for the claimed reason. No tolerance or gate is weakened to make it pass.
+- **F-018** provides typed image-plane and stored-pixel evidence plus one Rust
+  implementation of modality and VOI mapping. It proves Modality LUT
+  precedence and the LINEAR, LINEAR_EXACT, and SIGMOID boundary rules with
+  hand-computed fixtures before any shader consumes the parameters.
+- **F-019** handles multiframe and enhanced SOP input through the lossless
+  metadata model, with explicit frame counts, frame selection, and source
+  provenance. Truncated, inconsistent, and out-of-range frame declarations
+  are refused without claiming the F-020 geometry-calibration scope.
+- **F-024** registers JPEG baseline, extended, and lossless decoding through
+  the F-023 `Decoder` contract. Each supported UID writes exactly one checked
+  frame into caller-provided output and is compared with corpus truth.
+- **F-025** registers RLE, Deflate, and raw little-endian and big-endian paths.
+  It proves segment and stream termination, endian and signed-value handling,
+  exact output length, and refusal without partial success.
+- **F-026** registers JPEG 2000 through the approved openjp2 path and validates
+  every claimed syntax against the corpus on native and wasm. Dependency,
+  memory, and error boundaries remain explicit, with no unreviewed fallback.
+- Every concrete decoder has a controlled mutation observed red for the
+  claimed reason. The codec benchmark gains a real subject before any
+  optimisation claim is made.
+- `wasm-bindgen` remains confined to `ocelli-wasm`, and no render-loop or
+  network boundary is added by these worker-side modules.
 
 ## Dependency order
 
-F-017, F-021, F-022, and F-023 all depend on F-016, which is done. No S07 story
-is blocked by its declared dependencies.
+F-018 and F-019 depend on F-017, which is done. F-024, F-025, and F-026 depend
+on F-023, which is done. The generated allocation declares no dependency among
+the five S08 stories, so none begins blocked.
 
-The allocation declares no dependency among the four S07 stories. F-017,
-F-021, and F-022 all touch `ocelli-dicom`, so their designs must settle shared
-types and file ownership before concurrent implementation. F-023 primarily
-owns `ocelli-codec`. Its explicitly selected sixteen-UID product and corpus
-subset must remain accepted by F-016's broader observable parser registry.
-Additional syntaxes recognized by F-016 do not become codec capabilities.
+F-018 and F-019 both consume metadata and may touch shared DICOM module types.
+F-024, F-025, and F-026 all populate `ocelli-codec` and the same runtime
+registry. Their design plans must settle shared public types, registry
+ownership, dependency features, and test-file ownership before concurrent
+implementation. F-026 must also prove that the selected openjp2 path is viable
+on wasm before treating its decoder surface as settled.
 
 ## Standing expectations
 
@@ -112,10 +119,10 @@ The HLD is authoritative. A design-plan departure is recorded in
 No patient data enters a prompt, tracked file, fixture, log, error or commit.
 The ignored corpus remains behind `corpus/manifest.tsv` and its generators.
 
-`SeriesSource` and `Decoder` are the declared extension-point exceptions that
-may land with one implementer. No other new trait or generic parameter lands
-without two users in the current tree.
+The existing `Decoder` trait is the declared extension point. No second codec
+abstraction, forwarding wrapper, feature flag without a named user, or generic
+parameter with only one present instantiation is added.
 
-Transfer-syntax, provider, and source capability are reported explicitly. An
-unsupported route is unavailable or refused according to its contract and is
-never silently treated as the common path.
+Pixel arithmetic, frame boundaries, and Transfer Syntax UID dispatch remain
+observable. An unsupported route is unavailable or refused according to its
+contract and is never silently treated as the common path.
