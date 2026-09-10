@@ -1,7 +1,7 @@
 # DICOM ingest
 
-**F-IDs that contributed:** F-016, F-017, F-021
-**Last updated:** 2026-09-09
+**F-IDs that contributed:** F-016, F-017, F-019, F-021
+**Last updated:** 2026-09-10
 
 `ocelli-dicom` owns the first ingest boundary. It accepts an in-memory DICOM
 Part 10 file, resolves its declared transfer syntax, and returns the complete
@@ -142,6 +142,51 @@ typed value for PS3.18 F.2.5. It retains total multiplicity and ordered null
 positions without weakening the existing value constructors. SQ nulls and
 binary carriers cannot use the wrapper.
 
+## Multiframe projection and frame indexing
+
+`MultiframeMetadata` is a borrowed checked view over one `MetadataSet`.
+Number of Frames `(0028,0008)` defaults to one only when absent. A present
+value must be one positive IS value whose preserved spelling, including pad,
+is at most 12 bytes and whose numeric value fits DICOM's signed 32-bit IS
+range. Empty, zero, multiple, malformed, and overflowing declarations are
+distinct refusals. A present Per-frame Functional Groups Sequence must contain
+exactly the declared number of items. Shared Functional Groups may contain
+zero or one item.
+
+Attribute resolution is scoped to one checked zero-based frame. It consults
+the requested group in the per-frame item first and the shared item second.
+Top-level fallback is consulted only when the caller explicitly identifies it
+as legal for that attribute's module. The result borrows the original
+`MetadataElement`, names its winning `FunctionalGroupSource`, and records any
+lower-precedence duplicate source. Duplicate evidence is not erased merely
+because the per-frame value wins.
+
+The projection leaves sequence item order unchanged. Dimension Index, Frame
+Content, plane position, plane orientation, pixel measures, rescale, window,
+and real-world mapping values remain lossless metadata. It does not sort
+frames, derive geometry, calibrate spacing, or interpret gantry tilt. Those
+operations remain F-020 scope.
+
+`EncapsulatedFrameIndex` groups borrowed Fragment Values without concatenating
+or decoding them. Basic Offset Table entries are checked against Fragment Item
+Tag offsets measured from the first Fragment Item Tag. Each Fragment advances
+that offset by its 8-byte Item header plus even physical Value length. Both
+table paths refuse an odd physical Fragment Value. A populated table must
+contain one strictly increasing offset per frame and every offset must land on
+a supplied Fragment boundary. One frame may therefore borrow several adjacent
+Fragments.
+
+An empty Basic Offset Table maps a single frame to all Fragments. For multiple
+frames it accepts only the proven one-Fragment-per-frame case where the counts
+match. Every other empty-table mapping reports unavailable boundary evidence
+instead of guessing.
+
+Extended Offset Table input follows PS3.3 C.7.6.3.1.8. It requires one
+Fragment per frame, one 64-bit offset and length per frame, the same Fragment
+Item Tag offset origin, and exact ordered boundaries. A returned Fragment view
+excludes the one trailing Item pad byte when the encoded frame length is odd.
+Frame lookup never clamps an out-of-range index.
+
 ## Provider order
 
 `ProviderRegistry` is caller-owned and contains function pointers with stable
@@ -211,3 +256,12 @@ stopping, identity reporting, and duplicate `ProviderId` refusal.
 one-part and many-part instance responses, direct WADO-URI Part 10 input,
 encoded frame ranges, boundary-like payload bytes, malformed framing, media
 type refusal, and patient-safe source errors.
+
+`crates/ocelli-dicom/tests/multiframe.rs` constructs synthetic enhanced
+metadata through `MetadataSet`. It checks the absent-only frame-count default,
+invalid declarations, functional-group item counts, checked frame selection,
+per-frame precedence, explicit top-level permission, retained source evidence,
+and frame order. `crates/ocelli-dicom/tests/frame_index.rs` uses hand-computed
+Fragment Item Tag offsets to check multi-Fragment Basic Offset Table frames,
+empty-table evidence, Extended Offset Table lengths and pad removal, malformed
+boundaries, truncated tables, and final frame bounds.

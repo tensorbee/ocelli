@@ -7,7 +7,9 @@
 //! F-022 adds direct NIfTI-1.1 header, affine, and payload validation.
 
 mod dicomweb;
+mod frame_index;
 mod metadata;
+mod multiframe;
 mod nifti;
 mod parse;
 mod provider;
@@ -18,9 +20,14 @@ pub use dicomweb::{
     DicomwebSource, EncodedFramePart, EncodedFrames, SeriesSource, SourceBatch, SourceError,
     SourceResponse, SourceResponseKind,
 };
+pub use frame_index::{EncapsulatedFrameIndex, FrameIndexError};
 pub use metadata::{
     BulkDataUri, InlineBinary, MetadataElement, MetadataError, MetadataSet, MetadataValue,
     NullSlots, PersonName,
+};
+pub use multiframe::{
+    DuplicateSources, FunctionalGroupSource, MultiframeError, MultiframeMetadata,
+    ResolvedFunctionalGroup, TopLevelFallback,
 };
 pub use nifti::{
     NiftiAffineSource, NiftiByteOrder, NiftiDataType, NiftiError, NiftiHeader, NiftiQForm,

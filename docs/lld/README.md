@@ -20,7 +20,7 @@ row here in the same hand.
 | File | Area | F-IDs |
 |------|------|-------|
 | [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001, F-005 |
-| [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-021 |
+| [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-021 |
 | [dicomweb.md](dicomweb.md) | TypeScript DICOMweb transport and the pure Rust response contract | F-021 |
 | [nifti-ingest.md](nifti-ingest.md) | NIfTI-1.1 header, affine, coordinate conversion, and payload validation | F-022 |
 | [codecs.md](codecs.md) | Explicit decoder registration, capability, and exact Transfer Syntax UID dispatch | F-023 |
