@@ -4,10 +4,14 @@
 //! explicit representation kind, then projects them into the same metadata
 //! and Part 10 types used by the rest of the crate.
 
-use std::{ops::Range, str::FromStr};
+use std::{fmt, ops::Range, str::FromStr};
 
 use dicom_core::{PrimitiveValue, VR};
-use serde_json::{Map, Value};
+use serde::{
+    Deserialize,
+    de::{self, MapAccess, SeqAccess, Visitor},
+};
+use serde_json::{Map, Number, Value};
 use uriparse::URIReference;
 
 use crate::{MetadataElement, MetadataSet, ParseError, ParsedDicom, PersonName, Tag, parse_part10};
@@ -423,7 +427,8 @@ fn media_type_parameter<'a>(media_type: &'a str, requested: &str) -> Option<&'a 
 }
 
 fn parse_qido_json(bytes: &[u8]) -> Result<Vec<MetadataSet>, SourceError> {
-    let value: Value = serde_json::from_slice(bytes).map_err(|_| SourceError::InvalidJson)?;
+    let DuplicateCheckedValue(value) =
+        serde_json::from_slice(bytes).map_err(|_| SourceError::InvalidJson)?;
     let rows = value.as_array().ok_or(SourceError::InvalidJsonRoot)?;
     rows.iter()
         .map(|row| {
@@ -432,6 +437,91 @@ fn parse_qido_json(bytes: &[u8]) -> Result<Vec<MetadataSet>, SourceError> {
                 .and_then(parse_data_set)
         })
         .collect()
+}
+
+struct DuplicateCheckedValue(Value);
+
+impl<'de> Deserialize<'de> for DuplicateCheckedValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(DuplicateCheckedVisitor)
+    }
+}
+
+struct DuplicateCheckedVisitor;
+
+impl<'de> Visitor<'de> for DuplicateCheckedVisitor {
+    type Value = DuplicateCheckedValue;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON value without duplicate object members")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+        Ok(DuplicateCheckedValue(Value::Bool(value)))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+        Ok(DuplicateCheckedValue(Value::Number(value.into())))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+        Ok(DuplicateCheckedValue(Value::Number(value.into())))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Number::from_f64(value)
+            .map(Value::Number)
+            .map(DuplicateCheckedValue)
+            .ok_or_else(|| E::custom("JSON number is not finite"))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(DuplicateCheckedValue(Value::String(value.to_owned())))
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
+        Ok(DuplicateCheckedValue(Value::String(value)))
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(DuplicateCheckedValue(Value::Null))
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(DuplicateCheckedValue(Value::Null))
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut values = Vec::new();
+        while let Some(DuplicateCheckedValue(value)) = sequence.next_element()? {
+            values.push(value);
+        }
+        Ok(DuplicateCheckedValue(Value::Array(values)))
+    }
+
+    fn visit_map<A>(self, mut entries: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut object = Map::new();
+        while let Some(key) = entries.next_key::<String>()? {
+            if object.contains_key(&key) {
+                return Err(de::Error::custom("duplicate JSON object member"));
+            }
+            let DuplicateCheckedValue(value) = entries.next_value()?;
+            object.insert(key, value);
+        }
+        Ok(DuplicateCheckedValue(Value::Object(object)))
+    }
 }
 
 fn parse_data_set(object: &Map<String, Value>) -> Result<MetadataSet, SourceError> {

@@ -222,8 +222,10 @@ These are tracked delivery requirements, not missing HLD text.
 > F-017, F-021, and F-022 all touch `ocelli-dicom`, so their designs must
 > settle shared types and file ownership before concurrent implementation.
 
-The backlog and allocation agree on E3.7, S07, Rust, 2w, dependency F-016,
-and status pending. `allocation.json` contains no architecture note for F-022.
+At design time, the backlog and allocation agreed on E3.7, S07, Rust, 2w,
+dependency F-016, and status pending. `allocation.json` contained no
+architecture note for F-022. This paragraph records that pre-implementation
+snapshot rather than the current delivery state.
 
 ## What the specification does not cover
 

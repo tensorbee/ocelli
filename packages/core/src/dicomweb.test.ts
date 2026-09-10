@@ -161,6 +161,76 @@ describe("DicomwebClient, DICOM PS3.18 2026c", () => {
     expect(calls).toBe(0);
   });
 
+  it("refuses invalid DICOM UIDs before fetch and accepts the 64-character boundary", async () => {
+    let calls = 0;
+    const fetcher: typeof fetch = async () => {
+      calls += 1;
+      return ok("[]", "application/dicom+json");
+    };
+    const { client } = makeClient(fetcher);
+    const valid = "2.25.1";
+    const invalid = [
+      "",
+      ".",
+      "..",
+      ".1",
+      "1.",
+      "1..2",
+      "1.two.3",
+      "1.-2.3",
+      "01.2.3",
+      "1.02.3",
+      `1.${"2".repeat(63)}`,
+    ];
+
+    for (const uid of invalid) {
+      const operations = [
+        () => client.searchSeries(uid),
+        () => client.searchInstances(uid, valid),
+        () => client.searchInstances(valid, uid),
+        () => client.retrieveInstance(uid, valid, valid),
+        () => client.retrieveInstance(valid, uid, valid),
+        () => client.retrieveInstance(valid, valid, uid),
+        () =>
+          client.retrieveFrames(
+            uid,
+            valid,
+            valid,
+            [1],
+            "application/octet-stream",
+          ),
+        () =>
+          client.retrieveFrames(
+            valid,
+            uid,
+            valid,
+            [1],
+            "application/octet-stream",
+          ),
+        () =>
+          client.retrieveFrames(
+            valid,
+            valid,
+            uid,
+            [1],
+            "application/octet-stream",
+          ),
+        () => client.retrieveWadoUri(uid, valid, valid),
+        () => client.retrieveWadoUri(valid, uid, valid),
+        () => client.retrieveWadoUri(valid, valid, uid),
+      ];
+      for (const operation of operations) {
+        await expect(operation()).rejects.toMatchObject({ code: "InvalidRequest" });
+      }
+    }
+    expect(calls).toBe(0);
+
+    const maximum = `1.${"2".repeat(62)}`;
+    expect(maximum).toHaveLength(64);
+    await client.searchSeries(maximum);
+    expect(calls).toBe(1);
+  });
+
   it("requests bounded WADO-RS instance and frame resources", async () => {
     const calls: Array<{ readonly url: string; readonly init?: RequestInit }> = [];
     const fetcher: typeof fetch = async (input, init) => {

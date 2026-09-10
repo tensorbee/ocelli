@@ -30,6 +30,13 @@ cannot escape through generic filters. WADO-URI always supplies
 `requestType=WADO`, `studyUID`, `seriesUID`, `objectUID`, and
 `contentType=application/dicom`.
 
+Every study, series, instance, and WADO-URI object UID is validated before URL
+construction or fetch. PS3.5 section 9.1 permits nonempty decimal components
+separated by dots, forbids a leading zero except for the component `0`, and
+limits the complete UID to 64 characters. Empty values, dot segments,
+non-decimal components, leading-zero forms, and longer values are
+`InvalidRequest`.
+
 Automatic retry, authentication refresh, whole-study retrieval, whole-series
 retrieval, rendered WADO-URI output, caching, and timeout policy are outside
 this contract.
@@ -103,7 +110,11 @@ are accepted. Its spelling is discarded after validation and never enters a
 QIDO responses must be one top-level array of data-set objects. Attribute keys
 must be uppercase eight-digit hexadecimal tags and every attribute must carry
 a valid explicit `vr`. No carrier means a present empty element. Exactly one
-of `Value`, `BulkDataURI`, or `InlineBinary` may be present.
+of `Value`, `BulkDataURI`, or `InlineBinary` may be present. A
+duplicate-detecting deserialization visitor rejects repeated JSON object
+members before `serde_json::Value` can collapse them, including equal Tag keys
+inside sequence item data sets. The resulting public error is structural and
+retains no object name or response value.
 
 Projection reuses F-017 `MetadataSet` and `MetadataElement` constructors. It
 preserves array order and multiplicity, text source spelling, typed null slots,
@@ -123,6 +134,6 @@ and SQ null slots are refused.
 ## Targets
 
 The Rust implementation has no browser API, `wasm-bindgen`, or target-specific
-code. It uses the workspace `serde_json` dependency and compiles as part of
-`ocelli-dicom` for native and `wasm32-unknown-unknown`. Fetch remains in the
-TypeScript shell.
+code. It uses the workspace `serde` and `serde_json` dependencies and compiles
+as part of `ocelli-dicom` for native and `wasm32-unknown-unknown`. Fetch
+remains in the TypeScript shell.

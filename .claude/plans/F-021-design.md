@@ -160,6 +160,9 @@ implement the Pyramid source, tile scheduler, cache policy, or WSI viewport.
 - PS3.18 2026c section 9.1.2 requires WADO-URI `requestType=WADO`, `studyUID`,
   `seriesUID`, and `objectUID`. F-021 requests only `application/dicom`, not a
   rendered representation.
+- PS3.5 2026c section 9.1 requires a UID to contain nonempty decimal
+  components separated by dots. A component has no leading zero unless it is
+  exactly `0`, and the complete UID is at most 64 characters.
 - PS3.18 2026c Annex F defines a QIDO JSON result as one top-level array of
   DICOM JSON data sets. Each attribute is keyed by its uppercase eight-digit
   tag, carries `vr`, and carries at most one of `Value`, `BulkDataURI`, or
@@ -198,6 +201,8 @@ implement the Pyramid source, tile scheduler, cache policy, or WSI viewport.
    with `URL` and query components with `URLSearchParams`. Never concatenate a
    UID, search value, token, or attribute value into a URL by hand. Never place
    a request URL, query, response body, or authentication header in an error.
+   Validate every study, series, instance, and WADO-URI object UID against
+   PS3.5 section 9.1 before URL construction or fetch.
 3. Expose QIDO-RS operations for studies, a study's series, and a study and
    series' instances. Support DICOM attribute filters plus `includefield`,
    `limit`, `offset`, and `fuzzymatching`. Each matching attribute is unique,
@@ -240,14 +245,18 @@ implement the Pyramid source, tile scheduler, cache policy, or WSI viewport.
     `Value` multiplicity, VR, signed numeric values, person-name objects,
     sequences, `BulkDataURI`, and `InlineBinary`. The pass-1 repair adds one
     checked F-017 null-slot representation because the original public model
-    could not retain PS3.18 F.2.5 null positions for typed arrays.
+    could not retain PS3.18 F.2.5 null positions for typed arrays. Sprint
+    review requires duplicate JSON object members to be refused during
+    deserialization, before a map can collapse equal attribute Tag keys,
+    including inside sequence item data sets.
 11. Return `SourceBatch` variants for query metadata, parsed Part 10
     instances, and encoded frame ranges. Keep DICOMweb request types below the
     source abstraction so future DIMSE input can produce the same Part 10
     result without changing consumers above `SeriesSource`.
 12. Refuse malformed multipart framing, an absent or illegal boundary,
     incompatible part media types, malformed JSON, a non-array QIDO result,
-    an invalid tag or VR, multiple value carriers, invalid base64, and any
+    a repeated JSON object member, an invalid tag or VR, multiple value
+    carriers, invalid base64, and any
     F-016 `ParseError`. `SourceError` stores only an error class and safe
     counts or offsets. It never stores DICOM values, UIDs, URLs, response
     bodies, headers, or upstream parser text.
@@ -282,8 +291,10 @@ implement the Pyramid source, tile scheduler, cache policy, or WSI viewport.
 | Category | What it proves | Where |
 |----------|----------------|-------|
 | unit | URL construction covers the three QIDO resource levels, WADO-RS instance and frame resources, and the mandatory WADO-URI parameters from PS3.18 sections 9.1.2, 10.4, and 10.6 | `packages/core/src/dicomweb.test.ts` |
+| unit | Empty, dot-segment, non-decimal, leading-zero, and overlength UIDs are refused before fetch, while the valid 64-character boundary remains usable, per PS3.5 section 9.1 | `packages/core/src/dicomweb.test.ts` |
 | unit | Injected fetch owns authentication, AbortSignal reaches fetch, no automatic retry occurs, and HTTP, abort, network, and content-type failures remain distinct without leaking URL or response content | `packages/core/src/dicomweb.test.ts` |
 | fixture | A standard-derived `application/dicom+json` array preserves absence, empty values, multiplicity, VR, signed numbers, PN components, SQ items, `BulkDataURI`, and `InlineBinary` in F-017 metadata types, per PS3.18 Annex F | `crates/ocelli-dicom/tests/dicomweb.rs` |
+| fixture | Duplicate attribute Tag keys are refused before map materialization at the root data set and inside an SQ item, per PS3.18 sections F.2.2 and F.3.1 | `crates/ocelli-dicom/tests/dicomweb.rs` |
 | fixture | Single and multiple `multipart/related` DICOM parts are split only at legal CRLF-framed boundaries, validate per-part media types, and parse through F-016, per PS3.18 sections 8.6 and 10.4 | `crates/ocelli-dicom/tests/dicomweb.rs` |
 | fixture | Frame multipart input returns ordered zero-copy byte ranges and media-type evidence, including a payload containing boundary-like bytes that are not delimiter lines | `crates/ocelli-dicom/tests/dicomweb.rs` |
 | unit | Every malformed response class is refused without panic and `SourceError` debug or display output contains no DICOM value, UID, URL, header, or payload | `crates/ocelli-dicom/tests/dicomweb.rs` |
@@ -352,6 +363,8 @@ from F-011. Pass-2 remediation adds `uriparse` at the workspace and member
 levels because Content-Location permits relative URI references and an
 absolute-only URL parser would reject valid PS3.18 input. The root manifest
 therefore returns to the write set for this discovered dependency edge.
+Sprint-review remediation adds the existing workspace `serde` dependency at
+the member level for the duplicate-detecting deserialization visitor.
 
 The following are shared sprint files. The serial integrator or the
 `/complete-feature` workflow owns their final edit after concurrent feature
@@ -374,8 +387,9 @@ must be integrated by a three-way merge or handled serially, never overwritten
 from a stale worktree.
 
 F-021 does not edit `crates/ocelli-wasm`, `ci/error-codes.json`,
-`packages/core/src/errors.ts`, `docs/hld/DEVIATIONS.md`, or F-017's metadata
-implementation.
+`packages/core/src/errors.ts`, or `docs/hld/DEVIATIONS.md`. Its only edits to
+F-017-owned metadata implementation are the scoped `NullSlots` seam in
+`metadata.rs` and its independent metadata fixture, as authorized above.
 
 ## Open questions
 

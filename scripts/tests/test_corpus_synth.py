@@ -8,12 +8,14 @@ Run with the interpreter that has pydicom, numpy and the codec plugins:
 Three things are proved here, and they are the three that make a synthetic
 corpus worth having.
 
-1. **fixture.** The stored value of a hand-chosen raw word, computed from
-   PS3.3 C.7.6.3.1.4 and the definitions of BitsStored (0028,0101), HighBit
-   (0028,0102) and PixelRepresentation (0028,0103). The expected values in
-   this file were computed by hand from the standard and are shown working.
-   They were NOT read back from the generator, and the generator contains no
-   unpacking code they could have come from.
+1. **fixture.** The stored value of a hand-chosen raw word, computed from the
+   historical stored-window interpretation of BitsStored (0028,0101), HighBit
+   (0028,0102) and PixelRepresentation (0028,0103). Current PS3.3 C.7.6.3.3
+   requires HighBit to equal BitsStored minus one, so the HighBit 15 case is
+   explicitly legacy nonconforming interoperability evidence. The expected
+   values in this file were computed by hand and are shown working. They were
+   NOT read back from the generator, and the generator contains no unpacking
+   code they could have come from.
 
 2. **unit.** The generator is byte-deterministic. The manifest is a sha256 per
    case, so a generator that stamps a fresh UID or today's date produces a
@@ -62,8 +64,9 @@ import corpus_synth  # noqa: E402
 # The hand-computed fixture table.
 # ---------------------------------------------------------------------------
 #
-# PS3.3 C.7.6.3.1.4 and PS3.5 8.1.1 define the stored value inside its
-# container:
+# The retained legacy interpretation places the stored value inside its
+# container as follows. This arithmetic explains the nonconforming evidence.
+# It does not make HighBit 15 conform to current PS3.3 C.7.6.3.3:
 #
 #     shift  = HighBit + 1 - BitsStored
 #     mask   = (1 << BitsStored) - 1
@@ -97,7 +100,8 @@ PROBE_WORDS = (0xF800, 0x07FF, 0x0FFF, 0x0801, 0x8000, 0x7FF0, 0xFFF0, 0x800F)
 # i16 reports 4095, which is a perfectly plausible Hounsfield number.
 RIGHT_ALIGNED = (-2048, 2047, -1, -2047, 0, -16, -16, 15)
 
-# ct_signed_12in16_left.dcm: BitsStored 12, HighBit 15, PixelRepresentation 1.
+# ct_signed_12in16_left.dcm: legacy nonconforming interoperability evidence.
+# BitsStored 12, HighBit 15, PixelRepresentation 1.
 # shift = 15 + 1 - 12 = 4, mask = 0x0FFF, sign bit = 0x0800.
 #
 #   0xF800 >> 4 = 0x0F80, & 0x0FFF = 0xF80 = 3968, sign set -> 3968 - 4096 =  -128
@@ -201,7 +205,7 @@ def tearDownModule() -> None:
 
 
 class StoredValueFixture(unittest.TestCase):
-    """The values a 12-bit-in-16 case must unpack to, from PS3.3 C.7.6.3.1.4."""
+    """Conforming and retained legacy 12-bit-in-16 expected values."""
 
     def probe(self, name: str) -> tuple[pydicom.Dataset, tuple[int, ...]]:
         ds = pydicom.dcmread(str(CORPUS / "synthetic" / name))
@@ -216,10 +220,16 @@ class StoredValueFixture(unittest.TestCase):
         self.assertEqual((ds.BitsAllocated, ds.BitsStored, ds.HighBit,
                           ds.PixelRepresentation), (16, 12, 11, 1))
 
-    def test_left_aligned_header_is_what_the_case_claims(self) -> None:
+    def test_legacy_nonconforming_header_is_what_the_case_claims(self) -> None:
         ds, _ = self.probe("ct_signed_12in16_left.dcm")
         self.assertEqual((ds.BitsAllocated, ds.BitsStored, ds.HighBit,
                           ds.PixelRepresentation), (16, 12, 15, 1))
+
+        rows = corpus_check.load()
+        row = next(row for row in rows
+                   if row["path"] ==
+                   "synthetic/ct_signed_12in16_left.dcm")
+        self.assertIn("legacy-nonconforming", corpus_check.tokens(row))
 
     def test_right_aligned_stored_values(self) -> None:
         ds, words = self.probe("ct_signed_12in16_right.dcm")
@@ -227,7 +237,7 @@ class StoredValueFixture(unittest.TestCase):
                                  ds.PixelRepresentation) for w in words)
         self.assertEqual(got, RIGHT_ALIGNED)
 
-    def test_left_aligned_stored_values(self) -> None:
+    def test_legacy_nonconforming_left_aligned_stored_values(self) -> None:
         ds, words = self.probe("ct_signed_12in16_left.dcm")
         got = tuple(stored_value(w, ds.BitsStored, ds.HighBit,
                                  ds.PixelRepresentation) for w in words)

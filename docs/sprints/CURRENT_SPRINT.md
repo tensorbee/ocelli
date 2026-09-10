@@ -100,8 +100,9 @@ is blocked by its declared dependencies.
 The allocation declares no dependency among the four S07 stories. F-017,
 F-021, and F-022 all touch `ocelli-dicom`, so their designs must settle shared
 types and file ownership before concurrent implementation. F-023 primarily
-owns `ocelli-codec`, but its Transfer Syntax UID contract must agree with the
-observable dispatch established by F-016.
+owns `ocelli-codec`. Its explicitly selected sixteen-UID product and corpus
+subset must remain accepted by F-016's broader observable parser registry.
+Additional syntaxes recognized by F-016 do not become codec capabilities.
 
 ## Standing expectations
 

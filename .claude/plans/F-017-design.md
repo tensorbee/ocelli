@@ -105,10 +105,13 @@ for ST, LT, UT, and other trailing-pad-only VRs. Signed integer variants remain
 signed.
 
 `MetadataSet` and its element constructors are public within `ocelli-dicom` so
-F-021 can construct the same representation from QIDO-RS DICOM JSON without
-editing this story's files. F-021 owns JSON parsing. F-017 owns the value and
-collection invariants shared by Part 10 and DICOM JSON. The shared value type
-therefore also represents nested sequences, DICOM JSON Person Name component
+F-021 can construct the same representation from QIDO-RS DICOM JSON. F-021 owns
+JSON parsing. F-017 owns the value and collection invariants shared by Part 10
+and DICOM JSON. The approved F-021 implementation may add the scoped
+`NullSlots` value seam and its fixture in F-017-owned metadata files when the
+JSON carrier requires ordered null multiplicity that this design did not yet
+represent. The shared value type therefore also represents nested sequences,
+DICOM JSON Person Name component
 objects, `BulkDataURI`, and validated `InlineBinary`. Those carriers do not
 collapse into strings. Their shared constructors enforce the carrier and VR
 sets from PS3.18 F.2.2. An empty Inline Binary is refused because PS3.18 F.2.5
@@ -231,9 +234,11 @@ the direct dicom-rs component dependency shape. No new deviation is planned.
 - `docs/sprints/AS_BUILT.md`
 - `CHANGELOG.md`
 
-F-021 owns new DICOMweb source files. F-022 owns new NIfTI files. Neither may
-edit `metadata.rs` or `provider.rs` in its implementation wave. Sprint ledger
-files remain integrator-only when a parallel worker prepares a feature.
+F-021 owns new DICOMweb source files and the approved scoped `NullSlots`
+addition to `metadata.rs` and its fixture. It may not otherwise change the
+F-017 metadata or provider contracts. F-022 owns new NIfTI files and may not
+edit `metadata.rs` or `provider.rs`. Sprint ledger files remain integrator-only
+when a parallel worker prepares a feature.
 
 ## Open questions
 

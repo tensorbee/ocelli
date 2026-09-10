@@ -71,16 +71,25 @@ export class DicomwebClient {
     return this.#qido(["studies"], options);
   }
 
-  searchSeries(studyUid: string, options: QidoSearchOptions = {}): Promise<void> {
-    return this.#qido(["studies", studyUid, "series"], options);
+  async searchSeries(
+    studyUid: string,
+    options: QidoSearchOptions = {},
+  ): Promise<void> {
+    if (!validDicomUid(studyUid)) {
+      throw new DicomwebError("InvalidRequest");
+    }
+    await this.#qido(["studies", studyUid, "series"], options);
   }
 
-  searchInstances(
+  async searchInstances(
     studyUid: string,
     seriesUid: string,
     options: QidoSearchOptions = {},
   ): Promise<void> {
-    return this.#qido(
+    if (!validDicomUid(studyUid) || !validDicomUid(seriesUid)) {
+      throw new DicomwebError("InvalidRequest");
+    }
+    await this.#qido(
       ["studies", studyUid, "series", seriesUid, "instances"],
       options,
     );
@@ -92,6 +101,13 @@ export class DicomwebClient {
     instanceUid: string,
     signal?: AbortSignal,
   ): Promise<void> {
+    if (
+      !validDicomUid(studyUid) ||
+      !validDicomUid(seriesUid) ||
+      !validDicomUid(instanceUid)
+    ) {
+      throw new DicomwebError("InvalidRequest");
+    }
     const url = this.#resourceUrl([
       "studies",
       studyUid,
@@ -118,6 +134,9 @@ export class DicomwebClient {
     signal?: AbortSignal,
   ): Promise<void> {
     if (
+      !validDicomUid(studyUid) ||
+      !validDicomUid(seriesUid) ||
+      !validDicomUid(instanceUid) ||
       frames.length === 0 ||
       frames.some((frame) => !Number.isSafeInteger(frame) || frame < 1) ||
       frames.some((frame, index) => index > 0 && frame <= (frames[index - 1] ?? 0)) ||
@@ -157,6 +176,13 @@ export class DicomwebClient {
     objectUid: string,
     signal?: AbortSignal,
   ): Promise<void> {
+    if (
+      !validDicomUid(studyUid) ||
+      !validDicomUid(seriesUid) ||
+      !validDicomUid(objectUid)
+    ) {
+      throw new DicomwebError("InvalidRequest");
+    }
     const url = new URL(this.#wadoUriUrl);
     url.searchParams.set("requestType", "WADO");
     url.searchParams.set("studyUID", studyUid);
@@ -321,6 +347,13 @@ function safeUrl(value: string): URL {
 
 function validUint(value: number | undefined): boolean {
   return value === undefined || (Number.isSafeInteger(value) && value >= 0);
+}
+
+function validDicomUid(value: string): boolean {
+  return (
+    value.length <= 64 &&
+    /^(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*))*$/u.test(value)
+  );
 }
 
 function transportError(error: unknown, signal?: AbortSignal): DicomwebError {

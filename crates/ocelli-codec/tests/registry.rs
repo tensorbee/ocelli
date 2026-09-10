@@ -121,6 +121,23 @@ fn valid_frame_description_preserves_fields_and_checked_output_length() -> TestR
 }
 
 #[test]
+fn legacy_nonconforming_high_bit_15_descriptor_is_refused_exactly() {
+    assert_eq!(
+        FrameDesc::new(FrameDescInput {
+            bits_allocated: 16,
+            bits_stored: 12,
+            high_bit: 15,
+            pixel_representation: PixelRepresentation::Signed,
+            ..frame_input()
+        }),
+        Err(FrameDescError::HighBitMismatch {
+            high_bit: 15,
+            expected: 11,
+        })
+    );
+}
+
+#[test]
 fn known_catalogue_refuses_empty_and_repeated_entries() {
     assert_eq!(
         Registry::with_known(KNOWN_WITH_EMPTY).err(),

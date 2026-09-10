@@ -30,12 +30,15 @@ The `category` column records which layer a case belongs to.
 
 **Synthetic**, written by `scripts/corpus_synth.py` into `synthetic/` and
 `syntax/`. A corpus built only from real studies cannot be relied on to contain
-a signed 12-bit-in-16 CT with `HighBit` 15, a `MONOCHROME1` with a known
-gradient, a non-square `PixelSpacing`, or a deliberately non-uniform slice
-spacing. Each synthetic case exists to make one trap detectable and its pixel
-values are hand-predictable. The trap each one is for is written on the
-function that generates it, and is not repeated here, because a second copy of
-that list would be free to drift from the cases themselves.
+the retained legacy nonconforming signed 12-bit-in-16 CT with `HighBit` 15, a
+`MONOCHROME1` with a known gradient, a non-square `PixelSpacing`, or a
+deliberately non-uniform slice spacing. Current PS3.3 C.7.6.3.3 requires
+`HighBit == BitsStored - 1`, so the exact `HighBit` 15 row is interoperability
+evidence that strict frame validation must refuse, not a conforming descriptor.
+Each synthetic case exists to make one trap detectable and its pixel values are
+hand-predictable. The trap each one is for is written on the function that
+generates it, and is not repeated here, because a second copy of that list
+would be free to drift from the cases themselves.
 
 **Real**, four TCIA series under `real/`. A corpus built only from generated
 cases has never seen a vendor's padding, private blocks or odd-length values.

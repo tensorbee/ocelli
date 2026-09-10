@@ -1,6 +1,6 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-021, F-022, F-023, F-X008
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-X008
 **Last updated:** 2026-09-09
 
 The wasm build pipeline, the size budget, and the invariants that keep the
@@ -183,17 +183,19 @@ real violation. The table is enforced where it can be: the `compile_error!` in
 
 `ocelli-dicom` builds in step 2 for `wasm32-unknown-unknown` and in step 3 for
 the native host. Step 4 compares its direct dicom-rs feature selection across
-both targets. The selected 0.10 components are `dicom-object`,
-`dicom-encoding`, `dicom-parser`, and `dicom-transfer-syntax-registry`, all
-with defaults disabled. Only whole-data-set deflate is enabled. Pixel codec
-features remain outside F-016. A direct `flate2` dependency uses the Rust
-backend on both targets and exposes the consumed stream length needed for
+both targets. The selected 0.10 components are `dicom-core`, `dicom-object`,
+`dicom-encoding`, `dicom-parser`, and `dicom-transfer-syntax-registry`, all with
+defaults disabled. F-017 added the direct `dicom-core` edge for VR-aware
+lossless metadata projection. Only whole-data-set deflate is enabled. Pixel
+codec features remain outside F-016. A direct `flate2` dependency uses the
+Rust backend on both targets and exposes the consumed stream length needed for
 strict PS3.5 A.5 padding validation.
 
-F-021 adds the workspace `serde_json` dependency directly to `ocelli-dicom`
-for its pure DICOM JSON response parser. The same dependency and parser compile
-for both targets. Browser fetch and authentication remain in TypeScript, and
-`wasm-bindgen` remains absent from `ocelli-dicom`.
+F-021 adds the workspace `serde` and `serde_json` dependencies directly to
+`ocelli-dicom` for its pure DICOM JSON response parser and duplicate-detecting
+visitor. The same dependencies and parser compile for both targets. Browser
+fetch and authentication remain in TypeScript, and `wasm-bindgen` remains
+absent from `ocelli-dicom`.
 
 The same story uses `uriparse` to validate absolute and relative RFC 3986
 Content-Location references in multipart resource headers. It is shared Rust

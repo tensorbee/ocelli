@@ -4,9 +4,12 @@
 //! comes from PS3.18 sections 8.6 and 8.7. Every identifier and payload here
 //! is synthetic and hand encoded.
 
+use std::collections::BTreeSet;
+
+use ocelli_codec::{Capability, KNOWN_TRANSFER_SYNTAXES, Registry};
 use ocelli_dicom::{
     DicomwebSource, MetadataSet, MetadataValue, SeriesSource, SourceBatch, SourceError,
-    SourceResponse, SourceResponseKind, Tag,
+    SourceResponse, SourceResponseKind, Tag, parse_part10,
 };
 
 const EXPLICIT_VR_LE: &str = "1.2.840.10008.1.2.1";
@@ -46,11 +49,22 @@ fn long_explicit_element(tag: (u16, u16), vr: [u8; 2], value: &[u8]) -> Vec<u8> 
 }
 
 fn part10(rows: u16) -> Vec<u8> {
+    let mut data_set = Vec::new();
+    data_set.extend(explicit_element((0x0008, 0x0016), *b"UI", SOP_CLASS_UID));
+    data_set.extend(explicit_element(
+        (0x0028, 0x0010),
+        *b"US",
+        &rows.to_le_bytes(),
+    ));
+    part10_with_syntax(EXPLICIT_VR_LE, &data_set)
+}
+
+fn part10_with_syntax(transfer_syntax: &str, data_set: &[u8]) -> Vec<u8> {
     let mut meta_body = Vec::new();
     meta_body.extend(long_explicit_element((0x0002, 0x0001), *b"OB", &[0, 1]));
     meta_body.extend(explicit_element((0x0002, 0x0002), *b"UI", SOP_CLASS_UID));
     meta_body.extend(explicit_element((0x0002, 0x0003), *b"UI", SOP_INSTANCE_UID));
-    let mut syntax = EXPLICIT_VR_LE.as_bytes().to_vec();
+    let mut syntax = transfer_syntax.as_bytes().to_vec();
     if !syntax.len().is_multiple_of(2) {
         syntax.push(0);
     }
@@ -69,13 +83,16 @@ fn part10(rows: u16) -> Vec<u8> {
         &fixture_u32(meta_body.len()).to_le_bytes(),
     ));
     bytes.extend(meta_body);
-    bytes.extend(explicit_element((0x0008, 0x0016), *b"UI", SOP_CLASS_UID));
-    bytes.extend(explicit_element(
-        (0x0028, 0x0010),
-        *b"US",
-        &rows.to_le_bytes(),
-    ));
+    bytes.extend_from_slice(data_set);
     bytes
+}
+
+fn corpus_transfer_syntaxes() -> BTreeSet<&'static str> {
+    include_str!("../../../corpus/manifest.tsv")
+        .lines()
+        .skip(1)
+        .filter_map(|row| row.split('\t').nth(2))
+        .collect()
 }
 
 fn multipart(boundary: &str, parts: &[(&str, &[u8])]) -> Vec<u8> {
@@ -319,6 +336,29 @@ fn qido_json_preserves_annex_f_metadata_semantics() {
 }
 
 #[test]
+fn qido_json_refuses_duplicate_attributes_before_map_collapse() {
+    // PS3.18 F.2.2 and F.3.1: a DICOM JSON object has one Attribute object
+    // per Tag key and cannot represent duplicate Tag values.
+    let json =
+        br#"[{"00080060":{"vr":"CS","Value":["CT"]},"00080060":{"vr":"CS","Value":["MR"]}}]"#;
+    assert_eq!(
+        source(SourceResponseKind::QidoJson, json.to_vec()).err(),
+        Some(SourceError::InvalidJson)
+    );
+}
+
+#[test]
+fn qido_json_refuses_duplicate_attributes_inside_sequence_items() {
+    // PS3.18 F.2.2 applies recursively because each SQ item is a DICOM JSON
+    // Model object representing one nested data set.
+    let json = br#"[{"00081115":{"vr":"SQ","Value":[{"00081150":{"vr":"UI","Value":["2.25.1"]},"00081150":{"vr":"UI","Value":["2.25.2"]}}]}}]"#;
+    assert_eq!(
+        source(SourceResponseKind::QidoJson, json.to_vec()).err(),
+        Some(SourceError::InvalidJson)
+    );
+}
+
+#[test]
 fn qido_json_refuses_invalid_structure_and_carriers() {
     let cases: &[(&[u8], SourceError)] = &[
         (br#"{}"#, SourceError::InvalidJsonRoot),
@@ -408,6 +448,33 @@ fn wado_uri_parses_one_part10_object_without_a_multipart_wrapper() {
 }
 
 #[test]
+fn selected_codec_catalogue_matches_corpus_and_f016_dispatch() {
+    let selected: BTreeSet<_> = KNOWN_TRANSFER_SYNTAXES.iter().copied().collect();
+    assert_eq!(selected.len(), 16);
+    assert_eq!(selected, corpus_transfer_syntaxes());
+
+    for uid in KNOWN_TRANSFER_SYNTAXES {
+        // PS3.5 A.5 carries the data set as a raw Deflate stream. 03 00 is the
+        // complete empty fixed-Huffman block. Other dispatch paths accept an
+        // empty data set and append their own completion sentinel internally.
+        let data_set: &[u8] = if *uid == "1.2.840.10008.1.2.1.99" {
+            &[0x03, 0x00]
+        } else {
+            &[]
+        };
+        let parsed = parse_part10(&part10_with_syntax(uid, data_set));
+        assert!(
+            parsed.is_ok(),
+            "F-016 dispatch must accept selected Transfer Syntax UID {uid}: {parsed:?}"
+        );
+        assert_eq!(
+            parsed.map(|instance| instance.transfer_syntax().uid()),
+            Ok(*uid)
+        );
+    }
+}
+
+#[test]
 fn frame_multipart_returns_ordered_ranges_without_splitting_payload_lookalikes() {
     // PS3.18 8.6.1.2.1: only CRLF + DASH + the complete boundary + a legal
     // delimiter suffix separates parts. The first payload contains a prefix
@@ -448,12 +515,13 @@ fn frame_multipart_returns_ordered_ranges_without_splitting_payload_lookalikes()
 
 #[test]
 fn frame_parts_retain_parameterized_media_type_evidence() {
-    let media_type = "image/jls; transfer-syntax=1.2.840.10008.1.2.4.80";
-    let body = multipart("frame-edge", &[(media_type, b"encoded")]);
+    const FRAME_TRANSFER_SYNTAX: &str = "1.2.840.10008.1.2.4.80";
+    let media_type = format!("image/jls; transfer-syntax={FRAME_TRANSFER_SYNTAX}");
+    let body = multipart("frame-edge", &[(media_type.as_str(), b"encoded")]);
     let result = source(
         SourceResponseKind::WadoRsFrames {
             boundary: "frame-edge".to_owned(),
-            media_type: media_type.to_owned(),
+            media_type: media_type.clone(),
         },
         body,
     );
@@ -464,14 +532,18 @@ fn frame_parts_retain_parameterized_media_type_evidence() {
     };
     assert_eq!(
         frames.parts().first().map(|part| part.media_type()),
-        Some(media_type)
+        Some(media_type.as_str())
     );
     assert_eq!(
         frames
             .parts()
             .first()
             .and_then(|part| part.transfer_syntax()),
-        Some("1.2.840.10008.1.2.4.80")
+        Some(FRAME_TRANSFER_SYNTAX)
+    );
+    assert_eq!(
+        Registry::new().capability(FRAME_TRANSFER_SYNTAX),
+        Capability::KnownUnavailable
     );
 }
 
@@ -591,6 +663,16 @@ fn source_errors_never_retain_response_values_or_parser_text() {
         .unwrap_or(SourceError::InvalidJson);
     assert!(!format!("{error}").contains(marker));
     assert!(!format!("{error:?}").contains(marker));
+
+    let duplicate = format!(
+        r#"[{{"00080060":{{"vr":"CS","Value":["{marker}"]}},"00080060":{{"vr":"CS","Value":["MR"]}}}}]"#
+    );
+    let duplicate_error = source(SourceResponseKind::QidoJson, duplicate.into_bytes())
+        .err()
+        .unwrap_or(SourceError::InvalidJsonRoot);
+    assert_eq!(duplicate_error, SourceError::InvalidJson);
+    assert!(!format!("{duplicate_error}").contains(marker));
+    assert!(!format!("{duplicate_error:?}").contains(marker));
 
     let parse_error = source(
         SourceResponseKind::WadoUriPart10,

@@ -2232,3 +2232,39 @@ equality, retained Rows and Columns as DICOM `US` values, and added a private
 **Notes for future sessions.** F-024 and later stories own concrete codec
 adapters and conformance output. `decode.frame` remains unavailable with reason
 `no_runner` until a real decoder supplies the benchmark subject.
+
+## S07 delivery-record corrections, recorded 2026-09-09
+
+### F-017 unit-test inventory correction
+
+The F-017 completion entry above remains unchanged. Its test inventory omitted
+the F-017-owned unit test
+`metadata::tests::inline_binary_requires_canonical_padding_and_unused_bits`.
+F-017 delivered three unit tests in total, two for provider registration and
+one for metadata binary-carrier validation, plus the sixteen initial metadata
+fixture and property tests and the later fixed-VR sequence regression. F-021's
+null-slot tests remain F-021 work.
+
+### F-021 deviation correction
+
+The F-021 completion entry above remains unchanged. Its `Deviations` field
+should read: existing D-02 supplies the `ocelli-dicom` crate name, and existing
+D-18 supplies the direct dicom-rs component dependency shape and required
+`std` posture. F-021 introduced no new deviation.
+
+## S07 test-inventory corrections, recorded 2026-09-10
+
+### F-021 DICOMweb integration-test correction
+
+The F-021 completion entry above remains unchanged. After sprint-review pass 1,
+the DICOMweb integration suite had twelve tests because the executable
+transfer-syntax seam across the corpus catalogue, F-016 Part 10 dispatch, and
+F-021 frame metadata added one test to the eleven delivered by F-021. The two
+duplicate-attribute tests added by pass 3 are later sprint-review work.
+
+### F-023 registry integration-test correction
+
+The F-023 completion entry above remains unchanged. The registry integration
+suite now has thirteen tests after sprint review added the exact refusal for
+the retained legacy nonconforming 16 Bits Allocated, 12 Bits Stored, High Bit
+15 descriptor.

@@ -15,7 +15,8 @@
  *
  * What does NOT live here: anything a pixel touches.
  *
- * Scaffold. The public API is designed in F-100 (E16.1).
+ * F-021 publishes the bounded DICOMweb client and response sink API below.
+ * F-100 and F-101 own the later session-facing viewer and wasm boundary APIs.
  */
 
 export { writeDicomwebResponse, writeFrame } from "./bulk.js";

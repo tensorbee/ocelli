@@ -1,7 +1,7 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-X017
-**Last updated:** 2026-09-06
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017
+**Last updated:** 2026-09-09
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
@@ -12,18 +12,21 @@ What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 | `@ocelli/core` | The TypeScript shell of HLD section 10 | none |
 | `@ocelli/react` | The React binding | `@ocelli/core` at an exact version |
 
-Both are scaffolds. The public API is designed in F-100 and the boundary is
-built in F-101.
+`@ocelli/react` remains a scaffold. `@ocelli/core` now also publishes F-021's
+bounded DICOMweb transport and one-write response-sink contract. F-100 still
+owns the session-facing public viewer API and F-101 still owns its live wasm
+boundary.
 
 ### What is in the `@ocelli/core` tarball today
 
-Everything under `packages/core/src` compiles into `dist` and is re-exported
-from `index.ts`. F-005 added three modules to the four files that were there,
-and F-004 then added `capabilities.ts`.
+Everything under `packages/core/src` compiles into `dist`. Public modules are
+re-exported from `index.ts`, including F-021's DICOMweb client, request options,
+errors, response kinds, sink contract, and one-write helper.
 
 | Module | Holds |
 |--------|-------|
-| `bulk.ts` | The bulk channel down into linear memory |
+| `bulk.ts` | Frame writes and the F-021 one-write DICOMweb response sink contract |
+| `dicomweb.ts` | Bounded WADO-RS, WADO-URI, and QIDO-RS request construction, validation, authentication, cancellation, and response transfer |
 | `ring.ts` | The event ring's consumer side |
 | `errors.ts` | The error-code mirror, the message table, `decodeRecord` |
 | `panic.ts` | `readPanicRecord`, and the panic record's layout |
