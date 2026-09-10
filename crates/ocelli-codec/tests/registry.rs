@@ -8,8 +8,8 @@ use std::{
 };
 
 use ocelli_codec::{
-    Capability, CodecError, Decoder, FrameDesc, FrameDescError, FrameDescInput,
-    KNOWN_TRANSFER_SYNTAXES, PixelRepresentation, Registry, RegistryError,
+    Capability, CodecError, DecodePhotometricInterpretation, Decoder, FrameDesc, FrameDescError,
+    FrameDescInput, KNOWN_TRANSFER_SYNTAXES, PixelRepresentation, Registry, RegistryError,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -94,6 +94,18 @@ fn built_in_catalogue_starts_known_but_unavailable() {
             .iter()
             .all(|uid| registry.capability(uid) == Capability::KnownUnavailable)
     );
+}
+
+#[test]
+fn decoder_output_description_preserves_the_frame_by_default() -> TestResult {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut registry = Registry::new();
+    registry.register(decoder(ONE_TS_A, 0, calls))?;
+    assert_eq!(
+        registry.decode_photometric_interpretation(TS_A, &frame_desc()?)?,
+        DecodePhotometricInterpretation::Preserved
+    );
+    Ok(())
 }
 
 #[test]

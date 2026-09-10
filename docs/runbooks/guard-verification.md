@@ -670,9 +670,14 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 457 | `tools/bench/src/record.mjs` | none in this harness | A record written against a host class it was not measured on, and a malformed baseline. | - | tools/bench/tests/record_test.mjs; tools/bench/tests/hostclass_test.mjs |
 | 458 | `tools/bench/src/state.mjs` | none in this harness | A run state the harness cannot resume from. | - | tools/bench/tests/state_test.mjs |
 | 459 | `tools/bench/run.mjs` | none in this harness | An argument the harness does not accept, and a runner for a subject whose story is not done. | - | tools/bench/tests/run_test.mjs (run by the `bench` gate) |
-| 460 | `tools/bench/src/runners/wasm_cold_start.mjs` | none in this harness | A cold-start measurement taken against a stub, an incomplete artefact copy, and a page that never reported. | - | tools/bench/tests/cold_start_test.mjs |
-| 461 | `tools/bench/page/app.mjs` | none in this harness | A page serving an incomplete copy of the wasm artefact, and a mark count that does not match the phase list. | - | tools/bench/tests/cold_start_test.mjs |
-| 462 | `scripts/panic_probe.mjs` | none in this harness | A run that measured the probe's stub rather than the module. | - | bin/ocelli.sh gate panic, which builds a second module carrying the panic-probe feature and runs this file on every floor gate |
+| 460 | `tools/bench/src/runners/decode_frame.mjs` | `bench.decode-frame.duration`, level 1 | must refuse, output carries `duration guard accepted a non-positive measurement` | floor | `bin/ocelli.sh gate guards` |
+| 461 | `tools/bench/src/runners/decode_frame.mjs` | `bench.decode-frame.iterations`, level 1 | must refuse, output carries `iteration guard accepted an empty measurement` | floor | `bin/ocelli.sh gate guards` |
+| 462 | `tools/bench/src/runners/decode_frame.mjs` | `bench.decode-frame.range`, level 1 | must refuse, output carries `range guard accepted incomplete evidence` | floor | `bin/ocelli.sh gate guards` |
+| 463 | `tools/bench/src/runners/decode_frame.mjs` | `bench.decode-frame.checksum`, level 1 | must refuse, output carries `checksum guard accepted absent output evidence` | floor | `bin/ocelli.sh gate guards` |
+| 464 | `tools/bench/src/runners/decode_frame.mjs` | `bench.decode-frame.release-binary`, level 1 | must refuse, output carries `release guard accepted an absent executable` | floor | `bin/ocelli.sh gate guards` |
+| 465 | `tools/bench/src/runners/wasm_cold_start.mjs` | none in this harness | A cold-start measurement taken against a stub, an incomplete artefact copy, and a page that never reported. | - | tools/bench/tests/cold_start_test.mjs |
+| 466 | `tools/bench/page/app.mjs` | none in this harness | A page serving an incomplete copy of the wasm artefact, and a mark count that does not match the phase list. | - | tools/bench/tests/cold_start_test.mjs |
+| 467 | `scripts/panic_probe.mjs` | none in this harness | A run that measured the probe's stub rather than the module. | - | bin/ocelli.sh gate panic, which builds a second module carrying the panic-probe feature and runs this file on every floor gate |
 
 Known defects this table names, in full:
 

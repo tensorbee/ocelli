@@ -102,6 +102,7 @@ form as the table above, with the date it was decided.
 | openjph-core 0.1.0 | BSD-2-Clause in registry metadata | yes | yes | 2026-09-06 |
 | flate2 | MIT OR Apache-2.0 in registry metadata | yes | yes | 2026-09-07 |
 | oxideav-mjpeg 0.1.8 | MIT, packaged licence and repository metadata | yes | yes | 2026-09-10 |
+| oxideav-core 0.1.35 | MIT, packaged licence and repository metadata | yes | yes | 2026-09-10 |
 | ritk-codecs 0.6.0 | MIT OR Apache-2.0 in registry metadata | yes | yes | 2026-09-10 |
 
 ### S08 codec dependencies
@@ -109,6 +110,15 @@ form as the table above, with the date it was decided.
 `oxideav-mjpeg` 0.1.8 carries an MIT `LICENSE` file in both its package and
 repository. Its package metadata names the same public repository and licence.
 MIT permits derivative works and redistribution with the notice retained.
+The published standalone decoder entry point is not public in this version, so
+F-024 enables only its `registry` feature in addition to disabling defaults.
+That route resolves `oxideav-core` 0.1.35, which carries the same MIT licence
+evidence. An audit of the published source found no unsafe code in
+`oxideav-mjpeg` and eleven unsafe sites in `oxideav-core` arena support, four
+unsafe implementations and seven unsafe blocks. The audit matches whole-word
+`unsafe` over every `*.rs` file below each exact published package's `src/`
+directory. Those are external dependency sites and do not change the
+repository's unsafe allowlist.
 
 `ritk-codecs` 0.6.0 does not include a licence file in its published archive.
 Both crates.io metadata and the normalized package manifest report

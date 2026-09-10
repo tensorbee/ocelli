@@ -700,6 +700,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "jpeg-decoder"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
+
+[[package]]
 name = "js-sys"
 version = "0.3.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -948,6 +954,11 @@ version = "0.1.0"
 [[package]]
 name = "ocelli-codec"
 version = "0.1.0"
+dependencies = [
+ "jpeg-decoder",
+ "oxideav-core",
+ "oxideav-mjpeg",
+]
 
 [[package]]
 name = "ocelli-compute"
@@ -1062,6 +1073,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c7c9e0d9b23589f26070720bac724174bfec1083e82f7854cdd0267518343c0"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "oxideav-core"
+version = "0.1.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f8d0295ab8f6482bb51419d9a89adcf145fa1e654b34d2566046134aed5c424"
+dependencies = [
+ "bytemuck",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "oxideav-mjpeg"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3a94d32ce7c27be0c0174b761cbf5bbd79e7131ec9420eb2bdadea8e7e752dc"
+dependencies = [
+ "oxideav-core",
 ]
 
 [[package]]

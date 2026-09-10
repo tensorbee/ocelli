@@ -11,11 +11,11 @@
   ],
   "$why_no_other_dependency": [
     "There is no cornerstone3D here and there is no bundler. The page loads the wasm-pack glue that bin/ocelli.sh wasm already generates, as a browser would, and nothing is bundled, so a bundler could not change the module graph between two runs.",
-    "criterion is deliberately absent. There is no Rust subject to measure, AGENTS.md refuses a construct with no user today, and a dev-dependency that is not wasm32-portable breaks cargo check --all-targets on that target, which is how proptest reaching wait-timeout already constrains this workspace. F-023 and F-024 add the Rust runner and its dependency, with a named user."
+    "criterion is deliberately absent. The decode.frame Rust subject uses std::time::Instant in a release example, so it needs no benchmark-only Cargo dependency and remains visible to cargo check --all-targets."
   ],
   "scripts": {
     "start": "node run.mjs",
-    "test": "node --test tests/hostclass_test.mjs tests/paths_test.mjs tests/record_test.mjs tests/registry_test.mjs tests/run_test.mjs tests/state_test.mjs tests/cold_start_test.mjs",
+    "test": "node --test tests/hostclass_test.mjs tests/paths_test.mjs tests/record_test.mjs tests/registry_test.mjs tests/run_test.mjs tests/state_test.mjs tests/cold_start_test.mjs tests/decode_frame_test.mjs",
     "test:browser": "OCELLI_BENCH_BROWSER=1 node --test tests/cold_start_test.mjs"
   },
   "devDependencies": {

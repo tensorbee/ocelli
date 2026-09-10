@@ -41,6 +41,11 @@ Encapsulated frame fragments are reassembled before this decoder boundary.
 The decoder writes one frame with the exact rows, columns, sample count, and
 container width declared by `FrameDesc`.
 
+PS3.5 A.4 requires even-length Fragment Item Values. For JPEG it permits FF
+fill bytes inside the compressed stream before a marker so EOI ends on an even
+boundary, or the single trailing NULL required to pad an odd-length stream
+after EOI.
+
 ### `docs/hld/22-testing-and-tolerance.md`, section 25
 
 | **Layer** | **What it proves** | **Where it comes from** |
@@ -58,28 +63,46 @@ to 16-bit and ordinary 8-bit DCT JPEG. Its decoder rejects non-lossless sample
 precision other than 8-bit. The S08 corpus row for `.51` is 12-bit. Therefore
 the story's prescribed crate cannot decode its own extended corpus evidence.
 The operator approved `oxideav-mjpeg` 0.1.8 with default features disabled for
-the `.51` path. Its standalone decoder explicitly supports 12-bit SOF1,
-contains no C dependency, carries an MIT licence file, and compiles for native
-and `wasm32-unknown-unknown` in the S08 design probe. It is used only where
-`jpeg-decoder` cannot meet the DICOM precision contract.
+the `.51` path. The published crate does decode 12-bit SOF1 internally, but
+the documented standalone entry point is `pub(crate)` in version 0.1.8. The
+smallest public route is its `registry` feature and
+`oxideav_mjpeg::registry::make_decoder`. The operator approved that explicit
+feature after native and `wasm32-unknown-unknown` probes passed. It resolves
+`oxideav-core` 0.1.35 through the lockfile. The dependency contains no C code,
+carries an MIT licence file, and is used only where `jpeg-decoder` cannot meet
+the DICOM precision contract.
+
+The approved colour-ownership intent also contradicted the immutable HLD
+signature above. `decode` cannot mutate `FrameDesc` or return a changed colour
+description. The compatible adaptation is a compact typed
+`DecodePhotometricInterpretation` query on `Decoder`, defaulting to
+`Preserved`, with Registry forwarding. JPEG returns `Rgb` when its dependency
+has converted a three-sample colour frame. Raw, RLE, and JPEG 2000 adapters
+inherit the preservation default without changing their decode signature.
 
 ## Approach
 
 1. Pin `jpeg-decoder` with default features disabled so rayon is absent on
-   native and wasm.
-2. Pin `oxideav-mjpeg` 0.1.8 with default features disabled for 12-bit `.51`.
-   Add one `JpegDecoder` adapter for every UID its complete dependency set can
-   honestly decode. Register no UID until its corpus row passes.
+   native and wasm. Use it for `.50`, `.57`, `.70`, and `.51` process 2 at
+   eight-bit precision.
+2. Pin `oxideav-mjpeg` 0.1.8 with default features disabled and only its
+   `registry` feature enabled for 12-bit `.51`. Resolve `oxideav-core` 0.1.35
+   exactly in the lockfile. Add one configured `JpegDecoder` value per exact
+   UID. Register no UID until its fixture evidence passes.
 3. Decode into library-owned temporary output because both selected safe APIs
-   return owned frame storage. Validate metadata and exact length first, then
-   copy into the caller buffer only after complete success. D-21 records this
-   bounded decode-worker allocation rather than claiming the HLD section 21
-   no-allocation sentence is met.
+   return owned frame storage. The public `oxideav-core` packet API also
+   requires one bounded encoded-input copy for twelve-bit `.51`. Validate
+   metadata and exact length first, then copy into the caller buffer only after
+   complete success. D-21 records both decode-worker allocations rather than
+   claiming the HLD section 21 no-allocation sentence is met.
 4. Validate JPEG width, height, component count, precision, pixel format, and
-   complete codestream termination against `FrameDesc`. Refuse mismatch before
-   modifying the caller output.
+   complete codestream termination against `FrameDesc`. Accept PS3.5 A.4 FF
+   marker fill and the single necessary NULL after EOI, then remove that
+   external pad before dependency decode. Refuse excess or non-padding trailing
+   data before modifying the caller output.
 5. Record whether colour conversion already occurred. JPEG YCbCr decoded to
-   RGB is labelled RGB output so no later stage converts it again.
+   RGB is labelled RGB so a downstream consumer can avoid converting it again.
+   The query reports this fact but does not require consumers to use it.
 6. Compare `.50`, `.51`, `.57`, and `.70` decoded sample buffers against the
    uncompressed synthetic ramp or independently decoded truth. Lossless rows
    require exact equality. The baseline colour row uses its declared class-two
@@ -87,14 +110,14 @@ and `wasm32-unknown-unknown` in the S08 design probe. It is used only where
 7. Add the first real `decode.frame` benchmark runner and baseline only after
    at least one production adapter exists.
 8. Mutate one decoded sample and one colour-output label. Run the conformance
-   and double-conversion checks red and revert.
+   and output-description checks red and revert.
 
 ## Boundary and tier
 
 - wasm-bindgen: not touched
 - Pixels across the boundary: no
-- Render-loop allocation: none. Decode is worker-side. Decoder scratch is
-  pre-sized at construction
+- Render-loop allocation: none. Decode is worker-side. Both dependency decoder
+  values and their bounded owned buffers are created inside each decode call
 - unsafe: none
 - Tier A (WebGPU): n/a. Decode is CPU work before rendering
 - Tier B (WebGL2): n/a. The same decoder is used
@@ -104,13 +127,14 @@ and `wasm32-unknown-unknown` in the S08 design probe. It is used only where
 
 | Category | What it proves | Where |
 |----------|----------------|-------|
-| conformance | Each registered JPEG UID decodes its manifest-backed corpus frame to independently established truth | `crates/ocelli-codec/tests/jpeg_corpus.rs` |
+| conformance | Each registered JPEG UID decodes synthetic or corpus-derived bytes to hand-computed or independently established truth | `crates/ocelli-codec/tests/jpeg.rs` |
 | fixture | Process 14 and SV1 preserve hand-computed 12-bit sample extrema and exact output byte order, citing PS3.5 Annex F | `crates/ocelli-codec/tests/jpeg.rs` |
-| fixture | Baseline colour output is labelled once as RGB after decoder conversion | `crates/ocelli-codec/tests/jpeg.rs` |
-| unit | Truncated, trailing, dimension-mismatched, precision-mismatched, and wrong-length output inputs fail without partial caller-buffer mutation | module tests |
+| fixture | Baseline colour output is reported as RGB and computes fixed class-two statistics against the synthetic corpus reference | `crates/ocelli-codec/tests/jpeg.rs` |
+| fixture | JPEG Extended process 2 at 8-bit decodes against independent DCMTK truth | `crates/ocelli-codec/tests/jpeg.rs` |
+| unit | PS3.5 A.4 FF fill and one necessary NULL after EOI decode correctly, while truncation, excess or non-padding trailing data, dimension mismatch, precision mismatch, and wrong output length fail without partial caller-buffer mutation | `crates/ocelli-codec/tests/jpeg.rs` |
 | mutation | A sample change and colour-label change make named tests fail | feature review evidence |
-| benchmark | `decode.frame` measures one registered decoder over one corpus frame with setup excluded | `tools/bench/src/runners/decode_frame.rs` |
-| cross-target | Every registered UID builds and runs through the same Rust adapter on native and wasm | `bin/ocelli.sh check ocelli-codec` and `bin/ocelli.sh wasm` |
+| benchmark | `decode.frame` measures one registered decoder over one synthetic corpus frame with setup excluded | `crates/ocelli-codec/examples/decode_frame.rs` and `tools/bench/src/runners/decode_frame.mjs` |
+| cross-target | Every registered JPEG adapter configuration compiles from the same Rust source for native and `wasm32-unknown-unknown` | `bin/ocelli.sh gate native` and `bin/ocelli.sh cargo check -p ocelli-codec --all-targets --target wasm32-unknown-unknown` |
 
 ## Parity surface covered
 
@@ -122,6 +146,13 @@ reported as available.
 
 - D-21 records bounded library-owned decode output before the atomic copy into
   the caller buffer.
+- `oxideav-mjpeg` needs its explicit `registry` feature because the published
+  standalone decode function in 0.1.8 is not public. This expands the graph to
+  `oxideav-core` 0.1.35, whose published source contains eleven audited unsafe
+  tokens in arena support, four unsafe implementations and seven unsafe
+  blocks. The audit matches whole-word `unsafe` over every `*.rs` file below
+  the exact package's `src/` directory. The dependency's unsafe is not
+  repository unsafe.
 
 ## LLD impact
 
@@ -143,6 +174,7 @@ reported as available.
 
 ## Open questions
 
-None. The operator approved a second permissive pure-Rust decoder for `.51`.
-`oxideav-mjpeg` 0.1.8 is the selected candidate after provenance and native
-plus wasm compile checks.
+None. The operator approved a second permissive pure-Rust decoder for `.51`
+and the public `registry` route its published version requires.
+`oxideav-mjpeg` 0.1.8 with `oxideav-core` 0.1.35 is the selected candidate
+after provenance and native plus wasm compile checks.

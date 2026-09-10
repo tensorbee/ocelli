@@ -306,9 +306,8 @@ export async function main(argv) {
 
   // BEFORE --accept, deliberately. A run in which one runner threw and another
   // measured must not write a baseline and exit 0 with the failure visible only
-  // in `out/run.json`. There is one runner today, so `acceptRecord` would
-  // throw "this run measured nothing" and the ordering could not be observed.
-  // From F-023 onward there are two, and then it can.
+  // in `out/run.json`. With two runners from F-024 onward, a failure in one
+  // must prevent accepting the successful result from the other.
   const failedRunners = final.subjects.filter((one) => one.reason ===
     "runner_failed");
   if (failedRunners.length > 0) {

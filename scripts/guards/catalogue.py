@@ -309,6 +309,51 @@ def _write_packaged_licences(box: Sandbox, *, omit: str = "") -> None:
                       (box.path / name).read_bytes())
 
 
+def _decode_frame_accepts(box: Sandbox, condition: str) -> None:
+    box.substitute(
+        "tools/bench/src/runners/decode_frame.mjs",
+        condition,
+        "if (false) {",
+    )
+
+
+def _decode_frame_accepts_duration(box: Sandbox) -> None:
+    _decode_frame_accepts(
+        box,
+        "if (!Number.isFinite(parsed.value) || parsed.value <= 0) {",
+    )
+
+
+def _decode_frame_accepts_iterations(box: Sandbox) -> None:
+    _decode_frame_accepts(
+        box,
+        "if (!Number.isInteger(parsed.iterations) || parsed.iterations < 1) {",
+    )
+
+
+def _decode_frame_accepts_range(box: Sandbox) -> None:
+    _decode_frame_accepts(
+        box,
+        "if (!Array.isArray(parsed.range_ms) || parsed.range_ms.length !== 2 ||\n"
+        "      !parsed.range_ms.every(Number.isFinite)) {",
+    )
+
+
+def _decode_frame_accepts_checksum(box: Sandbox) -> None:
+    _decode_frame_accepts(
+        box,
+        "if (!Number.isSafeInteger(parsed.checksum) || parsed.checksum <= 0) {",
+    )
+
+
+def _decode_frame_accepts_absent_binary(box: Sandbox) -> None:
+    box.substitute(
+        "tools/bench/src/runners/decode_frame.mjs",
+        "    await access(binary);",
+        "    return;",
+    )
+
+
 def _missing_packaged_apache_licence(box: Sandbox) -> None:
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
     _write_packaged_licences(box, omit="LICENSE-APACHE")
@@ -10494,6 +10539,111 @@ GUARDS: tuple[Guard, ...] = (
                 "subject whose story is not done.",
         claims=("*",),
         covered_by=("tools/bench/tests/run_test.mjs (run by the `bench` gate)",),
+    ),
+    Guard(
+        id="bench.decode-frame",
+        file="tools/bench/src/runners/decode_frame.mjs",
+        gate="bench",
+        spec="HLD section 26, and `docs/lld/benchmarks.md`",
+        refuses="A decode.frame record without a positive finite duration, "
+                "a positive iteration count, a finite two-value observed "
+                "range, or a positive safe-integer checksum, and a "
+                "--no-build run without the exact release executable.",
+        claims=(
+            "positive finite duration",
+            "iteration count",
+            "finite observed range",
+            "output checksum",
+            "target/release/examples/decode_frame",
+        ),
+        probes=(
+            Probe(
+                "bench.decode-frame.duration",
+                _decode_frame_accepts_duration,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { parseDecodeFrame as parse } from "
+                    "'./tools/bench/src/runners/decode_frame.mjs';\n"
+                    "try { parse('{\"value\":0,\"iterations\":31,"
+                    "\"range_ms\":[0.2,0.3],\"checksum\":42}'); } "
+                    "catch (error) { if (String(error).includes("
+                    "'positive finite duration')) process.exit(0); "
+                    "throw error; }\n"
+                    "console.error('duration guard accepted a non-positive "
+                    "measurement'); process.exit(1);",
+                ),
+                "duration guard accepted a non-positive measurement",
+                level=1,
+            ),
+            Probe(
+                "bench.decode-frame.iterations",
+                _decode_frame_accepts_iterations,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { parseDecodeFrame as parse } from "
+                    "'./tools/bench/src/runners/decode_frame.mjs';\n"
+                    "try { parse('{\"value\":0.25,\"iterations\":0,"
+                    "\"range_ms\":[0.2,0.3],\"checksum\":42}'); } "
+                    "catch (error) { if (String(error).includes("
+                    "'iteration count')) process.exit(0); throw error; }\n"
+                    "console.error('iteration guard accepted an empty "
+                    "measurement'); process.exit(1);",
+                ),
+                "iteration guard accepted an empty measurement",
+                level=1,
+            ),
+            Probe(
+                "bench.decode-frame.range",
+                _decode_frame_accepts_range,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { parseDecodeFrame as parse } from "
+                    "'./tools/bench/src/runners/decode_frame.mjs';\n"
+                    "try { parse('{\"value\":0.25,\"iterations\":31,"
+                    "\"range_ms\":[0.2],\"checksum\":42}'); } catch "
+                    "(error) { if (String(error).includes('finite observed "
+                    "range')) process.exit(0); throw error; }\n"
+                    "console.error('range guard accepted incomplete "
+                    "evidence'); process.exit(1);",
+                ),
+                "range guard accepted incomplete evidence",
+                level=1,
+            ),
+            Probe(
+                "bench.decode-frame.checksum",
+                _decode_frame_accepts_checksum,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { parseDecodeFrame as parse } from "
+                    "'./tools/bench/src/runners/decode_frame.mjs';\n"
+                    "try { parse('{\"value\":0.25,\"iterations\":31,"
+                    "\"range_ms\":[0.2,0.3],\"checksum\":0}'); } catch "
+                    "(error) { if (String(error).includes('output checksum')) "
+                    "process.exit(0); throw error; }\n"
+                    "console.error('checksum guard accepted absent output "
+                    "evidence'); process.exit(1);",
+                ),
+                "checksum guard accepted absent output evidence",
+                level=1,
+            ),
+            Probe(
+                "bench.decode-frame.release-binary",
+                _decode_frame_accepts_absent_binary,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { requireReleaseBinary as requireBinary } from "
+                    "'./tools/bench/src/runners/decode_frame.mjs';\n"
+                    "try { await requireBinary(new URL("
+                    "'./target/guard-probe-absent', import.meta.url)); } "
+                    "catch (error) { if (String(error).includes("
+                    "'refuses a substitute')) process.exit(0); throw error; "
+                    "}\nconsole.error('release guard accepted an absent executable'); "
+                    "process.exit(1);",
+                ),
+                "release guard accepted an absent executable",
+                level=1,
+            ),
+        ),
     ),
     Guard(
         id="bench.cold-start",

@@ -12,3 +12,6 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+jpeg-decoder.workspace = true
+oxideav-core.workspace = true
+oxideav-mjpeg.workspace = true

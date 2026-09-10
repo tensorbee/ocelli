@@ -156,7 +156,8 @@ run_gate() {
                    tools/bench/tests/registry_test.mjs \
                    tools/bench/tests/run_test.mjs \
                    tools/bench/tests/state_test.mjs \
-                   tools/bench/tests/cold_start_test.mjs ;;
+                   tools/bench/tests/cold_start_test.mjs \
+                   tools/bench/tests/decode_frame_test.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py ;;
     prose)       python3 scripts/prose_check.py ;;
     content)     python3 scripts/staged_content_check.py --tracked ;;

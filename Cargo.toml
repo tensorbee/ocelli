@@ -85,6 +85,18 @@ dicom-encoding = { version = "0.10", default-features = false }
 dicom-parser = { version = "0.10", default-features = false }
 dicom-transfer-syntax-registry = { version = "0.10", default-features = false, features = ["deflate"] }
 flate2 = { version = "1.0.28", default-features = false, features = ["rust_backend"] }
+# F-024. JPEG Baseline and lossless use the dependency's single-threaded
+# pure-Rust path. The default feature enables rayon, which is neither needed
+# by decode workers nor suitable for the wasm target.
+jpeg-decoder = { version = "=0.3.2", default-features = false }
+# F-024 and D-21. The published 0.1.8 standalone decode entry point is not
+# public despite its crate documentation, so the explicitly enabled registry
+# feature is the smallest public route to its 12-bit SOF1 decoder. Defaults
+# remain disabled and only that named feature is restored.
+oxideav-mjpeg = { version = "=0.1.8", default-features = false, features = ["registry"] }
+# Exact public API companion selected by oxideav-mjpeg's registry feature.
+# Its external arena code's eleven unsafe sites are audited in the F-024 plan.
+oxideav-core = { version = "=0.1.35", default-features = false }
 # F-021 validates absolute and relative Content-Location URI references from
 # PS3.18 multipart resource headers without retaining their spelling.
 uriparse = "0.6.4"

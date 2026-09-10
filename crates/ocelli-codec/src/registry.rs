@@ -56,6 +56,20 @@ pub enum PixelRepresentation {
     Signed,
 }
 
+/// Photometric Interpretation presented by a decoder's output buffer.
+///
+/// Most decoders preserve the interpretation in [`FrameDesc`]. JPEG colour
+/// decoders commonly convert encoded YCbCr samples to packed RGB. Keeping that
+/// distinction typed reports the conversion for downstream consumers. The
+/// query is separate from decode, so consumers remain responsible for using it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DecodePhotometricInterpretation {
+    /// The output retains [`FrameDesc::photometric_interpretation`].
+    Preserved,
+    /// The output is packed RGB, regardless of the encapsulating DICOM value.
+    Rgb,
+}
+
 /// Unvalidated fields used to construct a [`FrameDesc`].
 ///
 /// Naming every DICOM pixel field prevents positional arguments with the same
@@ -283,6 +297,14 @@ pub enum CodecError {
     KnownUnavailable,
     /// The caller-provided output slice has the wrong byte length.
     OutputLength { expected: usize, actual: usize },
+    /// The encoded frame is structurally invalid or truncated.
+    InvalidCodestream,
+    /// Bytes follow the first complete encoded image.
+    TrailingData,
+    /// Encoded dimensions, components, precision, or process differ from the descriptor.
+    FrameMismatch,
+    /// The dependency produced an output layout this adapter cannot represent.
+    UnsupportedPixelFormat,
     /// A concrete decoder failed.
     DecoderFailure,
 }
@@ -293,6 +315,10 @@ impl fmt::Display for CodecError {
             Self::UnknownTransferSyntax => "unknown DICOM transfer syntax",
             Self::KnownUnavailable => "known DICOM transfer syntax has no registered decoder",
             Self::OutputLength { .. } => "caller-provided decode output has the wrong length",
+            Self::InvalidCodestream => "encoded frame is invalid or truncated",
+            Self::TrailingData => "encoded frame has trailing data",
+            Self::FrameMismatch => "encoded frame does not match its DICOM description",
+            Self::UnsupportedPixelFormat => "decoder output pixel format is unsupported",
             Self::DecoderFailure => "registered DICOM decoder failed",
         })
     }
@@ -305,7 +331,24 @@ pub trait Decoder: Send + Sync {
     /// The complete static set of UIDs this decoder accepts.
     fn transfer_syntaxes(&self) -> &'static [&'static str];
 
-    /// Decode one frame into `out`. Must not allocate per call.
+    /// Describe the Photometric Interpretation of decoded output.
+    ///
+    /// The default preserves the DICOM frame description. Concrete colour
+    /// decoders override this when they perform a colour transform.
+    fn decode_photometric_interpretation(
+        &self,
+        _desc: &FrameDesc,
+    ) -> DecodePhotometricInterpretation {
+        DecodePhotometricInterpretation::Preserved
+    }
+
+    /// Decode one frame atomically into `out`.
+    ///
+    /// Registry lookup and dispatch add no allocation of their own. Raw plus
+    /// RLE implementations remain allocation-free per call. Under deviation
+    /// D-21, concrete JPEG and JPEG 2000 adapters may allocate bounded
+    /// dependency-owned decoded storage and may copy encoded input when a safe
+    /// packet API requires owned bytes.
     ///
     /// # Errors
     ///
@@ -455,6 +498,21 @@ impl Registry {
         } else {
             Err(CodecError::UnknownTransferSyntax)
         }
+    }
+
+    /// Describe the Photometric Interpretation produced for one frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same exact-UID capability errors as [`Self::decoder`].
+    pub fn decode_photometric_interpretation(
+        &self,
+        transfer_syntax: &str,
+        desc: &FrameDesc,
+    ) -> Result<DecodePhotometricInterpretation, CodecError> {
+        Ok(self
+            .decoder(transfer_syntax)?
+            .decode_photometric_interpretation(desc))
     }
 
     /// Decode one frame through the decoder registered for the exact UID.

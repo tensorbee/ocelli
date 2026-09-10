@@ -2,11 +2,14 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 
+mod jpeg;
 mod registry;
 
+pub use jpeg::{JpegDecoder, register_jpeg_decoders};
+
 pub use registry::{
-    Capability, CodecError, Decoder, FrameDesc, FrameDescError, FrameDescInput,
-    KNOWN_TRANSFER_SYNTAXES, PixelRepresentation, Registry, RegistryError,
+    Capability, CodecError, DecodePhotometricInterpretation, Decoder, FrameDesc, FrameDescError,
+    FrameDescInput, KNOWN_TRANSFER_SYNTAXES, PixelRepresentation, Registry, RegistryError,
 };
 
 /// The crate's own name.

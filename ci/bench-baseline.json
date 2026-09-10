@@ -97,6 +97,75 @@
           }
         }
       }
+    },
+    "darwin|25.5.0|arm64|Apple_M4_Max|16|51539607552": {
+      "host_class": {
+        "platform": "darwin",
+        "release": "25.5.0",
+        "arch": "arm64",
+        "cpu_model": "Apple M4 Max",
+        "cpu_count": 16,
+        "memory_bytes": 51539607552
+      },
+      "subjects": {
+        "decode.frame": {
+          "value": 0.0849,
+          "unit": "ms",
+          "tolerance": 0.3,
+          "tolerance_provenance": "DERIVED from fifteen consecutive calibration runs on this host whose medians ranged from 0.0698 to 0.0891 ms, about 24 per cent across the range. Thirty per cent covers that observed spread with headroom.",
+          "provenance": "measured",
+          "recorded": "2026-09-10",
+          "story": "F-024",
+          "why": "First measured release Decoder::decode call over the synthetic JPEG Extended twelve-bit corpus frame",
+          "host_class": {
+            "platform": "darwin",
+            "release": "25.5.0",
+            "arch": "arm64",
+            "cpu_model": "Apple M4 Max",
+            "cpu_count": 16,
+            "memory_bytes": 51539607552
+          },
+          "instrument": {
+            "node": "v26.6.0",
+            "playwright": "1.62.1",
+            "chromium": "151.0.7922.34"
+          },
+          "conditions": {
+            "load_average": [
+              7.98095703125,
+              5.49560546875,
+              4.39013671875
+            ],
+            "free_memory_bytes": 932954112,
+            "uptime_seconds": 337416
+          },
+          "detail": {
+            "statistic": "median",
+            "iterations_run": 32,
+            "iterations_kept": 31,
+            "discarded": "one decoder warm-up call",
+            "observed_range_ms": [
+              0.08,
+              0.0883
+            ],
+            "clock": "std::time::Instant around each Decoder::decode call",
+            "rounding": "0.0001 ms, below the observed run-to-run spread",
+            "output_checksum": 830449,
+            "transfer_syntax": "1.2.840.10008.1.2.4.51",
+            "rows": 64,
+            "columns": 96,
+            "bits_stored": 12,
+            "profile": "release",
+            "fixture": "synthetic repository corpus row jpeg_extended_12",
+            "excludes": [
+              "process startup",
+              "fixture setup",
+              "decoder construction",
+              "caller output allocation"
+            ]
+          }
+        }
+      }
     }
   }
 }
