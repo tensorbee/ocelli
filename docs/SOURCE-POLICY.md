@@ -101,6 +101,22 @@ form as the table above, with the date it was decided.
 | pydicom bundled test files | not stated | yes | **NO** | 2026-09-04 |
 | openjph-core 0.1.0 | BSD-2-Clause in registry metadata | yes | yes | 2026-09-06 |
 | flate2 | MIT OR Apache-2.0 in registry metadata | yes | yes | 2026-09-07 |
+| oxideav-mjpeg 0.1.8 | MIT, packaged licence and repository metadata | yes | yes | 2026-09-10 |
+| ritk-codecs 0.6.0 | MIT OR Apache-2.0 in registry metadata | yes | yes | 2026-09-10 |
+
+### S08 codec dependencies
+
+`oxideav-mjpeg` 0.1.8 carries an MIT `LICENSE` file in both its package and
+repository. Its package metadata names the same public repository and licence.
+MIT permits derivative works and redistribution with the notice retained.
+
+`ritk-codecs` 0.6.0 does not include a licence file in its published archive.
+Both crates.io metadata and the normalized package manifest report
+`MIT OR Apache-2.0` and name its public repository. That platform metadata
+satisfies the policy's rule that both provenance sources must not be absent.
+Both licences permit derivative works and redistribution with their notice
+conditions retained. F-026 must retain the selected notice before production
+distribution and records the missing packaged file as a dependency risk.
 
 ### openjph-core 0.1.0, and the missing packaged licence text
 
