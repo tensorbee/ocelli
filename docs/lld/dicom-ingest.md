@@ -1,6 +1,6 @@
 # DICOM ingest
 
-**F-IDs that contributed:** F-016, F-017
+**F-IDs that contributed:** F-016, F-017, F-021
 **Last updated:** 2026-09-09
 
 `ocelli-dicom` owns the first ingest boundary. It accepts an in-memory DICOM
@@ -9,6 +9,14 @@ dicom-rs object together with evidence of the parser route that produced it.
 It projects metadata without collapsing absence, emptiness, value
 multiplicity, signedness, or nested data sets. It does not decode compressed
 pixel frames.
+
+`SeriesSource` is the transport-neutral response boundary above this parser.
+Its first implementation, `DicomwebSource`, consumes bytes already fetched
+and content-negotiated by TypeScript. QIDO JSON becomes ordered
+`MetadataSet` values. WADO-URI and WADO-RS instance payloads reuse
+`parse_part10`. WADO-RS frame payloads remain encoded ranges into one owned
+multipart response. The source does not perform I/O or depend on browser
+APIs.
 
 ## Public boundary
 
@@ -120,12 +128,19 @@ retains item order. Encapsulated Pixel Data fragments return
 `UnsupportedPixelFragments` because frame assembly and decode belong to the
 codec path.
 
-F-021 can construct the same model from DICOM JSON. Person Name component
+F-021 constructs the same model from DICOM JSON. Person Name component
 objects, `BulkDataURI`, and `InlineBinary` have explicit typed constructors.
 The constructors enforce the carrier VR sets in PS3.18 F.2.2. Inline binary
 must be nonempty canonical padded base64 with valid unused bits. A present
 empty DICOM JSON attribute uses `MetadataValue::Empty` as required by PS3.18
 F.2.5. Neither binary carrier is flattened into an ordinary string value.
+`MetadataElement::sequence` fixes the VR to `SQ` and retains ordered nested
+items for the DICOM JSON path without exposing a generic unchecked
+constructor.
+`MetadataElement::with_null_slots` adds a checked wrapper around an existing
+typed value for PS3.18 F.2.5. It retains total multiplicity and ordered null
+positions without weakening the existing value constructors. SQ nulls and
+binary carriers cannot use the wrapper.
 
 ## Provider order
 
@@ -191,3 +206,8 @@ both binary carriers and reject disallowed VRs, empty Inline Binary, and
 malformed base64. Property tests exercise primitive signedness and
 multiplicity. Provider tests bind first-answer precedence, present-empty
 stopping, identity reporting, and duplicate `ProviderId` refusal.
+
+`crates/ocelli-dicom/tests/dicomweb.rs` adds PS3.18 fixtures for Annex F JSON,
+one-part and many-part instance responses, direct WADO-URI Part 10 input,
+encoded frame ranges, boundary-like payload bytes, malformed framing, media
+type refusal, and patient-safe source errors.

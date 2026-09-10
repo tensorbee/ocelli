@@ -37,6 +37,9 @@ pub enum MetadataError {
     /// PS3.18 F.2.2 does not permit InlineBinary for this VR.
     #[error("DICOM JSON InlineBinary is not permitted for this VR")]
     InvalidInlineBinaryVr(VR),
+    /// DICOM JSON null positions do not match the compact typed value.
+    #[error("DICOM JSON null-slot metadata is inconsistent")]
+    InvalidNullSlots,
 }
 
 /// One lossless metadata collection indexed by DICOM tag.
@@ -146,6 +149,44 @@ impl MetadataElement {
     #[must_use]
     pub fn sequence(items: Vec<MetadataSet>) -> Self {
         Self::new(VR::SQ, MetadataValue::Sequence(items))
+    }
+
+    /// Retain null positions around an existing compact typed Value array.
+    ///
+    /// The empty indices must be strictly increasing and in range. Their
+    /// complement must have exactly the multiplicity of the existing value.
+    /// SQ, binary carriers, nested null-slot wrappers, and no-slot wrappers
+    /// are refused.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MetadataError::InvalidNullSlots`] for inconsistent metadata
+    /// or a value kind that DICOM JSON cannot wrap with null slots.
+    pub fn with_null_slots(
+        self,
+        value_count: usize,
+        empty_slots: Vec<usize>,
+    ) -> Result<Self, MetadataError> {
+        let present_count = self.value.value_count_for_null_slots();
+        let indices_are_valid = !empty_slots.is_empty()
+            && value_count > 0
+            && empty_slots.iter().enumerate().all(|(position, index)| {
+                *index < value_count
+                    && (position == 0 || empty_slots.get(position - 1) < Some(index))
+            });
+        if !indices_are_valid
+            || present_count != Some(value_count.saturating_sub(empty_slots.len()))
+        {
+            return Err(MetadataError::InvalidNullSlots);
+        }
+        Ok(Self::new(
+            self.vr,
+            MetadataValue::WithNullSlots(NullSlots {
+                value_count,
+                empty_slots,
+                present_values: Box::new(self.value),
+            }),
+        ))
     }
 
     /// Construct the typed DICOM JSON BulkDataURI carrier.
@@ -287,6 +328,8 @@ pub enum MetadataValue {
     BulkDataUri(BulkDataUri),
     /// Validated DICOM JSON InlineBinary, retained separately from text.
     InlineBinary(InlineBinary),
+    /// Typed DICOM JSON values plus their ordered null positions.
+    WithNullSlots(NullSlots),
 }
 
 impl MetadataValue {
@@ -311,6 +354,74 @@ impl MetadataValue {
             PrimitiveValue::DateTime(values) => Self::DateTimes(values.iter().copied().collect()),
             PrimitiveValue::Time(values) => Self::Times(values.iter().copied().collect()),
         }
+    }
+
+    fn value_count_for_null_slots(&self) -> Option<usize> {
+        match self {
+            Self::Text(values) => Some(values.len()),
+            Self::Tags(values) => Some(values.len()),
+            Self::Signed16(values) => Some(values.len()),
+            Self::Unsigned16(values) => Some(values.len()),
+            Self::Signed32(values) => Some(values.len()),
+            Self::Unsigned32(values) => Some(values.len()),
+            Self::Signed64(values) => Some(values.len()),
+            Self::Unsigned64(values) => Some(values.len()),
+            Self::Float32(values) => Some(values.len()),
+            Self::Float64(values) => Some(values.len()),
+            Self::Dates(values) => Some(values.len()),
+            Self::DateTimes(values) => Some(values.len()),
+            Self::Times(values) => Some(values.len()),
+            Self::PersonNames(values) => Some(values.len()),
+            Self::Empty
+            | Self::Bytes(_)
+            | Self::Sequence(_)
+            | Self::BulkDataUri(_)
+            | Self::InlineBinary(_)
+            | Self::WithNullSlots(_) => None,
+        }
+    }
+}
+
+/// The ordered null positions around a compact typed DICOM JSON value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NullSlots {
+    value_count: usize,
+    empty_slots: Vec<usize>,
+    present_values: Box<MetadataValue>,
+}
+
+impl NullSlots {
+    /// Total multiplicity, including null positions.
+    #[must_use]
+    pub const fn value_count(&self) -> usize {
+        self.value_count
+    }
+
+    /// Strictly increasing positions whose JSON Value was null.
+    #[must_use]
+    pub fn empty_slots(&self) -> &[usize] {
+        &self.empty_slots
+    }
+
+    /// Compact typed values in their original relative order.
+    #[must_use]
+    pub const fn present_values(&self) -> &MetadataValue {
+        &self.present_values
+    }
+
+    /// Whether one original in-range position was null.
+    #[must_use]
+    pub fn is_empty_slot(&self, slot: usize) -> Option<bool> {
+        (slot < self.value_count).then(|| self.empty_slots.binary_search(&slot).is_ok())
+    }
+
+    /// Map an original slot to its compact typed-value index.
+    #[must_use]
+    pub fn present_index(&self, slot: usize) -> Option<usize> {
+        if slot >= self.value_count || self.empty_slots.binary_search(&slot).is_ok() {
+            return None;
+        }
+        Some(slot - self.empty_slots.partition_point(|empty| *empty < slot))
     }
 }
 

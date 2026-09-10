@@ -200,9 +200,11 @@ implement the Pyramid source, tile scheduler, cache policy, or WSI viewport.
    a request URL, query, response body, or authentication header in an error.
 3. Expose QIDO-RS operations for studies, a study's series, and a study and
    series' instances. Support DICOM attribute filters plus `includefield`,
-   `limit`, `offset`, and `fuzzymatching` without collapsing repeated query
-   keys. Request `application/dicom+json` and identify the response to Rust as
-   `QidoJson`.
+   `limit`, `offset`, and `fuzzymatching`. Each matching attribute is unique,
+   UID List matching uses one comma-separated value, and only `includefield`
+   repeats. Unsupported `emptyvaluematching` and `multiplevaluematching`
+   controls are reserved from the generic filter path. Request
+   `application/dicom+json` and identify the response to Rust as `QidoJson`.
 4. Expose WADO-RS retrieval for one instance and for an explicit nonempty list
    of frames. Request original DICOM instance encoding through
    `multipart/related; type="application/dicom"; transfer-syntax=*`. Request
@@ -234,10 +236,11 @@ implement the Pyramid source, tile scheduler, cache policy, or WSI viewport.
    `parse_part10`. Parse frame multipart bodies into validated byte ranges and
    per-part media-type evidence without decoding or copying the frame payload.
 10. Parse QIDO-RS DICOM JSON in Rust into F-017's public lossless metadata set
-    and element types. Preserve absent versus empty, `Value` multiplicity, VR,
-    signed numeric values, person-name objects, sequences, `BulkDataURI`, and
-    `InlineBinary`. F-017 owns `metadata.rs` and exposes constructors sufficient
-    for this path. F-021 imports that public contract and does not modify it.
+    and element types. Preserve absent versus empty, typed null slots and
+    `Value` multiplicity, VR, signed numeric values, person-name objects,
+    sequences, `BulkDataURI`, and `InlineBinary`. The pass-1 repair adds one
+    checked F-017 null-slot representation because the original public model
+    could not retain PS3.18 F.2.5 null positions for typed arrays.
 11. Return `SourceBatch` variants for query metadata, parsed Part 10
     instances, and encoded frame ranges. Keep DICOMweb request types below the
     source abstraction so future DIMSE input can produce the same Part 10
@@ -317,10 +320,10 @@ deviation is required.
 ## Shared file ownership and write set
 
 F-017 lands before F-021 in the implementation wave because QIDO parsing uses
-its public metadata types. F-017 exclusively owns
-`crates/ocelli-dicom/src/metadata.rs` and its metadata fixtures. F-021 must not
-edit that file. If a required constructor is absent, F-017 adds it before the
-F-021 wave starts.
+its public metadata types. The approved pass-1 remediation reopens the F-017
+seam only for `NullSlots`, `MetadataValue::WithNullSlots`, the checked
+`MetadataElement::with_null_slots` constructor, and their independent metadata
+fixture. No generic unchecked value constructor is added.
 
 F-021 exclusively owns these created files:
 
@@ -336,10 +339,19 @@ F-021 modifies these implementation files:
 - `Cargo.lock`
 - `crates/ocelli-dicom/Cargo.toml`
 - `crates/ocelli-dicom/src/lib.rs`
+- `crates/ocelli-dicom/src/metadata.rs`, approved null-slot seam repair only
+- `crates/ocelli-dicom/tests/metadata.rs`, independent seam fixture only
 - `packages/core/src/bulk.ts`
 - `packages/core/src/bulk.test.ts`
 - `packages/core/src/index.ts`
 - `packages/core/src/index.test.ts`
+
+The approved plan originally listed the workspace `Cargo.toml` for a new
+`serde_json` declaration, but that dependency already existed in the workspace
+from F-011. Pass-2 remediation adds `uriparse` at the workspace and member
+levels because Content-Location permits relative URI references and an
+absolute-only URL parser would reject valid PS3.18 input. The root manifest
+therefore returns to the write set for this discovered dependency edge.
 
 The following are shared sprint files. The serial integrator or the
 `/complete-feature` workflow owns their final edit after concurrent feature
@@ -374,9 +386,9 @@ None.
 1. QIDO-RS DICOM JSON is parsed in Rust into F-017's public lossless metadata
    element and set types. Query metadata and Part 10 metadata therefore retain
    the same absence, empty, multiplicity, VR, and signedness semantics.
-2. F-017 owns the metadata implementation and exposes the constructors F-021
-   needs. F-021 does not create a parallel metadata model and does not edit
-   `metadata.rs`.
+2. F-017 owns the metadata implementation. F-021 does not create a parallel
+   metadata model. The approved pass-1 seam repair adds only the checked typed
+   null-slot representation needed to preserve PS3.18 F.2.5 multiplicity.
 3. TypeScript owns fetch, authentication injection, HTTP status, content-type
    validation, and cancellation. It passes response bytes plus an explicit
    response kind to the Rust-facing source contract.

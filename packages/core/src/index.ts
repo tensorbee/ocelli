@@ -18,8 +18,20 @@
  * Scaffold. The public API is designed in F-100 (E16.1).
  */
 
-export { writeFrame } from "./bulk.js";
-export type { BulkSink, WasmMemory } from "./bulk.js";
+export { writeDicomwebResponse, writeFrame } from "./bulk.js";
+export type {
+  BulkSink,
+  DicomwebResponseKind,
+  DicomwebResponseSink,
+  WasmMemory,
+} from "./bulk.js";
+
+export { DicomwebClient, DicomwebError } from "./dicomweb.js";
+export type {
+  DicomwebClientOptions,
+  DicomwebErrorCode,
+  QidoSearchOptions,
+} from "./dicomweb.js";
 
 export { readEvent, EVENT_STRIDE, HEADER_BYTES } from "./ring.js";
 export type { DrainResult, OcelliEvent } from "./ring.js";

@@ -463,6 +463,58 @@ fn sequence_constructor_fixes_sq_vr_and_preserves_ordered_items() {
     }
 }
 
+#[test]
+fn null_slots_reconstruct_typed_multiplicity_without_unchecked_nesting() {
+    let values =
+        MetadataElement::from_primitive(VR::US, &PrimitiveValue::U16(vec![1_u16, 2].into()));
+    let nullable = values.with_null_slots(3, vec![1]);
+    assert!(nullable.is_ok());
+    let Ok(nullable) = nullable else {
+        return;
+    };
+    assert!(matches!(nullable.value(), MetadataValue::WithNullSlots(_)));
+    let MetadataValue::WithNullSlots(slots) = nullable.value() else {
+        return;
+    };
+    assert_eq!(slots.value_count(), 3);
+    assert_eq!(slots.empty_slots(), &[1]);
+    assert_eq!(
+        slots.present_values(),
+        &MetadataValue::Unsigned16(vec![1, 2])
+    );
+    assert_eq!(slots.is_empty_slot(0), Some(false));
+    assert_eq!(slots.is_empty_slot(1), Some(true));
+    assert_eq!(slots.is_empty_slot(3), None);
+    assert_eq!(slots.present_index(0), Some(0));
+    assert_eq!(slots.present_index(1), None);
+    assert_eq!(slots.present_index(2), Some(1));
+
+    let all_null =
+        MetadataElement::from_primitive(VR::US, &PrimitiveValue::U16(Vec::<u16>::new().into()))
+            .with_null_slots(1, vec![0]);
+    assert!(all_null.is_ok(), "a one-slot null Value array is retained");
+
+    for invalid in [
+        MetadataElement::from_primitive(VR::US, &PrimitiveValue::U16(vec![1].into()))
+            .with_null_slots(1, Vec::new()),
+        MetadataElement::from_primitive(VR::US, &PrimitiveValue::U16(vec![1].into()))
+            .with_null_slots(2, vec![2]),
+        MetadataElement::from_primitive(VR::US, &PrimitiveValue::U16(vec![1].into()))
+            .with_null_slots(3, vec![1, 1]),
+    ] {
+        assert_eq!(invalid.err(), Some(MetadataError::InvalidNullSlots));
+    }
+
+    let carrier = MetadataElement::inline_binary(VR::OB, "AA==".to_owned());
+    assert!(carrier.is_ok());
+    if let Ok(carrier) = carrier {
+        assert_eq!(
+            carrier.with_null_slots(2, vec![1]).err(),
+            Some(MetadataError::InvalidNullSlots)
+        );
+    }
+}
+
 proptest! {
     #[test]
     fn primitive_projection_preserves_i16(values in proptest::collection::vec(any::<i16>(), 0..8)) {

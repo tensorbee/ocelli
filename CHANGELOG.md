@@ -23,6 +23,9 @@ Repository bootstrap. Nothing is published.
 - A DICOM Part 10 parser that dispatches from the declared Transfer Syntax UID,
   retains the complete dicom-rs object and selected route, and refuses malformed
   or truncated input without an alternate-syntax fallback.
+- A bounded DICOMweb client for QIDO-RS, WADO-RS and WADO-URI, with caller-owned
+  authentication, cancellation, strict response validation, lossless DICOM JSON
+  metadata projection and encoded frame-part ranges.
 - A quirk-capture registry and checker that bind a synthetic generator recipe,
   manifest row, independently computed expectation, regression test and active
   mutation evidence into one reviewed record.

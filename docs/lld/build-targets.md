@@ -1,6 +1,6 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-023, F-X008
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-021, F-023, F-X008
 **Last updated:** 2026-09-09
 
 The wasm build pipeline, the size budget, and the invariants that keep the
@@ -189,6 +189,15 @@ with defaults disabled. Only whole-data-set deflate is enabled. Pixel codec
 features remain outside F-016. A direct `flate2` dependency uses the Rust
 backend on both targets and exposes the consumed stream length needed for
 strict PS3.5 A.5 padding validation.
+
+F-021 adds the workspace `serde_json` dependency directly to `ocelli-dicom`
+for its pure DICOM JSON response parser. The same dependency and parser compile
+for both targets. Browser fetch and authentication remain in TypeScript, and
+`wasm-bindgen` remains absent from `ocelli-dicom`.
+
+The same story uses `uriparse` to validate absolute and relative RFC 3986
+Content-Location references in multipart resource headers. It is shared Rust
+with no browser binding and is compiled in both target legs.
 
 Shared does not mean no-std. The dicom-rs parser, dictionary and object graph
 require `std`, so D-18 removes `ocelli-dicom` from the repository's explicit

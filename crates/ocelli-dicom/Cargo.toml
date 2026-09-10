@@ -21,7 +21,9 @@ dicom-encoding = { workspace = true }
 dicom-parser = { workspace = true }
 dicom-transfer-syntax-registry = { workspace = true }
 flate2 = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+uriparse = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

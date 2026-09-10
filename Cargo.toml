@@ -85,6 +85,9 @@ dicom-encoding = { version = "0.10", default-features = false }
 dicom-parser = { version = "0.10", default-features = false }
 dicom-transfer-syntax-registry = { version = "0.10", default-features = false, features = ["deflate"] }
 flate2 = { version = "1.0.28", default-features = false, features = ["rust_backend"] }
+# F-021 validates absolute and relative Content-Location URI references from
+# PS3.18 multipart resource headers without retaining their spelling.
+uriparse = "0.6.4"
 # HLD section 15.2 writes `glam = "0.30"`. The version is untouched and only
 # the feature set differs, which is deviation D-09: every core crate carries
 # `#![cfg_attr(not(test), no_std)]`, glam's default feature is `std`, and glam

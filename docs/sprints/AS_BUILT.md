@@ -2086,3 +2086,38 @@ top-level Pixel Data representation, Encapsulated Format VR, the Basic Offset
 Table, required nonempty Fragments, and valid nested Native Format Pixel Data.
 The sprint review and verification ledgers bind this correction to their exact
 staged tree.
+
+## F-021, DICOMweb client: WADO-RS, WADO-URI, QIDO-RS, completed 2026-09-09
+
+**What was built.** `@ocelli/core` now owns bounded DICOMweb GET requests,
+authentication injection, status and content-type validation, cancellation,
+and one-write response transfer. `ocelli-dicom` consumes the transport-neutral
+response contract, projects QIDO DICOM JSON into lossless metadata, parses
+WADO instance payloads through the Part 10 path, and retains encoded frame
+parts as ranges with media-type evidence.
+**HLD sections implemented.** Sections 3, 4, 5.2, 9, 10, 13, 15.1, 17.2,
+23, 24, 26, 27.2, 27.3, and 35.
+**Deviations.** None.
+**Crates / packages modified.** `ocelli-dicom`, `@ocelli/core`, workspace
+dependency policy, DICOM ingest and build-target LLDs, and delivery records.
+**Tests added.** Eleven Rust DICOMweb fixtures, one independent typed-null
+metadata fixture, ten TypeScript DICOMweb tests, and one bulk-write fixture.
+**Fixture provenance.** Synthetic request, DICOM JSON, multipart, and Part 10
+fixtures are derived from DICOM PS3.18 2026c sections 8.3.4, 8.6, 8.7, 9.1.2,
+10.4, 10.6, and Annex F, plus PS3.10 section 7. No patient data is tracked.
+**Verification.** Every authoritative floor gate and the corpus gate passed on
+the exact staged completion tree. Focused Rust, TypeScript, mutation, native,
+content, and prose evidence also passed.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Retrieval and metadata projection
+are renderer-independent, and this story performs no pixel arithmetic.
+**LLD updated.** `docs/lld/dicomweb.md`, `docs/lld/dicom-ingest.md`,
+`docs/lld/build-targets.md`, and `docs/lld/README.md`.
+**Deviations from the design plan.** Review added strict QIDO control and
+pagination validation, full multipart resource-header validation, exact
+media-type parameter evidence, typed null-slot preservation, Group Length
+refusal, and RFC 3986 Content-Location parsing. The live Session command
+remains with F-101 as planned.
+**Notes for future sessions.** F-101 can connect the proven response sink to a
+live Session. Authentication remains caller-owned, and encoded frame payloads
+remain outside TypeScript interpretation.

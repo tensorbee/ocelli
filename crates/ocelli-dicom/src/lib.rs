@@ -5,15 +5,20 @@
 //! F-016 adds the Part 10 parser and observable transfer-syntax dispatch.
 //! F-017 adds lossless metadata projection and ordered providers.
 
+mod dicomweb;
 mod metadata;
 mod parse;
 mod provider;
 
 pub use dicom_core::VR;
 pub use dicom_object::{DefaultDicomObject, Tag};
+pub use dicomweb::{
+    DicomwebSource, EncodedFramePart, EncodedFrames, SeriesSource, SourceBatch, SourceError,
+    SourceResponse, SourceResponseKind,
+};
 pub use metadata::{
     BulkDataUri, InlineBinary, MetadataElement, MetadataError, MetadataSet, MetadataValue,
-    PersonName,
+    NullSlots, PersonName,
 };
 pub use parse::{DispatchPath, ParseError, ParsedDicom, TransferSyntaxInfo, parse_part10};
 pub use provider::{

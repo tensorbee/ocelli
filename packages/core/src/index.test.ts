@@ -27,7 +27,11 @@ import { coreAvailable, VERSION } from "./index.js";
  */
 const PUBLISHED: readonly string[] = [
   // ./bulk.js, HLD 17.2
+  "writeDicomwebResponse",
   "writeFrame",
+  // ./dicomweb.js, PS3.18 sections 9.1.2, 10.4, and 10.6
+  "DicomwebClient",
+  "DicomwebError",
   // ./ring.js, HLD 17.3
   "readEvent",
   "EVENT_STRIDE",
@@ -111,8 +115,11 @@ describe("@ocelli/core", () => {
    * covers the names, and this covers what they are: a `writeFrame` that
    * became a re-exported constant would satisfy the set and not this.
    */
-  it("publishes writeFrame and readEvent as callables", () => {
+  it("publishes bulk, DICOMweb, and event entry points as callables", () => {
+    expect(typeof core.writeDicomwebResponse).toBe("function");
     expect(typeof core.writeFrame).toBe("function");
+    expect(typeof core.DicomwebClient).toBe("function");
+    expect(typeof core.DicomwebError).toBe("function");
     expect(typeof core.readEvent).toBe("function");
   });
 });
