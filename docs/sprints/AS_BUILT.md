@@ -2158,3 +2158,77 @@ or tolerance.
 **Notes for future sessions.** Gzip, paired files, extensions, big-endian
 NIfTI-1, NIfTI-2 parsing, additional datatypes and `Volume` construction remain
 explicitly outside this story. Scaling is retained without being applied.
+
+## F-017, Metadata model and provider registry, completed 2026-09-09
+
+**What was built.** `ocelli-dicom` now projects parsed Part 10 attributes into
+a lossless ordered `MetadataSet`. Declared VR, missing versus present-empty
+state, multiplicity, signed and unsigned widths, source text spelling, nested
+sequence items, Person Name components, and validated DICOM JSON binary
+carriers remain observable. A caller-owned provider registry applies explicit
+first-answer precedence and returns the stable `ProviderId` that supplied each
+answer.
+**HLD sections implemented.** Sections 3, 4, 11, 15, 23, 25, and 27.
+**Deviations.** Existing D-02 supplies the `ocelli-dicom` crate name. Existing
+D-18 supplies the direct dicom-rs component dependency shape and required
+`std` posture.
+**Crates / packages modified.** `ocelli-dicom`, workspace dependency policy,
+the DICOM ingest LLD, and its LLD index.
+**Tests added.** Two provider unit tests, sixteen initial metadata fixture and
+property tests, and one later fixed-VR sequence-constructor regression.
+**Fixture provenance.** Synthetic Part 10 elements and sequences are
+hand-encoded from DICOM PS3.5. Binary-carrier fixtures use PS3.18 F.2.2 and
+F.2.5. No patient data is tracked.
+**Verification.** The authoritative feature floor and corpus gate passed on
+the exact staged delivery-record tree recorded by the verification ledger and
+commit trailer on 2026-09-09.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Metadata lookup is
+renderer-independent, native and wasm checks pass, and this story performs no
+pixel arithmetic.
+**LLD updated.** `docs/lld/dicom-ingest.md` and `docs/lld/README.md`.
+**Deviations from the design plan.** Review restricted DICOM JSON carriers to
+their PS3.18 VR sets, refused empty Inline Binary, made `ProviderId` the only
+registration identity, and moved text normalization into a VR-aware semantic
+view. F-021 integration required one later F-017-owned seam, the fixed-VR
+sequence constructor.
+**Notes for future sessions.** F-018 and F-019 can consume the lossless
+metadata and provider contracts. F-021 later added the checked
+`MetadataValue::WithNullSlots` representation and its independent test. That
+addition belongs to F-021 and is not counted as F-017 work.
+
+## F-023, Codec dispatch layer and capability registry, completed 2026-09-09
+
+**What was built.** `ocelli-codec` now provides the explicit runtime
+`Decoder` extension point, a sixteen-UID known Transfer Syntax catalogue,
+three-state capability reporting, validated DICOM frame descriptions, exact
+UID dispatch, and atomic collision-refusing registration. Decode output remains
+caller-owned and no concrete codec is activated.
+**HLD sections implemented.** Sections 4, 13, 15, 21, 24, 25, 26, 27, and 28.
+**Deviations.** D-19 records the result-returning registration contract and
+atomic refusal of empty, repeated, unknown, or already registered UIDs.
+**Crates / packages modified.** `ocelli-codec`, the no-std posture guard and
+its reviewed digest, codec and build-target LLDs, and benchmark availability
+documentation.
+**Tests added.** One checked-size unit test and twelve registry integration
+tests covering capability states, exact lookup, frame validation, atomic
+registration, collision refusal, caller-owned output, and propagated decoder
+errors.
+**Fixture provenance.** Synthetic frame descriptions and decoder declarations
+derive from DICOM PS3.3 C.7.6.3.3, the PS3.6 Rows and Columns definitions, and
+the PS3.5 Annex A Transfer Syntax catalogue. No patient data is tracked.
+**Verification.** The authoritative feature floor and corpus gate passed on
+the exact staged delivery-record tree recorded by the verification ledger and
+commit trailer on 2026-09-09.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. All rendering tiers use the same
+registry, decode workers do not touch the GPU, and this story performs no pixel
+arithmetic.
+**LLD updated.** `docs/lld/codecs.md`, `docs/lld/README.md`,
+`docs/lld/benchmarks.md`, and `docs/lld/build-targets.md`.
+**Deviations from the design plan.** Review enforced the required High Bit
+equality, retained Rows and Columns as DICOM `US` values, and added a private
+32-bit checked-length proof without widening the public DICOM contract.
+**Notes for future sessions.** F-024 and later stories own concrete codec
+adapters and conformance output. `decode.frame` remains unavailable with reason
+`no_runner` until a real decoder supplies the benchmark subject.
