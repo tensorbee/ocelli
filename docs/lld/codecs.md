@@ -1,6 +1,6 @@
 # Codec registry
 
-**F-IDs that contributed:** F-023, F-024, F-025
+**F-IDs that contributed:** F-023, F-024, F-025, F-026
 **Last updated:** 2026-09-10
 
 `ocelli-codec` owns decoder capability, registration, and exact Transfer
@@ -36,6 +36,40 @@ handles. Capability lookup and one-frame dispatch borrow existing state and do
 not allocate. JPEG decode uses bounded dependency-owned frame storage before
 one atomic copy into the caller's buffer. Deviation D-21 records why the safe
 dependency APIs cannot meet section 21's no-allocation sentence.
+
+## JPEG 2000 Part 1
+
+F-026 registers separate adapters for `.90` and `.91`. A bounded main-header
+inspector owns SIZ geometry, precision and signedness checks, COD transform and
+MCT checks, QCD quantization-style and segment-length checks, and terminal EOC
+plus necessary DICOM NULL padding. The supported domain is one MONOCHROME1 or
+MONOCHROME2 component in an 8-bit or 16-bit signed or unsigned container with
+identity rescale. Per DICOM PS3.5 A.4.4, `.90` requires reversible 5/3 and QCD
+no-quantization style. `.91` accepts reversible 5/3 or irreversible 9/7 with
+any valid Part 1 QCD style. Missing or duplicate QCD, invalid style lengths,
+and QCC quantization override are refused before decode. Colour and MCT are
+refused.
+
+A deterministic fixture generator rewrites the tracked reversible fixture's
+expounded QCD segment into a legal scalar-derived segment and asks OpenJPEG
+2.5.4 for the independent reference bytes. The resulting `.91` fixture proves
+QCD style 1 is decoded, while the `.90` mode refuses the same codestream before
+decode because A.4.4 requires no quantization.
+
+The vendored decoder returns owned `f32` samples. The adapter accepts only a
+complete output of exact length whose samples are finite, integral and in the
+declared stored-value range. It builds canonical little-endian bytes away from
+the caller buffer and copies only after every sample passes. This is the
+bounded allocation D-21 permits and preserves atomic caller output.
+
+The manifest-backed `.90` frame equals the uncompressed synthetic truth. The
+`.91` frame differs at 418 of 6,144 samples, with signed sum 30, maximum
+absolute difference 1 and no difference over 1. Against the independent
+pydicom and OpenJPEG decode it differs at 1,232 samples, with signed sum 730,
+maximum absolute difference 1 and no difference over 1. Both satisfy the
+unchanged HLD 25.1 mono16 predicate. The native gate executes these checks
+natively and in Node from plain and `+simd128` wasm modules. The wasm gate does
+not exercise this codec.
 
 ## Known does not mean available
 

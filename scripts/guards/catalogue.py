@@ -295,6 +295,45 @@ def _drop_wgpu_entry(box: Sandbox) -> None:
     box.substitute("Cargo.toml", 'wgpu = "=30.0.1"', "")
 
 
+def _remove_ritk_published_source(box: Sandbox) -> None:
+    box.delete("vendor/ritk-codecs-0.6.0/src/lib.rs")
+
+
+def _rewrite_ritk_source_and_inventory(box: Sandbox) -> None:
+    source_name = "vendor/ritk-codecs-0.6.0/src/lib.rs"
+    inventory_name = "vendor/ritk-codecs-0.6.0/PACKAGE-INVENTORY.sha256"
+    box.append(source_name, "// coordinated source and inventory change\n")
+    digest = hashlib.sha256((box.path / source_name).read_bytes()).hexdigest()
+    rows = box.read(inventory_name).splitlines()
+    box.write(inventory_name, "\n".join(
+        f"{digest}  ./src/lib.rs" if row.endswith("  ./src/lib.rs") else row
+        for row in rows
+    ) + "\n")
+
+
+def _append_ritk_normalized_manifest(box: Sandbox) -> None:
+    box.append("vendor/ritk-codecs-0.6.0/Cargo.toml", "\n# unrelated edit\n")
+
+
+def _append_ritk_original_manifest(box: Sandbox) -> None:
+    box.append("vendor/ritk-codecs-0.6.0/Cargo.toml.orig", "\n# unrelated edit\n")
+
+
+def _append_ritk_patch_provenance(box: Sandbox) -> None:
+    box.append("vendor/ritk-codecs-0.6.0/PATCH-PROVENANCE.md",
+               "\nThe Rust source was changed locally.\n")
+
+
+def _restore_ritk_rayon_default(box: Sandbox) -> None:
+    box.substitute("vendor/ritk-codecs-0.6.0/Cargo.toml",
+                   'version = "0.3"\ndefault-features = false',
+                   'version = "0.3"\ndefault-features = true')
+
+
+def _remove_done_benchmark_runner(box: Sandbox) -> None:
+    box.delete("tools/bench/src/runners/tier_startup_microbenchmark.mjs")
+
+
 def _oversize_wasm(box: Sandbox) -> None:
     box.write("ci/wasm-size-budget.json",
               json.dumps({"bytes": 1000, "tolerance": 0.05}, indent=2) + "\n")
@@ -6491,7 +6530,11 @@ GUARDS: tuple[Guard, ...] = (
                 "a wasm module over its recorded ceiling, an operational "
                 "parity consumer naming a target other than 5.8.2, and a "
                 "generated wasm package missing either regular, "
-                "byte-identical dual-licence grant.",
+                "byte-identical dual-licence grant, a changed or incomplete "
+                "ritk-codecs archive inventory or its immutable digest, an "
+                "undeclared change outside either exact manifest patch or "
+                "the exact patch provenance record, "
+                "incorrect provenance, or Rayon in either target graph.",
         claims=("*",),
         probes=(
             Probe("pins.range", _relax_wgpu_pin,
@@ -6556,6 +6599,44 @@ GUARDS: tuple[Guard, ...] = (
                        "as the first quoted string in the entry, so a table "
                        "whose first value happened to start with `=` passed "
                        "with a caret range unread."),
+            Probe("pins.ritk-inventory", _remove_ritk_published_source,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "published file is absent: src/lib.rs",
+                  note="D-20. The published package inventory is the source "
+                       "boundary. Removing one recorded file must fail."),
+            Probe("pins.ritk-inventory-root",
+                  _rewrite_ritk_source_and_inventory,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "inventory digest",
+                  note="D-20. The inventory digest is rooted outside the "
+                       "vendor tree, so changing source and its inventory "
+                       "row together must still fail."),
+            Probe("pins.ritk-normalized-manifest-extra",
+                  _append_ritk_normalized_manifest,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "Cargo.toml has undeclared changes",
+                  note="D-20. The normalized manifest may differ from the "
+                       "published package only by the declared default "
+                       "feature patch."),
+            Probe("pins.ritk-original-manifest-extra",
+                  _append_ritk_original_manifest,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "Cargo.toml.orig has undeclared changes",
+                  note="D-20. The original manifest has the same complete-"
+                       "bytes boundary as the normalized manifest."),
+            Probe("pins.ritk-provenance-extra",
+                  _append_ritk_patch_provenance,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "PATCH-PROVENANCE.md has undeclared changes",
+                  note="D-20. The complete patch record is rooted outside "
+                       "the vendor tree, so a false source-change claim "
+                       "appended to otherwise true provenance must fail."),
+            Probe("pins.ritk-rayon", _restore_ritk_rayon_default,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "Rayon is present",
+                  note="D-20. Restoring jpeg-decoder defaults recreates the "
+                       "dependency graph the local two-manifest patch exists "
+                       "to remove."),
         ),
     ),
 
@@ -8731,12 +8812,12 @@ GUARDS: tuple[Guard, ...] = (
         gate="bench",
         spec="HLD section 26's last rule, and story E1.6",
         refuses="A benchmark registry whose subject stories do not resolve, a "
-                "subject whose story has not landed carrying a runner or a "
-                "recorded number, and a playwright pin that has drifted "
-                "between the two harnesses.",
+                "pending, archived or superseded story carrying a runner or "
+                "recorded number, a done story lacking its permanent runner, "
+                "and a playwright pin that has drifted between harnesses.",
         claims=("*",),
         covered_by=("scripts/tests/test_bench_check.py "
-                    "(25 cases, run by the `bench` gate, which is in the "
+                    "(27 cases, run by the `bench` gate, which is in the "
                     "floor)",),
         limit="No level-3 probe. The suite above is the negative-case set for "
               "this guard and it runs on every floor gate, so a level-3 "
@@ -10536,9 +10617,45 @@ GUARDS: tuple[Guard, ...] = (
         gate="bench",
         spec="HLD section 26, and `docs/lld/benchmarks.md`",
         refuses="An argument the harness does not accept, and a runner for a "
-                "subject whose story is not done.",
+                "subject whose story is not in progress or done.",
         claims=("*",),
         covered_by=("tools/bench/tests/run_test.mjs (run by the `bench` gate)",),
+    ),
+    Guard(
+        id="codec.wasm-runner",
+        file="scripts/run_codec_wasm.mjs",
+        gate="native",
+        spec="HLD section 21 cross-target decoder contract and D-20",
+        refuses="Anything other than exactly two wasm modules, and a module "
+                "that does not export the production main entry point.",
+        claims=("*",),
+        covered_by=("scripts/tests/test_run_codec_wasm.mjs (run by the "
+                    "`native` gate before production module execution)",),
+    ),
+    Guard(
+        id="bench.jpeg2000",
+        file="tools/bench/src/runners/decode_transfer_syntax_jpeg2000.mjs",
+        gate="bench",
+        spec="HLD section 26 and D-20",
+        refuses="A JPEG 2000 benchmark result without positive finite "
+                "duration, exact kept and warm-up iteration counts, a "
+                "four-decode normalized timing sample, "
+                "positive ordered range enclosing the median, and output "
+                "checksum evidence.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/decode_jpeg2000_test.mjs (run by the "
+                    "`bench` gate)",),
+    ),
+    Guard(
+        id="bench.tier-startup",
+        file="tools/bench/src/runners/tier_startup_microbenchmark.mjs",
+        gate="bench",
+        spec="HLD section 26 and Appendix A gate A7.2",
+        refuses="A completed F-004 fill-rate instrument run that publishes "
+                "no positive safe-integer pixel rate.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/tier_startup_test.mjs (run by the "
+                    "`bench` gate)",),
     ),
     Guard(
         id="bench.decode-frame",

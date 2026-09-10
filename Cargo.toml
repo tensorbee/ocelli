@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "tools/oracle"]
+exclude = ["vendor/ritk-codecs-0.6.0"]
 
 [workspace.package]
 version = "0.1.0"
@@ -97,6 +98,11 @@ oxideav-mjpeg = { version = "=0.1.8", default-features = false, features = ["reg
 # Exact public API companion selected by oxideav-mjpeg's registry feature.
 # Its external arena code's eleven unsafe sites are audited in the F-024 plan.
 oxideav-core = { version = "=0.1.35", default-features = false }
+# F-026 and D-21. Exact published ritk-codecs 0.6.0 is vendored because its
+# jpeg-decoder dependency otherwise enables Rayon. The two-file manifest patch,
+# immutable source inventory and upstream license provenance live with the
+# package and are enforced by the pins gate.
+ritk-codecs = { version = "=0.6.0", path = "vendor/ritk-codecs-0.6.0" }
 # F-021 validates absolute and relative Content-Location URI references from
 # PS3.18 multipart resource headers without retaining their spelling.
 uriparse = "0.6.4"

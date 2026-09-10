@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "start": "node run.mjs",
-    "test": "node --test tests/hostclass_test.mjs tests/paths_test.mjs tests/record_test.mjs tests/registry_test.mjs tests/run_test.mjs tests/state_test.mjs tests/cold_start_test.mjs tests/decode_frame_test.mjs",
+    "test": "node --test tests/hostclass_test.mjs tests/paths_test.mjs tests/record_test.mjs tests/registry_test.mjs tests/run_test.mjs tests/state_test.mjs tests/cold_start_test.mjs tests/decode_frame_test.mjs tests/decode_jpeg2000_test.mjs tests/tier_startup_test.mjs",
     "test:browser": "OCELLI_BENCH_BROWSER=1 node --test tests/cold_start_test.mjs"
   },
   "devDependencies": {

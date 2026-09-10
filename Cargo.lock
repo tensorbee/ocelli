@@ -24,6 +24,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.104"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+
+[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -958,6 +964,7 @@ dependencies = [
  "jpeg-decoder",
  "oxideav-core",
  "oxideav-mjpeg",
+ "ritk-codecs",
 ]
 
 [[package]]
@@ -1309,6 +1316,14 @@ name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
+
+[[package]]
+name = "ritk-codecs"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "jpeg-decoder",
+]
 
 [[package]]
 name = "rustc-hash"

@@ -33,6 +33,9 @@ Repository bootstrap. Nothing is published.
 - An explicit runtime codec registry with exact Transfer Syntax UID capability
   states, validated DICOM frame descriptions, atomic collision-refusing
   registration, and caller-owned decode output buffers.
+- JPEG 2000 Part 1 decoding for lossless Transfer Syntax `.90` and general
+  Transfer Syntax `.91`, with exact stored-domain validation, atomic output,
+  native and WebAssembly execution, and a measured release benchmark.
 - Native DICOM Pixel Data normalization for little-endian and retired
   big-endian transfer syntaxes, allocation-free RLE Lossless decoding, checked
   native multiframe extraction, and typed Pixel Data VR and decoded sample

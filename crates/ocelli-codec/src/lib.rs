@@ -3,11 +3,13 @@
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 
 mod jpeg;
+mod jpeg2000;
 mod native;
 mod registry;
 mod rle;
 
 pub use jpeg::{JpegDecoder, register_jpeg_decoders};
+pub use jpeg2000::{Jpeg2000Decoder, register_jpeg2000_decoders};
 pub use native::{NativeFrameIndex, RawDecoder, register_native_and_rle_decoders};
 pub use rle::RleDecoder;
 

@@ -164,6 +164,86 @@
               "caller output allocation"
             ]
           }
+        },
+        "decode.transfer_syntax.jpeg2000": {
+          "value": 0.6878,
+          "unit": "ms",
+          "tolerance": 0.1,
+          "tolerance_provenance": "DERIVED from one controlled series of fifteen consecutive production runner medians after one warm-cache run on the four-decode normalized instrument: 0.6808, 0.7031, 0.6732, 0.7426, 0.7361, 0.7350, 0.6962, 0.6912, 0.6860, 0.6883, 0.6878, 0.6851, 0.6819, 0.6743, 0.6876 ms. Their median is 0.6878 ms and range is 0.6732 to 0.7426 ms. The extremes are 2.12 per cent below and 7.97 per cent above the center. The retained 10 per cent is the smallest declared band covering both extremes with 7.88 and 2.03 percentage points of lower and upper headroom.",
+          "provenance": "measured",
+          "recorded": "2026-09-10",
+          "story": "F-026",
+          "why": "Plan-reviewed four-decode normalized instrument stabilizes the one-call JPEG 2000 metric",
+          "host_class": {
+            "platform": "darwin",
+            "release": "25.5.0",
+            "arch": "arm64",
+            "cpu_model": "Apple M4 Max",
+            "cpu_count": 16,
+            "memory_bytes": 51539607552
+          },
+          "instrument": {
+            "node": "v24.13.0",
+            "playwright": "1.62.1",
+            "chromium": "151.0.7922.34"
+          },
+          "conditions": {
+            "load_average": [
+              2.85888671875,
+              3.65478515625,
+              3.90966796875
+            ],
+            "free_memory_bytes": 643760128,
+            "uptime_seconds": 365128
+          },
+          "detail": {
+            "statistic": "median of per-call normalized batch durations",
+            "iterations_run": 125,
+            "iterations_kept": 31,
+            "discarded": "one decoder warm-up call",
+            "decodes_per_sample": 4,
+            "observed_range_ms": [
+              0.7209,
+              0.7503
+            ],
+            "calibration_medians_ms": [
+              0.6808,
+              0.7031,
+              0.6732,
+              0.7426,
+              0.7361,
+              0.735,
+              0.6962,
+              0.6912,
+              0.686,
+              0.6883,
+              0.6878,
+              0.6851,
+              0.6819,
+              0.6743,
+              0.6876
+            ],
+            "calibration_range_ms": [
+              0.6732,
+              0.7426
+            ],
+            "clock": "std::time::Instant surrounds each four-decode batch, then elapsed time is normalized by four",
+            "rounding": "0.0001 ms, below the observed run-to-run spread",
+            "output_checksum": 1563934,
+            "transfer_syntax": "1.2.840.10008.1.2.4.91",
+            "rows": 64,
+            "columns": 96,
+            "bits_stored": 16,
+            "profile": "release",
+            "fixture": "synthetic manifest-backed jpeg2000_lossy corpus frame",
+            "excludes": [
+              "process startup",
+              "fixture setup",
+              "decoder construction",
+              "caller output allocation"
+            ]
+          },
+          "replaced": 0.7353
         }
       }
     }

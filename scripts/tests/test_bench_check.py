@@ -113,6 +113,15 @@ def entry(**changes) -> dict:
     return recorded
 
 
+def backlog_with_f023_status(status: str) -> str:
+    old = "| F-023 | E4.1 | S07 | a pending thing | Rust | 2w | F-016 | pending |"
+    new = f"| F-023 | E4.1 | S07 | a pending thing | Rust | 2w | F-016 | {status} |"
+    changed = BACKLOG.replace(old, new)
+    if changed == BACKLOG:
+        raise AssertionError("the F-023 backlog fixture row changed shape")
+    return changed
+
+
 class BenchCheck(unittest.TestCase):
 
     def problems(self, subjects=None, runners=None, base=None,
@@ -159,31 +168,37 @@ class BenchCheck(unittest.TestCase):
             any("render_first_frame.mjs matches no row" in p
                 for p in problems), problems)
 
-    def test_an_in_progress_story_is_not_done(self):
-        backlog = BACKLOG.replace("| F-016 | pending |",
-                                  "| F-016 | in-progress |")
-        self.assertIn("in-progress", backlog,
-                      "the substitution missed, so this test would pass "
-                      "against a `pending` backlog and prove nothing about "
-                      "the in-progress case")
+    def test_an_in_progress_story_may_have_a_runner_and_baseline_entry(self):
+        backlog = backlog_with_f023_status("in-progress")
         problems = self.problems(
-            runners={"wasm_cold_start", "decode_frame"}, backlog=backlog)
-        # Assert on the STATUS the message reports, not just that a message
-        # appeared. `test_a_runner_for_a_pending_subject_is_refused` already
-        # covers the appearance, so without this the two tests are one test
-        # under two names and the in-progress case is uncovered forever.
-        self.assertTrue(
-            any("is 'in-progress' rather than done" in p for p in problems),
-            problems)
+            runners={"wasm_cold_start", "decode_frame"},
+            base=baseline({"decode.frame": entry()}),
+            backlog=backlog)
+        self.assertEqual(problems, [])
 
     def test_a_done_story_may_have_a_runner_and_a_baseline_entry(self):
-        subject = dict(PENDING)
-        subject["subject_story"] = "F-001"
         problems = self.problems(
-            subjects=[dict(LANDED), subject],
             runners={"wasm_cold_start", "decode_frame"},
-            base=baseline({"decode.frame": entry()}))
+            base=baseline({"decode.frame": entry()}),
+            backlog=backlog_with_f023_status("done"))
         self.assertEqual(problems, [])
+
+    def test_a_done_story_with_no_runner_is_refused(self):
+        problems = self.problems(
+            backlog=backlog_with_f023_status("done"))
+        self.assertTrue(
+            any("decode.frame is done and has no runner" in p
+                for p in problems), problems)
+
+    def test_python_policy_matches_the_runtime_status_table(self):
+        expected = {
+            "pending": False,
+            "in-progress": True,
+            "done": True,
+            "archived": False,
+            "superseded": False,
+        }
+        self.assertEqual(bench_check.MEASURABLE_STATUS, expected)
 
     # --- the registry ------------------------------------------------------
 

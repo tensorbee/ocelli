@@ -92,11 +92,11 @@ test("a subject with a runner and a value is measured", () => {
   assert.deepEqual(entry.detail, { statistic: "median" });
 });
 
-test("an in-progress story is still not done, so still unavailable", () => {
+test("an in-progress story with a runner may be measured for review", () => {
   const entry = subjectState(
-    { subject, storyStatus: "in-progress", subjectExists: false },
-    { hasRunner: false, value: null },
+    { subject, storyStatus: "in-progress", subjectExists: true },
+    { hasRunner: true, value: 2.75, detail: { statistic: "median" } },
   );
-  assert.equal(entry.state, UNAVAILABLE);
-  assert.equal(entry.blocking_story_status, "in-progress");
+  assert.equal(entry.state, MEASURED);
+  assert.equal(entry.value, 2.75);
 });

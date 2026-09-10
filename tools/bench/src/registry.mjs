@@ -6,8 +6,8 @@
 // `scripts/bench_check.py`, which is the gate, and the two are deliberately
 // different jobs over the same data:
 //
-//   the gate    refuses a runner file or a baseline entry for a subject whose
-//               story is not done, and fails CI
+//   the gate    permits real runners during in-progress review, requires one
+//               when done, and refuses one for every other status
 //   this module refuses to RUN a subject it cannot label, so that no record can
 //               ever carry a number beside a story that has not landed
 //
@@ -57,6 +57,15 @@ export const VALID_STATUS = [
   "archived",
   "superseded",
 ];
+
+/** Status policy shared with scripts/bench_check.py. */
+export const MEASURABLE_STATUS = {
+  pending: false,
+  "in-progress": true,
+  done: true,
+  archived: false,
+  superseded: false,
+};
 
 const BACKLOG_ROW = /^\|\s*(F-X?\d{3}[a-z]?)\s*\|(.*)$/;
 
@@ -192,7 +201,11 @@ export function resolveSubjects(subjects, { allocationFids, statuses }) {
           `${JSON.stringify(status)}`,
       );
     }
-    return { subject, storyStatus: status, subjectExists: status === "done" };
+    return {
+      subject,
+      storyStatus: status,
+      subjectExists: MEASURABLE_STATUS[status],
+    };
   });
 }
 

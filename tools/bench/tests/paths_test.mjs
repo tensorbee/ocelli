@@ -97,12 +97,12 @@ test("every benchmark node suite is registered in both exact runner lists", () =
     readFileSync(join(BENCH_ROOT, "package.json"), "utf8"),
   );
   const packageSuites = [...manifest.scripts.test.matchAll(
-    /tests\/([a-z_]+_test\.mjs)/g,
+    /tests\/([a-z0-9_]+_test\.mjs)/g,
   )].map((match) => match[1]).sort();
   const gate = readFileSync(join(REPO_ROOT, "bin", "ocelli.sh"), "utf8")
     .match(/^ {4}bench\)[\s\S]*?;;$/m)?.[0] ?? "";
   const gateSuites = [...gate.matchAll(
-    /tools\/bench\/tests\/([a-z_]+_test\.mjs)/g,
+    /tools\/bench\/tests\/([a-z0-9_]+_test\.mjs)/g,
   )].map((match) => match[1]).sort();
 
   assert.deepEqual(packageSuites, suites, "tools/bench/package.json test list");

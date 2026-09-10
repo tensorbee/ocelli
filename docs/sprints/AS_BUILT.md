@@ -2316,3 +2316,61 @@ refusal.
 `UnsupportedPixelFormat` outcomes under the current byte-interleaved output
 contract. F-018 owns stored-bit interpretation after decode. Deflate remains
 `KnownUnavailable` to frame dispatch because its stream wraps the data set.
+
+## F-026, JPEG 2000 via ritk-codecs, completed 2026-09-10
+
+**What was built.** `ocelli-codec` now registers separate JPEG 2000 Part 1
+adapters for lossless Transfer Syntax `.90` and general Transfer Syntax `.91`.
+An owned SIZ, COD, QCD and EOC preflight validates the declared monochrome
+sample domain before dependency decode. Validated finite integral samples are
+copied atomically into caller-owned little-endian output. The same production
+decoder executes natively and as plain and SIMD WebAssembly under Node.
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section
+4, `docs/hld/12-workspace-and-build.md` section 15.2,
+`docs/hld/18-codec-registry.md` section 21,
+`docs/hld/20-errors-and-panics.md` section 23,
+`docs/hld/21-worker-protocol.md` section 24,
+`docs/hld/22-testing-and-tolerance.md` section 25,
+`docs/hld/23-performance-rules.md` section 26, and
+`docs/hld/24-agent-code-standards.md` section 27.
+**Deviations.** D-20 records the exact locally patched `ritk-codecs` 0.6.0
+dependency in place of the rejected `openjp2` route, including immutable
+source and licence provenance plus no-Rayon graphs. D-21 records bounded
+library-owned decoded storage before the atomic caller-buffer copy.
+**Crates / packages modified.** `ocelli-codec`, the exact vendored
+`ritk-codecs` package, the native and WebAssembly execution proof, benchmark
+harness and baseline, dependency and guard policy, and delivery records.
+**Tests added.** Seven JPEG 2000 integration tests and two private conversion
+tests cover lossless and lossy modes, 8-bit and 16-bit signed and unsigned
+stored domains, quantization and transform policy, descriptor mismatches,
+decoded range and length, exact output, and refusal atomicity. Two Node tests
+execute the production proof as plain and SIMD WebAssembly. Twelve focused
+benchmark tests bind iteration, batch, range, checksum, calibration and timing
+provenance. Vendor integrity, no-Rayon graphs and benchmark lifecycle remain
+covered by the pins and guard suites.
+**Fixture provenance.** Synthetic codestream fixtures derive from DICOM PS3.5
+A.4.4 and the JPEG 2000 Part 1 marker contract. Stored sample descriptions
+derive from DICOM PS3.3 C.7.6.3. The scalar-derived QCD fixture and reference
+are deterministically reproduced with OpenJPEG 2.5.4. Manifest-backed `.90`
+and `.91` cases use the ignored synthetic corpus. No patient data is tracked.
+**Verification.** The authoritative feature floor, corpus gate, native
+cross-target execution and production benchmark comparison passed on the exact
+staged completion tree recorded by the verification ledger and commit trailer
+on 2026-09-10.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Decode is CPU worker work before
+rendering, every tier consumes the same output, native and WebAssembly proofs
+execute the same implementation, no pixels cross the JavaScript boundary, and
+this story does not apply display pixel arithmetic.
+**LLD updated.** `docs/lld/codecs.md`, `docs/lld/benchmarks.md`,
+`docs/lld/build-targets.md`, `docs/lld/corpus.md`, `docs/lld/oracle.md`, and
+`docs/lld/README.md`.
+**Deviations from the design plan.** The approved dependency spike replaced
+the nonviable `openjp2` route with an exact published `ritk-codecs` package
+whose two manifests disable an unrelated JPEG default feature. Review added
+QCD ownership, complete vendor-byte binding, atomic conversion boundaries,
+scalar-derived quantization evidence and a four-decode normalized benchmark
+instrument without changing the HLD tolerance.
+**Notes for future sessions.** This story supports monochrome 8-bit and 16-bit
+signed or unsigned Part 1 `.90` and `.91` frames. Colour and multiple-component
+transforms remain refused. HTJ2K and JPEG-LS remain F-027 and F-028.

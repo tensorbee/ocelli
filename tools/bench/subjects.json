@@ -56,6 +56,18 @@
       "note": "F-027 (E4.5) is marked 'P0 KILL CRITERION, unverified in Rust today' in docs/sprints/allocation.json. F-X006 answered gate A1 against our own decoders in S03, and that answer is a feasibility answer rather than a timing one."
     },
     {
+      "id": "decode.transfer_syntax.jpeg2000",
+      "title": "One JPEG 2000 general decode over a synthetic corpus frame",
+      "definition_hld": "18-codec-registry.md section 21, 23-performance-rules.md section 26",
+      "definition": "One release Decoder::decode call for transfer syntax 1.2.840.10008.1.2.4.91 over the manifest-backed 64 by 96 mono16 synthetic corpus frame. The Rust executable owns the clock. Process startup, fixture setup, decoder construction, caller output allocation, fetch and GPU work are excluded.",
+      "unit": "ms",
+      "dimensions": ["transfer_syntax", "rows", "columns", "bits_stored"],
+      "tiers": ["n/a"],
+      "subject_story": "F-026",
+      "feeds": ["A1", "F-027"],
+      "note": "Separate from decode.frame, whose permanent baseline remains JPEG Extended process 4. This subject measures the shipped JPEG 2000 adapter and not a synthetic stand-in."
+    },
+    {
       "id": "decode.transfer_syntax.jpegls",
       "title": "Decode of one JPEG-LS frame, the P0 kill criterion's number",
       "definition_hld": "18-codec-registry.md section 21, A-spike-gates.md gate A2",
@@ -146,7 +158,7 @@
       "tiers": ["A", "B", "C"],
       "subject_story": "F-004",
       "feeds": ["A7.2"],
-      "note": "F-004 OWNS this micro-benchmark and F-006 only records it. They are two artefacts sharing a word: F-004's runs on every production session and returns a tier, this one is a development instrument that returns a recorded number. The runner, when it is written, invokes F-004's own instrument, `cargo test -p ocelli-render --release -- --ignored --nocapture measures_a_fill_rate_on_this_machine`, and reads crates/ocelli-render/src/probe.rs's output. It reimplements nothing. F-004 has since landed and its BACKLOG.md row is `done`, so this row is no longer blocked by a pending story. It stays without a runner until one is written, and the gate does not demand one, which is a gap this note records rather than hides."
+      "note": "F-004 owns this micro-benchmark and F-006 only records it. The permanent runner invokes F-004's own ignored release instrument and parses its pixel rate. It reimplements no GPU workload. A machine with no suitable adapter reports runner failure rather than a fabricated value."
     }
   ]
 }

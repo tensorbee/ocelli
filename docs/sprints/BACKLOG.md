@@ -142,7 +142,7 @@ A frame parses, decodes and passes the hand-computed LUT fixtures of HLD section
 | F-023 | E4.1 | S07 | Codec dispatch layer and capability registry | Rust | 2w | F-016 | done |
 | F-024 | E4.2 | S08 | JPEG baseline / extended / lossless via jpeg-decoder | Rust | 3w | F-023 | pending |
 | F-025 | E4.3 | S08 | RLE, deflate, raw little- and big-endian | Rust | 2w | F-023 | done |
-| F-026 | E4.4 | S08 | JPEG 2000 via openjp2, validated against the corpus | Rust | 4w | F-023 | pending |
+| F-026 | E4.4 | S08 | JPEG 2000 via openjp2, validated against the corpus | Rust | 4w | F-023 | done |
 | F-027 | E4.5 | S09 | HTJ2K: spike, then integrate or bridge to openjph wasm | Rust | 5w | F-026 | pending |
 | F-028 | E4.6 | S09 | JPEG-LS: decide CharLS bridge vs pure Rust, then integrate | Rust | 5w | F-023 | pending |
 | F-029 | E4.7 | S09 | LUT chain: modality, VOI (linear / exact / sigmoid), presentation, invert | Rust | 3w | F-023 | pending |

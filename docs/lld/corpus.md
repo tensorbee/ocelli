@@ -1,7 +1,7 @@
 # The golden corpus
 
-**F-IDs that contributed:** F-009, F-013, F-014, F-016, F-X006, F-X007, F-X012, F-X013
-**Last updated:** 2026-09-07
+**F-IDs that contributed:** F-009, F-013, F-014, F-016, F-026, F-X006, F-X007, F-X012, F-X013
+**Last updated:** 2026-09-10
 
 The corpus is the input every later correctness claim is measured on. It lives
 outside git under ignored `corpus/data` behind `corpus/manifest.tsv`, which is
@@ -12,6 +12,12 @@ is the design behind it.
 the oracle is what renders it, so the two are one instrument. That file records
 which rows cornerstone3D 5.8.2 cannot render and why, which is a fact about the
 reference rather than about the corpus.
+
+F-026's JPEG 2000 `.90` and `.91` evidence uses the same synthetic 64 by 96
+unsigned mono16 source. The lossless output is compared byte-for-byte with that
+source. The lossy row publishes sample-domain divergence under the unchanged
+HLD 25.1 predicate and an independent pydicom/OpenJPEG decode. No patient data
+is tracked in these fixtures.
 
 **Since F-X007 the sixty-two `series` rows are exercised as geometry as well as
 pixels.** The oracle attempts all four series directories and

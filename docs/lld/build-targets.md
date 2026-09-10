@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-X008
-**Last updated:** 2026-09-09
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-X008
+**Last updated:** 2026-09-10
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -109,7 +109,7 @@ bin/ocelli.sh native           # the proof
 bin/ocelli.sh gate native      # the same thing, as a gate, in the floor
 ```
 
-Four steps, each exit code read from the command itself.
+Eight steps, each exit code read from the command itself.
 
 | Step | What it proves |
 |------|----------------|
@@ -117,6 +117,13 @@ Four steps, each exit code read from the command itself.
 | 2 | `cargo check --workspace --exclude ocelli-native --target wasm32-unknown-unknown`. Every crate the table marks `wasm: yes` builds for wasm32 |
 | 3 | `cargo check --workspace --all-targets`. Every crate the table marks `native: yes` builds natively, tests included |
 | 4 | `scripts/target_feature_check.py`. Resolved features agree across the two targets, or the difference is declared |
+| 5 | `scripts/tests/test_run_codec_wasm.mjs`. The Node executor refuses wrong arity and a module without the production entry point |
+| 6 | The production JPEG 2000 proof executes natively against exact and lossy synthetic truth |
+| 7 | The same source builds as plain and `+simd128` release wasm modules |
+| 8 | Node executes both wasm modules. This is execution evidence, not merely a successful compile |
+
+Steps 6 to 8 are F-026's codec-specific execution proof. `gate wasm` still
+builds only `ocelli-wasm` and does not exercise `ocelli-codec`.
 
 **Step 2 deliberately omits `--all-targets` and step 3 keeps it.** For wasm32
 that flag pulls in dev-dependencies, and `proptest` reaches `wait-timeout`,

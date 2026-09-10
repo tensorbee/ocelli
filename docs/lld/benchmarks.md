@@ -1,6 +1,6 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-024, F-X014
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-X014
 **Last updated:** 2026-09-10
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
@@ -379,15 +379,44 @@ That gate then runs the guard's own negative cases and the node suites, all of t
 seventh review pass**, and all three were found by mutating the source rather
 than by reading it.
 
-- **`subjectExists` is `status === "done"` and not "not pending".**
-  `resolveSubjects` was only ever driven with `done` and `pending`, so
-  `in-progress`, `archived` and `superseded` never reached it and the two
-  spellings were indistinguishable. Reading either of the last two as delivered
-  is exactly the `REFUSED` state `src/state.mjs` calls the defect this harness
-  is most likely to produce, and a superseded story is one whose subject was
-  replaced rather than built. Every status now goes through it against a table,
-  and the authority for that table is `scripts/bench_check.py`, which refuses a
-  runner file and a baseline entry on `status != "done"` twice over.
+- **A subject is measurable only at `in-progress` or `done`.** Pending,
+  archived and superseded rows remain unavailable. In-progress permits a real
+  runner and baseline during independent review. Done requires a runner, so
+  status cannot substitute for permanent evidence. Python and JavaScript carry
+  the same explicit five-status table and tests.
+
+F-026 adds `decode.transfer_syntax.jpeg2000` without replacing the standing
+JPEG `decode.frame` subject. Its release runner measures one `.91` decode of
+the 64 by 96 manifest-backed mono16 synthetic frame. Each timing sample covers
+four consecutive production decodes and divides elapsed time by four. This
+keeps the one-call unit and the same setup and allocation exclusions while
+reducing scheduling noise. A temp-only interleaved experiment found that extra
+warm-ups through 32 did not remove the correlated slow mode. Raising kept
+samples from 31 to 63 or 127 left upper deviations of 6.94 and 7.41 per cent
+over 30 repeats. Four-decode samples reduced the observed upper deviation from
+8.17 to 5.71 per cent. Batches of eight and sixteen reached 5.70 and 4.67 per
+cent, so four was the smallest measured batch that materially improved the
+instrument.
+
+After one unrecorded warm-cache run, the controlled calibration series of 15
+consecutive production runner medians, in run order, was
+`0.6808, 0.7031, 0.6732, 0.7426, 0.7361, 0.7350, 0.6962, 0.6912, 0.6860, 0.6883, 0.6878, 0.6851, 0.6819, 0.6743, 0.6876`
+ms. Its median is 0.6878 ms and its range is 0.6732 to 0.7426 ms on host class
+`darwin|25.5.0|arm64|Apple_M4_Max|16|51539607552`. The extremes are 2.12 per
+cent below and 7.97 per cent above the median. The retained 10 per cent is the
+smallest declared symmetric band that covers both extremes, with 7.88 and 2.03
+percentage points of lower and upper headroom. The checked baseline retains
+exactly 15 values, and its standing test proves the recorded value is their
+median, the structured and documented series agree, every point is inside the
+band, and the tolerance remains exactly 10 per cent.
+
+Paired spike release wasm modules were 222,226 bytes with upstream defaults
+and 222,166 bytes with the no-Rayon manifest patch, a 60-byte reduction.
+Dependency graph absence and linked binary size are separate evidence.
+The runner contract records exactly 31 kept timing samples of four decodes each
+after one warm-up call. Its parser requires integer counts matching that
+contract, a finite positive duration and checksum, and a finite positive
+nondecreasing observed range that encloses the normalized median.
 - **The comparison reads the RECORDED unit and not the run's.** Nothing built a
   run whose unit differed from its baseline's, so the two were the same value.
   The two units in the test now have opposite polarity in `INCREASE_MEANS`, so

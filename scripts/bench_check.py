@@ -26,10 +26,16 @@ nothing.** That is the defect, it is this project's "quietly wrong" shape
 applied to cost rather than to pixels, and discipline is not a mechanism against
 it. So two things are refused mechanically:
 
-1. a runner file for a subject whose story has not landed, because a runner for
-   a subject that does not exist can only be timing a stub, and
+1. a runner file for a subject whose story is not in progress or done, because
+   a runner for a subject that does not exist can only be timing a stub,
 2. an entry in `ci/bench-baseline.json` for such a subject, because that is
-   where an invented number would come to rest.
+   where an invented number would come to rest, and
+3. a done subject with no runner, because completion requires the permanent
+   instrument rather than an intention to add it later.
+
+An in-progress story may carry its real runner and measured baseline so that
+independent review can inspect the implemented subject before the story is
+marked done. Pending, archived and superseded stories remain unavailable.
 
 `unavailable` is the correct output for those rows and it is a useful one: the
 record names the F-ID a reader should go and read.
@@ -75,6 +81,13 @@ VALID_TIERS = ("A", "B", "C", "n/a")
 
 # Mirrors scripts/backlog_check.py.
 VALID_STATUS = ("pending", "in-progress", "done", "archived", "superseded")
+MEASURABLE_STATUS = {
+    "pending": False,
+    "in-progress": True,
+    "done": True,
+    "archived": False,
+    "superseded": False,
+}
 BACKLOG_ROW = re.compile(r"^\|\s*(F-X?\d{3}[a-z]?)\s*\|(.*)$")
 
 # The fields ci/bench-baseline.json's host_class block must carry. Mirrors
@@ -218,15 +231,23 @@ def check_runners(rows: dict, statuses: dict[str, str],
                     f"that has stopped measuring it.")
             continue
         status = statuses.get(story, "")
-        if status != "done" and has_runner:
+        measurable = MEASURABLE_STATUS.get(status, False)
+        if not measurable and has_runner:
             problems.append(
                 f"{sid} has a runner at "
                 f"tools/bench/src/runners/{runner_basename(sid)}.mjs and its "
-                f"subject story {story} is {status!r} rather than done. A "
+                f"subject story {story} is {status!r} rather than "
+                f"in-progress or done. A "
                 f"runner for a subject that does not exist can only be timing "
                 f"a stub, and a plausible number for a thing that does not "
                 f"exist describes nothing. Report unavailable and name the "
                 f"story.")
+        elif status == "done" and not has_runner:
+            problems.append(
+                f"{sid} is done and has no runner at "
+                f"tools/bench/src/runners/{runner_basename(sid)}.mjs. A "
+                f"completed subject requires its permanent instrument; "
+                f"completion cannot stand in for evidence.")
     for name in sorted(runner_names - set(expected)):
         problems.append(
             f"tools/bench/src/runners/{name}.mjs matches no row in "
@@ -267,11 +288,13 @@ def check_baseline(baseline: dict, rows: dict,
                     f"{key}, and subjects.json has no such row")
                 continue
             story = rows[sid].get("subject_story")
-            if story is not None and statuses.get(story, "") != "done":
+            status = statuses.get(story, "")
+            if story is not None and not MEASURABLE_STATUS.get(status, False):
                 problems.append(
                     f"ci/bench-baseline.json records a number for {sid} on "
                     f"host class {key}, and its subject story {story} is "
-                    f"{statuses.get(story, 'unknown')!r} rather than done. "
+                    f"{statuses.get(story, 'unknown')!r} rather than "
+                    f"in-progress or done. "
                     f"This is the entry an invented number would come to rest "
                     f"in, and it is refused.")
             for field in BASELINE_ENTRY_FIELDS:

@@ -45,6 +45,6 @@ test("subject execution refuses a runner for a pending subject", async () => {
         storyStatus: "pending",
       },
     ], { out: "unused", build: false }),
-    /subject story F-999 is pending rather than done/,
+    /subject story F-999 is pending rather than in-progress or done/,
   );
 });

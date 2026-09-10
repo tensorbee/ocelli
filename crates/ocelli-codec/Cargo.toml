@@ -15,3 +15,4 @@ workspace = true
 jpeg-decoder.workspace = true
 oxideav-core.workspace = true
 oxideav-mjpeg.workspace = true
+ritk-codecs.workspace = true
