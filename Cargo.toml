@@ -79,6 +79,7 @@ wasm-bindgen = "=0.2.127"
 # A direct flate2 handle exposes the consumed stream length that dicom-rs's
 # erased adapter does not, so mandatory A.5 padding can be validated. Pixel
 # codecs remain for F-023 onward.
+dicom-core = { version = "0.10", default-features = false }
 dicom-object = { version = "0.10", default-features = false, features = ["deflate"] }
 dicom-encoding = { version = "0.10", default-features = false }
 dicom-parser = { version = "0.10", default-features = false }

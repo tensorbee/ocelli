@@ -20,7 +20,7 @@ row here in the same hand.
 | File | Area | F-IDs |
 |------|------|-------|
 | [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001, F-005 |
-| [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, transfer-syntax dispatch and refusal boundaries | F-016 |
+| [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, lossless metadata providers, transfer-syntax dispatch and refusal boundaries | F-016, F-017 |
 | [corpus.md](corpus.md) | Golden corpus layout, generation and verification | F-009, F-013, F-014, F-016, F-X006, F-X007, F-X012, F-X013 |
 | [build-targets.md](build-targets.md) | The wasm pipeline, the size budget, the cross-target proof and the isolation invariant | F-002, F-004, F-005, F-007, F-008, F-016, F-X008 |
 | [gpu-ownership.md](gpu-ownership.md) | One device, one queue, one owner. The section 31 contract | F-004, F-005, F-008, F-X001 |

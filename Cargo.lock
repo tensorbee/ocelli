@@ -973,11 +973,13 @@ dependencies = [
 name = "ocelli-dicom"
 version = "0.1.0"
 dependencies = [
+ "dicom-core",
  "dicom-encoding",
  "dicom-object",
  "dicom-parser",
  "dicom-transfer-syntax-registry",
  "flate2",
+ "proptest",
  "thiserror",
 ]
 

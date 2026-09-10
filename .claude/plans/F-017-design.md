@@ -99,8 +99,10 @@ This plan chooses a lossless `MetadataSet` projection over the F-016 parsed obje
 It represents a missing tag as a lookup outcome, a present zero-length element
 as an empty value, and a present primitive element as its declared VR plus an
 ordered value list. Text components retain the parser's stored spelling and
-legal trailing pad. A trimmed view is computed when requested rather than
-replacing the stored spelling. Signed integer variants remain signed.
+legal trailing pad. A VR-aware semantic view is computed when requested rather
+than replacing the stored spelling. It preserves significant leading spaces
+for ST, LT, UT, and other trailing-pad-only VRs. Signed integer variants remain
+signed.
 
 `MetadataSet` and its element constructors are public within `ocelli-dicom` so
 F-021 can construct the same representation from QIDO-RS DICOM JSON without
@@ -108,16 +110,20 @@ editing this story's files. F-021 owns JSON parsing. F-017 owns the value and
 collection invariants shared by Part 10 and DICOM JSON. The shared value type
 therefore also represents nested sequences, DICOM JSON Person Name component
 objects, `BulkDataURI`, and validated `InlineBinary`. Those carriers do not
-collapse into strings. Encapsulated Pixel Data fragments remain outside the
-metadata projection because F-023 and later decoder stories own that path.
+collapse into strings. Their shared constructors enforce the carrier and VR
+sets from PS3.18 F.2.2. An empty Inline Binary is refused because PS3.18 F.2.5
+represents a present empty attribute without a carrier. Encapsulated Pixel Data
+fragments remain outside the metadata projection because F-023 and later
+decoder stories own that path.
 
 The provider registry is an ordered collection of named provider functions. A
 lookup returns both the value and the stable provider identifier that supplied
 it. It has no implicit default provider and no cross-provider merge. The first
 provider that returns a present result wins. A provider that observes a present
 empty value has answered, so lookup does not continue and turn emptiness into a
-fallback value. Duplicate provider identifiers and duplicate registration of
-the same function are refused.
+fallback value. Duplicate provider identifiers are refused. Provider identity
+is the caller-supplied `ProviderId`, not a function address that Rust does not
+guarantee can be compared reliably.
 
 The HLD Appendix B has no `Covered by` column despite the design workflow's
 wording. Its metadata source count is context, not an acceptance list. This
@@ -134,8 +140,9 @@ parity with every symbol in the reference metadata package.
    byte or word payloads. Recursively project ordinary sequence items into
    nested `MetadataSet` values. Add explicit constructors for the Person Name,
    `BulkDataURI`, and `InlineBinary` carriers that F-021 obtains from DICOM
-   JSON. Pixel-fragment values are reported as unsupported rather than
-   flattened.
+   JSON. Enforce PS3.18 F.2.2 carrier VR sets and the F.2.5 empty-value rule in
+   those constructors. Pixel-fragment values are reported as unsupported
+   rather than flattened.
 2. Add `provider.rs`. Define stable `ProviderId`, a request containing the
    parsed object and requested tag, a function-pointer provider signature, the
    ordered registry, and a lookup result containing provider identity and
@@ -147,10 +154,11 @@ parity with every symbol in the reference metadata package.
    precedence, not test-only implementers.
 4. Keep provider registration caller-owned and deterministic. Registration
    order is the only precedence rule. Lookup never guesses a provider, tag, VR,
-   or default value.
+   or default value. `ProviderId` is the only registration identity.
 5. Extend the existing F-016 hand-encoded Part 10 test helpers with synthetic,
    non-identifying attributes. Exercise absent, explicit empty, padded UI and
-   space-padded text, ordered DS multiplicity, and negative SS and SL values.
+   space-padded text, significant leading ST space, ordered DS multiplicity,
+   and negative SS and SL values.
 6. Record a controlled mutation that changes present-empty into missing or
    reverses provider precedence. The corresponding test must fail for that
    reason.
@@ -170,7 +178,7 @@ parity with every symbol in the reference metadata package.
 | Category | What it proves | Where |
 |----------|----------------|-------|
 | unit | Missing differs from present empty, first answering provider wins, present empty stops fallback, and provider identity is returned | `crates/ocelli-dicom/src/provider.rs` |
-| fixture | PS3.5 value representation and padding rules retain padded UI and text spelling, ordered multi-valued DS text, signed SS and SL values, and a nested sequence from hand-encoded non-identifying data elements | `crates/ocelli-dicom/tests/metadata.rs` |
+| fixture | PS3.5 value representation and VR-specific padding rules retain padded UI and text spelling, significant leading ST space, ordered multi-valued DS text, signed SS and SL values, and a nested sequence from hand-encoded non-identifying data elements. PS3.18 F.2.2 and F.2.5 tests cover valid and invalid JSON carriers | `crates/ocelli-dicom/tests/metadata.rs` |
 | property | Projection preserves primitive multiplicity and signedness for generated bounded primitive values | `crates/ocelli-dicom/tests/metadata.rs` |
 | cross-target | Native and wasm32 compile and run the same metadata and provider API without `wasm-bindgen` | `bin/ocelli.sh check ocelli-dicom` and `bin/ocelli.sh wasm` |
 | mutation | Treating empty as missing or reversing provider order makes the named boundary test fail | recorded in the clean feature review |
@@ -207,8 +215,12 @@ the direct dicom-rs component dependency shape. No new deviation is planned.
 
 **Modified**
 
-- `crates/ocelli-dicom/Cargo.toml`, only if property-test support is not
-  already available from the workspace
+- `Cargo.toml`, to expose the existing dicom-core package as a direct workspace
+  dependency for the public metadata types
+- `Cargo.lock`, to record the direct dicom-core and property-test dependency
+  edges for `ocelli-dicom`
+- `crates/ocelli-dicom/Cargo.toml`, for the workspace dicom-core dependency and
+  property-test support
 - `crates/ocelli-dicom/src/lib.rs`
 - `docs/lld/dicom-ingest.md`
 - `docs/lld/README.md`, only if its story index requires it
