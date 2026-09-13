@@ -1,7 +1,7 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-X014
-**Last updated:** 2026-09-09
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-X014
+**Last updated:** 2026-09-10
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -13,14 +13,14 @@ Until the harness existed the rule was unenforceable, because there was nothing
 to measure with, and a rule with no instrument is satisfied by whoever is
 confident. `tools/bench` is the instrument. This file is the design behind it.
 
-**It is an instrument and not a report.** One of its eleven subjects has a
+**It is an instrument and not a report.** Two of its eleven subjects have a
 runner and a recorded number. Eight are blocked on a story that has not landed,
 because there is no renderer, no worker and no boundary, which is decision D7
-holding: the oracle and the instruments exist before the port code. Two
-subjects have landed but have no honest runner. `tier.startup_microbenchmark`
-has no runner after F-004, and `decode.frame` has no runner after F-023 because
-dispatch exists without a concrete decoder. The harness reports both as
-`unavailable` with reason `no_runner` and records no number for either.
+holding: the oracle and the instruments exist before the port code. One
+subject has landed but has no honest runner. `tier.startup_microbenchmark`
+has no runner after F-004. The harness reports it as `unavailable` with reason
+`no_runner` and records no number for it. F-024 supplies the first concrete
+decoder and the `decode.frame` runner.
 
 **`bin/ocelli.sh bench --list` is the authority on that split and this
 paragraph is not.** It reports each subject's blocking story and that story's
@@ -164,7 +164,7 @@ section calls the awkward eleventh row.
 | Subject | State | Blocked on |
 |---------|-------|------------|
 | `wasm.cold_start` | **measured** | nothing, this is the deliverable number |
-| `decode.frame` | unavailable, reason `no_runner` | nothing. F-023 supplies dispatch but no concrete decoder |
+| `decode.frame` | **measured** | nothing. F-024 supplies the first concrete decoder and runner |
 | `decode.transfer_syntax.htj2k` | unavailable | F-027 (E4.5), S09, a P0 kill criterion |
 | `decode.transfer_syntax.jpegls` | unavailable | F-028 (E4.6), S09, a P0 kill criterion |
 | `render.first_frame` | unavailable | F-038 (E6.2), S12, and F-037 (E6.1), S11 |
@@ -181,7 +181,7 @@ codec questions and both are about decode, so the numbers that marker points at
 are the three decode rows. First frame and interaction latency feed no kill
 criterion this repository has written down.
 
-## The one measurement this story took
+## The cold-start measurement
 
 **`wasm.cold_start`, 2.3 ms**, recorded on 2026-09-05 with a 25 per cent
 tolerance. `ci/bench-baseline.json` carries the figure, the host class, the
@@ -241,21 +241,42 @@ phase is a lower bound and nothing else, and the discarded warm-up means the
 figure is taken with the artefact already in the operating system's page cache.
 The record says both, in `detail.not_measured`.
 
-## Timing is taken from outside the core, never by instrumenting it
+## The first frame-decode measurement
 
-The obvious implementation is a `#[wasm_bindgen] pub fn bench_mark()` in
-`ocelli-wasm` and an `Instant::now()` in each crate. Both are refused.
+**`decode.frame`, 0.0849 ms**, recorded on 2026-09-10 with a 30 per cent
+tolerance. The runner measures one release `Decoder::decode` call through the
+twelve-bit JPEG Extended `.51` adapter over the deterministic 96 by 64
+synthetic corpus frame. It excludes process startup, fixture setup, decoder
+construction, and caller output allocation. Dependency allocations that occur
+inside `decode` remain inside the measurement boundary.
+
+The Rust executable performs one warm-up decode, then times 31 individual
+calls with `std::time::Instant` and reports their median. It rounds durations
+to 0.0001 ms, which is below the observed run-to-run spread. `black_box` keeps
+the source, frame description, and output observable. The record includes an
+output checksum and the transfer syntax, rows, columns, bits stored, release
+profile, and observed range.
+
+The tolerance is derived from fifteen consecutive calibration runs on the
+recording host. Their medians ranged from 0.0698 to 0.0891 ms, about 24 per
+cent across the range. Thirty per cent covers that measured spread with
+headroom. It is a regression baseline rather than a performance target.
+
+## Timing is taken outside production code
+
+The obvious wasm implementation is a `#[wasm_bindgen] pub fn bench_mark()` in
+`ocelli-wasm`. It is refused.
 
 - A timing export in `ocelli-wasm` adds a boundary function that exists for the
   harness and ships to every user, and F-101 (E16.2) owns what the boundary
   exports.
-- `std::time::Instant` does not work on `wasm32-unknown-unknown`, so a Rust
-  timing primitive would need a browser branch, which is browser-specific code
-  in a core crate and is precisely what decision D2 exists to prevent.
+- A timestamp inside `Decoder::decode` would alter every production call and
+  make the subject measure an instrumented implementation.
 
 The browser half times with `performance.now()` from the page, outside the
-module. A future native half times with `Instant` in `tools/bench`, outside the
-crates. **No file under `crates/` was modified by this story.**
+module. The native decode half uses `Instant` in a release-only Cargo example,
+outside the library. Neither timer changes production code or crosses a
+product boundary.
 
 ### The rounding decision
 
@@ -266,6 +287,11 @@ precision the clock does not have. Every duration is rounded to four decimal
 places, which is a thousand times finer than the quantum and therefore cannot
 move a figure across a tolerance boundary. It removes the arithmetic's artefact
 and nothing else.
+
+The native decode runner also records four decimal places in milliseconds.
+Its calibration ranged over 0.0193 ms between run medians, much larger than
+the 0.0001 ms recorded quantum. This avoids claiming irrelevant binary
+floating-point digits without affecting its tolerance boundary.
 
 ## The host class, and why a duration needs one
 
@@ -353,15 +379,44 @@ That gate then runs the guard's own negative cases and the node suites, all of t
 seventh review pass**, and all three were found by mutating the source rather
 than by reading it.
 
-- **`subjectExists` is `status === "done"` and not "not pending".**
-  `resolveSubjects` was only ever driven with `done` and `pending`, so
-  `in-progress`, `archived` and `superseded` never reached it and the two
-  spellings were indistinguishable. Reading either of the last two as delivered
-  is exactly the `REFUSED` state `src/state.mjs` calls the defect this harness
-  is most likely to produce, and a superseded story is one whose subject was
-  replaced rather than built. Every status now goes through it against a table,
-  and the authority for that table is `scripts/bench_check.py`, which refuses a
-  runner file and a baseline entry on `status != "done"` twice over.
+- **A subject is measurable only at `in-progress` or `done`.** Pending,
+  archived and superseded rows remain unavailable. In-progress permits a real
+  runner and baseline during independent review. Done requires a runner, so
+  status cannot substitute for permanent evidence. Python and JavaScript carry
+  the same explicit five-status table and tests.
+
+F-026 adds `decode.transfer_syntax.jpeg2000` without replacing the standing
+JPEG `decode.frame` subject. Its release runner measures one `.91` decode of
+the 64 by 96 manifest-backed mono16 synthetic frame. Each timing sample covers
+four consecutive production decodes and divides elapsed time by four. This
+keeps the one-call unit and the same setup and allocation exclusions while
+reducing scheduling noise. A temp-only interleaved experiment found that extra
+warm-ups through 32 did not remove the correlated slow mode. Raising kept
+samples from 31 to 63 or 127 left upper deviations of 6.94 and 7.41 per cent
+over 30 repeats. Four-decode samples reduced the observed upper deviation from
+8.17 to 5.71 per cent. Batches of eight and sixteen reached 5.70 and 4.67 per
+cent, so four was the smallest measured batch that materially improved the
+instrument.
+
+After one unrecorded warm-cache run, the controlled calibration series of 15
+consecutive production runner medians, in run order, was
+`0.6808, 0.7031, 0.6732, 0.7426, 0.7361, 0.7350, 0.6962, 0.6912, 0.6860, 0.6883, 0.6878, 0.6851, 0.6819, 0.6743, 0.6876`
+ms. Its median is 0.6878 ms and its range is 0.6732 to 0.7426 ms on host class
+`darwin|25.5.0|arm64|Apple_M4_Max|16|51539607552`. The extremes are 2.12 per
+cent below and 7.97 per cent above the median. The retained 10 per cent is the
+smallest declared symmetric band that covers both extremes, with 7.88 and 2.03
+percentage points of lower and upper headroom. The checked baseline retains
+exactly 15 values, and its standing test proves the recorded value is their
+median, the structured and documented series agree, every point is inside the
+band, and the tolerance remains exactly 10 per cent.
+
+Paired spike release wasm modules were 222,226 bytes with upstream defaults
+and 222,166 bytes with the no-Rayon manifest patch, a 60-byte reduction.
+Dependency graph absence and linked binary size are separate evidence.
+The runner contract records exactly 31 kept timing samples of four decodes each
+after one warm-up call. Its parser requires integer counts matching that
+contract, a finite positive duration and checksum, and a finite positive
+nondecreasing observed range that encloses the normalized median.
 - **The comparison reads the RECORDED unit and not the run's.** Nothing built a
   run whose unit differed from its baseline's, so the two were the same value.
   The two units in the test now have opposite polarity in `INCREASE_MEANS`, so
@@ -518,24 +573,20 @@ number. The runner, when it is written, invokes F-004's own instrument and reads
 
 ## What is deliberately absent
 
-**No `criterion` and no new CARGO dev-dependency**, and the qualifier is not
-pedantry: F-006 did add a node one. `tools/bench/package.json` and its lockfile
-are this story's, and they pin playwright at exactly the version `tools/oracle`
-pins, which `scripts/bench_check.py` asserts. What is untouched is the cargo
-side. There is no Rust subject to measure, `AGENTS.md` refuses a construct with
-no user today, and a dev-dependency that is not wasm32-portable breaks
-`cargo check --all-targets` on that target, which is how `proptest` reaching
-`wait-timeout` already constrains this workspace. F-023 and F-024 add the Rust
-runner and the cargo dependency it needs, with a named user.
+**No `criterion` and no new Cargo dev-dependency.** The frame runner is a Rust
+example with a named production subject and uses `std::time::Instant` directly.
+The JPEG dependencies are production dependencies rather than benchmark-only
+scaffolding. `tools/bench/package.json` and its lockfile continue to pin
+playwright at exactly the version `tools/oracle` pins, which
+`scripts/bench_check.py` asserts.
 
 **No new trait and no new generic.** The runner lookup is a file path derived
 from a subject id, and the two implementers a trait would need do not exist.
 
-**No hand-computed pixel fixture, and it is named rather than omitted.** HLD 27.2
-R3 requires one for every function doing pixel arithmetic. This harness computes
-no pixel, no coordinate and no LUT value, and it reads none of the corpus. An
-omitted row and a deliberate "no arithmetic here" read identically six months
-later.
+**No pixel arithmetic in the harness.** HLD 27.2 R3 requires a hand-computed
+fixture for every function doing pixel arithmetic. The benchmark only invokes
+the production decoder and reads no sample value. The decoder's tests own the
+hand-computed lossless fixture and independent `.51` reference.
 
 **No parity surface.** `docs/hld/B-parity-surface.md` enumerates viewport types,
 tool classes, blend modes, VOI LUT functions, transfer syntaxes, segmentation

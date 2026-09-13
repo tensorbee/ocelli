@@ -11,6 +11,7 @@ import {
   allocationFids,
   backlogStatuses,
   loadRegistry,
+  MEASURABLE_STATUS,
   parseRegistry,
   REQUIRED_FIELDS,
   resolveSubjects,
@@ -237,7 +238,7 @@ test("resolution reports whether the subject exists", () => {
     [null, "done", "pending"]);
 });
 
-test("only a done story makes a subject exist, over every status", () => {
+test("in-progress and done stories are measurable, over every status", () => {
   // `resolveSubjects` was only ever driven with `done` and `pending`, so
   // `in-progress`, `archived` and `superseded` never reached it and
   // `status === "done"` mutated to `status !== "pending"` left the suite
@@ -256,17 +257,19 @@ test("only a done story makes a subject exist, over every status", () => {
   // Its authority is `scripts/bench_check.py`, which refuses a runner file and
   // a baseline entry on `status != "done"` twice over, and this module's own
   // header rule that a rule living on one side only is a defect.
-  const DELIVERED = {
+  const MEASURABLE = {
     pending: false,
-    "in-progress": false,
+    "in-progress": true,
     done: true,
     archived: false,
     superseded: false,
   };
-  assert.deepEqual(Object.keys(DELIVERED), [...VALID_STATUS],
+  assert.deepEqual(MEASURABLE_STATUS, MEASURABLE,
+    "the exported runtime policy diverged from the reviewed status table");
+  assert.deepEqual(Object.keys(MEASURABLE), [...VALID_STATUS],
     "the accepted status set moved and this table no longer covers it");
 
-  for (const [status, delivered] of Object.entries(DELIVERED)) {
+  for (const [status, measurable] of Object.entries(MEASURABLE)) {
     const subjects = parseRegistry(
       registryText([{ ...ROW, subject_story: "F-001" }]),
     ).subjects;
@@ -275,9 +278,9 @@ test("only a done story makes a subject exist, over every status", () => {
       statuses: new Map([["F-001", status]]),
     });
     assert.equal(resolved.storyStatus, status);
-    assert.equal(resolved.subjectExists, delivered,
+    assert.equal(resolved.subjectExists, measurable,
       `a story that is ${JSON.stringify(status)} was read as ` +
-        `${resolved.subjectExists ? "delivered" : "not delivered"}`);
+        `${resolved.subjectExists ? "measurable" : "not measurable"}`);
   }
 });
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -28,7 +29,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from guards import census, discover, sandbox  # noqa: E402
 from guards.catalogue import (CONSTANTS, DEFECTS, DICOM_FIXTURE,  # noqa: E402
-                              GUARDS)
+                              GUARDS, _workspace_manifest_with_exclusion)
 
 
 class SandboxCopyPreservesTrackedShape(unittest.TestCase):
@@ -129,6 +130,28 @@ class SandboxCopyPreservesTrackedShape(unittest.TestCase):
                     source_root=root,
                     destination_root=root,
                 )
+
+
+class WorkspaceExcludeProbeBuilder(unittest.TestCase):
+    def test_it_extends_an_existing_exclusion_without_a_duplicate_key(
+            self) -> None:
+        manifest = (
+            '[workspace]\n'
+            'resolver = "3"\n'
+            'members = ["crates/*", "tools/oracle"]\n'
+            'exclude = ["vendor/ritk-codecs-0.6.0"]\n\n'
+            '[workspace.package]\n'
+            'edition = "2024"\n'
+        )
+
+        updated = _workspace_manifest_with_exclusion(manifest, "tools/oracle")
+
+        workspace = tomllib.loads(updated)["workspace"]
+        self.assertEqual(
+            workspace["exclude"],
+            ["vendor/ritk-codecs-0.6.0", "tools/oracle"],
+        )
+        self.assertEqual(updated.count("\nexclude = "), 1)
 
 
 class CatalogueIsWellFormed(unittest.TestCase):

@@ -49,6 +49,7 @@ import json
 import os
 import re
 import subprocess
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -295,6 +296,45 @@ def _drop_wgpu_entry(box: Sandbox) -> None:
     box.substitute("Cargo.toml", 'wgpu = "=30.0.1"', "")
 
 
+def _remove_ritk_published_source(box: Sandbox) -> None:
+    box.delete("vendor/ritk-codecs-0.6.0/src/lib.rs")
+
+
+def _rewrite_ritk_source_and_inventory(box: Sandbox) -> None:
+    source_name = "vendor/ritk-codecs-0.6.0/src/lib.rs"
+    inventory_name = "vendor/ritk-codecs-0.6.0/PACKAGE-INVENTORY.sha256"
+    box.append(source_name, "// coordinated source and inventory change\n")
+    digest = hashlib.sha256((box.path / source_name).read_bytes()).hexdigest()
+    rows = box.read(inventory_name).splitlines()
+    box.write(inventory_name, "\n".join(
+        f"{digest}  ./src/lib.rs" if row.endswith("  ./src/lib.rs") else row
+        for row in rows
+    ) + "\n")
+
+
+def _append_ritk_normalized_manifest(box: Sandbox) -> None:
+    box.append("vendor/ritk-codecs-0.6.0/Cargo.toml", "\n# unrelated edit\n")
+
+
+def _append_ritk_original_manifest(box: Sandbox) -> None:
+    box.append("vendor/ritk-codecs-0.6.0/Cargo.toml.orig", "\n# unrelated edit\n")
+
+
+def _append_ritk_patch_provenance(box: Sandbox) -> None:
+    box.append("vendor/ritk-codecs-0.6.0/PATCH-PROVENANCE.md",
+               "\nThe Rust source was changed locally.\n")
+
+
+def _restore_ritk_rayon_default(box: Sandbox) -> None:
+    box.substitute("vendor/ritk-codecs-0.6.0/Cargo.toml",
+                   'version = "0.3"\ndefault-features = false',
+                   'version = "0.3"\ndefault-features = true')
+
+
+def _remove_done_benchmark_runner(box: Sandbox) -> None:
+    box.delete("tools/bench/src/runners/tier_startup_microbenchmark.mjs")
+
+
 def _oversize_wasm(box: Sandbox) -> None:
     box.write("ci/wasm-size-budget.json",
               json.dumps({"bytes": 1000, "tolerance": 0.05}, indent=2) + "\n")
@@ -307,6 +347,51 @@ def _write_packaged_licences(box: Sandbox, *, omit: str = "") -> None:
         if name != omit:
             box.write(f"crates/ocelli-wasm/pkg/{name}",
                       (box.path / name).read_bytes())
+
+
+def _decode_frame_accepts(box: Sandbox, condition: str) -> None:
+    box.substitute(
+        "tools/bench/src/runners/decode_frame.mjs",
+        condition,
+        "if (false) {",
+    )
+
+
+def _decode_frame_accepts_duration(box: Sandbox) -> None:
+    _decode_frame_accepts(
+        box,
+        "if (!Number.isFinite(parsed.value) || parsed.value <= 0) {",
+    )
+
+
+def _decode_frame_accepts_iterations(box: Sandbox) -> None:
+    _decode_frame_accepts(
+        box,
+        "if (!Number.isInteger(parsed.iterations) || parsed.iterations < 1) {",
+    )
+
+
+def _decode_frame_accepts_range(box: Sandbox) -> None:
+    _decode_frame_accepts(
+        box,
+        "if (!Array.isArray(parsed.range_ms) || parsed.range_ms.length !== 2 ||\n"
+        "      !parsed.range_ms.every(Number.isFinite)) {",
+    )
+
+
+def _decode_frame_accepts_checksum(box: Sandbox) -> None:
+    _decode_frame_accepts(
+        box,
+        "if (!Number.isSafeInteger(parsed.checksum) || parsed.checksum <= 0) {",
+    )
+
+
+def _decode_frame_accepts_absent_binary(box: Sandbox) -> None:
+    box.substitute(
+        "tools/bench/src/runners/decode_frame.mjs",
+        "    await access(binary);",
+        "    return;",
+    )
 
 
 def _missing_packaged_apache_licence(box: Sandbox) -> None:
@@ -3059,6 +3144,31 @@ def _workspace_members(box: Sandbox) -> list[str]:
     return re.findall(r'"([^"]+)"', listing.group(1))
 
 
+def _workspace_manifest_with_exclusion(manifest: str, member: str) -> str:
+    """Add `member` to `[workspace].exclude` without duplicating the key.
+
+    The real manifest may already exclude vendored sources. Probe fixtures
+    must retain those exclusions and remain valid TOML, or the probe measures
+    the parser's refusal instead of the lint policy it declares.
+    """
+    block = re.search(r"^\[workspace\]$(.*?)(?=^\[|\Z)", manifest,
+                      re.M | re.S)
+    row = re.search(r"^[ \t]*exclude[ \t]*=[ \t]*(\[.*\])[ \t]*$",
+                    block.group(1), re.M)
+    if row is None:
+        insertion = block.start(1)
+        return (manifest[:insertion] +
+                f"\nexclude = {json.dumps([member])}" +
+                manifest[insertion:])
+
+    excluded = tomllib.loads(f"exclude = {row.group(1)}\n")["exclude"]
+
+    start = block.start(1) + row.start()
+    end = block.start(1) + row.end()
+    replacement = f"exclude = {json.dumps([*excluded, member])}"
+    return manifest[:start] + replacement + manifest[end:]
+
+
 def _member_directories(box: Sandbox) -> list[Path]:
     """Every directory the manifest's `members` globs resolve to."""
     found: list[Path] = []
@@ -3410,10 +3520,8 @@ def _exclude_a_named_workspace_member(box: Sandbox) -> None:
     the group allow planted here was in a member the walk no longer visited.
     """
     member = _a_member_outside_crates(box)
-    patterns = _workspace_members(box)
-    box.substitute("Cargo.toml", f"members = {json.dumps(patterns)}",
-                   f"members = {json.dumps(patterns)}\n"
-                   f"exclude = {json.dumps([member])}")
+    box.write("Cargo.toml", _workspace_manifest_with_exclusion(
+        box.read("Cargo.toml"), member))
     _member_outside_crates_group_allow(box)
 
 
@@ -6446,7 +6554,11 @@ GUARDS: tuple[Guard, ...] = (
                 "a wasm module over its recorded ceiling, an operational "
                 "parity consumer naming a target other than 5.8.2, and a "
                 "generated wasm package missing either regular, "
-                "byte-identical dual-licence grant.",
+                "byte-identical dual-licence grant, a changed or incomplete "
+                "ritk-codecs archive inventory or its immutable digest, an "
+                "undeclared change outside either exact manifest patch or "
+                "the exact patch provenance record, "
+                "incorrect provenance, or Rayon in either target graph.",
         claims=("*",),
         probes=(
             Probe("pins.range", _relax_wgpu_pin,
@@ -6511,6 +6623,44 @@ GUARDS: tuple[Guard, ...] = (
                        "as the first quoted string in the entry, so a table "
                        "whose first value happened to start with `=` passed "
                        "with a caret range unread."),
+            Probe("pins.ritk-inventory", _remove_ritk_published_source,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "published file is absent: src/lib.rs",
+                  note="D-20. The published package inventory is the source "
+                       "boundary. Removing one recorded file must fail."),
+            Probe("pins.ritk-inventory-root",
+                  _rewrite_ritk_source_and_inventory,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "inventory digest",
+                  note="D-20. The inventory digest is rooted outside the "
+                       "vendor tree, so changing source and its inventory "
+                       "row together must still fail."),
+            Probe("pins.ritk-normalized-manifest-extra",
+                  _append_ritk_normalized_manifest,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "Cargo.toml has undeclared changes",
+                  note="D-20. The normalized manifest may differ from the "
+                       "published package only by the declared default "
+                       "feature patch."),
+            Probe("pins.ritk-original-manifest-extra",
+                  _append_ritk_original_manifest,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "Cargo.toml.orig has undeclared changes",
+                  note="D-20. The original manifest has the same complete-"
+                       "bytes boundary as the normalized manifest."),
+            Probe("pins.ritk-provenance-extra",
+                  _append_ritk_patch_provenance,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "PATCH-PROVENANCE.md has undeclared changes",
+                  note="D-20. The complete patch record is rooted outside "
+                       "the vendor tree, so a false source-change claim "
+                       "appended to otherwise true provenance must fail."),
+            Probe("pins.ritk-rayon", _restore_ritk_rayon_default,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "Rayon is present",
+                  note="D-20. Restoring jpeg-decoder defaults recreates the "
+                       "dependency graph the local two-manifest patch exists "
+                       "to remove."),
         ),
     ),
 
@@ -8686,12 +8836,12 @@ GUARDS: tuple[Guard, ...] = (
         gate="bench",
         spec="HLD section 26's last rule, and story E1.6",
         refuses="A benchmark registry whose subject stories do not resolve, a "
-                "subject whose story has not landed carrying a runner or a "
-                "recorded number, and a playwright pin that has drifted "
-                "between the two harnesses.",
+                "pending, archived or superseded story carrying a runner or "
+                "recorded number, a done story lacking its permanent runner, "
+                "and a playwright pin that has drifted between harnesses.",
         claims=("*",),
         covered_by=("scripts/tests/test_bench_check.py "
-                    "(25 cases, run by the `bench` gate, which is in the "
+                    "(27 cases, run by the `bench` gate, which is in the "
                     "floor)",),
         limit="No level-3 probe. The suite above is the negative-case set for "
               "this guard and it runs on every floor gate, so a level-3 "
@@ -10491,9 +10641,150 @@ GUARDS: tuple[Guard, ...] = (
         gate="bench",
         spec="HLD section 26, and `docs/lld/benchmarks.md`",
         refuses="An argument the harness does not accept, and a runner for a "
-                "subject whose story is not done.",
+                "subject whose story is not in progress or done.",
         claims=("*",),
         covered_by=("tools/bench/tests/run_test.mjs (run by the `bench` gate)",),
+    ),
+    Guard(
+        id="codec.wasm-runner",
+        file="scripts/run_codec_wasm.mjs",
+        gate="native",
+        spec="HLD section 21 cross-target decoder contract and D-20",
+        refuses="Anything other than exactly two wasm modules, and a module "
+                "that does not export the production main entry point.",
+        claims=("*",),
+        covered_by=("scripts/tests/test_run_codec_wasm.mjs (run by the "
+                    "`native` gate before production module execution)",),
+    ),
+    Guard(
+        id="bench.jpeg2000",
+        file="tools/bench/src/runners/decode_transfer_syntax_jpeg2000.mjs",
+        gate="bench",
+        spec="HLD section 26 and D-20",
+        refuses="A JPEG 2000 benchmark result without positive finite "
+                "duration, exact kept and warm-up iteration counts, a "
+                "four-decode normalized timing sample, "
+                "positive ordered range enclosing the median, and output "
+                "checksum evidence.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/decode_jpeg2000_test.mjs (run by the "
+                    "`bench` gate)",),
+    ),
+    Guard(
+        id="bench.tier-startup",
+        file="tools/bench/src/runners/tier_startup_microbenchmark.mjs",
+        gate="bench",
+        spec="HLD section 26 and Appendix A gate A7.2",
+        refuses="A completed F-004 fill-rate instrument run that publishes "
+                "no positive safe-integer pixel rate.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/tier_startup_test.mjs (run by the "
+                    "`bench` gate)",),
+    ),
+    Guard(
+        id="bench.decode-frame",
+        file="tools/bench/src/runners/decode_frame.mjs",
+        gate="bench",
+        spec="HLD section 26, and `docs/lld/benchmarks.md`",
+        refuses="A decode.frame record without a positive finite duration, "
+                "a positive iteration count, a finite two-value observed "
+                "range, or a positive safe-integer checksum, and a "
+                "--no-build run without the exact release executable.",
+        claims=(
+            "positive finite duration",
+            "iteration count",
+            "finite observed range",
+            "output checksum",
+            "target/release/examples/decode_frame",
+        ),
+        probes=(
+            Probe(
+                "bench.decode-frame.duration",
+                _decode_frame_accepts_duration,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { parseDecodeFrame as parse } from "
+                    "'./tools/bench/src/runners/decode_frame.mjs';\n"
+                    "try { parse('{\"value\":0,\"iterations\":31,"
+                    "\"range_ms\":[0.2,0.3],\"checksum\":42}'); } "
+                    "catch (error) { if (String(error).includes("
+                    "'positive finite duration')) process.exit(0); "
+                    "throw error; }\n"
+                    "console.error('duration guard accepted a non-positive "
+                    "measurement'); process.exit(1);",
+                ),
+                "duration guard accepted a non-positive measurement",
+                level=1,
+            ),
+            Probe(
+                "bench.decode-frame.iterations",
+                _decode_frame_accepts_iterations,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { parseDecodeFrame as parse } from "
+                    "'./tools/bench/src/runners/decode_frame.mjs';\n"
+                    "try { parse('{\"value\":0.25,\"iterations\":0,"
+                    "\"range_ms\":[0.2,0.3],\"checksum\":42}'); } "
+                    "catch (error) { if (String(error).includes("
+                    "'iteration count')) process.exit(0); throw error; }\n"
+                    "console.error('iteration guard accepted an empty "
+                    "measurement'); process.exit(1);",
+                ),
+                "iteration guard accepted an empty measurement",
+                level=1,
+            ),
+            Probe(
+                "bench.decode-frame.range",
+                _decode_frame_accepts_range,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { parseDecodeFrame as parse } from "
+                    "'./tools/bench/src/runners/decode_frame.mjs';\n"
+                    "try { parse('{\"value\":0.25,\"iterations\":31,"
+                    "\"range_ms\":[0.2],\"checksum\":42}'); } catch "
+                    "(error) { if (String(error).includes('finite observed "
+                    "range')) process.exit(0); throw error; }\n"
+                    "console.error('range guard accepted incomplete "
+                    "evidence'); process.exit(1);",
+                ),
+                "range guard accepted incomplete evidence",
+                level=1,
+            ),
+            Probe(
+                "bench.decode-frame.checksum",
+                _decode_frame_accepts_checksum,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { parseDecodeFrame as parse } from "
+                    "'./tools/bench/src/runners/decode_frame.mjs';\n"
+                    "try { parse('{\"value\":0.25,\"iterations\":31,"
+                    "\"range_ms\":[0.2,0.3],\"checksum\":0}'); } catch "
+                    "(error) { if (String(error).includes('output checksum')) "
+                    "process.exit(0); throw error; }\n"
+                    "console.error('checksum guard accepted absent output "
+                    "evidence'); process.exit(1);",
+                ),
+                "checksum guard accepted absent output evidence",
+                level=1,
+            ),
+            Probe(
+                "bench.decode-frame.release-binary",
+                _decode_frame_accepts_absent_binary,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { requireReleaseBinary as requireBinary } from "
+                    "'./tools/bench/src/runners/decode_frame.mjs';\n"
+                    "try { await requireBinary(new URL("
+                    "'./target/guard-probe-absent', import.meta.url)); } "
+                    "catch (error) { if (String(error).includes("
+                    "'refuses a substitute')) process.exit(0); throw error; "
+                    "}\nconsole.error('release guard accepted an absent executable'); "
+                    "process.exit(1);",
+                ),
+                "release guard accepted an absent executable",
+                level=1,
+            ),
+        ),
     ),
     Guard(
         id="bench.cold-start",

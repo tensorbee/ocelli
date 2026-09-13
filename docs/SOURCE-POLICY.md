@@ -101,6 +101,43 @@ form as the table above, with the date it was decided.
 | pydicom bundled test files | not stated | yes | **NO** | 2026-09-04 |
 | openjph-core 0.1.0 | BSD-2-Clause in registry metadata | yes | yes | 2026-09-06 |
 | flate2 | MIT OR Apache-2.0 in registry metadata | yes | yes | 2026-09-07 |
+| oxideav-mjpeg 0.1.8 | MIT, packaged licence and repository metadata | yes | yes | 2026-09-10 |
+| oxideav-core 0.1.35 | MIT, packaged licence and repository metadata | yes | yes | 2026-09-10 |
+| ritk-codecs 0.6.0 | MIT OR Apache-2.0 in registry metadata | yes | yes | 2026-09-10 |
+
+### S08 codec dependencies
+
+`oxideav-mjpeg` 0.1.8 carries an MIT `LICENSE` file in both its package and
+repository. Its package metadata names the same public repository and licence.
+MIT permits derivative works and redistribution with the notice retained.
+The published standalone decoder entry point is not public in this version, so
+F-024 enables only its `registry` feature in addition to disabling defaults.
+That route resolves `oxideav-core` 0.1.35, which carries the same MIT licence
+evidence. An audit of the published source found no unsafe code in
+`oxideav-mjpeg` and eleven unsafe sites in `oxideav-core` arena support, four
+unsafe implementations and seven unsafe blocks. The audit matches whole-word
+`unsafe` over every `*.rs` file below each exact published package's `src/`
+directory. Those are external dependency sites and do not change the
+repository's unsafe allowlist.
+
+`ritk-codecs` 0.6.0 is vendored from the crates.io archive whose SHA-256 is
+`5fb65755a819c6ba38bf8aaf146f4ccc23d2fe217c8161a61bf00517c9d1cce5`.
+Its package metadata names VCS revision
+`33497ccd55b44e004c0b8314a1bcc2e0fc9cb3ed`. The archive's exact 74-file
+inventory is retained. No published file is removed and no Rust source is
+changed. Only `Cargo.toml` and `Cargo.toml.orig` disable `jpeg-decoder` default
+features so the native and wasm graphs contain no Rayon. Exact upstream MIT
+and Apache-2.0 texts from that revision are retained with the package. Ocelli
+selects the MIT alternative for redistribution. The pins gate checks every
+inventory hash and binds the complete 74-row inventory to an immutable digest
+outside the vendor tree. It binds the complete bytes of both patched manifests
+so unrelated edits cannot accompany the sole declared default-feature patch.
+It also binds the complete `PATCH-PROVENANCE.md` bytes to the external
+SHA-256 constant
+`3161785b1cbf76437756c68d13ba6b5d53dfc26f88f0dd285d2af0e395aedeff`,
+so the human-readable patch account cannot gain an undeclared claim.
+It also checks both licence hashes, the archive and VCS provenance, workspace
+exclusion, exact path and version, and both no-Rayon graphs.
 
 ### openjph-core 0.1.0, and the missing packaged licence text
 

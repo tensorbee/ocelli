@@ -2268,3 +2268,238 @@ The F-023 completion entry above remains unchanged. The registry integration
 suite now has thirteen tests after sprint review added the exact refusal for
 the retained legacy nonconforming 16 Bits Allocated, 12 Bits Stored, High Bit
 15 descriptor.
+
+## F-025, RLE, Deflate, raw little- and big-endian, completed 2026-09-10
+
+**What was built.** `ocelli-codec` now registers exact-UID native little-endian,
+retired native big-endian, and RLE Lossless adapters. Typed Pixel Data VR and
+decoded sample-layout evidence preserve the byte-order and layout contract.
+A checked native Value index owns whole-Value OB and OW validation plus
+allocation-free multiframe extraction, while Deflated Explicit VR Little
+Endian remains owned by the existing whole-data-set ingest path.
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section
+4, `docs/hld/12-workspace-and-build.md` section 15.2,
+`docs/hld/18-codec-registry.md` section 21,
+`docs/hld/20-errors-and-panics.md` section 23,
+`docs/hld/21-worker-protocol.md` section 24,
+`docs/hld/22-testing-and-tolerance.md` section 25, and
+`docs/hld/24-agent-code-standards.md` section 27.
+**Deviations.** Existing D-18 retains the direct strict `flate2` Deflate path
+at the whole-data-set ingest boundary. No new deviation was introduced.
+**Crates / packages modified.** `ocelli-codec`, the `ocelli-dicom` corpus
+integration test, codec and DICOM ingest LLDs, and delivery records.
+**Tests added.** Eleven native fixtures and ten RLE fixtures cover exact UID
+and VR behavior, endian normalization, complete native Values, multiframe bit
+offsets, PackBits structure, byte-plane ordering, supported colour layouts,
+refusal atomicity, and output bounds. One ignored corpus integration test
+compares native LE, native BE, RLE, and Deflate with one synthetic truth.
+Existing JPEG and registry fixtures gained typed VR and sample-layout checks.
+**Fixture provenance.** Hand-computed native and RLE fixtures derive from DICOM
+PS3.5 sections 6.2, 8.1.1, 8.2, and 8.2.2, Table 8.2.2-1, and Annexes A, D,
+and G. No patient data is tracked.
+**Verification.** The authoritative feature floor and corpus gate passed on
+the exact staged completion tree recorded by the verification ledger and
+commit trailer on 2026-09-10.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Decode is CPU worker work before
+rendering, all tiers consume the same output, native and wasm checks pass, and
+pixels do not cross the JavaScript boundary.
+**LLD updated.** `docs/lld/codecs.md`, `docs/lld/dicom-ingest.md`, and
+`docs/lld/README.md`.
+**Deviations from the design plan.** Preflight corrected PackBits no-op, row,
+padding, typed VR, and decoded-layout requirements. Review added complete
+Table 8.2.2-1 descriptor validation, valid RGB16 and YBR_FULL16 support, exact
+native whole-Value ownership, non-byte-aligned one-bit frame extraction, the
+OB versus OW final-storage distinction, and direct big-endian OW odd-slice
+refusal.
+**Notes for future sessions.** One-bit and 32-bit RLE remain explicit
+`UnsupportedPixelFormat` outcomes under the current byte-interleaved output
+contract. F-018 owns stored-bit interpretation after decode. Deflate remains
+`KnownUnavailable` to frame dispatch because its stream wraps the data set.
+
+## F-026, JPEG 2000 via ritk-codecs, completed 2026-09-10
+
+**What was built.** `ocelli-codec` now registers separate JPEG 2000 Part 1
+adapters for lossless Transfer Syntax `.90` and general Transfer Syntax `.91`.
+An owned SIZ, COD, QCD and EOC preflight validates the declared monochrome
+sample domain before dependency decode. Validated finite integral samples are
+copied atomically into caller-owned little-endian output. The same production
+decoder executes natively and as plain and SIMD WebAssembly under Node.
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section
+4, `docs/hld/12-workspace-and-build.md` section 15.2,
+`docs/hld/18-codec-registry.md` section 21,
+`docs/hld/20-errors-and-panics.md` section 23,
+`docs/hld/21-worker-protocol.md` section 24,
+`docs/hld/22-testing-and-tolerance.md` section 25,
+`docs/hld/23-performance-rules.md` section 26, and
+`docs/hld/24-agent-code-standards.md` section 27.
+**Deviations.** D-20 records the exact locally patched `ritk-codecs` 0.6.0
+dependency in place of the rejected `openjp2` route, including immutable
+source and licence provenance plus no-Rayon graphs. D-21 records bounded
+library-owned decoded storage before the atomic caller-buffer copy.
+**Crates / packages modified.** `ocelli-codec`, the exact vendored
+`ritk-codecs` package, the native and WebAssembly execution proof, benchmark
+harness and baseline, dependency and guard policy, and delivery records.
+**Tests added.** Seven JPEG 2000 integration tests and two private conversion
+tests cover lossless and lossy modes, 8-bit and 16-bit signed and unsigned
+stored domains, quantization and transform policy, descriptor mismatches,
+decoded range and length, exact output, and refusal atomicity. Two Node tests
+execute the production proof as plain and SIMD WebAssembly. Twelve focused
+benchmark tests bind iteration, batch, range, checksum, calibration and timing
+provenance. Vendor integrity, no-Rayon graphs and benchmark lifecycle remain
+covered by the pins and guard suites.
+**Fixture provenance.** Synthetic codestream fixtures derive from DICOM PS3.5
+A.4.4 and the JPEG 2000 Part 1 marker contract. Stored sample descriptions
+derive from DICOM PS3.3 C.7.6.3. The scalar-derived QCD fixture and reference
+are deterministically reproduced with OpenJPEG 2.5.4. Manifest-backed `.90`
+and `.91` cases use the ignored synthetic corpus. No patient data is tracked.
+**Verification.** The authoritative feature floor, corpus gate, native
+cross-target execution and production benchmark comparison passed on the exact
+staged completion tree recorded by the verification ledger and commit trailer
+on 2026-09-10.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Decode is CPU worker work before
+rendering, every tier consumes the same output, native and WebAssembly proofs
+execute the same implementation, no pixels cross the JavaScript boundary, and
+this story does not apply display pixel arithmetic.
+**LLD updated.** `docs/lld/codecs.md`, `docs/lld/benchmarks.md`,
+`docs/lld/build-targets.md`, `docs/lld/corpus.md`, `docs/lld/oracle.md`, and
+`docs/lld/README.md`.
+**Deviations from the design plan.** The approved dependency spike replaced
+the nonviable `openjp2` route with an exact published `ritk-codecs` package
+whose two manifests disable an unrelated JPEG default feature. Review added
+QCD ownership, complete vendor-byte binding, atomic conversion boundaries,
+scalar-derived quantization evidence and a four-decode normalized benchmark
+instrument without changing the HLD tolerance.
+**Notes for future sessions.** This story supports monochrome 8-bit and 16-bit
+signed or unsigned Part 1 `.90` and `.91` frames. Colour and multiple-component
+transforms remain refused. HTJ2K and JPEG-LS remain F-027 and F-028.
+
+## F-018, Image plane, pixel, modality-LUT and VOI-LUT modules, completed 2026-09-10
+
+**What was built.** `ocelli-pixel` now provides validated image dimensions,
+spacing, orientation, image-plane transforms, stored-pixel descriptions and
+container extraction. It owns Modality LUT and VOI LUT selection and mapping,
+including sequence precedence, LUT descriptors, rescale, LINEAR,
+LINEAR_EXACT, and SIGMOID. Accepted rounded direction cosines are normalized
+and orthogonalized before transform construction.
+**HLD sections implemented.** `docs/hld/13-core-types.md` sections 16 and
+16.1, and `docs/hld/15-lut-chain.md` sections 18 through 18.3.
+**Deviations.** Existing D-13 supplies the corrected
+`LINEAR_EXACT(-160) = 0.000` fixture value. No new deviation was introduced.
+**Crates / packages modified.** `ocelli-pixel`, `ocelli-core` value-space
+documentation, the pixel-pipeline LLD, and delivery records.
+**Tests added.** Ten module tests and sixteen integration fixtures cover image
+plane construction, rounded orientation, singleton-axis spacing, stored-bit
+masking and sign extension, Modality LUT precedence, LUT descriptor bounds,
+all three VOI functions, exact boundary comparisons, output lengths, and
+transform round trips.
+**Fixture provenance.** Hand-computed fixtures derive from DICOM PS3.3
+C.7.6.2.1.1, C.7.6.3, 10.7.1.3, C.11.1, C.11.2.1.2, C.11.2.1.3.1, and
+C.11.2.1.3.2. D-13 records the one corrected HLD worked value. No patient data
+is tracked.
+**Verification.** The authoritative feature floor and corpus gate passed on
+the exact staged integration tree recorded by the verification ledger and
+commit trailer on 2026-09-10.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: full CPU-side parameter preparation. B: full CPU-side
+parameter preparation. C: full and authoritative arithmetic implementation.
+The same source compiles natively and for `wasm32-unknown-unknown`, and no
+pixel crosses the JavaScript boundary.
+**LLD updated.** `docs/lld/pixel-pipeline.md`, `docs/lld/core-types.md`, and
+`docs/lld/README.md`.
+**Deviations from the design plan.** Review replaced an ad hoc orientation
+threshold with a derived bound for six-decimal DICOM rounding, normalized
+accepted orientation evidence, made zero spacing contextual to a singleton
+dimension, validated the unsigned LUT Data domain, and added exact 65,536-entry
+sentinel evidence.
+**Notes for future sessions.** Presentation inversion, palette and ICC
+execution remain later work. Codecs provide stored containers and this module
+remains the sole owner of stored-value and display arithmetic.
+
+## F-019, Multiframe and enhanced SOP class handling, completed 2026-09-10
+
+**What was built.** `ocelli-dicom` now provides a checked borrowed multiframe
+projection over lossless metadata, with positive Number of Frames handling,
+per-frame before shared lookup, explicit top-level fallback and retained
+duplicate-source evidence. Basic and Extended Offset Table indexes return
+checked borrowed fragment ranges without concatenating or decoding them.
+**HLD sections implemented.** `docs/hld/20-errors-and-panics.md` section 23
+and `docs/hld/22-testing-and-tolerance.md` section 25, together with DICOM
+PS3.3 C.7.6.6 and C.7.6.16 and PS3.5 encapsulated Pixel Data rules.
+**Deviations.** None.
+**Crates / packages modified.** `ocelli-dicom`, its multiframe and frame-index
+fixtures, DICOM ingest LLD, and delivery records.
+**Tests added.** Six synthetic multiframe fixtures and nine frame-index
+fixtures cover absent and invalid frame counts, functional-group source order,
+duplicate evidence, item counts, frame bounds, Basic and Extended offsets,
+multi-fragment ranges, physical Item padding, and malformed evidence. One
+ignored corpus assertion now projects the exact manifest-backed enhanced CT
+row through `MetadataSet` and `MultiframeMetadata`.
+**Fixture provenance.** Structural fixtures derive from DICOM PS3.3 C.7.6.6
+and C.7.6.16 plus PS3.5 encapsulated Pixel Data and Item boundary rules. The
+ignored corpus case is deterministic synthetic data generated by
+`scripts/corpus_synth.py`. No patient values enter source or logs.
+**Verification.** The authoritative feature floor and corpus gate passed on
+the exact staged integration tree recorded by the verification ledger and
+commit trailer on 2026-09-10. Sprint-review remediation added the missing
+manifest-backed projection assertion to the later staged sprint tree.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Projection and frame selection are
+decode-worker metadata work. The same source compiles natively and directly
+for `wasm32-unknown-unknown` without `wasm-bindgen`.
+**LLD updated.** `docs/lld/dicom-ingest.md` and `docs/lld/README.md`.
+**Deviations from the design plan.** Review enforced the preserved IS byte
+limit before trimming spaces, the signed 32-bit IS domain, even physical
+Fragment Values, and exact Extended Offset Table pad removal. Sprint review
+made the planned corpus projection executable and corrected the cross-target
+evidence commands.
+**Notes for future sessions.** F-020 owns interpretation of per-frame geometry,
+gantry tilt, spacing calibration, Dimension Index ordering, and volume
+construction. This story preserves that evidence without interpreting it.
+
+## F-024, JPEG baseline, extended, and lossless, completed 2026-09-10
+
+**What was built.** `ocelli-codec` now registers atomic exact-UID adapters for
+JPEG Baseline `.50`, Extended `.51`, Lossless `.57`, and Lossless SV1 `.70`.
+The boundary validates marker structure, process, precision, dimensions,
+components, output length and exact DICOM padding before copying complete
+decoded output into caller-owned storage. Typed output evidence reports when
+the decoder has converted colour to RGB.
+**HLD sections implemented.** `docs/hld/12-workspace-and-build.md` section
+15.2, `docs/hld/18-codec-registry.md` section 21,
+`docs/hld/22-testing-and-tolerance.md` section 25.1, and
+`docs/hld/23-performance-rules.md` section 26.
+**Deviations.** D-21 records bounded dependency-owned decoded storage and the
+required encoded-input copy before atomic caller-buffer output.
+**Crates / packages modified.** `ocelli-codec`, the exact JPEG dependencies,
+the decode benchmark runner and baseline, codec and benchmark LLDs, source
+policy, guard evidence, and delivery records.
+**Tests added.** Ten JPEG integration fixtures cover four exact UIDs, process
+and precision selection, independently established output, colour evidence,
+dimensions, truncation, trailing data, exact necessary padding, output length,
+and atomic refusal. Registry tests cover atomic four-UID registration. The
+benchmark suites bind the first production `decode.frame` subject and validate
+its release-only measurement record.
+**Fixture provenance.** Lossless sample extrema and byte order derive from
+DICOM PS3.5 Annex F. Fragment padding derives from PS3.5 A.4. JPEG Extended
+process 2 output uses independent DCMTK truth, and synthetic colour statistics
+use the corpus reference. No patient data is tracked.
+**Verification.** The authoritative feature floor, corpus, native
+cross-target check and production benchmark passed on the exact staged
+integration tree recorded by the verification ledger and commit trailer on
+2026-09-10.
+**Corpus.** Pass with 92 cases.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Decode is CPU worker work before
+rendering, all tiers consume the same output, and native plus direct wasm32
+checks compile the same adapters.
+**LLD updated.** `docs/lld/codecs.md`, `docs/lld/benchmarks.md`, and
+`docs/lld/README.md`.
+**Deviations from the design plan.** The approved plan added
+`oxideav-mjpeg` for twelve-bit JPEG Extended because `jpeg-decoder` does not
+cover that precision. Review made colour ownership a typed query, constrained
+FF fill and NULL padding exactly, added process 2 eight-bit evidence, and made
+the benchmark and its guard catalogue permanent.
+**Notes for future sessions.** JPEG-LS remains F-028. HTJ2K remains F-027.
+Downstream pixel code must consume the reported colour and sample-layout
+evidence rather than applying a second conversion.

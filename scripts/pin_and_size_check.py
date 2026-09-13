@@ -75,8 +75,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -85,6 +87,27 @@ ROOT = Path(__file__).resolve().parent.parent
 CARGO = ROOT / "Cargo.toml"
 BUDGET = ROOT / "ci" / "wasm-size-budget.json"
 PKG = ROOT / "crates" / "ocelli-wasm" / "pkg"
+RITK_VENDOR = ROOT / "vendor" / "ritk-codecs-0.6.0"
+
+RITK_ARCHIVE_SHA256 = "5fb65755a819c6ba38bf8aaf146f4ccc23d2fe217c8161a61bf00517c9d1cce5"
+RITK_VCS = "33497ccd55b44e004c0b8314a1bcc2e0fc9cb3ed"
+RITK_ADDITIONS = {
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "PACKAGE-INVENTORY.sha256",
+    "PATCH-PROVENANCE.md",
+}
+RITK_INVENTORY_SHA256 = "066d80ffd6b74bd9410df63f1d694c209431be8e3efde37b7c427f71da0cb351"
+RITK_PROVENANCE_SHA256 = "3161785b1cbf76437756c68d13ba6b5d53dfc26f88f0dd285d2af0e395aedeff"
+RITK_PATCHED_HASHES = {
+    "Cargo.toml": "a4832241153ecc35ddb1de5b246f0a244e2d4d301852944aa09952aba7b306d2",
+    "Cargo.toml.orig": "527ba797ed392fed09da5f771c84c6462b59100741ac2177c3223f43c6c176ae",
+}
+RITK_PATCHED = set(RITK_PATCHED_HASHES)
+RITK_LICENCE_HASHES = {
+    "LICENSE-MIT": "8ff8d4621b3a1aa9df7006e0eaeacd5dfb686dcaa328e86c692374fbf2c4874f",
+    "LICENSE-APACHE": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
+}
 
 PACKAGE_LICENCES = ("LICENSE-MIT", "LICENSE-APACHE")
 
@@ -179,6 +202,137 @@ def check_pins() -> list[str]:
     return problems
 
 
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def dependency_tree_outputs() -> tuple[list[str], list[str]]:
+    outputs = []
+    problems = []
+    for target in (None, "wasm32-unknown-unknown"):
+        command = ["cargo", "tree", "-p", "ocelli-codec", "--edges",
+                   "normal,build", "--prefix", "none"]
+        label = "native"
+        if target is not None:
+            command.extend(["--target", target])
+            label = target
+        result = subprocess.run(command, cwd=ROOT, text=True,
+                                capture_output=True, check=False)
+        if result.returncode != 0:
+            problems.append(
+                f"cannot prove the {label} dependency graph: cargo tree "
+                f"exited {result.returncode}: {result.stderr.strip()}")
+        else:
+            outputs.append(result.stdout)
+    return outputs, problems
+
+
+def check_ritk_vendor(
+    vendor: Path = RITK_VENDOR,
+    workspace: Path = CARGO,
+    dependency_trees: tuple[str, ...] | None = None,
+) -> list[str]:
+    """Prove the exact published package, local patch, licences and graphs."""
+    problems = []
+    inventory_path = vendor / "PACKAGE-INVENTORY.sha256"
+    if not inventory_path.is_file():
+        return ["ritk-codecs vendor has no PACKAGE-INVENTORY.sha256"]
+    if file_sha256(inventory_path) != RITK_INVENTORY_SHA256:
+        problems.append(
+            "ritk-codecs published-package inventory digest does not match "
+            "the immutable crates.io archive inventory")
+    inventory = {}
+    for line in inventory_path.read_text().splitlines():
+        digest, separator, name = line.partition("  ./")
+        if not separator or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            problems.append(f"ritk-codecs inventory row is invalid: {line!r}")
+            continue
+        if name in inventory:
+            problems.append(f"ritk-codecs inventory repeats {name}")
+        inventory[name] = digest
+    if len(inventory) != 74:
+        problems.append(
+            f"ritk-codecs inventory has {len(inventory)} published files, "
+            f"expected the archive's exact 74")
+
+    actual = {
+        str(path.relative_to(vendor)) for path in vendor.rglob("*")
+        if path.is_file()
+    }
+    expected = set(inventory) | RITK_ADDITIONS
+    for name in sorted(set(inventory) - actual):
+        problems.append(f"ritk-codecs published file is absent: {name}")
+    for name in sorted(actual - expected):
+        problems.append(f"ritk-codecs carries an unrecorded file: {name}")
+    for name, digest in sorted(inventory.items()):
+        path = vendor / name
+        if path.is_file() and name not in RITK_PATCHED and file_sha256(path) != digest:
+            problems.append(f"ritk-codecs published file changed: {name}")
+
+    try:
+        vcs = json.loads((vendor / ".cargo_vcs_info.json").read_text())["git"]["sha1"]
+    except (FileNotFoundError, KeyError, json.JSONDecodeError):
+        vcs = None
+    if vcs != RITK_VCS:
+        problems.append(f"ritk-codecs VCS revision is {vcs!r}, expected {RITK_VCS}")
+
+    for name, digest in RITK_LICENCE_HASHES.items():
+        path = vendor / name
+        if not path.is_file() or file_sha256(path) != digest:
+            problems.append(f"ritk-codecs {name} is absent or not the exact upstream text")
+    provenance = (vendor / "PATCH-PROVENANCE.md")
+    if not provenance.is_file() or file_sha256(provenance) != RITK_PROVENANCE_SHA256:
+        problems.append(
+            "ritk-codecs PATCH-PROVENANCE.md has undeclared changes from "
+            "the exact reviewed patch record")
+    provenance_text = provenance.read_text() if provenance.is_file() else ""
+    for fact in (RITK_ARCHIVE_SHA256, RITK_VCS, "MIT alternative"):
+        if fact not in provenance_text:
+            problems.append(f"ritk-codecs provenance does not record {fact}")
+
+    for manifest_name in sorted(RITK_PATCHED):
+        path = vendor / manifest_name
+        if path.is_file() and file_sha256(path) != RITK_PATCHED_HASHES[manifest_name]:
+            problems.append(
+                f"ritk-codecs {manifest_name} has undeclared changes beyond "
+                "the exact jpeg-decoder default-features patch")
+        try:
+            manifest = tomllib.loads(path.read_text())
+            jpeg = manifest["dependencies"]["jpeg-decoder"]
+        except (FileNotFoundError, KeyError, tomllib.TOMLDecodeError):
+            jpeg = None
+        if not isinstance(jpeg, dict) or jpeg.get("default-features") is not False:
+            problems.append(
+                f"ritk-codecs {manifest_name} does not set jpeg-decoder "
+                f"default-features = false")
+
+    try:
+        root = tomllib.loads(workspace.read_text())
+        exclude = root["workspace"]["exclude"]
+        dependency = root["workspace"]["dependencies"]["ritk-codecs"]
+    except (FileNotFoundError, KeyError, tomllib.TOMLDecodeError):
+        exclude, dependency = [], None
+    if "vendor/ritk-codecs-0.6.0" not in exclude:
+        problems.append("workspace does not exclude vendor/ritk-codecs-0.6.0")
+    if not isinstance(dependency, dict) or dependency.get("version") != "=0.6.0" \
+            or dependency.get("path") != "vendor/ritk-codecs-0.6.0":
+        problems.append("workspace ritk-codecs dependency is not the exact path and version")
+
+    trees = dependency_trees
+    if trees is None:
+        generated, tree_problems = dependency_tree_outputs()
+        trees = tuple(generated)
+        problems.extend(tree_problems)
+    for index, tree in enumerate(trees):
+        rayon = sorted({line.split()[0] for line in tree.splitlines()
+                        if line.split() and line.split()[0] in {"rayon", "rayon-core"}})
+        if rayon:
+            problems.append(
+                f"Rayon is present in dependency graph {index + 1}: "
+                f"{', '.join(rayon)}")
+    return problems
+
+
 def wasm_bytes() -> int | None:
     if not PKG.is_dir():
         return None
@@ -261,6 +415,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     problems = check_pins()
+    problems.extend(check_ritk_vendor())
     if args.with_size or args.accept_size:
         problems += check_size(args.accept_size)
         problems += check_package_licences()

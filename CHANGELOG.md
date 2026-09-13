@@ -33,6 +33,20 @@ Repository bootstrap. Nothing is published.
 - An explicit runtime codec registry with exact Transfer Syntax UID capability
   states, validated DICOM frame descriptions, atomic collision-refusing
   registration, and caller-owned decode output buffers.
+- Validated DICOM image-plane and stored-pixel evidence, with one modality and
+  VOI pipeline covering LUT precedence and LINEAR, LINEAR_EXACT, and SIGMOID.
+- Enhanced multiframe projection with checked frame counts, retained shared
+  and per-frame functional-group provenance, and bounded frame indexing.
+- JPEG Baseline, Extended, Lossless, and Lossless SV1 decoding with exact UID
+  registration, atomic caller-buffer output, and decoded colour evidence.
+- JPEG 2000 Part 1 decoding for lossless Transfer Syntax `.90` and general
+  Transfer Syntax `.91`, with exact stored-domain validation, atomic output,
+  native and WebAssembly execution, and a measured release benchmark.
+- Native DICOM Pixel Data normalization for little-endian and retired
+  big-endian transfer syntaxes, allocation-free RLE Lossless decoding, checked
+  native multiframe extraction, and typed Pixel Data VR and decoded sample
+  layout evidence. Deflated Explicit VR Little Endian remains a whole-data-set
+  ingest route rather than a frame decoder.
 - A safe in-memory NIfTI-1.1 ingest path for little-endian single-file volumes,
   with checked payload bounds, retained scaling and affine declarations, and
   selected qform or sform geometry converted from RAS to LPS coordinates.

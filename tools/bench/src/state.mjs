@@ -9,9 +9,9 @@
 //                 different host class or with a different instrument, so no
 //                 comparison is made. A duration is not portable and this is
 //                 where that is admitted rather than averaged over
-//   refused       a number for a subject whose story has not landed. Not a
-//                 state, an exception, and `scripts/bench_check.py` refuses the
-//                 tracked half of the same mistake
+//   refused       a number for a pending, archived or superseded subject. Not
+//                 a state, an exception, and `scripts/bench_check.py` refuses
+//                 the tracked half of the same mistake
 //
 // The fourth is the defect this whole story is most likely to produce. A
 // benchmark harness under time pressure invents a workload, produces a
@@ -61,7 +61,8 @@ export function subjectState(resolved, outcome) {
   if (value !== null && !subjectExists) {
     throw new Error(
       `REFUSED: a value was produced for ${subject.id}, whose subject story ` +
-        `${subject.subject_story} is ${storyStatus} rather than done. A ` +
+        `${subject.subject_story} is ${storyStatus} rather than ` +
+        `in-progress or done. A ` +
         `number recorded for a thing that does not exist describes nothing, ` +
         `and it is the one output this harness must never produce. Report ` +
         `unavailable and name the story instead.`,

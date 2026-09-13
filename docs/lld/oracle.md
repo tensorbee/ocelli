@@ -1,8 +1,8 @@
 # The oracle, reference half
 
 **F-IDs that contributed:** F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008,
-F-X009, F-X012, F-X013
-**Last updated:** 2026-09-06
+F-X009, F-X012, F-X013, F-026
+**Last updated:** 2026-09-10
 
 HLD section 11 names cornerstone3D as the reference the differential harness
 measures against, and decision D7 makes the oracle the thing that exists before
@@ -16,6 +16,12 @@ and for every declared series directory a reference volume and three orthogonal
 reformats of it. The half that judges is F-011 and it is
 `docs/lld/comparator.md`. Comparing Ocelli's own output against these frames
 still waits on there being an Ocelli output, which is decision D7 holding.
+
+F-026 has no production render bridge. Its JPEG 2000 conformance evidence is
+therefore a sample-domain native and actual Node-hosted wasm comparison against
+synthetic truth. Neither `gate wasm` nor this browser oracle is claimed to
+exercise the new codec. Rendered differential evidence waits for the production
+decoder-to-renderer connection.
 
 Two passes, in two pages, in that order. The **stack pass** attempts one frame
 of one instance for every applicable corpus row and renders every one the

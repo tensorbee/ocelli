@@ -56,6 +56,38 @@ pub enum PixelRepresentation {
     Signed,
 }
 
+/// Value Representation of the DICOM Pixel Data element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PixelDataVr {
+    /// Other Byte, whose value bytes are insensitive to transfer-syntax byte order.
+    Ob,
+    /// Other Word, whose physical 16-bit words follow transfer-syntax byte order.
+    Ow,
+}
+
+/// Photometric Interpretation presented by a decoder's output buffer.
+///
+/// Most decoders preserve the interpretation in [`FrameDesc`]. JPEG colour
+/// decoders commonly convert encoded YCbCr samples to packed RGB. Keeping that
+/// distinction typed reports the conversion for downstream consumers. The
+/// query is separate from decode, so consumers remain responsible for using it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DecodePhotometricInterpretation {
+    /// The output retains [`FrameDesc::photometric_interpretation`].
+    Preserved,
+    /// The output is packed RGB, regardless of the encapsulating DICOM value.
+    Rgb,
+}
+
+/// Sample ordering presented by a decoder's output buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DecodeSampleLayout {
+    /// The decoder preserves the input sample layout described by DICOM metadata.
+    Preserved,
+    /// Samples for each pixel are adjacent in the output buffer.
+    Interleaved,
+}
+
 /// Unvalidated fields used to construct a [`FrameDesc`].
 ///
 /// Naming every DICOM pixel field prevents positional arguments with the same
@@ -78,6 +110,8 @@ pub struct FrameDescInput {
     pub pixel_representation: PixelRepresentation,
     /// The DICOM Photometric Interpretation value.
     pub photometric_interpretation: String,
+    /// Value Representation used by the Pixel Data element.
+    pub pixel_data_vr: PixelDataVr,
 }
 
 /// Validated descriptive input for one decoded frame.
@@ -94,6 +128,7 @@ pub struct FrameDesc {
     high_bit: u16,
     pixel_representation: PixelRepresentation,
     photometric_interpretation: String,
+    pixel_data_vr: PixelDataVr,
     output_len: usize,
 }
 
@@ -117,6 +152,7 @@ impl FrameDesc {
             high_bit,
             pixel_representation,
             photometric_interpretation,
+            pixel_data_vr,
         } = input;
         if rows == 0 {
             return Err(FrameDescError::ZeroRows);
@@ -127,7 +163,7 @@ impl FrameDesc {
         if samples_per_pixel == 0 {
             return Err(FrameDescError::ZeroSamplesPerPixel);
         }
-        if !matches!(bits_allocated, 8 | 16 | 32) {
+        if !matches!(bits_allocated, 1 | 8 | 16 | 32) {
             return Err(FrameDescError::UnsupportedBitsAllocated {
                 bits: bits_allocated,
             });
@@ -147,7 +183,7 @@ impl FrameDesc {
         }
 
         let output_len =
-            checked_output_len::<usize>(rows, columns, samples_per_pixel, bits_allocated / 8)
+            checked_output_len::<usize>(rows, columns, samples_per_pixel, bits_allocated)
                 .ok_or(FrameDescError::OutputLengthOverflow)?;
 
         Ok(Self {
@@ -159,6 +195,7 @@ impl FrameDesc {
             high_bit,
             pixel_representation,
             photometric_interpretation,
+            pixel_data_vr,
             output_len,
         })
     }
@@ -211,6 +248,12 @@ impl FrameDesc {
         &self.photometric_interpretation
     }
 
+    /// Value Representation used by the Pixel Data element.
+    #[must_use]
+    pub const fn pixel_data_vr(&self) -> PixelDataVr {
+        self.pixel_data_vr
+    }
+
     /// Required caller-provided output length in bytes.
     #[must_use]
     pub const fn output_len(&self) -> usize {
@@ -227,7 +270,7 @@ pub enum FrameDescError {
     ZeroColumns,
     /// Samples per pixel was zero.
     ZeroSamplesPerPixel,
-    /// Bits Allocated was not 8, 16, or 32.
+    /// Bits Allocated was not 1, 8, 16, or 32.
     UnsupportedBitsAllocated { bits: u16 },
     /// Bits Stored was zero or exceeded Bits Allocated.
     BitsStoredOutOfRange {
@@ -246,7 +289,7 @@ impl fmt::Display for FrameDescError {
             Self::ZeroRows => "frame rows must be nonzero",
             Self::ZeroColumns => "frame columns must be nonzero",
             Self::ZeroSamplesPerPixel => "frame samples per pixel must be nonzero",
-            Self::UnsupportedBitsAllocated { .. } => "frame bits allocated must be 8, 16, or 32",
+            Self::UnsupportedBitsAllocated { .. } => "frame bits allocated must be 1, 8, 16, or 32",
             Self::BitsStoredOutOfRange { .. } => {
                 "frame bits stored must fit the allocated sample container"
             }
@@ -262,15 +305,16 @@ fn checked_output_len<T>(
     rows: u16,
     columns: u16,
     samples_per_pixel: u16,
-    bytes_per_sample: u16,
+    bits_allocated: u16,
 ) -> Option<T>
 where
     T: TryFrom<u64>,
 {
-    let length = u64::from(rows)
+    let bits = u64::from(rows)
         .checked_mul(u64::from(columns))?
         .checked_mul(u64::from(samples_per_pixel))?
-        .checked_mul(u64::from(bytes_per_sample))?;
+        .checked_mul(u64::from(bits_allocated))?;
+    let length = bits.checked_add(7)?.checked_div(8)?;
     T::try_from(length).ok()
 }
 
@@ -283,6 +327,14 @@ pub enum CodecError {
     KnownUnavailable,
     /// The caller-provided output slice has the wrong byte length.
     OutputLength { expected: usize, actual: usize },
+    /// The encoded frame is structurally invalid or truncated.
+    InvalidCodestream,
+    /// Bytes follow the first complete encoded image.
+    TrailingData,
+    /// Encoded dimensions, components, precision, or process differ from the descriptor.
+    FrameMismatch,
+    /// The dependency produced an output layout this adapter cannot represent.
+    UnsupportedPixelFormat,
     /// A concrete decoder failed.
     DecoderFailure,
 }
@@ -293,6 +345,10 @@ impl fmt::Display for CodecError {
             Self::UnknownTransferSyntax => "unknown DICOM transfer syntax",
             Self::KnownUnavailable => "known DICOM transfer syntax has no registered decoder",
             Self::OutputLength { .. } => "caller-provided decode output has the wrong length",
+            Self::InvalidCodestream => "encoded frame is invalid or truncated",
+            Self::TrailingData => "encoded frame has trailing data",
+            Self::FrameMismatch => "encoded frame does not match its DICOM description",
+            Self::UnsupportedPixelFormat => "decoder output pixel format is unsupported",
             Self::DecoderFailure => "registered DICOM decoder failed",
         })
     }
@@ -305,7 +361,29 @@ pub trait Decoder: Send + Sync {
     /// The complete static set of UIDs this decoder accepts.
     fn transfer_syntaxes(&self) -> &'static [&'static str];
 
-    /// Decode one frame into `out`. Must not allocate per call.
+    /// Describe the Photometric Interpretation of decoded output.
+    ///
+    /// The default preserves the DICOM frame description. Concrete colour
+    /// decoders override this when they perform a colour transform.
+    fn decode_photometric_interpretation(
+        &self,
+        _desc: &FrameDesc,
+    ) -> DecodePhotometricInterpretation {
+        DecodePhotometricInterpretation::Preserved
+    }
+
+    /// Describe the sample ordering produced by decoded output.
+    fn decode_sample_layout(&self, _desc: &FrameDesc) -> DecodeSampleLayout {
+        DecodeSampleLayout::Preserved
+    }
+
+    /// Decode one frame atomically into `out`.
+    ///
+    /// Registry lookup and dispatch add no allocation of their own. Raw plus
+    /// RLE implementations remain allocation-free per call. Under deviation
+    /// D-21, concrete JPEG and JPEG 2000 adapters may allocate bounded
+    /// dependency-owned decoded storage and may copy encoded input when a safe
+    /// packet API requires owned bytes.
     ///
     /// # Errors
     ///
@@ -457,6 +535,34 @@ impl Registry {
         }
     }
 
+    /// Describe the Photometric Interpretation produced for one frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same exact-UID capability errors as [`Self::decoder`].
+    pub fn decode_photometric_interpretation(
+        &self,
+        transfer_syntax: &str,
+        desc: &FrameDesc,
+    ) -> Result<DecodePhotometricInterpretation, CodecError> {
+        Ok(self
+            .decoder(transfer_syntax)?
+            .decode_photometric_interpretation(desc))
+    }
+
+    /// Describe the sample ordering produced for one frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same exact-UID capability errors as [`Self::decoder`].
+    pub fn decode_sample_layout(
+        &self,
+        transfer_syntax: &str,
+        desc: &FrameDesc,
+    ) -> Result<DecodeSampleLayout, CodecError> {
+        Ok(self.decoder(transfer_syntax)?.decode_sample_layout(desc))
+    }
+
     /// Decode one frame through the decoder registered for the exact UID.
     ///
     /// # Errors
@@ -494,9 +600,9 @@ mod tests {
 
     #[test]
     fn conforming_dicom_dimensions_can_overflow_a_32_bit_output_length() {
-        assert_eq!(checked_output_len::<u32>(u16::MAX, u16::MAX, 1, 4), None);
+        assert_eq!(checked_output_len::<u32>(u16::MAX, u16::MAX, 1, 32), None);
         assert_eq!(
-            checked_output_len::<u32>(u16::MAX, u16::MAX, 1, 1),
+            checked_output_len::<u32>(u16::MAX, u16::MAX, 1, 8),
             Some(4_294_836_225)
         );
     }

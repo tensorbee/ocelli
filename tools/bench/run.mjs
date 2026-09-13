@@ -168,11 +168,11 @@ function instrument() {
 /**
  * Run every subject that has a subject and a runner.
  *
- * A runner file for a subject whose story has not landed is REFUSED here as
- * well as by `scripts/bench_check.py`. The gate keeps it out of the tracked
- * tree and this keeps a local one from producing a record, which are two
- * different halves of the same rule: the tracked half is about what is
- * committed, this half is about what a number can ever be attached to.
+ * A runner file for a pending, archived or superseded subject is REFUSED here
+ * as well as by `scripts/bench_check.py`. In-progress is measurable so review
+ * can inspect the real implementation before completion. The gate keeps a
+ * premature runner out of the tracked tree and this keeps a local one from
+ * producing a record.
  */
 export async function runSubjects(resolved, options) {
   const entries = [];
@@ -183,8 +183,8 @@ export async function runSubjects(resolved, options) {
       throw new Error(
         `REFUSED: ${runnerBasename(row.subject.id)}.mjs exists and ` +
           `${row.subject.id}'s subject story ${row.subject.subject_story} is ` +
-          `${row.storyStatus} rather than done. A runner for a subject that ` +
-          `does not exist can only be timing a stub.`,
+          `${row.storyStatus} rather than in-progress or done. A runner for ` +
+          `a subject that does not exist can only be timing a stub.`,
       );
     }
     if (!hasRunner || !row.subjectExists) {
@@ -306,9 +306,8 @@ export async function main(argv) {
 
   // BEFORE --accept, deliberately. A run in which one runner threw and another
   // measured must not write a baseline and exit 0 with the failure visible only
-  // in `out/run.json`. There is one runner today, so `acceptRecord` would
-  // throw "this run measured nothing" and the ordering could not be observed.
-  // From F-023 onward there are two, and then it can.
+  // in `out/run.json`. With two runners from F-024 onward, a failure in one
+  // must prevent accepting the successful result from the other.
   const failedRunners = final.subjects.filter((one) => one.reason ===
     "runner_failed");
   if (failedRunners.length > 0) {
