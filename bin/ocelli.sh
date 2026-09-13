@@ -159,6 +159,7 @@ run_gate() {
                    tools/bench/tests/cold_start_test.mjs \
                    tools/bench/tests/decode_frame_test.mjs \
                    tools/bench/tests/decode_jpeg2000_test.mjs \
+                   tools/bench/tests/decode_jpegls_test.mjs \
                    tools/bench/tests/tier_startup_test.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py ;;
     prose)       python3 scripts/prose_check.py ;;

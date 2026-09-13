@@ -2651,3 +2651,116 @@ Decimal String, so the figure sits below the precision the source attribute can
 express. **A review pass raised that constant's original justification as a
 smell because the stated arithmetic did not produce the stated number**, and the
 number was left alone while the reason was replaced. That is the right order.
+
+## F-028, JPEG-LS lossless and near-lossless, completed 2026-09-13
+
+**The decision, and why it departs from gate A2's written recommendation.**
+Appendix A gate A2 resolved the JPEG-LS route as `Pure Rust` and recommended
+`pure_jpegls` 2.0.0, keeping `ritk-codecs` 0.6.0 as the named fallback. **F-028
+adopts the fallback**, and the S09 design round made that call rather than the
+implementation. Gate A2's single advantage for `pure_jpegls` was multi-component
+support, and its own coverage table marks that row `NOT MEASURED` for
+`ritk-codecs` while the recommendation then reads "appears to handle
+multi-component". Read from the vendored source,
+`vendor/ritk-codecs-0.6.0/src/jpeg_ls/decoder.rs` refuses `Nf != 1` explicitly,
+so **both candidates are single-component only**. With that removed, adopting
+`pure_jpegls` would have bought a `u16` return type and paid for it with a
+second vendored package: another archive digest, VCS identity, pair of licence
+texts, set of pins-gate rows and no-Rayon graph. All of those are already paid
+for `ritk-codecs`. **This is gate A2's own stated uncertainty resolving, not the
+gate being wrong**, and none of its measurements changed.
+**What was built.** `ocelli-codec` registers atomic exact-UID adapters for
+`.80` and `.81`. The boundary validates the descriptor, bounds the codestream to
+SOI through EOI with PS3.5 A.4's single pad byte tolerated, parses SOF55 and SOS
+without decoding the scan, and checks dimensions, precision, component count,
+interleave mode and `NEAR` against the descriptor and the UID before the
+dependency is called.
+**The two UIDs are not interchangeable.** ISO/IEC 14495-1 defines lossless as
+`NEAR = 0`, so `.80` refuses a positive `NEAR` and `.81` refuses zero, both as
+`FrameMismatch` and both asserted. Without that check either decoder would
+accept either codestream and the lossless claim would be unfalsifiable. `NEAR`
+is read two bytes per component past `Ns`, not from the end of the SOS segment,
+where `ILV` sits and reads as zero on every non-interleaved frame.
+**Section 18 is held by a test rather than a comment.** The dependency's
+`PixelLayout` applies a modality rescale. Slope is pinned to 1 and intercept to
+0 at the one call site, and a fixture asserts decoded sample `n` is exactly `n`
+over a full ramp. Moving either value fails eight of fifteen tests.
+**The stored-domain round trip is proven over the full range.** A 256 by 256
+fixture carries all 65,536 unsigned 16-bit values exactly once, and the test
+asserts both byte-identity with the constructed ramp and that every distinct
+value appeared exactly once, which is a statement about the domain rather than
+about 65,536 samples that might repeat.
+**HLD sections implemented.** `docs/hld/18-codec-registry.md` section 21 and
+`docs/hld/23-performance-rules.md` section 26. Section 21's note "JPEG-LS has no
+credible pure-Rust path" remains true inside dicom-rs, whose `charls` feature is
+`dep:charls` over the C++ library, and is no longer true outside it.
+**Deviations.** D-19 atomic registration, unchanged. D-20 widened in the design
+approval to cover the same vendored package's `jpeg_ls` module and the identity
+rescale pin, `Raised` now `F-026, F-028`. D-21 bounded dependency-owned decoded
+storage, `Raised` now `F-024, F-026, F-027, F-028`. No new row.
+**Crates / packages modified.** `ocelli-codec` only. No new dependency.
+**Tests added.** Fifteen integration fixtures and three unit tests, plus a
+committed generator, `tests/fixtures/generate_jpegls.py`, that rebuilds all ten
+fixtures and asserts each one's declared precision, `NEAR` and component count
+before writing it.
+**Fixture provenance.** The `.80` anchor is the uncompressed
+`syntax/explicit_vr_le.dcm` Pixel Data, whose SHA-256
+`b20a1ef346d9742bcbd38db9174ae5a4775531df434e50d7e209c11b67a27609` is exactly
+the digest `docs/spikes/A2-jpeg-ls.md` recorded for `R`, so the extraction is
+confirmed against an independently written record. The `.81` anchor is ISO/IEC
+14495-1's `NEAR` bound, which is the standard rather than an implementation.
+**Both anchors are independent of CharLS**, which matters because `pyjpegls`
+encoded both rows and `dcmdjpls` would be a second reading of the same library.
+The synthetic ramps are constructed in the generator. No patient data is
+tracked.
+**Mutations observed red.** Eleven, each reverted and the tree re-run green. The
+`NEAR` mode check, the rescale pin, the codestream component check, the `NEAR`
+byte index, the SOF55 precision check, three separate descriptor conditions, the
+dimension check, the SOF55 row and column order, the odd-length pad acceptance,
+and the stray SOI and EOI guard.
+**Verification.** Feature profile, the 26-gate floor plus corpus, on the exact
+staged tree recorded by the verification ledger on 2026-09-13.
+**Corpus.** Pass.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Decode is CPU work in a worker that
+completes before anything reaches a device and the resolved tier does not select
+a decoder. A tier-gated codec path would be HLD section 18's rule violated with
+the added property that the second path would only run on hardware nobody
+develops on. The axis that matters is the target, and `ocelli-codec` builds for
+`wasm32-unknown-unknown` with the adapter in it.
+**Benchmark.** `decode.transfer_syntax.jpegls` already existed in
+`tools/bench/subjects.json` with `subject_story: F-028`, so this story supplies
+the runner the registry was waiting for. Measured median 0.1221 ms over the 64
+by 96 lossless corpus frame, range 0.1108 to 0.1928.
+**Size.** `ci/wasm-size-budget.json` does not move, and that is a fact rather
+than an omission: `ocelli-wasm`'s only workspace dependency is `ocelli-core`, so
+`ocelli-codec` is not in the shipped module's graph. Gate A2 predicted roughly
+40 KB for the story that registers a decoder, and that cost arrives when the
+worker path pulls the codec crate in.
+**LLD updated.** `docs/lld/codecs.md`.
+**Deviations from the design plan.** None in substance. The plan named three
+mutations and eleven were run, because two review probes found conditions no
+fixture reached.
+**Registration the story also had to do, because a new refusal arrives with its
+probe.** The benchmark runner carries nine refusals of its own, so it needed a
+`scripts/guards/catalogue.py` entry, a recorded site count in
+`ci/guard-probe-budget.json`, a probe suite at
+`tools/bench/tests/decode_jpegls_test.mjs`, registration in both exact suite
+lists, `tools/bench/package.json` and `bin/ocelli.sh`, and a regenerated
+`docs/runbooks/guard-verification.md` table. Deleting the A2 spike harness also
+retired the catalogue's stale `spikes.a2` entry and its recorded count, which the
+census refused as coverage for a file that no longer exists.
+**Notes for future sessions.** Four things are worth carrying. **A multi-
+component JPEG-LS corpus row is still owed**, which gate A2 recorded and this
+story does not close. The adapter refuses one cleanly, so it is a coverage gap
+rather than a wrong pixel. **`scripts/bench_check.py` refused the benchmark
+runner while `docs/sprints/BACKLOG.md` still said `pending`**, which is the
+anti-fabrication rule working: the row moved to `in-progress` because that was
+the truth, not to get past a gate. **A disjunction tested only by an input
+that trips several arms reports coverage for arms doing nothing**, which is how
+two of this story's three review findings were found and is worth probing for
+directly next time. And **this subject's declared benchmark band is 15 per cent
+rather than JPEG 2000's 10**, because the decode is about six times faster so one
+discarded warm-cache run leaves proportionally more process warm-up in the first
+retained sample. Two confirmation series reproduced the effect, the protocol was
+not changed to produce a tighter number, and the recorded series is the first
+controlled one taken rather than the best of three.

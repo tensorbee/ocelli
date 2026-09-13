@@ -10671,6 +10671,20 @@ GUARDS: tuple[Guard, ...] = (
                     "`bench` gate)",),
     ),
     Guard(
+        id="bench.jpegls",
+        file="tools/bench/src/runners/decode_transfer_syntax_jpegls.mjs",
+        gate="bench",
+        spec="HLD section 26 and D-20",
+        refuses="A JPEG-LS benchmark result without positive finite "
+                "duration, exact kept and warm-up iteration counts, a "
+                "four-decode normalized timing sample, "
+                "positive ordered range enclosing the median, and output "
+                "checksum evidence.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/decode_jpegls_test.mjs (run by the "
+                    "`bench` gate)",),
+    ),
+    Guard(
         id="bench.tier-startup",
         file="tools/bench/src/runners/tier_startup_microbenchmark.mjs",
         gate="bench",
@@ -10893,19 +10907,6 @@ GUARDS: tuple[Guard, ...] = (
                "repository. `content.spike-output` guards the output "
                "DIRECTORY, which is not a backstop for these refusals, so "
                "nothing watches them go red.",
-    ),
-    Guard(
-        id="spikes.a2",
-        file="tools/spikes/a2-jpeg-ls/anchors.py",
-        gate="-",
-        spec="HLD Appendix A gate A2, `docs/spikes/GATES.md`",
-        refuses="Nothing this repository verifies.",
-        claims=("*",),
-        kind="not-a-guard",
-        reason="A throwaway spike harness for Appendix A gate A2, invoked by "
-               "no gate. Same argument as spikes.a1, including that its "
-               "output directory being guarded is not a backstop for its "
-               "refusals.",
     ),
 )
 

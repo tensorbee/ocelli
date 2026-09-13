@@ -51,6 +51,10 @@ Repository bootstrap. Nothing is published.
 - JPEG 2000 Part 1 decoding for lossless Transfer Syntax `.90` and general
   Transfer Syntax `.91`, with exact stored-domain validation, atomic output,
   native and WebAssembly execution, and a measured release benchmark.
+- JPEG-LS decoding for lossless Transfer Syntax `.80` and near-lossless `.81`,
+  with the two UIDs held apart by the codestream's own `NEAR` parameter, the
+  stored-domain round trip proven over the whole 16-bit range, multi-component
+  frames refused rather than mis-decoded, and a measured release benchmark.
 - Native DICOM Pixel Data normalization for little-endian and retired
   big-endian transfer syntaxes, allocation-free RLE Lossless decoding, checked
   native multiframe extraction, and typed Pixel Data VR and decoded sample

@@ -410,6 +410,32 @@ exactly 15 values, and its standing test proves the recorded value is their
 median, the structured and documented series agree, every point is inside the
 band, and the tolerance remains exactly 10 per cent.
 
+F-028 adds `decode.transfer_syntax.jpegls`, the runner the subject registry had
+declared and been waiting for since F-006. Its release runner measures one `.80`
+decode of the same 64 by 96 manifest-backed mono16 synthetic frame, on the same
+four-decode normalized instrument, so the two codec subjects differ only in the
+transfer syntax. The lossless row is measured rather than the near-lossless one,
+because it is the row with an encoder-independent anchor, and the two are not
+averaged because they are different work.
+
+After one unrecorded warm-cache run, the controlled calibration series of 15
+consecutive production runner medians, in run order, was
+`0.1297, 0.1199, 0.1152, 0.1180, 0.1178, 0.1162, 0.1114, 0.1140, 0.1132, 0.1156, 0.1156, 0.1179, 0.1188, 0.1145, 0.1124`
+ms. Its median is 0.1156 ms and its range is 0.1114 to 0.1297 ms on host class
+`darwin|25.5.0|arm64|Apple_M4_Max|16|51539607552`. The extremes are 3.63 per
+cent below and 12.20 per cent above the median. The retained 15 per cent is the
+smallest declared symmetric band that covers both extremes, with 11.37 and 2.80
+percentage points of lower and upper headroom.
+
+**That band is wider than JPEG 2000's 10 per cent and the reason is measured
+rather than assumed.** This decode is about six times faster, so one discarded
+warm-cache run leaves proportionally more process warm-up in the first retained
+sample. Two confirmation series taken immediately afterwards under the same
+protocol had first samples of 0.1323 and 0.1181 ms, each the highest value in
+its own series, which is the same effect reproducing. **The protocol was not
+changed to produce a tighter number**, and the recorded series is the first
+controlled one taken rather than the best of the three.
+
 Paired spike release wasm modules were 222,226 bytes with upstream defaults
 and 222,166 bytes with the no-Rayon manifest patch, a 60-byte reduction.
 Dependency graph absence and linked binary size are separate evidence.

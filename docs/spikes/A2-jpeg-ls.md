@@ -518,7 +518,12 @@ cargo build --target wasm32-unknown-unknown  # the link-cplusplus failure
 ```
 
 **The harness is throwaway and is not held to the gate set**, per `/spike`
-step 2, and it is deleted when this gate and A1 are closed. The gates that do
+step 2, and it is deleted when this gate and A1 are closed. **F-028 closed A2's
+production question and removed `tools/spikes/a2-jpeg-ls/`**, so the commands
+above describe a rig that existed rather than one a reader will find. Its
+measurements are unaffected and stay here, which is the reason this file
+survives the harness. The paragraph below is left as it was written, describing
+what the harness was held to while it was present. The gates that do
 reach it are `unsafe`, `provenance` and `content`, which read `git ls-files`,
 and `lint`, which reaches `run.mjs` through the `tools/spikes/**/*.mjs` block
 in `eslint.config.js`. It passes all four. `clippy`, `test`, `bindgen` and
