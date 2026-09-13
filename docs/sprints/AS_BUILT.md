@@ -2503,3 +2503,76 @@ the benchmark and its guard catalogue permanent.
 **Notes for future sessions.** JPEG-LS remains F-028. HTJ2K remains F-027.
 Downstream pixel code must consume the reported colour and sample-layout
 evidence rather than applying a second conversion.
+
+## F-029, LUT chain presentation and inversion, completed 2026-09-13
+
+**What was built.** `ocelli-pixel` now implements DICOM PS3.3 C.11's third
+stage. `PresentationTransform` applies `IDENTITY` as a no-op and `INVERSE` as
+the reflection `ymin + ymax - y` within the declared output range. `LutChain`
+composes stages 1 to 3 in C.11's order and adds no arithmetic of its own.
+`PresentationLutEvidence` names all three states C.11.6 permits, so a declared
+`IDENTITY` stays distinguishable from no declaration at all.
+**The decision the story turns on.** Inversion has two possible sources,
+Photometric Interpretation `MONOCHROME1` and Presentation LUT Shape
+`(2050,0020)`, and it is resolved exactly once. **An explicit shape decides
+alone and is never composed with `MONOCHROME1`**, so a double inversion cannot
+be spelled. A `MONOCHROME1` frame carrying an explicit `IDENTITY` is therefore
+not inverted, which is the presentation state being honoured and which reads as
+a bug to anyone expecting `MONOCHROME1` to always invert. The alternative,
+composing the two with an exclusive-or, was considered in the S09 design round
+and declined. `LutChain::inverts` is the single flag HLD section 18.4's
+`invert : u32` uniform carries.
+**What was deliberately not built.** The modality and VOI stages were not
+reimplemented. `apply_window` and `ModalityTransform` are byte unchanged and
+`tests/voi.rs` and `tests/modality.rs` are unmodified, so F-018's section 18.3
+fixtures still judge the same code. Palette colour and ICC, C.11's stage 4, are
+out of scope: that stage maps the stored value through the palette descriptors
+rather than a `Display` value, so it is not a fourth arm on this chain. A
+declared Presentation LUT Sequence `(2050,0010)` reports unsupported rather than
+falling back to the shape, because no corpus row carries one.
+**HLD sections implemented.** `docs/hld/15-lut-chain.md` section 18, the stage
+table's row 3, and section 18.4's single `invert` flag.
+**Deviations.** D-13, already declared at F-011 and applied here to the section
+18.3 fixture's first row. No new row.
+**Crates / packages modified.** `ocelli-pixel` only.
+**Tests added.** Sixteen fixtures in `crates/ocelli-pixel/tests/lut_chain.rs`.
+The four section 18.3 rows re-asserted through the composed chain, inversion at
+and away from the window centre, the override rule over all four shape and
+photometric combinations, reflection within a non-zero output range, 8-bit and
+16-bit VOI LUT Sequence ranges, stage ordering, the colour refusal, the sequence
+refusal, the malformed-range refusal, the refusal order, and two property
+sweeps.
+**Fixture provenance.** Every expected value is hand-computed from PS3.3
+C.11.2.1.2, C.11.2.1.3.2, C.11.2.1.1 or C.11.6.1.2, with the arithmetic shown in
+the comment above it. The three VOI functions and the reflection were re-derived
+independently in Python before the Rust was read, which is how the pass 1 defect
+below was found. No value was copied from program output. No patient data is
+tracked.
+**Mutations observed red.** Five, each reverted and the tree re-run green:
+resolution rule from override to exclusive-or, 15 passed 1 failed. Reflection
+from `ymin + ymax - y` to `ymax - y`, 14 passed 2 failed. Presentation stage
+dropped from `LutChain::apply`, 9 passed 7 failed. Display-range refusal deleted,
+14 passed 2 failed. The retained descriptor range corrupted, 14 passed 2 failed.
+**Verification.** Feature profile, the 26-gate floor plus corpus, on the exact
+staged tree recorded by the verification ledger on 2026-09-13.
+**Corpus.** Pass.
+**Tier coverage.** A: full, by a shader reading `LutChain`'s scalars through
+section 18.4's uniform. No WGSL is written by this story, so the claim is that
+the parameters exist in the shape 18.4 names. B: full, identical parameters and
+identical values, no tier-specific branch. C: full, and this is the
+authoritative path. Deviation D-07 requires tier C to reuse `ocelli-pixel`
+rather than reimplement the chain, and `LutChain::map_into` is that entry point.
+**LLD updated.** `docs/lld/pixel-pipeline.md`.
+**Deviations from the design plan.** None in substance. The plan's non-zero-
+`ymin` fixture was specified as "an input mapping to 100, inverted 151" and
+landed as an input mapping to 71, inverted 181, because no round input maps to
+100 under that window and the quarter-window point is hand-computable.
+**Notes for future sessions.** Two review findings are worth carrying. The
+pass 1 review's own summary sentence repeated the false claim it was raising
+against the code, which is the shape a documentation-heavy review goes wrong in.
+And a mutation probe silently did nothing because its anchor text occurred twice
+in the file, once in `VoiTransform::new` and once in `PresentationTransform::new`,
+while the test run in the same command printed `ok. 16 passed`, which reads
+exactly like the guard being unnecessary. The probe's `count(old) == 1`
+assertion is what caught it. **A mutation probe that does not assert its anchor
+is unique can report the opposite of the truth.**

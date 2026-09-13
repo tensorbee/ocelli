@@ -35,6 +35,11 @@ Repository bootstrap. Nothing is published.
   registration, and caller-owned decode output buffers.
 - Validated DICOM image-plane and stored-pixel evidence, with one modality and
   VOI pipeline covering LUT precedence and LINEAR, LINEAR_EXACT, and SIGMOID.
+- The presentation stage of the LUT chain, completing DICOM PS3.3 C.11's first
+  three stages in one composed pipeline. Inversion is resolved exactly once from
+  Photometric Interpretation and Presentation LUT Shape, an explicit shape
+  overrides rather than composes, and a declared Presentation LUT Sequence
+  reports unsupported rather than falling back.
 - Enhanced multiframe projection with checked frame counts, retained shared
   and per-frame functional-group provenance, and bounded frame indexing.
 - JPEG Baseline, Extended, Lossless, and Lossless SV1 decoding with exact UID
