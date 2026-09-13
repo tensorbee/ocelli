@@ -24,6 +24,9 @@ flate2 = { workspace = true }
 # F-022 constructs the validated NIfTI affine in the HLD coordinate types.
 glam = { workspace = true }
 ocelli-core = { path = "../ocelli-core" }
+# F-020 assembles derived geometry into the validated image-plane types
+# ocelli-pixel already owns, so PS3.3 C.7.6.2.1.1 exists exactly once.
+ocelli-pixel = { path = "../ocelli-pixel" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

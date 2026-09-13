@@ -5,8 +5,10 @@
 //! F-016 adds the Part 10 parser and observable transfer-syntax dispatch.
 //! F-017 adds lossless metadata projection and ordered providers.
 //! F-022 adds direct NIfTI-1.1 header, affine, and payload validation.
+//! F-020 derives per-frame geometry, stack shear and calibrated spacing.
 
 mod dicomweb;
+mod frame_geometry;
 mod frame_index;
 mod metadata;
 mod multiframe;
@@ -19,6 +21,10 @@ pub use dicom_object::{DefaultDicomObject, Tag};
 pub use dicomweb::{
     DicomwebSource, EncodedFramePart, EncodedFrames, SeriesSource, SourceBatch, SourceError,
     SourceResponse, SourceResponseKind,
+};
+pub use frame_geometry::{
+    FrameGeometry, FrameGeometryError, FrameGeometrySources, SpacingEvidence, SpacingRelationship,
+    StackGeometry, StackShear,
 };
 pub use frame_index::{EncapsulatedFrameIndex, FrameIndexError};
 pub use metadata::{

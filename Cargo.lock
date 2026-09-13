@@ -1000,6 +1000,7 @@ dependencies = [
  "glam",
  "ocelli-codec",
  "ocelli-core",
+ "ocelli-pixel",
  "proptest",
  "serde",
  "serde_json",

@@ -1,7 +1,7 @@
 # DICOM ingest
 
-**F-IDs that contributed:** F-016, F-017, F-019, F-021, F-025
-**Last updated:** 2026-09-10
+**F-IDs that contributed:** F-016, F-017, F-019, F-020, F-021, F-025
+**Last updated:** 2026-09-13
 
 `ocelli-dicom` owns the first ingest boundary. It accepts an in-memory DICOM
 Part 10 file, resolves its declared transfer syntax, and returns the complete
@@ -146,6 +146,103 @@ typed value for PS3.18 F.2.5. It retains total multiplicity and ordered null
 positions without weakening the existing value constructors. SQ nulls and
 binary carriers cannot use the wrapper.
 
+## Derived frame geometry
+
+F-020 is the first module in the programme that computes a coordinate from a tag
+rather than retaining one, so it cannot be judged on losslessness. Every
+derivation cites the PS3.3 section it implements and a value that cannot be
+derived is refused rather than defaulted.
+
+**The arithmetic is not here.** `ocelli-pixel` owns `ImagePlane` and PS3.3
+C.7.6.2.1.1's index-to-world transform, and this module assembles validated
+attributes into those existing types. `FrameGeometry::index_to_world` forwards.
+`ImagePlane::slice_normal` and `position_vector` exist so a cross-frame consumer
+can project an inter-frame vector without re-deriving the cross product.
+
+Image Position Patient `(0020,0032)`, Image Orientation Patient `(0020,0037)`
+and Pixel Spacing `(0028,0030)` resolve per-frame, then shared, then top level,
+which is PS3.3 C.7.6.16.1.1's order. The top-level fallback is permitted because
+a legacy single-frame instance carries all three there and has no functional
+groups at all. A duplicate declaration is malformed under C.7.6.16.1.1 and is
+**retained observably** in `FrameGeometrySources::duplicates` rather than
+refused, which is the choice F-019 already made for the same condition.
+
+Imager Pixel Spacing `(0018,1164)`, Gantry/Detector Tilt `(0018,1120)`, Rows and
+Columns belong to no functional group macro and are read from the main data set
+only.
+
+### Spacing precedence, PS3.3 C.7.6.1.1.5
+
+| Present | `SpacingRelationship` | Spacing used |
+|---------|----------------------|--------------|
+| Pixel Spacing only | `ImageOnly` | Pixel Spacing |
+| both, equal within `1e-9 mm` | `ImagerAgrees` | Pixel Spacing |
+| both, different | `Calibrated` | Pixel Spacing, Imager retained |
+| Imager Pixel Spacing only | refused, `UncalibratedSpacingOnly` | none |
+| neither | refused, `MissingPixelSpacing` | none |
+
+**The fourth row is the load-bearing one.** Imager Pixel Spacing is spacing at
+the detector plane. On a projection radiograph it differs from spacing in the
+image by the source-to-image magnification factor, typically 10 to 20 per cent,
+so substituting it produces a geometry that renders correctly and measures
+wrong. The caller decides.
+
+Slice Thickness `(0018,0050)` and Spacing Between Slices `(0018,0088)` are
+retained as evidence and are never used as inter-frame spacing. Thickness is the
+reconstructed slab thickness and may overlap or gap, and Spacing Between Slices
+is frequently absent and frequently wrong.
+
+### Stack shear, measured rather than read
+
+`StackGeometry` projects each inter-frame step onto the slice normal
+`N = X cross Y`. A stack is `AxisAligned` when every off-axis component is within
+tolerance, and the reported `step_mm` is the **signed** projection, so a
+descending stack is negative. Otherwise it is `Sheared` with the largest
+off-axis component, which means the volume is a sheared parallelepiped rather
+than a box.
+
+**Gantry/Detector Tilt decides nothing.** PS3.3 C.8.7.3.1.1 makes it the nominal
+angle and Type 3. It is retained as evidence, and fixtures assert both
+directions: a tag of `0` with sheared geometry reports `Sheared`, and a tag of
+`30` with axis-aligned geometry reports `AxisAligned`.
+
+An axis-aligned stack whose projected steps are not equal within tolerance is
+**refused** as `NonUniformFrameSpacing` rather than averaged. Non-uniform
+spacing is real in dose-modulated and multi-slab acquisitions, and rendering it
+as uniform distorts geometry in a way no measurement tool flags.
+
+Cross-instance slice spacing over a series is not here. Within one multiframe
+instance every frame's position comes from the same instance, which is what
+makes the step derivable. Sorting and spacing a series of separate instances
+belongs to the volume builder.
+
+### The two tolerances, both declared once
+
+`GEOMETRY_TOLERANCE_MM` is `1e-6`. It bounds both the off-axis component before
+a stack is called sheared and the agreement between projected steps before it is
+called uniform. Image Position Patient arrives as a Decimal String, which PS3.5
+section 6.2 caps at sixteen characters, and a patient coordinate routinely
+carries three or four digits before the point, so the attribute can express
+about eleven decimal places at the very most and real files carry four to six.
+The figure is therefore below the precision the source attribute can state,
+which is the property wanted: it absorbs `f64` arithmetic noise and can never
+mask a difference a file could actually express.
+
+`SPACING_EQUALITY_MM` is `1e-9` and is not a physical tolerance. Two spacing
+values that arrive as decimal text agree exactly as text in the ordinary case,
+so it only absorbs a differing number of trailing zeros.
+
+### Decimal String parsing
+
+`parse_decimal_string` implements PS3.5 section 6.2: an optionally signed
+decimal with an optional fraction and an optional exponent, at most sixteen
+bytes including the pad. `f64::from_str` performs the conversion and accepts
+three spellings the grammar does not. `inf` and `nan` are refused by the
+finiteness check. Rust's `1_0` digit separator is refused by a character filter
+that runs **before** the parse rather than relying on the parser. A leading `+`
+is legal DS and both accept it. The sixteen-byte cap is checked before trimming,
+because the pad is part of the value.
+
 ## Multiframe projection and frame indexing
 
 `MultiframeMetadata` is a borrowed checked view over one `MetadataSet`.
@@ -166,10 +263,11 @@ lower-precedence duplicate source. Duplicate evidence is not erased merely
 because the per-frame value wins.
 
 The projection leaves sequence item order unchanged. Dimension Index, Frame
-Content, plane position, plane orientation, pixel measures, rescale, window,
-and real-world mapping values remain lossless metadata. It does not sort
-frames, derive geometry, calibrate spacing, or interpret gantry tilt. Those
-operations remain F-020 scope.
+Content, rescale, window and real-world mapping values remain lossless
+metadata that nothing here interprets. It does not sort frames by Dimension
+Index. **Derived frame geometry is below**, and it is the one thing F-020 moved
+out of this paragraph: plane position, plane orientation and pixel measures are
+now interpreted, and gantry tilt is measured rather than read.
 
 `EncapsulatedFrameIndex` groups borrowed Fragment Values without concatenating
 or decoding them. Basic Offset Table entries are checked against Fragment Item

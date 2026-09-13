@@ -2576,3 +2576,78 @@ while the test run in the same command printed `ok. 16 passed`, which reads
 exactly like the guard being unnecessary. The probe's `count(old) == 1`
 assertion is what caught it. **A mutation probe that does not assert its anchor
 is unique can report the opposite of the truth.**
+
+## F-020, per-frame geometry, stack shear and spacing calibration, completed 2026-09-13
+
+**What was built.** `ocelli-dicom` gains `frame_geometry`, which derives one
+frame's image plane from F-019's functional-group projection and measures one
+instance's stack shear. `FrameGeometry` resolves Image Position Patient, Image
+Orientation Patient and Pixel Spacing per-frame, then shared, then top level,
+which is DICOM PS3.3 C.7.6.16.1.1's order, and assembles them into
+`ocelli-pixel`'s already-validated `ImagePlane`. `StackGeometry` projects each
+inter-frame step onto the slice normal and reports `AxisAligned` with a signed
+step, `Sheared` with the largest off-axis component, or `NotApplicable`.
+**The defect class this story was exposed to.** It is the first module in the
+programme that computes a coordinate from a tag rather than retaining one, so it
+cannot be judged on losslessness. Three derivations produce numbers that look
+plausible at any magnitude and each is refused or measured rather than guessed.
+Pixel Spacing is `[between rows, between columns]`, so `PixelSpacing[0]` scales
+the **column** direction cosine, and the fixture is deliberately non-square
+because a square-pixel fixture cannot observe the swap. Gantry tilt is
+**measured from geometry and never read from `(0018,1120)`**, which is Type 3
+and nominal, with fixtures asserting both directions: a tag of 0 with sheared
+geometry reports `Sheared` and a tag of 30 with axis-aligned geometry reports
+`AxisAligned`. Imager Pixel Spacing is retained as evidence and is **never**
+substituted for Pixel Spacing, because on a projection radiograph the two differ
+by the source-to-image magnification factor, so an imager-only instance is
+refused rather than rendered with a 10 to 20 per cent measurement error.
+**What was deliberately not built.** PS3.3 C.7.6.2.1.1's index-to-world
+transform was not reimplemented. `FrameGeometry::index_to_world` forwards to
+`ImagePlane::index_to_world`, and the two accessors added to `ocelli-pixel`,
+`slice_normal` and `position_vector`, exist so a cross-frame consumer does not
+re-derive the cross product. Cross-instance slice spacing over a series is out
+of scope and belongs to the volume builder. Within one multiframe instance the
+step is derivable because every frame's position comes from the same instance.
+**HLD sections implemented.** None directly. `grep -rn -i 'gantry|tilt|
+ImagerPixelSpacing|PixelMeasures|SpacingBetweenSlices|calibrat' docs/hld/*.md`
+returns three hits, all about DICOM Part 14 display calibration in sections 10
+and 26, which is a different subject. **The HLD specifies nothing about this
+story's arithmetic**, so the normative source is DICOM PS3.3 C.7.6.2.1.1,
+C.7.6.1.1.5, C.7.6.16.1.1, C.7.6.16.2.2 through C.7.6.16.2.4 and C.8.7.3.1.1,
+plus PS3.5 section 6.2, all transcribed into the design plan. That absence is
+recorded rather than filled with a plausible design presented as specified.
+**Deviations.** None. A deviation records a departure from written text and
+there is none here. `ocelli-dicom` had already left the `no_std` set under D-18,
+so depending on `no_std` `ocelli-pixel` is a one-way widening needing no row.
+**Crates / packages modified.** `ocelli-dicom` and `ocelli-pixel`.
+**Tests added.** Sixteen fixtures in
+`crates/ocelli-dicom/tests/frame_geometry.rs` and two unit tests for the Decimal
+String parser.
+**Fixture provenance.** Every expected coordinate is hand-computed from the
+PS3.3 section cited beside it, with the arithmetic shown in the comment. No
+value came from program output and no patient data is tracked.
+**Mutations observed red.** Eight, each reverted and the tree re-run green:
+spacing indices swapped, slice normal negated, shear tolerance widened, the
+imager-only refusal weakened, the uniformity check defeated, and each of the
+three functional-group source accessors falsified.
+**Verification.** Feature profile, the 26-gate floor plus corpus, on the exact
+staged tree recorded by the verification ledger on 2026-09-13.
+**Corpus.** Pass.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Deriving a coordinate from a tag is
+CPU metadata work in a worker before anything reaches a device, and the resolved
+tier does not select a derivation. A tier-gated geometry path would be the same
+defect HLD section 18 forbids for the LUT chain, with the added property that it
+would only run on hardware nobody develops on.
+**LLD updated.** `docs/lld/dicom-ingest.md`.
+**Deviations from the design plan.** None in substance. The plan proposed a
+`SpacingEvidence` carrying Pixel Spacing Calibration Type `(0028,0A02)` and it
+was not implemented, because nothing in this sprint reads it and an accessor no
+fixture reads is an accessor that can report anything, which pass 2 demonstrated
+on three others.
+**Notes for future sessions.** The three tolerances in this area are declared
+once each and documented at their constants. `GEOMETRY_TOLERANCE_MM` is `1e-6`
+and its justification is that Image Position Patient arrives as a sixteen-byte
+Decimal String, so the figure sits below the precision the source attribute can
+express. **A review pass raised that constant's original justification as a
+smell because the stated arithmetic did not produce the stated number**, and the
+number was left alone while the reason was replaced. That is the right order.

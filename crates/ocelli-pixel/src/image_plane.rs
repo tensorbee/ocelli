@@ -167,6 +167,23 @@ impl ImagePlane {
         self.dimensions
     }
 
+    /// The unit slice normal, DICOM PS3.3 C.7.6.2.1.1's `X cross Y`.
+    ///
+    /// Exposed so a cross-frame consumer can project an inter-frame vector onto
+    /// it without re-deriving the cross product, which would be a second copy
+    /// of this plane's geometry.
+    pub fn slice_normal(&self) -> DVec3 {
+        self.orientation
+            .row
+            .cross(self.orientation.column)
+            .normalize()
+    }
+
+    /// Image Position Patient as a vector, for inter-frame differences.
+    pub fn position_vector(&self) -> DVec3 {
+        DVec3::from_array(self.position.0)
+    }
+
     /// Build the PS3.3 C.7.6.2.1.1 index-to-patient transform.
     ///
     /// `x` is column index `i`, so the first matrix column uses column

@@ -136,7 +136,7 @@ A frame parses, decodes and passes the hand-computed LUT fixtures of HLD section
 | F-017 | E3.2 | S07 | Metadata model and provider registry | Rust | 4w | F-016 | done |
 | F-018 | E3.3 | S08 | Image plane, pixel, modality-LUT and VOI-LUT modules | Rust | 3w | F-017 | done |
 | F-019 | E3.4 | S08 | Multiframe and enhanced SOP class handling | Rust | 4w | F-017 | done |
-| F-020 | E3.5 | S09 | Per-frame functional groups, gantry tilt, spacing calibration | Rust | 3w | F-019 | pending |
+| F-020 | E3.5 | S09 | Per-frame functional groups, gantry tilt, spacing calibration | Rust | 3w | F-019 | done |
 | F-021 | E3.6 | S07 | DICOMweb client: WADO-RS, WADO-URI, QIDO-RS | Rust | 3w | F-016 | done |
 | F-022 | E3.7 | S07 | NIfTI volume ingest | Rust | 2w | F-016 | done |
 | F-023 | E4.1 | S07 | Codec dispatch layer and capability registry | Rust | 2w | F-016 | done |

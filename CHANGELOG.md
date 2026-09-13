@@ -42,6 +42,10 @@ Repository bootstrap. Nothing is published.
   reports unsupported rather than falling back.
 - Enhanced multiframe projection with checked frame counts, retained shared
   and per-frame functional-group provenance, and bounded frame indexing.
+- Derived per-frame image-plane geometry, with calibrated against uncalibrated
+  spacing kept distinct, gantry tilt measured from geometry rather than read
+  from its nominal tag, and non-uniform inter-frame spacing refused rather than
+  averaged.
 - JPEG Baseline, Extended, Lossless, and Lossless SV1 decoding with exact UID
   registration, atomic caller-buffer output, and decoded colour evidence.
 - JPEG 2000 Part 1 decoding for lossless Transfer Syntax `.90` and general
