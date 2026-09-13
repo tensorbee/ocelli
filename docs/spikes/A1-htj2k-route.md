@@ -4,6 +4,11 @@
 **Candidate**: `openjph-core` 0.1.0, route F3.
 **Outcome**: **Recommend F3 for the E2.6 production design, with conditions.**
 
+**Every "E2.6" below means E4.5, F-027.** E2.6 is F-014, the quirk-capture
+workflow, in S05. The spelling is left in place as written and corrected here
+once, because the record is what it is and a reader needs the referent before
+the body rather than after it. F-027 resolved the conditions.
+
 This story does not add a decoder to Ocelli. It measures the one candidate
 that can use the same Rust implementation on browser, desktop and server
 targets. The production decision remains with E2.6 and requires a deviation
@@ -179,9 +184,16 @@ would make this dependency a substantial safety audit surface.
 - **Unavailable** remains the safe behavior until E2.6 lands a production
   decoder. This evidence does not register F3 or change the parity count.
 
-## Exact follow-up for E2.6
+## Exact follow-up for E4.5, F-027
 
-E2.6 must design a production HTJ2K decoder around an exact pin of
+**This section addressed "E2.6" and that was a misnumbering.** E2.6 is F-014,
+the quirk-capture workflow, in S05. The HTJ2K production decoder story is E4.5,
+F-027, and the JPEG-LS one is E4.6, F-028. The heading is corrected here because
+a condition list addressed to the wrong story is a condition list nobody is
+holding. **F-027 closed six of the seven below and held the seventh with a
+gate.** See `docs/lld/codecs.md` and D-22.
+
+F-027 designed a production HTJ2K decoder around an exact pin of
 `openjph-core` 0.1.0 or a reviewed successor. Before activation it must:
 
 1. raise the section 15.2 deviation from `openjp2`
@@ -194,6 +206,13 @@ E2.6 must design a production HTJ2K decoder around an exact pin of
 6. measure incremental wasm size in the real production crate
 7. keep HTJ2K `Unavailable` on every rendering tier until all of those gates
    pass
+
+
+**The harness this file describes has been removed.** F-027 took route F3
+into production and deleted `tools/spikes/a1-htj2k/` and `tools/spikes/x013-htj2k-route/`,
+per the lifecycle `docs/spikes/A2-jpeg-ls.md` states for these rigs. Every measurement
+below is unchanged and is the reason this file survives the harness. The commands
+name a rig that existed rather than one a reader will find.
 
 ## Commands measured
 

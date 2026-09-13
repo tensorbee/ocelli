@@ -33,6 +33,31 @@ ALLOWED = {
     "crates/ocelli-core/src/cast.rs",
 }
 
+# Vendored third-party packages, which are dependencies that happen to be in
+# the tree rather than code this repository writes.
+#
+# **They are not simply excluded, and the reason is R5's own sentence.** R5's
+# payoff is that a device-submission reviewer reads two files to audit every
+# unsafe line, and a vendored package with unsafe in it makes that false
+# whether the package is tracked or resolved from a registry. Excluding
+# `vendor/` silently would leave R5 passing mechanically while its stated
+# purpose was weakened, which is the shape `docs/spikes/A2-jpeg-ls.md` already
+# warned about for the `charls` routes.
+#
+# So the count is RECORDED rather than ignored. A vendored package with no
+# record is refused, and a package whose count moves is refused, so the number
+# lands in front of a reviewer in the diff that changes it. The audit itself,
+# which files and which constructs, is in `docs/SOURCE-POLICY.md`.
+VENDOR_ROOT = "vendor/"
+VENDORED_UNSAFE = {
+    # D-20. The published package contains no unsafe Rust at all.
+    "ritk-codecs-0.6.0": 0,
+    # D-22. 104 constructs in nine files, of which the scalar memory, wavelet
+    # and colour paths are the ones reachable on wasm32. The architecture SIMD
+    # files hold the rest and are compiled only for x86_64 and aarch64.
+    "openjph-core-0.1.0": 104,
+}
+
 # `unsafe` as a keyword: a block, a fn, a trait, an impl, or an extern block.
 # Not `unsafe` inside a string, a comment, or an identifier like `is_unsafe`.
 UNSAFE = re.compile(r"(?<![\w])unsafe(?![\w])")
@@ -74,18 +99,45 @@ def main() -> int:
 
     problems = []
     checked = 0
+    vendored: dict[str, int] = {}
     for path in rust_files(args.staged):
         rel = path.relative_to(ROOT).as_posix()
         if rel in ALLOWED:
             continue
-        checked += 1
         try:
             source = strip_noise(path.read_text(encoding="utf-8"))
         except (UnicodeDecodeError, OSError):
             continue
+        if rel.startswith(VENDOR_ROOT):
+            package = rel[len(VENDOR_ROOT):].split("/", 1)[0]
+            vendored[package] = vendored.get(package, 0) + len(
+                UNSAFE.findall(source))
+            continue
+        checked += 1
         for match in UNSAFE.finditer(source):
             line = source.count("\n", 0, match.start()) + 1
             problems.append(f"{rel}:{line}: `unsafe` outside the allow-list")
+
+    for package in sorted(set(vendored) | set(VENDORED_UNSAFE)):
+        found = vendored.get(package)
+        recorded = VENDORED_UNSAFE.get(package)
+        if recorded is None:
+            problems.append(
+                f"vendored package {package} has {found} `unsafe` construct(s) "
+                f"and no recorded count. A vendored package is a dependency "
+                f"this repository ships, so its audit surface is recorded in "
+                f"VENDORED_UNSAFE and in docs/SOURCE-POLICY.md rather than "
+                f"being excluded silently")
+        elif found is None:
+            problems.append(
+                f"vendored package {package} is recorded with {recorded} "
+                f"`unsafe` construct(s) and is not in the tree. A record "
+                f"nothing reads is not a ratchet")
+        elif found != recorded:
+            problems.append(
+                f"vendored package {package} has {found} `unsafe` "
+                f"construct(s), recorded {recorded}. Re-audit it, update "
+                f"docs/SOURCE-POLICY.md, and move the number in the same diff")
 
     if problems:
         print("FAIL: `unsafe` outside the allow-list (HLD section 27.2 R5)")
@@ -98,8 +150,11 @@ def main() -> int:
         print("rationale, not an edit to this script made to get a build green.")
         return 1
 
+    audit = ", ".join(f"{package} {count}"
+                      for package, count in sorted(vendored.items()))
     print(f"OK: no unsafe outside the allow-list ({checked} files checked, "
-          f"{len(ALLOWED)} permitted)")
+          f"{len(ALLOWED)} permitted)"
+          + (f", vendored audit surface unchanged: {audit}" if vendored else ""))
     return 0
 
 

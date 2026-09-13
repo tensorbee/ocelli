@@ -158,6 +158,7 @@ run_gate() {
                    tools/bench/tests/state_test.mjs \
                    tools/bench/tests/cold_start_test.mjs \
                    tools/bench/tests/decode_frame_test.mjs \
+                   tools/bench/tests/decode_htj2k_test.mjs \
                    tools/bench/tests/decode_jpeg2000_test.mjs \
                    tools/bench/tests/decode_jpegls_test.mjs \
                    tools/bench/tests/tier_startup_test.mjs ;;
@@ -454,7 +455,7 @@ case "$command" in
 
     # 1. The two entry points LINK, not merely type-check. A stub that only
     #    checks would hide a missing symbol until Phase 2.
-    echo "  1/8 native entry points link"
+    echo "  1/11 native entry points link"
     cargo build -p ocelli-native --bins
 
     # 2. Every crate HLD section 4 marks `wasm: yes` builds for wasm32.
@@ -468,14 +469,14 @@ case "$command" in
     #    to. What ships to a browser is the lib, so that is what is proved.
     #    Running the tests under wasm32 needs wasm-bindgen-test and a browser
     #    runner, which is F-101's and the oracle's ground, not this gate's.
-    echo "  2/8 eleven shared crates plus ocelli-wasm build for wasm32"
+    echo "  2/11 eleven shared crates plus ocelli-wasm build for wasm32"
     cargo check --workspace --exclude ocelli-native \
       --target wasm32-unknown-unknown
 
     # 3. Every crate the table marks `native: yes` builds natively.
     #    --all-targets IS right here: a native build runs the test suite, so
     #    the tests have to compile.
-    echo "  3/8 the same crates build natively, tests included"
+    echo "  3/11 the same crates build natively, tests included"
     cargo check --workspace --all-targets
 
     # 4. Resolved features agree across the two targets, or the difference is
@@ -483,28 +484,46 @@ case "$command" in
     #    both targets compiling while one quietly resolved a different feature
     #    set is the sprint's stated false-portability defect, and nothing goes
     #    red on its own.
-    echo "  4/8 resolved features agree across targets"
+    echo "  4/11 resolved features agree across targets"
     python3 scripts/target_feature_check.py
 
     # 5. The same production JPEG 2000 proof executes natively. Steps 6 and 7
     # run that exact source as plain and SIMD-enabled wasm under Node.
-    echo "  5/8 codec wasm runner refusals and control"
+    echo "  5/11 codec wasm runner refusals and control"
     node --test scripts/tests/test_run_codec_wasm.mjs
 
-    echo "  6/8 JPEG 2000 production decoder executes natively"
+    echo "  6/11 JPEG 2000 production decoder executes natively"
     cargo run -p ocelli-codec --release --example verify_jpeg2000
 
-    echo "  7/8 JPEG 2000 production decoder builds as plain and SIMD wasm"
+    echo "  7/11 JPEG 2000 production decoder builds as plain and SIMD wasm"
     cargo build -p ocelli-codec --release --example verify_jpeg2000 \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-plain
     cargo rustc -p ocelli-codec --release --example verify_jpeg2000 \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd -- \
       -C target-feature=+simd128
 
-    echo "  8/8 plain and SIMD JPEG 2000 wasm execute under Node"
+    echo "  8/11 plain and SIMD JPEG 2000 wasm execute under Node"
     node scripts/run_codec_wasm.mjs \
       target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm \
       target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm
+
+    # 9 to 11 are the standing version of F-X013's central claim, that
+    # openjph-core produces identical samples on native, plain wasm and
+    # +simd128 wasm. The spike that measured it once is deleted. D-22.
+    echo "  9/11 HTJ2K production decoder executes natively"
+    cargo run -p ocelli-codec --release --example verify_htj2k
+
+    echo "  10/11 HTJ2K production decoder builds as plain and SIMD wasm"
+    cargo build -p ocelli-codec --release --example verify_htj2k \
+      --target wasm32-unknown-unknown --target-dir target/codec-wasm-plain
+    cargo rustc -p ocelli-codec --release --example verify_htj2k \
+      --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd -- \
+      -C target-feature=+simd128
+
+    echo "  11/11 plain and SIMD HTJ2K wasm execute under Node"
+    node scripts/run_codec_wasm.mjs \
+      target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm \
+      target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm
     ;;
 
   bench)

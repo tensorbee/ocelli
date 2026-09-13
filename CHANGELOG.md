@@ -55,6 +55,12 @@ Repository bootstrap. Nothing is published.
   with the two UIDs held apart by the codestream's own `NEAR` parameter, the
   stored-domain round trip proven over the whole 16-bit range, multi-component
   frames refused rather than mis-decoded, and a measured release benchmark.
+- HTJ2K decoding for Transfer Syntaxes `.201`, `.202` and `.203`, with the CAP
+  marker required so a JPEG 2000 Part 1 codestream cannot be read as HTJ2K, the
+  irreversible syntax published as a pinned measured divergence rather than a
+  bound, and identical output proven on native, plain WebAssembly and SIMD
+  WebAssembly. **It cannot be redistributed yet**: the decoder's package carries
+  no licence notice, and the release path refuses while that is true.
 - Native DICOM Pixel Data normalization for little-endian and retired
   big-endian transfer syntaxes, allocation-free RLE Lossless decoding, checked
   native multiframe extraction, and typed Pixel Data VR and decoded sample

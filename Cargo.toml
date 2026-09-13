@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "tools/oracle"]
-exclude = ["vendor/ritk-codecs-0.6.0"]
+exclude = ["vendor/ritk-codecs-0.6.0", "vendor/openjph-core-0.1.0"]
 
 [workspace.package]
 version = "0.1.0"
@@ -103,6 +103,19 @@ oxideav-core = { version = "=0.1.35", default-features = false }
 # immutable source inventory and upstream license provenance live with the
 # package and are enforced by the pins gate.
 ritk-codecs = { version = "=0.6.0", path = "vendor/ritk-codecs-0.6.0" }
+
+# F-027 and D-22. Section 15.2's feature note selects `openjp2` for JPEG 2000
+# and for the three HTJ2K syntaxes. Appendix A gate A1 measured openjp2 0.6.1 as
+# a FAIL on wasm32, and F-X013 priced this candidate as the one route that uses
+# the same Rust implementation on browser, desktop and server. It is vendored
+# rather than taken from the registry because it has one release, one owner and
+# no repository or issue tracker in its metadata, so a yank would make the build
+# unreproducible. The vendored package is byte-identical to the published
+# archive with no patch, because its manifest already yields the no-Rayon graph
+# section 15.2 wants. The package carries NO LICENCE TEXT, which is a
+# redistribution condition the pins gate refuses at the `--all` and release
+# profiles and which is open today.
+openjph-core = { version = "=0.1.0", path = "vendor/openjph-core-0.1.0" }
 # F-021 validates absolute and relative Content-Location URI references from
 # PS3.18 multipart resource headers without retaining their spelling.
 uriparse = "0.6.4"

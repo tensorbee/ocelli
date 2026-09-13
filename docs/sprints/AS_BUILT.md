@@ -2764,3 +2764,119 @@ discarded warm-cache run leaves proportionally more process warm-up in the first
 retained sample. Two confirmation series reproduced the effect, the protocol was
 not changed to produce a tighter number, and the recorded series is the first
 controlled one taken rather than the best of three.
+
+## F-027, HTJ2K through openjph-core, completed 2026-09-13
+
+**The decision, and what it does and does not close.** Appendix A gate A1 failed
+`openjp2` 0.6.1 on `wasm32-unknown-unknown` and F-X013 priced `openjph-core`
+0.1.0 as the one candidate using the same Rust implementation on browser,
+desktop and server. The S09 design round chose to **register all three HTJ2K
+UIDs** rather than report them unavailable. Six of F-X013's seven conditions
+close here. The seventh cannot be closed by engineering and is held by a gate.
+**What was built.** `ocelli-codec` registers atomic exact-UID adapters for
+`.201`, `.202` and `.203`. `openjph-core` 0.1.0 is vendored byte-identically to
+its crates.io archive with no patch, its published manifest already yielding the
+no-Rayon graph section 15.2 wants. The adapter parses SIZ, COD and CAP itself,
+validates dimensions, precision, signedness, component count and the mode
+constraints against the descriptor, and only then reaches the dependency.
+**CAP is what makes a codestream HTJ2K**, and the adapter reads that marker
+rather than asking the library, because trusting a dependency to have read the
+marker that decides what the file is would be trusting it with the question. The
+Part 1 `.90` corpus fixture is the same synthetic ramp and passes every other
+check, so it is what makes the CAP refusal falsifiable.
+**A design-plan defect the fixtures caught before any adapter code ran.** The
+plan said `.202` requires RPCL and "`.201` requires anything else". PS3.5 A.4.10
+constrains RPCL for `.202` and A.4.9 constrains nothing about progression for
+`.201`, so a `.202` codestream is also a valid `.201` one and the drafted rule
+would have refused conformant files. The corpus makes it concrete: its `.203`
+row is RPCL too, so progression does not partition the three at all. What
+separates the two lossless syntaxes from `.203` is the wavelet transform.
+Implemented as three modes rather than two, with the plan corrected.
+**`.203` is a pinned measured divergence rather than a bound.** The adapter's
+output digest is
+`ce4a2bb9d75b897292a4e9e9e7455447e976f5ff1e18b4ecb3219bb17d4d062c`, exactly
+what F-X013 recorded for its native, plain wasm and SIMD wasm builds, reproduced
+here through the production `Decoder` boundary rather than a throwaway cdylib.
+No tolerance was introduced: a digest fails if the decode changes at all, which
+is stronger than a bound. **The plan's instruction to pin F-X013's "41 of 6144"
+figure was corrected**, because that number is the candidate against OpenJPH
+0.31.0 via `ojph_expand`, an external tool this tree does not carry. Against the
+uncompressed ramp the irreversible decode differs at 5,377 of 6,144 samples,
+recorded rather than bounded.
+**Cross-target identity is standing rather than a spike result.**
+`bin/ocelli.sh gate native` gained three steps that run
+`examples/verify_htj2k.rs` over all three syntaxes natively, as plain wasm and
+as `+simd128` wasm. That was F-X013's central claim and the harness that
+measured it once is deleted.
+**The condition that stays open, and how it is held.** `openjph-core` 0.1.0
+carries no BSD notice or copyright material and crates.io reports no repository
+URL to obtain one from. `scripts/pin_and_size_check.py --require-redistribution`
+refuses while it is absent, `/release` step 5 runs it, and **no development
+profile does**, because `--floor`, `--sprint` and `--all` gate development and
+this gates publication. The refusal names the file that would close it. Probe
+`pins.openjph-notice` proves it fires today and stops firing once a notice is
+placed, which a review pass found it did not: planting the licence tripped a
+different refusal in the same script, so the gate had no reachable green state
+until the notice filenames became permitted additions.
+**The unsafe surface, which vendoring made visible.**
+`scripts/unsafe_allowlist_check.py` reads `git ls-files`, so vendoring put 104
+`unsafe` constructs inside its scan and it went red. The repair was **not** to
+exclude `vendor/`, because R5's payoff is that a device-submission reviewer
+reads two files and a vendored package carrying unsafe makes that false whether
+it is tracked or resolved from a registry. The count is recorded instead: the
+guard refuses a vendored package whose count moves, one with no record, and a
+record for a package not in the tree, and its OK line prints the per-package
+figure. That is stronger than the state before this story, where a dependency's
+unsafe was invisible either way. The per-file audit, nine files with fifty
+constructs on wasm-reachable paths, is in `docs/SOURCE-POLICY.md` and was
+re-counted rather than quoted.
+**HLD sections implemented.** `docs/hld/18-codec-registry.md` section 21 and
+`docs/hld/23-performance-rules.md` section 26.
+**Deviations.** **D-22, new**, the departure from section 15.2's `openjp2` for
+HTJ2K. D-19 atomic registration, unchanged. D-21 bounded dependency-owned
+decoded storage, whose largest instance this is at one `Vec<i32>` per image row.
+**Crates / packages modified.** `ocelli-codec`, plus the vendored
+`openjph-core` 0.1.0.
+**Tests added.** Ten integration fixtures, two unit tests sweeping all 98,304
+values of the sample-conversion domain, and a committed generator that asserts
+each fixture's CAP marker, progression order and wavelet kernel before writing
+it.
+**Fixture provenance.** The `.201` and `.202` anchors are the uncompressed
+`syntax/explicit_vr_le.dcm` Pixel Data, shared with the JPEG-LS fixtures rather
+than duplicated. The `.203` anchor is F-X013's recorded digest. No patient data
+is tracked.
+**Mutations observed red.** Nine, each reverted and the tree re-run green: the
+CAP check, the RPCL constraint, `.201`'s reversibility, both COD byte indices,
+the SIZ precision check, the codestream component check, the signedness check,
+and the sample conversion narrowed to `i8`. The last is green on the integration
+target and red on the lib target, which is correct: narrowing `i16` to `i8`
+changes nothing for unsigned samples because the `u16` arm still converts them
+exactly, and it matters only for negative samples no corpus row carries.
+**Verification.** Feature profile, the 26-gate floor plus corpus, on the exact
+staged tree recorded by the verification ledger on 2026-09-13.
+**Corpus.** Pass.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Decode is CPU work in a worker that
+completes before anything reaches a device and the resolved tier does not select
+a decoder. F-X013's condition 7 phrase "unavailable on every rendering tier" is
+about capability reporting rather than a tier-specific decode path, and there is
+none.
+**Benchmark.** `decode.transfer_syntax.htj2k`, the P0 kill criterion's number,
+measured at median 0.1685 ms over the `.203` corpus frame with a declared 5 per
+cent band. That is the tightest of the three codec subjects and no protocol
+changed to achieve it.
+**Size.** `ci/wasm-size-budget.json` does not move. `ocelli-wasm`'s only
+workspace dependency is `ocelli-core`, so `ocelli-codec` is not in the shipped
+module's graph.
+**LLD updated.** `docs/lld/codecs.md`, `docs/lld/benchmarks.md`.
+**Deviations from the design plan.** Two corrections, both recorded in the plan
+itself: the `.201` progression rule and the `.203` assertion method. The plan
+also drafted two `Mode` arms and three were needed.
+**Notes for future sessions.** **A gate must have a reachable green state**, and
+the probe harness is what proved this one did not. Planting the licence file the
+gate asks for tripped `carries an unrecorded file` in the same script, so the
+only action that could satisfy the gate would have failed it. **The `E2.6`
+referent in three spike answer files is corrected**: E2.6 is F-014, the
+quirk-capture workflow, and the codec stories are E4.5 and E4.6. And **vendoring
+changes which guards see a dependency**. `unsafe`, `provenance`, `content` and
+`prose` all read `git ls-files`, so the next vendored package should be checked
+against all four before it is committed rather than after.

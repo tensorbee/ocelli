@@ -104,6 +104,7 @@ form as the table above, with the date it was decided.
 | oxideav-mjpeg 0.1.8 | MIT, packaged licence and repository metadata | yes | yes | 2026-09-10 |
 | oxideav-core 0.1.35 | MIT, packaged licence and repository metadata | yes | yes | 2026-09-10 |
 | ritk-codecs 0.6.0 | MIT OR Apache-2.0 in registry metadata | yes | yes | 2026-09-10 |
+| openjph-core 0.1.0, production use | BSD-2-Clause in registry metadata, no packaged notice | yes | yes, not shippable | 2026-09-13 |
 
 ### S08 codec dependencies
 
@@ -160,10 +161,57 @@ which matches the crates.io API. Packaged VCS metadata names commit
 
 Question 2 is present, so the policy's rule for two absent provenance sources
 does not refuse the package. The missing packaged licence and copyright notice
-are still a production distribution risk. E2.6 must obtain the complete notice
-material before shipping the dependency or maintaining a fork. F-X013 uses it
-only in a throwaway measurement crate and records that limitation beside its
-recommendation.
+are still a production distribution risk.
+
+**F-027 took this package into production use and the risk is now held by a
+gate rather than by this paragraph.** The three answers above were re-verified
+independently rather than copied: the archive fetched on 2026-09-13 has SHA-256
+`c8b96ed12b3d41623a771af4af8131abf353bc822b7a567c6ef3b35ab967a36d`, matching
+the recorded value, the crates.io API reports `BSD-2-Clause`, not yanked, and
+4,863 downloads against F-X013's 3,703, and the archive's fifty files contain
+no `LICENSE`, `LICENCE`, `COPYING`, `NOTICE` or `README`.
+
+`python3 scripts/pin_and_size_check.py --require-redistribution` refuses while
+that material is absent, and `/release` step 5 runs it. **No development
+profile does**, because `--floor`, `--sprint` and `--all` gate development and
+this gates publication, which is the difference between depending on a package
+and shipping it. The refusal names the file that would close it, and probe
+`pins.openjph-notice` proves it fires today and stops firing once a notice is
+placed. The text referring this condition to "E2.6" was a misnumbering in
+F-X013's answer file: E2.6 is F-014, the quirk-capture workflow, and the HTJ2K
+production story is E4.5, F-027.
+
+### openjph-core 0.1.0, the unsafe audit
+
+The published package is 46 Rust files. Counted with
+`scripts/unsafe_allowlist_check.py`'s own scanner, which strips comments and
+string literals before matching the keyword, it contains **104** `unsafe`
+constructs in nine files:
+
+| File | Constructs | Reachable on wasm32 |
+|------|-----------|---------------------|
+| `src/transform/wavelet.rs` | 28 | yes |
+| `src/transform/simd/x86.rs` | 16 | no, `x86_64` only |
+| `src/transform/colour.rs` | 14 | yes |
+| `src/transform/simd/neon_colour.rs` | 10 | no, `aarch64` only |
+| `src/transform/simd/x86_colour.rs` | 10 | no, `x86_64` only |
+| `src/mem.rs` | 8 | yes |
+| `src/transform/simd/neon.rs` | 8 | no, `aarch64` only |
+| `src/coding/simd/neon.rs` | 6 | no, `aarch64` only |
+| `src/coding/simd/x86.rs` | 4 | no, `x86_64` only |
+
+**Fifty of the 104 are on paths a browser build reaches**, the scalar memory,
+wavelet and colour code. The package has no wasm32 or `simd128` implementation,
+so the architecture files are compiled out there. This reproduces F-X013's audit
+exactly, including its split, and it was re-counted rather than quoted.
+
+**Ocelli adds no unsafe of its own**, and this vendored surface is now visible
+rather than invisible: `scripts/unsafe_allowlist_check.py` records the per
+package count, refuses a vendored package with no record, refuses one whose
+count moves, and prints both in its OK line. Before F-027 a dependency's unsafe
+was unreachable by that guard whether vendored or not, so the guard's stated
+purpose, that a device-submission reviewer reads two files, was weaker than it
+read. It is now qualified by a number the build holds.
 
 ### The four TCIA collections, against the three questions
 

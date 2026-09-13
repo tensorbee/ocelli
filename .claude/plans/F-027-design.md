@@ -118,10 +118,14 @@ a failure.
    or a gate assertion, and the one that cannot be closed in-sprint becomes a
    release-blocking check rather than a note.
 3. **Whether HTJ2K is one decoder or three.** `.201`, `.202` and `.203` are
-   three UIDs. `.201` and `.202` are both lossless-only, differing in progression
-   order, which is a codestream property rather than a decoder property. This
-   plan uses two `Mode` arms, lossless-only covering `.201` and `.202`, and
-   general covering `.203`, which is the `Jpeg2000Decoder` shape.
+   three UIDs. This plan drafted two `Mode` arms, lossless-only covering `.201`
+   and `.202` together, on the reading that they differ only in progression
+   order.
+
+   **IMPLEMENTED AS THREE, because the two lossless syntaxes carry different
+   constraints.** `.202` requires RPCL and `.201` requires nothing about
+   progression, so one shared arm could only be right by refusing conformant
+   `.201` files. See the correction in Approach step 5.
 
 ## Approach
 
@@ -230,12 +234,21 @@ D-19.
    codestream HTJ2K rather than JPEG 2000 Part 1, and refuse a codestream with no
    CAP marker as `FrameMismatch`. Parse COD for the transform and the
    progression order.
-5. **Enforce the mode.** `.201` and `.202` are lossless-only, so the transform
-   must be reversible 5/3 and the quantization style must be none, which is the
-   pair `validate_header` already checks for `.90`. `.202` additionally requires
-   progression order RPCL, read from COD's `SGcod` progression byte, and `.201`
-   requires anything else. **Without the progression check the two UIDs are
-   interchangeable**, and a `.202` claim would be unfalsifiable.
+5. **Enforce the mode.** `.201` and `.202` are lossless-only, so the wavelet
+   transform must be the reversible 5/3 kernel. `.202` additionally requires
+   progression order RPCL, read from COD's `SGcod` progression byte.
+
+   **CORRECTED DURING IMPLEMENTATION, and this plan said it the wrong way
+   round.** The draft read "and `.201` requires anything else. Without the
+   progression check the two UIDs are interchangeable, and a `.202` claim would
+   be unfalsifiable." PS3.5 A.4.10 requires RPCL for `.202` and A.4.9 constrains
+   **nothing** about progression for `.201`, so a `.202` codestream is also a
+   valid `.201` one and implementing the sentence as drafted would have refused
+   conformant files. The corpus makes it concrete: its `.203` row is RPCL too,
+   so progression does not partition the three at all. What separates `.201` and
+   `.202` from `.203` is the transform, and RPCL is a one-directional
+   requirement on `.202` alone. Caught by the fixture generator before any
+   adapter code ran. See `.claude/reviews/F-027-working-pass-1.md` D1.
 6. Decode through `openjph-core`, whose `pull()` returns one owned `Vec<i32>`
    per row. Rows are assembled into one bounded owned buffer, validated
    completely, and copied into the caller's slice once. This is D-21's contract.
@@ -295,7 +308,7 @@ reporting, not about a tier-specific decode path, and there is none.
 |----------|----------------|-------|
 | `conformance` | `.201` decodes `corpus/manifest.tsv` row 35 exactly to `R`, the synthetic ramp, whose digest is `b20a1ef3...` | `crates/ocelli-codec/tests/htj2k.rs` |
 | `conformance` | `.202` decodes row 36 exactly to the same `R` | same |
-| `conformance` | `.203` decodes row 37 to digest `ce4a2bb9...`, and against OpenJPH's `41a94cc4...` differs at exactly 41 of 6,144 samples, first at index 69 with candidate 756 against 757, maximum absolute difference 1, histogram `1:41` | same |
+| `conformance` | `.203` decodes row 37 to digest `ce4a2bb9...`, which is what F-X013 recorded for the candidate on all three builds. **CORRECTED DURING IMPLEMENTATION**: the `41 of 6144` figure is the candidate against OpenJPH 0.31.0's output, and `ojph_expand` is an external tool the spike ran once, so that comparison is not reproducible in this tree. Pinning the candidate's own digest is the reproducible half and is stronger than a tolerance. Against the uncompressed ramp the irreversible decode differs at 5,377 of 6,144 samples, which is recorded rather than bounded | same |
 | `browser` | All three rows produce identical bytes on `wasm32-unknown-unknown`, plain and `+simd128`, as on native | same, under the wasm target |
 | `fixture` | 8-bit and 16-bit, signed and unsigned stored domains round trip exactly, hand-computed little-endian two's complement citing PS3.3 C.7.6.3.1.4 | same |
 | `unit` | A codestream with no CAP marker is `FrameMismatch`, so a JPEG 2000 Part 1 stream cannot be decoded as HTJ2K | same |

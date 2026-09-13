@@ -2,6 +2,7 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 
+mod htj2k;
 mod jpeg;
 mod jpeg2000;
 mod jpegls;
@@ -10,6 +11,7 @@ mod registry;
 mod rle;
 mod sample_convert;
 
+pub use htj2k::{Htj2kDecoder, register_htj2k_decoders};
 pub use jpeg::{JpegDecoder, register_jpeg_decoders};
 pub use jpeg2000::{Jpeg2000Decoder, register_jpeg2000_decoders};
 pub use jpegls::{JpegLsDecoder, register_jpegls_decoders};

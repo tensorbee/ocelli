@@ -1,6 +1,6 @@
 # Codec registry
 
-**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-028
+**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028
 **Last updated:** 2026-09-13
 
 `ocelli-codec` owns decoder capability, registration, and exact Transfer
@@ -162,6 +162,110 @@ another CharLS reading is not independent evidence. Two anchors are:
 
 `.81` is lossy by design, so "the output differs from the source" is expected
 there and is not evidence of a defect. The same statement about `.80` would be.
+
+## HTJ2K
+
+`1.2.840.10008.1.2.4.201`, `.202` and `.203`, JPEG 2000 Part 15, through
+`openjph-core` 0.1.0 vendored under deviation **D-22**. Appendix A gate A1
+measured `openjp2` 0.6.1 as a failure on `wasm32-unknown-unknown`, and F-X013
+priced this candidate as the one route using the same Rust implementation on
+browser, desktop and server. No package in the vendor tree implements HTJ2K
+otherwise: `ritk-codecs`'s `jpeg_2000` module carries `mq_coder` and
+`wavelet_9_7` with no HT block coder and no CAP handling.
+
+### CAP is what makes a codestream HTJ2K
+
+The CAP marker `(0xff50)` is the extended capability descriptor, and its
+presence is what separates an HTJ2K codestream from JPEG 2000 Part 1. The
+adapter parses it itself rather than asking the dependency, because
+`openjph-core` keeps its `ParamCap` `pub(crate)` and because trusting a library
+to have read the marker that decides what the file *is* would be trusting it
+with the question. A codestream without CAP is `FrameMismatch`, asserted with
+the Part 1 `.90` corpus fixture, which is the same synthetic ramp and passes
+every other check.
+
+### The three syntaxes, and the asymmetry between two of them
+
+| UID | Transform | Progression |
+|-----|-----------|-------------|
+| `.201` | reversible 5/3 required | unconstrained |
+| `.202` | reversible 5/3 required | **RPCL required** |
+| `.203` | unconstrained | unconstrained |
+
+PS3.5 A.4.10 requires RPCL for `.202`. A.4.9 constrains nothing about
+progression for `.201`. **So a `.202` codestream is also a valid `.201` one,
+and the two are not mutually exclusive.** That asymmetry is the standard's and
+is not smoothed over: inventing a non-RPCL constraint for `.201` to make the
+pair disjoint would refuse conformant files. The fixtures make both directions
+visible, the `.201` corpus row being LRCP and the `.202` row RPCL, and a test
+asserts that `.201` **accepts** the RPCL row.
+
+What separates the two lossless syntaxes from `.203` is the wavelet transform,
+not the progression order. The corpus `.203` row is RPCL as well, so progression
+does not partition the three at all.
+
+### `.203` and decision D14
+
+`.203` is irreversible, so the uncompressed reference is not an anchor for it:
+against the ramp this decode differs at 5,377 of 6,144 samples, which is what a
+lossy codec does. What is pinned instead is the candidate's own output digest,
+`ce4a2bb9d75b897292a4e9e9e7455447e976f5ff1e18b4ecb3219bb17d4d062c`, which
+F-X013 recorded identically for its native, plain wasm and `+simd128` builds and
+which the production adapter reproduces exactly.
+
+**Pinned rather than bounded, and no tolerance is introduced.** A tolerance
+would pass if the output moved within it. The digest fails if the decode changes
+at all, which is the stronger statement and is what D14 means by claiming a
+measured divergence. F-X013's further comparison against OpenJPH 0.31.0, 41 of
+6,144 samples differing by one, used `ojph_expand`, an external tool this tree
+does not carry, so that figure stays in the spike record and would have to be
+re-measured rather than assumed if the digest ever moved.
+
+### Cross-target identity is standing, not a spike result
+
+`bin/ocelli.sh gate native` steps 9 to 11 run `examples/verify_htj2k.rs` over
+all three syntaxes natively, as plain wasm and as `+simd128` wasm. That is the
+standing version of F-X013's central claim, through the production adapter
+rather than the throwaway harness, which is deleted.
+
+### The allocation cost, which is D-21's largest instance
+
+`openjph-core` 0.1.0 has no API that decodes into a caller-provided slice. Each
+`pull` returns a fresh `Vec<i32>` for one image row, so a 64-row frame costs at
+least 65 allocations. Every row is validated before the caller's output is
+touched and the write is one `copy_from_slice`, so an error leaves the buffer
+byte-unchanged. The `decode.transfer_syntax.htj2k` benchmark measures the cost
+rather than describing it.
+
+### Sample conversion, and why there is no cast
+
+The dependency returns `i32`. `Stored`'s representation is `f32`, which carries
+24 significant bits, so an arbitrary `i32` can round. The adapter accepts Bits
+Allocated 8 or 16 only, so every legitimate sample lies in
+`-32_768 ..= 65_535`, the union of the signed and unsigned 16-bit stored
+domains. `exact_f32` converts through `i16::from` and `u16::from`, both
+lossless, and refuses anything outside that union. `i32 as f32` would round
+silently on exactly the values the function exists to catch, and a unit test
+sweeps all 98,304 values of the union rather than sampling them.
+
+### The redistribution condition, which is open
+
+`openjph-core` 0.1.0's published archive carries no `LICENSE`, `LICENCE`,
+`COPYING` or `NOTICE`, and crates.io reports no repository URL to obtain one
+from. Its metadata declares BSD-2-Clause, which permits redistribution **with
+its notice conditions retained**.
+
+`python3 scripts/pin_and_size_check.py --require-redistribution` refuses while
+that material is absent and `/release` step 5 runs it. **No development profile
+does**, because `--floor`, `--sprint` and `--all` gate development and this
+gates publication. The refusal names the file that would close it. Probe
+`pins.openjph-notice` proves both directions: it fires today, and it stops
+firing once a notice is placed.
+
+The package's 104 `unsafe` constructs are a recorded number rather than an
+invisible one. `scripts/unsafe_allowlist_check.py` refuses a vendored package
+whose count moves, one with no record, and a record for a package not in the
+tree. The per-file audit is in `docs/SOURCE-POLICY.md`.
 
 ## Known does not mean available
 

@@ -7,7 +7,7 @@ description: "Publish a prepared and reviewed version to crates.io and npm. The 
 
 Canonical source: `.claude/commands/release.md`.
 
-Source SHA-256: `692d40e6a2cd155572fbe3134cc194b70413837626392fbd24104992ee569dba`.
+Source SHA-256: `e011d7ddb689b0ea51986b9bddd595107c7dc7d15aaf9f5564cca9793075baa0`.
 
 Before acting, read the canonical source completely and follow it using this
 host's available tools. Treat invocation arguments as arguments to that

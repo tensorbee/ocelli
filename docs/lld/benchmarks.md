@@ -410,6 +410,29 @@ exactly 15 values, and its standing test proves the recorded value is their
 median, the structured and documented series agree, every point is inside the
 band, and the tolerance remains exactly 10 per cent.
 
+F-027 adds `decode.transfer_syntax.htj2k`, the P0 kill criterion's number and
+the subject Appendix A gate A1 has been pointing at since F-006. Its release
+runner measures one `.203` decode of the same 64 by 96 manifest-backed mono16
+synthetic frame on the same four-decode normalized instrument. The irreversible
+row is the one measured, because the subject's definition says the three HTJ2K
+syntaxes are reported per syntax and never as one average, and a lossless and a
+lossy codestream are different work.
+
+After one unrecorded warm-cache run, the controlled calibration series of 15
+consecutive production runner medians, in run order, was
+`0.1697, 0.1726, 0.1715, 0.1696, 0.1622, 0.1631, 0.1685, 0.1663, 0.1697, 0.1646, 0.1692, 0.1683, 0.1677, 0.1630, 0.1726`
+ms. Its median is 0.1685 ms and its range is 0.1622 to 0.1726 ms on host class
+`darwin|25.5.0|arm64|Apple_M4_Max|16|51539607552`. The extremes are 3.74 per
+cent below and 2.43 per cent above the median. The retained 5 per cent is the
+smallest declared symmetric band that covers both extremes, with 1.26 and 2.57
+percentage points of lower and upper headroom.
+
+**That band is tighter than either other codec subject's and no protocol
+changed to achieve it.** Same instrument, same fifteen-sample series, same
+single discarded warm-cache run. JPEG 2000 needed 10 per cent and JPEG-LS 15,
+and the three spreads together say the band is a property of the subject rather
+than of the method, which is the reading a single number could not support.
+
 F-028 adds `decode.transfer_syntax.jpegls`, the runner the subject registry had
 declared and been waiting for since F-006. Its release runner measures one `.80`
 decode of the same 64 by 96 manifest-backed mono16 synthetic frame, on the same

@@ -109,6 +109,27 @@ RITK_LICENCE_HASHES = {
     "LICENSE-APACHE": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
 }
 
+OPENJPH_VENDOR = ROOT / "vendor" / "openjph-core-0.1.0"
+OPENJPH_ARCHIVE_SHA256 = "c8b96ed12b3d41623a771af4af8131abf353bc822b7a567c6ef3b35ab967a36d"
+OPENJPH_VCS = "7ed6d6d110d994ec740aacaa90a78b2e807c4c24"
+OPENJPH_INVENTORY_SHA256 = (
+    "f6aef8e7211a9ab5b562414d673f5df5db01f99a3cf926ee90d01d0e65a14772"
+)
+OPENJPH_PUBLISHED_FILES = 50
+# The notice material F-027 could not obtain. crates.io reports no repository
+# URL for this package, so there is nowhere to fetch a root LICENSE from.
+OPENJPH_NOTICE_FILES = ("LICENSE", "LICENCE", "COPYING", "NOTICE")
+# What this repository may add beside the published archive. Unlike the ritk
+# vendor there is no patch, because the published manifest already yields the
+# graph section 15.2 wants.
+#
+# **The notice filenames are permitted additions even though none is present.**
+# The probe `pins.openjph-notice` measured why: without them, obtaining the BSD
+# notice and placing it here would trip "carries an unrecorded file" and the
+# redistribution gate could never be satisfied by the only action that is
+# supposed to satisfy it. A gate with no reachable green state is not a gate.
+OPENJPH_ADDITIONS = {"PACKAGE-INVENTORY.sha256", *OPENJPH_NOTICE_FILES}
+
 PACKAGE_LICENCES = ("LICENSE-MIT", "LICENSE-APACHE")
 
 # Crates whose version must be an EXACT `=` pin, with the reason a range is
@@ -408,14 +429,128 @@ def check_size(accept: bool) -> list[str]:
     return []
 
 
+
+def check_openjph_vendor(
+    vendor: Path = OPENJPH_VENDOR,
+    workspace: Path = CARGO,
+) -> list[str]:
+    """Prove the exact published package and its workspace wiring.
+
+    Deviation D-22. There is no patch, so unlike the ritk vendor every
+    published file must match the archive byte for byte and the only addition
+    is the inventory this repository writes.
+    """
+    problems = []
+    inventory_path = vendor / "PACKAGE-INVENTORY.sha256"
+    if not inventory_path.is_file():
+        return ["openjph-core vendor has no PACKAGE-INVENTORY.sha256"]
+    if file_sha256(inventory_path) != OPENJPH_INVENTORY_SHA256:
+        problems.append(
+            "openjph-core published-package inventory digest does not match "
+            "the immutable crates.io archive inventory")
+    inventory = {}
+    for line in inventory_path.read_text().splitlines():
+        digest, separator, name = line.partition("  ")
+        if not separator or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            problems.append(f"openjph-core inventory row is invalid: {line!r}")
+            continue
+        if name in inventory:
+            problems.append(f"openjph-core inventory repeats {name}")
+        inventory[name] = digest
+    if len(inventory) != OPENJPH_PUBLISHED_FILES:
+        problems.append(
+            f"openjph-core inventory has {len(inventory)} published files, "
+            f"expected the archive's exact {OPENJPH_PUBLISHED_FILES}")
+
+    actual = {
+        str(path.relative_to(vendor)) for path in vendor.rglob("*")
+        if path.is_file()
+    }
+    expected = set(inventory) | OPENJPH_ADDITIONS
+    for name in sorted(set(inventory) - actual):
+        problems.append(f"openjph-core published file is absent: {name}")
+    for name in sorted(actual - expected):
+        problems.append(f"openjph-core carries an unrecorded file: {name}")
+    for name, digest in sorted(inventory.items()):
+        path = vendor / name
+        if path.is_file() and file_sha256(path) != digest:
+            problems.append(
+                f"openjph-core published file changed: {name}. The vendored "
+                f"package carries no patch, so every file is the archive's")
+
+    try:
+        vcs = json.loads((vendor / ".cargo_vcs_info.json").read_text())["git"]["sha1"]
+    except (FileNotFoundError, KeyError, json.JSONDecodeError):
+        vcs = None
+    if vcs != OPENJPH_VCS:
+        problems.append(f"openjph-core VCS revision is {vcs!r}, expected {OPENJPH_VCS}")
+
+    try:
+        root = tomllib.loads(workspace.read_text())
+        exclude = root["workspace"]["exclude"]
+        dependency = root["workspace"]["dependencies"]["openjph-core"]
+    except (FileNotFoundError, KeyError, tomllib.TOMLDecodeError):
+        exclude, dependency = [], None
+    if "vendor/openjph-core-0.1.0" not in exclude:
+        problems.append("workspace does not exclude vendor/openjph-core-0.1.0")
+    if not isinstance(dependency, dict) or dependency.get("version") != "=0.1.0" \
+            or dependency.get("path") != "vendor/openjph-core-0.1.0":
+        problems.append(
+            "workspace openjph-core dependency is not the exact path and version")
+    return problems
+
+
+def check_openjph_redistribution(vendor: Path = OPENJPH_VENDOR) -> list[str]:
+    """Refuse to publish while the BSD notice material is absent.
+
+    **This refusal is expected to fire.** `openjph-core` 0.1.0's published
+    archive carries no `LICENSE`, `LICENCE`, `COPYING` or `NOTICE`, and
+    crates.io reports no repository URL where a root file could be obtained.
+    Its registry metadata and normalized manifest both declare `BSD-2-Clause`,
+    which permits redistribution **with its notice conditions retained**, and
+    the material that would satisfy them is what this repository does not have.
+
+    `docs/SOURCE-POLICY.md` decided `Depend? yes` for this package and recorded
+    the missing notice as a distribution risk. The S09 design round decided that
+    risk is held by a gate rather than by a note, so this check exists, fails
+    today, and names what would close it.
+
+    It is NOT in the `pins` gate and therefore not in `--floor`, `--sprint` or
+    `--all`, which in this repository are the same set. Those profiles gate
+    development, and the decision was that development proceeds while
+    publication cannot. `/release` invokes this flag, and
+    `guards.openjph-notice` is what proves the refusal still refuses.
+    """
+    present = [name for name in OPENJPH_NOTICE_FILES if (vendor / name).is_file()]
+    if present:
+        return []
+    return [
+        "openjph-core 0.1.0 carries no BSD notice or copyright material, so it "
+        "cannot be redistributed. Its crates.io archive has no "
+        f"{', '.join(OPENJPH_NOTICE_FILES)} and the registry reports no "
+        "repository URL to obtain one from. BSD-2-Clause permits "
+        "redistribution only with its notice conditions retained. Obtain the "
+        f"complete notice, place it at {vendor.name}/LICENSE, record its hash "
+        "beside the other vendored licence hashes, and see D-22 in "
+        "docs/hld/DEVIATIONS.md."
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--with-size", action="store_true")
     parser.add_argument("--accept-size", action="store_true")
+    parser.add_argument(
+        "--require-redistribution", action="store_true",
+        help="refuse a vendored package whose licence notice is absent. "
+             "/release passes this. No development profile does.")
     args = parser.parse_args(argv)
 
     problems = check_pins()
     problems.extend(check_ritk_vendor())
+    problems.extend(check_openjph_vendor())
+    if args.require_redistribution:
+        problems.extend(check_openjph_redistribution())
     if args.with_size or args.accept_size:
         problems += check_size(args.accept_size)
         problems += check_package_licences()
