@@ -956,6 +956,9 @@ dependencies = [
 [[package]]
 name = "ocelli-cache"
 version = "0.1.0"
+dependencies = [
+ "proptest",
+]
 
 [[package]]
 name = "ocelli-codec"

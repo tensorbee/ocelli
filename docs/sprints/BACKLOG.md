@@ -154,7 +154,7 @@ One budgeted cache, one wgpu device, the LUT chain running as a shader stage on 
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-031 | E5.1 | S11 | ocelli-cache: budgeted LRU across encoded, decoded and GPU tiers | Rust | 4w | F-001 | pending |
+| F-031 | E5.1 | S11 | ocelli-cache: budgeted LRU across encoded, decoded and GPU tiers | Rust | 4w | F-001 | done |
 | F-032 | E5.2 | S12 | Image cache with eviction events surfaced to JS | Rust | 2w | F-031 | pending |
 | F-033 | E5.3 | S12 | Volume cache and progressive volume assembly | Rust | 4w | F-031 | pending |
 | F-034 | E5.4 | S12 | Memory-pressure telemetry and JS-visible budget controls | Rust | 2w | F-031 | pending |

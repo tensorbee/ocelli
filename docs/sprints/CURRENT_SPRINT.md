@@ -9,7 +9,7 @@ against the arithmetic `ocelli-pixel` already owns.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-031 | E5.1 | `ocelli-cache`: budgeted LRU across encoded, decoded and GPU tiers | Rust | 4w | pending |
+| F-031 | E5.1 | `ocelli-cache`: budgeted LRU across encoded, decoded and GPU tiers | Rust | 4w | done |
 | F-037 | E6.1 | `ocelli-render`: device init, capability tiering, device-lost recovery | Rust | 4w | done |
 | F-041 | E6.5 | WGSL LUT-chain shader | Rust | 4w | done |
 

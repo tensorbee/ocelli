@@ -3239,3 +3239,71 @@ observable were each falsified by the next review pass, the third by legal
 windows where the operator moves the output by 42.5 of 255. The fourth version
 is a deletion. The operators are written as PS3.3 writes them, which needs no
 mutation to justify it, and the test that does pin one says only what it pins.
+
+## F-031, ocelli-cache budgeted LRU across encoded, decoded and GPU tiers, completed 2026-09-15
+
+**What this closes.** HLD section 20's `Budgeted` and `Lru<K, V>`, over
+`alloc::collections::BTreeMap` and a monotonic `u64` tick, plus section 8's
+three tiers as `CacheTier` and `Pressure`. **It creates no value type.** An
+encoded byte run, a decoded frame and a GPU texture are F-032, F-033, F-036 and
+F-040, all S12 or S13, and a `Budgeted` implementation for a texture that no
+texture type exists to be is a `bytes()` nobody can check.
+
+**`insert` returns `Admission<K, V>`, which is deviation D-24.** Section 20
+returns `Vec<(K, V)>` documented as "the entries evicted to make room", and
+three things reach the caller: entries evicted to fit the incoming one, the
+previous value under a repeated key, and an entry the budget cannot hold at all.
+F-032 surfaces these as JS events and they are three different events, and
+F-034's telemetry counts evictions, which a replacement would inflate.
+
+**D-24's row was edited during implementation and the edit is the interesting
+part.** The row as approved said an entry is refused when its `bytes` exceeds
+the whole budget. The implemented condition is `would_admit`, which is that OR a
+budget of zero, because the plan's own test row "a zero-budget cache admits
+nothing" was false for a zero-byte entry under the approved wording. One clause
+changed in each of two columns and the count stayed at 24.
+
+**Verification.** Feature profile at the worker's tree, 22 gates green, four
+skipped for absent prerequisites, **`corpus=absent`** because `corpus/data` is
+gitignored and a worker worktree does not have it. The corpus is verified in
+this sprint's consolidated run, on the integrated tree, which is where it can be.
+
+**Fixture provenance.** Three byte fixtures citing PS3.3 C.7.6.3.1 and HLD
+section 7, with hand-computed sizes: a 512 by 512 sixteen-bit frame at 524,288
+bytes, a row-padded texture allocation at 262,144 against a decoded source of
+153,600, and section 7's own bricking figure, 512 by 512 by 600 sixteen-bit at
+314,572,800 against a 256 MiB budget.
+
+**Tier coverage.** A: n/a. B: n/a. C: n/a. This crate holds no GPU code and
+creates no device. The GPU tier here is a budget in bytes and a discriminant,
+not a wgpu call, and a tier C session's encoded and decoded tiers behave
+identically while its GPU tier simply has no entries.
+
+**Size.** `ci/wasm-size-budget.json` does not move. `ocelli-wasm` does not reach
+`ocelli-cache`.
+
+**Ten review passes, and nine tests exist because of what they found.** The six
+mandated mutations were each observed red on their named test. The reviewers ran
+roughly 140 more and **nine left the suite green**: the evicted vector's
+ordering, all three sites that re-read `V::bytes()`, a refusal bumping recency,
+`is_empty` computed from `used` rather than from the entry count, a deferred
+release of a displaced value, and a dropped Samples per Pixel in a fixture. Each
+became a test.
+
+**Three departures from the plan, all reported.** `Admission`'s `Default` is
+hand-written rather than derived, because a derive bounds `K` and `V` and would
+make `Admission::default()` unusable inside `insert`, which is deviation D-08's
+trap in a new place. `would_admit` became `budget > 0 && bytes <= budget`. And
+the plan's claim that the common insert path is allocation-free is false and was
+corrected: `insert` allocates a `BTreeMap` node irregularly, measured at 34, 5
+and 1 allocations over forty inserts.
+
+**Notes for future sessions.** **The parallel worker path worked and its one
+rough edge is worth recording.** The worker correctly refused to touch
+`CURRENT_SPRINT.md`, `BACKLOG.md`, `SPRINT_TRACKER.md` and the sprint run state,
+which live only in the canonical worktree, so F-031 arrived at integration still
+`claimed` with a `pending` backlog row. That is the protocol working rather than
+failing, and the integrator owns those four files. The three-way merge itself
+was clean: one overlapping file, `Cargo.lock`, auto-merged, and the only shared
+prose was a single row of `docs/hld/DEVIATIONS.md` that the worker narrowed and
+this branch had not touched since the base.

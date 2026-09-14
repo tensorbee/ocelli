@@ -120,6 +120,17 @@ story can quietly break:
 > not the size of the decoded frame it was uploaded from. A budget kept in
 > source sizes is a number that does not describe memory.
 
+**`AGENTS.md` asks for two implementers before a new trait, and this one lands
+with none outside tests.** That rule is about constructs this repository
+invents. `Budgeted` is not invented here, it is section 20's own signature
+transcribed, and it is the crate's reason to exist: the trait is what keeps the
+LRU from knowing whether it holds a frame or a texture, which is what makes
+F-032, F-033, F-036 and F-040 implementations rather than forks of it. The
+alternative, a cache that takes a `usize` beside every value, moves the same
+decision to every call site and loses the one place `bytes` can be documented.
+The three test implementations are the three tiers, one of them the row-padded
+texture the rule is about.
+
 ### 2. `Lru<K, V>`, section 20's struct and signature, plus what it needs to work
 
 ```rust
@@ -188,27 +199,46 @@ insert and only one of them is that.**
 /// HLD section 20 returns `Vec<(K, V)>`. Deviation D-24 widens it, because the
 /// vector's own doc comment says "evicted to make room" and two of the three
 /// outcomes below were not.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Admission<K, V> {
-    /// Live entries removed to fit the incoming one. Section 20's vector.
+    /// Live entries removed to fit the incoming one. Section 20's vector,
+    /// least recently used first, which is the order F-032's events reach JS
+    /// in. The ordering was added to this listing by the F-031 review, which
+    /// found it stated in the code and the LLD and not here.
     pub evicted: Vec<(K, V)>,
     /// The previous value under the same key. Replaced, not evicted.
     pub displaced: Option<V>,
-    /// The incoming entry, handed back because `bytes` exceeds the whole
-    /// budget. Never admitted, so never evicted.
+    /// The incoming entry, handed back because the budget cannot hold it.
+    /// `Lru::would_admit` is the condition: `bytes` above the whole budget,
+    /// or a budget of zero. Never admitted, so never evicted.
     pub refused: Option<(K, V)>,
 }
 ```
 
-**`refused` is non-empty only when `evicted` is empty**, and the type asserts
-it: an entry that cannot fit an empty cache is refused before anything is
-evicted, so a refusal never costs the caller entries it still had room for.
-That ordering is the reason the refusal is checked first in `insert` and it is
-what the boundary test pins.
+The second half of that condition arrived with the F-031 review, which found
+that `0 <= 0` let a tier with no budget fill with entries it reported no bytes
+for. The test table's zero-budget row is where the rule is pinned.
 
-`Admission<K, V>` derives `Default`, so the common path, an insert that fits
-with nothing displaced, is one value with three empty fields and no
-allocation at all: `Vec::new` does not allocate until something is pushed.
+**`refused` is non-empty only when `evicted` is empty.** The type does not
+assert that, the order inside `insert` guarantees it: an entry the budget cannot
+hold is refused before anything is evicted, so a refusal never costs the caller
+entries it still had room for. That ordering is the reason the refusal is
+checked first, and the unit and property suites both pin it. This paragraph said
+"the type asserts it" until the F-031 review, which is a claim about a
+constraint no signature carries.
+
+`Admission<K, V>` has a `Default`, so the common path, an insert that fits
+with nothing displaced, is one value with three empty fields, and **that value
+allocates nothing**: `Vec::new` does not allocate until something is pushed.
+The claim is about the return value. `insert` itself can allocate, and the
+Boundary and tier block below says what it costs.
+
+**That `Default` is written out rather than derived**, which the listing above
+records as `#[derive(Debug, PartialEq, Eq)]` since the F-031 review.
+`#[derive(Default)]` bounds every type parameter, so it would produce
+`K: Default, V: Default` and make `Admission::default()` unavailable inside
+`insert`, which knows nothing about either. This is the trap D-08 records for
+the marker spaces, in a second place.
 
 **Eviction order.** Least recently used first, by the `used_at` tick.
 `insert` and `get` set `used_at = self.clock` and then increment `clock`.
@@ -249,12 +279,13 @@ pub struct Pressure {
 ```
 
 **`CacheTier` has a reader today and that is why it exists.** It is on
-`Lru::new`, on `Pressure` and on every eviction record, so an eviction leaving
-this crate already says which budget it came from. F-032 surfaces those as JS
-events and F-034 surfaces the pressure, and an eviction event that cannot say
-whether a texture or a frame went is not one the shell can react to. Without
-the field those two stories would add it, and adding it here is one place to
-look rather than three.
+`Lru::new` and on `Pressure`. **`Admission` does not carry it**, and this
+paragraph said "on every eviction record" until the F-031 review: an eviction
+record is a `(K, V)` pair and nothing more. A caller emitting an eviction event
+knows which budget it came from because it knows which cache it called, and a
+field repeating that would be a second place for it to be wrong. F-032 surfaces
+evictions as JS events and F-034 surfaces the pressure, and both hold a cache
+per tier to call.
 
 **There is no `CacheSet` holding all three.** The three tiers hold three
 different value types, so one struct over them needs three type parameters with
@@ -280,12 +311,20 @@ put in them.
 - wasm-bindgen: not touched
 - Pixels across the boundary: no. `ocelli-cache` is `no_std`, holds no boundary
   type and names no pixel type. D3 is untouched
-- Render-loop allocation: **none on the render loop's path.** `get`,
-  `contains_key`, `pressure` and `len` allocate nothing. `insert` returns an
-  `Admission` carrying section 20's own `Vec`, and it is called on the decode
-  and upload paths rather than per frame. An insert that evicts nothing pushes
-  nothing, and `Vec::new` does not allocate until it is pushed to, so even that
-  path is allocation-free. See What the specification does not cover, item 7
+- Render-loop allocation: **none on the render loop's path.** `insert` is the
+  only method on `Lru` that allocates, which is a rule rather than a list of
+  the other eight, and the render loop's cache interaction is `get`. `insert`
+  returns an `Admission` carrying section 20's own `Vec`, and it is called on
+  the decode and upload paths rather than per frame. An insert that evicts
+  nothing pushes nothing, and `Vec::new` does not allocate until it is pushed
+  to, so the returned value is not what allocates. **`insert` itself can
+  allocate**, because the map takes a node at a time, measured over forty
+  non-evicting inserts as thirty-four allocating nothing, five once and one
+  twice, with the split moving under a different key order. That is the reason
+  it is not a render-loop call. This line said "so even that path is
+  allocation-free" until the F-031 review, which was a sentence a later story
+  could have read as permission. `docs/lld/cache.md` carries the measurement.
+  See What the specification does not cover, item 7
 - unsafe: none
 - Tier A (WebGPU): n/a. This crate holds no GPU code and creates no device. The
   GPU tier is a budget in bytes and a `CacheTier` discriminant, not a wgpu call
@@ -302,15 +341,24 @@ put in them.
 | `unit` | An empty cache reports `used == 0`, and `budget` is what `new` was given | `crates/ocelli-cache/src/lru.rs` |
 | `unit` | Insertion under budget evicts nothing and returns an empty vector | same |
 | `unit` | Eviction is least-recently-used: insert A, B, C to fill the budget, `get(A)`, insert D, and **B is what leaves**, not A and not C | same |
-| `unit` | `contains_key` and `pressure` do NOT bump recency. Same sequence with `contains_key(A)` in place of `get(A)` evicts A | same |
+| `unit` | `contains_key` does NOT bump recency. Same sequence with `contains_key(A)` in place of `get(A)` evicts A | same |
+| `unit` | `pressure` does NOT bump recency. The same sequence again, with the reading taken through `pressure`, so a failure says which of the two methods was the use. One test each, from the F-031 review | same |
 | `unit` | `remove` returns the value, lowers `used` by exactly that entry's admitted bytes, and returns `None` for an absent key | same |
 | `unit` | Re-inserting a live key does not double-count `used`, and the old value arrives as `displaced` rather than inside `evicted` | same |
+| `unit` | Replacing a live key **at a full budget** evicts nothing, because the previous value's bytes leave `used` before eviction begins. Deferring that release until after the loop keeps the accounting correct and evicts a stranger, and this is the test it fails. From the F-031 review | same |
 | `unit` | An entry larger than the whole budget arrives as `refused`, `evicted` is empty, `used` is unchanged and the cache still holds everything it held before | same |
 | `unit` | `would_admit` agrees with `insert` for the same size at the budget, one byte under it and one byte over it | same |
 | `unit` | An insert that fits with nothing displaced returns `Admission::default()`, so the three-field shape does not make the common path noisy | same |
-| `unit` | A zero-budget cache admits nothing and stays empty | same |
+| `unit` | A zero-budget cache admits nothing and stays empty, **an entry of zero bytes included**. Without that rule `0 <= 0` holds and a disabled tier fills with entries it reports no bytes for. The zero-byte half was added by the F-031 review | same |
+| `unit` | A tier that does have a budget admits an entry of zero bytes, so the rule above is not read as "zero bytes is always refused". From the F-031 review | same |
+| `unit` | Entries of zero bytes never evict anything, at a full budget or any other, because the budget bounds bytes and not entries. From the F-031 review | same |
+| `unit` | An insert that needs two entries to leave returns them **least recently used first**. The only deterministic test that evicts more than one entry, so the only one that can see the order at all. The property test evicts several routinely and asserts nothing about their order. From the F-031 review | same |
+| `unit` | A refused insert does not change the eviction order, so offering a live key a value the budget cannot hold is not a use. From the F-031 review | same |
+| `unit` | `remove` releases the bytes the entry was **admitted** at, not what it reports now, against a value whose reported size changed after admission. From the F-031 review | same |
+| `unit` | An eviction releases the admitted bytes, same value, same reason. One entry leaving frees what it was admitted at, and releasing less would take a second entry with it | same |
+| `unit` | Replacing a live key releases the admitted bytes, same value, third and last site that gives bytes back | same |
 | `unit` | An entry of exactly the remaining budget is admitted, and one byte more evicts. The boundary belongs to the admitting side | same |
-| `fixture` | **The budget is asserted in bytes against hand-computed entry sizes rather than against what the implementation reports.** A 512 by 512 sixteen-bit frame is 512 × 512 × 2 = 524,288 bytes. A budget of 2,097,152 bytes holds exactly four of them and the fifth evicts the first | `crates/ocelli-cache/tests/budget.rs` |
+| `fixture` | **The budget is asserted in bytes against hand-computed entry sizes rather than against what the implementation reports.** A 512 by 512 sixteen-bit frame is 512 × 512 × 2 = 524,288 bytes, and the same geometry at three samples of eight bits is 786,432, which is the only shape that notices Samples per Pixel leaving the product. A budget of 2,097,152 bytes holds exactly four greyscale frames and the fifth evicts the first | `crates/ocelli-cache/tests/budget.rs` |
 | `fixture` | **`bytes` is the allocated footprint, not the source footprint.** A test value modelling a GPU texture reports a row-padded allocation, 300 bytes per row padded to 512 over 512 rows is 262,144 bytes, against a decoded source of 153,600. A budget of 262,144 holds exactly one, and an implementation reporting the source size would hold one and report 108,544 bytes free | same |
 | `fixture` | HLD section 7's bricking figure: 512 × 512 × 600 sixteen-bit is 314,572,800 bytes against a 256 MiB budget of 268,435,456, so the series does not fit and the cache says so through `would_admit`. This is the arithmetic behind "chunked upload is the normal path" | same |
 | `property` | After any randomised sequence of `insert`, `get` and `remove`, `used` equals the sum of the live entries' admitted bytes, and `used <= budget` | `crates/ocelli-cache/tests/invariants.rs` |
@@ -321,7 +369,10 @@ observed red, and the mutation reverted:
 
 1. Evict the **most** recently used instead of the least. The LRU-order test
    goes red, and it goes red on B rather than only on a count.
-2. Make `contains_key` bump recency. The telemetry test goes red.
+2. Make `contains_key` bump recency, which takes changing it to `&mut self`
+   first, because a method that cannot mutate cannot carry the defect. The
+   `contains_key` telemetry test goes red and the `pressure` one does not, which
+   is what splitting them buys.
 3. Add the incoming entry's bytes to `used` before evicting rather than after.
    The exact-fit boundary test goes red.
 4. Drop the displaced value on a repeated key without returning it and without
