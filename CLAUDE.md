@@ -186,9 +186,13 @@ What exists, in the order it matters:
   unavailable by design: PS3.5 A.5 deflates the whole data set rather than a
   frame, so it is `ocelli-dicom`'s route under D-18.
   `crates/ocelli-codec/tests/registry.rs` asserts both halves.
-- **The pixel pipeline**, stages 1 to 3 of DICOM PS3.3 C.11 in `ocelli-pixel`,
-  with the section 18.3 fixtures behind them and inversion resolved exactly
-  once. Palette and ICC, stage 4, are not implemented.
+- **The pixel pipeline**, all four stages of DICOM PS3.3 C.11 in `ocelli-pixel`,
+  with the section 18.3 fixtures behind them, inversion resolved exactly once,
+  and the colour transform applied exactly once against the decoder's own
+  reported output space. **ICC, the other half of stage 4's row, is not
+  implemented.** This line said "stages 1 to 3" and "palette and ICC are not
+  implemented" until F-030, which is the shape the paragraph below this list
+  keeps having to correct.
 - **Derived DICOM geometry**, per-frame plane, stack shear measured from the
   geometry rather than read from the gantry tilt tag, and calibrated against
   uncalibrated spacing kept distinct.

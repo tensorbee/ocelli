@@ -9,7 +9,7 @@ transforms.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-030 | E4.8 | Palette colour, planar configuration, photometric interpretation, YBR | Rust | 2w | pending |
+| F-030 | E4.8 | Palette colour, planar configuration, photometric interpretation, YBR | Rust | 2w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:
@@ -37,19 +37,21 @@ than a degraded one.
 - **F-X011** remains pending because its acceptance evidence requires a second
   physical machine and none is available. It is unfinished M1 evidence and is
   not a dependency of F-030.
-- **A multi-component JPEG-LS corpus row is owed.** Appendix A gate A2 recorded
-  it and F-028 did not close it. `crates/ocelli-codec/src/jpegls.rs` refuses a
-  multi-component frame cleanly, so the gap is coverage rather than a wrong
-  pixel. **F-030 is the story that makes such a row meaningful**, because until
-  colour is interpreted there is nothing to check a decoded RGB frame against.
-  Whether to add the row here or file it separately is a design-plan decision.
+- **A multi-component JPEG-LS corpus row was owed, and F-030 added it.**
+  Appendix A gate A2 recorded it and F-028 did not close it. The S10 design
+  round put it in this sprint rather than a separate story, and
+  `syntax/jpegls_lossless_rgb8.dcm` is the row. `crates/ocelli-codec/src/jpegls.rs`
+  still refuses a multi-component frame cleanly, which is the required behaviour
+  rather than a gap, and the row is what makes that refusal measured against a
+  real three-component codestream instead of a synthetic descriptor. **What
+  remains owed is multi-component DECODING**, which is a codec story.
 - **`openjph-core` 0.1.0 carries no BSD notice material.** `/release` step 5
   refuses while that is true and no development profile does. It blocks nothing
   in this sprint and it blocks publication. See D-22.
 - S09 closed F-020, F-027, F-028 and F-029. F-030's only declared prerequisite
   is F-029, which is `done`, so it does not begin blocked.
 
-## The corpus covers three of this story's four halves, and not the fourth
+## The corpus covered three of this story's four halves, and F-030 added the fourth
 
 Measured rather than assumed, from `corpus/manifest.tsv`:
 
@@ -59,20 +61,35 @@ Measured rather than assumed, from `corpus/manifest.tsv`:
 | `RGB`, Planar Configuration 1 | `synthetic/sc_rgb_planar.dcm` |
 | `YBR_FULL_422` | `synthetic/us_ybr_full_422.dcm` |
 | A decoder-converted colour frame | `syntax/jpeg_baseline_rgb8.dcm` |
-| **`PALETTE COLOR`** | **none** |
+| **`PALETTE COLOR`** | **`synthetic/sc_palette_color.dcm` and `synthetic/sc_palette_color_16.dcm`, added by F-030** |
 
-**There is no palette colour case in the corpus.** `scripts/corpus_check.py`
-knows the photometric value and validates one if present, and nothing requires
-one. So the palette half of this story has to be proven by a synthetic fixture
-whose expected values are hand-computed from PS3.3 C.7.9, generated into ignored
-`corpus/data` from a committed generator, which is what `scripts/corpus_synth.py`
-already does for every other synthetic case.
+**There was no palette colour case in the corpus when this sprint opened.**
+`scripts/corpus_check.py` knew the photometric value and validated one if
+present, and nothing required one. F-030 added two, through a new
+`corpus_synth.py --case` selector that writes one case without rebuilding the
+whole layer, because a full rebuild would have re-encoded the three HTJ2K rows
+with an OpenJPH that has moved since the manifest was built.
 
-That is a legitimate route and it is weaker than a manifest-backed row, so the
-design plan says which it uses and why rather than discovering the gap mid
-implementation. The planar pair is the model to copy: two rows that are the same
-image in two layouts, which is the only shape that can catch a layout read
-backwards.
+**This section originally planned the weaker route** and said so: a synthetic
+fixture generated into ignored `corpus/data` from a committed generator, with no
+manifest row behind it. That turned out to be unnecessary. `corpus_synth.py`
+already produces manifest-backed rows for every other synthetic case, and the
+only thing standing in the way was that adding one meant regenerating all of
+them. The selector removed that, so the palette half is manifest-backed like the
+rest rather than one rung weaker.
+
+The planar pair was the model, two rows that are the same image in two layouts,
+which is the only shape that can catch a layout read backwards. The palette pair
+follows it with two rows that are the same table addressed two ways, one with a
+non-zero first mapped input and one with an entry count declared zero.
+
+**The 8-bits-per-entry LUT Data packing is deliberately not in the corpus.**
+Both rows declare 16 bits per entry, where one entry per 16-bit word is
+unambiguous. PS3.3 C.7.6.3.1.6's packing for 8-bit data is a PS3.5 encoding
+question owned by the parser story, and a guess about it would have been frozen
+into a manifest digest where it reads as evidence. The 8-bit descriptor path is
+proven by `crates/ocelli-pixel/tests/palette.rs` instead, which depends on no
+wire packing.
 
 ## The defect class this sprint is exposed to
 
@@ -144,8 +161,10 @@ asserts that about the corpus and nothing asserts it about our unpacker.
 
 One story, so there is no order. F-030 depends on F-029, which is `done`.
 
-**This sprint closes M2 if it lands.** Fourteen of M2's fifteen stories are
-done and F-030 is the fifteenth.
+**This sprint closes M2, and F-030 landed.** All fifteen of M2's stories are
+`done` in `docs/sprints/BACKLOG.md`, counted from `allocation.json`'s
+`milestone` field rather than from a number typed here, which is F-016 through
+F-030 inclusive.
 
 ## Standing expectations
 
