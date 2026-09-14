@@ -1,179 +1,180 @@
-# Current sprint, S10
+# Current sprint, S11
 
-**Milestone**: M2, DICOM ingest and the pixel pipeline.
-**Branch**: `sprint/s10`
+**Milestone**: M3, the cache and the renderer.
+**Branch**: `sprint/s11`
 **Opened**: 2026-09-14
-**Goal**: Close M2 by adding the colour half of the pixel pipeline: palette
-colour, planar configuration, photometric interpretation and the YBR
-transforms.
+**Goal**: Open M3 by standing up the two things every rendered frame needs, a
+budgeted cache and a real GPU device, and then writing the LUT chain's shader
+against the arithmetic `ocelli-pixel` already owns.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-030 | E4.8 | Palette colour, planar configuration, photometric interpretation, YBR | Rust | 2w | done |
+| F-031 | E5.1 | `ocelli-cache`: budgeted LRU across encoded, decoded and GPU tiers | Rust | 4w | pending |
+| F-037 | E6.1 | `ocelli-render`: device init, capability tiering, device-lost recovery | Rust | 4w | pending |
+| F-041 | E6.5 | WGSL LUT-chain shader | Rust | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:
 
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S10 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S11 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S10 is one story and it is the last one in M2. Nine sprints of ingest, codec
-and monochrome pixel work leave exactly one gap: everything colour. F-030 adds
-DICOM PS3.3 C.7.6.3's Photometric Interpretation handling beyond the monochrome
-pair, Planar Configuration for uncompressed colour, the palette colour lookup
-of C.7.9, and the YBR to RGB transforms. **It is the fourth stage of HLD section
-18's LUT chain table**, the one F-029 deliberately left out.
+**This is the sprint the GPU stops being a plan.** Ten sprints built ingest,
+codecs and the pixel pipeline, and every one of them ran on the CPU. S11 creates
+the first long-lived `wgpu::Device`, gives the cache a budget to respect, and
+writes the first shader. Nothing renders a corpus frame end to end at the close
+of this sprint, and that is later business: F-038's render graph in S12, then
+F-040's texture upload path and F-039's OffscreenCanvas in S13, are what turn
+these three components into a frame.
 
-**A wave of one story runs serial**, in this worktree, with no claim, no worker
-branch, no worktree and no integration step. That is the simpler path rather
-than a degraded one.
+The three stories are close to independent. F-031 touches `ocelli-cache` and no
+GPU at all. F-037 touches `ocelli-render`'s device path. F-041 writes WGSL and
+its host-side uniform. They share no source file, so they can run as a parallel
+wave, **except for one resource**: any test that touches a real device
+contends for it. See the serialisation note below.
 
 ## What is carried in
 
+- **M2 closed at S10 and a release is due by the table in `docs/RELEASE.md`**,
+  which maps M2 to `0.2.0`. **It cannot be taken.** `/release` step 5 refuses
+  while `openjph-core` 0.1.0 carries no BSD notice material, which is D-22, and
+  M1's `0.1.0` was never published either, so the namespace reservation the
+  release table treats as already done is still outstanding. Neither blocks any
+  story here. Both block publication, and the gap widens every milestone.
 - **F-X011** remains pending because its acceptance evidence requires a second
   physical machine and none is available. It is unfinished M1 evidence and is
-  not a dependency of F-030.
-- **A multi-component JPEG-LS corpus row was owed, and F-030 added it.**
-  Appendix A gate A2 recorded it and F-028 did not close it. The S10 design
-  round put it in this sprint rather than a separate story, and
-  `syntax/jpegls_lossless_rgb8.dcm` is the row. `crates/ocelli-codec/src/jpegls.rs`
-  still refuses a multi-component frame cleanly, which is the required behaviour
-  rather than a gap, and the row is what makes that refusal measured against a
-  real three-component codestream instead of a synthetic descriptor. **What
-  remains owed is multi-component DECODING**, which is a codec story.
-- **`openjph-core` 0.1.0 carries no BSD notice material.** `/release` step 5
-  refuses while that is true and no development profile does. It blocks nothing
-  in this sprint and it blocks publication. See D-22.
-- S09 closed F-020, F-027, F-028 and F-029. F-030's only declared prerequisite
-  is F-029, which is `done`, so it does not begin blocked.
-
-## The corpus covered three of this story's four halves, and F-030 added the fourth
-
-Measured rather than assumed, from `corpus/manifest.tsv`:
-
-| What F-030 must interpret | Corpus row |
-|---------------------------|------------|
-| `RGB`, Planar Configuration 0 | `synthetic/sc_rgb_interleaved.dcm` |
-| `RGB`, Planar Configuration 1 | `synthetic/sc_rgb_planar.dcm` |
-| `YBR_FULL_422` | `synthetic/us_ybr_full_422.dcm` |
-| A decoder-converted colour frame | `syntax/jpeg_baseline_rgb8.dcm` |
-| **`PALETTE COLOR`** | **`synthetic/sc_palette_color.dcm` and `synthetic/sc_palette_color_16.dcm`, added by F-030** |
-
-**There was no palette colour case in the corpus when this sprint opened.**
-`scripts/corpus_check.py` knew the photometric value and validated one if
-present, and nothing required one. F-030 added two, through a new
-`corpus_synth.py --case` selector that writes one case without rebuilding the
-whole layer, because a full rebuild would have re-encoded the three HTJ2K rows
-with an OpenJPH that has moved since the manifest was built.
-
-**This section originally planned the weaker route** and said so: a synthetic
-fixture generated into ignored `corpus/data` from a committed generator, with no
-manifest row behind it. That turned out to be unnecessary. `corpus_synth.py`
-already produces manifest-backed rows for every other synthetic case, and the
-only thing standing in the way was that adding one meant regenerating all of
-them. The selector removed that, so the palette half is manifest-backed like the
-rest rather than one rung weaker.
-
-The planar pair was the model, two rows that are the same image in two layouts,
-which is the only shape that can catch a layout read backwards. The palette pair
-follows it with two rows that are the same table addressed two ways, one with a
-non-zero first mapped input and one with an entry count declared zero.
-
-**The 8-bits-per-entry LUT Data packing is deliberately not in the corpus.**
-Both rows declare 16 bits per entry, where one entry per 16-bit word is
-unambiguous. PS3.3 C.7.6.3.1.6's packing for 8-bit data is a PS3.5 encoding
-question owned by the parser story, and a guess about it would have been frozen
-into a manifest digest where it reads as evidence. The 8-bit descriptor path is
-proven by `crates/ocelli-pixel/tests/palette.rs` instead, which depends on no
-wire packing.
+  not a dependency of anything in this sprint.
+- **ICC is not implemented**, the other half of HLD section 18's stage-4 row.
+  F-030 built palette and the colour transforms and left ICC, which is
+  whole-slide colour management and has no corpus row carrying a profile.
+- **Multi-component JPEG-LS decoding is still owed.** F-030 added the corpus
+  row Appendix A gate A2 asked for, and the adapter still refuses such a frame
+  cleanly. The row measures the refusal. Decoding one is a codec story.
+- **The oracle still has no Ocelli renderer to compare against.** That is
+  decision D7 holding rather than a gap, and **F-041 is the first story that
+  moves toward closing it**, though it does not close it.
 
 ## The defect class this sprint is exposed to
 
-**Colour is where a plausible image is most likely to be the wrong one**, and
-this story concentrates four separate ways of producing it.
+**Every previous sprint could be wrong in a way a fixture catches. This one
+can be wrong in a way only a second machine catches.**
 
-**The colour transform applied twice, or not at all.** A JPEG decoder usually
-outputs RGB even though the DICOM header still says `YBR_FULL_422`. F-024
-already made that observable: `Decoder::decode_photometric_interpretation`
-returns `Rgb` or `Preserved` and `decode_sample_layout` returns `Interleaved` or
-`Preserved`. **Those queries exist and nothing downstream consumes them yet.**
-F-030 is the first consumer, and a second conversion applied on top of a
-decoder's own darkens and shifts hue on an image that still looks like an image.
-The F-024 AS_BUILT entry's closing note says exactly this and it is now due.
+**A second copy of the LUT arithmetic, living in WGSL.** This is the one the
+HLD names directly, in section 18: implement it once in `ocelli-pixel` and let
+the shader read the parameters. F-041 writes a shader whose whole job is to
+apply `LINEAR`, `LINEAR_EXACT` and `SIGMOID`, and the obvious way to write it
+is to type the three formulas into WGSL. That is the forbidden second copy, and
+it is worse than an ordinary duplicate because it diverges only on hardware and
+only under a pixel diff. Section 18.4's `VoiParams` struct is the specified
+shape: the shader reads `center`, `width`, `slope`, `intercept`, `ymin`, `ymax`,
+`fn_kind` and `invert`, and `LutChain::inverts` already resolves that last flag
+exactly once on the CPU. **A shader that recomputes inversion from Photometric
+Interpretation is the double-inversion defect F-029 spent a story preventing.**
 
-**`PALETTE COLOR` indexes the STORED value, not the Display value.** PS3.3 C.7.9
-maps the stored value through the palette descriptors. F-029's design plan
-recorded this as the reason palette is not a fourth arm on `LutChain`: a palette
-path taking a `Display` input would be wrong in a way that stage ordering alone
-would not reveal. Getting it wrong produces a colour image with the right shape
-and the wrong colours.
+**Tier B is a declared tier and nothing has ever run on it.** HLD section 7
+gives tier B as WebGL2 through wgpu's downlevel profile, fragment shaders only,
+no compute, no storage buffers, and a 3D-texture floor of 256 against tier A's
+2048. D-14 added wgpu's `webgl` feature to `ocelli-render` precisely so tier B
+can resolve in a browser at all, and that feature has cost zero bytes so far
+because nothing reaches it. F-037 and F-041 are where a feature written for
+tier A and never tried on tier B starts to look finished while being
+unavailable on half the declared matrix.
 
-**The palette descriptor's three values are a trap each.** A first value of `0`
-means 65,536 entries and not zero. The second value is the first **input** value
-mapped, so ignoring the offset shifts the whole colour map. A `bits per entry`
-of 16 with 8-bit-looking data is real, and the descriptor is what decides, not
-the data. `LutDescriptor` in `ocelli-pixel` already implements the first of
-these for the modality and VOI stages and is the place to look before writing a
-second one.
+**And tier C is CPU, which is deviation D-07 and not the HLD's.** `ocelli-pixel`
+is tier C's authoritative path, so the correct tier C answer for a shader story
+is that the arithmetic already exists and is not reimplemented. An omitted row
+and a deliberate "no CPU path" read identically six months later.
 
-**`PlanarConfiguration` is meaningful only for uncompressed data.** For an
-encapsulated syntax the codec defines the layout, so a header saying `1` for a
-JPEG frame is to be ignored rather than honoured. `SampleLayout` in
-`ocelli-pixel` already validates the Samples per Pixel, Photometric
-Interpretation and Planar Configuration relationship, and
-`StoredPixelDescription::unpack`'s doc comment already warns that a codec
-expanding subsampled colour must describe its actual output layout. That
-sentence becomes executable in this story.
+**Device loss is a real state, not an error path nobody reaches.** A browser
+drops a WebGPU device on a driver reset, a tab backgrounded too long, or an
+OOM, and the specified behaviour is to recover rather than to fail the session.
+An implementation that treats loss as unreachable will be correct on every
+machine anyone develops on.
 
-**One further trap the corpus can see.** `YBR_FULL_422` stores Y1 Y2 Cb Cr for
-each pair of pixels, so its frame is two bytes per pixel rather than three.
-`scripts/tests/test_corpus_synth.py::test_ybr_full_422_frame_is_two_bytes_per_pixel`
-asserts that about the corpus and nothing asserts it about our unpacker.
+**The cache's budget is a promise about bytes, and `Budgeted::bytes` is where
+that promise is kept or quietly broken.** HLD section 20 gives the trait and
+the `Lru::insert` signature returning evicted entries so the caller can emit
+events. A GPU texture whose `bytes` reports its decoded source size rather than
+its allocated size makes the budget a number that does not describe memory.
 
 ## What done means
 
-- **F-030** interprets every Photometric Interpretation
-  `crates/ocelli-pixel/src/stored_pixel.rs` already names, with each conversion
-  citing its PS3.3 section and carrying a hand-computed fixture. A frame whose
-  colour cannot be interpreted is refused rather than rendered in the wrong
-  space.
-- **The colour transform happens exactly once**, and the decoder's own
-  `DecodePhotometricInterpretation` and `DecodeSampleLayout` evidence is what
-  decides. A fixture proves a decoder-converted frame is not converted again,
-  and it must fail if it were, which a greyscale fixture cannot show.
-- **Palette colour reads the stored value**, with the descriptor's
-  zero-means-65536 count, its first-mapped-input offset and its declared bits
-  per entry all proven rather than assumed.
-- **`PlanarConfiguration` is honoured for native syntaxes and ignored for
-  encapsulated ones**, with both directions asserted.
-- Palette and colour arithmetic lives in `ocelli-pixel` beside the rest of the
-  LUT chain. HLD section 18 requires that arithmetic to exist exactly once and
-  a second copy behind a colour check is the same defect as a second copy
-  anywhere else.
-- `wasm-bindgen` remains confined to `ocelli-wasm`, and no render-loop or
-  network boundary is added.
+- **F-031** implements HLD section 20's `Budgeted` and `Lru<K, V>` with
+  `insert` returning the evicted entries rather than dropping them, because
+  F-032 surfaces those as JS events and an eviction nobody can observe is not
+  one the shell can react to. Three tiers with distinct pressure, per HLD
+  section 8: encoded bytes transient, decoded frames in a caller-sized LRU,
+  GPU textures their own tier, because evicting a texture and evicting a frame
+  have very different costs. **No allocation in the render loop**, and the
+  budget is asserted in bytes against hand-computed entry sizes rather than
+  against what the implementation reports.
+- **F-037** creates the long-lived device. `GpuContext` already exists from
+  F-008 and `resolve` already decides the tier from F-004 and F-X001, so this
+  story wires the decision to a real adapter request and adds the recovery
+  path. **`ocelli-render` remains the only crate permitted to create a
+  `wgpu::Device`**, which `ci/check-device-ownership.sh` asserts and which this
+  story must not weaken. Device loss is recovered from and the recovery is
+  observable, not inferred.
+- **F-041** writes the WGSL and the host-side uniform of HLD section 18.4,
+  transcribed rather than reinvented, and **adds no arithmetic that
+  `ocelli-pixel` does not already own**. Its evidence is that the shader's
+  output agrees with `LutChain::map_into` over the section 18.3 fixture inputs,
+  which is a comparison against this repository's own validated CPU path and is
+  therefore weaker than an oracle verdict and stronger than a screenshot. Say
+  which it is in the design plan.
+- **Every one of the three declares all three tier rows**, and "n/a" is a real
+  answer that an omitted row is not.
+- `wasm-bindgen` remains confined to `ocelli-wasm`, pixels do not cross the
+  boundary, and no story adds a second `queue.submit()` per frame.
 
-## Dependency order
+## The size budget starts moving this sprint, and that is expected
 
-One story, so there is no order. F-030 depends on F-029, which is `done`.
+`ci/wasm-size-budget.json` records 16,388 bytes and its own note says the
+number that will bear on Appendix A gate A4 "arrives with the render path from
+S11, not here". D-14 says the same thing from the other side: wgpu's `webgl`
+feature costs zero bytes today only because `ocelli-wasm` does not reach
+`ocelli-render`.
 
-**This sprint closes M2, and F-030 landed.** All fifteen of M2's stories are
-`done` in `docs/sprints/BACKLOG.md`, counted from `allocation.json`'s
-`milestone` field rather than from a number typed here, which is F-016 through
-F-030 inclusive.
+So a re-baseline in this sprint is **not** a gate being loosened, provided it is
+deliberate. `scripts/pin_and_size_check.py` refuses a silent one and
+`python3 scripts/pin_and_size_check.py --accept-size` is the explicit route,
+which the budget file's own `note` field already names. The design plan that
+takes it says what grew and why, and fills the `rebaselined` block the way
+F-005 did, with a measurement against a rebuild of the base commit so the delta
+is the story's and not drift. Gate
+A4 estimates 3 to 8 MB uncompressed with Naga dominating and records itself as
+unmeasured. **A measurement that lands inside that estimate is evidence and a
+measurement that lands outside it is a finding**, and either is worth more than
+the estimate. Neither is a reason to widen the tolerance.
+
+## Dependency order and the one shared resource
+
+F-031 depends on F-001, F-037 on F-004, F-041 on F-029. All three are `done`,
+so no story begins blocked and there is no order between them.
+
+**The GPU is an exclusive resource and the wave plan must serialise it.** Two
+workers running device tests concurrently on one machine contend for the
+adapter and produce timeouts that read exactly like rendering failures. F-031
+needs no device and can run beside either of the others. F-037 and F-041 both
+do, so they do not run concurrently with each other whatever the worker count
+says.
 
 ## Standing expectations
 
 The HLD is authoritative. A design-plan departure is recorded in
-`docs/hld/DEVIATIONS.md`, never improvised in implementation.
+`docs/hld/DEVIATIONS.md`, never improvised in implementation. **`wgpu` is pinned
+exactly and agents confidently emit APIs that have not existed for two years**,
+so every wgpu call in this sprint is checked against the pinned version's own
+documentation rather than from memory. Treat GPU code that compiles first try
+with suspicion.
 
 No patient data enters a prompt, tracked file, fixture, log, error or commit.
 The ignored corpus remains behind `corpus/manifest.tsv` and its generators.
 
-Pixel arithmetic remains observable. An unsupported colour route reports
-unavailable or refuses according to its contract and is never silently treated
-as the common path, which is HLD section 31's rule generalised.
+A feature that cannot run on the resolved tier **reports unavailable**. It never
+quietly produces a different result, which is HLD section 31's rule generalised
+by D-07.
