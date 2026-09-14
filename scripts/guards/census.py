@@ -179,8 +179,19 @@ DELEGATED = {
               "watches them. The individual lint's detection is upstream's.",
     "test": "cargo test runs the crates' own suites, which are their stories' "
             "tests. The trybuild compile-fail cases under "
-            "crates/ocelli-compute/tests/ui/ are standing guard tests of "
-            "exactly this kind and are recorded against the `device` entry.",
+            "crates/ocelli-compute/tests/ui/ and crates/ocelli-render/tests/ui/ "
+            "are standing guard tests of exactly this kind. The first is "
+            "recorded against the `device` entry. The second is F-037's "
+            "workload-dimension case and belongs to no guard, because the "
+            "thing it refuses is a type error rather than a policy.",
+    "gpu": "cargo test again, filtered to the `#[ignore]`d tests that need a "
+           "real adapter, so the same reason as `test` applies unchanged. It "
+           "is a separate gate rather than part of `test` because deviation "
+           "D-04 leaves CI without an adapter, so it carries `YES` in the GPU "
+           "column and is excluded from the floor beside `oracle`. What it "
+           "runs refuses nothing of its own: ocelli-render's device lifecycle "
+           "and the LUT shader are asserted by their stories' tests, not by a "
+           "guard script.",
     "wasm": "the build is wasm-pack's. The size ceiling is pin_and_size_check "
             "and is probed.",
     "native": "the build is cargo's. Step 4 is target_feature_check and is "

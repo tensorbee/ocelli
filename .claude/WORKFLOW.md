@@ -102,9 +102,33 @@ gate covers. Four profiles:
   was removed rather than left with a condition that can no longer be true,
   because a dead exception is a live misreading. The two profiles are now the
   same set of gates.
-- **`--all`**, the floor plus `corpus` and `oracle`. This is what a human runs
+- **`--all`**, the floor plus every gate outside it. This is what a human runs
   before a release.
 - **named gates**, the inner loop.
+
+**No profile's gate list is written out here**, and that is deliberate.
+`bin/ocelli.sh gate --list` prints every gate with its GPU column, and the
+`--floor` exclusion list in `bin/ocelli.sh` is compared for set equality against
+`scripts/ci_floor_check.py`'s `NOT_IN_FLOOR` by the `ci` gate, so the two
+mechanisms cannot drift. A third copy in this file can, and the line above said
+"the floor plus `corpus` and `oracle`" from S02 until S11 added a second GPU
+gate, at which point it was wrong without anything noticing.
+
+**There are now two gates that need a GPU**, and `oracle` is no longer the only
+one. `gpu` was added by F-037 and runs every `#[ignore]`d test in
+`ocelli-render`: the device opens, a loss is observed, a deliberate destroy is
+refused rather than rebuilt, a rebuild works, and the LUT-chain shader agrees
+with `ocelli-pixel` over the section 18.3 fixture inputs. It exists because
+`cargo test --workspace` is the `test` gate and carries `needs_gpu = no`, so an
+`#[ignore]`d test ran in **no profile at all**, including `--sprint`. A story
+whose evidence is a GPU comparison would otherwise have closed green with that
+evidence checked by nothing.
+
+`gpu` is excluded from `--floor` under deviation **D-04** for exactly the reason
+`oracle` is, and it is an ADDITION to the set CI does not run rather than a
+weakening of anything CI does. A machine with no adapter resolves tier C, and
+the tests there report that they did not apply and pass, which is D-07's honesty
+rule rather than a gate pretending to have run.
 
 ### Everything runs natively, and there is no container path
 

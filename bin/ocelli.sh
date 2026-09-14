@@ -84,6 +84,7 @@ GATES=(
   "quirk-mutations|no|checker-owned quirk mutations fail at their fixed boundaries"
   "corpus-tests|no|the corpus generator and coverage suites, a skip fails it"
   "corpus|no|corpus coverage over the codec registry, then presence and digests"
+  "gpu|YES|the device lifecycle and the LUT shader on a real adapter (E6.1, E6.5)"
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
 )
 
@@ -291,6 +292,34 @@ run_gate() {
     # means both. Chained on `&&` for the reason the corpus arm gives above: a
     # case arm returns the status of its LAST command, so an unchained
     # `"$0" oracle` could fail and be reported green by a passing comparison.
+    # F-037 and F-041. Every test in `ocelli-render` that needs a real adapter,
+    # which is every test marked `#[ignore]` there.
+    #
+    # `-- --ignored` runs ONLY the ignored tests, which is the whole set and
+    # nothing else: the default `cargo test --workspace` in the `test` gate
+    # already runs everything that needs no adapter, so this gate is exactly the
+    # complement and neither gate is a subset of the other.
+    #
+    # NOT a named list of test files. `--test device --test voi_shader` was the
+    # design plan's spelling and it omits `ocelli-render`'s own `--lib` ignored
+    # tests, one of which is the device-loss REBUILD path: that arm needs a
+    # `pub(crate)` injection seam, because the pinned wgpu can produce only a
+    # `Destroyed` loss on demand and `Unknown` is the one this project rebuilds
+    # from, so the test has to live inside the crate. A named list would have
+    # left the recovery arm run by nothing while reading as though it covered
+    # the story.
+    #
+    # `probe::tests::measures_a_fill_rate_on_this_machine` is swept up by this
+    # and asserts nothing, so it is not evidence of correctness. It is not
+    # nothing either: it drives `resolve` end to end on a real adapter, so a
+    # panic or a hang there fails this gate. Its printed figure is for a human
+    # recording a band in `ci/tier-thresholds.json` and that is a separate,
+    # deliberate, release-profile run.
+    #
+    # No `skip` arm. A machine with no adapter resolves tier C, and the tests
+    # themselves report that they did not apply and pass, which is deviation
+    # D-07's honesty rule rather than a gate pretending to have run.
+    gpu)         cargo test -p ocelli-render -- --ignored ;;
     oracle)      "$0" oracle && "$0" compare ;;
     *)           echo "unknown gate: $name" >&2; return 2 ;;
   esac
@@ -378,7 +407,16 @@ gates_cmd() {
         # while `gate --floor` silently stopped running `prose`. A gate
         # leaving the floor removes work rather than adding a demand, so
         # that direction had no detection at all. Now it does.
-        case "$name" in oracle|corpus|guards-deep|quirk-mutations) continue ;; esac
+        #
+        # `gpu` is the second GPU gate and joins `oracle` for the same reason
+        # and under the same deviation D-04. It runs `ocelli-render`'s
+        # `#[ignore]`d tests, which need a real adapter: the device opens, a
+        # loss is observed, a destroy is refused, a rebuild works, and the LUT
+        # shader agrees with `ocelli-pixel`. Added by F-037, because
+        # `cargo test --workspace` has `needs_gpu = no` and an `#[ignore]`d test
+        # therefore ran in NO profile at all, including `--sprint`. It is an
+        # ADDITION to the set CI does not run, so D-04's row stays true.
+        case "$name" in oracle|corpus|guards-deep|quirk-mutations|gpu) continue ;; esac
         selected+=("$name")
       done ;;
     --sprint|--all)
