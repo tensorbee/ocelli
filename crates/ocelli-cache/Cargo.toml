@@ -12,3 +12,9 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+
+[dev-dependencies]
+# The two budget invariants of HLD section 20 are stated over random operation
+# sequences, which is the `property` row of the workflow's test taxonomy.
+# Dev-only, so it reaches neither the shipped surface nor `scripts/no_std_check.py`.
+proptest = { workspace = true }

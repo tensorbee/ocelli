@@ -36,3 +36,4 @@ row here in the same hand.
 | [comparator.md](comparator.md) | The harness's judging half: the tolerance predicate, the verdict vocabulary, the attribution ladder and the census | F-011, F-013, F-015, F-X012 |
 | [benchmarks.md](benchmarks.md) | The benchmark harness of HLD section 26, its subject registry, the host class and the `bench` gate | F-006, F-023, F-024, F-026, F-X014 |
 | [guards.md](guards.md) | The guard harness: discovery, the catalogue, the sandbox, the probe runner, the census and executable skill examples | F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020 |
+| [cache.md](cache.md) | `crates/ocelli-cache`: the budgeted LRU, what `Budgeted::bytes` promises, and section 8's three tiers | F-031 |
