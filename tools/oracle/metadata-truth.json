@@ -168,6 +168,43 @@
         "/attributes/columns": { "scope": "top-level", "value": 96 },
         "/attributes/rescaleIntercept": { "scope": "top-level", "value": 0.0 }
       }
+    },
+    "synthetic/sc_palette_color.dcm": {
+      "citation": "PS3.3 C.7.9 and C.7.6.3.1.5",
+      "fields": {
+        "/attributes/photometricInterpretation": { "scope": "top-level", "value": "PALETTE COLOR" },
+        "/attributes/samplesPerPixel": { "scope": "top-level", "value": 1 },
+        "/attributes/bitsAllocated": { "scope": "top-level", "value": 8 },
+        "/attributes/bitsStored": { "scope": "top-level", "value": 8 },
+        "/attributes/highBit": { "scope": "top-level", "value": 7 },
+        "/attributes/pixelRepresentation": { "scope": "top-level", "value": 0 },
+        "/attributes/rows": { "scope": "top-level", "value": 12 },
+        "/attributes/columns": { "scope": "top-level", "value": 20 }
+      }
+    },
+    "synthetic/sc_palette_color_16.dcm": {
+      "citation": "PS3.3 C.7.9 and C.7.6.3.1.5",
+      "fields": {
+        "/attributes/photometricInterpretation": { "scope": "top-level", "value": "PALETTE COLOR" },
+        "/attributes/samplesPerPixel": { "scope": "top-level", "value": 1 },
+        "/attributes/bitsAllocated": { "scope": "top-level", "value": 16 },
+        "/attributes/bitsStored": { "scope": "top-level", "value": 16 },
+        "/attributes/highBit": { "scope": "top-level", "value": 15 },
+        "/attributes/pixelRepresentation": { "scope": "top-level", "value": 0 },
+        "/attributes/rows": { "scope": "top-level", "value": 12 },
+        "/attributes/columns": { "scope": "top-level", "value": 20 }
+      }
+    },
+    "syntax/jpegls_lossless_rgb8.dcm": {
+      "citation": "PS3.3 C.7.6.3.1.3 and PS3.5 A.4.3",
+      "fields": {
+        "/attributes/photometricInterpretation": { "scope": "top-level", "value": "RGB" },
+        "/attributes/samplesPerPixel": { "scope": "top-level", "value": 3 },
+        "/attributes/bitsAllocated": { "scope": "top-level", "value": 8 },
+        "/attributes/pixelRepresentation": { "scope": "top-level", "value": 0 },
+        "/attributes/rows": { "scope": "top-level", "value": 64 },
+        "/attributes/columns": { "scope": "top-level", "value": 96 }
+      }
     }
   }
 }

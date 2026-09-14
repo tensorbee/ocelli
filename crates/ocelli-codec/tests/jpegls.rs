@@ -306,6 +306,42 @@ fn a_multi_component_codestream_is_refused_by_the_header_check() -> TestResult {
     Ok(())
 }
 
+/// The manifest-backed multi-component row, which is the one gate A2 asked for.
+///
+/// `docs/spikes/A2-jpeg-ls.md` measured `Nf != 1` as "REFUSED by the crate, and
+/// NOT MEASURED here" and recorded that the corpus could not close the gap
+/// because no such row existed. F-030 added `syntax/jpegls_lossless_rgb8.dcm`,
+/// so the refusal now has a real encoder's three-component output behind it.
+///
+/// **This is not a duplicate of the test above.** That one is a repository
+/// local 16 by 16 fixture encoded LINE-interleaved, `ILV = 1`. This one is a
+/// corpus row encoded SAMPLE-interleaved, `ILV = 2`. The adapter's condition is
+/// `interleave != 0`, so a test at one value cannot speak for the other, and
+/// only one of the two is manifest backed.
+///
+/// The descriptor is single-sample monochrome at the frame's real dimensions,
+/// so every earlier check passes and the codestream header check is the one
+/// that fires. Nothing is decoded, which is the point: the adopted crate has no
+/// multi-component support and the required behaviour is a clean refusal rather
+/// than a wrong pixel.
+#[test]
+fn the_manifest_backed_sample_interleaved_colour_row_is_refused() -> TestResult {
+    let desc = frame(64, 96, 8, 8, PixelRepresentation::Unsigned, "MONOCHROME2")?;
+    let mut out = vec![0xa5; desc.output_len()];
+    assert_eq!(
+        JpegLsDecoder::lossless().decode(
+            include_bytes!("fixtures/jpegls_corpus_rgb8.jls"),
+            &desc,
+            &mut out,
+        ),
+        Err(CodecError::UnsupportedPixelFormat)
+    );
+    // No partial output. A refusal that had already written some of the frame
+    // would leave a caller holding half a decoded image and an error.
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+    Ok(())
+}
+
 #[test]
 fn each_descriptor_condition_is_refused_on_its_own() -> TestResult {
     // `validate_descriptor` is a disjunction, so a test whose descriptor

@@ -55,4 +55,16 @@ pub enum PixelError {
     PresentationLutNotApplicable,
     /// A Presentation LUT Sequence is present and this build does not execute one.
     PresentationLutSequenceUnsupported,
+    /// The colour stage was asked for a monochrome frame, whose route is stage 3.
+    ColorTransformNotApplicable,
+    /// `YBR_ICT` or `YBR_RCT` reached the colour stage untouched by its codec.
+    CodecOwnedColorTransform,
+    /// A `PALETTE COLOR` frame arrived without its three lookup tables.
+    MissingPaletteLut,
+    /// Palette lookup tables arrived for a photometric interpretation that has no index.
+    UnexpectedPaletteLut,
+    /// The three palette channels disagree on entry count or first mapped input.
+    MismatchedPaletteDescriptors,
+    /// A 4:2:2 chroma pair would be split by an odd Columns or an odd pixel count.
+    SubsampledChromaAlignment,
 }

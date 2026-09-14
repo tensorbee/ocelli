@@ -51,7 +51,17 @@ NEAR = 3
 MANIFEST_ROWS = {
     "jpegls_corpus_lossless.jls": "jpegls_lossless.dcm",
     "jpegls_corpus_near_lossless.jls": "jpegls_near_lossless.dcm",
+    # F-030 added `syntax/jpegls_lossless_rgb8.dcm`, the multi-component row
+    # Appendix A gate A2 recorded as owed. It is sample-interleaved, ILV = 2,
+    # where MULTI_COMPONENT below is line-interleaved, ILV = 1. The adapter's
+    # condition is `interleave != 0`, so the two cover different values of it
+    # and the corpus-backed one is the row A2 asked for.
+    "jpegls_corpus_rgb8.jls": "jpegls_lossless_rgb8.dcm",
 }
+# Nf and ILV the manifest-backed multi-component row must declare, asserted in
+# `build` rather than assumed, because the row's whole purpose is those two
+# numbers.
+CORPUS_RGB = ("jpegls_corpus_rgb8.jls", 3, 2)
 REFERENCE = "jpegls_corpus_reference_u16le.raw"
 REFERENCE_SOURCE = "explicit_vr_le.dcm"
 
@@ -111,6 +121,13 @@ def build() -> dict[str, bytes]:
     for name, source in MANIFEST_ROWS.items():
         artefacts[name] = encapsulated_frame(CORPUS / source)
 
+    name, want_components, want_interleave = CORPUS_RGB
+    found = (components_of(artefacts[name]), interleave_of(artefacts[name]))
+    if found != (want_components, want_interleave):
+        raise SystemExit(
+            f"{name}: SOF55 Nf and SOS ILV are {found}, wanted "
+            f"{(want_components, want_interleave)}")
+
     reference = pydicom.dcmread(str(CORPUS / REFERENCE_SOURCE))
     artefacts[REFERENCE] = bytes(reference.PixelData)
 
@@ -145,6 +162,18 @@ def components_of(codestream: bytes) -> int:
     """Number of components Nf from SOF55, ISO/IEC 14495-1 C.2.2."""
     offset = marker_offset(codestream, 0xF7)
     return codestream[offset + 9]
+
+
+def interleave_of(codestream: bytes) -> int:
+    """ILV from the SOS marker segment, ISO/IEC 14495-1 C.2.3.
+
+    The segment is `Ls Ns (Ci Tm)*Ns NEAR ILV Al/Ah`, so ILV sits one byte past
+    NEAR, which is itself two bytes per component past `Ns`.
+    """
+    offset = marker_offset(codestream, 0xDA)
+    payload = codestream[offset + 4 : offset + 2 + int.from_bytes(codestream[offset + 2 : offset + 4], "big")]
+    components = payload[0]
+    return payload[2 + 2 * components]
 
 
 def precision_of(codestream: bytes) -> int:

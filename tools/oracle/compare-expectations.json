@@ -52,6 +52,9 @@
     "syntax__jpegls_lossless": [
       "weak"
     ],
+    "syntax__jpegls_lossless_rgb8": [
+      "unstated-threshold"
+    ],
     "syntax__jpegls_near_lossless": [
       "weak"
     ],
@@ -66,6 +69,12 @@
     ],
     "synthetic__ct_unsigned_16": [
       "weak"
+    ],
+    "synthetic__sc_palette_color": [
+      "unstated-threshold"
+    ],
+    "synthetic__sc_palette_color_16": [
+      "unstated-threshold"
     ],
     "synthetic__sc_rgb_interleaved": [
       "unstated-threshold"

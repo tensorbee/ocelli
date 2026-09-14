@@ -9,6 +9,19 @@ story. E2.6 is F-014, the quirk-capture workflow. F-028 adopted the named
 fallback rather than the recommendation, on evidence this file marks
 `NOT MEASURED`, and its measurements are unchanged. See `docs/lld/codecs.md`.
 
+**2026-09-14, F-030: the multi-component corpus row this file recorded as owed
+now exists.** Condition 2 of the recommendation said "A multi-component JPEG-LS
+corpus row is owed, and it is a corpus story with a manifest row rather than
+something this gate adds", and the coverage section said the gap was real and
+the corpus could not close it. `syntax/jpegls_lossless_rgb8.dcm` closes the
+corpus half: `Nf = 3`, `ILV = 2`, encoded by the same `pyjpegls` 1.5.1 this gate
+used, and `crates/ocelli-codec/tests/jpegls.rs` asserts the adapter refuses it
+cleanly. **The measurements below are not revised and the `NOT MEASURED` rows
+stay as written**, because they record what was known when the gate ran and a
+spike record that is edited to match later work stops being evidence. What
+changed is coverage, not a measurement: multi-component **decoding** is still
+unmeasured and is still a codec story. See `docs/lld/codecs.md`.
+
 `docs/hld/A-spike-gates.md`, Appendix A, the row, transcribed character for
 character, em-dash included. It sits in a table because
 `scripts/prose_check.py` relaxes the voice rules inside a table row, which is

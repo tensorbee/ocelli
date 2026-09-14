@@ -920,6 +920,152 @@ class SyntheticTraps(unittest.TestCase):
         self.assertEqual(ds.Columns % 2, 0)
         self.assertEqual(len(bytes(ds.PixelData)), ds.Rows * ds.Columns * 2)
 
+    def test_palette_case_carries_a_non_zero_first_mapped_input(self) -> None:
+        """PS3.3 C.7.6.3.1.5, the descriptor's second value.
+
+        The offset is the trap. A first mapped input of zero makes it invisible,
+        so the case would prove nothing about a reader that ignores the value.
+        """
+        ds = self.read("sc_palette_color.dcm")
+        self.assertEqual(ds.PhotometricInterpretation, "PALETTE COLOR")
+        self.assertEqual(ds.SamplesPerPixel, 1)
+        for descriptor in (ds.RedPaletteColorLookupTableDescriptor,
+                           ds.GreenPaletteColorLookupTableDescriptor,
+                           ds.BluePaletteColorLookupTableDescriptor):
+            self.assertEqual(list(descriptor), [256, 10, 16])
+        # Some stored values are below the first mapped input, so the low clamp
+        # is exercised by the frame rather than only by the descriptor.
+        values = np.frombuffer(bytes(ds.PixelData), dtype=np.uint8)
+        self.assertTrue(bool((values < 10).any()))
+        self.assertTrue(bool((values >= 10).any()))
+
+    def test_palette_16_declares_zero_meaning_65536_entries(self) -> None:
+        """PS3.3 C.7.6.3.1.5: "When the number of table entries is equal to
+        2^16 then this value shall be 0."
+
+        65,536 does not fit in a US, so a full 16-bit palette has no other legal
+        spelling. A reader that takes the 0 literally finds an empty table.
+        """
+        ds = self.read("sc_palette_color_16.dcm")
+        self.assertEqual(ds.PhotometricInterpretation, "PALETTE COLOR")
+        self.assertEqual(ds.BitsAllocated, 16)
+        for descriptor, data in (
+                (ds.RedPaletteColorLookupTableDescriptor,
+                 ds.RedPaletteColorLookupTableData),
+                (ds.GreenPaletteColorLookupTableDescriptor,
+                 ds.GreenPaletteColorLookupTableData),
+                (ds.BluePaletteColorLookupTableDescriptor,
+                 ds.BluePaletteColorLookupTableData)):
+            self.assertEqual(list(descriptor), [0, 0, 16])
+            # The declared 0 and the actual 65,536 entries, at two bytes each.
+            self.assertEqual(len(bytes(data)), 65_536 * 2)
+
+    def test_palette_channels_are_three_different_functions_of_the_index(
+            self) -> None:
+        """Equal channels would satisfy a red-green-blue transposition and a
+        monotone triple would satisfy an off-by-one in every channel at once.
+        Neither could then be caught by anything reading this case."""
+        ds = self.read("sc_palette_color.dcm")
+        channels = [np.frombuffer(bytes(data), dtype="<u2")
+                    for data in (ds.RedPaletteColorLookupTableData,
+                                 ds.GreenPaletteColorLookupTableData,
+                                 ds.BluePaletteColorLookupTableData)]
+        self.assertFalse(np.array_equal(channels[0], channels[1]))
+        self.assertFalse(np.array_equal(channels[0], channels[2]))
+        self.assertFalse(np.array_equal(channels[1], channels[2]))
+
+
+class CaseSelector(unittest.TestCase):
+    """`--case`, added by F-030, and the refusal that keeps it honest.
+
+    `generate()` removes and rebuilds the whole synthetic and syntax layer,
+    which re-encodes every externally encoded row with whatever version of that
+    encoder is installed. `--case` exists so a story that adds one case does not
+    also land a toolchain bump it did not choose, and its refusal exists so a
+    mistyped name cannot silently generate nothing and report success.
+    """
+
+    def test_an_unknown_case_is_refused_and_names_the_known_ones(self) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            corpus_synth.generate_one(Path("."), "no-such-case")
+        message = str(caught.exception)
+        self.assertIn("unknown case", message)
+        # The refusal lists what it would have accepted, so a typo is one run
+        # to fix rather than a hunt through the generator.
+        self.assertIn("sc_palette_color", message)
+
+    def test_every_generated_case_is_reachable_by_name(self) -> None:
+        """One list, read by both `generate()` and `--case`.
+
+        A case present in the full run and missing from the selector would be
+        regenerable only by rebuilding everything, which is the exact thing the
+        selector exists to avoid.
+        """
+        names = list(corpus_synth.case_callables(Path(".")))
+        self.assertEqual(len(names), len(set(names)))
+        for expected in ("sc_palette_color", "sc_palette_color_16",
+                         "jpegls_rgb8", "syntax"):
+            self.assertIn(expected, names)
+
+    def test_the_manifest_categories_name_every_synthetic_case(self) -> None:
+        """A case that generates a file with no CATEGORIES row would make
+        `--write-manifest` raise, but only after the file was written."""
+        synthetic = {name for name in corpus_synth.case_callables(Path("."))
+                     if name not in ("syntax", "jpegls_rgb8")}
+        recorded = {Path(path).stem for path in corpus_synth.CATEGORIES}
+        recorded |= set(corpus_synth.SERIES_CATEGORY)
+        self.assertEqual(synthetic - recorded, set())
+
+
+class MultiComponentJpegLs(unittest.TestCase):
+    """The row Appendix A gate A2 recorded as owed, added by F-030.
+
+    A2 measured `Nf != 1` as "REFUSED by the crate, and NOT MEASURED here" and
+    said the corpus could not close the gap, because no multi-component JPEG-LS
+    row existed. A DICOM JPEG-LS frame can be RGB, so it was a coverage hole.
+    """
+
+    def test_the_colour_jpegls_row_is_three_component(self) -> None:
+        path = CORPUS / "syntax" / "jpegls_lossless_rgb8.dcm"
+        if not path.is_file():
+            self.skipTest("the ignored corpus is not present")
+        ds = pydicom.dcmread(str(path))
+        self.assertEqual(str(ds.file_meta.TransferSyntaxUID),
+                         "1.2.840.10008.1.2.4.80")
+        self.assertEqual(ds.SamplesPerPixel, 3)
+        self.assertEqual(ds.PhotometricInterpretation, "RGB")
+
+    def test_the_codestream_declares_nf_three_and_sample_interleave(
+            self) -> None:
+        """ISO/IEC 14495-1 C.2.2 SOF55 and C.2.3 SOS.
+
+        Read from the codestream rather than from the data set, because the two
+        can disagree and it is the codestream the decoder refuses on. `ILV = 2`
+        is sample interleave, which is what distinguishes this row from the
+        line-interleaved repository-local fixture in
+        `crates/ocelli-codec/tests/fixtures/jpegls_rgb8_ilv1.jls`.
+        """
+        path = CORPUS / "syntax" / "jpegls_lossless_rgb8.dcm"
+        if not path.is_file():
+            self.skipTest("the ignored corpus is not present")
+        ds = pydicom.dcmread(str(path))
+        frames = list(pydicom.encaps.generate_frames(ds.PixelData,
+                                                     number_of_frames=1))
+        self.assertEqual(len(frames), 1)
+        codestream = frames[0]
+
+        start = codestream.find(b"\xff\xf7")
+        self.assertGreater(start, 0)
+        # Lf(2) P(1) Y(2) X(1..2) Nf, per C.2.2.
+        self.assertEqual(codestream[start + 9], 3)
+
+        sos = codestream.find(b"\xff\xda")
+        self.assertGreater(sos, start)
+        components = codestream[sos + 4]
+        self.assertEqual(components, 3)
+        # Ns (Ci Tm)*Ns NEAR ILV, per C.2.3.
+        self.assertEqual(codestream[sos + 4 + 2 * components + 2], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

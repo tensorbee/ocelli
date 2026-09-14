@@ -119,6 +119,40 @@ impl SampleLayout {
     pub const fn planar_configuration(self) -> Option<PlanarConfiguration> {
         self.planar_configuration
     }
+
+    /// Stored samples on the wire for each pixel.
+    ///
+    /// This is **not** Samples per Pixel for a 4:2:2 photometric
+    /// interpretation. PS3.3 C.7.6.3.1.2 subsamples the chroma two to one
+    /// horizontally and stores each pair of pixels as `Y1 Y2 Cb Cr`, so a
+    /// frame is `Rows * Columns * 2` bytes and not `* 3`. Samples per Pixel
+    /// stays 3, because that is what the data set carries and what
+    /// [`SampleLayout::new`] validated.
+    ///
+    /// A reader that sizes a buffer from Samples per Pixel alone over-reads by
+    /// half a frame, which is the trap
+    /// `scripts/tests/test_corpus_synth.py::test_ybr_full_422_frame_is_two_bytes_per_pixel`
+    /// asserts about the corpus.
+    ///
+    /// **Public despite having no caller outside this crate today.** The
+    /// alternative leaves [`SampleLayout::samples_per_pixel`] as the only
+    /// public answer to "how many stored samples does a pixel have", and that
+    /// answer is wrong for exactly the two interpretations where getting it
+    /// wrong over-reads. A correct fact that is hard to reach loses to an
+    /// incorrect one that is easy to reach.
+    pub const fn stored_samples_per_pixel(self) -> u8 {
+        match self.photometric_interpretation {
+            PhotometricInterpretation::YbrFull422 | PhotometricInterpretation::YbrPartial422 => 2,
+            _ => self.samples_per_pixel,
+        }
+    }
+
+    const fn is_subsampled(self) -> bool {
+        matches!(
+            self.photometric_interpretation,
+            PhotometricInterpretation::YbrFull422 | PhotometricInterpretation::YbrPartial422
+        )
+    }
 }
 
 /// Validated sample-container width, meaningful bits and signedness.
@@ -202,7 +236,21 @@ impl StoredPixelDescription {
     }
 
     /// Number of stored samples in one frame.
+    ///
+    /// Sized from [`SampleLayout::stored_samples_per_pixel`] rather than from
+    /// Samples per Pixel, so a 4:2:2 frame is two per pixel and not three.
+    ///
+    /// # Errors
+    ///
+    /// [`PixelError::SubsampledChromaAlignment`] when Columns is odd and the
+    /// photometric interpretation subsamples chroma, because half a
+    /// `Y1 Y2 Cb Cr` group cannot be stored. Reported before any length
+    /// arithmetic, so no buffer is sized from a count that does not exist.
+    /// [`PixelError::LengthOverflow`] when the frame does not fit `usize`.
     pub fn sample_count(&self) -> Result<usize, PixelError> {
+        if self.layout.is_subsampled() && !self.dimensions.columns().is_multiple_of(2) {
+            return Err(PixelError::SubsampledChromaAlignment);
+        }
         let pixels = usize::try_from(self.dimensions.rows())
             .map_err(|_| PixelError::LengthOverflow)?
             .checked_mul(
@@ -211,7 +259,7 @@ impl StoredPixelDescription {
             )
             .ok_or(PixelError::LengthOverflow)?;
         pixels
-            .checked_mul(usize::from(self.layout.samples_per_pixel()))
+            .checked_mul(usize::from(self.layout.stored_samples_per_pixel()))
             .ok_or(PixelError::LengthOverflow)
     }
 

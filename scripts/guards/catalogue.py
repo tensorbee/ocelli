@@ -9143,10 +9143,21 @@ GUARDS: tuple[Guard, ...] = (
         file="scripts/corpus_synth.py",
         gate="corpus-tests",
         spec="`corpus/README.md`, the generator's recorded tool versions",
-        refuses="A manifest whose header is not the recorded column set.",
+        refuses="A manifest whose header is not the recorded column set, and "
+                "a `--case` naming a case the generator does not have.",
         claims=("*",),
         covered_by=("scripts/tests/test_corpus_synth.py "
                     "(run by the `corpus-tests` gate)",),
+        limit="The sixth refusal site is F-030's `--case` selector rejecting "
+              "an unknown case name, and it is covered by "
+              "`CaseSelector::test_an_unknown_case_is_refused_and_names_the_"
+              "known_ones` rather than by a sandbox probe. This module imports "
+              "pydicom and numpy at module scope, `.venv` is not tracked, and "
+              "a probe sandbox is built from `git ls-files`, so every invoke "
+              "of this script inside a sandbox dies at import before reaching "
+              "any refusal of its own. That is the same reason every other "
+              "refusal in this file is `covered_by` its unit test rather than "
+              "probed, and the count moving from 5 to 6 is this selector.",
     ),
 
     # -- the cross-target proof and the packages ---------------------------

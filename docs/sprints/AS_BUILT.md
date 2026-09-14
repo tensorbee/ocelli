@@ -2880,3 +2880,155 @@ quirk-capture workflow, and the codec stories are E4.5 and E4.6. And **vendoring
 changes which guards see a dependency**. `unsafe`, `provenance`, `content` and
 `prose` all read `git ls-files`, so the next vendored package should be checked
 against all four before it is committed rather than after.
+
+## F-030, Palette colour, planar configuration, photometric interpretation, YBR, completed 2026-09-14
+
+**What this closes, and what it does not.** DICOM PS3.3 C.11's stage 4, so all
+four stages of the LUT chain now live in `ocelli-pixel` and nowhere else. It
+also closes M2. **ICC is not implemented**, which is the other half of HLD
+section 18's stage-4 row, and the story that needs it will find no corpus row
+carrying a profile either.
+
+**The HLD gives this story one table row.** Sections 18.1 through 18.4 cover
+stages 1 to 3 and the shader uniform, and none of them mentions palette, planar
+configuration or YBR. So unlike F-018 and F-029 this story could not be
+transcribed from the HLD and was transcribed from PS3.3 instead, with every
+decision the standard does not make named in the design plan rather than
+presented as specified.
+
+**What was built.** `crates/ocelli-pixel/src/color.rs`. `ColorTransform`
+resolves the colour space and the sample layout from two rules, each written
+once, and maps a frame into caller-provided `Rgb` storage. `PaletteColorLut` is
+three `LutDescriptor`s and one cross-check and adds **no lookup arithmetic**,
+because `LutDescriptor` already implements every one of PS3.3 C.7.6.3.1.5's
+descriptor rules including zero-means-65,536 and the clamping either side of the
+mapped range. Six new `PixelError` variants. `SampleLayout` gains
+`stored_samples_per_pixel`, and `sample_count` is sized from it.
+
+**The double-conversion guard, which is the defect this story existed for.**
+A JPEG decoder usually outputs RGB while the data set still says
+`YBR_FULL_422`, and a second conversion on top of the decoder's own darkens and
+shifts hue on an image that still looks like an image. F-024 added
+`DecodePhotometricInterpretation` and `DecodeSampleLayout` to make that
+observable, and until now every use of them was a decoder declaring its own
+behaviour with nothing reading them to decide anything. The resolution reads
+them and lives in exactly one function. Its fixture asserts the same samples
+both ways in one test, because a half that only proves "not converted twice"
+also passes against an implementation that never converts at all.
+
+**A latent defect found and fixed.** `sample_count` returned
+`rows * columns * samples_per_pixel`, which is three per pixel for
+`YBR_FULL_422`. The wire holds two. So `synthetic/us_ybr_full_422.dcm` could
+not be unpacked at all, `unpack` demanding three bytes per pixel from a source
+holding two, and nothing observed it.
+`test_ybr_full_422_frame_is_two_bytes_per_pixel` asserted the property about the
+corpus and nothing asserted it about the unpacker. It does now, and an odd
+`Columns` is refused rather than silently splitting a chroma group.
+
+**HLD sections implemented.** `docs/hld/15-lut-chain.md` section 18, stage 4,
+by deviation. DICOM PS3.3 C.7.6.3.1.2, C.7.6.3.1.3, C.7.6.3.1.5 and C.7.9 are
+the real normative source.
+
+**Deviations.** **D-23, new.** No arm of stage 4 takes a `Display` input, so
+HLD section 18's `Display -> RGB` does not describe any route this story builds.
+Palette maps the stored value per C.7.6.3.1.5's "the first stored pixel value
+mapped", and the colour routes map decoded samples that never entered the chain.
+D-07's tier rows are answered below. D-16's `unstated-threshold` qualifier is
+the one the three new views take in the comparator's census.
+
+**Crates / packages modified.** `ocelli-pixel`, and `ocelli-codec` tests only.
+
+**Tests added.** Fourteen colour fixtures, seven palette fixtures, four unit
+tests in `color.rs`, one codec fixture for the manifest-backed multi-component
+refusal, and seven Python tests over the new corpus rows and the case selector.
+
+**Fixture provenance.** Every expected value was computed in exact rational
+arithmetic from PS3.3's stated equations and descriptor rules, in Python, before
+the Rust existed. None came from Ocelli's output. **The colour fixtures state
+YBR and assert RGB, never the reverse**: the standard's rounded forward matrix
+is not exactly normalised and sends a saturated primary to `Cb = 255.5`, so an
+expected value built through that intermediate would assert something the wire
+cannot hold.
+
+**The inverse matrices, and a measured divergence.** PS3.3 states the forward
+direction only. The implementation inverts the matrix the standard states rather
+than using the textbook BT.601 inverse. The two differ by at most **0.020027735
+of 255**, and that bound is exact rather than sampled: the difference of two
+inverses is a linear map, so its maximum over the 8-bit box is at a vertex, and
+all eight were evaluated. The fixture tolerance of `0.001` is 20.03 times
+tighter, so the BT.601 substitution cannot hide inside it.
+
+**Mutations observed red.** Eleven, each reverted and the tree re-run green.
+The BT.601 constant, the partial-range `+ 16` luma offset, 4:2:2 counted as
+three samples in each of the two places that count it, the decoder `Rgb`
+evidence ignored, `YbrPartial422` routed through the full-range matrix, the
+interleaved indices replaced with planar ones, the palette first-mapped-input
+offset, the palette descriptor cross-check, the JPEG-LS codestream header check,
+and `case_sigmoid_width_half` dropped from the generator's case list. The first
+is the strongest: it moves one coefficient by `0.0000124` and the fixture still
+fails.
+
+**The corpus gained three rows and moved no existing digest.**
+`synthetic/sc_palette_color.dcm` carries a first mapped input of 10 with stored
+values both sides of it. `synthetic/sc_palette_color_16.dcm` declares an entry
+count of 0, meaning 65,536, which is the only legal spelling.
+`syntax/jpegls_lossless_rgb8.dcm` is the multi-component JPEG-LS row Appendix A
+gate A2 recorded as owed. Before this the corpus had no `PALETTE COLOR` case at
+all, so neither palette trap had a file behind it.
+
+**`corpus_synth.py --case` exists because a full regeneration would have been
+a toolchain bump in disguise.** `--tool-versions` reported OpenJPH at 0.31.0
+against the 0.26.3 the manifest was built with, and `generate()` rebuilds the
+whole layer, so adding a case the ordinary way would have moved three `htj2k_*`
+digests inside a colour story. The selector reads the same case list the full
+run reads, so a case cannot exist in one and be missing from the other. The
+drift is still present, still reported, and still someone's deliberate decision
+to make.
+
+**Verification.** Sprint profile, all 30 gates including the oracle and the
+corpus, on the exact staged tree `2e9b2ec54b95` recorded in the verify ledger.
+
+**Corpus.** Pass, 95 rows verified, 0 mismatched.
+
+**Tier coverage.** A: n/a. B: n/a. C: full. This adds no rendering feature. It
+resolves the parameters a later shader story reads, which is HLD section 18's
+division, and `ColorTransform::map_into` is tier C's authoritative colour path
+the same way `LutChain::map_into` is its greyscale one. There is no
+tier-specific arithmetic copy and no shader, uniform or `#[repr(C)]` struct was
+invented for a reader that does not exist.
+
+**Size.** `ci/wasm-size-budget.json` does not move. `ocelli-wasm` depends only
+on `ocelli-core`, so `ocelli-pixel` is not in the shipped module's graph.
+
+**LLD updated.** `docs/lld/pixel-pipeline.md`, `docs/lld/corpus.md`,
+`docs/lld/codecs.md`, and a dated note appended to `docs/spikes/A2-jpeg-ls.md`.
+`docs/lld/errors.md` was checked and deliberately not touched: it covers
+`ocelli-core`'s numbered `ErrorCode` registry and does not enumerate
+`PixelError`, so the six new variants need no entry and no `ci/error-codes.json`
+row.
+
+**Deviations from the design plan.** Three, all recorded in the plan or the
+progress note. A multi-component JPEG-LS fixture already existed, repository
+local and line-interleaved, so the new row is justified on being manifest backed
+and sample-interleaved rather than on being the first of its kind.
+`StoredPixelDescription::new` did not need to become fallible, because
+`sample_count` already was and `unpack` calls it first. And both palette rows
+declare 16 bits per entry rather than one of each, because PS3.3 C.7.6.3.1.6's
+packing for 8-bit LUT Data is a PS3.5 encoding question owned by the parser
+story and a guess about it would have been frozen into a manifest digest where
+it reads as evidence.
+
+**Notes for future sessions.** **A wildcard match arm in a colour path is a
+defect, not a style question.** The first review pass found two, each inside an
+arm that already matched two variants, and either would have absorbed a colour
+space added later and rendered it as pass-through RGB. Nothing in the gate set
+could have caught it, because no test can exist for a variant nobody has added.
+The compiler refusing to build is the only guard that works, so stage 4's
+`pixel` matches once and names every variant.
+
+**And `scripts/quirk_check.py` read reachability as direct calls.** Refactoring
+`generate()` to walk a list of per-case callables turned the quirk check red
+while every case was still generated. The rule now follows reachability
+transitively, which is the property it always meant, and dropping a case from
+the list still turns it red. The next refactor of a generator should expect any
+guard that reads its AST to be shaped around the old layout.

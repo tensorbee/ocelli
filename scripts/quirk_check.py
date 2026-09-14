@@ -241,20 +241,49 @@ def json_shape(value: Any) -> Any:
 
 
 def called_functions(path: Path, caller: str) -> set[str]:
-    """Return direct function calls made inside one top-level function."""
+    """Return the functions reachable from one top-level function.
+
+    Transitive through the module's own top-level functions, not just the
+    direct calls `caller` makes. The property being checked is that a quirk's
+    case is reached by a full generation run, and a direct-call reading answers
+    a narrower question that happens to coincide only while the generator is
+    flat.
+
+    F-030 made them stop coinciding: `generate` now walks a dict of per-case
+    callables so that `--case` and the full run read ONE list, and every case
+    function moved one level down. Reading direct calls would have reported
+    every quirk's case as unreachable while every case was still generated,
+    which is a guard failing on a refactor rather than on a defect.
+
+    Lambdas are followed too, because the dict's values are lambdas that call
+    the case functions.
+    """
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (OSError, SyntaxError):
         return set()
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == caller:
-            return {
-                child.func.id
-                for child in ast.walk(node)
-                if isinstance(child, ast.Call)
-                and isinstance(child.func, ast.Name)
-            }
-    return set()
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+    }
+    if caller not in functions:
+        return set()
+
+    reached: set[str] = set()
+    pending = [caller]
+    seen = {caller}
+    while pending:
+        node = functions[pending.pop()]
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call) or not isinstance(child.func, ast.Name):
+                continue
+            name = child.func.id
+            reached.add(name)
+            if name in functions and name not in seen:
+                seen.add(name)
+                pending.append(name)
+    return reached
 
 
 def manifest_rows(text: str) -> dict[str, list[dict[str, str]]]:
