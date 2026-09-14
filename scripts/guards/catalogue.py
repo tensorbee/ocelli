@@ -241,6 +241,29 @@ def _text_at(rel: str, body: str) -> Callable[[Sandbox], None]:
     return lambda box: _stage(box, rel, body)
 
 
+def _unsafe_in_a_vendored_package(box: Sandbox) -> None:
+    box.append(
+        "vendor/openjph-core-0.1.0/src/mem.rs",
+        "\nfn planted() { unsafe { } }\n",
+    )
+
+
+def _drop_a_vendored_unsafe_record(box: Sandbox) -> None:
+    # The sandbox is a copy of `git ls-files`, so planting a NEW vendored
+    # package would write an untracked file the guard never sees. Removing the
+    # record for a package that IS in the tree reaches the same branch: a
+    # vendored package the ratchet has no number for.
+    name = "scripts/unsafe_allowlist_check.py"
+    box.write(name, box.read(name).replace('    "openjph-core-0.1.0": 104,\n', ""))
+
+
+def _record_a_vendored_package_that_is_absent(box: Sandbox) -> None:
+    name = "scripts/unsafe_allowlist_check.py"
+    box.write(name, box.read(name).replace(
+        '    "openjph-core-0.1.0": 104,\n',
+        '    "openjph-core-0.1.0": 104,\n    "planted-0.0.0": 7,\n'))
+
+
 def _unsafe_in_a_third_file(box: Sandbox) -> None:
     # HLD 27.2 R5 names two files. This is a third, and nothing about the
     # choice depends on the checker's comment-stripping regex.
@@ -294,6 +317,37 @@ def _reorder_wgpu_table(box: Sandbox) -> None:
 
 def _drop_wgpu_entry(box: Sandbox) -> None:
     box.substitute("Cargo.toml", 'wgpu = "=30.0.1"', "")
+
+
+def _remove_openjph_published_source(box: Sandbox) -> None:
+    box.delete("vendor/openjph-core-0.1.0/src/lib.rs")
+
+
+def _rewrite_openjph_source_and_inventory(box: Sandbox) -> None:
+    source_name = "vendor/openjph-core-0.1.0/src/lib.rs"
+    inventory_name = "vendor/openjph-core-0.1.0/PACKAGE-INVENTORY.sha256"
+    box.append(source_name, "// coordinated source and inventory change\n")
+    digest = hashlib.sha256((box.path / source_name).read_bytes()).hexdigest()
+    rows = box.read(inventory_name).splitlines()
+    box.write(inventory_name, "\n".join(
+        f"{digest}  src/lib.rs" if row.endswith("  src/lib.rs") else row
+        for row in rows
+    ) + "\n")
+
+
+def _change_openjph_vcs_revision(box: Sandbox) -> None:
+    box.write(
+        "vendor/openjph-core-0.1.0/.cargo_vcs_info.json",
+        '{"git": {"sha1": "0000000000000000000000000000000000000000"}, '
+        '"path_in_vcs": "openjph-core"}',
+    )
+
+
+def _plant_openjph_notice(box: Sandbox) -> None:
+    box.write(
+        "vendor/openjph-core-0.1.0/LICENSE",
+        "Copyright (c) placeholder\nBSD-2-Clause notice text\n",
+    )
 
 
 def _remove_ritk_published_source(box: Sandbox) -> None:
@@ -6434,9 +6488,41 @@ GUARDS: tuple[Guard, ...] = (
         spec="HLD 27.2 R5, `docs/hld/24-agent-code-standards.md`",
         refuses="An `unsafe` keyword in any file other than the two the rule "
                 "names, so that auditing every unsafe line means reading two "
-                "files.",
+                "files. Under a vendored package, which is a dependency that "
+                "happens to be tracked, it instead refuses a count that has "
+                "moved from its record, a vendored package with no record at "
+                "all, and a record naming a package that is not in the tree.",
         claims=("*",),
         probes=(
+            Probe("unsafe.vendored-count-moved", _unsafe_in_a_vendored_package,
+                  script("python3", "scripts/unsafe_allowlist_check.py"),
+                  "recorded 104",
+                  note="D-22. `vendor/` is NOT excluded. R5's payoff is that a "
+                       "device-submission reviewer reads two files, and a "
+                       "vendored package carrying unsafe makes that false "
+                       "whether it is tracked or resolved from a registry. "
+                       "Excluding it would leave R5 passing mechanically while "
+                       "its stated purpose was weakened, so the count is "
+                       "recorded and moving it is a refusal that lands in the "
+                       "diff."),
+            Probe("unsafe.vendored-unrecorded",
+                  _drop_a_vendored_unsafe_record,
+                  script("python3", "scripts/unsafe_allowlist_check.py"),
+                  "no recorded count",
+                  note="D-22, the direction the ratchet gets wrong if it only "
+                       "watches known packages. A vendored package the record "
+                       "does not name would otherwise add an audit surface "
+                       "nothing reports. The mutation removes the RECORD "
+                       "rather than planting a package, because the sandbox is "
+                       "a copy of `git ls-files` and an untracked file is "
+                       "invisible to the guard."),
+            Probe("unsafe.vendored-record-without-a-package",
+                  _record_a_vendored_package_that_is_absent,
+                  script("python3", "scripts/unsafe_allowlist_check.py"),
+                  "is not in the tree",
+                  note="D-22. A record nothing reads is not a ratchet, so a "
+                       "package that leaves the tree must take its number with "
+                       "it rather than leaving a line that reads as coverage."),
             Probe("unsafe.third-file", _unsafe_in_a_third_file,
                   script("python3", "scripts/unsafe_allowlist_check.py"),
                   "`unsafe` outside the allow-list (HLD section 27.2 R5)",
@@ -6558,7 +6644,15 @@ GUARDS: tuple[Guard, ...] = (
                 "ritk-codecs archive inventory or its immutable digest, an "
                 "undeclared change outside either exact manifest patch or "
                 "the exact patch provenance record, "
-                "incorrect provenance, or Rayon in either target graph.",
+                "incorrect provenance, or Rayon in either target graph. "
+                "For openjph-core under D-22, where there is NO patch: a "
+                "changed, absent or unrecorded published file, a changed "
+                "inventory or its immutable digest, a wrong packaged VCS "
+                "revision, workspace wiring that is not the exact path and "
+                "version, and, at `--require-redistribution` only, a vendored "
+                "package carrying no licence notice. That last refusal fires "
+                "on the unmodified tree today and no development profile runs "
+                "the flag.",
         claims=("*",),
         probes=(
             Probe("pins.range", _relax_wgpu_pin,
@@ -6623,6 +6717,46 @@ GUARDS: tuple[Guard, ...] = (
                        "as the first quoted string in the entry, so a table "
                        "whose first value happened to start with `=` passed "
                        "with a caret range unread."),
+            Probe("pins.openjph-inventory", _remove_openjph_published_source,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "openjph-core published file is absent: src/lib.rs",
+                  note="D-22. The published package inventory is the source "
+                       "boundary. This vendor carries NO patch, so every "
+                       "recorded file must match the archive byte for byte."),
+            Probe("pins.openjph-inventory-root",
+                  _rewrite_openjph_source_and_inventory,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "inventory digest",
+                  note="D-22. The inventory digest is rooted outside the "
+                       "vendor tree, so changing source and its inventory row "
+                       "together must still fail, and it fails on the DIGEST "
+                       "rather than on the row."),
+            Probe("pins.openjph-vcs", _change_openjph_vcs_revision,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "openjph-core VCS revision is",
+                  note="D-22. The packaged VCS revision is half of this "
+                       "package's provenance and the archive digest is the "
+                       "other half. It has one release and one owner."),
+            Probe("pins.openjph-notice", _plant_openjph_notice,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--require-redistribution"),
+                  "pinned exactly",
+                  polarity="accept",
+                  control=script("python3", "scripts/pin_and_size_check.py",
+                                 "--require-redistribution"),
+                  control_status=1,
+                  control_expect="carries no BSD notice or copyright material",
+                  note="D-22, and this probe runs in BOTH directions because "
+                       "the refusal fires on the unmodified tree. The control "
+                       "is the unmutated repository, where the check must "
+                       "REFUSE and name the missing notice. The mutation "
+                       "plants a licence file, where it must ACCEPT. Without "
+                       "the second half this would be a hard-coded failure "
+                       "rather than a gate on a condition, and without the "
+                       "first half nothing would record that the condition is "
+                       "open today. No development profile runs this flag: "
+                       "`--floor`, `--sprint` and `--all` gate development and "
+                       "this gates publication. `/release` step 5 runs it."),
             Probe("pins.ritk-inventory", _remove_ritk_published_source,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "published file is absent: src/lib.rs",
@@ -10671,6 +10805,34 @@ GUARDS: tuple[Guard, ...] = (
                     "`bench` gate)",),
     ),
     Guard(
+        id="bench.htj2k",
+        file="tools/bench/src/runners/decode_transfer_syntax_htj2k.mjs",
+        gate="bench",
+        spec="HLD section 26, Appendix A gate A1 and D-22",
+        refuses="An HTJ2K benchmark result without positive finite "
+                "duration, exact kept and warm-up iteration counts, a "
+                "four-decode normalized timing sample, "
+                "positive ordered range enclosing the median, and output "
+                "checksum evidence.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/decode_htj2k_test.mjs (run by the "
+                    "`bench` gate)",),
+    ),
+    Guard(
+        id="bench.jpegls",
+        file="tools/bench/src/runners/decode_transfer_syntax_jpegls.mjs",
+        gate="bench",
+        spec="HLD section 26 and D-20",
+        refuses="A JPEG-LS benchmark result without positive finite "
+                "duration, exact kept and warm-up iteration counts, a "
+                "four-decode normalized timing sample, "
+                "positive ordered range enclosing the median, and output "
+                "checksum evidence.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/decode_jpegls_test.mjs (run by the "
+                    "`bench` gate)",),
+    ),
+    Guard(
         id="bench.tier-startup",
         file="tools/bench/src/runners/tier_startup_microbenchmark.mjs",
         gate="bench",
@@ -10849,20 +11011,6 @@ GUARDS: tuple[Guard, ...] = (
                "and both of which carry probes above.",
     ),
     Guard(
-        id="spikes.a1",
-        file="tools/spikes/a1-htj2k/run.mjs",
-        gate="-",
-        spec="HLD Appendix A gate A1, `docs/spikes/GATES.md`",
-        refuses="Nothing this repository verifies.",
-        claims=("*",),
-        kind="not-a-guard",
-        reason="A throwaway spike harness for Appendix A gate A1, invoked by "
-               "no gate and by no CI step. `content.spike-output` guards its "
-               "output DIRECTORY and is not a backstop for its refusals, "
-               "unlike the probed backstops populate-corpus and "
-               "bootstrap-importer name. Nothing watches these go red.",
-    ),
-    Guard(
         id="spikes.compare",
         file="tools/spikes/common/compare.mjs",
         gate="-",
@@ -10893,19 +11041,6 @@ GUARDS: tuple[Guard, ...] = (
                "repository. `content.spike-output` guards the output "
                "DIRECTORY, which is not a backstop for these refusals, so "
                "nothing watches them go red.",
-    ),
-    Guard(
-        id="spikes.a2",
-        file="tools/spikes/a2-jpeg-ls/anchors.py",
-        gate="-",
-        spec="HLD Appendix A gate A2, `docs/spikes/GATES.md`",
-        refuses="Nothing this repository verifies.",
-        claims=("*",),
-        kind="not-a-guard",
-        reason="A throwaway spike harness for Appendix A gate A2, invoked by "
-               "no gate. Same argument as spikes.a1, including that its "
-               "output directory being guarded is not a backstop for its "
-               "refusals.",
     ),
 )
 

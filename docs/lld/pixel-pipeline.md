@@ -4,8 +4,8 @@
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1,
 `docs/hld/15-lut-chain.md` sections 18 through 18.3, DICOM PS3.3 C.7.6.2,
 C.7.6.3 and C.11
-**F-IDs that contributed:** F-018
-**Last updated:** 2026-09-10
+**F-IDs that contributed:** F-018, F-029
+**Last updated:** 2026-09-13
 
 Living current-state document. It describes what the code does today.
 
@@ -18,12 +18,13 @@ reimplements modality or VOI arithmetic.
 The stages are:
 
 ```text
-decoded container bytes -> Stored -> Modality -> Display
+decoded container bytes -> Stored -> Modality -> Display -> Display
 ```
 
-Presentation inversion and palette or ICC execution are not implemented yet.
-`MONOCHROME1` remains explicit photometric evidence on `SampleLayout`, so a
-later presentation stage can invert exactly once.
+The three implemented stages are PS3.3 C.11's first three. Palette colour and
+ICC execution, which is C.11's stage 4, are not implemented. That stage maps the
+**stored** value through the palette descriptors rather than a `Display` value,
+so it is not a fourth arm on this chain.
 
 The crate is `no_std`. It uses `alloc` only while a LUT descriptor takes
 ownership of setup-time data and constructs its input keys. Scalar mapping,
@@ -140,6 +141,57 @@ Deviation D-13 is applied to the HLD section 18.3 fixture.
 `LINEAR_EXACT(-160)` at centre 40 and width 400 is `0.000`, not `1.594`.
 The formula and boundary comparison both produce zero.
 
+`VoiTransform::output_range` reports the stage's declared output range, which
+the presentation stage needs. A window reports the `[ymin, ymax]` it was
+validated with. A VOI LUT Sequence reports DICOM PS3.3 C.11.2.1.1's
+`0 ..= 2^bits - 1`, taken from the descriptor's third value rather than from the
+largest entry present. `LutDescriptor` retains that bound from construction, so
+the entry-size-to-range mapping exists once, inside the validation that refuses
+every other entry size.
+
+## Presentation stage
+
+`PresentationTransform` implements DICOM PS3.3 C.11.6. `Identity` is a no-op
+rather than an arithmetic round trip, so an identity chain is bit-identical to
+the VOI stage alone. `Inverse` is the reflection `ymin + ymax - y` within the
+declared output range. Writing `ymax - y` is correct only when `ymin` is zero,
+which is why the fixture uses a `16` to `236` range.
+
+**Inversion has two possible sources and is resolved exactly once**, in
+`PresentationTransform::new`. `PresentationLutEvidence` names all three states
+PS3.3 C.11.6 permits, so "no shape declared" stays distinguishable from "a shape
+declared IDENTITY", which is what the rule turns on:
+
+| Presentation LUT Shape `(2050,0020)` | Photometric Interpretation | Resolved |
+|---|---|---|
+| `INVERSE` | any monochrome | `Inverse` |
+| `IDENTITY` | any monochrome | `Identity` |
+| absent | `MONOCHROME1` | `Inverse` |
+| absent | `MONOCHROME2` | `Identity` |
+| any | palette, RGB or any `YBR_*` | refused |
+
+**An explicit shape decides alone and is never composed with `MONOCHROME1`.** A
+`MONOCHROME1` frame carrying an explicit `IDENTITY` is therefore not inverted,
+which is the presentation state being honoured and reads as a bug to anyone
+expecting `MONOCHROME1` to always invert. Composing the two with an exclusive-or
+is the shape that can invert twice, and a double inversion is invisible at the
+midpoint of the output range, which is exactly where `LINEAR_EXACT` maps the
+window centre. The fixtures therefore assert an input away from the centre.
+
+`LutChain` composes stages 1 to 3 in PS3.3 C.11's order and adds no arithmetic
+of its own. Its reason to exist is the resolution above, plus `inverts()`, which
+is the single flag HLD section 18.4's `invert : u32` uniform carries. A shader
+reads the resolved flag and does not combine evidence itself.
+
+A declared Presentation LUT Sequence `(2050,0010)` reports
+`PresentationLutSequenceUnsupported` rather than falling back to the shape. No
+corpus row carries one, so an implementation would be judged only by a fixture
+asserting what the code does.
+
+`PresentationTransform::new` reports three refusals in a fixed and asserted
+order: a malformed output range, then a non-greyscale photometric
+interpretation, then an unsupported sequence.
+
 ## Failure boundary
 
 `PixelError` reports malformed plane attributes, stored-pixel descriptors,
@@ -150,8 +202,10 @@ and no `wasm-bindgen` type appears in this crate.
 ## Tiers
 
 The arithmetic is identical for all runtime tiers. Tiers A and B consume the
-CPU-prepared parameters and evidence. Tier C uses the same implementation as
-its authoritative pixel path. There is no tier-specific arithmetic copy.
+CPU-prepared parameters and evidence, including `LutChain::inverts`, which is
+HLD section 18.4's `invert : u32`. Tier C uses the same implementation as its
+authoritative pixel path, entering it through `LutChain::map_into`. There is no
+tier-specific arithmetic copy.
 
 `bin/ocelli.sh gate native` proves native linkage and shared-crate wasm
 compilation. The focused `cargo check -p ocelli-pixel --all-targets --target

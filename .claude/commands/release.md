@@ -27,22 +27,31 @@ Refuse before any tag or push if one fails:
 4. `python3 scripts/verify_ledger.py check-commit HEAD --require-corpus`
    passes. `corpus=absent` is permitted during early development and is **not**
    permitted here.
-5. `python3 scripts/sprint_workflow.py release-notes vX.Y.Z --check` passes,
+5. **`python3 scripts/pin_and_size_check.py --require-redistribution` passes.**
+   No development profile runs this flag, deliberately. `--floor`, `--sprint`
+   and `--all` gate development and this gates publication, which is the
+   difference between depending on a package and shipping it. **It fails today**
+   on `openjph-core` 0.1.0, whose published archive carries no licence text and
+   whose registry entry names no repository to obtain one from, and whose
+   BSD-2-Clause terms permit redistribution only with its notice conditions
+   retained. See D-22 in `docs/hld/DEVIATIONS.md`. The refusal names the file
+   that would close it.
+6. `python3 scripts/sprint_workflow.py release-notes vX.Y.Z --check` passes,
    and the rendered body is inspected. Its source is the `CHANGELOG.md`
    section headed by the exact tag at this HEAD.
-6. `cargo publish --workspace --dry-run` succeeds with path patches, so
+7. `cargo publish --workspace --dry-run` succeeds with path patches, so
    internal dependencies resolve against this reviewed source graph rather than
    registry placeholders. A dry run uploads nothing.
-7. `npm pack` for each published package, contents listed. **The wasm module
+8. `npm pack` for each published package, contents listed. **The wasm module
    must be present in `@ocelli/core` and must be the one this HEAD builds**,
    not a stale artefact left in `pkg/` by an earlier build. Rebuild it first
    and compare the digest.
-8. `ocelli-wasm` is `publish = false`, and no test-only or private package is
+9. `ocelli-wasm` is `publish = false`, and no test-only or private package is
    in either allowlist.
-9. `docs/hld/DEVIATIONS.md` carries no row whose reason has expired. **A
+10. `docs/hld/DEVIATIONS.md` carries no row whose reason has expired. **A
    deviation shipped in a 1.x release becomes supported behaviour whether or
    not anyone intended it.**
-10. Fetch remote tags. The exact tag must be absent locally and on `origin`.
+11. Fetch remote tags. The exact tag must be absent locally and on `origin`.
     Refuse an already-published version rather than treating it as success.
 
 ## Final approval

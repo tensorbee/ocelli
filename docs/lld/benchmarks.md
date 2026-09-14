@@ -410,6 +410,55 @@ exactly 15 values, and its standing test proves the recorded value is their
 median, the structured and documented series agree, every point is inside the
 band, and the tolerance remains exactly 10 per cent.
 
+F-027 adds `decode.transfer_syntax.htj2k`, the P0 kill criterion's number and
+the subject Appendix A gate A1 has been pointing at since F-006. Its release
+runner measures one `.203` decode of the same 64 by 96 manifest-backed mono16
+synthetic frame on the same four-decode normalized instrument. The irreversible
+row is the one measured, because the subject's definition says the three HTJ2K
+syntaxes are reported per syntax and never as one average, and a lossless and a
+lossy codestream are different work.
+
+After one unrecorded warm-cache run, the controlled calibration series of 15
+consecutive production runner medians, in run order, was
+`0.1697, 0.1726, 0.1715, 0.1696, 0.1622, 0.1631, 0.1685, 0.1663, 0.1697, 0.1646, 0.1692, 0.1683, 0.1677, 0.1630, 0.1726`
+ms. Its median is 0.1685 ms and its range is 0.1622 to 0.1726 ms on host class
+`darwin|25.5.0|arm64|Apple_M4_Max|16|51539607552`. The extremes are 3.74 per
+cent below and 2.43 per cent above the median. The retained 5 per cent is the
+smallest declared symmetric band that covers both extremes, with 1.26 and 2.57
+percentage points of lower and upper headroom.
+
+**That band is tighter than either other codec subject's and no protocol
+changed to achieve it.** Same instrument, same fifteen-sample series, same
+single discarded warm-cache run. JPEG 2000 needed 10 per cent and JPEG-LS 15,
+and the three spreads together say the band is a property of the subject rather
+than of the method, which is the reading a single number could not support.
+
+F-028 adds `decode.transfer_syntax.jpegls`, the runner the subject registry had
+declared and been waiting for since F-006. Its release runner measures one `.80`
+decode of the same 64 by 96 manifest-backed mono16 synthetic frame, on the same
+four-decode normalized instrument, so the two codec subjects differ only in the
+transfer syntax. The lossless row is measured rather than the near-lossless one,
+because it is the row with an encoder-independent anchor, and the two are not
+averaged because they are different work.
+
+After one unrecorded warm-cache run, the controlled calibration series of 15
+consecutive production runner medians, in run order, was
+`0.1297, 0.1199, 0.1152, 0.1180, 0.1178, 0.1162, 0.1114, 0.1140, 0.1132, 0.1156, 0.1156, 0.1179, 0.1188, 0.1145, 0.1124`
+ms. Its median is 0.1156 ms and its range is 0.1114 to 0.1297 ms on host class
+`darwin|25.5.0|arm64|Apple_M4_Max|16|51539607552`. The extremes are 3.63 per
+cent below and 12.20 per cent above the median. The retained 15 per cent is the
+smallest declared symmetric band that covers both extremes, with 11.37 and 2.80
+percentage points of lower and upper headroom.
+
+**That band is wider than JPEG 2000's 10 per cent and the reason is measured
+rather than assumed.** This decode is about six times faster, so one discarded
+warm-cache run leaves proportionally more process warm-up in the first retained
+sample. Two confirmation series taken immediately afterwards under the same
+protocol had first samples of 0.1323 and 0.1181 ms, each the highest value in
+its own series, which is the same effect reproducing. **The protocol was not
+changed to produce a tighter number**, and the recorded series is the first
+controlled one taken rather than the best of the three.
+
 Paired spike release wasm modules were 222,226 bytes with upstream defaults
 and 222,166 bytes with the no-Rayon manifest patch, a 60-byte reduction.
 Dependency graph absence and linked binary size are separate evidence.

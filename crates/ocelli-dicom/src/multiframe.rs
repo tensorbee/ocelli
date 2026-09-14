@@ -121,6 +121,12 @@ impl DuplicateSources {
         self.0 == 0
     }
 
+    /// Every source kind present in either set.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
     const fn with(mut self, source: FunctionalGroupSource) -> Self {
         self.0 |= match source {
             FunctionalGroupSource::TopLevel => Self::TOP_LEVEL,
@@ -200,6 +206,15 @@ impl<'a> MultiframeMetadata<'a> {
     #[must_use]
     pub const fn frame_count(&self) -> usize {
         self.frame_count
+    }
+
+    /// The borrowed main data set.
+    ///
+    /// A consumer needs it for attributes that belong to no functional group
+    /// macro, such as Rows, Columns and Gantry/Detector Tilt.
+    #[must_use]
+    pub const fn metadata(&self) -> &'a MetadataSet {
+        self.metadata
     }
 
     /// Resolve one attribute without interpreting its value.

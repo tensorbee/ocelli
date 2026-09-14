@@ -2503,3 +2503,380 @@ the benchmark and its guard catalogue permanent.
 **Notes for future sessions.** JPEG-LS remains F-028. HTJ2K remains F-027.
 Downstream pixel code must consume the reported colour and sample-layout
 evidence rather than applying a second conversion.
+
+## F-029, LUT chain presentation and inversion, completed 2026-09-13
+
+**What was built.** `ocelli-pixel` now implements DICOM PS3.3 C.11's third
+stage. `PresentationTransform` applies `IDENTITY` as a no-op and `INVERSE` as
+the reflection `ymin + ymax - y` within the declared output range. `LutChain`
+composes stages 1 to 3 in C.11's order and adds no arithmetic of its own.
+`PresentationLutEvidence` names all three states C.11.6 permits, so a declared
+`IDENTITY` stays distinguishable from no declaration at all.
+**The decision the story turns on.** Inversion has two possible sources,
+Photometric Interpretation `MONOCHROME1` and Presentation LUT Shape
+`(2050,0020)`, and it is resolved exactly once. **An explicit shape decides
+alone and is never composed with `MONOCHROME1`**, so a double inversion cannot
+be spelled. A `MONOCHROME1` frame carrying an explicit `IDENTITY` is therefore
+not inverted, which is the presentation state being honoured and which reads as
+a bug to anyone expecting `MONOCHROME1` to always invert. The alternative,
+composing the two with an exclusive-or, was considered in the S09 design round
+and declined. `LutChain::inverts` is the single flag HLD section 18.4's
+`invert : u32` uniform carries.
+**What was deliberately not built.** The modality and VOI stages were not
+reimplemented. `apply_window` and `ModalityTransform` are byte unchanged and
+`tests/voi.rs` and `tests/modality.rs` are unmodified, so F-018's section 18.3
+fixtures still judge the same code. Palette colour and ICC, C.11's stage 4, are
+out of scope: that stage maps the stored value through the palette descriptors
+rather than a `Display` value, so it is not a fourth arm on this chain. A
+declared Presentation LUT Sequence `(2050,0010)` reports unsupported rather than
+falling back to the shape, because no corpus row carries one.
+**HLD sections implemented.** `docs/hld/15-lut-chain.md` section 18, the stage
+table's row 3, and section 18.4's single `invert` flag.
+**Deviations.** D-13, already declared at F-011 and applied here to the section
+18.3 fixture's first row. No new row.
+**Crates / packages modified.** `ocelli-pixel` only.
+**Tests added.** Sixteen fixtures in `crates/ocelli-pixel/tests/lut_chain.rs`.
+The four section 18.3 rows re-asserted through the composed chain, inversion at
+and away from the window centre, the override rule over all four shape and
+photometric combinations, reflection within a non-zero output range, 8-bit and
+16-bit VOI LUT Sequence ranges, stage ordering, the colour refusal, the sequence
+refusal, the malformed-range refusal, the refusal order, and two property
+sweeps.
+**Fixture provenance.** Every expected value is hand-computed from PS3.3
+C.11.2.1.2, C.11.2.1.3.2, C.11.2.1.1 or C.11.6.1.2, with the arithmetic shown in
+the comment above it. The three VOI functions and the reflection were re-derived
+independently in Python before the Rust was read, which is how the pass 1 defect
+below was found. No value was copied from program output. No patient data is
+tracked.
+**Mutations observed red.** Five, each reverted and the tree re-run green:
+resolution rule from override to exclusive-or, 15 passed 1 failed. Reflection
+from `ymin + ymax - y` to `ymax - y`, 14 passed 2 failed. Presentation stage
+dropped from `LutChain::apply`, 9 passed 7 failed. Display-range refusal deleted,
+14 passed 2 failed. The retained descriptor range corrupted, 14 passed 2 failed.
+**Verification.** Feature profile, the 26-gate floor plus corpus, on the exact
+staged tree recorded by the verification ledger on 2026-09-13.
+**Corpus.** Pass.
+**Tier coverage.** A: full, by a shader reading `LutChain`'s scalars through
+section 18.4's uniform. No WGSL is written by this story, so the claim is that
+the parameters exist in the shape 18.4 names. B: full, identical parameters and
+identical values, no tier-specific branch. C: full, and this is the
+authoritative path. Deviation D-07 requires tier C to reuse `ocelli-pixel`
+rather than reimplement the chain, and `LutChain::map_into` is that entry point.
+**LLD updated.** `docs/lld/pixel-pipeline.md`.
+**Deviations from the design plan.** None in substance. The plan's non-zero-
+`ymin` fixture was specified as "an input mapping to 100, inverted 151" and
+landed as an input mapping to 71, inverted 181, because no round input maps to
+100 under that window and the quarter-window point is hand-computable.
+**Notes for future sessions.** Two review findings are worth carrying. The
+pass 1 review's own summary sentence repeated the false claim it was raising
+against the code, which is the shape a documentation-heavy review goes wrong in.
+And a mutation probe silently did nothing because its anchor text occurred twice
+in the file, once in `VoiTransform::new` and once in `PresentationTransform::new`,
+while the test run in the same command printed `ok. 16 passed`, which reads
+exactly like the guard being unnecessary. The probe's `count(old) == 1`
+assertion is what caught it. **A mutation probe that does not assert its anchor
+is unique can report the opposite of the truth.**
+
+## F-020, per-frame geometry, stack shear and spacing calibration, completed 2026-09-13
+
+**What was built.** `ocelli-dicom` gains `frame_geometry`, which derives one
+frame's image plane from F-019's functional-group projection and measures one
+instance's stack shear. `FrameGeometry` resolves Image Position Patient, Image
+Orientation Patient and Pixel Spacing per-frame, then shared, then top level,
+which is DICOM PS3.3 C.7.6.16.1.1's order, and assembles them into
+`ocelli-pixel`'s already-validated `ImagePlane`. `StackGeometry` projects each
+inter-frame step onto the slice normal and reports `AxisAligned` with a signed
+step, `Sheared` with the largest off-axis component, or `NotApplicable`.
+**The defect class this story was exposed to.** It is the first module in the
+programme that computes a coordinate from a tag rather than retaining one, so it
+cannot be judged on losslessness. Three derivations produce numbers that look
+plausible at any magnitude and each is refused or measured rather than guessed.
+Pixel Spacing is `[between rows, between columns]`, so `PixelSpacing[0]` scales
+the **column** direction cosine, and the fixture is deliberately non-square
+because a square-pixel fixture cannot observe the swap. Gantry tilt is
+**measured from geometry and never read from `(0018,1120)`**, which is Type 3
+and nominal, with fixtures asserting both directions: a tag of 0 with sheared
+geometry reports `Sheared` and a tag of 30 with axis-aligned geometry reports
+`AxisAligned`. Imager Pixel Spacing is retained as evidence and is **never**
+substituted for Pixel Spacing, because on a projection radiograph the two differ
+by the source-to-image magnification factor, so an imager-only instance is
+refused rather than rendered with a 10 to 20 per cent measurement error.
+**What was deliberately not built.** PS3.3 C.7.6.2.1.1's index-to-world
+transform was not reimplemented. `FrameGeometry::index_to_world` forwards to
+`ImagePlane::index_to_world`, and the two accessors added to `ocelli-pixel`,
+`slice_normal` and `position_vector`, exist so a cross-frame consumer does not
+re-derive the cross product. Cross-instance slice spacing over a series is out
+of scope and belongs to the volume builder. Within one multiframe instance the
+step is derivable because every frame's position comes from the same instance.
+**HLD sections implemented.** None directly. `grep -rn -i 'gantry|tilt|
+ImagerPixelSpacing|PixelMeasures|SpacingBetweenSlices|calibrat' docs/hld/*.md`
+returns three hits, all about DICOM Part 14 display calibration in sections 10
+and 26, which is a different subject. **The HLD specifies nothing about this
+story's arithmetic**, so the normative source is DICOM PS3.3 C.7.6.2.1.1,
+C.7.6.1.1.5, C.7.6.16.1.1, C.7.6.16.2.2 through C.7.6.16.2.4 and C.8.7.3.1.1,
+plus PS3.5 section 6.2, all transcribed into the design plan. That absence is
+recorded rather than filled with a plausible design presented as specified.
+**Deviations.** None. A deviation records a departure from written text and
+there is none here. `ocelli-dicom` had already left the `no_std` set under D-18,
+so depending on `no_std` `ocelli-pixel` is a one-way widening needing no row.
+**Crates / packages modified.** `ocelli-dicom` and `ocelli-pixel`.
+**Tests added.** Sixteen fixtures in
+`crates/ocelli-dicom/tests/frame_geometry.rs` and two unit tests for the Decimal
+String parser.
+**Fixture provenance.** Every expected coordinate is hand-computed from the
+PS3.3 section cited beside it, with the arithmetic shown in the comment. No
+value came from program output and no patient data is tracked.
+**Mutations observed red.** Eight, each reverted and the tree re-run green:
+spacing indices swapped, slice normal negated, shear tolerance widened, the
+imager-only refusal weakened, the uniformity check defeated, and each of the
+three functional-group source accessors falsified.
+**Verification.** Feature profile, the 26-gate floor plus corpus, on the exact
+staged tree recorded by the verification ledger on 2026-09-13.
+**Corpus.** Pass.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Deriving a coordinate from a tag is
+CPU metadata work in a worker before anything reaches a device, and the resolved
+tier does not select a derivation. A tier-gated geometry path would be the same
+defect HLD section 18 forbids for the LUT chain, with the added property that it
+would only run on hardware nobody develops on.
+**LLD updated.** `docs/lld/dicom-ingest.md`.
+**Deviations from the design plan.** None in substance. The plan proposed a
+`SpacingEvidence` carrying Pixel Spacing Calibration Type `(0028,0A02)` and it
+was not implemented, because nothing in this sprint reads it and an accessor no
+fixture reads is an accessor that can report anything, which pass 2 demonstrated
+on three others.
+**Notes for future sessions.** The three tolerances in this area are declared
+once each and documented at their constants. `GEOMETRY_TOLERANCE_MM` is `1e-6`
+and its justification is that Image Position Patient arrives as a sixteen-byte
+Decimal String, so the figure sits below the precision the source attribute can
+express. **A review pass raised that constant's original justification as a
+smell because the stated arithmetic did not produce the stated number**, and the
+number was left alone while the reason was replaced. That is the right order.
+
+## F-028, JPEG-LS lossless and near-lossless, completed 2026-09-13
+
+**The decision, and why it departs from gate A2's written recommendation.**
+Appendix A gate A2 resolved the JPEG-LS route as `Pure Rust` and recommended
+`pure_jpegls` 2.0.0, keeping `ritk-codecs` 0.6.0 as the named fallback. **F-028
+adopts the fallback**, and the S09 design round made that call rather than the
+implementation. Gate A2's single advantage for `pure_jpegls` was multi-component
+support, and its own coverage table marks that row `NOT MEASURED` for
+`ritk-codecs` while the recommendation then reads "appears to handle
+multi-component". Read from the vendored source,
+`vendor/ritk-codecs-0.6.0/src/jpeg_ls/decoder.rs` refuses `Nf != 1` explicitly,
+so **both candidates are single-component only**. With that removed, adopting
+`pure_jpegls` would have bought a `u16` return type and paid for it with a
+second vendored package: another archive digest, VCS identity, pair of licence
+texts, set of pins-gate rows and no-Rayon graph. All of those are already paid
+for `ritk-codecs`. **This is gate A2's own stated uncertainty resolving, not the
+gate being wrong**, and none of its measurements changed.
+**What was built.** `ocelli-codec` registers atomic exact-UID adapters for
+`.80` and `.81`. The boundary validates the descriptor, bounds the codestream to
+SOI through EOI with PS3.5 A.4's single pad byte tolerated, parses SOF55 and SOS
+without decoding the scan, and checks dimensions, precision, component count,
+interleave mode and `NEAR` against the descriptor and the UID before the
+dependency is called.
+**The two UIDs are not interchangeable.** ISO/IEC 14495-1 defines lossless as
+`NEAR = 0`, so `.80` refuses a positive `NEAR` and `.81` refuses zero, both as
+`FrameMismatch` and both asserted. Without that check either decoder would
+accept either codestream and the lossless claim would be unfalsifiable. `NEAR`
+is read two bytes per component past `Ns`, not from the end of the SOS segment,
+where `ILV` sits and reads as zero on every non-interleaved frame.
+**Section 18 is held by a test rather than a comment.** The dependency's
+`PixelLayout` applies a modality rescale. Slope is pinned to 1 and intercept to
+0 at the one call site, and a fixture asserts decoded sample `n` is exactly `n`
+over a full ramp. Moving either value fails eight of fifteen tests.
+**The stored-domain round trip is proven over the full range.** A 256 by 256
+fixture carries all 65,536 unsigned 16-bit values exactly once, and the test
+asserts both byte-identity with the constructed ramp and that every distinct
+value appeared exactly once, which is a statement about the domain rather than
+about 65,536 samples that might repeat.
+**HLD sections implemented.** `docs/hld/18-codec-registry.md` section 21 and
+`docs/hld/23-performance-rules.md` section 26. Section 21's note "JPEG-LS has no
+credible pure-Rust path" remains true inside dicom-rs, whose `charls` feature is
+`dep:charls` over the C++ library, and is no longer true outside it.
+**Deviations.** D-19 atomic registration, unchanged. D-20 widened in the design
+approval to cover the same vendored package's `jpeg_ls` module and the identity
+rescale pin, `Raised` now `F-026, F-028`. D-21 bounded dependency-owned decoded
+storage, `Raised` now `F-024, F-026, F-027, F-028`. No new row.
+**Crates / packages modified.** `ocelli-codec` only. No new dependency.
+**Tests added.** Fifteen integration fixtures and three unit tests, plus a
+committed generator, `tests/fixtures/generate_jpegls.py`, that rebuilds all ten
+fixtures and asserts each one's declared precision, `NEAR` and component count
+before writing it.
+**Fixture provenance.** The `.80` anchor is the uncompressed
+`syntax/explicit_vr_le.dcm` Pixel Data, whose SHA-256
+`b20a1ef346d9742bcbd38db9174ae5a4775531df434e50d7e209c11b67a27609` is exactly
+the digest `docs/spikes/A2-jpeg-ls.md` recorded for `R`, so the extraction is
+confirmed against an independently written record. The `.81` anchor is ISO/IEC
+14495-1's `NEAR` bound, which is the standard rather than an implementation.
+**Both anchors are independent of CharLS**, which matters because `pyjpegls`
+encoded both rows and `dcmdjpls` would be a second reading of the same library.
+The synthetic ramps are constructed in the generator. No patient data is
+tracked.
+**Mutations observed red.** Eleven, each reverted and the tree re-run green. The
+`NEAR` mode check, the rescale pin, the codestream component check, the `NEAR`
+byte index, the SOF55 precision check, three separate descriptor conditions, the
+dimension check, the SOF55 row and column order, the odd-length pad acceptance,
+and the stray SOI and EOI guard.
+**Verification.** Feature profile, the 26-gate floor plus corpus, on the exact
+staged tree recorded by the verification ledger on 2026-09-13.
+**Corpus.** Pass.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Decode is CPU work in a worker that
+completes before anything reaches a device and the resolved tier does not select
+a decoder. A tier-gated codec path would be HLD section 18's rule violated with
+the added property that the second path would only run on hardware nobody
+develops on. The axis that matters is the target, and `ocelli-codec` builds for
+`wasm32-unknown-unknown` with the adapter in it.
+**Benchmark.** `decode.transfer_syntax.jpegls` already existed in
+`tools/bench/subjects.json` with `subject_story: F-028`, so this story supplies
+the runner the registry was waiting for. Measured median 0.1221 ms over the 64
+by 96 lossless corpus frame, range 0.1108 to 0.1928.
+**Size.** `ci/wasm-size-budget.json` does not move, and that is a fact rather
+than an omission: `ocelli-wasm`'s only workspace dependency is `ocelli-core`, so
+`ocelli-codec` is not in the shipped module's graph. Gate A2 predicted roughly
+40 KB for the story that registers a decoder, and that cost arrives when the
+worker path pulls the codec crate in.
+**LLD updated.** `docs/lld/codecs.md`.
+**Deviations from the design plan.** None in substance. The plan named three
+mutations and eleven were run, because two review probes found conditions no
+fixture reached.
+**Registration the story also had to do, because a new refusal arrives with its
+probe.** The benchmark runner carries nine refusals of its own, so it needed a
+`scripts/guards/catalogue.py` entry, a recorded site count in
+`ci/guard-probe-budget.json`, a probe suite at
+`tools/bench/tests/decode_jpegls_test.mjs`, registration in both exact suite
+lists, `tools/bench/package.json` and `bin/ocelli.sh`, and a regenerated
+`docs/runbooks/guard-verification.md` table. Deleting the A2 spike harness also
+retired the catalogue's stale `spikes.a2` entry and its recorded count, which the
+census refused as coverage for a file that no longer exists.
+**Notes for future sessions.** Four things are worth carrying. **A multi-
+component JPEG-LS corpus row is still owed**, which gate A2 recorded and this
+story does not close. The adapter refuses one cleanly, so it is a coverage gap
+rather than a wrong pixel. **`scripts/bench_check.py` refused the benchmark
+runner while `docs/sprints/BACKLOG.md` still said `pending`**, which is the
+anti-fabrication rule working: the row moved to `in-progress` because that was
+the truth, not to get past a gate. **A disjunction tested only by an input
+that trips several arms reports coverage for arms doing nothing**, which is how
+two of this story's three review findings were found and is worth probing for
+directly next time. And **this subject's declared benchmark band is 15 per cent
+rather than JPEG 2000's 10**, because the decode is about six times faster so one
+discarded warm-cache run leaves proportionally more process warm-up in the first
+retained sample. Two confirmation series reproduced the effect, the protocol was
+not changed to produce a tighter number, and the recorded series is the first
+controlled one taken rather than the best of three.
+
+## F-027, HTJ2K through openjph-core, completed 2026-09-13
+
+**The decision, and what it does and does not close.** Appendix A gate A1 failed
+`openjp2` 0.6.1 on `wasm32-unknown-unknown` and F-X013 priced `openjph-core`
+0.1.0 as the one candidate using the same Rust implementation on browser,
+desktop and server. The S09 design round chose to **register all three HTJ2K
+UIDs** rather than report them unavailable. Six of F-X013's seven conditions
+close here. The seventh cannot be closed by engineering and is held by a gate.
+**What was built.** `ocelli-codec` registers atomic exact-UID adapters for
+`.201`, `.202` and `.203`. `openjph-core` 0.1.0 is vendored byte-identically to
+its crates.io archive with no patch, its published manifest already yielding the
+no-Rayon graph section 15.2 wants. The adapter parses SIZ, COD and CAP itself,
+validates dimensions, precision, signedness, component count and the mode
+constraints against the descriptor, and only then reaches the dependency.
+**CAP is what makes a codestream HTJ2K**, and the adapter reads that marker
+rather than asking the library, because trusting a dependency to have read the
+marker that decides what the file is would be trusting it with the question. The
+Part 1 `.90` corpus fixture is the same synthetic ramp and passes every other
+check, so it is what makes the CAP refusal falsifiable.
+**A design-plan defect the fixtures caught before any adapter code ran.** The
+plan said `.202` requires RPCL and "`.201` requires anything else". PS3.5 A.4.10
+constrains RPCL for `.202` and A.4.9 constrains nothing about progression for
+`.201`, so a `.202` codestream is also a valid `.201` one and the drafted rule
+would have refused conformant files. The corpus makes it concrete: its `.203`
+row is RPCL too, so progression does not partition the three at all. What
+separates the two lossless syntaxes from `.203` is the wavelet transform.
+Implemented as three modes rather than two, with the plan corrected.
+**`.203` is a pinned measured divergence rather than a bound.** The adapter's
+output digest is
+`ce4a2bb9d75b897292a4e9e9e7455447e976f5ff1e18b4ecb3219bb17d4d062c`, exactly
+what F-X013 recorded for its native, plain wasm and SIMD wasm builds, reproduced
+here through the production `Decoder` boundary rather than a throwaway cdylib.
+No tolerance was introduced: a digest fails if the decode changes at all, which
+is stronger than a bound. **The plan's instruction to pin F-X013's "41 of 6144"
+figure was corrected**, because that number is the candidate against OpenJPH
+0.31.0 via `ojph_expand`, an external tool this tree does not carry. Against the
+uncompressed ramp the irreversible decode differs at 5,377 of 6,144 samples,
+recorded rather than bounded.
+**Cross-target identity is standing rather than a spike result.**
+`bin/ocelli.sh gate native` gained three steps that run
+`examples/verify_htj2k.rs` over all three syntaxes natively, as plain wasm and
+as `+simd128` wasm. That was F-X013's central claim and the harness that
+measured it once is deleted.
+**The condition that stays open, and how it is held.** `openjph-core` 0.1.0
+carries no BSD notice or copyright material and crates.io reports no repository
+URL to obtain one from. `scripts/pin_and_size_check.py --require-redistribution`
+refuses while it is absent, `/release` step 5 runs it, and **no development
+profile does**, because `--floor`, `--sprint` and `--all` gate development and
+this gates publication. The refusal names the file that would close it. Probe
+`pins.openjph-notice` proves it fires today and stops firing once a notice is
+placed, which a review pass found it did not: planting the licence tripped a
+different refusal in the same script, so the gate had no reachable green state
+until the notice filenames became permitted additions.
+**The unsafe surface, which vendoring made visible.**
+`scripts/unsafe_allowlist_check.py` reads `git ls-files`, so vendoring put 104
+`unsafe` constructs inside its scan and it went red. The repair was **not** to
+exclude `vendor/`, because R5's payoff is that a device-submission reviewer
+reads two files and a vendored package carrying unsafe makes that false whether
+it is tracked or resolved from a registry. The count is recorded instead: the
+guard refuses a vendored package whose count moves, one with no record, and a
+record for a package not in the tree, and its OK line prints the per-package
+figure. That is stronger than the state before this story, where a dependency's
+unsafe was invisible either way. The per-file audit, nine files with fifty
+constructs on wasm-reachable paths, is in `docs/SOURCE-POLICY.md` and was
+re-counted rather than quoted.
+**HLD sections implemented.** `docs/hld/18-codec-registry.md` section 21 and
+`docs/hld/23-performance-rules.md` section 26.
+**Deviations.** **D-22, new**, the departure from section 15.2's `openjp2` for
+HTJ2K. D-19 atomic registration, unchanged. D-21 bounded dependency-owned
+decoded storage, whose largest instance this is at one `Vec<i32>` per image row.
+**Crates / packages modified.** `ocelli-codec`, plus the vendored
+`openjph-core` 0.1.0.
+**Tests added.** Ten integration fixtures, two unit tests sweeping all 98,304
+values of the sample-conversion domain, and a committed generator that asserts
+each fixture's CAP marker, progression order and wavelet kernel before writing
+it.
+**Fixture provenance.** The `.201` and `.202` anchors are the uncompressed
+`syntax/explicit_vr_le.dcm` Pixel Data, shared with the JPEG-LS fixtures rather
+than duplicated. The `.203` anchor is F-X013's recorded digest. No patient data
+is tracked.
+**Mutations observed red.** Nine, each reverted and the tree re-run green: the
+CAP check, the RPCL constraint, `.201`'s reversibility, both COD byte indices,
+the SIZ precision check, the codestream component check, the signedness check,
+and the sample conversion narrowed to `i8`. The last is green on the integration
+target and red on the lib target, which is correct: narrowing `i16` to `i8`
+changes nothing for unsigned samples because the `u16` arm still converts them
+exactly, and it matters only for negative samples no corpus row carries.
+**Verification.** Feature profile, the 26-gate floor plus corpus, on the exact
+staged tree recorded by the verification ledger on 2026-09-13.
+**Corpus.** Pass.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. Decode is CPU work in a worker that
+completes before anything reaches a device and the resolved tier does not select
+a decoder. F-X013's condition 7 phrase "unavailable on every rendering tier" is
+about capability reporting rather than a tier-specific decode path, and there is
+none.
+**Benchmark.** `decode.transfer_syntax.htj2k`, the P0 kill criterion's number,
+measured at median 0.1685 ms over the `.203` corpus frame with a declared 5 per
+cent band. That is the tightest of the three codec subjects and no protocol
+changed to achieve it.
+**Size.** `ci/wasm-size-budget.json` does not move. `ocelli-wasm`'s only
+workspace dependency is `ocelli-core`, so `ocelli-codec` is not in the shipped
+module's graph.
+**LLD updated.** `docs/lld/codecs.md`, `docs/lld/benchmarks.md`.
+**Deviations from the design plan.** Two corrections, both recorded in the plan
+itself: the `.201` progression rule and the `.203` assertion method. The plan
+also drafted two `Mode` arms and three were needed.
+**Notes for future sessions.** **A gate must have a reachable green state**, and
+the probe harness is what proved this one did not. Planting the licence file the
+gate asks for tripped `carries an unrecorded file` in the same script, so the
+only action that could satisfy the gate would have failed it. **The `E2.6`
+referent in three spike answer files is corrected**: E2.6 is F-014, the
+quirk-capture workflow, and the codec stories are E4.5 and E4.6. And **vendoring
+changes which guards see a dependency**. `unsafe`, `provenance`, `content` and
+`prose` all read `git ls-files`, so the next vendored package should be checked
+against all four before it is committed rather than after.

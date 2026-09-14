@@ -15,4 +15,8 @@ workspace = true
 jpeg-decoder.workspace = true
 oxideav-core.workspace = true
 oxideav-mjpeg.workspace = true
+openjph-core.workspace = true
 ritk-codecs.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true

@@ -244,6 +244,164 @@
             ]
           },
           "replaced": 0.7353
+        },
+        "decode.transfer_syntax.jpegls": {
+          "value": 0.1156,
+          "unit": "ms",
+          "tolerance": 0.15,
+          "tolerance_provenance": "DERIVED from one controlled series of fifteen consecutive production runner medians after one warm-cache run on the four-decode normalized instrument: 0.1297, 0.1199, 0.1152, 0.1180, 0.1178, 0.1162, 0.1114, 0.1140, 0.1132, 0.1156, 0.1156, 0.1179, 0.1188, 0.1145, 0.1124 ms. Their median is 0.1156 ms and range is 0.1114 to 0.1297 ms. The extremes are 3.63 per cent below and 12.20 per cent above the center. The retained 15 per cent is the smallest declared band covering both extremes with 11.37 and 2.80 percentage points of lower and upper headroom. It is wider than decode.transfer_syntax.jpeg2000's 10 per cent because this decode is about six times faster, so one discarded warm-cache run leaves proportionally more process warm-up in the first retained sample. Two confirmation series taken immediately afterwards under the same protocol had first samples of 0.1323 and 0.1181 ms, the highest value in each, which is the same effect reproducing. The protocol was NOT changed to produce a tighter number.",
+          "provenance": "measured",
+          "recorded": "2026-09-13",
+          "story": "F-028",
+          "why": "First baseline for the JPEG-LS subject the registry already declared",
+          "host_class": {
+            "platform": "darwin",
+            "release": "25.5.0",
+            "arch": "arm64",
+            "cpu_model": "Apple M4 Max",
+            "cpu_count": 16,
+            "memory_bytes": 51539607552
+          },
+          "instrument": {
+            "node": "v24.13.0",
+            "playwright": "1.62.1",
+            "chromium": "151.0.7922.34"
+          },
+          "conditions": {
+            "load_average": [
+              2.85888671875,
+              3.65478515625,
+              3.90966796875
+            ],
+            "free_memory_bytes": 643760128,
+            "uptime_seconds": 365128
+          },
+          "detail": {
+            "statistic": "median of per-call normalized batch durations",
+            "iterations_run": 125,
+            "iterations_kept": 31,
+            "discarded": "one decoder warm-up call",
+            "decodes_per_sample": 4,
+            "observed_range_ms": [
+              0.1108,
+              0.1928
+            ],
+            "calibration_medians_ms": [
+              0.1297,
+              0.1199,
+              0.1152,
+              0.118,
+              0.1178,
+              0.1162,
+              0.1114,
+              0.114,
+              0.1132,
+              0.1156,
+              0.1156,
+              0.1179,
+              0.1188,
+              0.1145,
+              0.1124
+            ],
+            "calibration_range_ms": [
+              0.1114,
+              0.1297
+            ],
+            "clock": "std::time::Instant surrounds each four-decode batch, then elapsed time is normalized by four",
+            "rounding": "0.0001 ms, below the observed run-to-run spread",
+            "output_checksum": 1563649,
+            "transfer_syntax": "1.2.840.10008.1.2.4.80",
+            "rows": 64,
+            "columns": 96,
+            "bits_stored": 16,
+            "profile": "release",
+            "fixture": "synthetic manifest-backed jpegls_lossless corpus frame",
+            "excludes": [
+              "process startup",
+              "fixture setup",
+              "decoder construction",
+              "caller output allocation"
+            ]
+          }
+        },
+        "decode.transfer_syntax.htj2k": {
+          "value": 0.1685,
+          "unit": "ms",
+          "tolerance": 0.05,
+          "tolerance_provenance": "DERIVED from one controlled series of fifteen consecutive production runner medians after one warm-cache run on the four-decode normalized instrument: 0.1697, 0.1726, 0.1715, 0.1696, 0.1622, 0.1631, 0.1685, 0.1663, 0.1697, 0.1646, 0.1692, 0.1683, 0.1677, 0.1630, 0.1726 ms. Their median is 0.1685 ms and range is 0.1622 to 0.1726 ms. The extremes are 3.74 per cent below and 2.43 per cent above the center. The retained 5 per cent is the smallest declared band covering both extremes with 1.26 and 2.57 percentage points of lower and upper headroom. It is tighter than either other codec subject's band. No protocol changed to achieve that: the same instrument, the same fifteen-sample series and the same one discarded warm-cache run produced a spread this narrow, which is a fact about the subject rather than about the method.",
+          "provenance": "measured",
+          "recorded": "2026-09-13",
+          "story": "F-027",
+          "why": "First baseline for the HTJ2K subject, the P0 kill criterion's number",
+          "host_class": {
+            "platform": "darwin",
+            "release": "25.5.0",
+            "arch": "arm64",
+            "cpu_model": "Apple M4 Max",
+            "cpu_count": 16,
+            "memory_bytes": 51539607552
+          },
+          "instrument": {
+            "node": "v24.13.0",
+            "playwright": "1.62.1",
+            "chromium": "151.0.7922.34"
+          },
+          "conditions": {
+            "load_average": [
+              2.85888671875,
+              3.65478515625,
+              3.90966796875
+            ],
+            "free_memory_bytes": 643760128,
+            "uptime_seconds": 365128
+          },
+          "detail": {
+            "statistic": "median of per-call normalized batch durations",
+            "iterations_run": 125,
+            "iterations_kept": 31,
+            "discarded": "one decoder warm-up call",
+            "decodes_per_sample": 4,
+            "observed_range_ms": [
+              0.1663,
+              0.1788
+            ],
+            "calibration_medians_ms": [
+              0.1697,
+              0.1726,
+              0.1715,
+              0.1696,
+              0.1622,
+              0.1631,
+              0.1685,
+              0.1663,
+              0.1697,
+              0.1646,
+              0.1692,
+              0.1683,
+              0.1677,
+              0.163,
+              0.1726
+            ],
+            "calibration_range_ms": [
+              0.1622,
+              0.1726
+            ],
+            "clock": "std::time::Instant surrounds each four-decode batch, then elapsed time is normalized by four",
+            "rounding": "0.0001 ms, below the observed run-to-run spread",
+            "output_checksum": 1559962,
+            "transfer_syntax": "1.2.840.10008.1.2.4.203",
+            "rows": 64,
+            "columns": 96,
+            "bits_stored": 16,
+            "profile": "release",
+            "fixture": "synthetic manifest-backed htj2k_lossy corpus frame",
+            "excludes": [
+              "process startup",
+              "fixture setup",
+              "decoder construction",
+              "caller output allocation"
+            ]
+          }
         }
       }
     }

@@ -10,7 +10,8 @@ use std::{
 use ocelli_codec::{
     Capability, CodecError, DecodePhotometricInterpretation, DecodeSampleLayout, Decoder,
     FrameDesc, FrameDescError, FrameDescInput, KNOWN_TRANSFER_SYNTAXES, PixelDataVr,
-    PixelRepresentation, Registry, RegistryError,
+    PixelRepresentation, Registry, RegistryError, register_htj2k_decoders, register_jpeg_decoders,
+    register_jpeg2000_decoders, register_jpegls_decoders, register_native_and_rle_decoders,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -418,4 +419,82 @@ fn high_bit_must_equal_bits_stored_minus_one() {
             expected: 11,
         })
     );
+}
+
+/// Deflated Explicit VR Little Endian, the one known syntax no decoder in this
+/// crate claims.
+const DEFLATED: &str = "1.2.840.10008.1.2.1.99";
+
+#[test]
+fn every_decoder_family_registers_into_one_registry_without_collision() -> TestResult {
+    // Each family's own test asserts that its registration is atomic and that
+    // its own UIDs become available. **None of them registers more than one
+    // family**, so the property that matters at the crate level is asserted
+    // here: the five coexist, they partition the known catalogue, and no two
+    // claim the same UID.
+    //
+    // Registration refuses a collision rather than overwriting, deviation
+    // D-19, so a sixth family claiming a UID an existing one owns would fail
+    // at run time in whatever order a caller happened to register. This test
+    // is what makes that fail at build time instead.
+    let mut registry = Registry::new();
+    register_native_and_rle_decoders(&mut registry)?;
+    register_jpeg_decoders(&mut registry)?;
+    register_jpeg2000_decoders(&mut registry)?;
+    register_jpegls_decoders(&mut registry)?;
+    register_htj2k_decoders(&mut registry)?;
+
+    let mut available = Vec::new();
+    let mut unavailable = Vec::new();
+    for uid in KNOWN_TRANSFER_SYNTAXES {
+        match registry.capability(uid) {
+            Capability::Available => available.push(*uid),
+            Capability::KnownUnavailable => unavailable.push(*uid),
+            Capability::Unknown => return Err(format!("{uid} is not known").into()),
+        }
+    }
+
+    // Fifteen of the sixteen. The exception is named rather than counted
+    // around, because a count alone would hide which one moved.
+    assert_eq!(unavailable, vec![DEFLATED]);
+    assert_eq!(available.len(), KNOWN_TRANSFER_SYNTAXES.len() - 1);
+
+    // Deflated Explicit VR Little Endian is unavailable BY DESIGN and not by
+    // omission. PS3.5 A.5 deflates the whole data set rather than a frame, so
+    // it is a parser route owned by `ocelli-dicom` under deviation D-18 and
+    // F-025 deliberately left its UID unclaimed here. Asserting the reason
+    // rather than the number is what stops a later story from "fixing" it.
+    assert_eq!(registry.capability(DEFLATED), Capability::KnownUnavailable);
+    assert_eq!(
+        registry.decoder(DEFLATED).err(),
+        Some(CodecError::KnownUnavailable)
+    );
+    Ok(())
+}
+
+#[test]
+fn registering_a_family_twice_refuses_and_leaves_the_others_intact() -> TestResult {
+    // The order-independence half of the same property. A repeated
+    // registration must refuse rather than overwrite, and must not disturb the
+    // families already present.
+    let mut registry = Registry::new();
+    register_jpegls_decoders(&mut registry)?;
+    register_htj2k_decoders(&mut registry)?;
+    assert!(register_jpegls_decoders(&mut registry).is_err());
+
+    for uid in [
+        "1.2.840.10008.1.2.4.80",
+        "1.2.840.10008.1.2.4.81",
+        "1.2.840.10008.1.2.4.201",
+        "1.2.840.10008.1.2.4.202",
+        "1.2.840.10008.1.2.4.203",
+    ] {
+        assert_eq!(registry.capability(uid), Capability::Available);
+    }
+    // And the families not registered are still distinguishable from unknown.
+    assert_eq!(
+        registry.capability("1.2.840.10008.1.2.4.90"),
+        Capability::KnownUnavailable
+    );
+    Ok(())
 }

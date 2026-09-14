@@ -173,14 +173,30 @@ What exists, in the order it matters:
   compare against, so detection is proved by a declared mutation catalogue
   applied to real reference frames. `bin/ocelli.sh gate oracle` runs both
   halves, and the bare `bin/ocelli.sh oracle` is the reference half alone.
-- **The corpus**, 91 rows behind `corpus/manifest.tsv`, covering all sixteen
-  transfer syntaxes the codec registry will claim, which are listed in
-  `scripts/corpus_check.py` because the crate is still a scaffold.
+- **The corpus**, behind `corpus/manifest.tsv`, covering all sixteen transfer
+  syntaxes the codec registry knows. **No row count is written here**, because
+  this line said 91 while the file held 92 and a number in prose beside the file
+  that holds it is stale the next time a row lands.
+  `tail -n +2 corpus/manifest.tsv | grep -c .` prints it.
 - **`ocelli-core`**, the coordinate and value spaces, entries 1 and 2 of the
   first-ten-files list.
+- **The codec registry and five decoder families.** Raw, RLE, JPEG, JPEG 2000,
+  JPEG-LS and HTJ2K. **Fifteen of the sixteen known transfer syntaxes are
+  available**, and the sixteenth, Deflated Explicit VR Little Endian, is
+  unavailable by design: PS3.5 A.5 deflates the whole data set rather than a
+  frame, so it is `ocelli-dicom`'s route under D-18.
+  `crates/ocelli-codec/tests/registry.rs` asserts both halves.
+- **The pixel pipeline**, stages 1 to 3 of DICOM PS3.3 C.11 in `ocelli-pixel`,
+  with the section 18.3 fixtures behind them and inversion resolved exactly
+  once. Palette and ICC, stage 4, are not implemented.
+- **Derived DICOM geometry**, per-frame plane, stack shear measured from the
+  geometry rather than read from the gantry tilt tag, and calibrated against
+  uncalibrated spacing kept distinct.
 - **Every build target.** wasm through `wasm-pack` with a recorded size
-  budget, the two native entry points, and a cross-target proof that both
-  build from the same eleven shared crates.
+  budget, the two native entry points, and a cross-target proof that the same
+  eleven shared crates build for both. Eleven is `ls crates | wc -l` minus
+  `ocelli-native`, which is native-only, and minus `ocelli-wasm`, which
+  `bin/ocelli.sh` step 2 names separately.
 - **The GPU device-sharing contract**, `GpuContext` in `ocelli-render` and
   `ComputeCtx` in `ocelli-compute`, section 38's Phase 1 hook.
 - **The npm packaging pipeline**, proven against a consumer outside the
@@ -188,8 +204,19 @@ What exists, in the order it matters:
 
 Most of `docs/hld/` Part II is still unimplemented, so where this file and that
 directory disagree about what exists, that directory is describing the target
-and this one is describing today. **No pixel, LUT or geometry port code has
-been written**, which is decision D7 holding: the oracle exists first. S03 did
-add Rust that HLD Part II specifies, the tier resolution of section 7 and the
-error model of section 23, so the unqualified form of that sentence stopped
-being true and the qualified one is the claim.
+and this one is describing today.
+
+**This paragraph used to say "No pixel, LUT or geometry port code has been
+written", and by S09 every word of that was false.** It was written when it was
+true, qualified once in S03 when it stopped being true in the unqualified form,
+and then left standing through S08's F-018, which wrote the modality and VOI
+stages and the image plane, and S09's F-029 and F-020, which wrote the
+presentation stage and derived geometry. **The S09 sprint review found it**, and
+it survived four clean per-story reviews because no story in either sprint
+touched this file and each review looked at its own diff.
+
+What is true is narrower and is what D7 actually asks: **the oracle existed
+before any of that code, and it still has no Ocelli renderer to compare
+against.** The pixel arithmetic is validated by hand-computed fixtures citing
+their PS3.3 section, which is the other half of section 27.2, and the oracle's
+verdict on rendered frames arrives when there is a renderer to render them.

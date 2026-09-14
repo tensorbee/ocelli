@@ -51,4 +51,8 @@ pub enum PixelError {
     InvalidWindow,
     /// The requested display range is non-finite or descends.
     InvalidDisplayRange,
+    /// The presentation stage was asked for a non-greyscale photometric interpretation.
+    PresentationLutNotApplicable,
+    /// A Presentation LUT Sequence is present and this build does not execute one.
+    PresentationLutSequenceUnsupported,
 }

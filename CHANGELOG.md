@@ -35,13 +35,32 @@ Repository bootstrap. Nothing is published.
   registration, and caller-owned decode output buffers.
 - Validated DICOM image-plane and stored-pixel evidence, with one modality and
   VOI pipeline covering LUT precedence and LINEAR, LINEAR_EXACT, and SIGMOID.
+- The presentation stage of the LUT chain, completing DICOM PS3.3 C.11's first
+  three stages in one composed pipeline. Inversion is resolved exactly once from
+  Photometric Interpretation and Presentation LUT Shape, an explicit shape
+  overrides rather than composes, and a declared Presentation LUT Sequence
+  reports unsupported rather than falling back.
 - Enhanced multiframe projection with checked frame counts, retained shared
   and per-frame functional-group provenance, and bounded frame indexing.
+- Derived per-frame image-plane geometry, with calibrated against uncalibrated
+  spacing kept distinct, gantry tilt measured from geometry rather than read
+  from its nominal tag, and non-uniform inter-frame spacing refused rather than
+  averaged.
 - JPEG Baseline, Extended, Lossless, and Lossless SV1 decoding with exact UID
   registration, atomic caller-buffer output, and decoded colour evidence.
 - JPEG 2000 Part 1 decoding for lossless Transfer Syntax `.90` and general
   Transfer Syntax `.91`, with exact stored-domain validation, atomic output,
   native and WebAssembly execution, and a measured release benchmark.
+- JPEG-LS decoding for lossless Transfer Syntax `.80` and near-lossless `.81`,
+  with the two UIDs held apart by the codestream's own `NEAR` parameter, the
+  stored-domain round trip proven over the whole 16-bit range, multi-component
+  frames refused rather than mis-decoded, and a measured release benchmark.
+- HTJ2K decoding for Transfer Syntaxes `.201`, `.202` and `.203`, with the CAP
+  marker required so a JPEG 2000 Part 1 codestream cannot be read as HTJ2K, the
+  irreversible syntax published as a pinned measured divergence rather than a
+  bound, and identical output proven on native, plain WebAssembly and SIMD
+  WebAssembly. **It cannot be redistributed yet**: the decoder's package carries
+  no licence notice, and the release path refuses while that is true.
 - Native DICOM Pixel Data normalization for little-endian and retired
   big-endian transfer syntaxes, allocation-free RLE Lossless decoding, checked
   native multiframe extraction, and typed Pixel Data VR and decoded sample

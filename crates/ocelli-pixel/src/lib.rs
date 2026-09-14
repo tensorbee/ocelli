@@ -18,7 +18,10 @@ pub use error::PixelError;
 pub use image_plane::{
     ImageDimensions, ImageOrientationPatient, ImagePlane, ImagePositionPatient, PixelSpacing,
 };
-pub use lut::{LutDescriptor, ModalityTransform, VoiFunction, VoiTransform, modality};
+pub use lut::{
+    LutChain, LutDescriptor, ModalityTransform, PresentationLutEvidence, PresentationLutShape,
+    PresentationTransform, VoiFunction, VoiTransform, modality,
+};
 pub use stored_pixel::{
     ByteOrder, PhotometricInterpretation, PixelRepresentation, PlanarConfiguration, SampleLayout,
     StoredBits, StoredPixelDescription,

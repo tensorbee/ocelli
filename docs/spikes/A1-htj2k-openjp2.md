@@ -587,3 +587,9 @@ which candidate it belongs to. Nothing under `tools/spikes/out/` is committed: `
 it and `scripts/staged_content_check.py` refuses it by path, because
 `git add -f` exists and a codestream extracted from a corpus row is derived
 from that row.
+
+**The harness this file describes has been removed.** F-027 took route F3
+into production and deleted `tools/spikes/a1-htj2k/` and `tools/spikes/x013-htj2k-route/`,
+per the lifecycle `docs/spikes/A2-jpeg-ls.md` states for these rigs. Every measurement
+below is unchanged and is the reason this file survives the harness. The commands
+name a rig that existed rather than one a reader will find.
