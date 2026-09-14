@@ -164,7 +164,7 @@ One budgeted cache, one wgpu device, the LUT chain running as a shader stage on 
 | F-038 | E6.2 | S12 | Render graph and frame scheduler with dirty tracking | Rust | 4w | F-037 | pending |
 | F-039 | E6.3 | S13 | OffscreenCanvas in a render worker; resize and DPR handling | Rust | 3w | F-037 | pending |
 | F-040 | E6.4 | S13 | Texture upload path: decode straight to write_texture | Rust | 4w | F-037 | pending |
-| F-041 | E6.5 | S11 | WGSL LUT-chain shader | Rust | 4w | F-029 | pending |
+| F-041 | E6.5 | S11 | WGSL LUT-chain shader | Rust | 4w | F-029 | done |
 | F-042 | E6.6 | S13 | WebGL2 fallback and tier-B shader variants | Rust | 5w | F-041 | pending |
 | F-043 | E6.7 | S14 | Chunked brick residency as the default upload path | Rust | 4w | F-040 | pending |
 | F-044 | E6.8 | S13 | Colour LUT / transfer function upload and preset library | Rust | 2w | F-041 | pending |

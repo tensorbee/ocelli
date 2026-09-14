@@ -3141,3 +3141,101 @@ tier C override as well and hardcodes the three evidence fields, so the
 which is already a parameter: counting its invocations is zero with the short
 circuit and non-zero without, needs no new seam, and is not a timing bound
 because the closure returns a constant and the assertion is on the call count.
+
+## F-041, WGSL LUT-chain shader, completed 2026-09-15
+
+**What this closes.** DICOM PS3.3 C.11 stages 1 to 3 now evaluate on the GPU,
+from HLD section 18.4's uniform, and the shader's output is checked against
+`ocelli-pixel` on a real adapter. **It does not close decision D7**: the oracle
+still has no Ocelli renderer to compare against, because there is no frame. What
+it closes is the arithmetic half, and F-038's render graph and F-040's texture
+upload are what make a frame out of it.
+
+**The shader carries no entry point, and that is a departure from the plan.**
+The plan said "a fragment shader, so one shader serves both GPU tiers".
+`shaders/voi.wgsl` holds section 18.4's uniform and the LUT functions and stops
+there, because an entry point decides for every consumer how a stored value
+arrives and where a display value goes, and there is no texture type yet for one
+to arrive through. A consumer concatenates its own. **The file uses nothing HLD
+section 7 denies tier B**, which `voi::tests` asserts by text and
+`the_shader_composes_into_a_render_pipeline_not_only_a_compute_one` asserts by
+building a real render pipeline from it.
+
+**The test harness appends a COMPUTE entry point over two storage buffers**,
+which tier B has neither of, because it needs arbitrary `f32` inputs in and
+exact `f32` values back. **That is a property of the harness and not of the
+shader**, and it is written down in three places rather than left to be
+inferred, because a compute harness beside a tier B claim is exactly the shape
+that reads as hand-waving later.
+
+**The evidence, and what class it is.** The section 18.3 rows, the boundary
+rows, the width-one rows, the SIGMOID row and the non-zero-range inversion row
+are hand-computed from PS3.3 in exact rational arithmetic and asserted on the
+GPU directly. Nothing in this repository produced those numbers, and they are
+what stops the comparison below being circular. The sweep, 4096 stored values
+across all three functions inverted and not, is a comparison against this
+repository's own validated CPU path: **weaker than an oracle verdict**, because
+both sides are ours, and **stronger than a screenshot**, because it is a numeric
+diff at `f32` with no quantisation hiding a 0.32-of-255 divergence.
+
+**Measured maximum divergence: 0.000030517578**, two `f32` ULP at 255 or one at
+256, against an asserted bound of `1e-4`. Decision D14 asks for a measured
+divergence rather than a bit-exactness claim, and that is the number.
+
+**Fixture provenance.** Every expected value computed in exact rational
+arithmetic from PS3.3 C.11.2.1.2, C.11.2.1.3.2 and C.11.2.1.3.1 before the
+shader was written, and deviation D-13 applied to section 18.3's row one, whose
+`LINEAR_EXACT` value is `0.000` and not the `1.594` the HLD prints.
+
+**Tier coverage.** A: full, and this is the tier every test ran on. B: the
+shader uses nothing tier B lacks, asserted by text and by a real render
+pipeline, and **nothing in this repository has ever run on tier B**, so the
+claim is that the shader needs nothing tier B denies rather than that it has
+been seen to work there. F-042 and F-X002 are the stories that could close it.
+C: n/a as a shader, and full as arithmetic, because deviation D-07 makes
+`ocelli-pixel` tier C's authoritative path and this story reimplements nothing
+for it.
+
+**Size.** `ci/wasm-size-budget.json` does not move. `ocelli-wasm` reaches
+neither `ocelli-render` nor `ocelli-pixel`.
+
+**Three more departures from the plan, all reported rather than improvised.**
+The plan's mutation row for the upper boundary operator is not achievable and
+the row for the lower one needed a window the plan did not name, `w = 1`.
+`ocelli-render` gained `ocelli-core` as a DEV dependency, because
+`LutChain::map_into`'s signature is in `Stored` and `Display`. And **`bytemuck`
+had no consumer in this workspace before this story**, so F-041 is the first,
+which the `pins` gate sees as a newly active dependency.
+
+**An open finding against `ocelli-pixel`, recorded and not fixed.** A legal
+LINEAR chain can return a value outside its own declared output range, at one
+input per window, on the CPU and the GPU identically and bit for bit. Measured
+in `f32` at centre `1024.5`, width `1.0003662109375`, range `[0, 255]`: the
+upper breakpoint rounds to `1024.0002` and the body there is **297.50003**
+against a `ymax` of 255. The cause is that PS3.3 C.11.2.1.2's formula in single
+precision does not reproduce its own breakpoint, and only the upper one can
+escape, because the lower comparison is `<=` and clamps first.
+`docs/lld/pixel-pipeline.md` carries the reproduction. **It is not F-041's**,
+the arithmetic is F-018's, no tolerance was widened to hide it, and **no backlog
+row was created**, because creating an F-ID moves the backlog's identity and the
+sprint plan's arithmetic and is the operator's scheduling decision.
+
+**Verification.** Feature profile, 28 gates including `corpus` and `gpu`, on the
+staged tree recorded in the verify ledger.
+
+**Corpus.** Pass.
+
+**Notes for future sessions.** **A percentage in prose is a fact about the
+sampler until it carries its frame.** This story shipped an unframed "83 per
+cent" twice, in two files, for two different questions. Measured over several
+frames the same quantity ranges from 6.0 to 99.9 per cent and the out-of-range
+rate from 22 to 50 per cent, so both the rate and the worst-case magnitude move
+with how the parameters are drawn. Both numbers are deleted. The worked example
+is exact and reproduces, and that is what the records claim.
+
+**And an argument nobody depends on is worth deleting rather than correcting.**
+Three separate versions of a comment about which VOI boundary operator is
+observable were each falsified by the next review pass, the third by legal
+windows where the operator moves the output by 42.5 of 255. The fourth version
+is a deletion. The operators are written as PS3.3 writes them, which needs no
+mutation to justify it, and the test that does pin one says only what it pins.

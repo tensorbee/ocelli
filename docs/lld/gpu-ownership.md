@@ -1,6 +1,6 @@
 # GPU ownership
 
-**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-X001
+**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-041, F-X001
 **Last updated:** 2026-09-14
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
@@ -35,6 +35,20 @@ here before anything uses it.
 
 `ocelli-compute` depends on `ocelli-render`. Section 31 fixes it by saying the
 renderer owns the device and compute borrows it.
+
+**F-041 added `ocelli-render` on `ocelli-pixel`**, and it points the other way
+for a different reason. HLD section 18 says to implement the LUT chain once in
+`ocelli-pixel` "and let the shader read the parameters", which requires the
+renderer to be able to see them. `VoiParams::from_chain` reads a resolved
+`LutChain` and computes nothing. Section 4's crate table forbids no direction,
+and the alternative, putting a `#[repr(C)]` uniform in a `no_std` crate that
+holds no GPU type, would move a rendering concern into the pixel crate to avoid
+an edge that costs nothing.
+
+The same story added `ocelli-core` as a DEV dependency of `ocelli-render`,
+because `LutChain::map_into`'s signature is in `Stored` and `Display` and the
+sweep test compares against it. That one never enters the shipped surface, which
+reaches `ocelli-core` through `ocelli-pixel` and does not name it.
 
 It is not a cycle because **the renderer consumes compute results, it does not
 call kernels**. The caller that drives both is `ocelli-viewport`. Section 31's

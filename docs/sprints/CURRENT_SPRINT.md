@@ -11,7 +11,7 @@ against the arithmetic `ocelli-pixel` already owns.
 |------|----------|-------|-------|-----|--------|
 | F-031 | E5.1 | `ocelli-cache`: budgeted LRU across encoded, decoded and GPU tiers | Rust | 4w | pending |
 | F-037 | E6.1 | `ocelli-render`: device init, capability tiering, device-lost recovery | Rust | 4w | done |
-| F-041 | E6.5 | WGSL LUT-chain shader | Rust | 4w | pending |
+| F-041 | E6.5 | WGSL LUT-chain shader | Rust | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:

@@ -4,7 +4,7 @@
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1,
 `docs/hld/15-lut-chain.md` sections 18 through 18.3, DICOM PS3.3 C.7.6.2,
 C.7.6.3, C.7.9 and C.11
-**F-IDs that contributed:** F-018, F-029, F-030
+**F-IDs that contributed:** F-018, F-029, F-030, F-041
 **Last updated:** 2026-09-14
 
 Living current-state document. It describes what the code does today.
@@ -209,6 +209,97 @@ window centre. The fixtures therefore assert an input away from the centre.
 of its own. Its reason to exist is the resolution above, plus `inverts()`, which
 is the single flag HLD section 18.4's `invert : u32` uniform carries. A shader
 reads the resolved flag and does not combine evidence itself.
+
+**F-041 built that shader and the accessors it reads through.**
+`ModalityTransform::rescale` returns section 18.4's `slope` and `intercept`,
+`VoiTransform::window` returns its `center`, `width` and function, and
+`LutChain::modality` and `LutChain::voi` expose the two stages as shared
+borrows. **All four add no arithmetic**: each returns state the type already
+holds, which is the reading half of section 18's "implement it once, in
+ocelli-pixel, and let the shader read the parameters".
+
+Both accessors return `None` for a LUT Sequence, and that is not a gap.
+Section 18.4's uniform has `slope`, `intercept`, `center` and `width` and no
+field for a sequence, while section 18's stage table says a sequence TAKES
+PRECEDENCE over those values. So there is nothing honest to return, and
+`ocelli_render::VoiParams::from_chain` turns the `None` into a refusal rather
+than substituting the values the sequence overrode. That is HLD section 31's
+rule generalised by deviation D-07: the GPU path reports unavailable and tier C
+runs the sequence through `LutChain::map_into` as it always did.
+
+### The measured divergence between the shader and this crate
+
+**0.000030517578**, the maximum absolute difference between
+`ocelli_render::VOI_WGSL` on a real adapter and `LutChain::map_into`, over 4096
+stored values spanning both clamps, all three VOI functions, inverted and not.
+That is two `f32` ULP at 255, or one at 256, against an asserted bound of
+`1e-4`. Recorded on `aarch64-apple-darwin`, Metal, tier A, by
+`crates/ocelli-render/tests/voi_shader.rs::the_shader_agrees_with_ocelli_pixel_over_a_sweep`,
+which prints it on every run.
+
+**It is a measured divergence and not a bit-exactness claim**, which is decision
+D14. WGSL's `exp` is not required to be correctly rounded and this crate's comes
+from glam's libm backend, so SIGMOID can legitimately differ in the last places
+on other hardware.
+
+**And it is weaker than an oracle verdict.** Both sides are ours, so a shared
+misreading of PS3.3 would agree with itself. What stops the comparison being
+circular is that the section 18.3 rows, the boundary rows, the width-one rows
+and the SIGMOID row are asserted on the GPU against values hand-computed from
+PS3.3 rather than against anything this repository produced.
+
+### An open finding against this crate's own arithmetic, found by F-041
+
+**A legal LINEAR chain can return a value outside its declared output range, at
+one input per window, on the CPU and the GPU identically.**
+
+Measured in `f32`, centre `1024.5`, width `1.0003662109375`, range `[0, 255]`.
+Both are accepted by `VoiTransform::new`. Then
+`c' = 1024`, `w' = 0.00036621094`, and the upper breakpoint `fl(c' + w'/2)`
+rounds to `1024.0002`. The body evaluated there is **297.50003** against a
+declared `ymax` of 255, an overshoot of 42.5. The comparison `x > c' + w'/2` is
+false at that input, so the clamp does not fire and the body runs.
+
+**The cause is that PS3.3 C.11.2.1.2's formula in single precision does not
+reproduce its own breakpoint.** `(fl(c' + w'/2) - c') / w'` is not exactly
+`0.5` when `w'` is small relative to `c'`. At the parameters above the quotient
+is `0.6666667`.
+
+**Only the UPPER breakpoint can escape**, because the comparisons are
+asymmetric. The lower one is `<=`, so at `x == lower` the clamp fires and the
+body is never evaluated. The upper one is `>`, so at `x == upper` it does not.
+That is one input per window.
+
+**NO PERCENTAGE IS GIVEN HERE, DELIBERATELY.** An earlier version of this
+paragraph said 83 per cent of randomly drawn legal parameter pairs, which was a
+figure measured for a different question, how often the lower OPERATOR is
+observable, and which cannot describe this one, because the lower side never
+leaves the range. The F-041 review then measured the right question at 28.3 per
+cent and this author measured it at 50.0 per cent, both over 1,500,000 draws,
+differing only in how `c` and `w` were distributed. A rate that moves by that
+much with the sampling frame is a fact about the sampler, and quoting one
+without its frame is the shape `CLAUDE.md` names as this repository's repeating
+failure. The worked example above is exact and reproduces, and that is the claim
+this section makes.
+
+**It is not F-041's and F-041 did not touch it.** The shader reproduces
+`LutChain::apply` to within two `f32` ULP over F-041's sweep, and **at these
+particular parameters the two agree bit for bit**, `0x4394c001` on both, so both
+sides overshoot together and by the same amount. The arithmetic is this
+crate's, from F-018.
+
+**It is not fixed here and no tolerance was widened to hide it.** Fixing it
+means clamping the result to `[ymin, ymax]` after the body, or evaluating the
+comparison in a wider type, and either is a change to the pixel arithmetic that
+needs its own design plan, its own fixtures and its own oracle verdict. What
+exists today is this paragraph and the numbers to reproduce it.
+
+**The uniform's layout is `ocelli-render`'s and its values are this crate's.**
+`ocelli-pixel` stays `no_std`, gains no `#[repr(C)]` struct and learns nothing
+about bindings. What stops the two halves disagreeing is that `ymin` and `ymax`
+reach the uniform from `VoiTransform::output_range`, which is the same range
+`LutChain::new` constructed the presentation stage with, so the shader's
+reflection is about the range the inversion flag was resolved against.
 
 A declared Presentation LUT Sequence `(2050,0010)` reports
 `PresentationLutSequenceUnsupported` rather than falling back to the shape. No

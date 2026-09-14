@@ -30,6 +30,7 @@
 pub mod caps;
 pub mod gpu;
 pub mod probe;
+pub mod voi;
 
 pub use caps::{
     AdapterFacts, Caps, DecidedBy, FailedAdapter, FillRate, FillRateBands, OverrideOutcome,
@@ -38,6 +39,7 @@ pub use caps::{
 };
 pub use gpu::{DeviceError, DeviceLoss, DeviceState, GpuContext, Recovered, SharedEncoder};
 pub use probe::{Edge, Passes, ResolvedAdapter, resolve, resolve_adapter};
+pub use voi::{VOI_WGSL, VoiParams, VoiParamsError};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.
