@@ -1,7 +1,7 @@
 # Codec registry
 
-**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028
-**Last updated:** 2026-09-13
+**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028, F-030
+**Last updated:** 2026-09-14
 
 `ocelli-codec` owns decoder capability, registration, and exact Transfer
 Syntax UID dispatch. Concrete adapters cover native Implicit and Explicit VR
@@ -119,8 +119,22 @@ catches a frame declared as colour. The codestream check catches a
 the file that claims to be monochrome and is not, and no descriptor check can
 see it.
 
-A multi-component JPEG-LS corpus row is still owed, which gate A2 recorded. The
-adapter refuses one cleanly, so the gap is coverage rather than a wrong pixel.
+**The multi-component corpus row gate A2 recorded as owed exists as of F-030.**
+`syntax/jpegls_lossless_rgb8.dcm` is the RGB reference encoded to
+`1.2.840.10008.1.2.4.80` by `pyjpegls` 1.5.1, declaring `Nf = 3` and `ILV = 2`.
+The adapter still refuses it, which is the required behaviour rather than a gap:
+the adopted crate has no multi-component support and a clean refusal is HLD
+section 31's rule.
+
+The row is not a duplicate of `tests/fixtures/jpegls_rgb8_ilv1.jls`. That
+fixture is repository-local, 16 by 16, and **line**-interleaved, `ILV = 1`. The
+corpus row is manifest-backed, 64 by 96, and **sample**-interleaved, `ILV = 2`.
+The adapter's condition is `interleave != 0`, so a test at one value does not
+speak for the other, and only one of the two is manifest-backed. Both are
+asserted, and both go red when the header check is removed.
+
+What remains owed is multi-component **decoding**, which is a codec story with
+its own candidate evidence and not a corpus gap.
 
 ### The modality rescale is pinned to the identity
 

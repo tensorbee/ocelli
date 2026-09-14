@@ -9,24 +9,73 @@
       "citation": "PS3.3 C.11.2.1.2 and C.11.2.1.3.2, with deviation D-13",
       "windowCenter": 40.0,
       "windowWidth": 400.0,
-      "outputRange": [0.0, 255.0],
+      "outputRange": [
+        0.0,
+        255.0
+      ],
       "samples": [
-        { "input": -160.0, "linear": 0.0, "linearExact": 0.0 },
-        { "input": 40.0, "linear": 127.81954887218046, "linearExact": 127.5 },
-        { "input": 240.0, "linear": 255.0, "linearExact": 255.0 },
-        { "input": -60.0, "linear": 63.90977443609023, "linearExact": 63.75 }
+        {
+          "input": -160.0,
+          "linear": 0.0,
+          "linearExact": 0.0
+        },
+        {
+          "input": 40.0,
+          "linear": 127.81954887218046,
+          "linearExact": 127.5
+        },
+        {
+          "input": 240.0,
+          "linear": 255.0,
+          "linearExact": 255.0
+        },
+        {
+          "input": -60.0,
+          "linear": 63.90977443609023,
+          "linearExact": 63.75
+        }
       ]
     }
   },
   "geometryFixtures": {
     "oblique-nonsquare": {
       "citation": "PS3.3 C.7.6.2.1.1",
-      "imagePositionPatient": [10.0, 20.0, 30.0],
-      "imageOrientationPatient": [0.8, 0.6, 0.0, 0.0, 0.0, -1.0],
-      "pixelSpacing": [0.5, 0.25],
+      "imagePositionPatient": [
+        10.0,
+        20.0,
+        30.0
+      ],
+      "imageOrientationPatient": [
+        0.8,
+        0.6,
+        0.0,
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "pixelSpacing": [
+        0.5,
+        0.25
+      ],
       "samples": [
-        { "column": 2.0, "row": 3.0, "patient": [10.4, 20.3, 28.5] },
-        { "column": 7.0, "row": 4.0, "patient": [11.4, 21.05, 28.0] }
+        {
+          "column": 2.0,
+          "row": 3.0,
+          "patient": [
+            10.4,
+            20.3,
+            28.5
+          ]
+        },
+        {
+          "column": 7.0,
+          "row": 4.0,
+          "patient": [
+            11.4,
+            21.05,
+            28.0
+          ]
+        }
       ]
     }
   },
@@ -34,139 +83,541 @@
     "synthetic/ct_unsigned_16.dcm": {
       "citation": "PS3.3 C.7.6.3, C.11 and C.11.6",
       "fields": {
-        "/attributes/bitsAllocated": { "scope": "top-level", "value": 16 },
-        "/attributes/bitsStored": { "scope": "top-level", "value": 16 },
-        "/attributes/highBit": { "scope": "top-level", "value": 15 },
-        "/attributes/pixelRepresentation": { "scope": "top-level", "value": 0 },
-        "/attributes/rescaleSlope": { "scope": "top-level", "value": 1.0 },
-        "/attributes/rescaleIntercept": { "scope": "top-level", "value": 0.0 },
-        "/attributes/windowCenter": { "scope": "top-level", "value": [40.0] },
-        "/attributes/windowWidth": { "scope": "top-level", "value": [400.0] },
-        "/attributes/voiLutFunction": { "scope": "top-level", "value": "LINEAR" },
-        "/attributes/photometricInterpretation": { "scope": "top-level", "value": "MONOCHROME2" },
-        "/attributes/samplesPerPixel": { "scope": "top-level", "value": 1 },
-        "/attributes/rows": { "scope": "top-level", "value": 12 },
-        "/attributes/columns": { "scope": "top-level", "value": 20 },
-        "/attributes/pixelSpacing": { "scope": "top-level", "value": [0.5, 0.25] },
-        "/attributes/presentationLutShape": { "scope": "top-level", "value": "INVERSE" }
+        "/attributes/bitsAllocated": {
+          "scope": "top-level",
+          "value": 16
+        },
+        "/attributes/bitsStored": {
+          "scope": "top-level",
+          "value": 16
+        },
+        "/attributes/highBit": {
+          "scope": "top-level",
+          "value": 15
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 0
+        },
+        "/attributes/rescaleSlope": {
+          "scope": "top-level",
+          "value": 1.0
+        },
+        "/attributes/rescaleIntercept": {
+          "scope": "top-level",
+          "value": 0.0
+        },
+        "/attributes/windowCenter": {
+          "scope": "top-level",
+          "value": [
+            40.0
+          ]
+        },
+        "/attributes/windowWidth": {
+          "scope": "top-level",
+          "value": [
+            400.0
+          ]
+        },
+        "/attributes/voiLutFunction": {
+          "scope": "top-level",
+          "value": "LINEAR"
+        },
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "MONOCHROME2"
+        },
+        "/attributes/samplesPerPixel": {
+          "scope": "top-level",
+          "value": 1
+        },
+        "/attributes/rows": {
+          "scope": "top-level",
+          "value": 12
+        },
+        "/attributes/columns": {
+          "scope": "top-level",
+          "value": 20
+        },
+        "/attributes/pixelSpacing": {
+          "scope": "top-level",
+          "value": [
+            0.5,
+            0.25
+          ]
+        },
+        "/attributes/presentationLutShape": {
+          "scope": "top-level",
+          "value": "INVERSE"
+        }
       }
     },
     "synthetic/ct_signed_12in16_left.dcm": {
       "citation": "PS3.3 C.7.6.3 and C.11",
       "fields": {
-        "/attributes/bitsStored": { "scope": "top-level", "value": 12 },
-        "/attributes/highBit": { "scope": "top-level", "value": 15 },
-        "/attributes/pixelRepresentation": { "scope": "top-level", "value": 1 },
-        "/attributes/rescaleSlope": { "scope": "top-level", "value": 1.0 },
-        "/attributes/rescaleIntercept": { "scope": "top-level", "value": -1024.0 },
-        "/attributes/windowCenter": { "scope": "top-level", "value": [40.0] },
-        "/attributes/windowWidth": { "scope": "top-level", "value": [400.0] },
-        "/attributes/voiLutFunction": { "scope": "top-level", "value": "LINEAR" },
-        "/cornerstoneMetadata/modalityLutModule/rescaleSlope": { "scope": "top-level", "sourcePointer": "/metadataSources/cornerstoneMetadata/modalityLutModule/rescaleSlope", "value": 1.0 },
-        "/cornerstoneMetadata/modalityLutModule/rescaleIntercept": { "scope": "top-level", "sourcePointer": "/metadataSources/cornerstoneMetadata/modalityLutModule/rescaleIntercept", "value": -1024.0 },
-        "/cornerstoneMetadata/voiLutModule/windowCenter": { "scope": "top-level", "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/windowCenter", "value": [40.0] },
-        "/cornerstoneMetadata/voiLutModule/windowWidth": { "scope": "top-level", "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/windowWidth", "value": [400.0] },
-        "/cornerstoneMetadata/imagePixelModule/bitsStored": { "scope": "top-level", "sourcePointer": "/metadataSources/cornerstoneMetadata/imagePixelModule/bitsStored", "value": 12 },
-        "/cornerstoneMetadata/imagePixelModule/highBit": { "scope": "top-level", "sourcePointer": "/metadataSources/cornerstoneMetadata/imagePixelModule/highBit", "value": 15 },
-        "/cornerstoneMetadata/imagePixelModule/pixelRepresentation": { "scope": "top-level", "sourcePointer": "/metadataSources/cornerstoneMetadata/imagePixelModule/pixelRepresentation", "value": 1 }
+        "/attributes/bitsStored": {
+          "scope": "top-level",
+          "value": 12
+        },
+        "/attributes/highBit": {
+          "scope": "top-level",
+          "value": 15
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 1
+        },
+        "/attributes/rescaleSlope": {
+          "scope": "top-level",
+          "value": 1.0
+        },
+        "/attributes/rescaleIntercept": {
+          "scope": "top-level",
+          "value": -1024.0
+        },
+        "/attributes/windowCenter": {
+          "scope": "top-level",
+          "value": [
+            40.0
+          ]
+        },
+        "/attributes/windowWidth": {
+          "scope": "top-level",
+          "value": [
+            400.0
+          ]
+        },
+        "/attributes/voiLutFunction": {
+          "scope": "top-level",
+          "value": "LINEAR"
+        },
+        "/cornerstoneMetadata/modalityLutModule/rescaleSlope": {
+          "scope": "top-level",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/modalityLutModule/rescaleSlope",
+          "value": 1.0
+        },
+        "/cornerstoneMetadata/modalityLutModule/rescaleIntercept": {
+          "scope": "top-level",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/modalityLutModule/rescaleIntercept",
+          "value": -1024.0
+        },
+        "/cornerstoneMetadata/voiLutModule/windowCenter": {
+          "scope": "top-level",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/windowCenter",
+          "value": [
+            40.0
+          ]
+        },
+        "/cornerstoneMetadata/voiLutModule/windowWidth": {
+          "scope": "top-level",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/windowWidth",
+          "value": [
+            400.0
+          ]
+        },
+        "/cornerstoneMetadata/imagePixelModule/bitsStored": {
+          "scope": "top-level",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/imagePixelModule/bitsStored",
+          "value": 12
+        },
+        "/cornerstoneMetadata/imagePixelModule/highBit": {
+          "scope": "top-level",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/imagePixelModule/highBit",
+          "value": 15
+        },
+        "/cornerstoneMetadata/imagePixelModule/pixelRepresentation": {
+          "scope": "top-level",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/imagePixelModule/pixelRepresentation",
+          "value": 1
+        }
       }
     },
     "synthetic/ct_signed_12in16_right.dcm": {
       "citation": "PS3.3 C.7.6.3 and C.11",
       "fields": {
-        "/attributes/bitsStored": { "scope": "top-level", "value": 12 },
-        "/attributes/highBit": { "scope": "top-level", "value": 11 },
-        "/attributes/pixelRepresentation": { "scope": "top-level", "value": 1 },
-        "/attributes/rescaleIntercept": { "scope": "top-level", "value": -1024.0 }
+        "/attributes/bitsStored": {
+          "scope": "top-level",
+          "value": 12
+        },
+        "/attributes/highBit": {
+          "scope": "top-level",
+          "value": 11
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 1
+        },
+        "/attributes/rescaleIntercept": {
+          "scope": "top-level",
+          "value": -1024.0
+        }
       }
     },
     "synthetic/ct_sigmoid_width_half.dcm": {
       "citation": "PS3.3 C.11.1 and C.11.2.1.3.1",
       "fields": {
-        "/attributes/rescaleSlope": { "scope": "top-level", "value": 0.25 },
-        "/attributes/rescaleIntercept": { "scope": "top-level", "value": 0.0 },
-        "/attributes/windowCenter": { "scope": "top-level", "value": [40.0] },
-        "/attributes/windowWidth": { "scope": "top-level", "value": [0.5] },
-        "/attributes/voiLutFunction": { "scope": "top-level", "value": "SIGMOID" }
+        "/attributes/rescaleSlope": {
+          "scope": "top-level",
+          "value": 0.25
+        },
+        "/attributes/rescaleIntercept": {
+          "scope": "top-level",
+          "value": 0.0
+        },
+        "/attributes/windowCenter": {
+          "scope": "top-level",
+          "value": [
+            40.0
+          ]
+        },
+        "/attributes/windowWidth": {
+          "scope": "top-level",
+          "value": [
+            0.5
+          ]
+        },
+        "/attributes/voiLutFunction": {
+          "scope": "top-level",
+          "value": "SIGMOID"
+        }
       }
     },
     "synthetic/cr_monochrome1.dcm": {
       "citation": "PS3.3 C.7.6.3.1.2 and C.11.2",
       "fields": {
-        "/attributes/photometricInterpretation": { "scope": "top-level", "value": "MONOCHROME1" },
-        "/attributes/rescaleSlope": { "scope": "top-level", "value": null },
-        "/attributes/rescaleIntercept": { "scope": "top-level", "value": null },
-        "/attributes/windowCenter": { "scope": "top-level", "value": [2048.0] },
-        "/attributes/windowWidth": { "scope": "top-level", "value": [4096.0] }
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "MONOCHROME1"
+        },
+        "/attributes/rescaleSlope": {
+          "scope": "top-level",
+          "value": null
+        },
+        "/attributes/rescaleIntercept": {
+          "scope": "top-level",
+          "value": null
+        },
+        "/attributes/windowCenter": {
+          "scope": "top-level",
+          "value": [
+            2048.0
+          ]
+        },
+        "/attributes/windowWidth": {
+          "scope": "top-level",
+          "value": [
+            4096.0
+          ]
+        }
       }
     },
     "synthetic/sc_rgb_interleaved.dcm": {
       "citation": "PS3.3 C.7.6.3.1.3",
       "fields": {
-        "/attributes/photometricInterpretation": { "scope": "top-level", "value": "RGB" },
-        "/attributes/samplesPerPixel": { "scope": "top-level", "value": 3 },
-        "/attributes/planarConfiguration": { "scope": "top-level", "value": 0 }
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "RGB"
+        },
+        "/attributes/samplesPerPixel": {
+          "scope": "top-level",
+          "value": 3
+        },
+        "/attributes/planarConfiguration": {
+          "scope": "top-level",
+          "value": 0
+        }
       }
     },
     "synthetic/sc_rgb_planar.dcm": {
       "citation": "PS3.3 C.7.6.3.1.3",
       "fields": {
-        "/attributes/photometricInterpretation": { "scope": "top-level", "value": "RGB" },
-        "/attributes/samplesPerPixel": { "scope": "top-level", "value": 3 },
-        "/attributes/planarConfiguration": { "scope": "top-level", "value": 1 }
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "RGB"
+        },
+        "/attributes/samplesPerPixel": {
+          "scope": "top-level",
+          "value": 3
+        },
+        "/attributes/planarConfiguration": {
+          "scope": "top-level",
+          "value": 1
+        }
       }
     },
     "synthetic/mr_nonsquare_spacing.dcm": {
       "citation": "PS3.3 C.7.6.2.1.1",
       "fields": {
-        "/attributes/imagePositionPatient": { "scope": "top-level", "value": [0.0, 0.0, 0.0] },
-        "/attributes/imageOrientationPatient": { "scope": "top-level", "value": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0] },
-        "/attributes/pixelSpacing": { "scope": "top-level", "value": [0.5, 0.25] },
-        "/attributes/sliceThickness": { "scope": "top-level", "value": 3.0 }
+        "/attributes/imagePositionPatient": {
+          "scope": "top-level",
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "/attributes/imageOrientationPatient": {
+          "scope": "top-level",
+          "value": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0
+          ]
+        },
+        "/attributes/pixelSpacing": {
+          "scope": "top-level",
+          "value": [
+            0.5,
+            0.25
+          ]
+        },
+        "/attributes/sliceThickness": {
+          "scope": "top-level",
+          "value": 3.0
+        }
       }
     },
     "synthetic/ct_multiframe_perframe.dcm": {
       "citation": "PS3.3 C.7.6.16, C.11.1 and C.11.2",
       "fields": {
-        "/attributes/rescaleSlope": { "scope": "top-level", "value": null },
-        "/attributes/rescaleIntercept": { "scope": "top-level", "value": null },
-        "/cornerstoneMetadata/modalityLutModule/rescaleSlope": { "scope": "per-frame", "sourcePointer": "/metadataSources/cornerstoneMetadata/modalityLutModule/rescaleSlope", "value": 1.0 },
-        "/cornerstoneMetadata/modalityLutModule/rescaleIntercept": { "scope": "per-frame", "sourcePointer": "/metadataSources/cornerstoneMetadata/modalityLutModule/rescaleIntercept", "value": -1024.0 },
-        "/cornerstoneMetadata/voiLutModule/windowCenter": { "scope": "per-frame", "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/windowCenter", "value": [40.0] },
-        "/cornerstoneMetadata/voiLutModule/windowWidth": { "scope": "per-frame", "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/windowWidth", "value": [400.0] },
-        "/cornerstoneMetadata/voiLutModule/voiLUTFunction": { "scope": "per-frame", "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/voiLUTFunction", "value": "LINEAR" },
-        "/cornerstoneMetadata/imagePlaneModule/pixelSpacing": { "scope": "shared-functional-group", "sourcePointer": "/metadataSources/cornerstoneMetadata/imagePlaneModule/pixelSpacing", "value": [0.5, 0.25] },
-        "/cornerstoneMetadata/imagePlaneModule/sliceThickness": { "scope": "shared-functional-group", "sourcePointer": "/metadataSources/cornerstoneMetadata/imagePlaneModule/sliceThickness", "value": 2.5 }
+        "/attributes/rescaleSlope": {
+          "scope": "top-level",
+          "value": null
+        },
+        "/attributes/rescaleIntercept": {
+          "scope": "top-level",
+          "value": null
+        },
+        "/cornerstoneMetadata/modalityLutModule/rescaleSlope": {
+          "scope": "per-frame",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/modalityLutModule/rescaleSlope",
+          "value": 1.0
+        },
+        "/cornerstoneMetadata/modalityLutModule/rescaleIntercept": {
+          "scope": "per-frame",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/modalityLutModule/rescaleIntercept",
+          "value": -1024.0
+        },
+        "/cornerstoneMetadata/voiLutModule/windowCenter": {
+          "scope": "per-frame",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/windowCenter",
+          "value": [
+            40.0
+          ]
+        },
+        "/cornerstoneMetadata/voiLutModule/windowWidth": {
+          "scope": "per-frame",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/windowWidth",
+          "value": [
+            400.0
+          ]
+        },
+        "/cornerstoneMetadata/voiLutModule/voiLUTFunction": {
+          "scope": "per-frame",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/voiLUTFunction",
+          "value": "LINEAR"
+        },
+        "/cornerstoneMetadata/imagePlaneModule/pixelSpacing": {
+          "scope": "shared-functional-group",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/imagePlaneModule/pixelSpacing",
+          "value": [
+            0.5,
+            0.25
+          ]
+        },
+        "/cornerstoneMetadata/imagePlaneModule/sliceThickness": {
+          "scope": "shared-functional-group",
+          "sourcePointer": "/metadataSources/cornerstoneMetadata/imagePlaneModule/sliceThickness",
+          "value": 2.5
+        }
       }
     },
     "syntax/jpeg_baseline_rgb8.dcm": {
       "citation": "PS3.3 C.7.6.3 and PS3.5 8.2.1",
       "fields": {
-        "/attributes/transferSyntaxUID": { "scope": "top-level", "value": "1.2.840.10008.1.2.4.50" },
-        "/attributes/photometricInterpretation": { "scope": "top-level", "value": "YBR_FULL_422" },
-        "/attributes/samplesPerPixel": { "scope": "top-level", "value": 3 },
-        "/attributes/planarConfiguration": { "scope": "top-level", "value": 0 },
-        "/attributes/bitsAllocated": { "scope": "top-level", "value": 8 },
-        "/attributes/bitsStored": { "scope": "top-level", "value": 8 },
-        "/attributes/highBit": { "scope": "top-level", "value": 7 },
-        "/attributes/pixelRepresentation": { "scope": "top-level", "value": 0 },
-        "/attributes/rows": { "scope": "top-level", "value": 64 },
-        "/attributes/columns": { "scope": "top-level", "value": 96 },
-        "/attributes/lossyImageCompression": { "scope": "top-level", "value": "01" },
-        "/attributes/lossyImageCompressionMethod": { "scope": "top-level", "value": "ISO_10918_1" }
+        "/attributes/transferSyntaxUID": {
+          "scope": "top-level",
+          "value": "1.2.840.10008.1.2.4.50"
+        },
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "YBR_FULL_422"
+        },
+        "/attributes/samplesPerPixel": {
+          "scope": "top-level",
+          "value": 3
+        },
+        "/attributes/planarConfiguration": {
+          "scope": "top-level",
+          "value": 0
+        },
+        "/attributes/bitsAllocated": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/bitsStored": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/highBit": {
+          "scope": "top-level",
+          "value": 7
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 0
+        },
+        "/attributes/rows": {
+          "scope": "top-level",
+          "value": 64
+        },
+        "/attributes/columns": {
+          "scope": "top-level",
+          "value": 96
+        },
+        "/attributes/lossyImageCompression": {
+          "scope": "top-level",
+          "value": "01"
+        },
+        "/attributes/lossyImageCompressionMethod": {
+          "scope": "top-level",
+          "value": "ISO_10918_1"
+        }
       }
     },
     "syntax/reference_mono12.dcm": {
       "citation": "PS3.3 C.7.6.3",
       "fields": {
-        "/attributes/transferSyntaxUID": { "scope": "top-level", "value": "1.2.840.10008.1.2.1" },
-        "/attributes/bitsAllocated": { "scope": "top-level", "value": 16 },
-        "/attributes/bitsStored": { "scope": "top-level", "value": 12 },
-        "/attributes/highBit": { "scope": "top-level", "value": 11 },
-        "/attributes/pixelRepresentation": { "scope": "top-level", "value": 0 },
-        "/attributes/rows": { "scope": "top-level", "value": 64 },
-        "/attributes/columns": { "scope": "top-level", "value": 96 },
-        "/attributes/rescaleIntercept": { "scope": "top-level", "value": 0.0 }
+        "/attributes/transferSyntaxUID": {
+          "scope": "top-level",
+          "value": "1.2.840.10008.1.2.1"
+        },
+        "/attributes/bitsAllocated": {
+          "scope": "top-level",
+          "value": 16
+        },
+        "/attributes/bitsStored": {
+          "scope": "top-level",
+          "value": 12
+        },
+        "/attributes/highBit": {
+          "scope": "top-level",
+          "value": 11
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 0
+        },
+        "/attributes/rows": {
+          "scope": "top-level",
+          "value": 64
+        },
+        "/attributes/columns": {
+          "scope": "top-level",
+          "value": 96
+        },
+        "/attributes/rescaleIntercept": {
+          "scope": "top-level",
+          "value": 0.0
+        }
+      }
+    },
+    "synthetic/sc_palette_color.dcm": {
+      "citation": "PS3.3 C.7.9 and C.7.6.3.1.5",
+      "fields": {
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "PALETTE COLOR"
+        },
+        "/attributes/samplesPerPixel": {
+          "scope": "top-level",
+          "value": 1
+        },
+        "/attributes/bitsAllocated": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/bitsStored": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/highBit": {
+          "scope": "top-level",
+          "value": 7
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 0
+        },
+        "/attributes/rows": {
+          "scope": "top-level",
+          "value": 12
+        },
+        "/attributes/columns": {
+          "scope": "top-level",
+          "value": 20
+        }
+      }
+    },
+    "synthetic/sc_palette_color_16.dcm": {
+      "citation": "PS3.3 C.7.9 and C.7.6.3.1.5",
+      "fields": {
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "PALETTE COLOR"
+        },
+        "/attributes/samplesPerPixel": {
+          "scope": "top-level",
+          "value": 1
+        },
+        "/attributes/bitsAllocated": {
+          "scope": "top-level",
+          "value": 16
+        },
+        "/attributes/bitsStored": {
+          "scope": "top-level",
+          "value": 16
+        },
+        "/attributes/highBit": {
+          "scope": "top-level",
+          "value": 15
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 0
+        },
+        "/attributes/rows": {
+          "scope": "top-level",
+          "value": 12
+        },
+        "/attributes/columns": {
+          "scope": "top-level",
+          "value": 20
+        }
+      }
+    },
+    "syntax/jpegls_lossless_rgb8.dcm": {
+      "citation": "PS3.3 C.7.6.3.1.3 and PS3.5 A.4.3",
+      "fields": {
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "RGB"
+        },
+        "/attributes/samplesPerPixel": {
+          "scope": "top-level",
+          "value": 3
+        },
+        "/attributes/bitsAllocated": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 0
+        }
       }
     }
   }

@@ -40,6 +40,17 @@ Repository bootstrap. Nothing is published.
   Photometric Interpretation and Presentation LUT Shape, an explicit shape
   overrides rather than composes, and a declared Presentation LUT Sequence
   reports unsupported rather than falling back.
+- The colour stage of the LUT chain, completing DICOM PS3.3 C.11. Palette
+  colour indexes the stored value through the three lookup tables, honouring the
+  descriptor's first mapped input and its zero-means-65,536 entry count. RGB,
+  YBR_FULL, YBR_FULL_422 and YBR_PARTIAL_422 are interpreted, with the inverse
+  matrices derived from PS3.3 C.7.6.3.1.2's own equations. YBR_ICT and YBR_RCT
+  report unsupported, because the JPEG 2000 codec owns those transforms. The
+  colour conversion is applied exactly once, decided against the decoder's own
+  reported output space, so a frame a codec already converted is not converted
+  again. Planar Configuration is honoured for native Pixel Data and ignored for
+  encapsulated. A 4:2:2 frame is read as two stored samples per pixel rather
+  than three.
 - Enhanced multiframe projection with checked frame counts, retained shared
   and per-frame functional-group provenance, and bounded frame indexing.
 - Derived per-frame image-plane geometry, with calibrated against uncalibrated

@@ -146,7 +146,7 @@ A frame parses, decodes and passes the hand-computed LUT fixtures of HLD section
 | F-027 | E4.5 | S09 | HTJ2K: spike, then integrate or bridge to openjph wasm | Rust | 5w | F-026 | done |
 | F-028 | E4.6 | S09 | JPEG-LS: decide CharLS bridge vs pure Rust, then integrate | Rust | 5w | F-023 | done |
 | F-029 | E4.7 | S09 | LUT chain: modality, VOI (linear / exact / sigmoid), presentation, invert | Rust | 3w | F-023 | done |
-| F-030 | E4.8 | S10 | Palette colour, planar configuration, photometric interpretation, YBR | Rust | 2w | F-029 | pending |
+| F-030 | E4.8 | S10 | Palette colour, planar configuration, photometric interpretation, YBR | Rust | 2w | F-029 | done |
 
 ### M3, Cache and the render core
 

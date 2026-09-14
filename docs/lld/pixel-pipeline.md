@@ -3,9 +3,9 @@
 **Area**: `crates/ocelli-pixel`
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1,
 `docs/hld/15-lut-chain.md` sections 18 through 18.3, DICOM PS3.3 C.7.6.2,
-C.7.6.3 and C.11
-**F-IDs that contributed:** F-018, F-029
-**Last updated:** 2026-09-13
+C.7.6.3, C.7.9 and C.11
+**F-IDs that contributed:** F-018, F-029, F-030
+**Last updated:** 2026-09-14
 
 Living current-state document. It describes what the code does today.
 
@@ -21,10 +21,25 @@ The stages are:
 decoded container bytes -> Stored -> Modality -> Display -> Display
 ```
 
-The three implemented stages are PS3.3 C.11's first three. Palette colour and
-ICC execution, which is C.11's stage 4, are not implemented. That stage maps the
-**stored** value through the palette descriptors rather than a `Display` value,
-so it is not a fourth arm on this chain.
+All four of PS3.3 C.11's stages are implemented. Stage 4 is **not** a fourth arm
+on the chain above, and deviation **D-23** records why: no arm of it takes a
+`Display` input. Palette colour maps the **stored** value through the palette
+descriptors, per C.7.6.3.1.5's "the first stored pixel value mapped", and the
+`RGB` and every `YBR_*` route map decoded samples that never entered the chain
+at all. ICC, which HLD section 18's table names beside palette, is not
+implemented.
+
+```text
+decoded container bytes -> Stored -> Modality -> Display -> Display    stages 1 to 3
+decoded container bytes -> Stored ------------------------> Rgb        stage 4
+```
+
+**Stage 3 and stage 4 partition the photometric interpretations exactly.**
+`PresentationTransform::new` refuses every colour space with
+`PresentationLutNotApplicable`, and `ColorTransform::resolve` refuses both
+monochrome ones with `ColorTransformNotApplicable`. A frame therefore reaches
+exactly one of the two, never both and never neither, and that is asserted from
+both sides rather than left as a reading of the two match statements.
 
 The crate is `no_std`. It uses `alloc` only while a LUT descriptor takes
 ownership of setup-time data and constructs its input keys. Scalar mapping,
@@ -104,6 +119,18 @@ The unpacker operates on decoded sample containers. A codec that expands
 subsampled colour or converts YCbCr to RGB must describe its actual output
 layout before this stage. It must not pass an on-wire subsampled byte count as
 three expanded samples per pixel.
+
+**`sample_count` is sized from `SampleLayout::stored_samples_per_pixel`, not
+from Samples per Pixel**, and the two differ for 4:2:2. PS3.3 C.7.6.3.1.2
+subsamples the chroma two to one horizontally and stores each pair of pixels as
+`Y1 Y2 Cb Cr`, so a frame is `Rows * Columns * 2` and not `* 3`. Samples per
+Pixel stays 3, because that is what the data set carries and what
+`SampleLayout::new` validated. Before F-030 the count was three per pixel, so
+the `synthetic/us_ybr_full_422.dcm` corpus row could not be unpacked at all:
+`unpack` demanded three bytes per pixel from a source holding two, and nothing
+observed it. An odd `Columns` with a 4:2:2 interpretation is refused with
+`SubsampledChromaAlignment`, before any length arithmetic, because half a
+chroma group cannot be stored.
 
 ## Modality stage
 
@@ -192,6 +219,116 @@ asserting what the code does.
 order: a malformed output range, then a non-greyscale photometric
 interpretation, then an unsupported sequence.
 
+## Colour stage
+
+`ColorTransform` implements PS3.3 C.7.6.3.1.2, C.7.6.3.1.3 and C.7.9. Its
+output is `Rgb`, three `f32` channels, declared in `ocelli-pixel` beside its
+only producer rather than added to HLD 16.1's listing of three scalar spaces.
+
+### The resolution, which is what stops a second conversion
+
+Two rules, each with one place to read them:
+
+```text
+colour space = Rgb                      when the decoder reports Rgb
+               the data set's value      otherwise
+
+layout       = Interleaved              when the decoder reports Interleaved
+               Interleaved              when the encoding is Encapsulated
+               the data set's value      otherwise
+```
+
+The first line is the guard. A JPEG decoder usually outputs RGB even though the
+data set still says `YBR_FULL_422`, and a second conversion on top of the
+decoder's own darkens and shifts hue on an image that still looks like an image.
+F-024 added `DecodePhotometricInterpretation` and `DecodeSampleLayout` to
+`ocelli-codec` to make that observable, and until F-030 every use of them was a
+decoder declaring its own behaviour. **Nothing read them to decide anything.**
+F-030 is the first stage that does, through the mirrored types below.
+
+The second layout line is C.7.6.3.1.3's "required to be 0 when the Pixel Data is
+encapsulated", so a data set declaring `1` for a JPEG frame is ignored. The
+third is the same attribute honoured for a native syntax. Both directions are
+asserted, because a test of the first alone cannot tell "ignored correctly" from
+"never read at all".
+
+`DecodedPhotometric` and `DecodedLayout` mirror the two `ocelli-codec` enums.
+The crates do not depend on each other, `ocelli-pixel` carrying portable
+arithmetic and `ocelli-codec` carrying five codec libraries, so the mapping
+between them is owed by whichever story first wires a decoder's output into this
+stage. `PixelRepresentation` already has this shape for the same reason.
+
+### The routes, and the two that are refused
+
+| Resolved space | What happens |
+|---|---|
+| `PALETTE COLOR` | three `LutDescriptor` lookups over the **stored** value |
+| `RGB` | layout only |
+| `YBR_FULL` | inverse full-range matrix |
+| `YBR_FULL_422` | chroma replicated across the pair, then the full-range matrix |
+| `YBR_PARTIAL_422` | chroma replicated, then the partial-range matrix |
+| `YBR_ICT`, `YBR_RCT` | refused, `CodecOwnedColorTransform` |
+| `MONOCHROME1`, `MONOCHROME2` | refused, `ColorTransformNotApplicable` |
+
+PS3.3 permits `YBR_ICT` and `YBR_RCT` only with JPEG 2000, where the
+codestream's own multiple component transform carries them.
+`crates/ocelli-codec/src/jpeg2000.rs` refuses `mct != 0`, so neither can reach
+this stage still in that space. RCT is an integer lifting transform and not a
+matrix at all, so applying the full-range matrix to it would produce a plausible
+image in the wrong colours. Under a decoder reporting `Rgb` the question does
+not arise, because the resolution has already replaced the space.
+
+The 4:2:2 upsample **replicates** rather than interpolating. PS3.3 names no
+filter, so interpolation would invent values the standard does not define.
+
+### The inverse matrices, and a measured divergence
+
+PS3.3 C.7.6.3.1.2 states the `RGB -> YBR` direction only. Decoding needs the
+inverse of a matrix whose coefficients the standard rounded to four decimals.
+**The implementation inverts the matrix the standard states**, in exact rational
+arithmetic, rather than using the textbook BT.601 inverse. Inverting the stated
+equations is self-consistent by construction, because those equations are the
+standard's definition of the encoding.
+
+The two differ by at most **0.020028 of 255** over the 8-bit cube, at
+`(Y, Cb, Cr) = (0, 0, 0)`. That is below one quantisation step and it is
+measured rather than claimed to be zero, which is decision D14. The fixtures run
+at a tolerance of `0.001`, twenty times tighter, so substituting BT.601
+constants makes them red. That was verified by mutation rather than reasoned
+about.
+
+Two coefficients in each matrix are near zero and are not typographical. They
+are the residue of the standard's rounding, and writing them as zero would be a
+second rounding decision this stage is not entitled to make.
+
+**Nothing is clamped to `[0, 255]`.** The rounded forward matrix is not exactly
+normalised, so a saturated primary encodes to `Cb = 255.5`, and three of the
+eight `YBR_FULL` fixture rows are negative on at least one channel. A stage that
+clamped would hide that. Clamping belongs with the rounding decision at the
+render or export boundary, which HLD 27.3 makes a review item wherever it lands.
+
+### Palette adds no lookup arithmetic
+
+`PaletteColorLut` is three `LutDescriptor`s and one cross-check. `LutDescriptor`
+already validates all three of C.7.6.3.1.5's descriptor values, including the
+zero-means-65,536 entry count, and its lookup already clamps below the first
+mapped input and above the last entry, which is C.7.6.3.1.5's stated clamping.
+HLD section 18 requires that arithmetic to exist exactly once and this was the
+one place in stage 4 where a second copy was available for free.
+
+The cross-check refuses three descriptors that disagree on entry count or first
+mapped input. A palette whose channels mapped different input ranges would shift
+hue against luminance, which no shape check on the result reveals.
+
+**A known cost, recorded rather than fixed.** `LutDescriptor` materialises an
+`inputs` ramp and binary-searches it, so a 16-bit palette holds 65,536 `f32`
+inputs per channel beside its values, about 1.5 MB for three channels where
+index arithmetic would need none of it. F-030 did not change it: the ramp is
+shared with the modality and VOI stages, and replacing the search with index
+arithmetic changes those two stages' behaviour at a fractional input. That is a
+change to validated pixel arithmetic and needs its own story and its own
+fixture.
+
 ## Failure boundary
 
 `PixelError` reports malformed plane attributes, stored-pixel descriptors,
@@ -204,8 +341,13 @@ and no `wasm-bindgen` type appears in this crate.
 The arithmetic is identical for all runtime tiers. Tiers A and B consume the
 CPU-prepared parameters and evidence, including `LutChain::inverts`, which is
 HLD section 18.4's `invert : u32`. Tier C uses the same implementation as its
-authoritative pixel path, entering it through `LutChain::map_into`. There is no
-tier-specific arithmetic copy.
+authoritative pixel path, entering it through `LutChain::map_into` and
+`ColorTransform::map_into`. There is no tier-specific arithmetic copy.
+
+The colour stage adds no shader, uniform or `#[repr(C)]` struct. HLD 18.4's
+uniform covers stages 1 to 3 and says nothing about colour, so a palette texture
+layout and a colour-matrix uniform belong to the rendering story that has a
+reader for them.
 
 `bin/ocelli.sh gate native` proves native linkage and shared-crate wasm
 compilation. The focused `cargo check -p ocelli-pixel --all-targets --target

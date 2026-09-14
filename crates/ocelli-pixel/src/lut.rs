@@ -94,7 +94,28 @@ impl LutDescriptor {
         self.largest_representable_value
     }
 
-    fn lookup(&self, input: f32) -> f32 {
+    /// Number of entries, which is the descriptor's first value resolved.
+    ///
+    /// Resolved, so a declared `0` has already become 65,536 here. Palette
+    /// colour compares this across its three channels.
+    pub(crate) fn entry_count(&self) -> usize {
+        self.values.len()
+    }
+
+    /// The first mapped input, as bits so it is comparable.
+    ///
+    /// Bit equality is value equality for this field, and the two ways it
+    /// could fail to be are both unreachable. A NaN cannot get here, because
+    /// [`LutDescriptor::new`] builds the value from
+    /// [`descriptor_input_to_f32`] over a validated `i32`. Negative zero
+    /// cannot either, because that function only negates a magnitude it took
+    /// from a value it already knows is below zero, so the magnitude is at
+    /// least one.
+    pub(crate) fn first_input_bits(&self) -> u32 {
+        self.inputs.first().copied().unwrap_or(0.0).to_bits()
+    }
+
+    pub(crate) fn lookup(&self, input: f32) -> f32 {
         let after = self.inputs.partition_point(|candidate| *candidate <= input);
         let index = after.saturating_sub(1).min(self.values.len() - 1);
         self.values.get(index).copied().unwrap_or(0.0)

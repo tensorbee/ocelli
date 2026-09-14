@@ -53,6 +53,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
 
@@ -221,6 +222,9 @@ SYNTAX_CASES = {
     "jpeg_lossless_p14.dcm": "1.2.840.10008.1.2.4.57",
     "jpeg_lossless_p14_sv1.dcm": "1.2.840.10008.1.2.4.70",
     "jpegls_lossless.dcm": "1.2.840.10008.1.2.4.80",
+    # A second .80 case, three-component. Appendix A gate A2 recorded the row
+    # as owed and F-030 added it. See case_jpegls_rgb8.
+    "jpegls_lossless_rgb8.dcm": "1.2.840.10008.1.2.4.80",
     "jpegls_near_lossless.dcm": "1.2.840.10008.1.2.4.81",
     "j2k_lossless.dcm": "1.2.840.10008.1.2.4.90",
     "j2k_lossy.dcm": "1.2.840.10008.1.2.4.91",
@@ -239,6 +243,7 @@ REFERENCE_RGB8 = "reference_rgb8.dcm"
 SYNTAX_REFERENCE = {name: REFERENCE_MONO16 for name in SYNTAX_CASES}
 SYNTAX_REFERENCE["jpeg_extended_12.dcm"] = REFERENCE_MONO12
 SYNTAX_REFERENCE["jpeg_baseline_rgb8.dcm"] = REFERENCE_RGB8
+SYNTAX_REFERENCE["jpegls_lossless_rgb8.dcm"] = REFERENCE_RGB8
 
 # What every generated row records. These files are the output of a script in
 # this repository, so they carry this repository's own terms (see LICENSE). The
@@ -499,6 +504,95 @@ def case_series(out: Path, name: str, nonuniform: bool) -> None:
             ds, (trap_frame(probe=False) + index * 16).astype(np.uint16),
             16, 12, 11, 0)
         write(ds, directory / f"slice_{index:03d}.dcm")
+
+
+def palette_entry(index: int) -> tuple[int, int, int]:
+    """Entry `i` is `(i, 255 - i, 3i mod 256)`, modulo 256 on the index.
+
+    Three different functions of the index on purpose. Equal channels would
+    satisfy a red-green-blue transposition and a monotone triple would satisfy
+    an off-by-one in every channel at once, so neither could be caught.
+    """
+    low = index % 256
+    return low, 255 - low, (low * 3) % 256
+
+
+def case_palette_color(out: Path, name: str, entries: int, first_mapped: int,
+                       bits_allocated: int) -> None:
+    """PALETTE COLOR, PS3.3 C.7.9 and C.7.6.3.1.5.
+
+    The corpus had no palette case at all before F-030, so neither the
+    zero-means-65536 entry count nor the first-mapped-input offset had a file
+    behind them.
+
+    Two traps, one per generated case. `first_mapped` non-zero is the offset:
+    stored values below it clamp to the first entry, and a reader that ignores
+    (0028,1101) value two shifts the whole colour map. `entries` of 65536 is
+    declared as 0, which is the only legal spelling because 65536 does not fit
+    in a US, and a reader that takes 0 literally finds an empty table.
+
+    **Bits per entry is 16 in both cases, deliberately.** PS3.3 C.7.6.3.1.6's
+    packing for 8-bit LUT Data is a PS3.5 encoding question that belongs to the
+    parser story rather than to this one, and guessing it here would put a
+    guess into a manifest digest. The 8-bit descriptor path is proven instead
+    by `crates/ocelli-pixel/tests/palette.rs`, which exercises the descriptor
+    directly and does not depend on any wire packing.
+    """
+    ds = new_dataset(name, SC_STORAGE, "OT")
+    ds.ConversionType = "WSD"
+    ds.PixelSpacing = list(NON_SQUARE_SPACING)
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "PALETTE COLOR"
+    ds.BitsAllocated = bits_allocated
+    ds.BitsStored = bits_allocated
+    ds.HighBit = bits_allocated - 1
+    ds.PixelRepresentation = 0
+    ds.Rows, ds.Columns = TRAP_ROWS, TRAP_COLS
+
+    count = TRAP_ROWS * TRAP_COLS
+    dtype = np.uint8 if bits_allocated == 8 else np.uint16
+    # A ramp across the declared input range, starting at zero so the values
+    # below `first_mapped` exercise the low clamp rather than being assumed.
+    top = min(first_mapped + entries - 1, (1 << bits_allocated) - 1)
+    indices = ramp(TRAP_ROWS, TRAP_COLS, top, dtype)
+    ds.PixelData = indices.tobytes()
+
+    # (0028,1101) to (0028,1103). Three values: number of entries, first
+    # stored pixel value mapped, bits per entry. 65536 is declared as 0.
+    descriptor = [0 if entries == 65_536 else entries, first_mapped, 16]
+    ds.RedPaletteColorLookupTableDescriptor = list(descriptor)
+    ds.GreenPaletteColorLookupTableDescriptor = list(descriptor)
+    ds.BluePaletteColorLookupTableDescriptor = list(descriptor)
+
+    table = np.array([palette_entry(index) for index in range(entries)],
+                     dtype=np.uint16)
+    ds.RedPaletteColorLookupTableData = table[:, 0].tobytes()
+    ds.GreenPaletteColorLookupTableData = table[:, 1].tobytes()
+    ds.BluePaletteColorLookupTableData = table[:, 2].tobytes()
+    assert len(indices.tobytes()) == count * (bits_allocated // 8)
+    write(ds, out / "synthetic" / f"{name}.dcm")
+
+
+def case_jpegls_rgb8(out: Path) -> None:
+    """Multi-component JPEG-LS, the row Appendix A gate A2 recorded as owed.
+
+    `docs/spikes/A2-jpeg-ls.md` measured `Nf != 1` as "REFUSED by the crate,
+    and NOT MEASURED here" and said the corpus could not close it, because no
+    such row existed. A DICOM JPEG-LS frame can be RGB, so this is a coverage
+    hole rather than a curiosity.
+
+    The row exists to prove the refusal is clean against a real three-component
+    codestream. `crates/ocelli-codec/src/jpegls.rs` refuses Samples per Pixel
+    other than one before the dependency is reached, so nothing decodes this
+    yet, and that is the point rather than a gap in the row.
+
+    It reads the already-written RGB reference rather than building a second
+    base, so the pair differ only in transfer syntax.
+    """
+    directory = out / "syntax"
+    encode_with_pydicom(directory / REFERENCE_RGB8, "jpegls_lossless_rgb8.dcm",
+                        "1.2.840.10008.1.2.4.80",
+                        directory / "jpegls_lossless_rgb8.dcm")
 
 
 def case_rgb(out: Path, planar: int, name: str) -> None:
@@ -975,31 +1069,85 @@ def generate_syntax_layer(out: Path) -> None:
                       "-prog_order", "RPCL"])
 
 
-def generate(out: Path) -> Path:
-    """Write the whole synthetic layer under `out`, replacing what is there."""
+def case_callables(out: Path) -> dict[str, Callable[[], None]]:
+    """Every individually generatable case, in generation order.
+
+    One list, read by both `generate()` and `--case`, so a case cannot exist in
+    the full run and be missing from the selector.
+
+    `syntax` is one entry rather than sixteen because its cases share three
+    bases that are written by the same function. `jpegls_rgb8` is separate and
+    ordered after it, because it re-reads the RGB reference that entry writes.
+    """
+    return {
+        "ct_signed_12in16_right":
+            lambda: case_signed_12in16(out, 11, "ct_signed_12in16_right"),
+        "ct_signed_12in16_left":
+            lambda: case_signed_12in16(out, 15, "ct_signed_12in16_left"),
+        "ct_unsigned_16": lambda: case_unsigned_16(out),
+        "ct_sigmoid_width_half": lambda: case_sigmoid_width_half(out),
+        "cr_monochrome1": lambda: case_monochrome1(out),
+        "mr_nonsquare_spacing": lambda: case_nonsquare_spacing(out),
+        "ct_series_uniform":
+            lambda: case_series(out, "ct_series_uniform", nonuniform=False),
+        "ct_series_nonuniform":
+            lambda: case_series(out, "ct_series_nonuniform", nonuniform=True),
+        "sc_rgb_interleaved": lambda: case_rgb(out, 0, "sc_rgb_interleaved"),
+        "sc_rgb_planar": lambda: case_rgb(out, 1, "sc_rgb_planar"),
+        "us_ybr_full_422": lambda: case_ybr_full_422(out),
+        "ct_multiframe_perframe": lambda: case_multiframe(out),
+        "sc_palette_color":
+            lambda: case_palette_color(out, "sc_palette_color", 256, 10, 8),
+        "sc_palette_color_16":
+            lambda: case_palette_color(out, "sc_palette_color_16", 65_536, 0,
+                                       16),
+        "syntax": lambda: generate_syntax_layer(out),
+        "jpegls_rgb8": lambda: case_jpegls_rgb8(out),
+    }
+
+
+def require_encoders() -> None:
     for tool in ("dcmcjpeg", "ojph_compress"):
         if shutil.which(tool) is None:
             raise RuntimeError(
                 f"{tool} is not on PATH. The synthetic layer needs DCMTK and "
                 f"OpenJPH, see corpus/README.md.")
 
+
+def generate(out: Path) -> Path:
+    """Write the whole synthetic layer under `out`, replacing what is there."""
+    require_encoders()
     out = Path(out)
     for subdirectory in ("synthetic", "syntax"):
         shutil.rmtree(out / subdirectory, ignore_errors=True)
+    for build in case_callables(out).values():
+        build()
+    return out
 
-    case_signed_12in16(out, 11, "ct_signed_12in16_right")
-    case_signed_12in16(out, 15, "ct_signed_12in16_left")
-    case_unsigned_16(out)
-    case_sigmoid_width_half(out)
-    case_monochrome1(out)
-    case_nonsquare_spacing(out)
-    case_series(out, "ct_series_uniform", nonuniform=False)
-    case_series(out, "ct_series_nonuniform", nonuniform=True)
-    case_rgb(out, 0, "sc_rgb_interleaved")
-    case_rgb(out, 1, "sc_rgb_planar")
-    case_ybr_full_422(out)
-    case_multiframe(out)
-    generate_syntax_layer(out)
+
+def generate_one(out: Path, case: str) -> Path:
+    """Write ONE case, leaving every other generated file untouched.
+
+    This exists because `generate()` removes and rebuilds the whole synthetic
+    and syntax layer, which re-encodes every externally encoded row with
+    whatever version of that encoder is installed today. Adding a case that way
+    lands a toolchain bump inside an unrelated story's diff and churns digests
+    nobody in that story chose to move.
+
+    `--tool-versions` is what makes the drift visible. This is what makes it
+    avoidable.
+    """
+    out = Path(out)
+    cases = case_callables(out)
+    if case not in cases:
+        raise RuntimeError(
+            f"unknown case {case!r}. Known: {', '.join(sorted(cases))}")
+    # Only the `syntax` entry shells out to DCMTK and OpenJPH. `jpegls_rgb8`
+    # encodes through pydicom's pyjpegls plugin, and every other case is
+    # written by pydicom directly.
+    if case == "syntax":
+        require_encoders()
+    cases[case]()
     return out
 
 
@@ -1028,6 +1176,10 @@ CATEGORIES = {
     "synthetic/sc_rgb_planar.dcm": ("OT", "synthetic, colour, planar-config-1"),
     "synthetic/us_ybr_full_422.dcm":
         ("US", "synthetic, us, colour, ybr-full-422"),
+    "synthetic/sc_palette_color.dcm":
+        ("OT", "synthetic, colour, palette-color, first-mapped-input-10"),
+    "synthetic/sc_palette_color_16.dcm":
+        ("OT", "synthetic, colour, palette-color, entry-count-zero-means-65536"),
     "synthetic/ct_multiframe_perframe.dcm":
         ("CT", "synthetic, mono16, multiframe, per-frame-functional-groups"),
 }
@@ -1059,13 +1211,19 @@ def manifest_rows(out: Path) -> list[str]:
     }
     for name in sorted(set(SYNTAX_CASES) | set(syntax_category)):
         syntax = SYNTAX_CASES.get(name, "1.2.840.10008.1.2.1")
+        # The tolerance class and the modality are both decided by whether the
+        # case is built on the RGB reference, so they read the same fact rather
+        # than two rules that happen to agree. Before F-030 the class was keyed
+        # on one exact filename and the modality on the substring, which agreed
+        # by coincidence while there was exactly one colour case.
+        colour = "rgb8" in name
         if name in syntax_category:
             category = syntax_category[name]
-        elif name == "jpeg_baseline_rgb8.dcm":
+        elif colour:
             category = "synthetic, colour, transfer-syntax"
         else:
             category = "synthetic, mono16, transfer-syntax"
-        modality = "OT" if "rgb8" in name else "CT"
+        modality = "OT" if colour else "CT"
         rows.append({"path": f"syntax/{name}", "modality": modality,
                      "transfer_syntax": syntax, "category": category})
 
@@ -1106,12 +1264,30 @@ def main() -> int:
     parser.add_argument("--tool-versions", action="store_true",
                         help="compare the installed encoders against the ones "
                              "corpus/manifest.tsv was built with")
+    parser.add_argument("--case", metavar="NAME",
+                        help="regenerate ONE case, leaving every other "
+                             "generated file untouched. Use this to add a "
+                             "case without re-encoding rows whose encoder has "
+                             "moved since the manifest was built")
+    parser.add_argument("--list-cases", action="store_true",
+                        help="print the names --case accepts")
     args = parser.parse_args()
 
     if args.tool_versions:
         return report_tool_versions()
+    if args.list_cases:
+        print("\n".join(case_callables(Path(".")).keys()))
+        return 0
 
     out = Path(args.out).expanduser() if args.out else corpus_dir()
+    if args.case:
+        generate_one(out, args.case)
+        print(f"wrote case {args.case} under {out}")
+        print("next: uv run scripts/corpus_synth.py --write-manifest, "
+              "then uv run scripts/corpus_check.py")
+        print("every other row's digest is re-read from the file already on "
+              "disk, so only the new one moves")
+        return 0
     if not (args.manifest_rows or args.write_manifest):
         generate(out)
         written = sum(1 for path in out.rglob("*.dcm")

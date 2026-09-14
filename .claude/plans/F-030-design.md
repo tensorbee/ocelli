@@ -567,8 +567,11 @@ arithmetic.
   until now was a declared behaviour with no codestream behind it.
 - `docs/spikes/A2-jpeg-ls.md`. A dated appended note, not a rewrite. See
   Approach section 7.
-- `docs/lld/errors.md`, if it enumerates `PixelError`. To be checked during
-  implementation.
+- `docs/lld/errors.md`, **checked during implementation and not touched.** It
+  covers `ocelli-core`'s `ErrorCode`, the numbered boundary registry, and does
+  not enumerate `PixelError` at all. The six new variants therefore need no
+  entry there and no `ci/error-codes.json` row, because
+  `scripts/error_code_check.py` reads `ErrorCode` and nothing else.
 
 ## Open questions
 
