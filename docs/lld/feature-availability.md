@@ -1,7 +1,7 @@
 # Feature availability
 
-**F-IDs that contributed:** F-X001
-**Last updated:** 2026-09-06
+**F-IDs that contributed:** F-037, F-X001
+**Last updated:** 2026-09-14
 
 The contract every tier-gated feature declares, and the distinction between a
 working primary path, a declared fallback and an unavailable feature. This is
@@ -26,6 +26,8 @@ of any of them.
 | Benchmark, adapter-type and renderer-string evidence | F-004 in `ocelli-render` | A software adapter resolves tier C instead of being treated as tier B |
 | `ErrorCode::Unavailable` | F-005 in `ocelli-core`, the TypeScript mirror and `ci/error-codes.json` | Stable code 700 for a feature that has no valid path |
 | `ComputeError::Unavailable { required, resolved }` | F-008 in `ocelli-compute` | An in-process typed example that keeps the two tier roles distinct |
+| `caps::opens_a_device` | F-037 in `ocelli-render` | Whether the session has a GPU device at all. Tier C has none, so every GPU-requiring feature is `Unavailable` there by construction rather than by each feature checking |
+| `DeviceState` and `GpuContext::recover` | F-037 in `ocelli-render` | A lost device is an OBSERVED state rather than a later call failing, so a feature can report unavailable for the right reason while a rebuild is pending |
 
 The detailed resolver and evidence rules remain in
 [tier-resolution.md](tier-resolution.md). This file begins after that one

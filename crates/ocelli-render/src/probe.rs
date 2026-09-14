@@ -5,11 +5,18 @@
 //! be wrong is in the other file, and the other file needs no adapter to test.
 //!
 //! **The probe device is transient.** It is created, measured on and dropped
-//! before [`resolve`] returns. It never becomes a [`crate::GpuContext`], so
-//! HLD section 31's one-device invariant is untouched: there is never a moment
-//! when two devices exist. The call sits inside `ocelli-render`, which is the
-//! only crate permitted to make one, and `ci/check-device-ownership.sh` still
-//! passes unchanged.
+//! before [`resolve`] returns. It never becomes a [`crate::GpuContext`], so on
+//! this path there is never a moment when two devices exist. The call sits
+//! inside `ocelli-render`, which is the only crate permitted to make one, and
+//! `ci/check-device-ownership.sh` still passes unchanged.
+//!
+//! **Recovery is the one path where two handles briefly coexist**, and this
+//! header used to make the claim without that qualification.
+//! [`crate::GpuContext::recover`] opens the replacement before it replaces the
+//! context, so a refused rebuild leaves the caller where it started rather than
+//! with no device at all. HLD section 31's invariant is about two devices
+//! SHARING textures and is untouched, for the reasons set out at that call site
+//! and in `docs/lld/gpu-ownership.md`.
 //!
 //! **Nothing is read back.** The workload shades an offscreen texture and
 //! never maps it. Decision D3 says pixels never cross the boundary, and a
@@ -24,6 +31,7 @@ use crate::caps::{
     AdapterFacts, FailedAdapter, FillRate, FillRateBands, ProbeOutcome, Resolution, SimdSupport,
     Tier, TierRequest, TierSignals, candidate_order, classify,
 };
+use crate::gpu::{DeviceError, GpuContext};
 
 /// The format the workload renders into. Mandatorily renderable on every
 /// backend, so the measurement is the same shape everywhere.
@@ -34,13 +42,62 @@ pub(crate) const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8
 /// with, because a fill rate without its workload is not a measurement.
 pub const FILL_RATE_ALU_STEPS: u32 = 64;
 
+/// One side of the square render target a timed run shades into.
+///
+/// **A newtype, and F-037 is the story `measure_with` named as the one to argue
+/// it.** That function's documentation recorded the residue: [`run`] took
+/// `edge` and `passes` as two adjacent `u32`s, the closure in [`measure`]
+/// forwarded them positionally, and transposing them there compiled and passed
+/// the whole suite.
+///
+/// **It passed because nothing reaches that call site, not because the numbers
+/// agree.** They do not. [`fragments`] is `edge * edge * passes`, which is not
+/// symmetric in its two arguments, so the calibration goes from 65,536
+/// fragments to 256 and the full pass from 16,777,216 to 262,144, factors of
+/// 256 and 64. What stays consistent is that [`fragments`] and [`run`] are
+/// handed the SAME transposed pair, so the reported numerator matches the
+/// trivial workload actually shaded and nothing internal disagrees. Every test
+/// here supplies its own `issue` and never reaches [`measure`]'s closure, and
+/// `the_recorded_workload_matches_the_checked_in_file` calls [`fragments`] on
+/// [`RUN_PLAN`] directly rather than through that closure, so it agrees too.
+/// Only a real adapter's measured rate would collapse.
+///
+/// **An earlier version of this paragraph said the product was unchanged**, in
+/// four files, and it was inherited from the comment this replaced. It
+/// understated the defect by a factor of 256 in the direction that makes the
+/// newtype look less necessary than it is.
+///
+/// `AGENTS.md`: "Reducing cases is good even when it adds types", with
+/// `Pt<Canvas>` against `Pt<World>` as this project's clearest example. Two
+/// interchangeable `u32`s at a call site no test reaches is exactly that shape,
+/// and the transposition is now a compile error rather than a comment
+/// describing a hole.
+///
+/// **Public because the workload is part of a recorded measurement's
+/// provenance**, which is the same reason [`FILL_RATE_ALU_STEPS`] is public:
+/// `ci/tier-thresholds.json` states in terms that "a figure taken with a
+/// different workload is a different measurement and does not belong in this
+/// file".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Edge(pub u32);
+
+/// How many full-viewport draws one timed run issues into its target.
+///
+/// The other half of [`Edge`]'s argument. `passes` is a factor of sixteen
+/// between the two workloads, and it is not decoration: dividing a real
+/// adapter's measured rate by sixteen pushes it under
+/// [`crate::caps::FillRateBands::hardware_floor_pps`] and demotes a hardware
+/// adapter to tier C.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Passes(pub u32);
+
 /// The calibration pass: a small target, one pass.
-const CALIBRATION_EDGE: u32 = 256;
-const CALIBRATION_PASSES: u32 = 1;
+const CALIBRATION_EDGE: Edge = Edge(256);
+const CALIBRATION_PASSES: Passes = Passes(1);
 
 /// The full pass, 256 times the calibration's fragment count.
-const FULL_EDGE: u32 = 1024;
-const FULL_PASSES: u32 = 16;
+const FULL_EDGE: Edge = Edge(1024);
+const FULL_PASSES: Passes = Passes(16);
 
 /// If the calibration took longer than this, the full pass is not affordable
 /// at startup and the calibration figure is itself the answer.
@@ -71,7 +128,7 @@ const COMPLETION_TIMEOUT_NANOS: u64 = 5_000_000_000;
 /// is what stops the plan and the file from drifting apart, and
 /// `probe::tests::a_slow_first_submission_does_not_stop_the_full_pass` is what
 /// stops the plan from being a statement [`measure`] does not follow.
-pub(crate) const RUN_PLAN: [(u32, u32); 3] = [
+pub(crate) const RUN_PLAN: [(Edge, Passes); 3] = [
     (CALIBRATION_EDGE, CALIBRATION_PASSES),
     (CALIBRATION_EDGE, CALIBRATION_PASSES),
     (FULL_EDGE, FULL_PASSES),
@@ -96,11 +153,102 @@ pub(crate) const WORKLOAD_WGSL: &str = include_str!("fill_rate.wgsl");
 /// recorded outcome, which is deviation D-07's honesty rule applied to the
 /// resolver itself.
 pub async fn resolve(request: TierRequest, clock: &mut dyn FnMut() -> u64) -> Resolution {
+    detect(request, clock).await.0
+}
+
+/// Resolve the session's tier and KEEP the adapter that won.
+///
+/// [`resolve`] answers "which tier" and drops everything it touched, which is
+/// what F-004's callers want. This answers "which tier, and what do I open a
+/// device on", which is what a session wants, and it is the entry point HLD
+/// section 22's rebuild needs: recovering from a device loss must not re-run
+/// detection, because section 7 says the tier "resolves once at startup" and a
+/// session that silently changed tier mid-flight is the quietly-different
+/// answer deviation D-07 refuses.
+///
+/// **`None` when the session opens no device**, which is
+/// [`crate::caps::opens_a_device`] and is tier C. That includes the case where
+/// an adapter opened perfectly well and D-07's combination rule demoted it
+/// anyway, because the resolved tier is the answer and the probe outcome is
+/// only evidence for it.
+///
+/// **That second case is reached by no test, and this is the honest statement
+/// of what is and is not covered.** The decision itself,
+/// [`crate::caps::opens_a_device`], is exhaustively tested over all three tiers
+/// with no adapter. What is untested is the GUARD here applying it: deleting
+/// the `if` leaves the whole suite green, measured in the F-037 review's first
+/// pass. `a_cpu_override_yields_no_adapter` below reaches the tier C path but
+/// cannot kill that mutation, because a `Cpu` override short-circuits in
+/// [`detect`] and the adapter is `None` for that reason as well. Killing it
+/// needs a machine where a real adapter opens and the combination rule still
+/// resolves tier C, which is a software rasteriser, and this repository has no
+/// such machine in any gate. **F-X002 is the story that gets one**, through
+/// lavapipe in CI and headless Chrome on SwiftShader, and
+/// `docs/spikes/A7-tier-c.md` section A7.2 already names that as its acceptance
+/// criterion. Until then the only thing watching this line is the human check
+/// `docs/hld/24-agent-code-standards.md` section 27.3 requires.
+///
+/// **The probe device is still transient, and on this path there is still never
+/// a moment when two devices exist.** This function retains an `Adapter`, which
+/// is not a device. The probe's device is created, measured on and dropped
+/// inside [`detect`] before this returns, and the long-lived one is opened
+/// later, by [`ResolvedAdapter::open`], at the caller's choosing.
+///
+/// **The recovery path is different and says so at the line that does it.**
+/// [`GpuContext::recover`] opens the replacement before it replaces the
+/// context, so two handles are briefly alive there. That is deliberate, it is
+/// what makes a refused rebuild safe, and the reasoning is at that call site and
+/// in `docs/lld/gpu-ownership.md`.
+pub async fn resolve_adapter(
+    request: TierRequest,
+    clock: &mut dyn FnMut() -> u64,
+) -> Option<ResolvedAdapter> {
+    let (resolution, adapter) = detect(request, clock).await;
+    if !crate::caps::opens_a_device(&resolution.caps) {
+        return None;
+    }
+    adapter.map(|adapter| ResolvedAdapter {
+        adapter,
+        resolution,
+    })
+}
+
+/// The detection pass both public entry points share.
+///
+/// Returns the verdict, and the adapter the measurement was taken on when there
+/// was one. Extracted so [`resolve`] and [`resolve_adapter`] cannot disagree
+/// about how a tier is decided, which is the one thing about this module that
+/// must not exist twice.
+async fn detect(
+    request: TierRequest,
+    clock: &mut dyn FnMut() -> u64,
+) -> (Resolution, Option<wgpu::Adapter>) {
     // An override of tier C short-circuits everything: no instance, no
     // adapter, no device, no benchmark. That is the estate D-07 names getting
     // its startup cost back.
+    //
+    // NO ASSERTION ON THE RETURN VALUE CAN CATCH DELETING THESE THREE LINES.
+    // `classify` short-circuits a tier C override as well, and hardcodes
+    // `adapters_seen: 0`, `fill_rate: None` and `device_created: false` into
+    // the evidence it returns, while `TierSignals::unprobed()` supplies the
+    // same `bands` and `simd` the long path builds. So the `Resolution` is
+    // identical either way. What differs is only that an instance, an adapter
+    // and a device get created and thrown away first.
+    //
+    // THE CALLER'S CLOCK IS WHAT OBSERVES IT, and
+    // `tests::a_cpu_override_yields_no_adapter_and_spends_no_startup_cost`
+    // asserts on that. `clock` is already a parameter, so counting its
+    // invocations needs no new seam: this block returns before anything times
+    // anything, so the count is deterministically zero, and without it `run`
+    // calls the clock around its submission. It is not a timing bound, because
+    // the closure returns a constant and the assertion is on the call count.
+    //
+    // Two earlier attempts at that test asserted the return value instead and
+    // were green under this mutation, which is why the route is written out
+    // here. The test needs a real adapter to bite, so it is `#[ignore]`d and
+    // `bin/ocelli.sh gate gpu` runs it.
     if request.requested() == Some(Tier::Cpu) {
-        return classify(&TierSignals::unprobed(), request);
+        return (classify(&TierSignals::unprobed(), request), None);
     }
 
     // `new_instance_with_webgpu_detection` rather than `Instance::new`,
@@ -112,16 +260,97 @@ pub async fn resolve(request: TierRequest, clock: &mut dyn FnMut() -> u64) -> Re
     )
     .await;
 
-    let adapters = enumerate(&instance).await;
+    let mut adapters = enumerate(&instance).await;
     let facts: Vec<AdapterFacts> = adapters.iter().map(facts_of).collect();
-    let probe = measure_candidates(&adapters, &facts, clock).await;
+    let probed = measure_candidates(&adapters, &facts, clock).await;
+    let chosen = probed.chosen;
 
     let signals = TierSignals {
-        probe,
+        probe: probed.outcome,
         simd: SimdSupport::build_target(),
         bands: FillRateBands::RECORDED,
     };
-    classify(&signals, request)
+    let resolution = classify(&signals, request);
+
+    // `swap_remove` rather than indexing a clone: the winner is taken out by
+    // value and the rest are dropped with the vector. Order does not survive,
+    // and nothing after this point reads the vector.
+    //
+    // Dropping `instance` here is safe. `wgpu::Adapter` holds a refcounted
+    // handle to the same context, so the adapter outlives the instance value.
+    let adapter =
+        chosen.and_then(|index| (index < adapters.len()).then(|| adapters.swap_remove(index)));
+    (resolution, adapter)
+}
+
+/// The adapter a session resolved on, retained so a lost device can be rebuilt.
+///
+/// **This is not a device and holds none.** HLD section 31's one-device
+/// invariant is about `request_device`, and this type only makes it possible to
+/// call it again later without a second detection pass.
+#[derive(Debug)]
+pub struct ResolvedAdapter {
+    adapter: wgpu::Adapter,
+    resolution: Resolution,
+}
+
+impl ResolvedAdapter {
+    /// What the tier resolved to, and the evidence it resolved on.
+    #[must_use]
+    pub fn resolution(&self) -> &Resolution {
+        &self.resolution
+    }
+
+    /// Open the session's one long-lived device.
+    ///
+    /// **This and the probe's are the only two `request_device` calls in the
+    /// workspace, and both are in `ocelli-render`**, which
+    /// `ci/check-device-ownership.sh` asserts on every push. HLD section 31:
+    /// "Two devices cannot share textures, which would defeat the entire
+    /// point."
+    ///
+    /// The returned [`GpuContext`] is already watching itself for loss, because
+    /// [`GpuContext::new`] registers the callback. There is no window in which
+    /// a context exists and is unobserved.
+    ///
+    /// # Errors
+    ///
+    /// [`DeviceError::Refused`] carrying wgpu's own diagnostic text, which is
+    /// explicitly unstable and is for a human.
+    pub async fn open(&self) -> Result<GpuContext, DeviceError> {
+        let descriptor = wgpu::DeviceDescriptor {
+            label: Some("ocelli device"),
+            required_features: wgpu::Features::empty(),
+            // The adapter's OWN limits, never `Limits::default()`. A downlevel
+            // GL adapter does not meet the WebGPU defaults, which is the whole
+            // reason tier B exists, and asking for the defaults on one is how a
+            // tier B session fails to start at all. `measure_candidates` makes
+            // the same choice for the probe device and for the same reason.
+            //
+            // NO TEST IN THIS REPOSITORY CATCHES A REGRESSION HERE, and that is
+            // measured rather than assumed. F-037 replaced this line with
+            // `wgpu::Limits::default()` and `cargo test -p ocelli-render --test
+            // device -- --ignored` stayed at exit 0, 6 passed and 0 failed, on
+            // the aarch64-apple-darwin Metal adapter in
+            // `ci/tier-thresholds.json`. A tier A adapter exceeds the WebGPU
+            // defaults, so asking for them succeeds and the mutation is
+            // invisible. Only a downlevel adapter separates the two, and HLD
+            // section 7's tier B has never been exercised by anything in this
+            // project. F-042 is the WebGL2 story and F-X002 is the story that
+            // gets a software adapter into a test, and until one of them lands
+            // the only thing watching this line is the human check
+            // `docs/hld/24-agent-code-standards.md` section 27.3 requires.
+            required_limits: self.adapter.limits(),
+            ..Default::default()
+        };
+        let (device, queue) = self
+            .adapter
+            .request_device(&descriptor)
+            .await
+            // `RequestDeviceError` exposes its reason only through `Display`.
+            .map_err(|error| DeviceError::Refused(error.to_string()))?;
+        Ok(GpuContext::new(device, queue, self.resolution.caps))
+    }
 }
 
 /// Every adapter the instance offers.
@@ -186,6 +415,13 @@ enum AttemptOutcome<T> {
         adapters_seen: usize,
         failed: Vec<FailedAdapter>,
         adapter: AdapterFacts,
+        /// Which candidate won, as an index into the caller's adapter list.
+        ///
+        /// F-037 needs this and `AdapterFacts` cannot supply it: the facts are
+        /// a description, and two adapters can legitimately describe the same,
+        /// so matching on them to find the winner would be a lookup that can be
+        /// ambiguous. The index is what the loop already knew.
+        index: usize,
         value: T,
     },
 }
@@ -216,6 +452,7 @@ where
                     adapters_seen,
                     failed,
                     adapter: adapter_facts.clone(),
+                    index,
                     value,
                 };
             }
@@ -235,11 +472,22 @@ where
     }
 }
 
+/// A probe outcome, and which adapter produced it.
+///
+/// `ProbeOutcome` is the evidence `classify` reads and it names the winner by
+/// its `AdapterFacts`. `chosen` is the same winner by index, which is what
+/// [`detect`] needs to take the `wgpu::Adapter` itself out of the list. They
+/// are two views of one decision made in one place, not two decisions.
+struct Probed {
+    outcome: ProbeOutcome,
+    chosen: Option<usize>,
+}
+
 async fn measure_candidates(
     adapters: &[wgpu::Adapter],
     facts: &[AdapterFacts],
     clock: &mut dyn FnMut() -> u64,
-) -> ProbeOutcome {
+) -> Probed {
     let attempted = attempt_candidates(facts, |index| {
         let adapter = adapters.get(index);
         async move {
@@ -266,25 +514,43 @@ async fn measure_candidates(
     .await;
 
     match attempted {
-        AttemptOutcome::NoAdapter { adapters_seen } => ProbeOutcome::NoAdapter { adapters_seen },
+        AttemptOutcome::NoAdapter { adapters_seen } => Probed {
+            outcome: ProbeOutcome::NoAdapter { adapters_seen },
+            chosen: None,
+        },
         AttemptOutcome::NoDevice {
             adapters_seen,
             failed,
-        } => ProbeOutcome::NoDevice {
-            adapters_seen,
-            failed,
+        } => Probed {
+            outcome: ProbeOutcome::NoDevice {
+                adapters_seen,
+                failed,
+            },
+            chosen: None,
         },
         AttemptOutcome::Opened {
             adapters_seen,
             failed,
             adapter,
+            index,
             value: (device, queue),
-        } => ProbeOutcome::Opened {
-            adapters_seen,
-            failed,
-            adapter,
-            fill_rate: measure(&device, &queue, clock),
-        },
+        } => {
+            let fill_rate = measure(&device, &queue, clock);
+            // The probe device and queue are dropped HERE, at the end of this
+            // scope, before anything opens the long-lived one. The module
+            // header's "there is never a moment when two devices exist" is this
+            // line, and F-037 did not move it.
+            drop((device, queue));
+            Probed {
+                outcome: ProbeOutcome::Opened {
+                    adapters_seen,
+                    failed,
+                    adapter,
+                    fill_rate,
+                },
+                chosen: Some(index),
+            }
+        }
     }
 }
 
@@ -305,8 +571,8 @@ async fn measure_candidates(
 /// const function on stable, and the alternative is `as`, which HLD section
 /// 27.3 makes a human review item and the workspace denies for truncation.
 /// The constant-ness buys nothing here and the cast would cost a review.
-pub(crate) fn fragments(edge: u32, passes: u32) -> u64 {
-    u64::from(edge) * u64::from(edge) * u64::from(passes)
+pub(crate) fn fragments(edge: Edge, passes: Passes) -> u64 {
+    u64::from(edge.0) * u64::from(edge.0) * u64::from(passes.0)
 }
 
 /// Whether the full pass is affordable, given what the calibration cost.
@@ -354,24 +620,24 @@ fn measure(
 /// the same reason `clock` is one on [`resolve`]: the alternative is a generic
 /// parameter with one instantiation, and `AGENTS.md` refuses that shape.
 ///
-/// **What the injection does NOT close, stated because the shape of this
-/// function otherwise reads as if it closed everything.** `edge` and `passes`
-/// are both `u32` and adjacent, and the closure in [`measure`] forwards them
-/// positionally. Transposing them there,
-/// `run(device, queue, &pipeline, passes, edge, clock)`, compiles and passes
-/// the whole suite, because every test here supplies its own `issue` and never
-/// reaches that call. The calibration then shades a 1 by 1 target 256 times
-/// and the fragment count is unchanged, so [`fragments`] agrees with itself
-/// and only a real adapter's timing would differ.
+/// **The transposition this function's documentation used to name as open is
+/// CLOSED, by F-037.** `edge` and `passes` were both `u32` and adjacent, the
+/// closure in [`measure`] forwarded them positionally, and transposing them
+/// there, `run(device, queue, &pipeline, passes, edge, clock)`, compiled and
+/// passed the whole suite. It passed because every test here supplies its own
+/// `issue` and never reaches that call, **not** because the numbers agree:
+/// [`fragments`] is `edge * edge * passes` and is not symmetric, so the
+/// calibration drops from 65,536 fragments to 256. [`fragments`] and [`run`]
+/// are handed the same transposed pair, so the reported numerator matches the
+/// trivial workload actually shaded and nothing internal disagrees. Only a real
+/// adapter's measured rate would have collapsed. See [`Edge`].
 ///
-/// **That hole is residue rather than something the injection created.** The
-/// same transposition existed at each of the three call sites this function
-/// replaced, and no test reached those either, so the count of unreachable
-/// sites went from three to one. Closing the last one needs a type that makes
-/// the two arguments non-interchangeable, which is `AGENTS.md`'s "reducing
-/// cases is good even when it adds types" and is F-037's to argue when it
-/// builds the long-lived device. Until then the only thing watching it is the
-/// human check `docs/hld/24-agent-code-standards.md` section 27.3 requires.
+/// [`Edge`] and [`Passes`] make that transposition a compile error, so the
+/// residue is gone rather than smaller, and the human check
+/// `docs/hld/24-agent-code-standards.md` section 27.3 requires is no longer the
+/// only thing watching it. `tests/ui/workload_dimensions_are_not_interchangeable.rs`
+/// asserts the refusal, because a type that merely happens to differ today and
+/// a type whose difference is checked read identically in a diff.
 ///
 /// **The first run's figure is thrown away, and that discard is the whole
 /// reason this function is separately testable.** The FIRST submission on a
@@ -393,7 +659,7 @@ fn measure(
 /// which renders nothing and presents as a slow viewer. That is deviation
 /// D-07's misdetection arriving from the direction the resolver exists to
 /// catch.
-fn measure_with(issue: &mut dyn FnMut(u32, u32) -> Option<FillRate>) -> Option<FillRate> {
+fn measure_with(issue: &mut dyn FnMut(Edge, Passes) -> Option<FillRate>) -> Option<FillRate> {
     let [
         (warm_up_edge, warm_up_passes),
         (calibration_edge, calibration_passes),
@@ -443,15 +709,15 @@ fn run(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     pipeline: &wgpu::RenderPipeline,
-    edge: u32,
-    passes: u32,
+    edge: Edge,
+    passes: Passes,
     clock: &mut dyn FnMut() -> u64,
 ) -> Option<FillRate> {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("ocelli fill rate target"),
         size: wgpu::Extent3d {
-            width: edge,
-            height: edge,
+            width: edge.0,
+            height: edge.0,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -467,7 +733,7 @@ fn run(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("ocelli fill rate"),
     });
-    for _ in 0..passes {
+    for _ in 0..passes.0 {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("ocelli fill rate pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -519,8 +785,8 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::{
-        AttemptOutcome, CALIBRATION_BUDGET_NANOS, CALIBRATION_EDGE, CALIBRATION_PASSES, FULL_EDGE,
-        FULL_PASSES, RUN_PLAN, WORKLOAD_WGSL, attempt_candidates, fragments,
+        AttemptOutcome, CALIBRATION_BUDGET_NANOS, CALIBRATION_EDGE, CALIBRATION_PASSES, Edge,
+        FULL_EDGE, FULL_PASSES, Passes, RUN_PLAN, WORKLOAD_WGSL, attempt_candidates, fragments,
         full_pass_is_affordable, measure_with,
     };
     use crate::caps::{AdapterFacts, FillRate};
@@ -661,13 +927,13 @@ mod tests {
     #[test]
     fn the_fragment_count_is_every_texel_once_per_pass() {
         // Four texels, three passes, twelve fragments.
-        assert_eq!(fragments(2, 3), 12);
+        assert_eq!(fragments(Edge(2), Passes(3)), 12);
         // Sixteen texels, sixteen passes, 256 fragments.
-        assert_eq!(fragments(4, 16), 256);
+        assert_eq!(fragments(Edge(4), Passes(16)), 256);
         // One texel, two passes, and a pass is still a pass.
-        assert_eq!(fragments(1, 2), 2);
+        assert_eq!(fragments(Edge(1), Passes(2)), 2);
         // The smallest case there is.
-        assert_eq!(fragments(1, 1), 1);
+        assert_eq!(fragments(Edge(1), Passes(1)), 1);
         // The two workloads. 256 * 256 is 65,536, over one pass.
         assert_eq!(fragments(CALIBRATION_EDGE, CALIBRATION_PASSES), 65_536);
         // 1024 * 1024 is 1,048,576 texels, over sixteen passes.
@@ -898,6 +1164,67 @@ mod tests {
             "the full pass's failure was treated as the calibration's"
         );
         assert_ne!(fails_at(2), fails_at(3));
+    }
+
+    /// **A tier C override yields no `ResolvedAdapter` and spends no startup
+    /// cost getting there.**
+    ///
+    /// Deviation D-07 names the estate that overrides to tier C getting its
+    /// startup cost back, and a [`detect`] that enumerated adapters before
+    /// reading the override would spend it anyway.
+    ///
+    /// **The `clock` parameter is what makes that assertable**, and two earlier
+    /// versions of this test missed it. `resolve_adapter` already takes
+    /// `clock: &mut dyn FnMut() -> u64` from the caller, so counting its
+    /// invocations is an assertion on a parameter that already exists. The
+    /// short circuit returns before any instance, adapter or device is created,
+    /// so nothing times anything and the count is deterministically zero.
+    /// Delete the short circuit and [`measure`] runs, [`run`] calls `clock`
+    /// around its submission, and the count is non-zero.
+    ///
+    /// **This is not a timing bound.** The closure returns a constant `0` and
+    /// the assertion is on how many times it was CALLED, so there is no
+    /// duration, no threshold and nothing to be flaky. A timing bound was
+    /// rejected for this, because a permanently flaky gate is a gate that gets
+    /// disabled, and so was an injectable instance factory, which would be a
+    /// seam with one production caller.
+    ///
+    /// **`#[ignore]`d because the killing power needs an adapter that OPENS.**
+    /// `clock` is reached only from [`measure`], which only the `Opened` arm of
+    /// [`measure_candidates`] calls. So with the short circuit deleted the
+    /// mutation still survives on a machine that enumerates nothing, and also
+    /// on one that enumerates an adapter whose device request fails: both reach
+    /// `ProbeOutcome` variants that never time anything. `bin/ocelli.sh gate
+    /// gpu` is what runs this, on a machine where a device does open.
+    ///
+    /// The floor's coverage of the same DECISION is
+    /// `caps::tests::tiers_a_and_b_open_a_device_and_tier_c_does_not`, which
+    /// drives `opens_a_device` over all three tiers with no adapter at all.
+    /// What only this test adds is that [`detect`] honours that decision before
+    /// spending any startup cost on it.
+    #[test]
+    #[ignore = "the startup-cost assertion only bites where adapters exist (D-04)"]
+    fn a_cpu_override_yields_no_adapter_and_spends_no_startup_cost() {
+        let mut ticks = 0_u32;
+        let resolved = {
+            let mut clock = || {
+                ticks += 1;
+                0_u64
+            };
+            pollster::block_on(super::resolve_adapter(
+                crate::caps::TierRequest::Requested(crate::caps::Tier::Cpu),
+                &mut clock,
+            ))
+        };
+
+        assert!(
+            resolved.is_none(),
+            "a tier C override was handed an adapter to open a device on"
+        );
+        assert_eq!(
+            ticks, 0,
+            "the tier C override spent startup cost anyway, so the short circuit is gone"
+        );
     }
 
     /// [`RUN_PLAN`] is what [`super::measure_with`] issues, and the three pairs

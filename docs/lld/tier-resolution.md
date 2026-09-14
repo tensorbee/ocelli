@@ -1,7 +1,7 @@
 # Tier resolution
 
-**F-IDs that contributed:** F-004, F-X001, F-X016
-**Last updated:** 2026-09-06
+**F-IDs that contributed:** F-004, F-037, F-X001, F-X016
+**Last updated:** 2026-09-14
 
 How a session decides whether it is tier A, tier B or tier C, and how it
 records why. This describes what the code does today.
@@ -360,11 +360,18 @@ other value would be invented.
 ## The device is transient
 
 The first probe device that opens is measured and dropped before `resolve` returns.
-It never becomes a `GpuContext`, so HLD section 31's one-device invariant is
-untouched: there is never a moment when two devices exist. The call sits
-inside `ocelli-render`, which is the only crate permitted to make one, and
-`ci/check-device-ownership.sh` passes unchanged. See
-[gpu-ownership.md](gpu-ownership.md).
+It never becomes a `GpuContext`, so **on the resolution path** there is never a
+moment when two devices exist. The call sits inside `ocelli-render`, which is
+the only crate permitted to make one, and `ci/check-device-ownership.sh` passes
+unchanged.
+
+**Recovery is the one path where two handles briefly coexist**, and this
+paragraph made the claim without that qualification until the F-037 review's
+third pass found it as the fifth copy. `GpuContext::recover` opens the
+replacement before it replaces the context, so a refused rebuild leaves the
+caller where it started rather than with no device at all. HLD section 31's
+invariant is about two devices SHARING textures and is untouched. See
+[gpu-ownership.md](gpu-ownership.md), which is where that reasoning lives.
 
 `request_device` is asked for `Features::empty()` and the **adapter's own**
 limits, never `Limits::default()`. A downlevel GL adapter does not meet the
@@ -452,15 +459,26 @@ the render path is wired in from S11. That crate had an empty
 
 - **It does not wire tier resolution into `ocelli-wasm`.** That module has no
   dependency on `ocelli-render` and so never reaches wgpu. The boundary is
-  E16.2 in S16, and no browser path of the resolver can run before F-037 in S11.
-  Wiring it now would add an entry point nothing calls and re-baseline the
-  wasm size budget for a feature with no user. F-004 touches
+  E16.2 in S16. Wiring it now would add an entry point nothing calls and
+  re-baseline the wasm size budget for a feature with no user. F-004 touches
   `ci/wasm-size-budget.json` not at all.
+
+  **This said "no browser path of the resolver can run before F-037 in S11",
+  and F-037 has landed without changing the situation.** It built the
+  long-lived device inside `ocelli-render` and took the same decision F-004
+  was given in S03: the edge to `ocelli-wasm` is still not there, so the
+  browser path still cannot run and `ci/wasm-size-budget.json` still RECORDS
+  16,388 bytes. That is the recorded budget rather than a fresh measurement.
+  F-039, E6.3 in S13, is the first story with a reason to add it, and
+  `ci/wasm-size-budget.json` now says so where it used to say S11.
 - **It does not create a long-lived device.** The probe device is transient
-  and `GpuContext` is still built by whoever owns one. Device creation and
-  loss recovery are F-037, which is E6.1 in S11, "ocelli-render: device init,
-  capability tiering, device-lost recovery". F-039 is E6.3 in S13 and is
-  OffscreenCanvas.
+  and `GpuContext` is still built by whoever owns one. **F-037 has since built
+  the long-lived one**, as `probe::resolve_adapter` plus
+  `ResolvedAdapter::open`, and the probe device is still transient: F-004's
+  `resolve` is now a one-line call into a shared `detect`, and the probe's
+  device and queue are dropped inside it before anything opens the second one.
+  See [gpu-ownership.md](gpu-ownership.md) for the lifecycle. F-039 is E6.3 in
+  S13 and is OffscreenCanvas.
 - **It does not render on tier C.** This story resolves the tier. Rendering on
   it is F-X001 to F-X004.
 - **It does not amend `docs/spikes/A7-tier-c.md`.** The `Gallium` narrowing is
@@ -528,3 +546,8 @@ red, which is HLD 27.3's third bullet and is recorded per row in
 | `the_override_parser_accepts_exactly_its_four_words` | `caps.rs` | An alias being ADDED to `from_override_str`. Every string of at most three characters over `[a-z0-9-_]` is refused except `a`, `b`, `cpu` and the empty string, so `OCELLI_TIER=c` cannot come to mean tier C on one deployment and be refused on the next |
 | `rejects the same module with one byte of its SIMD opcode broken` | `packages/core/src/capabilities.test.ts` | The committed probe module being replaced by a valid non-SIMD one that validates for the wrong reason |
 | `the_override_variable_is_named_once` | `crates/ocelli-native/src/lib.rs` | `OCELLI_TIER` being spelled two ways |
+| `workload_dimensions_are_not_interchangeable.rs` | `crates/ocelli-render/tests/ui/` | `Edge` and `Passes` collapsing back into a pair of `u32`s, which is what made `run(device, queue, &pipeline, passes, edge, clock)` compile. F-037. It compiled because no test reaches `measure`'s closure, **not** because the numbers agree: `fragments` is `edge * edge * passes` and is not symmetric, so the calibration drops from 65,536 fragments to 256 and the full pass from 16,777,216 to 262,144. `fragments` and `run` take the same transposed pair, so the reported numerator matches the trivial workload shaded and nothing internal disagrees, and only a real adapter's measured rate collapses. `probe::measure_with` carried this as a declared open residue for nine review passes and it is now a compile error. Measured: transposing the call site is `E0308` |
+| `tiers_a_and_b_open_a_device_and_tier_c_does_not` | `caps.rs` | `opens_a_device` ignoring the tier. All three named, because a predicate returning `true` unconditionally satisfies the first two rows. A tier C session that held a device would hold one nothing renders through |
+| `an_unknown_loss_recovers_and_a_destroy_does_not` | `caps.rs` | `recovers_from` ignoring the reason, in either direction. Both rows named for the same reason. Getting `Destroyed` wrong makes a shutdown path rebuild behind itself |
+| `exactly_one_loss_reason_recovers` | `caps.rs` | The same decision, counted, so an implementation answering the same for both reasons fails here as well as above. It does **not** catch a third `DeviceLostReason`: the array it counts over names two variants, so a third would simply not be tested. What catches a third is `recovers_from`'s match having no wildcard arm, which makes it fail to compile, and no runtime test substitutes for that |
+| `the_first_loss_reported_is_the_one_kept` | `gpu.rs` | `record_loss` losing its `is_none` guard. A second report about the same dead device would overwrite the reason `recovers_from` decides on, turning a recoverable session into one that refuses. It drives the production function rather than rebuilding the rule, which is why `record_loss` is a free function at all: reaching it through `GpuContext` needs a device, and this runs in the floor |

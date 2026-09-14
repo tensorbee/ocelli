@@ -460,12 +460,11 @@ MANUAL_EVENTS = {"workflow_dispatch", "repository_dispatch", "schedule"}
 # stdlib-only `quirks` gate remains in the floor.
 #
 # `gpu` is the SECOND gate marked `YES` in the runner's GPU column, added by
-# F-037. It runs every `#[ignore]`d test in `ocelli-render`, all of which need a
-# real adapter: the device opens, a loss is observed, a destroy is refused, a
-# rebuild works, and the LUT shader agrees with `ocelli-pixel`. Deviation D-04
-# is that CI has no GPU, so nothing in CI may run it, exactly as for `oracle`.
-# It therefore needs no CI step, and the rule below reads the GPU column rather
-# than a second literal here to know that.
+# F-037. It runs every `#[ignore]`d test in `ocelli-render`, which is the whole
+# definition of the set rather than a claim about why each one is ignored.
+# Deviation D-04 is that CI has no GPU, so nothing in CI may run it, exactly as
+# for `oracle`. It therefore needs no CI step, and the rule below reads the GPU
+# column rather than a second literal here to know that.
 #
 # Kept here so this script fails if the runner's exclusion list changes without
 # anyone thinking about CI.

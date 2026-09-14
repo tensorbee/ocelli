@@ -116,13 +116,27 @@ gate, at which point it was wrong without anything noticing.
 
 **There are now two gates that need a GPU**, and `oracle` is no longer the only
 one. `gpu` was added by F-037 and runs every `#[ignore]`d test in
-`ocelli-render`: the device opens, a loss is observed, a deliberate destroy is
-refused rather than rebuilt, a rebuild works, and the LUT-chain shader agrees
-with `ocelli-pixel` over the section 18.3 fixture inputs. It exists because
+`ocelli-render`. That is the whole definition of the set, and it is
+deliberately not glossed as "the ones needing an adapter": most of them do, and
+at least one is ignored because its MUTATION only dies where adapters exist
+rather than because it needs one to run. It exists because
 `cargo test --workspace` is the `test` gate and carries `needs_gpu = no`, so an
 `#[ignore]`d test ran in **no profile at all**, including `--sprint`. A story
 whose evidence is a GPU comparison would otherwise have closed green with that
 evidence checked by nothing.
+
+**One of the tests it sweeps up asserts nothing**, and the gate's own comment
+says so rather than letting the count read as coverage:
+`probe::tests::measures_a_fill_rate_on_this_machine` prints a fill rate for a
+human recording a band in `ci/tier-thresholds.json`. It is not nothing, because
+it drives `resolve` end to end on a real adapter and a panic there fails the
+gate, and it is not evidence of correctness either.
+
+The gate runs `--test-threads=1`, because the adapter is an exclusive resource.
+`docs/sprints/CURRENT_SPRINT.md` says two workers running device tests
+concurrently on one machine contend for the adapter and produce timeouts that
+read exactly like rendering failures, and a gate opening several devices at once
+is the same contention inside one process.
 
 `gpu` is excluded from `--floor` under deviation **D-04** for exactly the reason
 `oracle` is, and it is an ADDITION to the set CI does not run rather than a

@@ -184,14 +184,13 @@ DELEGATED = {
             "recorded against the `device` entry. The second is F-037's "
             "workload-dimension case and belongs to no guard, because the "
             "thing it refuses is a type error rather than a policy.",
-    "gpu": "cargo test again, filtered to the `#[ignore]`d tests that need a "
-           "real adapter, so the same reason as `test` applies unchanged. It "
-           "is a separate gate rather than part of `test` because deviation "
+    "gpu": "cargo test again, filtered to the `#[ignore]`d tests, so the same "
+           "reason as `test` applies unchanged. It is a separate gate rather "
+           "than part of `test` because deviation "
            "D-04 leaves CI without an adapter, so it carries `YES` in the GPU "
            "column and is excluded from the floor beside `oracle`. What it "
            "runs refuses nothing of its own: ocelli-render's device lifecycle "
-           "and the LUT shader are asserted by their stories' tests, not by a "
-           "guard script.",
+           "is asserted by its story's tests, not by a guard script.",
     "wasm": "the build is wasm-pack's. The size ceiling is pin_and_size_check "
             "and is probed.",
     "native": "the build is cargo's. Step 4 is target_feature_check and is "

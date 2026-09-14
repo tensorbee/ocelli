@@ -35,6 +35,14 @@ workspace = true
 # untouched, which is the shape D-09 set for glam.
 [dependencies]
 wgpu = { workspace = true, features = ["webgl"] }
+# F-037. HLD section 23's first sentence is "thiserror in the core crates", and
+# `DeviceError` is this crate's first error type. Deviation D-15 keeps
+# `default-features = false` at the workspace entry, which is what stops the
+# `std` feature reaching a no_std crate through the graph. This crate is not
+# no_std under D-10, so the setting costs it nothing and is inherited rather
+# than restated. `ocelli-compute` already takes it the same way for
+# `ComputeError`.
+thiserror = { workspace = true }
 
 # `resolve` is `async fn`, because `request_adapter` and `request_device` are
 # futures in the pinned wgpu, and a native test needs something to drive it.
@@ -43,3 +51,9 @@ wgpu = { workspace = true, features = ["webgl"] }
 [dev-dependencies]
 pollster = { workspace = true }
 proptest = { workspace = true }
+# F-037. `Edge` and `Passes` being non-interchangeable is a claim only the
+# compiler can check, and `tests/ui/` is where this workspace already asserts
+# that kind of claim: F-001 for coordinate-space mismatches and F-008 for the
+# device-ownership contract in `ocelli-compute`. Dev-only, so it never enters
+# the shipped surface, which is the argument the workspace entry already makes.
+trybuild = { workspace = true }

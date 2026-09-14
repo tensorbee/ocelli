@@ -3032,3 +3032,112 @@ while every case was still generated. The rule now follows reachability
 transitively, which is the property it always meant, and dropping a case from
 the list still turns it red. The next refactor of a generator should expect any
 guard that reads its AST to be shaped around the old layout.
+
+## F-037, ocelli-render device init, capability tiering and device-lost recovery, completed 2026-09-14
+
+**What this closes.** The session's one long-lived `wgpu::Device` exists, and
+HLD section 22's "device loss is a real state, not an error path" is a mechanism
+rather than a sentence. **It does not close section 22's other two clauses.**
+That bullet says to rebuild "the device and all resources, and restore viewport
+state from the shell's copy", and this workspace has no texture, buffer,
+pipeline or viewport type to rebuild. `Recovered` is the struct F-038, F-039 and
+F-040 extend so they do not have to change `recover`'s signature.
+
+**What was built.** `probe::resolve_adapter` retains the adapter the tier
+resolved on and `ResolvedAdapter::open` opens the device, which is the second
+and last `request_device` in the workspace and is still inside `ocelli-render`.
+`GpuContext` gains a loss slot written by a callback its own constructor
+registers, `state()`, and `recover()`. Two decisions live in `caps` and not in
+`gpu`, following the split `lib.rs` already declared: `recovers_from` and
+`opens_a_device`, both total matches over their input with no wildcard arm, both
+reachable by `cargo test --workspace` with no adapter.
+
+**The recovery policy, and the consequence to hold.** `Unknown` rebuilds and
+`Destroyed` does not, because a destroy is the application's own teardown and
+rebuilding behind a shutdown path is a loop. **The reason this project refuses
+is the only one the pinned wgpu can produce on demand**, so the callback path is
+proved end to end on `Destroyed` and the rebuild path is proved on a record
+injected through a `pub(crate)` seam that applies the same `record_loss` the
+callback applies. That a real driver reset produces `Unknown` and reaches the
+same slot is not proved and cannot be proved on one machine.
+
+**Recovery is the one place two devices briefly coexist**, deliberately.
+`recover` opens the replacement before it replaces the context, so a refused
+rebuild leaves the caller where it started rather than with no device at all.
+Six documentation sites carried an unqualified "there is never a moment when two
+devices exist" and all six are now scoped. HLD section 31 is untouched, because
+its concern is two devices SHARING textures and nothing is shared across that
+line.
+
+**The `Edge` and `Passes` newtypes.** `probe::measure_with` named this story as
+the one to argue them, and the argument held. Transposing `run`'s two adjacent
+`u32`s compiled and passed the whole suite for nine review passes. It is now
+`E0308`. The comment that recorded the residue also said the transposed product
+was unchanged, in four files, and that was **false**: `fragments` is
+`edge * edge * passes` and is not symmetric, so the calibration drops from
+65,536 fragments to 256 and the full pass from 16,777,216 to 262,144. The old
+comment understated the defect by a factor of 256, in the direction that made
+the fix look less necessary.
+
+**Verification.** Feature profile, 28 gates including `corpus` and the new
+`gpu`, on the staged tree `60865666e8bc` recorded in the verify ledger.
+
+**Corpus.** Pass.
+
+**Fixture provenance.** No pixel arithmetic and no geometry, so no `fixture`
+row and that is the truth rather than an omission. The evidence here is nine
+controlled mutations, eight red and one a compile error, plus two residues
+recorded as green and named below.
+
+**Tier coverage.** A: full, this is the tier the device opens for. B: full, the
+device is opened with the adapter's OWN limits and never `Limits::default()`,
+and loss and recovery are backend-agnostic in wgpu 30.0.1. C: **unavailable and
+reportable**, which F-037 made a mechanism: `opens_a_device` is false for tier C
+and `resolve_adapter` returns nothing even when an adapter opened perfectly well
+and D-07's combination rule demoted it.
+
+**Size.** `ci/wasm-size-budget.json` does not move and is not re-baselined.
+`ocelli-wasm` names `ocelli-core` and nothing else, and this story deliberately
+did not add the edge, which is the answer F-004 was given in S03. The file's
+`bearing_on_gate_A4` field said the number arrives "with the render path from
+S11" and now names F-039 in S13. `docs/sprints/CURRENT_SPRINT.md`'s heading said
+the budget starts moving this sprint and now says it does not, with the reason.
+
+**Three residues, recorded rather than closed.**
+
+1. **`ResolvedAdapter::open`'s `required_limits`.** Replacing
+   `self.adapter.limits()` with `wgpu::Limits::default()` leaves the device
+   tests green, measured twice. A tier A adapter exceeds the WebGPU defaults, so
+   asking for them succeeds and only a downlevel adapter separates the two. HLD
+   section 7's tier B has never been exercised by anything here. F-042 or F-X002.
+2. **`resolve_adapter`'s `opens_a_device` guard.** Deleting the `if` leaves
+   everything green, because killing it needs a machine where a real adapter
+   opens and the combination rule still resolves tier C, which is a software
+   rasteriser. F-X002, whose acceptance criterion in `docs/spikes/A7-tier-c.md`
+   section A7.2 is exactly that.
+3. **A wildcard arm added to `recovers_from`.** Green, correctly: what refuses a
+   third `DeviceLostReason` is the compiler, and no runtime test substitutes.
+
+**The two approved design plans carry the unqualified two-devices claim**,
+`.claude/plans/F-037-design.md` and `F-004-design.md`, and they are not edited
+after approval. An approved plan is a record of what was decided, and correcting
+it retrospectively would make the record unreadable as one.
+
+**Notes for future sessions.** **A quantifier written beside a growing set goes
+stale the first time a member joins it for a new reason.** The `gpu` gate's set
+was described as "the ones needing a real adapter" in six places, then a test
+joined it that is ignored because its MUTATION only dies where adapters exist
+rather than because it needs one to run. The fix was not to correct six
+sentences, it was to stop glossing the set at all: it is every test marked
+`#[ignore]` in `ocelli-render`, and that attribute is the whole definition. The
+review found a seventh site thirteen lines below the paragraph explaining the
+problem.
+
+**And a test that asserts a return value cannot catch an optimisation that does
+not change the return value.** Two attempts to test `detect`'s tier C short
+circuit were green under their own mutation, because `classify` short-circuits a
+tier C override as well and hardcodes the three evidence fields, so the
+`Resolution` is identical either way. What observes it is the caller's `clock`,
+which is already a parameter: counting its invocations is zero with the short
+circuit and non-zero without, needs no new seam, and is not a timing bound
+because the closure returns a constant and the assertion is on the call count.

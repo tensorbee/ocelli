@@ -10,7 +10,7 @@ against the arithmetic `ocelli-pixel` already owns.
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-031 | E5.1 | `ocelli-cache`: budgeted LRU across encoded, decoded and GPU tiers | Rust | 4w | pending |
-| F-037 | E6.1 | `ocelli-render`: device init, capability tiering, device-lost recovery | Rust | 4w | pending |
+| F-037 | E6.1 | `ocelli-render`: device init, capability tiering, device-lost recovery | Rust | 4w | done |
 | F-041 | E6.5 | WGSL LUT-chain shader | Rust | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
@@ -131,25 +131,49 @@ its allocated size makes the budget a number that does not describe memory.
 - `wasm-bindgen` remains confined to `ocelli-wasm`, pixels do not cross the
   boundary, and no story adds a second `queue.submit()` per frame.
 
-## The size budget starts moving this sprint, and that is expected
+## The size budget does NOT move this sprint, and this section said it would
 
-`ci/wasm-size-budget.json` records 16,388 bytes and its own note says the
-number that will bear on Appendix A gate A4 "arrives with the render path from
-S11, not here". D-14 says the same thing from the other side: wgpu's `webgl`
+**This heading read "The size budget starts moving this sprint, and that is
+expected" when the sprint opened, and the S11 design round decided otherwise.**
+The paragraph below it quoted `ci/wasm-size-budget.json` saying the number
+bearing on Appendix A gate A4 "arrives with the render path from S11, not here",
+and F-037 corrected that field to name **F-039, E6.3 in S13**. The quotation is
+left here in its corrected form rather than deleted, because a sprint plan that
+silently stops predicting something it predicted is worse than one that records
+the change.
+
+**The reason is that no S11 story reaches `ocelli-render` from `ocelli-wasm`.**
+`crates/ocelli-wasm/Cargo.toml` names `ocelli-core` and nothing else. F-031 is
+`ocelli-cache`, F-037 is the device inside `ocelli-render`, and F-041 is a
+shader inside `ocelli-render`, and none of the three adds that dependency edge.
+Adding it would put an entry point nothing calls into the shipped module purely
+to move a number, which is the same answer F-004 was given in the S03 design
+round. D-14 is unchanged and still correct from the other side: wgpu's `webgl`
 feature costs zero bytes today only because `ocelli-wasm` does not reach
 `ocelli-render`.
 
-So a re-baseline in this sprint is **not** a gate being loosened, provided it is
-deliberate. `scripts/pin_and_size_check.py` refuses a silent one and
-`python3 scripts/pin_and_size_check.py --accept-size` is the explicit route,
-which the budget file's own `note` field already names. The design plan that
-takes it says what grew and why, and fills the `rebaselined` block the way
-F-005 did, with a measurement against a rebuild of the base commit so the delta
-is the story's and not drift. Gate
-A4 estimates 3 to 8 MB uncompressed with Naga dominating and records itself as
-unmeasured. **A measurement that lands inside that estimate is evidence and a
-measurement that lands outside it is a finding**, and either is worth more than
-the estimate. Neither is a reason to widen the tolerance.
+So **`ci/wasm-size-budget.json` is expected to still record 16,388 bytes at the
+close of S11**, and a story re-baselining it is a finding rather than the plan.
+
+**The recorded budget and the measured artefact already differ, and that is not
+this sprint's doing.** The `wasm` gate measures 16,455 bytes against the
+recorded 16,388, a drift of 67 bytes that is inside the file's 5 per cent
+tolerance and so passes. It reproduces at this sprint's base commit `3b00890`,
+so it predates S11 and no S11 story caused it. It is recorded here because the
+sentence above is about the RECORDED number and a reader checking it against a
+build would otherwise find a discrepancy with nothing explaining it.
+
+The route stays documented for the sprint that does take it.
+`scripts/pin_and_size_check.py` refuses a silent re-baseline and
+`python3 scripts/pin_and_size_check.py --accept-size` is the explicit one, which
+the budget file's own `note` field already names. The design plan that takes it
+says what grew and why, and fills the `rebaselined` block the way F-005 did,
+with a measurement against a rebuild of the base commit so the delta is the
+story's and not drift. Gate A4 estimates 3 to 8 MB uncompressed with Naga
+dominating and records itself as unmeasured. **A measurement that lands inside
+that estimate is evidence and a measurement that lands outside it is a
+finding**, and either is worth more than the estimate. Neither is a reason to
+widen the tolerance.
 
 ## Dependency order and the one shared resource
 
