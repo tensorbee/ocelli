@@ -56,16 +56,16 @@ ocelli-pixel = { path = "../ocelli-pixel" }
 # reach a buffer. This is the workspace entry's FIRST consumer.
 bytemuck = { workspace = true }
 
-# `resolve` is `async fn`, because `request_adapter` and `request_device` are
-# futures in the pinned wgpu, and a native test needs something to drive it.
-# Dev-only, so it never enters the shipped surface, which is the same argument
-# the workspace entry already makes for proptest and trybuild.
 [dev-dependencies]
 # F-041. `tests/voi_shader.rs` compares the shader's output against
 # `LutChain::map_into`, whose signature is in `Stored` and `Display` from
 # `ocelli-core`. Dev-only: the shipped surface reaches `ocelli-core` through
 # `ocelli-pixel` and does not name it.
 ocelli-core = { path = "../ocelli-core" }
+# `resolve` is `async fn`, because `request_adapter` and `request_device` are
+# futures in the pinned wgpu, and a native test needs something to drive it.
+# Dev-only, so it never enters the shipped surface, which is the same argument
+# the workspace entry already makes for proptest and trybuild.
 pollster = { workspace = true }
 proptest = { workspace = true }
 # F-037. `Edge` and `Passes` being non-interchangeable is a claim only the

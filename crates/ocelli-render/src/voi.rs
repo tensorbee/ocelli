@@ -2,9 +2,14 @@
 //! chain.
 //!
 //! Section 18's instruction is to "implement it once, in ocelli-pixel, and let
-//! the shader read the parameters". This module is the reading. It computes no
-//! LUT arithmetic and makes no LUT decision: every value here is taken from a
-//! [`LutChain`] that already resolved it.
+//! the shader read the parameters". This module is the reading.
+//!
+//! **The Rust here computes no LUT value**: every field of [`VoiParams`] is
+//! taken from a [`LutChain`] that already resolved it. **The WGSL here does
+//! evaluate the three window formulas**, because section 18.4's uniform hands a
+//! shader `center`, `width` and `fn_kind`. What neither half does is make a LUT
+//! DECISION, and the shader is handed no input from which it could re-make one.
+//! `shaders/voi.wgsl` sets that out at the line.
 //!
 //! **The layout lives here and not in `ocelli-pixel`.** A `#[repr(C)]` uniform
 //! is a rendering concern, and `ocelli-pixel` is `no_std`, holds no GPU type

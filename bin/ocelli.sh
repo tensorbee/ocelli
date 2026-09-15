@@ -84,7 +84,7 @@ GATES=(
   "quirk-mutations|no|checker-owned quirk mutations fail at their fixed boundaries"
   "corpus-tests|no|the corpus generator and coverage suites, a skip fails it"
   "corpus|no|corpus coverage over the codec registry, then presence and digests"
-  "gpu|YES|ocelli-render's #[ignore]d tests, the hardware tier (E6.1, D-04)"
+  "gpu|YES|ocelli-render's #[ignore]d tests, the hardware tier (E6.1, E6.5, D-04)"
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
 )
 
@@ -300,10 +300,17 @@ run_gate() {
     # not because it needs one to run, and a gloss over a growing set goes stale
     # the first time a test joins it for a new reason. This one already has.
     #
-    # What the set is today: the device lifecycle, that short-circuit test, and
-    # the fill-rate instrument noted below. F-041's LUT-shader comparison joins
-    # it when that story lands, and the gate needs no edit for it because this
-    # names no test file.
+    # What the set is today, with F-031, F-037 and F-041 all landed: the device
+    # lifecycle, the tier C short-circuit test, the fill-rate instrument noted
+    # below, and F-041's LUT-shader comparison against `ocelli-pixel`.
+    #
+    # NO COUNT IS WRITTEN HERE.
+    # `cargo test -p ocelli-render -- --ignored --list | grep -c ': test$'`
+    # prints how many there are, across every binary in the crate. The gate needed no edit when F-041
+    # landed, because this names no test file, and THIS COMMENT DID, twice: a
+    # gloss saying the set was "the ones needing an adapter", then a hard count
+    # of eighteen put in the same arm that warns against exactly that. F-038,
+    # F-040 and F-042 all add to this crate.
     #
     # `-- --ignored` runs ONLY the ignored tests, which is the whole set and
     # nothing else. The default `cargo test --workspace` in the `test` gate runs

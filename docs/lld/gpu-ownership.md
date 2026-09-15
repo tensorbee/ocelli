@@ -1,7 +1,7 @@
 # GPU ownership
 
 **F-IDs that contributed:** F-004, F-005, F-008, F-037, F-041, F-X001
-**Last updated:** 2026-09-14
+**Last updated:** 2026-09-15
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
 mechanism. The quote below alters that bullet in one place, splitting its
@@ -302,9 +302,9 @@ promises what the code does not do.
 
 `crates/ocelli-render/tests/device.rs` and one `#[ignore]`d case in `gpu.rs`,
 both run by `bin/ocelli.sh gate gpu`. **They are not that gate's whole set**,
-which is every `#[ignore]`d test in the crate and also holds the tier C
-short-circuit test and the fill-rate instrument. What follows is the device
-lifecycle alone. A device opens and agrees with the resolved tier. A destroy is
+which is every `#[ignore]`d test in the crate: the device lifecycle, the tier C
+short-circuit test, the fill-rate instrument, and F-041's LUT-shader comparison.
+What follows is the device lifecycle alone. A device opens and agrees with the resolved tier. A destroy is
 observed as a loss carrying `Destroyed`. That destroy is
 refused rather than rebuilt, and the refusal leaves the state it refused to act
 on unchanged. Recovering a live device is a different refusal, `NotLost`. An

@@ -5,15 +5,29 @@
 `docs/hld/15-lut-chain.md` sections 18 through 18.3, DICOM PS3.3 C.7.6.2,
 C.7.6.3, C.7.9 and C.11
 **F-IDs that contributed:** F-018, F-029, F-030, F-041
-**Last updated:** 2026-09-14
+**Last updated:** 2026-09-15
 
 Living current-state document. It describes what the code does today.
 
 ## Ownership
 
 `ocelli-pixel` owns all interpretation between decoded DICOM sample containers
-and display values. No decoder interprets Bits Stored or signedness. No shader
-reimplements modality or VOI arithmetic.
+and display values. No decoder interprets Bits Stored or signedness.
+
+**No shader re-makes a LUT DECISION, and one shader does evaluate the
+formulas.** That sentence read "no shader reimplements modality or VOI
+arithmetic" until F-041, which made it false: `crates/ocelli-render/shaders/voi.wgsl`
+evaluates stage 1, all three window functions and stage 3, because HLD section
+18.4's uniform hands a shader `slope`, `intercept`, `center`, `width` and
+`fn_kind`, and a shader given those has to evaluate something.
+
+What exists once is every decision. The shader receives a resolved `invert`
+flag and no Photometric Interpretation, one selected window pair and no
+multiplicity, rescale values and no sequence, and a width this crate already
+validated. It cannot re-decide any of them, which is a property of what the
+uniform does not carry. `VoiParams::from_chain` refuses outright when a LUT
+Sequence makes the uniform inexpressible, rather than substituting values the
+sequence overrode.
 
 The stages are:
 

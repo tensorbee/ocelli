@@ -45,21 +45,21 @@ pub const FILL_RATE_ALU_STEPS: u32 = 64;
 /// One side of the square render target a timed run shades into.
 ///
 /// **A newtype, and F-037 is the story `measure_with` named as the one to argue
-/// it.** That function's documentation recorded the residue: [`run`] took
-/// `edge` and `passes` as two adjacent `u32`s, the closure in [`measure`]
+/// it.** That function's documentation recorded the residue: `run` took
+/// `edge` and `passes` as two adjacent `u32`s, the closure in `measure`
 /// forwarded them positionally, and transposing them there compiled and passed
 /// the whole suite.
 ///
 /// **It passed because nothing reaches that call site, not because the numbers
-/// agree.** They do not. [`fragments`] is `edge * edge * passes`, which is not
+/// agree.** They do not. `fragments` is `edge * edge * passes`, which is not
 /// symmetric in its two arguments, so the calibration goes from 65,536
 /// fragments to 256 and the full pass from 16,777,216 to 262,144, factors of
-/// 256 and 64. What stays consistent is that [`fragments`] and [`run`] are
+/// 256 and 64. What stays consistent is that `fragments` and `run` are
 /// handed the SAME transposed pair, so the reported numerator matches the
 /// trivial workload actually shaded and nothing internal disagrees. Every test
-/// here supplies its own `issue` and never reaches [`measure`]'s closure, and
-/// `the_recorded_workload_matches_the_checked_in_file` calls [`fragments`] on
-/// [`RUN_PLAN`] directly rather than through that closure, so it agrees too.
+/// here supplies its own `issue` and never reaches `measure`'s closure, and
+/// `the_recorded_workload_matches_the_checked_in_file` calls `fragments` on
+/// `RUN_PLAN` directly rather than through that closure, so it agrees too.
 /// Only a real adapter's measured rate would collapse.
 ///
 /// **An earlier version of this paragraph said the product was unchanged**, in
@@ -116,7 +116,7 @@ const CALIBRATION_BUDGET_NANOS: u64 = 2_000_000;
 /// hints, which is exactly what it is for.
 const COMPLETION_TIMEOUT_NANOS: u64 = 5_000_000_000;
 
-/// The three runs [`measure`] issues, in order, as `(edge, passes)` pairs: the
+/// The three runs `measure` issues, in order, as `(edge, passes)` pairs: the
 /// warm-up whose figure is discarded, the calibration, and the full pass.
 ///
 /// **A value rather than three call sites, so the workload is assertable.**
@@ -127,7 +127,7 @@ const COMPLETION_TIMEOUT_NANOS: u64 = 5_000_000_000;
 /// `caps::detection_tests::the_recorded_workload_matches_the_checked_in_file`
 /// is what stops the plan and the file from drifting apart, and
 /// `probe::tests::a_slow_first_submission_does_not_stop_the_full_pass` is what
-/// stops the plan from being a statement [`measure`] does not follow.
+/// stops the plan from being a statement `measure` does not follow.
 pub(crate) const RUN_PLAN: [(Edge, Passes); 3] = [
     (CALIBRATION_EDGE, CALIBRATION_PASSES),
     (CALIBRATION_EDGE, CALIBRATION_PASSES),
@@ -179,7 +179,7 @@ pub async fn resolve(request: TierRequest, clock: &mut dyn FnMut() -> u64) -> Re
 /// the `if` leaves the whole suite green, measured in the F-037 review's first
 /// pass. `a_cpu_override_yields_no_adapter` below reaches the tier C path but
 /// cannot kill that mutation, because a `Cpu` override short-circuits in
-/// [`detect`] and the adapter is `None` for that reason as well. Killing it
+/// `detect` and the adapter is `None` for that reason as well. Killing it
 /// needs a machine where a real adapter opens and the combination rule still
 /// resolves tier C, which is a software rasteriser, and this repository has no
 /// such machine in any gate. **F-X002 is the story that gets one**, through
@@ -191,7 +191,7 @@ pub async fn resolve(request: TierRequest, clock: &mut dyn FnMut() -> u64) -> Re
 /// **The probe device is still transient, and on this path there is still never
 /// a moment when two devices exist.** This function retains an `Adapter`, which
 /// is not a device. The probe's device is created, measured on and dropped
-/// inside [`detect`] before this returns, and the long-lived one is opened
+/// inside `detect` before this returns, and the long-lived one is opened
 /// later, by [`ResolvedAdapter::open`], at the caller's choosing.
 ///
 /// **The recovery path is different and says so at the line that does it.**
@@ -476,7 +476,7 @@ where
 ///
 /// `ProbeOutcome` is the evidence `classify` reads and it names the winner by
 /// its `AdapterFacts`. `chosen` is the same winner by index, which is what
-/// [`detect`] needs to take the `wgpu::Adapter` itself out of the list. They
+/// `detect` needs to take the `wgpu::Adapter` itself out of the list. They
 /// are two views of one decision made in one place, not two decisions.
 struct Probed {
     outcome: ProbeOutcome,
@@ -558,7 +558,7 @@ async fn measure_candidates(
 /// target, once per pass.
 ///
 /// **The numerator of the fill rate, extracted so the floor can assert it.**
-/// It was an expression inside [`run`], and the only test over it recomputed
+/// It was an expression inside `run`, and the only test over it recomputed
 /// the same expression in its own body, which asserts the arithmetic against
 /// itself: dropping the `passes` factor left the crate green. `passes` is not
 /// decoration, it is a factor of sixteen between the two workloads, and
@@ -580,7 +580,7 @@ pub(crate) fn fragments(edge: Edge, passes: Passes) -> u64 {
 /// [`CALIBRATION_BUDGET_NANOS`] is a ceiling ON the calibration, not a figure
 /// the calibration has to beat: the rule is "if the calibration took LONGER
 /// than this", and a calibration that took exactly the budget did not take
-/// longer than it, so the full pass still runs. Extracted from [`measure`] so
+/// longer than it, so the full pass still runs. Extracted from `measure` so
 /// the boundary is assertable without an adapter, which deviation D-04 leaves
 /// the floor without.
 const fn full_pass_is_affordable(calibration_nanos: u64) -> bool {
@@ -593,7 +593,7 @@ const fn full_pass_is_affordable(calibration_nanos: u64) -> bool {
 /// The full pass runs only if the calibration was fast enough to make it
 /// affordable, and if it was not, the calibration figure is itself the answer.
 ///
-/// This half builds the pipeline and hands [`measure_with`] a way to issue one
+/// This half builds the pipeline and hands `measure_with` a way to issue one
 /// run. Everything that decides anything is in that function, which needs no
 /// adapter, for the reason the module header gives about `caps` and `probe`.
 fn measure(
@@ -615,19 +615,19 @@ fn measure(
 
 /// [`RUN_PLAN`], issued in order, and the figure that comes out of it.
 ///
-/// `issue` is [`run`] in the resolver and a recording stand-in in the tests,
+/// `issue` is `run` in the resolver and a recording stand-in in the tests,
 /// which deviation D-04 leaves without an adapter. It is a `&mut dyn FnMut` for
 /// the same reason `clock` is one on [`resolve`]: the alternative is a generic
 /// parameter with one instantiation, and `AGENTS.md` refuses that shape.
 ///
 /// **The transposition this function's documentation used to name as open is
 /// CLOSED, by F-037.** `edge` and `passes` were both `u32` and adjacent, the
-/// closure in [`measure`] forwarded them positionally, and transposing them
+/// closure in `measure` forwarded them positionally, and transposing them
 /// there, `run(device, queue, &pipeline, passes, edge, clock)`, compiled and
 /// passed the whole suite. It passed because every test here supplies its own
 /// `issue` and never reaches that call, **not** because the numbers agree:
-/// [`fragments`] is `edge * edge * passes` and is not symmetric, so the
-/// calibration drops from 65,536 fragments to 256. [`fragments`] and [`run`]
+/// `fragments` is `edge * edge * passes` and is not symmetric, so the
+/// calibration drops from 65,536 fragments to 256. `fragments` and `run`
 /// are handed the same transposed pair, so the reported numerator matches the
 /// trivial workload actually shaded and nothing internal disagrees. Only a real
 /// adapter's measured rate would have collapsed. See [`Edge`].
@@ -889,7 +889,7 @@ mod tests {
     /// Issue [`RUN_PLAN`] against a stand-in for [`super::run`] that records
     /// what it was asked for and reports `elapsed_nanos` for every run.
     ///
-    /// The fragment count it hands back is the production [`fragments`] of the
+    /// The fragment count it hands back is the production `fragments` of the
     /// pair it was given, so a run issued at the wrong size reports the wrong
     /// numerator here exactly as it would on a device.
     fn issued(elapsed_nanos: u64) -> (Vec<u64>, Option<FillRate>) {
@@ -945,7 +945,7 @@ mod tests {
     /// calibration has to be small enough that a rasteriser reaches the budget
     /// rather than hanging startup.
     ///
-    /// Both figures come from the production [`fragments`], so the ratio is a
+    /// Both figures come from the production `fragments`, so the ratio is a
     /// claim about the workloads this crate actually issues.
     #[test]
     fn the_full_pass_is_much_larger_than_the_calibration() {
@@ -1170,7 +1170,7 @@ mod tests {
     /// cost getting there.**
     ///
     /// Deviation D-07 names the estate that overrides to tier C getting its
-    /// startup cost back, and a [`detect`] that enumerated adapters before
+    /// startup cost back, and a `detect` that enumerated adapters before
     /// reading the override would spend it anyway.
     ///
     /// **The `clock` parameter is what makes that assertable**, and two earlier
@@ -1179,7 +1179,7 @@ mod tests {
     /// invocations is an assertion on a parameter that already exists. The
     /// short circuit returns before any instance, adapter or device is created,
     /// so nothing times anything and the count is deterministically zero.
-    /// Delete the short circuit and [`measure`] runs, [`run`] calls `clock`
+    /// Delete the short circuit and `measure` runs, `run` calls `clock`
     /// around its submission, and the count is non-zero.
     ///
     /// **This is not a timing bound.** The closure returns a constant `0` and
@@ -1190,8 +1190,8 @@ mod tests {
     /// seam with one production caller.
     ///
     /// **`#[ignore]`d because the killing power needs an adapter that OPENS.**
-    /// `clock` is reached only from [`measure`], which only the `Opened` arm of
-    /// [`measure_candidates`] calls. So with the short circuit deleted the
+    /// `clock` is reached only from `measure`, which only the `Opened` arm of
+    /// `measure_candidates` calls. So with the short circuit deleted the
     /// mutation still survives on a machine that enumerates nothing, and also
     /// on one that enumerates an adapter whose device request fails: both reach
     /// `ProbeOutcome` variants that never time anything. `bin/ocelli.sh gate
@@ -1200,7 +1200,7 @@ mod tests {
     /// The floor's coverage of the same DECISION is
     /// `caps::tests::tiers_a_and_b_open_a_device_and_tier_c_does_not`, which
     /// drives `opens_a_device` over all three tiers with no adapter at all.
-    /// What only this test adds is that [`detect`] honours that decision before
+    /// What only this test adds is that `detect` honours that decision before
     /// spending any startup cost on it.
     #[test]
     #[ignore = "the startup-cost assertion only bites where adapters exist (D-04)"]

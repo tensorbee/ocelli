@@ -13,6 +13,19 @@
 //! `request_device` call and [`probe::ResolvedAdapter`]. `gpu` holds the device
 //! once it exists, its loss state and its rebuild.
 //!
+//! **`voi` is the fourth module and the crate's first shader**, added by F-041
+//! (E6.5, S11). It holds HLD section 18.4's uniform, [`voi::VoiParams`], and the
+//! WGSL that reads it, [`voi::VOI_WGSL`]. The division section 18 draws is that
+//! `ocelli-pixel` owns the LUT values and this crate owns the layout. **The
+//! WGSL does evaluate the three window formulas**, because section 18.4's
+//! uniform hands a shader `center`, `width` and `fn_kind` and a shader given
+//! those has to evaluate something. What it does not do is make a LUT
+//! DECISION: it is handed no input from which it could re-select a window,
+//! recompute inversion or apply a sequence. The Rust in `voi` computes nothing
+//! at all and only reads a resolved chain. The WGSL carries no entry
+//! point and is composed by its consumer, which today is a test and tomorrow is
+//! F-038's render graph.
+//!
 //! Tier resolution is split across two modules on purpose. `caps` decides and
 //! touches no GPU, `probe` touches the GPU and decides nothing. Everything
 //! that can be WRONG about a tier is in `caps`, which needs no adapter to

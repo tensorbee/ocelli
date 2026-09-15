@@ -3089,9 +3089,16 @@ row and that is the truth rather than an omission. The evidence here is nine
 controlled mutations, eight red and one a compile error, plus two residues
 recorded as green and named below.
 
-**Tier coverage.** A: full, this is the tier the device opens for. B: full, the
-device is opened with the adapter's OWN limits and never `Limits::default()`,
-and loss and recovery are backend-agnostic in wgpu 30.0.1. C: **unavailable and
+**Tier coverage.** A: full, this is the tier the device opens for. B: **the
+code path exists and has never been exercised**, which is the honest word and
+not "full". The device is opened with the adapter's OWN limits and never
+`Limits::default()`, and loss and recovery are backend-agnostic in wgpu 30.0.1,
+so nothing here needs a capability tier B lacks. But residue 1 below records
+that the limits line is caught by no test on a tier A machine, and nothing in
+this repository has ever run on tier B. S11's sprint review found this entry
+saying "full" while F-041's entry refused the same word for the same absence of
+evidence, and `docs/sprints/CURRENT_SPRINT.md` names that divergence as a risk
+this sprint was exposed to. C: **unavailable and
 reportable**, which F-037 made a mechanism: `opens_a_device` is false for tier C
 and `resolve_adapter` returns nothing even when an adapter opened perfectly well
 and D-07's combination rule demoted it.

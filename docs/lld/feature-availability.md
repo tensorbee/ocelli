@@ -1,7 +1,7 @@
 # Feature availability
 
 **F-IDs that contributed:** F-037, F-041, F-X001
-**Last updated:** 2026-09-14
+**Last updated:** 2026-09-15
 
 The contract every tier-gated feature declares, and the distinction between a
 working primary path, a declared fallback and an unavailable feature. This is
