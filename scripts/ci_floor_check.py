@@ -187,12 +187,18 @@ nothing else asserted anything about it. The reviewer deleted the whole
 and the floor probes all exited 0. `guards-deep` is what runs the cargo probes
 and `census --profile deep`, which is the sweep-complete rule.
 
-The four excluded gates are not excluded for the same reason, and the runner
-says which is which without a second literal here. `oracle` is the one gate
-`bin/ocelli.sh` marks `YES` in its GPU column, and deviation D-04 is that CI
-has no GPU, so nothing in CI may run it. The other three are excluded for cost
-or for the corpus, and CI runs each through the corpus-tooling or guards jobs:
-`corpus`, `guards-deep` and `quirk-mutations`.
+The excluded gates are not excluded for the same reason, and the runner says
+which is which without a second literal here: the ones excluded because CI has
+no GPU are exactly the ones `bin/ocelli.sh` marks `YES` in its GPU column, and
+`gpu_gates` reads that column. Deviation D-04 is that CI has no GPU, so nothing
+in CI may run them. The rest are excluded for cost or for the corpus, and CI
+runs each through the corpus-tooling or guards jobs.
+
+**No count is written here and no gate is named here**, deliberately. This
+paragraph said "the four excluded gates" and "`oracle` is the one gate" from the
+fourth pass until F-037 added `gpu` in S11, and both halves went stale in the
+same commit. `NOT_IN_FLOOR` above is the list and the GPU column is the reason,
+and a sentence restating either is stale the next time a gate lands.
 
 So the rule is: **a gate outside the floor that does not need a GPU must still
 be run by some CI step, provably reachable on at least one event the workflow
@@ -452,9 +458,17 @@ MANUAL_EVENTS = {"workflow_dispatch", "repository_dispatch", "schedule"}
 # the locked DICOM environment and its attribution boundary needs cargo. The
 # corpus-tooling job installs both and invokes it on every event. The separate
 # stdlib-only `quirks` gate remains in the floor.
+#
+# `gpu` is the SECOND gate marked `YES` in the runner's GPU column, added by
+# F-037. It runs every `#[ignore]`d test in `ocelli-render`, which is the whole
+# definition of the set rather than a claim about why each one is ignored.
+# Deviation D-04 is that CI has no GPU, so nothing in CI may run it, exactly as
+# for `oracle`. It therefore needs no CI step, and the rule below reads the GPU
+# column rather than a second literal here to know that.
+#
 # Kept here so this script fails if the runner's exclusion list changes without
 # anyone thinking about CI.
-NOT_IN_FLOOR = {"oracle", "corpus", "guards-deep", "quirk-mutations"}
+NOT_IN_FLOOR = {"oracle", "corpus", "guards-deep", "quirk-mutations", "gpu"}
 
 
 # The `GATES=( ... )` array literal. The array is read as SHELL WORDS by

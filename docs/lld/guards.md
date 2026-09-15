@@ -1,7 +1,7 @@
 # The guard harness
 
-**F-IDs that contributed:** F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020
-**Last updated:** 2026-09-06
+**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020
+**Last updated:** 2026-09-14
 
 A guard is any refusal this repository can produce: a script that exits 1, a
 hook that rejects a commit, a gate that fails.
@@ -375,6 +375,17 @@ rules are one rule seen three ways: the S03 review's fourth pass deleted the
 fewer, and probes still passing, because a probe invokes
 `scripts/prose_check.py` directly rather than through the gate. `--floor`,
 `--sprint` and `--all` all shrank and nothing said so.
+
+**The rule is not a formality, measured again in S11.** F-037 added a `gpu`
+gate and the census refused it twice before it was declared: once for having no
+catalogue entry and no `DELEGATED` reason, and once because
+`scripts/ci_floor_check.py`'s `NOT_IN_FLOOR` had changed without its recorded
+digest moving. `gpu` is `DELEGATED`, for the same reason `test` is: it runs
+`cargo test -p ocelli-render -- --ignored`, which is a crate's own suite, and it
+refuses nothing of its own. The ratchet was re-recorded with
+`python3 scripts/guard_census.py --record`, which moved exactly two values, the
+`NOT_IN_FLOOR` digest and `gates_declared` from 30 to 31, so the widening is
+visible in the diff rather than asserted in a message.
 
 **The `GATES` array has ONE reader since the eleventh pass**, and this
 paragraph used to record the duplication instead of removing it. It said the
@@ -789,9 +800,12 @@ to `bin/ocelli.sh`, while the step remains in the useful per-area job.
 The older named-only rule for an arm containing work the extractor cannot see
 still applies independently. Its probe first reduces the synthetic arm to one
 visible command, so deleting that rule cannot be hidden by the newer
-multi-command rule. D-04's exclusions remain a separate set comparison:
-`corpus`, `guards-deep` and `oracle` do not become floor gates through this
-equivalence rule.
+multi-command rule. **D-04's exclusions remain a separate set comparison**, and
+no gate becomes a floor gate through this equivalence rule. The excluded set is
+`scripts/ci_floor_check.py`'s `NOT_IN_FLOOR`, compared for set equality with the
+runner's own `case` line, and it is deliberately not listed again here: this
+sentence named three gates while the set held four, and F-037 added `gpu` as a
+fifth in S11.
 
 The per-event reader reports an unreachable gate before it asks how a reachable
 arm is spelled. That keeps condition-reading probes attached to the missing

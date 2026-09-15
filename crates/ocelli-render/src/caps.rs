@@ -117,6 +117,71 @@ pub fn compute_available(caps: &Caps) -> bool {
     caps.compute && caps.tier.supports_compute()
 }
 
+/// Whether a device lost for this reason is rebuilt.
+///
+/// HLD section 22: "**Device loss is a real state, not an error path.** Handle
+/// device_lost, rebuild the device and all resources, and restore viewport
+/// state from the shell's copy". It does not say which losses are recoverable,
+/// and the pinned wgpu gives exactly two reasons, so the decision is this
+/// two-row table.
+///
+/// `Unknown` is section 22's population. `wgpu-types` 30.0.1 documents it as
+/// "The device was lost for an unspecific reason, including driver errors",
+/// which covers the driver reset, the tab backgrounded too long and the OOM.
+/// `wgpu`'s browser backend maps `GpuDeviceLostReason::Unknown` onto it, so it
+/// is what a browser produces for the same events.
+///
+/// `Destroyed` is [`wgpu::Device::destroy`] having been called, which is the
+/// application's own deliberate teardown. Rebuilding there is a recovery
+/// nobody asked for, and a shutdown path that destroys and then observes the
+/// loss would rebuild a device it is in the middle of discarding.
+///
+/// **This lives in `caps` and not in `gpu` because it is a decision**, which is
+/// the split `lib.rs` declares and the same argument that put
+/// [`compute_available`] here. The consequence is the one that matters: this
+/// function is reachable by `cargo test --workspace` on a machine with no
+/// adapter, which deviation D-04 leaves the CI floor as.
+///
+/// **A total match over both variants, deliberately, with no wildcard arm.** A
+/// future wgpu adding a third reason makes this fail to compile, which is the
+/// outcome this project wants. The alternative, `_ => false` or `_ => true`,
+/// has a new reason silently inheriting an answer nobody chose for it, and
+/// device loss is exactly the state where a silent default is a session that
+/// never comes back.
+#[must_use]
+pub const fn recovers_from(reason: wgpu::DeviceLostReason) -> bool {
+    match reason {
+        wgpu::DeviceLostReason::Unknown => true,
+        wgpu::DeviceLostReason::Destroyed => false,
+    }
+}
+
+/// Whether a session resolved to these capabilities opens a long-lived device
+/// at all.
+///
+/// Tiers A and B do. **Tier C does not, and that is the point**: deviation
+/// D-07 adds a CPU tier precisely for the machine that has no usable adapter,
+/// and `ocelli-pixel` is its authoritative path. A tier C session that opened a
+/// device anyway would have one nothing renders through, and the honest
+/// behaviour is HLD section 31's, generalised by D-07: the feature reports
+/// unavailable rather than quietly producing a different answer.
+///
+/// **This is not the same question as "did an adapter open".** An adapter can
+/// open and the session still resolve to tier C, because D-07's combination
+/// rule demotes a software rasteriser on its measured fill rate, its reported
+/// device type and its renderer string. So this reads the RESOLVED tier and
+/// never the probe outcome, and [`crate::probe::resolve_adapter`] returns
+/// nothing when it says no, even though it is holding an adapter that worked.
+///
+/// A total match, for the reason [`recovers_from`] gives.
+#[must_use]
+pub const fn opens_a_device(caps: &Caps) -> bool {
+    match caps.tier {
+        Tier::A | Tier::B => true,
+        Tier::Cpu => false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // F-004, the detection half.
 //
@@ -862,7 +927,7 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
 
 #[cfg(test)]
 mod tests {
-    use super::{Caps, Tier, compute_available};
+    use super::{Caps, Tier, compute_available, opens_a_device, recovers_from};
 
     /// Build a `Caps` for the compute-availability truth table.
     fn caps_with(compute: bool, tier: Tier) -> Caps {
@@ -952,6 +1017,100 @@ mod tests {
         assert!(!caps.compute);
         assert_eq!(caps.max_tex_3d, 256);
         assert_eq!(caps.max_buffer, 268_435_456);
+    }
+
+    /// **Both loss reasons, named, because there are exactly two.**
+    ///
+    /// HLD section 22: "Device loss is a real state, not an error path. Handle
+    /// device_lost, rebuild the device and all resources". It does not say
+    /// which losses are recoverable, and the pinned wgpu offers exactly two
+    /// reasons to decide between, so the decision is a two-row table and this
+    /// is the whole of it.
+    ///
+    /// `Unknown` is section 22's population: the pinned `wgpu-types` documents
+    /// it as "The device was lost for an unspecific reason, including driver
+    /// errors", which is the driver reset, the backgrounded tab and the OOM.
+    ///
+    /// `Destroyed` is `Device::destroy` having been called, which is the
+    /// application's own teardown. Rebuilding there is a recovery nobody asked
+    /// for, and on a shutdown path that destroys and then observes the loss it
+    /// is a loop.
+    ///
+    /// **Both rows are asserted rather than only the `true` one.** A
+    /// `recovers_from` that ignored its argument and returned `true` satisfies
+    /// the first assertion alone, and that implementation is exactly the
+    /// mutation this test exists to kill.
+    #[test]
+    fn an_unknown_loss_recovers_and_a_destroy_does_not() {
+        assert!(
+            recovers_from(wgpu::DeviceLostReason::Unknown),
+            "a driver reset is HLD section 22's population and must recover"
+        );
+        assert!(
+            !recovers_from(wgpu::DeviceLostReason::Destroyed),
+            "a destroy is the caller's own teardown, and rebuilding behind it loops"
+        );
+    }
+
+    /// **Tier C opens no device, and the other two do.**
+    ///
+    /// Deviation D-07's honesty rule at the point it becomes a call: a machine
+    /// resolved to tier C renders through `ocelli-pixel`, so a device it holds
+    /// is a device nothing renders through. `probe::resolve_adapter` reads this
+    /// and returns nothing, **even when an adapter opened successfully**, which
+    /// is the case that makes the function worth having: D-07's combination
+    /// rule demotes a software rasteriser that opened a perfectly good device.
+    ///
+    /// All three tiers are named. A predicate that ignored the tier and
+    /// returned `true` satisfies the first two assertions, and that is the
+    /// mutation this row exists to kill.
+    #[test]
+    fn tiers_a_and_b_open_a_device_and_tier_c_does_not() {
+        assert!(opens_a_device(&caps_with(true, Tier::A)));
+        assert!(opens_a_device(&caps_with(false, Tier::B)));
+        assert!(
+            !opens_a_device(&caps_with(true, Tier::Cpu)),
+            "a tier C session renders through ocelli-pixel and holds no device"
+        );
+    }
+
+    /// The device question and the compute question are different questions.
+    ///
+    /// Tier B opens a device and does not run compute, so a single predicate
+    /// serving both would be wrong on that row. Stated as a test because the
+    /// two functions sit next to each other and read alike.
+    #[test]
+    fn opening_a_device_is_not_the_same_question_as_running_compute() {
+        let tier_b = caps_with(true, Tier::B);
+        assert!(opens_a_device(&tier_b));
+        assert!(!compute_available(&tier_b));
+    }
+
+    /// Exactly one of the two reasons recovers, stated as a count.
+    ///
+    /// The pair above separates the two constant implementations by naming each
+    /// row. This separates them by a different measure, so a `recovers_from`
+    /// that answered `true` for both or `false` for both fails here as well as
+    /// there.
+    ///
+    /// **It does NOT catch a future wgpu adding a third reason**, and an
+    /// earlier version of this comment claimed it did. The array below is
+    /// written out with two variants in it, so a third one would simply not be
+    /// tested and the count would still be one. What actually catches a third
+    /// reason is [`recovers_from`]'s match having no wildcard arm, which makes
+    /// it fail to COMPILE, and no runtime test can substitute for that. The
+    /// claim was wrong in the direction that matters: it described a guard
+    /// where there is a compiler.
+    #[test]
+    fn exactly_one_loss_reason_recovers() {
+        let recovering = [
+            wgpu::DeviceLostReason::Unknown,
+            wgpu::DeviceLostReason::Destroyed,
+        ]
+        .into_iter()
+        .filter(|reason| recovers_from(*reason))
+        .count();
+        assert_eq!(recovering, 1);
     }
 }
 

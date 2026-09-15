@@ -3032,3 +3032,285 @@ while every case was still generated. The rule now follows reachability
 transitively, which is the property it always meant, and dropping a case from
 the list still turns it red. The next refactor of a generator should expect any
 guard that reads its AST to be shaped around the old layout.
+
+## F-037, ocelli-render device init, capability tiering and device-lost recovery, completed 2026-09-14
+
+**What this closes.** The session's one long-lived `wgpu::Device` exists, and
+HLD section 22's "device loss is a real state, not an error path" is a mechanism
+rather than a sentence. **It does not close section 22's other two clauses.**
+That bullet says to rebuild "the device and all resources, and restore viewport
+state from the shell's copy", and this workspace has no texture, buffer,
+pipeline or viewport type to rebuild. `Recovered` is the struct F-038, F-039 and
+F-040 extend so they do not have to change `recover`'s signature.
+
+**What was built.** `probe::resolve_adapter` retains the adapter the tier
+resolved on and `ResolvedAdapter::open` opens the device, which is the second
+and last `request_device` in the workspace and is still inside `ocelli-render`.
+`GpuContext` gains a loss slot written by a callback its own constructor
+registers, `state()`, and `recover()`. Two decisions live in `caps` and not in
+`gpu`, following the split `lib.rs` already declared: `recovers_from` and
+`opens_a_device`, both total matches over their input with no wildcard arm, both
+reachable by `cargo test --workspace` with no adapter.
+
+**The recovery policy, and the consequence to hold.** `Unknown` rebuilds and
+`Destroyed` does not, because a destroy is the application's own teardown and
+rebuilding behind a shutdown path is a loop. **The reason this project refuses
+is the only one the pinned wgpu can produce on demand**, so the callback path is
+proved end to end on `Destroyed` and the rebuild path is proved on a record
+injected through a `pub(crate)` seam that applies the same `record_loss` the
+callback applies. That a real driver reset produces `Unknown` and reaches the
+same slot is not proved and cannot be proved on one machine.
+
+**Recovery is the one place two devices briefly coexist**, deliberately.
+`recover` opens the replacement before it replaces the context, so a refused
+rebuild leaves the caller where it started rather than with no device at all.
+Six documentation sites carried an unqualified "there is never a moment when two
+devices exist" and all six are now scoped. HLD section 31 is untouched, because
+its concern is two devices SHARING textures and nothing is shared across that
+line.
+
+**The `Edge` and `Passes` newtypes.** `probe::measure_with` named this story as
+the one to argue them, and the argument held. Transposing `run`'s two adjacent
+`u32`s compiled and passed the whole suite for nine review passes. It is now
+`E0308`. The comment that recorded the residue also said the transposed product
+was unchanged, in four files, and that was **false**: `fragments` is
+`edge * edge * passes` and is not symmetric, so the calibration drops from
+65,536 fragments to 256 and the full pass from 16,777,216 to 262,144. The old
+comment understated the defect by a factor of 256, in the direction that made
+the fix look less necessary.
+
+**Verification.** Feature profile, 28 gates including `corpus` and the new
+`gpu`, on the staged tree `60865666e8bc` recorded in the verify ledger.
+
+**Corpus.** Pass.
+
+**Fixture provenance.** No pixel arithmetic and no geometry, so no `fixture`
+row and that is the truth rather than an omission. The evidence here is nine
+controlled mutations, eight red and one a compile error, plus two residues
+recorded as green and named below.
+
+**Tier coverage.** A: full, this is the tier the device opens for. B: **the
+code path exists and has never been exercised**, which is the honest word and
+not "full". The device is opened with the adapter's OWN limits and never
+`Limits::default()`, and loss and recovery are backend-agnostic in wgpu 30.0.1,
+so nothing here needs a capability tier B lacks. But residue 1 below records
+that the limits line is caught by no test on a tier A machine, and nothing in
+this repository has ever run on tier B. S11's sprint review found this entry
+saying "full" while F-041's entry refused the same word for the same absence of
+evidence, and `docs/sprints/CURRENT_SPRINT.md` names that divergence as a risk
+this sprint was exposed to. C: **unavailable and
+reportable**, which F-037 made a mechanism: `opens_a_device` is false for tier C
+and `resolve_adapter` returns nothing even when an adapter opened perfectly well
+and D-07's combination rule demoted it.
+
+**Size.** `ci/wasm-size-budget.json` does not move and is not re-baselined.
+`ocelli-wasm` names `ocelli-core` and nothing else, and this story deliberately
+did not add the edge, which is the answer F-004 was given in S03. The file's
+`bearing_on_gate_A4` field said the number arrives "with the render path from
+S11" and now names F-039 in S13. `docs/sprints/CURRENT_SPRINT.md`'s heading said
+the budget starts moving this sprint and now says it does not, with the reason.
+
+**Three residues, recorded rather than closed.**
+
+1. **`ResolvedAdapter::open`'s `required_limits`.** Replacing
+   `self.adapter.limits()` with `wgpu::Limits::default()` leaves the device
+   tests green, measured twice. A tier A adapter exceeds the WebGPU defaults, so
+   asking for them succeeds and only a downlevel adapter separates the two. HLD
+   section 7's tier B has never been exercised by anything here. F-042 or F-X002.
+2. **`resolve_adapter`'s `opens_a_device` guard.** Deleting the `if` leaves
+   everything green, because killing it needs a machine where a real adapter
+   opens and the combination rule still resolves tier C, which is a software
+   rasteriser. F-X002, whose acceptance criterion in `docs/spikes/A7-tier-c.md`
+   section A7.2 is exactly that.
+3. **A wildcard arm added to `recovers_from`.** Green, correctly: what refuses a
+   third `DeviceLostReason` is the compiler, and no runtime test substitutes.
+
+**The two approved design plans carry the unqualified two-devices claim**,
+`.claude/plans/F-037-design.md` and `F-004-design.md`, and they are not edited
+after approval. An approved plan is a record of what was decided, and correcting
+it retrospectively would make the record unreadable as one.
+
+**Notes for future sessions.** **A quantifier written beside a growing set goes
+stale the first time a member joins it for a new reason.** The `gpu` gate's set
+was described as "the ones needing a real adapter" in six places, then a test
+joined it that is ignored because its MUTATION only dies where adapters exist
+rather than because it needs one to run. The fix was not to correct six
+sentences, it was to stop glossing the set at all: it is every test marked
+`#[ignore]` in `ocelli-render`, and that attribute is the whole definition. The
+review found a seventh site thirteen lines below the paragraph explaining the
+problem.
+
+**And a test that asserts a return value cannot catch an optimisation that does
+not change the return value.** Two attempts to test `detect`'s tier C short
+circuit were green under their own mutation, because `classify` short-circuits a
+tier C override as well and hardcodes the three evidence fields, so the
+`Resolution` is identical either way. What observes it is the caller's `clock`,
+which is already a parameter: counting its invocations is zero with the short
+circuit and non-zero without, needs no new seam, and is not a timing bound
+because the closure returns a constant and the assertion is on the call count.
+
+## F-041, WGSL LUT-chain shader, completed 2026-09-15
+
+**What this closes.** DICOM PS3.3 C.11 stages 1 to 3 now evaluate on the GPU,
+from HLD section 18.4's uniform, and the shader's output is checked against
+`ocelli-pixel` on a real adapter. **It does not close decision D7**: the oracle
+still has no Ocelli renderer to compare against, because there is no frame. What
+it closes is the arithmetic half, and F-038's render graph and F-040's texture
+upload are what make a frame out of it.
+
+**The shader carries no entry point, and that is a departure from the plan.**
+The plan said "a fragment shader, so one shader serves both GPU tiers".
+`shaders/voi.wgsl` holds section 18.4's uniform and the LUT functions and stops
+there, because an entry point decides for every consumer how a stored value
+arrives and where a display value goes, and there is no texture type yet for one
+to arrive through. A consumer concatenates its own. **The file uses nothing HLD
+section 7 denies tier B**, which `voi::tests` asserts by text and
+`the_shader_composes_into_a_render_pipeline_not_only_a_compute_one` asserts by
+building a real render pipeline from it.
+
+**The test harness appends a COMPUTE entry point over two storage buffers**,
+which tier B has neither of, because it needs arbitrary `f32` inputs in and
+exact `f32` values back. **That is a property of the harness and not of the
+shader**, and it is written down in three places rather than left to be
+inferred, because a compute harness beside a tier B claim is exactly the shape
+that reads as hand-waving later.
+
+**The evidence, and what class it is.** The section 18.3 rows, the boundary
+rows, the width-one rows, the SIGMOID row and the non-zero-range inversion row
+are hand-computed from PS3.3 in exact rational arithmetic and asserted on the
+GPU directly. Nothing in this repository produced those numbers, and they are
+what stops the comparison below being circular. The sweep, 4096 stored values
+across all three functions inverted and not, is a comparison against this
+repository's own validated CPU path: **weaker than an oracle verdict**, because
+both sides are ours, and **stronger than a screenshot**, because it is a numeric
+diff at `f32` with no quantisation hiding a 0.32-of-255 divergence.
+
+**Measured maximum divergence: 0.000030517578**, two `f32` ULP at 255 or one at
+256, against an asserted bound of `1e-4`. Decision D14 asks for a measured
+divergence rather than a bit-exactness claim, and that is the number.
+
+**Fixture provenance.** Every expected value computed in exact rational
+arithmetic from PS3.3 C.11.2.1.2, C.11.2.1.3.2 and C.11.2.1.3.1 before the
+shader was written, and deviation D-13 applied to section 18.3's row one, whose
+`LINEAR_EXACT` value is `0.000` and not the `1.594` the HLD prints.
+
+**Tier coverage.** A: full, and this is the tier every test ran on. B: the
+shader uses nothing tier B lacks, asserted by text and by a real render
+pipeline, and **nothing in this repository has ever run on tier B**, so the
+claim is that the shader needs nothing tier B denies rather than that it has
+been seen to work there. F-042 and F-X002 are the stories that could close it.
+C: n/a as a shader, and full as arithmetic, because deviation D-07 makes
+`ocelli-pixel` tier C's authoritative path and this story reimplements nothing
+for it.
+
+**Size.** `ci/wasm-size-budget.json` does not move. `ocelli-wasm` reaches
+neither `ocelli-render` nor `ocelli-pixel`.
+
+**Three more departures from the plan, all reported rather than improvised.**
+The plan's mutation row for the upper boundary operator is not achievable and
+the row for the lower one needed a window the plan did not name, `w = 1`.
+`ocelli-render` gained `ocelli-core` as a DEV dependency, because
+`LutChain::map_into`'s signature is in `Stored` and `Display`. And **`bytemuck`
+had no consumer in this workspace before this story**, so F-041 is the first,
+which the `pins` gate sees as a newly active dependency.
+
+**An open finding against `ocelli-pixel`, recorded and not fixed.** A legal
+LINEAR chain can return a value outside its own declared output range, at one
+input per window, on the CPU and the GPU identically and bit for bit. Measured
+in `f32` at centre `1024.5`, width `1.0003662109375`, range `[0, 255]`: the
+upper breakpoint rounds to `1024.0002` and the body there is **297.50003**
+against a `ymax` of 255. The cause is that PS3.3 C.11.2.1.2's formula in single
+precision does not reproduce its own breakpoint, and only the upper one can
+escape, because the lower comparison is `<=` and clamps first.
+`docs/lld/pixel-pipeline.md` carries the reproduction. **It is not F-041's**,
+the arithmetic is F-018's, no tolerance was widened to hide it, and **no backlog
+row was created**, because creating an F-ID moves the backlog's identity and the
+sprint plan's arithmetic and is the operator's scheduling decision.
+
+**Verification.** Feature profile, 28 gates including `corpus` and `gpu`, on the
+staged tree recorded in the verify ledger.
+
+**Corpus.** Pass.
+
+**Notes for future sessions.** **A percentage in prose is a fact about the
+sampler until it carries its frame.** This story shipped an unframed "83 per
+cent" twice, in two files, for two different questions. Measured over several
+frames the same quantity ranges from 6.0 to 99.9 per cent and the out-of-range
+rate from 22 to 50 per cent, so both the rate and the worst-case magnitude move
+with how the parameters are drawn. Both numbers are deleted. The worked example
+is exact and reproduces, and that is what the records claim.
+
+**And an argument nobody depends on is worth deleting rather than correcting.**
+Three separate versions of a comment about which VOI boundary operator is
+observable were each falsified by the next review pass, the third by legal
+windows where the operator moves the output by 42.5 of 255. The fourth version
+is a deletion. The operators are written as PS3.3 writes them, which needs no
+mutation to justify it, and the test that does pin one says only what it pins.
+
+## F-031, ocelli-cache budgeted LRU across encoded, decoded and GPU tiers, completed 2026-09-15
+
+**What this closes.** HLD section 20's `Budgeted` and `Lru<K, V>`, over
+`alloc::collections::BTreeMap` and a monotonic `u64` tick, plus section 8's
+three tiers as `CacheTier` and `Pressure`. **It creates no value type.** An
+encoded byte run, a decoded frame and a GPU texture are F-032, F-033, F-036 and
+F-040, all S12 or S13, and a `Budgeted` implementation for a texture that no
+texture type exists to be is a `bytes()` nobody can check.
+
+**`insert` returns `Admission<K, V>`, which is deviation D-24.** Section 20
+returns `Vec<(K, V)>` documented as "the entries evicted to make room", and
+three things reach the caller: entries evicted to fit the incoming one, the
+previous value under a repeated key, and an entry the budget cannot hold at all.
+F-032 surfaces these as JS events and they are three different events, and
+F-034's telemetry counts evictions, which a replacement would inflate.
+
+**D-24's row was edited during implementation and the edit is the interesting
+part.** The row as approved said an entry is refused when its `bytes` exceeds
+the whole budget. The implemented condition is `would_admit`, which is that OR a
+budget of zero, because the plan's own test row "a zero-budget cache admits
+nothing" was false for a zero-byte entry under the approved wording. One clause
+changed in each of two columns and the count stayed at 24.
+
+**Verification.** Feature profile at the worker's tree, 22 gates green, four
+skipped for absent prerequisites, **`corpus=absent`** because `corpus/data` is
+gitignored and a worker worktree does not have it. The corpus is verified in
+this sprint's consolidated run, on the integrated tree, which is where it can be.
+
+**Fixture provenance.** Three byte fixtures citing PS3.3 C.7.6.3.1 and HLD
+section 7, with hand-computed sizes: a 512 by 512 sixteen-bit frame at 524,288
+bytes, a row-padded texture allocation at 262,144 against a decoded source of
+153,600, and section 7's own bricking figure, 512 by 512 by 600 sixteen-bit at
+314,572,800 against a 256 MiB budget.
+
+**Tier coverage.** A: n/a. B: n/a. C: n/a. This crate holds no GPU code and
+creates no device. The GPU tier here is a budget in bytes and a discriminant,
+not a wgpu call, and a tier C session's encoded and decoded tiers behave
+identically while its GPU tier simply has no entries.
+
+**Size.** `ci/wasm-size-budget.json` does not move. `ocelli-wasm` does not reach
+`ocelli-cache`.
+
+**Ten review passes, and nine tests exist because of what they found.** The six
+mandated mutations were each observed red on their named test. The reviewers ran
+roughly 140 more and **nine left the suite green**: the evicted vector's
+ordering, all three sites that re-read `V::bytes()`, a refusal bumping recency,
+`is_empty` computed from `used` rather than from the entry count, a deferred
+release of a displaced value, and a dropped Samples per Pixel in a fixture. Each
+became a test.
+
+**Three departures from the plan, all reported.** `Admission`'s `Default` is
+hand-written rather than derived, because a derive bounds `K` and `V` and would
+make `Admission::default()` unusable inside `insert`, which is deviation D-08's
+trap in a new place. `would_admit` became `budget > 0 && bytes <= budget`. And
+the plan's claim that the common insert path is allocation-free is false and was
+corrected: `insert` allocates a `BTreeMap` node irregularly, measured at 34, 5
+and 1 allocations over forty inserts.
+
+**Notes for future sessions.** **The parallel worker path worked and its one
+rough edge is worth recording.** The worker correctly refused to touch
+`CURRENT_SPRINT.md`, `BACKLOG.md`, `SPRINT_TRACKER.md` and the sprint run state,
+which live only in the canonical worktree, so F-031 arrived at integration still
+`claimed` with a `pending` backlog row. That is the protocol working rather than
+failing, and the integrator owns those four files. The three-way merge itself
+was clean: one overlapping file, `Cargo.lock`, auto-merged, and the only shared
+prose was a single row of `docs/hld/DEVIATIONS.md` that the worker narrowed and
+this branch had not touched since the base.

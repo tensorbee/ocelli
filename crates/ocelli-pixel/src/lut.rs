@@ -182,6 +182,25 @@ impl ModalityTransform {
         }
     }
 
+    /// HLD section 18.4's `slope` and `intercept`, or `None` for a sequence.
+    ///
+    /// **An accessor over state this type already holds, adding no
+    /// arithmetic.** Section 18 says to implement the chain once here "and let
+    /// the shader read the parameters", and this is the reading half. F-041
+    /// builds the uniform from it.
+    ///
+    /// `None` when a Modality LUT Sequence was selected. Section 18's stage
+    /// table says a sequence takes precedence over rescale, and section 18.4's
+    /// uniform has no field for one, so there is nothing honest to return.
+    /// Returning the rescale values a sequence overrode would answer a
+    /// different question with numbers that look right.
+    pub const fn rescale(&self) -> Option<(f32, f32)> {
+        match &self.0 {
+            ModalitySelection::Lut(_) => None,
+            ModalitySelection::Rescale { slope, intercept } => Some((*slope, *intercept)),
+        }
+    }
+
     /// Map caller-provided slices without allocating.
     pub fn map_into(
         &self,
@@ -284,6 +303,28 @@ impl VoiTransform {
             } => Display(apply_window(
                 modality.0, *center, *width, *function, *ymin, *ymax,
             )),
+        }
+    }
+
+    /// HLD section 18.4's `center`, `width` and `fn_kind`, or `None` for a
+    /// sequence.
+    ///
+    /// The stage 2 half of [`ModalityTransform::rescale`], with the same
+    /// reasoning: an accessor over state already held, no arithmetic, and
+    /// `None` where the uniform cannot express what was selected. **The window
+    /// pair returned is the SELECTED one**, resolved once by
+    /// [`VoiTransform::new`] from the possibly multi-valued Window Center and
+    /// Window Width of PS3.3 C.11.2.1.1, so a caller reading this cannot
+    /// re-select and cannot select differently.
+    pub const fn window(&self) -> Option<(f32, f32, VoiFunction)> {
+        match &self.0 {
+            VoiSelection::Lut(_) => None,
+            VoiSelection::Window {
+                center,
+                width,
+                function,
+                ..
+            } => Some((*center, *width, *function)),
         }
     }
 
@@ -454,6 +495,25 @@ impl LutChain {
     /// The single resolved inversion flag HLD section 18.4's uniform carries.
     pub const fn inverts(&self) -> bool {
         self.presentation.inverts()
+    }
+
+    /// Stage 1's transform, so a caller can read its parameters.
+    ///
+    /// Shared, never owned. The chain resolved the composition once and a
+    /// caller reading a stage must not be able to rebuild it differently.
+    pub const fn modality(&self) -> &ModalityTransform {
+        &self.modality
+    }
+
+    /// Stage 2's transform, so a caller can read its parameters and its range.
+    ///
+    /// Section 18.4's `ymin` and `ymax` come from
+    /// [`VoiTransform::output_range`] on this, which is the SAME range stage 3
+    /// was constructed with by [`LutChain::new`]. That is what stops the
+    /// uniform from carrying one range while the resolved inversion was
+    /// computed about another.
+    pub const fn voi(&self) -> &VoiTransform {
+        &self.voi
     }
 
     /// Map one Stored value through stages 1, 2 and 3 in PS3.3 C.11's order.

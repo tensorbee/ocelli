@@ -160,7 +160,11 @@ build and packaging paths and the reference half of the oracle. S03 gave the
 oracle a verdict, resolved the runtime tier, answered Appendix A gates A1 and
 A2, and gave the repository's refusals a standing harness. That last one is
 not "every guard": `python3 scripts/guard_census.py` prints the bucket watched
-by nothing, and it is not empty. See
+by nothing, and **it is empty today**, which this line said it was not until
+S11's sprint review ran the command. The sentence is kept rather than deleted
+because the bucket is a ratchet that may only decrease and the census refuses a
+non-zero count once the sweep is recorded complete, so "run the command" is
+still the instruction and only the answer moved. See
 `docs/sprints/CURRENT_SPRINT.md` and `docs/lld/`.
 
 What exists, in the order it matters:
@@ -181,7 +185,11 @@ What exists, in the order it matters:
 - **`ocelli-core`**, the coordinate and value spaces, entries 1 and 2 of the
   first-ten-files list.
 - **The codec registry and five decoder families.** Raw, RLE, JPEG, JPEG 2000,
-  JPEG-LS and HTJ2K. **Fifteen of the sixteen known transfer syntaxes are
+  JPEG-LS and HTJ2K. **Six names, five families**, because Raw and RLE register
+  together through `register_native_and_rle_decoders` and
+  `crates/ocelli-codec/tests/registry.rs` says so. S11's sprint review changed
+  this to six and its next pass changed it back, which is what counting names
+  instead of `register_*` functions costs. **Fifteen of the sixteen known transfer syntaxes are
   available**, and the sixteenth, Deflated Explicit VR Little Endian, is
   unavailable by design: PS3.5 A.5 deflates the whole data set rather than a
   frame, so it is `ocelli-dicom`'s route under D-18.
@@ -203,6 +211,20 @@ What exists, in the order it matters:
   `bin/ocelli.sh` step 2 names separately.
 - **The GPU device-sharing contract**, `GpuContext` in `ocelli-render` and
   `ComputeCtx` in `ocelli-compute`, section 38's Phase 1 hook.
+- **The session's one long-lived `wgpu::Device`**, opened from the adapter the
+  tier resolved on, with device loss an observable state and a recovery policy
+  that rebuilds an `Unknown` loss and refuses a deliberate `destroy`. S11's
+  F-037. `ocelli-render` is still the only crate that may create a device.
+- **A budgeted LRU**, HLD section 20's `Budgeted` and `Lru<K, V>` with the
+  three tiers of section 8 as a discriminant and a pressure signal. S11's F-031.
+  **It holds no value type**: an encoded run, a decoded frame and a GPU texture
+  are S12 and S13 stories.
+- **The LUT chain's shader.** `crates/ocelli-render/shaders/voi.wgsl`, HLD
+  section 18.4's uniform and the three window functions, agreeing with
+  `LutChain::map_into` on a real adapter to two `f32` ULP at 255. S11's F-041.
+  **Nothing renders a frame yet**, so decision D7 still holds: the oracle has no
+  Ocelli renderer to compare against, and F-038 and F-040 are what make a frame
+  out of these three.
 - **The npm packaging pipeline**, proven against a consumer outside the
   workspace.
 

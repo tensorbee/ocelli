@@ -7992,8 +7992,9 @@ GUARDS: tuple[Guard, ...] = (
                        "reports HARNESS rather than passing quietly."),
         ),
         limit="The non-floor rule exempts a gate `bin/ocelli.sh` marks YES in "
-              "its GPU column, which is `oracle` and deviation D-04's reason "
-              "for it, and that column is not in the declared-constant "
+              "its GPU column, and deviation D-04 is why such a gate is "
+              "excluded from the floor. That column is not in the "
+              "declared-constant "
               "ratchet. Marking `guards-deep|YES|` would therefore exempt it "
               "without this check noticing. It is left as a limit rather than "
               "recorded, because the column is a semantic claim in the "

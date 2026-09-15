@@ -35,11 +35,42 @@ workspace = true
 # untouched, which is the shape D-09 set for glam.
 [dependencies]
 wgpu = { workspace = true, features = ["webgl"] }
+# F-037. HLD section 23's first sentence is "thiserror in the core crates", and
+# `DeviceError` is this crate's first error type. Deviation D-15 keeps
+# `default-features = false` at the workspace entry, which is what stops the
+# `std` feature reaching a no_std crate through the graph. This crate is not
+# no_std under D-10, so the setting costs it nothing and is inherited rather
+# than restated. `ocelli-compute` already takes it the same way for
+# `ComputeError`.
+thiserror = { workspace = true }
+# F-041. HLD section 18 says to implement the LUT chain once in `ocelli-pixel`
+# and "let the shader read the parameters", so the renderer has to be able to
+# see them. `VoiParams::from_chain` reads a resolved `LutChain` and computes
+# nothing. Section 4's crate table forbids no direction and this is the one
+# section 18 implies.
+ocelli-pixel = { path = "../ocelli-pixel" }
+# F-041. HLD section 20's third bullet, by name: "Use bytemuck::cast_slice for
+# reinterpreting pixel buffers. Hand-written transmutes are unsafe code with no
+# upside here." `unsafe` is allow-listed to two files and neither is this crate,
+# so the `Pod` derive on section 18.4's `#[repr(C)]` uniform is how its bytes
+# reach a buffer. This is the workspace entry's FIRST consumer.
+bytemuck = { workspace = true }
 
+[dev-dependencies]
+# F-041. `tests/voi_shader.rs` compares the shader's output against
+# `LutChain::map_into`, whose signature is in `Stored` and `Display` from
+# `ocelli-core`. Dev-only: the shipped surface reaches `ocelli-core` through
+# `ocelli-pixel` and does not name it.
+ocelli-core = { path = "../ocelli-core" }
 # `resolve` is `async fn`, because `request_adapter` and `request_device` are
 # futures in the pinned wgpu, and a native test needs something to drive it.
 # Dev-only, so it never enters the shipped surface, which is the same argument
 # the workspace entry already makes for proptest and trybuild.
-[dev-dependencies]
 pollster = { workspace = true }
 proptest = { workspace = true }
+# F-037. `Edge` and `Passes` being non-interchangeable is a claim only the
+# compiler can check, and `tests/ui/` is where this workspace already asserts
+# that kind of claim: F-001 for coordinate-space mismatches and F-008 for the
+# device-ownership contract in `ocelli-compute`. Dev-only, so it never enters
+# the shipped surface, which is the argument the workspace entry already makes.
+trybuild = { workspace = true }

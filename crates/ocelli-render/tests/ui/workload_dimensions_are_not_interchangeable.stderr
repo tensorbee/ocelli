@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/workload_dimensions_are_not_interchangeable.rs:34:28
+   |
+34 |     let wrong_edge: Edge = passes;
+   |                     ----   ^^^^^^ expected `Edge`, found `Passes`
+   |                     |
+   |                     expected due to this
+
+error[E0308]: mismatched types
+  --> tests/ui/workload_dimensions_are_not_interchangeable.rs:35:32
+   |
+35 |     let wrong_passes: Passes = edge;
+   |                       ------   ^^^^ expected `Passes`, found `Edge`
+   |                       |
+   |                       expected due to this
