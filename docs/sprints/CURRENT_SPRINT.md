@@ -1,200 +1,179 @@
-# Current sprint, S11
+# Current sprint, S12
 
 **Milestone**: M3, the cache and the renderer.
-**Branch**: `sprint/s11`
-**Opened**: 2026-09-14
-**Goal**: Open M3 by standing up the two things every rendered frame needs, a
-budgeted cache and a real GPU device, and then writing the LUT chain's shader
-against the arithmetic `ocelli-pixel` already owns.
+**Branch**: `sprint/s12`
+**Opened**: 2026-09-15
+**Goal**: Turn S11's three components into things a session can use. The cache
+gets its consumers, its events and its brick addressing, and the renderer gets
+the graph that schedules a frame.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-031 | E5.1 | `ocelli-cache`: budgeted LRU across encoded, decoded and GPU tiers | Rust | 4w | done |
-| F-037 | E6.1 | `ocelli-render`: device init, capability tiering, device-lost recovery | Rust | 4w | done |
-| F-041 | E6.5 | WGSL LUT-chain shader | Rust | 4w | done |
+| F-032 | E5.2 | Image cache with eviction events surfaced to JS | Rust | 2w | pending |
+| F-033 | E5.3 | Volume cache and progressive volume assembly | Rust | 4w | pending |
+| F-034 | E5.4 | Memory-pressure telemetry and JS-visible budget controls | Rust | 2w | pending |
+| F-036 | E5.6 | Chunked residency model and brick addressing in the cache | Rust | 4w | pending |
+| F-038 | E6.2 | Render graph and frame scheduler with dirty tracking | Rust | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:
 
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S11 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S12 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-**This is the sprint the GPU stops being a plan.** Ten sprints built ingest,
-codecs and the pixel pipeline, and every one of them ran on the CPU. S11 creates
-the first long-lived `wgpu::Device`, gives the cache a budget to respect, and
-writes the first shader. Nothing renders a corpus frame end to end at the close
-of this sprint, and that is later business: F-038's render graph in S12, then
-F-040's texture upload path and F-039's OffscreenCanvas in S13, are what turn
-these three components into a frame.
+**S11 built three components and connected none of them.** It created the first
+long-lived `wgpu::Device`, a budgeted LRU holding no value type, and a shader
+with no frame to run in. S12 is where each acquires a consumer: F-032 and F-033
+give the cache the tiers it was built for, F-036 gives it the brick addressing
+HLD section 38 calls a Phase 1 hook, F-034 makes its pressure visible to the
+shell, and F-038 gives the renderer the graph that decides when to draw.
 
-The three stories are close to independent. F-031 touches `ocelli-cache` and no
-GPU at all. F-037 touches `ocelli-render`'s device path. F-041 writes WGSL and
-its host-side uniform. They share no source file, so they can run as a parallel
-wave, **except for one resource**: any test that touches a real device
-contends for it. See the serialisation note below.
+**A frame still does not reach a canvas at the close of this sprint.** F-039's
+OffscreenCanvas and F-040's texture upload are S13, and they are what put pixels
+on a surface. What changes here is that the pieces stop being independent.
 
 ## What is carried in
 
-- **M2 closed at S10 and a release is due by the table in `docs/RELEASE.md`**,
-  which maps M2 to `0.2.0`. **It cannot be taken.** `/release` step 5 refuses
-  while `openjph-core` 0.1.0 carries no BSD notice material, which is D-22, and
-  M1's `0.1.0` was never published either, so the namespace reservation the
-  release table treats as already done is still outstanding. Neither blocks any
-  story here. Both block publication, and the gap widens every milestone.
-- **F-X011** remains pending because its acceptance evidence requires a second
-  physical machine and none is available. It is unfinished M1 evidence and is
-  not a dependency of anything in this sprint.
-- **ICC is not implemented**, the other half of HLD section 18's stage-4 row.
-  F-030 built palette and the colour transforms and left ICC, which is
-  whole-slide colour management and has no corpus row carrying a profile.
-- **Multi-component JPEG-LS decoding is still owed.** F-030 added the corpus
-  row Appendix A gate A2 asked for, and the adapter still refuses such a frame
-  cleanly. The row measures the refusal. Decoding one is a codec story.
-- **The oracle still has no Ocelli renderer to compare against.** That is
-  decision D7 holding rather than a gap, and **F-041 is the first story that
-  moves toward closing it**, though it does not close it.
+- **An open finding against `ocelli-pixel`'s own arithmetic**, recorded in
+  `docs/lld/pixel-pipeline.md` by F-041 and **not scheduled**. A legal `LINEAR`
+  chain returns a value outside its declared output range at one input per
+  window, identically on CPU and GPU, because PS3.3 C.11.2.1.2's formula in
+  `f32` does not reproduce its own breakpoint. It has no F-ID, because creating
+  one moves the backlog's identity and the sprint plan's arithmetic and is the
+  operator's decision. **Nothing in S12 touches that arithmetic**, and a story
+  that begins consuming `Display` values should know the range is not a
+  guarantee.
+- **Tier B has still never been exercised**, by anything, in any sprint. F-037
+  and F-041 both wrote for it and neither could try it. F-042 is the WebGL2
+  story and it is S13. F-038's pipelines are the next code written for a tier
+  nobody has run on.
+- **The wasm size budget has not moved**, and still records 16,388 bytes.
+  `ocelli-wasm` reaches `ocelli-core` and nothing else. Appendix A gate A4's
+  measurement arrives with F-039 in S13, which `ci/wasm-size-budget.json` now
+  says rather than naming S11.
+- **`max_review_passes` is written by `sprint_workflow.py init` and read by
+  nothing**, so `/run-sprint`'s "mark the sprint blocked" branch has no
+  mechanism behind it. Found by S11's sprint review, outside that sprint's diff,
+  and carrying no F-ID.
+- **M2's release is still due and still cannot be taken.** `/release` step 5
+  refuses while `openjph-core` 0.1.0 carries no BSD notice material, which is
+  D-22, and M1's `0.1.0` was never published. Neither blocks a story here, both
+  block publication, and the gap widens every milestone.
+- **F-X011** remains pending because its evidence needs a second physical
+  machine. **ICC** is still unimplemented, the other half of HLD section 18's
+  stage-4 row. **Multi-component JPEG-LS decoding** is still owed, with a corpus
+  row measuring the refusal.
+- **The oracle still has no Ocelli renderer to compare against**, and F-038 does
+  not close that either. A render graph with no canvas and no texture upload
+  produces no frame, so decision D7 holds until F-040.
 
 ## The defect class this sprint is exposed to
 
-**Every previous sprint could be wrong in a way a fixture catches. This one
-can be wrong in a way only a second machine catches.**
+**S11 could be wrong in a way only hardware catches. S12 can be wrong in a way
+only a second study catches.**
 
-**A second copy of the LUT arithmetic, living in WGSL.** This is the one the
-HLD names directly, in section 18: implement it once in `ocelli-pixel` and let
-the shader read the parameters. F-041 writes a shader whose whole job is to
-apply `LINEAR`, `LINEAR_EXACT` and `SIGMOID`, and the obvious way to write it
-is to type the three formulas into WGSL. That is the forbidden second copy, and
-it is worse than an ordinary duplicate because it diverges only on hardware and
-only under a pixel diff. Section 18.4's `VoiParams` struct is the specified
-shape: the shader reads `center`, `width`, `slope`, `intercept`, `ymin`, `ymax`,
-`fn_kind` and `invert`, and `LutChain::inverts` already resolves that last flag
-exactly once on the CPU. **A shader that recomputes inversion from Photometric
-Interpretation is the double-inversion defect F-029 spent a story preventing.**
+**Slice spacing taken from a tag.** This is the one to fear, and F-033 is where
+it lives. `SpacingBetweenSlices` is frequently absent and frequently wrong, and
+`SliceThickness` is the reconstructed slab and may overlap or gap. **The ground
+truth is the difference between consecutive `ImagePositionPatient` values
+projected onto the slice normal**, and nothing else. Reading the tag on an
+overlapping-reconstruction CT compresses the volume along z by a constant
+factor, which makes every sagittal and coronal reformat wrong while the axial
+view looks perfect, and no measurement tool flags it. Sorting by
+`InstanceNumber` or `SliceLocation` rather than by projected position is the
+same defect one step earlier.
 
-**Tier B is a declared tier and nothing has ever run on it.** HLD section 7
-gives tier B as WebGL2 through wgpu's downlevel profile, fragment shaders only,
-no compute, no storage buffers, and a 3D-texture floor of 256 against tier A's
-2048. D-14 added wgpu's `webgl` feature to `ocelli-render` precisely so tier B
-can resolve in a browser at all, and that feature has cost zero bytes so far
-because nothing reaches it. F-037 and F-041 are where a feature written for
-tier A and never tried on tier B starts to look finished while being
-unavailable on half the declared matrix.
+**Non-uniform spacing averaged rather than refused.** Dose-modulated and
+multi-slab acquisitions really do produce variable gaps. A volume model that
+assumes uniform spacing must detect and refuse, not silently average. Gantry
+tilt makes the volume a sheared parallelepiped rather than a box, which F-020
+already established must be **detected from the geometry** rather than read from
+`GantryDetectorTilt`.
 
-**And tier C is CPU, which is deviation D-07 and not the HLD's.** `ocelli-pixel`
-is tier C's authoritative path, so the correct tier C answer for a shader story
-is that the arithmetic already exists and is not reimplemented. An omitted row
-and a deliberate "no CPU path" read identically six months later.
+**A series is not a volume.** It can hold two orientations, a localiser mixed
+with axials, and duplicate positions. F-033 groups by `FrameOfReferenceUID` and
+`ImageOrientationPatient` before it assembles anything, or it builds one volume
+out of two.
 
-**Device loss is a real state, not an error path nobody reaches.** A browser
-drops a WebGPU device on a driver reset, a tab backgrounded too long, or an
-OOM, and the specified behaviour is to recover rather than to fail the session.
-An implementation that treats loss as unreachable will be correct on every
-machine anyone develops on.
+**A JS callback per eviction.** Decision **D4** is that events are polled from a
+ring once per frame and never delivered as a callback per event, and F-032 and
+F-034 are the first stories with a real event to emit. An eviction handler that
+crosses the boundary per eviction is the hot-path crossing D4 exists to remove,
+and it will look correct because it works.
 
-**The cache's budget is a promise about bytes, and `Budgeted::bytes` is where
-that promise is kept or quietly broken.** HLD section 20 gives the trait and
-the `Lru::insert` signature returning evicted entries so the caller can emit
-events. A GPU texture whose `bytes` reports its decoded source size rather than
-its allocated size makes the budget a number that does not describe memory.
+**And pixels still do not cross the boundary**, which is decision D3. A cache
+surfacing eviction events surfaces the event and not the frame.
+
+**Chunked residency is the default path, not a fallback.** Deviation **D-11**
+says so in terms. F-036 written as an optimisation that engages above a
+threshold is the architecture the HLD explicitly refused, and section 7's own
+figure is why: a 512 by 512 by 600 sixteen-bit series is roughly 300 MB against
+a guaranteed maximum buffer of 256 MiB, so the chunked path is the ordinary one.
+
+**One submit per frame, across all viewports.** HLD section 22, and F-038 is the
+first code that can break it. So is "pipelines compile at init, never
+mid-frame", and so is section 20's "no allocation in the render loop", which
+until now has been a rule with no render loop to apply to. **F-038 is where
+those three stop being aspirations.**
+
+**Device loss rebuilds resources, and F-037 deliberately did not.** Section 22
+asks for the device and all resources. F-037 rebuilt the device and returned
+`Recovered` carrying only `Caps`, because no resource type existed. F-038 is the
+first story that creates resources a rebuild has to restore, so it extends
+`Recovered` rather than changing `recover`'s signature.
 
 ## What done means
 
-- **F-031** implements HLD section 20's `Budgeted` and `Lru<K, V>` with
-  `insert` returning the evicted entries rather than dropping them, because
-  F-032 surfaces those as JS events and an eviction nobody can observe is not
-  one the shell can react to. Three tiers with distinct pressure, per HLD
-  section 8: encoded bytes transient, decoded frames in a caller-sized LRU,
-  GPU textures their own tier, because evicting a texture and evicting a frame
-  have very different costs. **No allocation in the render loop**, and the
-  budget is asserted in bytes against hand-computed entry sizes rather than
-  against what the implementation reports.
-- **F-037** creates the long-lived device. `GpuContext` already exists from
-  F-008 and `resolve` already decides the tier from F-004 and F-X001, so this
-  story wires the decision to a real adapter request and adds the recovery
-  path. **`ocelli-render` remains the only crate permitted to create a
-  `wgpu::Device`**, which `ci/check-device-ownership.sh` asserts and which this
-  story must not weaken. Device loss is recovered from and the recovery is
-  observable, not inferred.
-- **F-041** writes the WGSL and the host-side uniform of HLD section 18.4,
-  transcribed rather than reinvented, and **adds no arithmetic that
-  `ocelli-pixel` does not already own**. Its evidence is that the shader's
-  output agrees with `LutChain::map_into` over the section 18.3 fixture inputs,
-  which is a comparison against this repository's own validated CPU path and is
-  therefore weaker than an oracle verdict and stronger than a screenshot. Say
-  which it is in the design plan.
-- **Every one of the three declares all three tier rows**, and "n/a" is a real
+- **F-032** surfaces evictions the cache already reports. `Lru::insert` returns
+  `Admission` with `evicted`, `displaced` and `refused` distinguished, which is
+  deviation D-24 and exists precisely so these become three different events.
+  Collapsing them at the boundary throws away what F-031 was built to preserve.
+- **F-033** derives spacing from projected `ImagePositionPatient`, refuses
+  non-uniform spacing rather than averaging it, and groups by frame of reference
+  and orientation before assembling. **Every one of those is a fixture with
+  hand-computed values citing its PS3.3 section**, and the spacing fixture uses
+  a series whose tag and whose projected spacing disagree, because one where
+  they agree cannot tell the two implementations apart.
+- **F-034** reports pressure per tier, which is what `CacheTier` and `Pressure`
+  are for, and crosses the boundary through the ring rather than a callback.
+- **F-036** makes bricking the ordinary path and says so in its design plan, per
+  D-11. A threshold above which it engages is a deviation and needs a row.
+- **F-038** issues one `queue.submit()` per frame across all viewports, compiles
+  every pipeline at init, allocates nothing in the render loop, and extends
+  `Recovered` with the resources a device rebuild must restore.
+- **Every one of the five declares all three tier rows**, and "n/a" is a real
   answer that an omitted row is not.
 - `wasm-bindgen` remains confined to `ocelli-wasm`, pixels do not cross the
-  boundary, and no story adds a second `queue.submit()` per frame.
+  boundary, and `ocelli-render` remains the only crate that may create a device.
 
-## The size budget does NOT move this sprint, and this section said it would
+## Dependency order and the shared resources
 
-**This heading read "The size budget starts moving this sprint, and that is
-expected" when the sprint opened, and the S11 design round decided otherwise.**
-The paragraph below it quoted `ci/wasm-size-budget.json` saying the number
-bearing on Appendix A gate A4 "arrives with the render path from S11, not here",
-and F-037 corrected that field to name **F-039, E6.3 in S13**. The quotation is
-left here in its corrected form rather than deleted, because a sprint plan that
-silently stops predicting something it predicted is worse than one that records
-the change.
+F-032, F-033, F-034 and F-036 all depend on F-031. F-038 depends on F-037. All
+of those are `done`, so no story begins blocked and there is no order between
+the five.
 
-**The reason is that no S11 story reaches `ocelli-render` from `ocelli-wasm`.**
-`crates/ocelli-wasm/Cargo.toml` names `ocelli-core` and nothing else. F-031 is
-`ocelli-cache`, F-037 is the device inside `ocelli-render`, and F-041 is a
-shader inside `ocelli-render`, and none of the three adds that dependency edge.
-Adding it would put an entry point nothing calls into the shipped module purely
-to move a number, which is the same answer F-004 was given in the S03 design
-round. D-14 is unchanged and still correct from the other side: wgpu's `webgl`
-feature costs zero bytes today only because `ocelli-wasm` does not reach
-`ocelli-render`.
+**Two exclusive resources, and they are not the same one.**
 
-So **`ci/wasm-size-budget.json` is expected to still record 16,388 bytes at the
-close of S11**, and a story re-baselining it is a finding rather than the plan.
+**`crates/ocelli-cache`** is written by four of the five stories. They cannot
+share a wave without conflicting on the same source files, whatever the worker
+count says. F-038 touches `ocelli-render` and can run beside any one of them.
 
-**The recorded budget and the measured artefact already differ, and that is not
-this sprint's doing.** The `wasm` gate measures 16,455 bytes against the
-recorded 16,388, a drift of 67 bytes that is inside the file's 5 per cent
-tolerance and so passes. It reproduces at this sprint's base commit `3b00890`,
-so it predates S11 and no S11 story caused it. It is recorded here because the
-sentence above is about the RECORDED number and a reader checking it against a
-build would otherwise find a discrepancy with nothing explaining it.
-
-The route stays documented for the sprint that does take it.
-`scripts/pin_and_size_check.py` refuses a silent re-baseline and
-`python3 scripts/pin_and_size_check.py --accept-size` is the explicit one, which
-the budget file's own `note` field already names. The design plan that takes it
-says what grew and why, and fills the `rebaselined` block the way F-005 did,
-with a measurement against a rebuild of the base commit so the delta is the
-story's and not drift. Gate A4 estimates 3 to 8 MB uncompressed with Naga
-dominating and records itself as unmeasured. **A measurement that lands inside
-that estimate is evidence and a measurement that lands outside it is a
-finding**, and either is worth more than the estimate. Neither is a reason to
-widen the tolerance.
-
-## Dependency order and the one shared resource
-
-F-031 depends on F-001, F-037 on F-004, F-041 on F-029. All three are `done`,
-so no story begins blocked and there is no order between them.
-
-**The GPU is an exclusive resource and the wave plan must serialise it.** Two
-workers running device tests concurrently on one machine contend for the
-adapter and produce timeouts that read exactly like rendering failures. F-031
-needs no device and can run beside either of the others. F-037 and F-041 both
-do, so they do not run concurrently with each other whatever the worker count
-says.
+**The GPU**, for F-038 alone this sprint. The rule S11 established holds: two
+workers running device tests concurrently on one machine contend for the adapter
+and produce timeouts that read exactly like rendering failures. The `gpu` gate
+runs `--test-threads=1` for the same reason inside one process.
 
 ## Standing expectations
 
 The HLD is authoritative. A design-plan departure is recorded in
 `docs/hld/DEVIATIONS.md`, never improvised in implementation. **`wgpu` is pinned
 exactly and agents confidently emit APIs that have not existed for two years**,
-so every wgpu call in this sprint is checked against the pinned version's own
-documentation rather than from memory. Treat GPU code that compiles first try
-with suspicion.
+so every wgpu call is checked against the pinned version's own documentation
+rather than from memory. Treat GPU code that compiles first try with suspicion.
 
 No patient data enters a prompt, tracked file, fixture, log, error or commit.
 The ignored corpus remains behind `corpus/manifest.tsv` and its generators.
