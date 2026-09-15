@@ -200,16 +200,17 @@ Repository bootstrap. Nothing is published.
 - A standing probe harness for the repository's guards, and **not for every
   guard**, which is what this line claimed for four sentences before qualifying
   itself until the S03 review's seventh pass. `python3 scripts/guard_census.py`
-  prints the bucket watched by nothing and it is not empty.
+  prints the bucket watched by nothing. **It is empty today**, and this line
+  said it was not until S11's sprint review ran the command.
   `bin/ocelli.sh gate guards`
   drives each probed refusal into its rejected state in a disposable repository
   and requires it to fire, and a probe whose guard exits zero is a failure of
   the harness rather than a pass. The census refuses in both directions, so a
   refusal no entry claims and an entry claiming no refusal both fail. It sorts
   every discovered refusal into four buckets, and the fourth is the refusals
-  watched by nothing. **That bucket is not empty**, and the number in it is a
+  watched by nothing. **That bucket is empty today**, and the number in it is a
   ratchet that may only go down, so a refusal added without a watcher fails the
-  floor. `python3 scripts/guard_census.py` prints the buckets and names each
+  floor and the count cannot climb back. `python3 scripts/guard_census.py` prints the buckets and names each
   uncovered entry, each declared limit and each open hole with its owner. Those
   are entry-level buckets summed over refusal sites rather than a count of
   refusals driven red, which the census says on the line that prints them. Holes
@@ -244,3 +245,25 @@ Repository bootstrap. Nothing is published.
   verification records must both name the clean HEAD tree. Explicitly carried
   stories remain distinct from completed work and need a tracked reason in
   `CURRENT_SPRINT.md` before close preflight accepts them.
+- A budgeted LRU across the encoded, decoded and GPU tiers. `Budgeted::bytes`
+  reports what an entry costs the resource it is budgeted against rather than
+  what it was made from, insertion reports evictions, a replaced value and a
+  refused entry as three distinct outcomes so a caller can surface three
+  different events, and the budget is asserted in bytes against hand-computed
+  entry sizes.
+- The session's one long-lived GPU device, opened from the adapter the tier
+  resolved on and with the adapter's own limits rather than the WebGPU
+  defaults, so a downlevel adapter can open one at all. Device loss is an
+  observed state rather than a later call failing: an unspecified loss is
+  rebuilt on the same adapter without re-resolving the tier, and a deliberate
+  destroy is refused rather than rebuilt behind the caller. A session that
+  resolves to the CPU tier holds no device by construction.
+- The LUT chain's WGSL shader, evaluating DICOM PS3.3 C.11's first three stages
+  from a thirty-two-byte uniform, so a window or level change writes those
+  bytes and nothing else. The shader makes no LUT decision, because
+  the uniform carries a resolved inversion flag, one selected window pair and
+  rescale values, and carries no photometric interpretation, no window
+  multiplicity and no lookup-table sequence from which any of them could be
+  re-derived. A chain driven by a Modality or VOI LUT Sequence cannot be
+  expressed in that uniform and reports unavailable rather than substituting
+  the values the sequence overrode.
