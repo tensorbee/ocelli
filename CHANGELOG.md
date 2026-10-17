@@ -254,6 +254,13 @@ Repository bootstrap. Nothing is published.
 - The decoded image cache, whose inserts report an eviction, a replacement and
   a refusal as three distinct events, each encodable into the fixed 48-byte
   event envelope the shell will drain once per frame.
+- Volume assembly from decoded frames. Slices group by frame of reference and
+  orientation, then sort by `ImagePositionPatient` projected on the slice
+  normal, and the inter-slice spacing is the median of those gaps. Non-uniform
+  spacing, a sheared stack and a multi-sample layout are refused rather than
+  averaged or placed into a store they cannot fill. Each volume keeps one
+  contiguous allocation, a per-slice presence set, and its own decoded-tier
+  budget so it cannot evict frames.
 - The session's one long-lived GPU device, opened from the adapter the tier
   resolved on and with the adapter's own limits rather than the WebGPU
   defaults, so a downlevel adapter can open one at all. Device loss is an

@@ -3346,3 +3346,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/gpu-ownership.md` and new `docs/lld/render-graph.md`.
 **Deviations from the design plan.** `install_recovered` takes the extra step the plan's text implied but did not state: per-viewport GPU objects are dropped and the caller rebinds views, because a bind group from a dead device cannot be carried into a pass on its replacement. `set_voi` gained a `ViewportNotRebound` answer for that state. The bench gate also caught the plan's bench row: `render.first_frame` ends at a presented-frame ring event, which does not exist until F-039, F-040 and F-101 land, so `tools/bench/subjects.json` now names F-101 as the subject story rather than giving F-038 a runner that could only time a readback.
 **Notes for future sessions.** Four review passes converged 4/6, 1/2, 0/1, 0/0. The findings that mattered were all test-reachability: tier in the lookup, the VOI route, and recovery objects. `FRAME` and pipeline work in F-039 and F-040 build on caller-supplied targets and caller ticks, and F-042 is the first story that can exercise tier B.
+
+## F-033, Volume cache and progressive volume assembly, completed 2026-10-17
+
+**What was built.** Volume assembly in `ocelli-volume`: grouping by FrameOfReferenceUID and ImageOrientationPatient, sorting by position projected on the slice normal from PS3.3 C.7.6.2.1.1, spacing as the median projected gap refused past 0.5 per cent, shear detected from the inter-slice vector with no tilt tag read, section 19's `Volume` over one contiguous `VoxelStore`, a one-entry level axis, `SlicePresence` under D-25, progressive `place` with the sorted arrival order retained on the volume, and a `VolumeCache` in the decoded tier with its own budget. SpacingBetweenSlices and SliceThickness are not read anywhere in the crate.
+
+**HLD sections implemented.** `docs/hld/16-volume-representation.md` section 19, `docs/hld/06-memory-and-cache.md` section 8, `docs/hld/27-phase1-hooks.md` section 38 level axis.
+**Deviations.** D-25, the hand-rolled `SlicePresence` in place of `bitvec::BitVec`. Cited unchanged: none.
+**Crates / packages modified.** `crates/ocelli-volume`, and two direction-cosine accessors in `crates/ocelli-pixel`.
+**Tests added.** `crates/ocelli-volume/tests/assembly.rs`, 14 tests including an oblique fixture whose normal separates projected position from the IPP z component, and a randomised uniform series recovering its generating spacing within 1e-9 mm.
+**Fixture provenance.** Hand-computed from DICOM PS3.3 C.7.6.2.1.1, with gaps and positions chosen so a tag reader, a mean and a z-sort each fail.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path.
+**Tier coverage.** A: n/a, the volume is host memory. B: n/a, same reason, with tier B's 256 3D-texture floor noted for F-040. C: full, tier C assembles the same volume with no device.
+**LLD updated.** New `docs/lld/volumes.md`, its row in `docs/lld/README.md`, and the volume cache in `docs/lld/cache.md`.
+**Deviations from the design plan.** Assembly gained three refusals the plan implied but did not name: `InconsistentSpacing` for differing in-plane spacing or a multi-sample layout, `UnsupportedVoxelKind` for kinds section 19 cannot name, and an `order` field so a caller places arriving slices at their sorted positions without re-deriving the projection.
+**Notes for future sessions.** Three review passes converged 4/6, 0/1, 0/0. The defect that mattered most was test reachability: every fixture used axial cosines, so a z-component sort passed the whole suite until an oblique fixture landed. F-036 converts between this crate's `VoxelKind` and its own in `ocelli-cache`, and F-051 is the first caller of `place`.

@@ -1,6 +1,6 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032
+**F-IDs that contributed:** F-031, F-032, F-033
 **Last updated:** 2026-10-17
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
@@ -142,10 +142,12 @@ types, so one struct over them would need three type parameters with one
 instantiation each. Three tiers is three `Lru` values, created by the stories
 that have a value type to put in them.
 
-**One of the three value types exists now.** F-032 built the decoded tier's
-`DecodedFrame` and its `ImageCache`. Encoded bytes and GPU textures still
-arrive with their own stories, and each implements `Budgeted` for itself. That
-is also why there is no `wgpu` dependency here: this crate never sees a
+**One value type lives in this crate.** F-032 built the decoded tier's
+`DecodedFrame` and its `ImageCache`. F-033's `Volume` implements `Budgeted`
+in `ocelli-volume` and keeps a second decoded-tier `Lru` there, so a volume
+cannot spend the frame budget. Encoded bytes and GPU textures still arrive
+with their own stories, and each implements `Budgeted` for itself. That is
+also why there is no `wgpu` dependency here: this crate never sees a
 texture, only its size.
 
 ## The decoded tier and its events, F-032
@@ -169,6 +171,15 @@ S12 design round decided for F-032 and F-034 together, and `CacheEvents`
 wraps a `Vec` that allocates on the insert path as `Lru::insert` does. One
 insert can produce many events when it evicts many entries, and none are
 dropped to fit a fixed capacity.
+
+## The volume cache, F-033
+
+`Volume::bytes` is the length of its one contiguous store. `VolumeCache` is
+`Lru<VolumeKey, Volume>` constructed on `CacheTier::Decoded` with the budget
+the caller passed, and it exposes `insert`, `get`, `remove` and `pressure`
+without adding a second eviction policy. The grouping, the projected spacing
+and the refusals live in `docs/lld/volumes.md`. This crate still holds no
+volume type and still does not read a voxel.
 
 ## Allocation, and the render loop
 

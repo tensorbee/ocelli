@@ -1071,6 +1071,14 @@ version = "0.1.0"
 [[package]]
 name = "ocelli-volume"
 version = "0.1.0"
+dependencies = [
+ "glam",
+ "ocelli-cache",
+ "ocelli-core",
+ "ocelli-pixel",
+ "proptest",
+ "thiserror",
+]
 
 [[package]]
 name = "ocelli-wasm"

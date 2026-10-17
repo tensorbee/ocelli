@@ -53,6 +53,16 @@ impl ImageOrientationPatient {
         let column = (column - row * row.dot(column)).normalize();
         Ok(Self { row, column })
     }
+
+    /// The validated row direction cosine, `X` in PS3.3 C.7.6.2.1.1.
+    pub fn row(&self) -> DVec3 {
+        self.row
+    }
+
+    /// The validated column direction cosine, `Y` in PS3.3 C.7.6.2.1.1.
+    pub fn column(&self) -> DVec3 {
+        self.column
+    }
 }
 
 /// Pixel Spacing with DICOM's row-then-column value order made explicit.
