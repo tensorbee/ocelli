@@ -10,9 +10,10 @@
 //! `Vec`, which are only compatible if insertion happens on the decode and
 //! upload paths. The render loop's cache interaction is `get`.
 //!
-//! **`insert` is the only method here that allocates**, which is a rule rather
-//! than a list, because a list has to be maintained in every file it is copied
-//! into and a rule does not. `docs/lld/cache.md` carries the measurement.
+//! **`insert` and `set_budget` are the methods here that allocate.** A shrink
+//! pushes one eviction at a time onto the returned `Admission`, which is the
+//! same allocation `insert` already makes, and a grow or a no-op pushes
+//! nothing. `docs/lld/cache.md` carries the measurement for `insert`.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -223,6 +224,41 @@ impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// The budget this tier was given. The same number `pressure` reports.
+    #[must_use]
+    pub fn budget(&self) -> usize {
+        self.budget
+    }
+
+    /// Move this tier's budget.
+    ///
+    /// Growing evicts nothing. Shrinking evicts least recently used first
+    /// until `used` fits, and a budget of zero evicts every entry, including
+    /// one whose admitted size is zero, because `would_admit` already treats
+    /// zero as a tier that is off. Setting the budget the tier already has
+    /// changes nothing.
+    ///
+    /// The returned `Admission` carries only `evicted`. A control does not
+    /// displace or refuse. This allocates when a shrink pushes an eviction,
+    /// which is why it is not a render-loop call.
+    pub fn set_budget(&mut self, budget: usize) -> Admission<K, V> {
+        let mut admission = Admission::default();
+        if budget == self.budget {
+            return admission;
+        }
+        self.budget = budget;
+        while self.used > self.budget || (self.budget == 0 && !self.entries.is_empty()) {
+            // An empty map cannot be asked again. A budget of zero drains
+            // zero-byte entries after `used` has already reached zero, and
+            // the same `None` ends that drain.
+            let Some((victim, entry)) = self.evict_least_recently_used() else {
+                break;
+            };
+            admission.evicted.push((victim, entry.value));
+        }
+        admission
     }
 
     /// Whether an entry of this size could ever be admitted, so a caller can

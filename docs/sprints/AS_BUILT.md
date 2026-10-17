@@ -3329,7 +3329,7 @@ this branch had not touched since the base.
 **Tier coverage.** A: n/a. B: n/a. C: n/a. The decoded tier behaves identically on every tier and holds no GPU resource.
 **LLD updated.** `docs/lld/cache.md`.
 **Deviations from the design plan.** The plan's fixed-capacity allocation sentence was false and was corrected during review pass 1. `CacheEvents` wraps a `Vec`, allocates on the insert path as `Lru::insert` does, and one insert can produce many events.
-**Notes for future sessions.** Three independent review passes converged 3/1, 0/1, 0/0. The mutations that mattered were kind renumbering, which pass 1 found green and is now pinned by `kind_numbers_are_pinned_to_the_wire_values`, and the tier mutation, which pass 2 found green and is now asserted. F-034 counts evictions from these events, so the displaced variant must never be folded into evicted.
+**Notes for future sessions.** Three independent review passes converged 3/1, 0/1, 0/0. The mutations that mattered were kind renumbering, which pass 1 found green and is now pinned by `kind_numbers_are_pinned_to_the_wire_values`, and the tier mutation, which pass 2 found green and is now asserted.
 
 ## F-038, Render graph and frame scheduler with dirty tracking, completed 2026-10-17
 
@@ -3362,3 +3362,19 @@ this branch had not touched since the base.
 **LLD updated.** New `docs/lld/volumes.md`, its row in `docs/lld/README.md`, and the volume cache in `docs/lld/cache.md`.
 **Deviations from the design plan.** Assembly gained three refusals the plan implied but did not name: `InconsistentSpacing` for differing in-plane spacing or a multi-sample layout, `UnsupportedVoxelKind` for kinds section 19 cannot name, and an `order` field so a caller places arriving slices at their sorted positions without re-deriving the projection.
 **Notes for future sessions.** Three review passes converged 4/6, 0/1, 0/0. The defect that mattered most was test reachability: every fixture used axial cosines, so a z-component sort passed the whole suite until an oblique fixture landed. F-036 converts between this crate's `VoxelKind` and its own in `ocelli-cache`, and F-051 is the first caller of `place`.
+
+## F-034, Memory-pressure telemetry and JS-visible budget controls, completed 2026-10-17
+
+**What was built.** Pressure bands and budget control in `ocelli-cache`. `Pressure::band` places a tier in Low, Elevated or Critical by comparing `used * 2` with `budget` and `used * 10` with `budget * 9` in `u64`, with a zero budget Low when empty and Critical when it holds bytes. `TierCounters` folds an `Admission`, counting evictions and refusals and ignoring a displacement, and the counts saturate. `Lru::set_budget` evicts least recently used until `used` fits, and a budget of zero empties the tier. `TelemetryEvent` encodes a band crossing as kind 4 and a budget change as kind 5 into F-032's 48-byte `RingEvent`, with `viewport` `u32::MAX`. A pressure payload does not carry `evicted_bytes`. No ring is built and nothing reaches JavaScript.
+
+**HLD sections implemented.** `docs/hld/17-cache-and-allocation.md` section 20, `docs/hld/06-memory-and-cache.md` section 8, and `docs/hld/14-the-boundary-in-code.md` section 17.3 envelope only.
+**Deviations.** None. `set_budget` fills the open part of section 20's listing, as `get`, `remove` and `pressure` already did.
+**Crates / packages modified.** `crates/ocelli-cache` only.
+**Tests added.** `crates/ocelli-cache/tests/telemetry.rs`, 12 tests. The band fixture is hand-computed for budget 300 at 149, 150, 269 and 270. The pressure fixture writes tier Gpu, used 262144 and budget 524288 as little-endian bytes.
+**Fixture provenance.** No pixel arithmetic and no geometry arithmetic. The wire bytes and the band edges are hand-computed from HLD section 17.3 and from the integer fractions in the design plan.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec or pixel path.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. The bands and the budget are host-side byte accounting and behave the same on every tier.
+**LLD updated.** `docs/lld/cache.md` and its row in `docs/lld/README.md`. No `docs/lld/events.md`, because no event-kind registry was added.
+**Deviations from the design plan.** `BudgetChanged` carries `evicted_bytes` and `dropped` because the plan's payload table requires those fields and the enum sketch omitted them. `evicted_bytes` sums `Budgeted::bytes` of the returned values, because `Admission` does not return the size stored at admission.
+**Notes for future sessions.** Four review passes converged 1/0, 1/0, 1/0, 0/0. The code defect was a zero-budget drain that left a recently read zero-byte entry, now guarded by `a_recently_read_zero_byte_entry_still_leaves_at_budget_zero`. The later defects were false sentences about what F-034 counts, and the fix was to delete them. Two nitpicks remain. `evicted_bytes` re-reads `Budgeted::bytes`, and the Encoded wire code 0 is not pinned by a test. F-101 builds the ring.

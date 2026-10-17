@@ -1,6 +1,6 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033
+**F-IDs that contributed:** F-031, F-032, F-033, F-034
 **Last updated:** 2026-10-17
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
@@ -155,8 +155,7 @@ texture, only its size.
 `ImageCache::insert` converts the `Admission` into `CacheEvents`, displaced
 first because `Lru` releases the previous value before eviction begins, then
 the evictions in least recently used order. **The three variants are never
-collapsed**, which is what deviation D-24 bought: F-034 counts evictions from
-these events, and a replacement counted as one would inflate that number.
+collapsed.**
 
 `CacheEvent::encode` writes the event into section 17.3's `RingEvent`: kind
 1, 2 and 3 for evicted, displaced and refused, `viewport` as `u32::MAX`
@@ -181,6 +180,34 @@ without adding a second eviction policy. The grouping, the projected spacing
 and the refusals live in `docs/lld/volumes.md`. This crate still holds no
 volume type and still does not read a voxel.
 
+## Pressure bands and budget controls, F-034
+
+`Pressure::band` places a reading in `Low`, `Elevated` or `Critical`. The
+edges are half and nine tenths of that tier's own budget, compared as
+`used * 2` against `budget` and `used * 10` against `budget * 9`, in `u64`.
+A budget of zero is `Low` when it holds nothing and `Critical` when it holds
+bytes. `PressureBand::crossing` returns one `TelemetryEvent::Pressure` when
+the band has changed and nothing when it has not. The caller keeps the last
+reported band.
+
+`TierCounters` folds `Admission` between readings. An eviction counts, a
+refusal counts, and a displacement counts as neither. The counts saturate.
+`evicted_bytes` sums `Budgeted::bytes` of the evicted values.
+
+`Lru::set_budget` evicts least recently used first until `used` fits the new
+budget. A budget of zero empties the tier, zero-byte entries included.
+Growing, and setting the budget the tier already has, evict nothing. The
+caller emits the returned evictions first and a `BudgetChanged`
+event after them.
+
+Both events encode into the same 48-byte `RingEvent` F-032 defined. Pressure
+is kind 4 and a budget change is kind 5, `viewport` is `u32::MAX`, and the
+payload is little-endian. A pressure event does not carry `evicted_bytes`.
+No ring is built and nothing reaches JavaScript, which remains F-101.
+
+`budget`, `pressure`, `len` and `band` do not move the use tick. A reading
+is still not a use.
+
 ## Allocation, and the render loop
 
 HLD section 20's first bullet forbids allocation in the render loop, and its own
@@ -188,9 +215,9 @@ HLD section 20's first bullet forbids allocation in the render loop, and its own
 not a render-loop call.** Insertion happens on the decode and upload paths, and
 the render loop's cache interaction is `get`.
 
-**`insert` is the only method on `Lru` that allocates.** That is the rule, and
-it is stated as one because the alternative is a list of the other eight
-maintained in three files, which is how a true sentence becomes a stale one.
+**`insert` and `set_budget` are the methods on `Lru` that allocate.** A shrink
+allocates when it pushes an eviction. A grow and a repeated budget push
+nothing. The other methods do not build a `Vec`.
 
 **`insert` can allocate**, and the doc comment on it says so, because the
 sentence a later story needs is the one that stops it calling this per frame.
@@ -213,8 +240,11 @@ key owns memory. That was measured at one with a `u32` key and two with a
 `String` key. The clone is what ends the scan's borrow of the map before the
 removal, and it is why `K: Clone` is on the type.
 
-**Every other method on `Lru` measured zero**, `get` and `remove` on a hit and
-on a miss alike, and so did an insert that was refused.
+**Every other method that existed for that measurement returned zero**, `get`
+and `remove` on a hit and on a miss alike, and so did an insert that was
+refused. `set_budget` was not in that run. A shrink that evicts pays for the
+same two things an evicting insert pays for, the `Vec` push and the clone of
+the victim key. A grow pushes nothing and clones nothing.
 
 ## Tiers A, B and C
 

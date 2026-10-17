@@ -261,6 +261,13 @@ Repository bootstrap. Nothing is published.
   averaged or placed into a store they cannot fill. Each volume keeps one
   contiguous allocation, a per-slice presence set, and its own decoded-tier
   budget so it cannot evict frames.
+- Memory-pressure bands and a budget control on each cache tier. A reading
+  is Low, Elevated or Critical from integer comparisons at one half and nine
+  tenths of that tier's budget. A budget of zero is Low when the tier is
+  empty and Critical when it holds bytes, and setting the budget to zero
+  empties the tier. Shrinking evicts least recently used first. Band
+  crossings and budget changes encode into the same 48-byte event envelope
+  as an eviction. Nothing reaches JavaScript yet.
 - The session's one long-lived GPU device, opened from the adapter the tier
   resolved on and with the adapter's own limits rather than the WebGPU
   defaults, so a downlevel adapter can open one at all. Device loss is an

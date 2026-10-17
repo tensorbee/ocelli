@@ -21,14 +21,16 @@ extern crate alloc;
 
 pub mod image;
 pub mod lru;
+pub mod telemetry;
 pub mod tier;
 
 pub use image::{
-    CacheEvent, CacheEvents, DecodedFrame, FrameKey, ImageCache, KIND_DISPLACED, KIND_EVICTED,
-    KIND_REFUSED, RingEvent, SeriesId,
+    CacheEvent, CacheEvents, DecodedFrame, FrameKey, ImageCache, KIND_BUDGET_CHANGED,
+    KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, RingEvent, SeriesId,
 };
 pub use lru::{Admission, Budgeted, Lru};
-pub use tier::{CacheTier, Pressure};
+pub use telemetry::{CacheTelemetry, TelemetryEvent, TierCounters, TierTelemetry};
+pub use tier::{CacheTier, Pressure, PressureBand};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.

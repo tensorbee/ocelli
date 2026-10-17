@@ -132,6 +132,13 @@ pub const KIND_EVICTED: u32 = 1;
 pub const KIND_DISPLACED: u32 = 2;
 /// Event kind for [`CacheEvent::Refused`].
 pub const KIND_REFUSED: u32 = 3;
+/// Event kind for a pressure-band crossing or a requested pressure reading.
+///
+/// F-034. The number sits in the same range as the three cache kinds. There
+/// is no event-kind registry this sprint, so a test pins it.
+pub const KIND_PRESSURE: u32 = 4;
+/// Event kind for a budget change. F-034, pinned the same way.
+pub const KIND_BUDGET_CHANGED: u32 = 5;
 
 /// Section 17.3's `Event`, field for field. 48 bytes.
 ///
