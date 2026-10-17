@@ -251,6 +251,9 @@ Repository bootstrap. Nothing is published.
   refused entry as three distinct outcomes so a caller can surface three
   different events, and the budget is asserted in bytes against hand-computed
   entry sizes.
+- The decoded image cache, whose inserts report an eviction, a replacement and
+  a refusal as three distinct events, each encodable into the fixed 48-byte
+  event envelope the shell will drain once per frame.
 - The session's one long-lived GPU device, opened from the adapter the tier
   resolved on and with the adapter's own limits rather than the WebGPU
   defaults, so a downlevel adapter can open one at all. Device loss is an

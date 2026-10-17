@@ -7,20 +7,26 @@
 //! and `Pressure`. `insert` returns `Admission<K, V>` rather than section 20's
 //! `Vec<(K, V)>`, which is deviation D-24.
 //!
-//! **The three value types are not here.** Section 8's tiers hold encoded
-//! bytes, decoded frames and GPU textures, and none of the three exists in this
-//! workspace yet. This crate owns the budget and the rule `Budgeted::bytes`
-//! keeps, and the stories that create a value type implement the trait for it.
-//! That is also why there is no `wgpu` dependency: `ocelli-cache` never sees a
-//! texture, only its size.
+//! **The encoded and GPU value types are not here.** Section 8's tiers hold
+//! encoded bytes, decoded frames and GPU textures. F-032 added the decoded
+//! tier's `DecodedFrame` and its `ImageCache` in `image`, and the other two
+//! value types still belong to their own stories. This crate owns the budget
+//! and the rule `Budgeted::bytes` keeps, and the stories that create a value
+//! type implement the trait for it. That is also why there is no `wgpu`
+//! dependency: `ocelli-cache` never sees a texture, only its size.
 
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
 
+pub mod image;
 pub mod lru;
 pub mod tier;
 
+pub use image::{
+    CacheEvent, CacheEvents, DecodedFrame, FrameKey, ImageCache, KIND_DISPLACED, KIND_EVICTED,
+    KIND_REFUSED, RingEvent, SeriesId,
+};
 pub use lru::{Admission, Budgeted, Lru};
 pub use tier::{CacheTier, Pressure};
 

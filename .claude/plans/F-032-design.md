@@ -212,8 +212,9 @@ the thing that carries it across is F-101 in S16.
 - Pixels across the boundary: **no, and this is the story that could.** A
   `DecodedFrame` holds samples. The event carries a key and a byte count and
   never a sample. Decision D3
-- Render-loop allocation: none. `CacheEvents` is a small fixed-capacity value,
-  three variants at most per insert, so emitting one allocates nothing
+- Render-loop allocation: none. `insert` is a decode-path call and
+  `CacheEvents` wraps a `Vec` that allocates as `Lru::insert` already does,
+  and one insert can produce many events when it evicts many entries
 - unsafe: none
 - Tier A (WebGPU): n/a. This is the decoded tier, which holds no GPU resource
 - Tier B (WebGL2): n/a, same reason

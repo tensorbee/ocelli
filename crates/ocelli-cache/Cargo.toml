@@ -12,6 +12,10 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# F-032. The decoded tier's value type carries `ocelli-pixel`'s description and
+# plane, and the section 17.3 event encoding is a `bytemuck` layout.
+bytemuck = { workspace = true }
+ocelli-pixel = { path = "../ocelli-pixel" }
 
 [dev-dependencies]
 # The two budget invariants of HLD section 20 are stated over random operation

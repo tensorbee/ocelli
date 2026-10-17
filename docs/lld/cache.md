@@ -1,13 +1,15 @@
 # Cache
 
-**F-IDs that contributed:** F-031
-**Last updated:** 2026-09-14
+**F-IDs that contributed:** F-031, F-032
+**Last updated:** 2026-10-17
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
 section 20's `Budgeted` trait and `Lru<K, V>`, made into `crates/ocelli-cache`.
 
-This crate holds sizes and never contents it understands. It names no pixel
-type, links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
+This crate holds sizes and one decoded value type whose contents it carries
+without interpreting. `DecodedFrame` holds an `ocelli-pixel` description and
+plane as validated evidence and a sample buffer it never reads as pixels. The
+crate links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
 
 ## The types
 
@@ -18,6 +20,10 @@ type, links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
 | `Admission<K, V>` | What one `insert` evicted, displaced or refused. Deviation D-24 |
 | `CacheTier` | Section 8's three tiers, `Encoded`, `Decoded` and `Gpu` |
 | `Pressure` | One tier's reading: the tier, the bytes used and the budget |
+| `DecodedFrame` | F-032. The decoded tier's value type. Its `bytes` is the sample buffer length |
+| `ImageCache` | F-032. An `Lru<FrameKey, DecodedFrame>` fixed to the decoded tier, returning events |
+| `CacheEvent` | F-032. One variant per `Admission` field: `Evicted`, `Displaced`, `Refused` |
+| `RingEvent` | F-032. Section 17.3's 48-byte event envelope, `#[repr(C)]` and `Pod` |
 
 ## What `bytes` means, which is the promise the budget keeps
 
@@ -136,10 +142,33 @@ types, so one struct over them would need three type parameters with one
 instantiation each. Three tiers is three `Lru` values, created by the stories
 that have a value type to put in them.
 
-**None of the three value types exists yet.** Encoded bytes, decoded frames and
-GPU textures arrive with F-032, F-033, F-036 and F-040, and each implements
-`Budgeted` for itself. That is also why there is no `wgpu` dependency here: this
-crate never sees a texture, only its size.
+**One of the three value types exists now.** F-032 built the decoded tier's
+`DecodedFrame` and its `ImageCache`. Encoded bytes and GPU textures still
+arrive with their own stories, and each implements `Budgeted` for itself. That
+is also why there is no `wgpu` dependency here: this crate never sees a
+texture, only its size.
+
+## The decoded tier and its events, F-032
+
+`ImageCache::insert` converts the `Admission` into `CacheEvents`, displaced
+first because `Lru` releases the previous value before eviction begins, then
+the evictions in least recently used order. **The three variants are never
+collapsed**, which is what deviation D-24 bought: F-034 counts evictions from
+these events, and a replacement counted as one would inflate that number.
+
+`CacheEvent::encode` writes the event into section 17.3's `RingEvent`: kind
+1, 2 and 3 for evicted, displaced and refused, `viewport` as `u32::MAX`
+because an eviction belongs to no viewport and zero is a valid viewport id,
+and a payload of series, instance, frame and bytes, little-endian, with the
+last eight bytes reserved and zero. The numbers are the wire contract until
+F-103 decides whether event kinds get a registry, so a test pins each one.
+
+**No ring is built and nothing reaches JavaScript.** The ring in linear
+memory is F-101 in S16. This story stops at the tested encoding, which the
+S12 design round decided for F-032 and F-034 together, and `CacheEvents`
+wraps a `Vec` that allocates on the insert path as `Lru::insert` does. One
+insert can produce many events when it evicts many entries, and none are
+dropped to fit a fixed capacity.
 
 ## Allocation, and the render loop
 

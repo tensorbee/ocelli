@@ -3314,3 +3314,19 @@ failing, and the integrator owns those four files. The three-way merge itself
 was clean: one overlapping file, `Cargo.lock`, auto-merged, and the only shared
 prose was a single row of `docs/hld/DEVIATIONS.md` that the worker narrowed and
 this branch had not touched since the base.
+
+## F-032, Image cache with eviction events surfaced to JS, completed 2026-10-17
+
+**What was built.** The decoded tier's value type `DecodedFrame`, its `ImageCache` over F-031's `Lru` fixed to `CacheTier::Decoded`, one `CacheEvent` per `Admission` outcome with evicted, displaced and refused kept apart under D-24, and the 48-byte section 17.3 `RingEvent` encoding with kind numbers 1, 2 and 3 and a `u32::MAX` viewport sentinel. No ring is built and nothing reaches JavaScript, which the S12 design round decided for F-032 and F-034 together. F-101 in S16 carries the encoding across.
+
+**HLD sections implemented.** `docs/hld/06-memory-and-cache.md` section 8, `docs/hld/17-cache-and-allocation.md` section 20 as consumed by F-031, and `docs/hld/14-the-boundary-in-code.md` section 17.3 envelope only.
+**Deviations.** None new. D-24 is the widened return this story consumes.
+**Crates / packages modified.** `crates/ocelli-cache` only, plus `Cargo.lock` for its `bytemuck` and `ocelli-pixel` edges.
+**Tests added.** `crates/ocelli-cache/tests/image_cache.rs`, 11 tests: 9 unit and fixture tests and 1 property test, plus layout assertions. Focused suite is 38 tests in the crate, all passing, with clippy clean.
+**Fixture provenance.** No pixel arithmetic. Byte fixtures are hand-computed from Rows and Columns in DICOM PS3.3 C.7.6.3.1, a 512 by 512 sixteen-bit frame at 524,288 bytes, and the layout numbers come from HLD section 17.3.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec or pixel path.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. The decoded tier behaves identically on every tier and holds no GPU resource.
+**LLD updated.** `docs/lld/cache.md`.
+**Deviations from the design plan.** The plan's fixed-capacity allocation sentence was false and was corrected during review pass 1. `CacheEvents` wraps a `Vec`, allocates on the insert path as `Lru::insert` does, and one insert can produce many events.
+**Notes for future sessions.** Three independent review passes converged 3/1, 0/1, 0/0. The mutations that mattered were kind renumbering, which pass 1 found green and is now pinned by `kind_numbers_are_pinned_to_the_wire_values`, and the tier mutation, which pass 2 found green and is now asserted. F-034 counts evictions from these events, so the displaced variant must never be folded into evicted.
