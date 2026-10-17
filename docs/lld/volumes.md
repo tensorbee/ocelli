@@ -1,6 +1,6 @@
 # Volumes
 
-**F-IDs that contributed:** F-033
+**F-IDs that contributed:** F-033, F-036
 **Last updated:** 2026-10-17
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
@@ -96,6 +96,7 @@ diverge from.
 
 ## What this does not do
 
-No brick addressing, which is F-036. No reslice onto a viewport, which is a
-later geometry story. No texture upload, which is F-040. Pixels stay in the
-store and do not cross the worker boundary.
+A volume enumerates bricks through `BrickGrid` from `ocelli-cache`, via
+`Volume::brick_grid`. It does not keep a second decomposition. No reslice
+onto a viewport, which is a later geometry story. No texture upload, which
+is F-040. Pixels stay in the store and do not cross the worker boundary.

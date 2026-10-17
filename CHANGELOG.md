@@ -290,3 +290,9 @@ Repository bootstrap. Nothing is published.
   re-derived. A chain driven by a Modality or VOI LUT Sequence cannot be
   expressed in that uniform and reports unavailable rather than substituting
   the values the sequence overrode.
+- Chunked residency and brick addressing in the cache. A volume decomposes
+  into bricks whose edge is 128 voxels for eight-bit samples and 64 for
+  sixteen-bit samples and for four-byte floats. An edge brick keeps its true
+  extent, and its cost is the host buffer length. Residency is the set of
+  brick keys present on the GPU tier. An address that does not fit is an
+  error rather than a wrapped index. Nothing is uploaded to a texture yet.

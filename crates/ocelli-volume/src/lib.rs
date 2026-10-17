@@ -15,7 +15,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use glam::{DMat3, DVec3};
-use ocelli_cache::{Budgeted, CacheTier, DecodedFrame, Lru, Pressure, SeriesId};
+use ocelli_cache::{
+    BrickGrid, BrickWidth, Budgeted, CacheTier, DecodedFrame, Lru, Pressure, SeriesId,
+};
 use ocelli_core::{Pt, World};
 use ocelli_pixel::{ImageOrientationPatient, PixelRepresentation};
 
@@ -50,6 +52,17 @@ impl VoxelKind {
             Self::U8 => 1,
             Self::I16 | Self::U16 => 2,
             Self::F32 => 4,
+        }
+    }
+}
+
+impl From<VoxelKind> for BrickWidth {
+    /// Sixteen-bit samples share one edge, signed or unsigned.
+    fn from(kind: VoxelKind) -> Self {
+        match kind {
+            VoxelKind::U8 => Self::EightBit,
+            VoxelKind::I16 | VoxelKind::U16 => Self::SixteenBit,
+            VoxelKind::F32 => Self::Float32,
         }
     }
 }
@@ -355,6 +368,14 @@ pub struct Volume {
 }
 
 impl Volume {
+    /// The brick grid of this volume at level 0.
+    ///
+    /// Enumeration goes through [`BrickGrid`]. This volume does not keep a
+    /// second decomposition.
+    pub fn brick_grid(&self) -> BrickGrid {
+        BrickGrid::new(self.dims, BrickWidth::from(self.voxel))
+    }
+
     /// Assemble a candidate into a volume, or refuse it with the reason.
     ///
     /// Slices sort by projected position. Spacing between slices is the

@@ -1,6 +1,6 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-036
 **Last updated:** 2026-10-17
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
@@ -142,13 +142,13 @@ types, so one struct over them would need three type parameters with one
 instantiation each. Three tiers is three `Lru` values, created by the stories
 that have a value type to put in them.
 
-**One value type lives in this crate.** F-032 built the decoded tier's
-`DecodedFrame` and its `ImageCache`. F-033's `Volume` implements `Budgeted`
-in `ocelli-volume` and keeps a second decoded-tier `Lru` there, so a volume
-cannot spend the frame budget. Encoded bytes and GPU textures still arrive
-with their own stories, and each implements `Budgeted` for itself. That is
-also why there is no `wgpu` dependency here: this crate never sees a
-texture, only its size.
+**Two value types live in this crate.** F-032 built the decoded tier's
+`DecodedFrame` and its `ImageCache`. F-036 built `Brick` and `BrickCache` on
+the GPU tier, and `bytes` is the host buffer length. F-033's `Volume`
+implements `Budgeted` in `ocelli-volume` and keeps a second decoded-tier
+`Lru` there, so a volume cannot spend the frame budget. Encoded bytes and
+GPU textures still arrive with their own stories. There is no `wgpu`
+dependency here: this crate never sees a texture, only its size.
 
 ## The decoded tier and its events, F-032
 
@@ -208,6 +208,29 @@ No ring is built and nothing reaches JavaScript, which remains F-101.
 `budget`, `pressure`, `len` and `band` do not move the use tick. A reading
 is still not a use.
 
+## Brick addressing and residency, F-036
+
+`BrickGrid::new` is the only place the edge is chosen. Eight-bit samples take
+128. Sixteen-bit samples and four-byte floats take 64. The grid is a ceiling
+division on each axis. A brick coordinate is a floor division. An edge brick
+keeps its true extent, and `Brick::bytes` is the buffer length, so a partial
+brick does not report a full cube.
+
+`byte_offset` is section 19's layout, `((z * dims[1] + y) * dims[0] + x) *
+bytes_per_voxel`. Each product is a checked `u64`, then narrowed once. A
+product that does not fit in `u64`, or an address that does not fit in
+`usize`, is `BrickError`, never a wrapped index and never a panic. `index_of`
+is the same order at brick scale, x fastest, then y, then z.
+
+`BrickCache` is one `Lru` on `CacheTier::Gpu`. `missing` lists absent keys in
+`index_of` order and does not touch recency. `is_resident` is that list being
+empty for a grid that has at least one brick. There is no whole-volume path
+and no size threshold. `Admission` from `insert` is returned to the caller.
+This story emits no eviction event.
+
+`Volume::brick_grid` in `ocelli-volume` converts that crate's `VoxelKind` and
+calls `BrickGrid::new`. The volume does not keep a second decomposition.
+
 ## Allocation, and the render loop
 
 HLD section 20's first bullet forbids allocation in the render loop, and its own
@@ -248,15 +271,15 @@ the victim key. A grow pushes nothing and clones nothing.
 
 ## Tiers A, B and C
 
-Not applicable, all three. There is no rendering or compute feature here to
-degrade: the crate holds no GPU code and creates no device, and the GPU tier is
-a budget in bytes and a `CacheTier` discriminant. A tier C session's encoded and
-decoded tiers are identical to a tier A session's, and its GPU tier simply has
-no entries.
+Brick addressing is full on A, B and C. It is host arithmetic, and the crate
+still creates no device and holds no shader. Tier B's 256 texture floor holds
+a 128 edge, and a longer volume axis is more bricks. Tier C runs the same
+code. The GPU tier then holds host bricks, because nothing uploads them yet.
+Encoded bytes are not in this crate. A tier C session's decoded tier matches
+a tier A session's.
 
 ## What is not here
 
 No staging-buffer pool, which is section 20's fourth bullet and belongs to the
-upload path. No brick addressing, which is section 7's bricking bullet and is
-F-036. No `bytemuck::cast_slice`, which is section 20's third bullet and is
-about reinterpreting pixel buffers this crate does not hold.
+upload path. No `bytemuck::cast_slice`, which is section 20's third bullet.
+No frustum selection, no prefetch, no indirection texture and no GPU upload.

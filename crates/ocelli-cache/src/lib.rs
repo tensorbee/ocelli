@@ -7,23 +7,24 @@
 //! and `Pressure`. `insert` returns `Admission<K, V>` rather than section 20's
 //! `Vec<(K, V)>`, which is deviation D-24.
 //!
-//! **The encoded and GPU value types are not here.** Section 8's tiers hold
-//! encoded bytes, decoded frames and GPU textures. F-032 added the decoded
-//! tier's `DecodedFrame` and its `ImageCache` in `image`, and the other two
-//! value types still belong to their own stories. This crate owns the budget
-//! and the rule `Budgeted::bytes` keeps, and the stories that create a value
-//! type implement the trait for it. That is also why there is no `wgpu`
-//! dependency: `ocelli-cache` never sees a texture, only its size.
+//! **Encoded bytes are not here.** Section 8's tiers hold encoded bytes,
+//! decoded frames and GPU textures. F-032 added the decoded tier's
+//! `DecodedFrame` and its `ImageCache` in `image`. F-036 added `Brick` on the
+//! GPU tier: a host buffer whose cost is residency, not a texture. There is
+//! still no `wgpu` dependency, because this crate never sees a texture, only
+//! its size.
 
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
 
+pub mod brick;
 pub mod image;
 pub mod lru;
 pub mod telemetry;
 pub mod tier;
 
+pub use brick::{Brick, BrickCache, BrickError, BrickGrid, BrickKey, BrickWidth, VolumeId};
 pub use image::{
     CacheEvent, CacheEvents, DecodedFrame, FrameKey, ImageCache, KIND_BUDGET_CHANGED,
     KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, RingEvent, SeriesId,
