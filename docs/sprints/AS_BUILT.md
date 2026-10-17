@@ -3330,3 +3330,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/cache.md`.
 **Deviations from the design plan.** The plan's fixed-capacity allocation sentence was false and was corrected during review pass 1. `CacheEvents` wraps a `Vec`, allocates on the insert path as `Lru::insert` does, and one insert can produce many events.
 **Notes for future sessions.** Three independent review passes converged 3/1, 0/1, 0/0. The mutations that mattered were kind renumbering, which pass 1 found green and is now pinned by `kind_numbers_are_pinned_to_the_wire_values`, and the tier mutation, which pass 2 found green and is now asserted. F-034 counts evictions from these events, so the displaced variant must never be folded into evicted.
+
+## F-038, Render graph and frame scheduler with dirty tracking, completed 2026-10-17
+
+**What was built.** HLD section 22's `Pass` enum and pipeline key as types, a `RenderGraph` that registers viewports at fixed capacity, compiles only the composite stack pipeline at creation, tracks five dirty sources per viewport set in Rust, encodes each dirty viewport once in registration order into one encoder and submits exactly once, with a `submissions` counter as the observable half of that rule. A viewport whose blend has no shader body reports unavailable and keeps its dirt. `set_voi` is the single VOI write route and validates state, pass and rebind before it reads the chain. `Recovered` now carries `GraphResources`, `recover`'s signature is unchanged, and installing a recovery drops every per-viewport object the dead device owned until the caller rebinds views. No surface is acquired and no texture is uploaded, so decision D7 stays open for F-039 and F-040.
+
+**HLD sections implemented.** `docs/hld/19-render-graph.md` section 22, `docs/hld/05-rendering.md` section 7 scheduling and tier bullets, and `docs/hld/23-performance-rules.md` section 26 for this story's half.
+**Deviations.** None new. D-04, D-07, D-12, D-13 and D-14 cited unchanged.
+**Crates / packages modified.** `crates/ocelli-render` only.
+**Tests added.** `crates/ocelli-render/tests/graph.rs` and `graph_voi.rs`, 5 unit and fixture rows in the floor and 7 device rows under the gpu gate, including half-float rows that separate LINEAR at 0.50125 from LINEAR_EXACT at 0.5, which an 8-bit target cannot.
+**Fixture provenance.** DICOM PS3.3 C.11.2.1.2, C.11.2.1.3.2 and C.11.2.1.3.1 via section 18.3, with D-13 applied to LINEAR at the centre.
+**Verification.** Feature profile plus the gpu gate, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec or pixel path.
+**Tier coverage.** A: full, exercised. B: full by construction under D-12, never exercised by any gate, and claimed as such. C: unavailable and reported, since tier Cpu holds no device.
+**LLD updated.** `docs/lld/gpu-ownership.md` and new `docs/lld/render-graph.md`.
+**Deviations from the design plan.** `install_recovered` takes the extra step the plan's text implied but did not state: per-viewport GPU objects are dropped and the caller rebinds views, because a bind group from a dead device cannot be carried into a pass on its replacement. `set_voi` gained a `ViewportNotRebound` answer for that state. The bench gate also caught the plan's bench row: `render.first_frame` ends at a presented-frame ring event, which does not exist until F-039, F-040 and F-101 land, so `tools/bench/subjects.json` now names F-101 as the subject story rather than giving F-038 a runner that could only time a readback.
+**Notes for future sessions.** Four review passes converged 4/6, 1/2, 0/1, 0/0. The findings that mattered were all test-reachability: tier in the lookup, the VOI route, and recovery objects. `FRAME` and pipeline work in F-039 and F-040 build on caller-supplied targets and caller ticks, and F-042 is the first story that can exercise tier B.

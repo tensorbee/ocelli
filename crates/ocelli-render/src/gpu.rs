@@ -78,13 +78,23 @@ pub enum DeviceState {
     Lost(DeviceLoss),
 }
 
+/// The graph resources a device rebuild restored, registered by F-038's
+/// render graph at creation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GraphResources {
+    /// How many pipelines the graph had compiled and the rebuild restores.
+    pub pipelines_restored: u32,
+    /// The graph cache generation. One at creation, bumped by each rebuild.
+    pub cache_generation: u64,
+}
+
 /// What a successful [`GpuContext::recover`] produced.
 ///
-/// It carries nothing but `caps` because there is nothing else to carry: HLD
-/// section 22 says to "rebuild the device and all resources", and this
-/// workspace has no texture, buffer, pipeline or bind-group type yet. F-038,
-/// F-039 and F-040 extend this struct rather than change `recover`'s signature,
-/// which is why it is a struct and not a bare `Caps`.
+/// It carries `caps`, and from F-038 the graph resources a rebuild restored.
+/// HLD section 22 says to "rebuild the device and all resources", and
+/// `recover`'s signature does not change as those resources arrive, which is
+/// why this is a struct and not a bare `Caps`. Carrying restored state ends
+/// the `Copy` derive F-037 had, so it is `Clone`.
 ///
 /// **`caps` cannot currently differ from the pre-loss `caps`, and an earlier
 /// version of this comment claimed it could.** [`ResolvedAdapter::open`] copies
@@ -97,10 +107,13 @@ pub enum DeviceState {
 /// under a live session, closing that gap is a decision with its own design
 /// plan rather than a field whose documentation promises something the code
 /// does not do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Recovered {
     /// The capabilities the rebuilt device resolved to.
     pub caps: Caps,
+    /// The graph resources the rebuild restored, when a graph registered
+    /// them with [`GpuContext::register_graph_resources`].
+    pub graph: Option<GraphResources>,
 }
 
 /// The slot a device's loss callback writes into.
@@ -173,6 +186,8 @@ pub struct GpuContext {
     device: Device,
     queue: Queue,
     caps: Caps,
+    /// Graph resources F-038 registered, carried across a rebuild.
+    graph: Option<GraphResources>,
     /// Written by this device's loss callback and by nothing else.
     ///
     /// **One slot per device, created in `new` beside the callback that writes
@@ -210,8 +225,21 @@ impl GpuContext {
             device,
             queue,
             caps,
+            graph: None,
             lost,
         }
+    }
+
+    /// Register the graph resources a rebuild must restore.
+    ///
+    /// F-038's graph calls this at creation with the pipeline count it
+    /// compiled. A rebuild returns the same count with the generation bumped,
+    /// in [`Recovered`]. Calling it again replaces the count.
+    pub fn register_graph_resources(&mut self, pipelines_restored: u32) {
+        self.graph = Some(GraphResources {
+            pipelines_restored,
+            cache_generation: self.graph.map_or(1, |graph| graph.cache_generation),
+        });
     }
 
     /// Whether this device is still usable, as OBSERVED rather than inferred.
@@ -229,9 +257,10 @@ impl GpuContext {
     ///
     /// HLD section 22: "Handle device_lost, rebuild the device and all
     /// resources, and restore viewport state from the shell's copy." This does
-    /// the first of those three. **There are no resources and no viewports in
-    /// this workspace yet**, so [`Recovered`] is what F-038, F-039 and F-040
-    /// extend rather than a claim that nothing else needs rebuilding.
+    /// the first of those three, and from F-038 returns the registered graph
+    /// resources in [`Recovered`] for the caller to reinstall. Viewport state
+    /// itself stays with the shell copy and is re-supplied by the caller, so
+    /// no viewport type is invented here ahead of E7.
     ///
     /// The adapter is the caller's, retained by [`crate::probe::resolve_adapter`],
     /// so a rebuild costs no second detection pass. Re-running detection here
@@ -274,10 +303,18 @@ impl GpuContext {
         // device and is unaffected.
         let rebuilt = adapter.open().await?;
         let caps = *rebuilt.caps();
+        // The graph registration survives the rebuild with its generation
+        // bumped, because the pipelines it counts are rebuilt on the new
+        // device and are not the objects the old device owned.
+        let mut graph = self.graph;
+        if let Some(restored) = &mut graph {
+            restored.cache_generation += 1;
+        }
         // The whole context, so the old device, the old queue and the old loss
         // slot go together. A rebuild that kept the slot would start `Lost`.
         *self = rebuilt;
-        Ok(Recovered { caps })
+        self.graph = graph;
+        Ok(Recovered { caps, graph })
     }
 
     /// The shared device. Borrowed, never handed over.

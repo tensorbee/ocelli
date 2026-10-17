@@ -167,7 +167,7 @@ section calls the awkward eleventh row.
 | `decode.frame` | **measured** | nothing. F-024 supplies the first concrete decoder and runner |
 | `decode.transfer_syntax.htj2k` | unavailable | F-027 (E4.5), S09, a P0 kill criterion |
 | `decode.transfer_syntax.jpegls` | unavailable | F-028 (E4.6), S09, a P0 kill criterion |
-| `render.first_frame` | unavailable | F-038 (E6.2), S12, and F-037 (E6.1), S11 |
+| `render.first_frame` | unavailable | F-101 (E16.2), S16, and before it F-037 (E6.1), S11, F-038 (E6.2), S12 and F-039 with F-040, S13 |
 | `interaction.window_level_drag` | unavailable | F-101 (E16.2), the boundary and event ring, S16 |
 | `interaction.scroll` | unavailable | F-101 (E16.2), S16 |
 | `session.cpu_interactive` | unavailable | F-X003 (X1.3), S16 |

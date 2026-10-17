@@ -261,6 +261,12 @@ Repository bootstrap. Nothing is published.
   rebuilt on the same adapter without re-resolving the tier, and a deliberate
   destroy is refused rather than rebuilt behind the caller. A session that
   resolves to the CPU tier holds no device by construction.
+- A render graph and frame scheduler that registers viewports, compiles its
+  pipelines at creation, tracks camera, window, slice, segmentation and data
+  dirt per viewport, and submits one command encoder per frame across all of
+  them. A blend mode with no shader reports itself unavailable instead of
+  rendering the wrong one, and a rebuilt device restores the graph's
+  pipelines while the caller re-supplies its viewport textures.
 - The LUT chain's WGSL shader, evaluating DICOM PS3.3 C.11's first three stages
   from a thirty-two-byte uniform, so a window or level change writes those
   bytes and nothing else. The shader makes no LUT decision, because

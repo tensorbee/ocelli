@@ -1,7 +1,7 @@
 # GPU ownership
 
-**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-041, F-X001
-**Last updated:** 2026-09-15
+**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-038, F-041, F-X001
+**Last updated:** 2026-10-17
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
 mechanism. The quote below alters that bullet in one place, splitting its
@@ -26,7 +26,8 @@ here before anything uses it.
 | `ResolvedAdapter` | `ocelli-render` | The adapter the tier resolved on, retained so a lost device can be rebuilt. Holds no device |
 | `DeviceState` | `ocelli-render` | `Live`, or `Lost` with the reason and wgpu's text. HLD section 22's "real state" |
 | `DeviceError` | `ocelli-render` | `Refused`, `NotLost`, `Unrecoverable` |
-| `Recovered` | `ocelli-render` | What a rebuild produced. `Caps` today, and what F-038 to F-040 extend |
+| `Recovered` | `ocelli-render` | What a rebuild produced: caps, and from F-038 the graph resources it restored |
+| `GraphResources` | `ocelli-render` | Pipelines restored and the graph cache generation, registered by the graph at creation |
 | `ComputeCtx<'a>` | `ocelli-compute` | A borrow of a `GpuContext` and a command encoder, for one dispatch |
 | `Kernel` | `ocelli-compute` | HLD section 31's trait, signature as given |
 | `ComputeError` | `ocelli-compute` | `Unavailable` and `Workgroup` |

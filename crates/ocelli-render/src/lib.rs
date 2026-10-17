@@ -4,8 +4,8 @@
 //!
 //! F-001 creates the crate. F-008 gives it the device-ownership contract.
 //! F-004 resolves the tier, **F-037 (E6.1, S11) creates the long-lived device
-//! and makes device loss an observable state**, and the render graph follows in
-//! F-038.
+//! and makes device loss an observable state**, and **F-038 (E6.2, S12) adds
+//! the render graph and frame scheduler in `graph`**.
 //!
 //! The device lifecycle is split the same way tier resolution is. `caps` holds
 //! the two decisions, [`caps::opens_a_device`] and [`caps::recovers_from`],
@@ -23,8 +23,8 @@
 //! DECISION: it is handed no input from which it could re-select a window,
 //! recompute inversion or apply a sequence. The Rust in `voi` computes nothing
 //! at all and only reads a resolved chain. The WGSL carries no entry
-//! point and is composed by its consumer, which today is a test and tomorrow is
-//! F-038's render graph.
+//! point and is composed by its consumer, which is F-038's render graph and
+//! the shader tests beside it.
 //!
 //! Tier resolution is split across two modules on purpose. `caps` decides and
 //! touches no GPU, `probe` touches the GPU and decides nothing. Everything
@@ -42,6 +42,7 @@
 
 pub mod caps;
 pub mod gpu;
+pub mod graph;
 pub mod probe;
 pub mod voi;
 
@@ -50,7 +51,13 @@ pub use caps::{
     ProbeOutcome, Resolution, SimdSupport, SoftwareVerdict, Tier, TierEvidence, TierRequest,
     TierSignals, candidate_order, classify, compute_available, opens_a_device, recovers_from,
 };
-pub use gpu::{DeviceError, DeviceLoss, DeviceState, GpuContext, Recovered, SharedEncoder};
+pub use gpu::{
+    DeviceError, DeviceLoss, DeviceState, GpuContext, GraphResources, Recovered, SharedEncoder,
+};
+pub use graph::{
+    BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineKey, RenderGraph, SegPass,
+    StackPass, ViewportId, VolumePass,
+};
 pub use probe::{Edge, Passes, ResolvedAdapter, resolve, resolve_adapter};
 pub use voi::{VOI_WGSL, VoiParams, VoiParamsError};
 

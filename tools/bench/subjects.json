@@ -87,9 +87,9 @@
       "unit": "ms",
       "dimensions": ["tier", "viewport_type", "rows", "columns"],
       "tiers": ["A", "B", "C"],
-      "subject_story": "F-038",
+      "subject_story": "F-101",
       "feeds": [],
-      "note": "Blocked on F-037 (E6.1, device init, S11) as well as on F-038 (E6.2, the render graph and frame scheduler, S12). `subject_story` names the later of the two because that is the one whose landing makes the measurement possible."
+      "note": "Blocked on F-037 (E6.1, device init, S11), F-038 (E6.2, the render graph and frame scheduler, S12), F-039 and F-040 (the first presented frame, S13) and F-101 (E16.2, the event ring this measurement ends at, S16). `subject_story` named F-038 until F-038 landed, when the bench gate correctly refused a runner for a measurement whose end point does not exist yet: F-038 presents no frame and builds no ring, so a runner written there could only have timed a readback, which the definition forbids. It now names F-101, whose landing makes the measurement possible."
     },
     {
       "id": "interaction.window_level_drag",
