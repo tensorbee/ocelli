@@ -887,22 +887,19 @@ a raw pointer dereference in a tracked file. The intent is unchanged, since
 ## F-006, Benchmark harness: decode, first frame, interaction latency, completed 2026-09-05
 
 **What was built.** `tools/bench`, an instrument rather than a report. A tracked
-subject registry lists the eleven things this project will ever measure, each
+subject registry lists the things this project will ever measure, each
 carrying its normative definition, its unit, its tier dimensions and the F-ID of
 the story that will give it a subject. A driver resolves each subject at run
 time to `measured`, `unavailable` naming the blocking story, or `incomparable`
 on a host-class mismatch, and a fourth state, a recorded number for a subject
 that does not exist, is refused by a gate rather than left to discipline.
 
-**Nine of the eleven subjects had nothing to measure when this story landed, and
-the harness says so.** All nine are blocked on a story that has not landed,
-which is decision D7 holding rather than a shortfall. The other two do have a
-subject: `wasm.cold_start` measures the release wasm artefact, and
+**Nine of the eleven subjects had nothing to measure when this story landed.**
+`wasm.cold_start` measured the release wasm artefact, and
 `tier.startup_microbenchmark` was blocked on F-004, which landed earlier in this
-same sprint, so it reports a `done` story and still has no runner.
-`bin/ocelli.sh bench --list` is the authority on the split rather than any
-sentence, because it reads the backlog and a written count goes stale the first
-time a story lands. No proxy workload was
+same sprint. `bin/ocelli.sh bench --list` is the authority on the split today
+rather than any sentence, because it reads the backlog and a written count goes
+stale the first time a story lands. No proxy workload was
 substituted, no stub was timed and no number was invented. The design fixes
 every subject's DEFINITION now, from the specification, including the ones with
 no subject, so a later story adds a runner into a slot with no latitude to
@@ -983,9 +980,9 @@ be. And `scripts/ci_floor_check.py` has a hole the change nearly exercised.
 - **A gate that reads planning data is sensitive to ledger commits landing
   between a worktree's base and its merge.** F-004's backlog row moved to `done`
   after this worktree was cut, so `subject_story: F-004` resolved differently
-  either side of the merge. Checked at integration and safe, because the guard
-  refuses a runner for a story that is not done and does not demand one for a
-  story that is.
+  either side of the merge. Checked at integration and safe. The guard refuses
+  a runner for a pending, archived or superseded story. A done story must have
+  one, and so must a row that names no story.
 
 ## F-X007, Oracle volume and MPR reference renders, completed 2026-09-05
 
@@ -1473,7 +1470,7 @@ reads as it did at completion, and the correction is here:
 | F-006's entry as written | What the command says |
 |--------------------------|-----------------------|
 | `cold_start_test.mjs` has five cases and one needs a browser | Seven cases, one of which needs a browser. `node --test tools/bench/tests/cold_start_test.mjs` prints the total, and the browser case reports as skipped without `OCELLI_BENCH_BROWSER=1` |
-| the `bench` arm names the five files | It names six since `828037e` added `paths_test.mjs`. `grep -o 'tools/bench/tests/[a-z_]*\.mjs' bin/ocelli.sh \| sort -u \| wc -l` is the count, and `ls tools/bench/tests/*.mjs \| wc -l` is what exists |
+| the `bench` arm names the five files | It named six when `828037e` added `paths_test.mjs`. The pattern `[a-z_]` cannot match a digit. `grep -o 'tools/bench/tests/[A-Za-z0-9_]*\.mjs' bin/ocelli.sh \| sort -u` is what the arm names, and `ls tools/bench/tests/*.mjs` is what exists |
 
 **F-011's `**Tests added.**` breakdown does not sum to its own headline.** The
 entry says 64 added and then lists 42 unit, 10 tolerance fixture, 5 VOI
@@ -3039,8 +3036,7 @@ guard that reads its AST to be shaped around the old layout.
 HLD section 22's "device loss is a real state, not an error path" is a mechanism
 rather than a sentence. **It does not close section 22's other two clauses.**
 That bullet says to rebuild "the device and all resources, and restore viewport
-state from the shell's copy", and this workspace has no texture, buffer,
-pipeline or viewport type to rebuild. `Recovered` is the struct F-038, F-039 and
+state from the shell's copy". `Recovered` is the struct F-038, F-039 and
 F-040 extend so they do not have to change `recover`'s signature.
 
 **What was built.** `probe::resolve_adapter` retains the adapter the tier
@@ -3154,16 +3150,15 @@ because the closure returns a constant and the assertion is on the call count.
 **What this closes.** DICOM PS3.3 C.11 stages 1 to 3 now evaluate on the GPU,
 from HLD section 18.4's uniform, and the shader's output is checked against
 `ocelli-pixel` on a real adapter. **It does not close decision D7**: the oracle
-still has no Ocelli renderer to compare against, because there is no frame. What
-it closes is the arithmetic half, and F-038's render graph and F-040's texture
-upload are what make a frame out of it.
+still has no Ocelli renderer to compare against. What
+it closes is the arithmetic half. F-038 renders into a caller-supplied texture
+view and acquires no surface.
 
 **The shader carries no entry point, and that is a departure from the plan.**
 The plan said "a fragment shader, so one shader serves both GPU tiers".
 `shaders/voi.wgsl` holds section 18.4's uniform and the LUT functions and stops
 there, because an entry point decides for every consumer how a stored value
-arrives and where a display value goes, and there is no texture type yet for one
-to arrive through. A consumer concatenates its own. **The file uses nothing HLD
+arrives and where a display value goes. A consumer concatenates its own. **The file uses nothing HLD
 section 7 denies tier B**, which `voi::tests` asserts by text and
 `the_shader_composes_into_a_render_pipeline_not_only_a_compute_one` asserts by
 building a real render pipeline from it.
@@ -3251,10 +3246,9 @@ mutation to justify it, and the test that does pin one says only what it pins.
 
 **What this closes.** HLD section 20's `Budgeted` and `Lru<K, V>`, over
 `alloc::collections::BTreeMap` and a monotonic `u64` tick, plus section 8's
-three tiers as `CacheTier` and `Pressure`. **It creates no value type.** An
-encoded byte run, a decoded frame and a GPU texture are F-032, F-033, F-036 and
-F-040, all S12 or S13, and a `Budgeted` implementation for a texture that no
-texture type exists to be is a `bytes()` nobody can check.
+three tiers as `CacheTier` and `Pressure`. **It creates no value type.**
+`DecodedFrame`, `Brick` and `Volume` landed in later stories. An encoded byte
+run and a GPU texture are still not production `Budgeted` values.
 
 **`insert` returns `Admission<K, V>`, which is deviation D-24.** Section 20
 returns `Vec<(K, V)>` documented as "the entries evicted to make room", and
@@ -3289,9 +3283,9 @@ identically while its GPU tier simply has no entries.
 **Size.** `ci/wasm-size-budget.json` does not move. `ocelli-wasm` does not reach
 `ocelli-cache`.
 
-**Ten review passes, and nine tests exist because of what they found.** The six
+**Ten review passes, and the tests that exist because of what they found.** The six
 mandated mutations were each observed red on their named test. The reviewers ran
-roughly 140 more and **nine left the suite green**: the evicted vector's
+roughly 140 more and these left the suite green: the evicted vector's
 ordering, all three sites that re-read `V::bytes()`, a refusal bumping recency,
 `is_empty` computed from `used` rather than from the entry count, a deferred
 release of a displaced value, and a dropped Samples per Pixel in a fixture. Each
@@ -3322,7 +3316,7 @@ this branch had not touched since the base.
 **HLD sections implemented.** `docs/hld/06-memory-and-cache.md` section 8, `docs/hld/17-cache-and-allocation.md` section 20 as consumed by F-031, and `docs/hld/14-the-boundary-in-code.md` section 17.3 envelope only.
 **Deviations.** None new. D-24 is the widened return this story consumes.
 **Crates / packages modified.** `crates/ocelli-cache` only, plus `Cargo.lock` for its `bytemuck` and `ocelli-pixel` edges.
-**Tests added.** `crates/ocelli-cache/tests/image_cache.rs`, 11 tests: 9 unit and fixture tests and 1 property test, plus layout assertions. Focused suite is 38 tests in the crate, all passing, with clippy clean.
+**Tests added.** `crates/ocelli-cache/tests/image_cache.rs`. The property test is `events_account_for_the_bytes_the_cache_stopped_holding`. The ring layout is pinned by `ring_event_is_48_bytes_at_section_17_3_offsets` and `raw_payload_starts_at_byte_16`. The crate's tests passed, with clippy clean.
 **Fixture provenance.** No pixel arithmetic. Byte fixtures are hand-computed from Rows and Columns in DICOM PS3.3 C.7.6.3.1, a 512 by 512 sixteen-bit frame at 524,288 bytes, and the layout numbers come from HLD section 17.3.
 **Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
 **Corpus.** See the verification record in the commit trailer. This story changes no codec or pixel path.
@@ -3333,12 +3327,12 @@ this branch had not touched since the base.
 
 ## F-038, Render graph and frame scheduler with dirty tracking, completed 2026-10-17
 
-**What was built.** HLD section 22's `Pass` enum and pipeline key as types, a `RenderGraph` that registers viewports at fixed capacity, compiles only the composite stack pipeline at creation, tracks five dirty sources per viewport set in Rust, encodes each dirty viewport once in registration order into one encoder and submits exactly once, with a `submissions` counter as the observable half of that rule. A viewport whose blend has no shader body reports unavailable and keeps its dirt. `set_voi` is the single VOI write route and validates state, pass and rebind before it reads the chain. `Recovered` now carries `GraphResources`, `recover`'s signature is unchanged, and installing a recovery drops every per-viewport object the dead device owned until the caller rebinds views. No surface is acquired and no texture is uploaded, so decision D7 stays open for F-039 and F-040.
+**What was built.** HLD section 22's `Pass` enum and pipeline key as types, a `RenderGraph` that registers viewports at fixed capacity, compiles only the composite stack pipeline at creation, tracks five dirty sources per viewport set in Rust, encodes each dirty viewport once in registration order into one encoder and submits exactly once, with a `submissions` counter as the observable half of that rule. A viewport whose blend has no shader body reports unavailable and keeps its dirt. `set_voi` is the single VOI write route and validates state, pass and rebind before it reads the chain. `Recovered` now carries `GraphResources`, `recover`'s signature is unchanged, and installing a recovery drops every per-viewport object the dead device owned until the caller rebinds views. No surface is acquired and no texture is uploaded. Decision D7 stays open.
 
 **HLD sections implemented.** `docs/hld/19-render-graph.md` section 22, `docs/hld/05-rendering.md` section 7 scheduling and tier bullets, and `docs/hld/23-performance-rules.md` section 26 for this story's half.
 **Deviations.** None new. D-04, D-07, D-12, D-13 and D-14 cited unchanged.
 **Crates / packages modified.** `crates/ocelli-render` only.
-**Tests added.** `crates/ocelli-render/tests/graph.rs` and `graph_voi.rs`, 5 unit and fixture rows in the floor and 7 device rows under the gpu gate, including half-float rows that separate LINEAR at 0.50125 from LINEAR_EXACT at 0.5, which an 8-bit target cannot.
+**Tests added.** Floor tests in `crates/ocelli-render/src/graph.rs` and `tests/graph.rs`. Ignored device tests in `tests/graph.rs` and `tests/graph_voi.rs`. The half-float rows separate LINEAR at 0.50125 from LINEAR_EXACT at 0.5, which an 8-bit target cannot.
 **Fixture provenance.** DICOM PS3.3 C.11.2.1.2, C.11.2.1.3.2 and C.11.2.1.3.1 via section 18.3, with D-13 applied to LINEAR at the centre.
 **Verification.** Feature profile plus the gpu gate, staged tree, gates recorded in the verify ledger at commit time.
 **Corpus.** See the verification record in the commit trailer. This story changes no codec or pixel path.
@@ -3386,7 +3380,7 @@ this branch had not touched since the base.
 **HLD sections implemented.** `docs/hld/06-memory-and-cache.md` section 8, `docs/hld/16-volume-representation.md` section 19, `docs/hld/17-cache-and-allocation.md` section 20, `docs/hld/26-differentiating-capabilities.md` section 30, and `docs/hld/27-phase1-hooks.md` section 38. Decision D11, chunked residency is the only path.
 **Deviations.** None.
 **Crates / packages modified.** `crates/ocelli-cache` and `crates/ocelli-volume`.
-**Tests added.** `crates/ocelli-cache/tests/bricks.rs`, 22 tests, and `crates/ocelli-volume/tests/brick_width.rs`, 2 tests. The 512 by 512 by 600 sixteen-bit fixture places voxel 200, 130, 599 in brick 3, 2, 9 at byte offset 302121344. The 500 by 300 by 130 eight-bit fixture gives the last brick extent 116, 44, 2 and 10208 bytes.
+**Tests added.** `crates/ocelli-cache/tests/bricks.rs`, 22 tests, and `crates/ocelli-volume/tests/brick_width.rs`, 2 tests. The 512 by 512 by 600 sixteen-bit fixture places voxel 200, 130, 599 in brick 3, 2, 9. That brick's origin, voxel 192, 128, 576, is at byte offset 302121344. The 500 by 300 by 130 eight-bit fixture gives the last brick extent 116, 44, 2 and 10208 bytes.
 **Fixture provenance.** Hand-computed from DICOM PS3.3 C.7.6.3.1 for the image dimensions and C.7.6.2.1.1 for the axis order, and from HLD section 19's byte layout. The overflow fixtures are products past `u32::MAX` and past `u64::MAX`, computed before the assertions.
 **Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
 **Corpus.** See the verification record in the commit trailer. This story changes no codec or pixel path.

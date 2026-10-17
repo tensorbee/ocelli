@@ -8,7 +8,7 @@
     "`toleranceMm` is HLD 25.1's geometry line, 'world coordinates within 1e-6 mm'. This file sets no other tolerance and changes none.",
     "Strict in both directions. Every declared subject in volume-params.json has an entry here and every entry here names a declared subject. The harness's own measured geometry must match a declared expectation within the tolerance, and a mismatch fails the run. A declared referenceDivergence that does not occur fails the run, and a reference that diverges from the truth with no declared entry fails the run, so this file cannot grow into a list of excuses and a stale claim cannot hide a reference that improved.",
     "`uniform: null` means the question was NOT ASKED, not that the answer is unknown to the harness. HLD 25.1's 1e-6 mm is a comparison tolerance and is exact for the two synthetic subjects by construction. It would classify almost any real series as non-uniform, which is a verdict the corpus cannot support, so the two real subjects publish maxDeviationFromMeanMm and are classified by nothing. Deciding a uniformity policy for real data belongs to the story that builds the volume.",
-    "Nothing here says what Ocelli should DO with a non-uniform series. No volume builder exists, decision D7 holds, and no HLD section states a refusal policy, a threshold or what a caller sees. This file makes that decision CHECKABLE and takes none of it."
+    "Nothing here says what Ocelli should DO with a non-uniform series. No HLD section states a refusal policy, a threshold or what a caller sees. This file makes that decision CHECKABLE and takes none of it."
   ],
   "subjects": {
     "volume__synthetic__ct_series_uniform": {

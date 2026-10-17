@@ -6,9 +6,9 @@
 //! because that cost belongs to the budget an entry was admitted against and
 //! not to the entry.
 //!
-//! **There is no type holding all three.** The three tiers hold three different
-//! value types, so one struct over them would need three type parameters with
-//! one instantiation each. Three tiers is three `Lru` values.
+//! **There is no type holding all three.** Production caches are not one `Lru`
+//! per tier. `ImageCache` and `VolumeCache` are both `CacheTier::Decoded`.
+//! `BrickCache` is `CacheTier::Gpu`. No production cache is `CacheTier::Encoded`.
 
 /// Which of HLD section 8's three budgets a cache keeps.
 ///

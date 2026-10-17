@@ -19,9 +19,9 @@ HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 ## The rules that hold
 
 **Pipelines compile at creation.** Only the composite stack pipeline has a
-shader body. The other fourteen pass, blend and tier combinations are keys,
-and a lookup for one reports unavailable rather than aliasing composite,
-which is deviation D-07's honesty rule applied to a blend mode.
+shader body. A lookup for any other pass, blend and tier combination reports
+unavailable rather than aliasing composite, which is deviation D-07's honesty
+rule applied to a blend mode.
 
 **One submission per submitted frame.** A tick encodes each dirty viewport
 once into one encoder and submits once, and `submissions` counts them. That
@@ -47,7 +47,7 @@ rebuilt.
 ## What this does not do
 
 No surface is acquired, which is F-039. No texture is uploaded, which is
-F-040, and no frame exists for the oracle to judge until that lands, so
-decision D7 stays open. Tier B is full by construction and has never been
-exercised by a gate: F-042 is its first test. The five blend modes beyond
-composite wait for F-052 and F-054.
+F-040. The oracle still has no Ocelli frame to judge, so decision D7 stays
+open. Tier B is full by construction and has never been
+exercised by a gate: F-042 is its first test. Mip, MinIp and Average wait
+for F-054, which depends on F-052. LabelmapEdgeProjection waits for F-067.

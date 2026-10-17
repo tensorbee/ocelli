@@ -297,10 +297,12 @@ impl GpuContext {
         // HLD section 31's invariant is untouched, because its concern is
         // stated as "two devices cannot share textures, which would defeat the
         // entire point", and nothing shares anything across this line. The old
-        // device is lost, by the check above, so it renders nothing, owns no
-        // resource this workspace has a type for, and is dropped at the
-        // assignment. `ci/check-device-ownership.sh` is about who may CREATE a
-        // device and is unaffected.
+        // device is lost, by the check above, so it renders nothing. The
+        // graph's pipelines were created on it and are not shared with the new
+        // device. The registration copied below is the count and the
+        // generation. The caller reinstalls the pipelines. The old device
+        // handle is dropped at the assignment. `ci/check-device-ownership.sh`
+        // is about who may CREATE a device and is unaffected.
         let rebuilt = adapter.open().await?;
         let caps = *rebuilt.caps();
         // The graph registration survives the rebuild with its generation

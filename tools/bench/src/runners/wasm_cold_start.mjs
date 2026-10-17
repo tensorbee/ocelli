@@ -1,9 +1,8 @@
-// `wasm.cold_start`, the one subject with a real subject today.
+// `wasm.cold_start` times the release wasm artefact in a browser.
 //
 // Appendix A gate A4 has two halves. F-002 measured the first, recording
 // 14,104 bytes in `ci/wasm-size-budget.json` on 2026-09-04, re-baselined by
-// F-005 to 16,388. **The second half, cold start, has never been measured at
-// all.** This is that half.
+// F-005 to 16,388. This file is the cold-start half.
 //
 // It is not a fabricated workload. It is the actual release artefact doing the
 // actual thing a browser does at session start, and nothing here substitutes a

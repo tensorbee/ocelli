@@ -10755,8 +10755,9 @@ GUARDS: tuple[Guard, ...] = (
         file="tools/bench/src/registry.mjs",
         gate="bench",
         spec="HLD section 26, and story E1.6",
-        refuses="A registry entry with no subject story, a duplicate subject, "
-                "and a runner for a subject whose story has not landed.",
+        refuses="A duplicate subject id, a subject_story that is neither null "
+                "nor a string, and a named story absent from the allocation "
+                "or from the backlog status table.",
         claims=("*",),
         covered_by=("tools/bench/tests/registry_test.mjs "
                     "(run by the `bench` gate)",),

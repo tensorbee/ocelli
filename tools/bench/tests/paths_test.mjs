@@ -7,11 +7,12 @@
 // of 0 over a run that took no figure.
 //
 // `run.mjs` asks `existsSync(runnerPath(id))` for every subject. A
-// `runnerBasename` that returned the id unchanged makes that false for the one
-// subject with a runner, so every subject reports `unavailable / no_runner`,
-// `failedRunners` is empty, `main` returns 0, and the gate is green having
-// measured nothing. An `isEntryPoint` that is never true does the same thing
-// one level up, and its own comment says so.
+// `runnerBasename` that returned the id unchanged makes that false for every
+// subject whose id contains a dot. A subject that exists and whose runner
+// file is then missed reports `unavailable / no_runner`, `failedRunners` is
+// empty, `main` returns 0, and the gate is green having measured nothing. An
+// `isEntryPoint` that is never true does the same thing one level up, and its
+// own comment says so.
 //
 // The convention itself is the registry's. `tools/bench/subjects.json` states
 // it in the `id` field's documentation, "The runner file, when one exists, is
@@ -79,13 +80,13 @@ test("a runner path is src/runners/<basename>.mjs under tools/bench", () => {
 
 // The consequence, not the convention. `run.mjs` decides whether a subject has
 // an instrument by asking `existsSync` this exact question, so a basename rule
-// that drifted from the file on disk turns the one measurable subject in this
-// tree into `unavailable / no_runner` and the run into a green nothing.
-test("the runner that exists today is found at the path run.mjs asks for", () => {
+// that drifted from the file on disk misses every subject whose id contains a
+// dot and reports that subject `unavailable / no_runner`.
+test("a subject that exists is found at the path run.mjs asks for", () => {
   assert.equal(
     existsSync(runnerPath("wasm.cold_start")),
     true,
-    "run.mjs would report the only measurable subject as having no runner",
+    "run.mjs would report wasm.cold_start as having no runner",
   );
 });
 

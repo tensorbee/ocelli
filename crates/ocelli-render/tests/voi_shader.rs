@@ -19,7 +19,7 @@
 //! with itself. It is **stronger than a screenshot**, because it is a numeric
 //! diff at `f32` with no quantisation to eight bits hiding a 0.32-of-255
 //! divergence. The oracle's verdict on a rendered frame arrives when there is a
-//! renderer to render one, which is F-038 and F-040.
+//! renderer to render one. F-038 schedules a frame and acquires no surface.
 //!
 //! # The harness is tier A only and the shader is not
 //!

@@ -140,8 +140,8 @@ this project's hot path.
 - **Measure with the benchmark harness before optimising anything. The
   intuitions that work in JavaScript do not transfer.** The harness is
   `bin/ocelli.sh bench` and the subjects it will ever measure are listed in
-  `tools/bench/subjects.json`. Most of them report `unavailable` today and name
-  the story that gives them a subject, which is decision D7 holding. See
+  `tools/bench/subjects.json`. `bin/ocelli.sh bench --list` prints each
+  subject's blocking story and that story's backlog status. See
   `docs/lld/benchmarks.md`. The instrument is half of section 26's rule, and an
   earlier paraphrase here dropped it, leaving a habit where the specification
   put a dependency.

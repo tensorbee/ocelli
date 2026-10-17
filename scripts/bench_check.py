@@ -13,25 +13,25 @@ deterministic, and it cannot be satisfied by intention.
 
 ## The defect this exists for
 
-Most of the rows in `tools/bench/subjects.json` have nothing to measure in this
-tree. There is no decoder, no renderer, no worker and no boundary, which is
-decision D7 holding: the oracle and the instruments exist before the port code.
-No count is written here, because a written count goes stale the first time a
-story lands and one already did. `node tools/bench/run.mjs --list` prints the
-split and reads `docs/sprints/BACKLOG.md` to do it.
+A row whose story is pending, archived or superseded has nothing to measure
+yet. A row that names no story exists today.
+`node tools/bench/run.mjs --list` prints each subject's blocking story and that
+story's backlog status. No count is written here, because a written count goes
+stale the first time a story lands.
 
 **A benchmark harness under time pressure invents a workload, produces a
 plausible number, and that number then sits in a tracked file describing
 nothing.** That is the defect, it is this project's "quietly wrong" shape
 applied to cost rather than to pixels, and discipline is not a mechanism against
-it. So two things are refused mechanically:
+it. The gate refuses these mechanically:
 
-1. a runner file for a subject whose story is not in progress or done, because
-   a runner for a subject that does not exist can only be timing a stub,
-2. an entry in `ci/bench-baseline.json` for such a subject, because that is
-   where an invented number would come to rest, and
-3. a done subject with no runner, because completion requires the permanent
-   instrument rather than an intention to add it later.
+1. a runner file for a subject whose story is pending, archived or superseded,
+   because a runner for a subject that does not exist can only be timing a stub,
+2. an entry in `ci/bench-baseline.json` for a subject in one of those three
+   statuses, because that is where an invented number would come to rest, and
+3. a missing runner on a done story, and on a row that names no story. A done
+   story requires the permanent instrument. A row that names no story exists
+   today and must have one.
 
 An in-progress story may carry its real runner and measured baseline so that
 independent review can inspect the implemented subject before the story is
@@ -429,9 +429,10 @@ def main() -> int:
             print(f"  {problem}")
         print()
         print("This gate asserts the instrument and never a duration. A "
-              "subject whose story has not landed is reported `unavailable` "
-              "and names that story. It is never given a runner, and it is "
-              "never given a number.")
+              "pending, archived or superseded story is reported "
+              "`unavailable` and names that story. It is not given a runner "
+              "and it is not given a number. A row that names no story must "
+              "have a runner.")
         return 1
 
     subjects = registry.get("subjects", [])

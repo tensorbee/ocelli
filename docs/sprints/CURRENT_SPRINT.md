@@ -68,8 +68,8 @@ on a surface. What changes here is that the pieces stop being independent.
   stage-4 row. **Multi-component JPEG-LS decoding** is still owed, with a corpus
   row measuring the refusal.
 - **The oracle still has no Ocelli renderer to compare against**, and F-038 does
-  not close that either. A render graph with no canvas and no texture upload
-  produces no frame, so decision D7 holds until F-040.
+  not close that either. The graph renders into a caller-supplied texture view
+  and acquires no surface, so decision D7 holds.
 
 ## The defect class this sprint is exposed to
 

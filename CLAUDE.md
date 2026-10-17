@@ -217,14 +217,15 @@ What exists, in the order it matters:
   F-037. `ocelli-render` is still the only crate that may create a device.
 - **A budgeted LRU**, HLD section 20's `Budgeted` and `Lru<K, V>` with the
   three tiers of section 8 as a discriminant and a pressure signal. S11's F-031.
-  **It holds no value type**: an encoded run, a decoded frame and a GPU texture
-  are S12 and S13 stories.
+  The value types are `DecodedFrame` and `Brick` in `ocelli-cache`, and
+  `Volume` in `ocelli-volume`. An encoded byte run and a GPU texture are not
+  among them.
 - **The LUT chain's shader.** `crates/ocelli-render/shaders/voi.wgsl`, HLD
   section 18.4's uniform and the three window functions, agreeing with
   `LutChain::map_into` on a real adapter to two `f32` ULP at 255. S11's F-041.
-  **Nothing renders a frame yet**, so decision D7 still holds: the oracle has no
-  Ocelli renderer to compare against, and F-038 and F-040 are what make a frame
-  out of these three.
+  F-038 renders into a caller-supplied texture view and acquires no surface.
+  Decision D7 still holds. The oracle has no Ocelli renderer to compare
+  against.
 - **The npm packaging pipeline**, proven against a consumer outside the
   workspace.
 

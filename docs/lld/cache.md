@@ -129,7 +129,7 @@ a caller to measure one against.
 `alloc::collections::BTreeMap` is the map because the crate is `no_std` and
 `alloc` has no `HashMap`. The `K: Ord + Clone` bound is what that map needs.
 
-## Three tiers, three caches
+## The caches and their tiers
 
 `CacheTier` is carried by the cache rather than by the value, because the cost
 of an eviction belongs to the budget an entry was admitted against. `Lru::new`
@@ -137,17 +137,18 @@ takes it and `Pressure` reports it. **`Admission` does not carry it**, because a
 caller emitting an eviction event already knows which cache it called `insert`
 on, and a field repeating that would be a second place for it to be wrong.
 
-**There is no type holding all three tiers.** They hold three different value
-types, so one struct over them would need three type parameters with one
-instantiation each. Three tiers is three `Lru` values, created by the stories
-that have a value type to put in them.
+**There is no type holding all three tiers.** Production caches are not one
+`Lru` per tier. `ImageCache` and `VolumeCache` are both `CacheTier::Decoded`.
+`BrickCache` is `CacheTier::Gpu`. No production cache is `CacheTier::Encoded`.
 
 **Two value types live in this crate.** F-032 built the decoded tier's
 `DecodedFrame` and its `ImageCache`. F-036 built `Brick` and `BrickCache` on
 the GPU tier, and `bytes` is the host buffer length. F-033's `Volume`
 implements `Budgeted` in `ocelli-volume` and keeps a second decoded-tier
-`Lru` there, so a volume cannot spend the frame budget. Encoded bytes and
-GPU textures still arrive with their own stories. There is no `wgpu`
+`Lru` there, so a volume cannot spend the frame budget. Encoded bytes are
+the transient tier HLD section 8 drops when a frame decodes. F-031 left
+`CacheTier::Encoded` as a discriminant and no production cache uses it.
+GPU textures are F-040 and F-043. There is no `wgpu`
 dependency here: this crate never sees a texture, only its size.
 
 ## The decoded tier and its events, F-032

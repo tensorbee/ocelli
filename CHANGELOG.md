@@ -179,7 +179,7 @@ Repository bootstrap. Nothing is published.
   and the F-ID of the story that will give it a subject. The driver resolves
   each subject at run time to `measured`, to `unavailable` naming the blocking
   story, or to `incomparable` on a host-class mismatch, and a recorded number
-  for a subject whose story has not landed is refused by the `bench` gate
+  for a pending, archived or superseded story is refused by the `bench` gate
   rather than left to discipline. **Most subjects had nothing to measure when
   this landed and the harness says so**, which is decision D7 holding rather
   than a shortfall. No proxy workload was substituted, no stub was timed and no

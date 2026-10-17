@@ -268,8 +268,8 @@ refusal path safe, which is `recover`'s documented guarantee that a
 
 Section 31's invariant is untouched, because it is stated as "two devices cannot
 share textures, which would defeat the entire point". Nothing is shared across
-that line: the old device is lost in every non-test path, this workspace has no
-texture type for either to hold, and the old one is dropped at the assignment.
+that line: the old device is lost in every non-test path, and the old one is
+dropped at the assignment.
 `ci/check-device-ownership.sh` is about which crate may CREATE a device and is
 unaffected.
 
@@ -282,11 +282,10 @@ application's own teardown, and rebuilding behind a shutdown path is a loop.
 Both matches are written without a wildcard arm, so a future wgpu adding a third
 reason stops the build rather than letting it inherit an answer nobody chose.
 
-**What recovery does NOT do, and it is two of section 22's three clauses.**
-There are no resources and no viewports in this workspace, so `Recovered`
-carries the rebuilt device's `Caps` and nothing else. It is a struct rather than
-a bare `Caps` so F-038's render graph, F-039's canvas and F-040's textures
-extend it instead of changing `recover`'s signature.
+**What recovery does not restore.** `Recovered` carries the rebuilt device's
+`Caps` and, when a graph registered them, the `GraphResources` the rebuild
+restored. It does not carry a canvas or a texture. F-039 and F-040 extend
+this struct rather than `recover`'s signature.
 
 **`caps` cannot currently differ from the pre-loss `caps`**, and this paragraph
 said it could until the F-037 review's second pass. `ResolvedAdapter::open`
@@ -302,9 +301,9 @@ promises what the code does not do.
 ### What the tests prove, and the two things they do not
 
 `crates/ocelli-render/tests/device.rs` and one `#[ignore]`d case in `gpu.rs`,
-both run by `bin/ocelli.sh gate gpu`. **They are not that gate's whole set**,
-which is every `#[ignore]`d test in the crate: the device lifecycle, the tier C
-short-circuit test, the fill-rate instrument, and F-041's LUT-shader comparison.
+both run by `bin/ocelli.sh gate gpu`. **They are not that gate's whole set.**
+The gate is every `#[ignore]`d test in the crate.
+`cargo test -p ocelli-render -- --ignored --list` prints that set.
 What follows is the device lifecycle alone. A device opens and agrees with the resolved tier. A destroy is
 observed as a loss carrying `Destroyed`. That destroy is
 refused rather than rebuilt, and the refusal leaves the state it refused to act

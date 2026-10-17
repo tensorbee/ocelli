@@ -8,8 +8,9 @@
 //
 //   the gate    permits real runners during in-progress review, requires one
 //               when done, and refuses one for every other status
-//   this module refuses to RUN a subject it cannot label, so that no record can
-//               ever carry a number beside a story that has not landed
+//   this module throws when a row cannot be labelled, and it sets
+//               subjectExists true for a null story and for an in-progress
+//               or done story
 //
 // THE OVERLAP IS LARGER THAN ONE FACT AND SAYING OTHERWISE WOULD HIDE THE COST.
 // Both sides carry the required-field list, the valid tiers, the valid backlog

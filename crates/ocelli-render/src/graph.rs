@@ -6,8 +6,8 @@
 //!
 //! **No surface is acquired and no texture is uploaded.** Presentation is
 //! F-039 and upload is F-040. A viewport renders into a caller-supplied
-//! texture view, from a caller-supplied stored-value texture, so the oracle
-//! still has no Ocelli frame to judge until F-040. Decision D7 stays open.
+//! texture view, from a caller-supplied stored-value texture. The oracle
+//! still has no Ocelli frame to judge. Decision D7 stays open.
 
 use ocelli_pixel::LutChain;
 use wgpu::util::DeviceExt;
@@ -690,8 +690,8 @@ impl RenderGraph {
         // that registered nothing there still cannot keep this graph's
         // per-viewport objects, which belonged to the dead device all the
         // same. There is no silent return: installing always drops them.
-        // The rebuilt tier is the recovered one, because a fallback adapter
-        // may resolve differently from the device that was lost.
+        // `recovered.caps` is the tier `open` copied from the same adapter.
+        // Recovery does not resolve a tier.
         self.tier = recovered.caps.tier;
         let (uniform_layout, source_layout, keys, pipelines) =
             Self::compile(ctx, self.tier, self.format);
