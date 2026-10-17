@@ -1,0 +1,44 @@
+# F-033 review, pass 3
+
+**Reviewed**: working tree diff for F-033 in `crates/ocelli-volume/src/lib.rs`, `crates/ocelli-volume/Cargo.toml`, `crates/ocelli-volume/tests/assembly.rs`, `crates/ocelli-pixel/src/image_plane.rs` and the F-033 row of `docs/sprints/BACKLOG.md`, against pass 2 in `.claude/reviews/F-033-volume-pass-2.md`
+**Result**: 0 defects, 0 smells, 4 nitpicks
+
+## Defects
+
+None. The pass 2 smell is closed and guarded, as itemised under Verified clean. No new wrong behaviour was found in the fresh pass over the whole diff.
+
+## Smells
+
+None. The multi-sample half of the `InconsistentSpacing` guard is now exercised by a committed test and proved by mutation below, so pass 2 S1 does not survive.
+
+## Nitpicks
+
+### N1, `place` reports size before range on a doubly wrong write
+**Where**: [crates/ocelli-volume/src/lib.rs](/Users/atulsharma/Documents/projects/tensorbee/ocelli/crates/ocelli-volume/src/lib.rs:509)
+**What**: Carried from pass 1 N1 and pass 2 N1 and unchanged. A write that is both out of range and the wrong size returns `SliceSizeMismatch`. No text specifies an order, so this stays a preference.
+
+### N2, Unreachable fallback arithmetic hides two invariants
+**Where**: [crates/ocelli-volume/src/lib.rs](/Users/atulsharma/Documents/projects/tensorbee/ocelli/crates/ocelli-volume/src/lib.rs:444)
+**What**: Carried from pass 1 N2 and pass 2 N2 and unchanged. The gaps closure falls back to `0.0` for window elements that `windows(2)` always supplies, and `slice_mut` saturates its start offset where `slice` checks the same product.
+
+### N3, The `assemble` error list omits two refusals it can return
+**Where**: [crates/ocelli-volume/src/lib.rs](/Users/atulsharma/Documents/projects/tensorbee/ocelli/crates/ocelli-volume/src/lib.rs:366)
+**What**: Carried from pass 2 N3 and unchanged. The `# Errors` list names six variants and omits `InconsistentSpacing` and `UnsupportedVoxelKind`, both returned from the per-slice loop. Each variant carries its own accurate doc on the enum, so a reader loses nothing except the summary.
+
+### N4, The multi-sample fixture comment doubles both byte counts
+**Where**: [crates/ocelli-volume/tests/assembly.rs](/Users/atulsharma/Documents/projects/tensorbee/ocelli/crates/ocelli-volume/tests/assembly.rs:496)
+**What**: The comment says one slice is 72 bytes against the store 24. The fixture is 3 rows by 4 columns at three samples per pixel and one byte per sample, so one incoming slice is 36 bytes as built at line 514, and the `U8` store slice is 12 bytes. The ratio and the refusal reasoning are right and only the two absolute counts are doubled. The assertion itself is exact and mutation proved below, so this is wording to correct on the next touch and not behaviour.
+
+## Verified clean
+
+- Pass 2 S1 closed. `a_multi_sample_slice_refuses_before_it_can_never_be_placed` at assembly.rs lines 493 to 521 builds two interleaved RGB slices with `SampleLayout` of three samples, `PhotometricInterpretation::Rgb` and interleaved planar configuration, and asserts `Err(VolumeError::InconsistentSpacing)`. That is the layout clause at lib.rs lines 398 to 400 exercised by a committed fixture, where pass 2 found both helpers hardcoded to one sample.
+- Mutation proof for S1. The clause `evidence.frame.description().layout.samples_per_pixel() != 1` was deleted so the guard kept only the spacing comparison. `bin/ocelli.sh test ocelli-volume` then exited 101 with 13 assembly tests passing and exactly `a_multi_sample_slice_refuses_before_it_can_never_be_placed` failing, with left `Ok` for dims `[4, 3, 2]` and voxel `U8` against right `Err(InconsistentSpacing)`. The edit was reverted exactly. The file hash returned to `094fc08eba885e32e72ec84ee24a4e02a84fcf17f6e22ead088c74508fcd88de` and the suite went green again. A guard that stays green both ways would have been a defect under microscope item 2, and this one goes red.
+- Arithmetic in microscope order. Projected spacing still comes from `position_vector().dot(normal)` at lib.rs line 412 with the normal from `slice_normal` as `X cross Y` normalised at image_plane.rs lines 185 to 190, sorted ascending, with consecutive differences checked for duplicate at 1e-9 mm, shear by lateral residual over 1e-6 mm, and uniformity past 0.5 per cent of the median. The median still averages the two middle gaps on an even count at lib.rs lines 570 to 584. No `SpacingBetweenSlices`, `SliceThickness`, `SliceLocation`, `InstanceNumber` or tilt tag is read anywhere in the crate beyond the crate doc saying they are not read. Search found no `as` cast in `crates/ocelli-volume/src/lib.rs` outside prose, and conversions use `try_from` with stated fallbacks with the `SlicePresence` shift bounded by `n % 64`.
+- `PixelSpacing[0]` direction. Volume spacing is `[column_mm(), row_mm(), median]` at lib.rs lines 473 to 477 against dims of `[columns, rows, count]` from `describe` at lines 561 to 567, so spacing index 0 steps along the row cosine and index 1 along the column cosine. That agrees with `index_to_world` at image_plane.rs lines 218 to 219 and with PS3.3 C.7.6.2.1.1. The new `row()` and `column()` accessors at image_plane.rs lines 57 to 65 return the validated `X` and `Y` cosines under their standard names, and their one caller builds the direction matrix as `DMat3::from_cols(row, column, normal)` at lib.rs line 484. The non-square spacing test still asserts steps of 1.0 and 0.5 from hand-computed patient points.
+- Origin, layout and kinds. Origin is the IPP of the lowest projected slice copied exactly at lib.rs lines 478 to 488 with no half voxel offset. Slice `n` still starts at `n * dims[0] * dims[1] * bytes_per_voxel` in both `slice` and `slice_mut` over one contiguous `Vec<u8>`, and the 4 by 3 by 2 fixture still puts slice 1 at byte 24. `describe` still names only `(8, Unsigned)`, `(16, Signed)` and `(16, Unsigned)` and returns `UnsupportedVoxelKind` for everything else, guarded by `kinds_voxel_kind_cannot_name_refuse`. The oblique fixture still separates projected position from the IPP z component, so a z-only sort cannot pass.
+- Claims in prose. The `NotOneVolume` doc at lib.rs lines 154 to 156 claims only mixed orientations for assembly and names `group_volumes` as the frame of reference owner, and a search confirms `frame_of_reference` is read only in grouping at lines 107 to 124 and never in `assemble`. The duplicate and shear bounds still carry their rationales at lines 425 to 428 and 434 to 436. Decision C1 still holds with exactly one level entry carrying dims, spacing and offset 0, guarded with `order`, both `place` error payloads, `SlicePresence` across the 64-bit word boundary at 130 slices, `Budgeted` bytes of 72 and `VolumeCache` insert, get, remove and pressure in one committed test. Deviation D-25 is still recorded in `docs/hld/DEVIATIONS.md` for the hand-rolled `SlicePresence`.
+- Things that exist and that nothing executes. Every guard branch in the per-slice loop now has a committed test that goes red without it, including the layout clause proved above. `Volume.order` still records the arrival index of each slice in sorted order from the same projected sort that derives spacing, so sorting is derived once inside this crate and the guarded test places each arriving sample block through it.
+- Boundary and tier. The diff adds no `unsafe`, no `wasm-bindgen` and no `bitvec`. Cargo adds only glam, thiserror, ocelli-cache, ocelli-core and ocelli-pixel with proptest as a dev dependency. No pixel crosses the boundary, no allocation sits in a render loop, and `place` copies into the one allocation made at assembly. Tier C assembles the same volume with no device, and tiers A and B remain upload concerns for a later story as the plan states.
+- Structure. No new trait, generic parameter, `Box<dyn>` or forwarding wrapper appears. `Budgeted` is an existing trait with a new implementer, `VolumeCache` holds its own `Lru` on `CacheTier::Decoded` per decision F1, and the newtypes each hold one invariant. Brick decomposition stays F-036 scope and is not in this diff.
+- Backlog. The F-033 row reads `in-progress`, which is one word changed from `pending` and matches the status vocabulary on line 7 of the same file and a working diff under review.
+- Gates with exit codes read from the commands themselves. `bin/ocelli.sh test ocelli-volume` exited 0 with 1 unit test and 14 assembly tests passing. `bin/ocelli.sh clippy ocelli-volume` exited 0. `bin/ocelli.sh test ocelli-pixel` exited 0 with every suite passing. The tree after the mutation and revert hashes to `094fc08eba885e32e72ec84ee24a4e02a84fcf17f6e22ead088c74508fcd88de` for lib.rs, `22a6f1e25cf02de9ce82d069abaa0afa79fb8b5fe4fe5862e11dc7bf592e9648` for assembly.rs and `8ab87c8167ef07f92e312ddefa5fed6f490632b7078b7a2907bdba670e177555` for image_plane.rs, with lib.rs and image_plane.rs identical to the hashes recorded in pass 2 before any pass 3 mutation.

@@ -1,7 +1,7 @@
 # The comparator, the oracle's judging half
 
 **F-IDs that contributed:** F-011, F-012, F-013, F-015, F-X012
-**Last updated:** 2026-09-06
+**Last updated:** 2026-10-17
 
 HLD section 11 says the harness "pushes the same study through both stacks and
 compares frames within a written per-modality tolerance, with metadata diffed
@@ -18,12 +18,11 @@ sees.
 
 ## What it compares today, stated plainly
 
-**No port code exists.** Decision D7 is that the validation oracle exists before
-the port code, and F-011 did not break it. There is no Ocelli renderer, so
-there is no Ocelli frame, so the comparator has no second side of the corpus to
-compare against. A stub renderer was refused in the design round: it would be
-port code written before it was designed, and its frames would prove only that
-the stub and the comparator agree.
+Decision D7 is that the validation oracle exists before the port code, and
+F-011 did not break it. The comparator has no second side of the corpus to
+compare against. A stub renderer was refused in the design
+round: it would be port code written before it was designed, and its frames
+would prove only that the stub and the comparator agree.
 
 So the comparator is a function of two directories, and today those two
 directories are filled by three things, none of which is a renderer.
@@ -524,10 +523,12 @@ the comparator excusing our own defect with somebody else's, so rung 4 carries
 `!geometry.is_empty()`.
 
 The S03 sprint review found that narrowing watched by an accident.
-`plus-three-on-one-pixel-of-a-reformat` lands on the one subject carrying a
-declared divergence only because `real` sorts before `synthetic` in the
-`BTreeSet` the records are iterated from, so a synthetic subject sorting first
-would have retired the guard in silence. Three unit tests in `attribution.rs`
+`plus-three-on-one-pixel-of-a-reformat` lands on the first volume reformat
+that passes. It is not pinned to a subject carrying a declared reference
+divergence. On this corpus that reformat is `volume__real__mr_eay131__AXIAL`
+because records are iterated from a `BTreeSet` and `real` sorts before
+`synthetic`, so a synthetic subject sorting first would have retired the
+guard in silence. Three unit tests in `attribution.rs`
 now build both sides themselves and hold the three cases apart: a declared
 divergence with geometry agreeing is `fail` attributed to ours, the same
 divergence with geometry diverging is `unmeasured` attributed to the reference,

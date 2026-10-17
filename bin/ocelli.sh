@@ -300,17 +300,11 @@ run_gate() {
     # not because it needs one to run, and a gloss over a growing set goes stale
     # the first time a test joins it for a new reason. This one already has.
     #
-    # What the set is today, with F-031, F-037 and F-041 all landed: the device
-    # lifecycle, the tier C short-circuit test, the fill-rate instrument noted
-    # below, and F-041's LUT-shader comparison against `ocelli-pixel`.
-    #
     # NO COUNT IS WRITTEN HERE.
     # `cargo test -p ocelli-render -- --ignored --list | grep -c ': test$'`
-    # prints how many there are, across every binary in the crate. The gate needed no edit when F-041
-    # landed, because this names no test file, and THIS COMMENT DID, twice: a
-    # gloss saying the set was "the ones needing an adapter", then a hard count
-    # of eighteen put in the same arm that warns against exactly that. F-038,
-    # F-040 and F-042 all add to this crate.
+    # prints how many there are, across every binary in the crate. The gate
+    # names no test file, so a story that adds an ignored test does not have
+    # to edit this arm.
     #
     # `-- --ignored` runs ONLY the ignored tests, which is the whole set and
     # nothing else. The default `cargo test --workspace` in the `test` gate runs
@@ -593,32 +587,35 @@ case "$command" in
   bench)
     # The benchmark harness HLD section 26 names. F-006.
     #
-    # It refuses an absent install the way `oracle` does, and for a sharper
-    # reason: the ONE subject that has a subject today is timed in a browser,
-    # so a missing playwright is not a degraded run, it is no run at all. The
-    # harness would then report its single measurable subject as a runner
-    # failure, which is correct output and is not what anyone typing this
-    # wanted.
+    # It refuses an absent install the way `oracle` does. `--help`, `-h` and
+    # `--list`, as their own arguments, do not load a runner. Every other
+    # invocation stops here when `tools/bench/node_modules` is absent, before
+    # a runner starts.
+    # `wasm_cold_start.mjs` imports playwright inside `run`. The decode runners
+    # and `tier_startup_microbenchmark.mjs` spawn a process and do not import
+    # it, so a missing browser is not their failure.
     #
     # tools/bench keeps its own install rather than sharing the oracle's, and
     # scripts/bench_check.py asserts the two playwright pins are equal so the
     # separation cannot become a drift.
     #
-    # `--help` and `--list` are exempt, because neither loads a runner and
-    # neither touches playwright. Refusing them would mean a developer could
-    # not read what the harness measures without first installing a browser,
-    # and the registry is the part most worth reading.
-    case " $* " in
-      *" --help "*|*" -h "*|*" --list "*) ;;
-      *)
-        if [ ! -d tools/bench/node_modules ]; then
-          echo "The benchmark harness's browser is not installed." >&2
-          echo "Run: (cd tools/bench && npm ci && npx playwright install chromium)" >&2
-          echo "See docs/lld/benchmarks.md for what it measures and what it does not." >&2
-          echo "\`bench --list\` and \`bench --help\` work without it." >&2
-          exit 1
-        fi ;;
-    esac
+    # `--help`, `-h` and `--list` are exempt, because none of them loads a
+    # runner and none of them touches playwright. Refusing them would mean a
+    # developer could not read what the harness measures without first
+    # installing a browser, and the registry is the part most worth reading.
+    bench_exempt=
+    for arg in "$@"; do
+      case "$arg" in
+        --help|-h|--list) bench_exempt=1 ;;
+      esac
+    done
+    if [ -z "$bench_exempt" ] && [ ! -d tools/bench/node_modules ]; then
+      echo "The benchmark harness's browser is not installed." >&2
+      echo "Run: (cd tools/bench && npm ci && npx playwright install chromium)" >&2
+      echo "See docs/lld/benchmarks.md for what it measures and what it does not." >&2
+      echo "\`bench --list\`, \`bench --help\` and \`bench -h\` work without it." >&2
+      exit 1
+    fi
     node tools/bench/run.mjs "$@"
     ;;
 

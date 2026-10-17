@@ -112,8 +112,8 @@ test("a rate that FELL is worse, and a duration that fell is better", () => {
   // The defect this replaces: `direction` was `delta > 0 ? "slower" :
   // "faster"` for every unit, so tier.startup_microbenchmark, whose unit is
   // pixels_per_second and whose subject story is already done, would have
-  // reported a halved fill rate as `faster`. Four of the eleven registry rows
-  // are not durations.
+  // reported a halved fill rate as `faster`. Not every registry row is a
+  // duration.
   const halvedRate = withinTolerance(1000, 500, 0.1, "pixels_per_second");
   assert.equal(halvedRate.direction, DOWN);
   assert.equal(halvedRate.sense, WORSE,

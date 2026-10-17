@@ -2,7 +2,7 @@
 
 **F-IDs that contributed:** F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008,
 F-X009, F-X012, F-X013, F-026
-**Last updated:** 2026-09-10
+**Last updated:** 2026-10-17
 
 HLD section 11 names cornerstone3D as the reference the differential harness
 measures against, and decision D7 makes the oracle the thing that exists before
@@ -57,7 +57,7 @@ is not evidence of anything on its own.
 | `tools/oracle/build-page.mjs` | esbuild, into `page/dist` |
 | `tools/oracle/page/app.mjs` | the stack render page, `window.__oracle` |
 | `tools/oracle/page/volume.mjs` | the volume and MPR render page, `window.__oracleVolume` |
-| `tools/oracle/src/` | twelve `.mjs` modules, the reference half: paths, manifest, params, voi, geometry, volume, sidecar, output, pins, server, unsupported, faults. The comparator's Rust sits beside them, its binary under `src/bin/` |
+| `tools/oracle/src/` | the reference half's `.mjs` modules: paths, manifest, params, voi, geometry, volume, sidecar, output, pins, server, unsupported, faults, metadata-sources. The comparator's Rust sits beside them, its binary under `src/bin/` |
 | `tools/oracle/tests/` | twelve `node:test` suites, the fault runner, and the comparator's Rust fixtures |
 | `tools/oracle/check_sidecars.py` | the pydicom cross-read of the sidecars |
 | `tools/oracle/render-params.json` | committed, and it decides every stack frame |
@@ -685,8 +685,8 @@ reading could not show the reference reading a file wrong, which is exactly
 what happened with YBR_FULL_422 and with `voiLUTFunction`.
 
 `attributes` is then cross-read a third time by `check_sidecars.py` under
-pydicom, over every sidecar, plus `metadata-truth.json` for eleven named
-synthetic and syntax rows whose values are known by construction from
+pydicom, over every sidecar, plus `metadata-truth.json` for every row in
+its `entries` object, whose values are known by construction from
 `scripts/corpus_synth.py` and PS3.3. The truth file is required to ASSERT every
 photometric interpretation and both values of Pixel Representation that the
 corpus's sidecars carry, and the checker fails if that stops being true.
@@ -902,7 +902,7 @@ the through-plane element is derived: nothing about `SpacingBetweenSlices`,
 nothing about `SliceThickness`, and nothing about non-uniform spacing. A grep of
 `docs/hld/` finds no mention of any of them outside `DEVIATIONS.md`. The rule is
 correct and it comes from PS3.3 C.7.6.2.1.1, which is what this module cites at
-the site. Its normative status matters to the future volume builder rather than
+the site. Its normative status matters to the volume builder rather than
 to a reference-render harness, so it is written down here as evidence rather
 than asserted, and a deviation row proposing it was considered and declined in
 S03's design round. That record is kept in `.claude/plans/F-X007-design.md`
@@ -974,9 +974,8 @@ stops averaging it goes red and names the orientation.
 **The reference's behaviour is not a refusal, so the oracle cannot use it to
 prove ours is right.** The ground truth comes from PS3.3 and from the
 generator's construction instead. And **this story asserts nothing about what
-Ocelli should do with a non-uniform series.** No volume builder exists, decision
-D7 holds, and no HLD section states a refusal policy, a threshold, or what a
-caller sees. `volume-truth.json` writes `uniform: false` and the measured
+Ocelli should do with a non-uniform series.** No HLD section states a refusal
+policy, a threshold, or what a caller sees. `volume-truth.json` writes `uniform: false` and the measured
 deviation and writes no Ocelli verdict. What F-X007 delivers is the reference
 output that makes that decision checkable.
 

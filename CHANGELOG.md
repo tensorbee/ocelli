@@ -179,7 +179,7 @@ Repository bootstrap. Nothing is published.
   and the F-ID of the story that will give it a subject. The driver resolves
   each subject at run time to `measured`, to `unavailable` naming the blocking
   story, or to `incomparable` on a host-class mismatch, and a recorded number
-  for a subject whose story has not landed is refused by the `bench` gate
+  for a pending, archived or superseded story is refused by the `bench` gate
   rather than left to discipline. **Most subjects had nothing to measure when
   this landed and the harness says so**, which is decision D7 holding rather
   than a shortfall. No proxy workload was substituted, no stub was timed and no
@@ -251,6 +251,23 @@ Repository bootstrap. Nothing is published.
   refused entry as three distinct outcomes so a caller can surface three
   different events, and the budget is asserted in bytes against hand-computed
   entry sizes.
+- The decoded image cache, whose inserts report an eviction, a replacement and
+  a refusal as three distinct events, each encodable into the fixed 48-byte
+  event envelope the shell will drain once per frame.
+- Volume assembly from decoded frames. Slices group by frame of reference and
+  orientation, then sort by `ImagePositionPatient` projected on the slice
+  normal, and the inter-slice spacing is the median of those gaps. Non-uniform
+  spacing, a sheared stack and a multi-sample layout are refused rather than
+  averaged or placed into a store they cannot fill. Each volume keeps one
+  contiguous allocation, a per-slice presence set, and its own decoded-tier
+  budget so it cannot evict frames.
+- Memory-pressure bands and a budget control on each cache tier. A reading
+  is Low, Elevated or Critical from integer comparisons at one half and nine
+  tenths of that tier's budget. A budget of zero is Low when the tier is
+  empty and Critical when it holds bytes, and setting the budget to zero
+  empties the tier. Shrinking evicts least recently used first. Band
+  crossings and budget changes encode into the same 48-byte event envelope
+  as an eviction. Nothing reaches JavaScript yet.
 - The session's one long-lived GPU device, opened from the adapter the tier
   resolved on and with the adapter's own limits rather than the WebGPU
   defaults, so a downlevel adapter can open one at all. Device loss is an
@@ -258,6 +275,12 @@ Repository bootstrap. Nothing is published.
   rebuilt on the same adapter without re-resolving the tier, and a deliberate
   destroy is refused rather than rebuilt behind the caller. A session that
   resolves to the CPU tier holds no device by construction.
+- A render graph and frame scheduler that registers viewports, compiles its
+  pipelines at creation, tracks camera, window, slice, segmentation and data
+  dirt per viewport, and submits one command encoder per frame across all of
+  them. A blend mode with no shader reports itself unavailable instead of
+  rendering the wrong one, and a rebuilt device restores the graph's
+  pipelines while the caller re-supplies its viewport textures.
 - The LUT chain's WGSL shader, evaluating DICOM PS3.3 C.11's first three stages
   from a thirty-two-byte uniform, so a window or level change writes those
   bytes and nothing else. The shader makes no LUT decision, because
@@ -267,3 +290,9 @@ Repository bootstrap. Nothing is published.
   re-derived. A chain driven by a Modality or VOI LUT Sequence cannot be
   expressed in that uniform and reports unavailable rather than substituting
   the values the sequence overrode.
+- Chunked residency and brick addressing in the cache. A volume decomposes
+  into bricks whose edge is 128 voxels for eight-bit samples and 64 for
+  sixteen-bit samples and for four-byte floats. An edge brick keeps its true
+  extent, and its cost is the host buffer length. Residency is the set of
+  brick keys present on the GPU tier. An address that does not fit is an
+  error rather than a wrapped index. Nothing is uploaded to a texture yet.

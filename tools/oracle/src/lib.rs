@@ -15,11 +15,10 @@
 //!
 //! # What it compares today
 //!
-//! **No port code exists.** Decision D7 is that the validation oracle exists
-//! before the port code, and this story does not break it. There is no Ocelli
-//! renderer, so there is no Ocelli frame, so the comparator has no second side
-//! of the corpus to compare against. A stub renderer was refused: its frames
-//! would prove only that the stub and the comparator agree.
+//! Decision D7 is that the validation oracle exists before the port code, and
+//! this story does not break it. The comparator has no second side of the
+//! corpus to compare against. A stub renderer was refused: its frames would
+//! prove only that the stub and the comparator agree.
 //!
 //! So the comparator is a function of two directories, and today those two
 //! directories are filled by three things, none of which is a renderer.

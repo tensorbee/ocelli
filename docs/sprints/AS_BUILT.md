@@ -887,22 +887,19 @@ a raw pointer dereference in a tracked file. The intent is unchanged, since
 ## F-006, Benchmark harness: decode, first frame, interaction latency, completed 2026-09-05
 
 **What was built.** `tools/bench`, an instrument rather than a report. A tracked
-subject registry lists the eleven things this project will ever measure, each
+subject registry lists the things this project will ever measure, each
 carrying its normative definition, its unit, its tier dimensions and the F-ID of
 the story that will give it a subject. A driver resolves each subject at run
 time to `measured`, `unavailable` naming the blocking story, or `incomparable`
 on a host-class mismatch, and a fourth state, a recorded number for a subject
 that does not exist, is refused by a gate rather than left to discipline.
 
-**Nine of the eleven subjects had nothing to measure when this story landed, and
-the harness says so.** All nine are blocked on a story that has not landed,
-which is decision D7 holding rather than a shortfall. The other two do have a
-subject: `wasm.cold_start` measures the release wasm artefact, and
+**Nine of the eleven subjects had nothing to measure when this story landed.**
+`wasm.cold_start` measured the release wasm artefact, and
 `tier.startup_microbenchmark` was blocked on F-004, which landed earlier in this
-same sprint, so it reports a `done` story and still has no runner.
-`bin/ocelli.sh bench --list` is the authority on the split rather than any
-sentence, because it reads the backlog and a written count goes stale the first
-time a story lands. No proxy workload was
+same sprint. `bin/ocelli.sh bench --list` is the authority on the split today
+rather than any sentence, because it reads the backlog and a written count goes
+stale the first time a story lands. No proxy workload was
 substituted, no stub was timed and no number was invented. The design fixes
 every subject's DEFINITION now, from the specification, including the ones with
 no subject, so a later story adds a runner into a slot with no latitude to
@@ -983,9 +980,9 @@ be. And `scripts/ci_floor_check.py` has a hole the change nearly exercised.
 - **A gate that reads planning data is sensitive to ledger commits landing
   between a worktree's base and its merge.** F-004's backlog row moved to `done`
   after this worktree was cut, so `subject_story: F-004` resolved differently
-  either side of the merge. Checked at integration and safe, because the guard
-  refuses a runner for a story that is not done and does not demand one for a
-  story that is.
+  either side of the merge. Checked at integration and safe. The guard refuses
+  a runner for a pending, archived or superseded story. A done story must have
+  one, and so must a row that names no story.
 
 ## F-X007, Oracle volume and MPR reference renders, completed 2026-09-05
 
@@ -1473,7 +1470,7 @@ reads as it did at completion, and the correction is here:
 | F-006's entry as written | What the command says |
 |--------------------------|-----------------------|
 | `cold_start_test.mjs` has five cases and one needs a browser | Seven cases, one of which needs a browser. `node --test tools/bench/tests/cold_start_test.mjs` prints the total, and the browser case reports as skipped without `OCELLI_BENCH_BROWSER=1` |
-| the `bench` arm names the five files | It names six since `828037e` added `paths_test.mjs`. `grep -o 'tools/bench/tests/[a-z_]*\.mjs' bin/ocelli.sh \| sort -u \| wc -l` is the count, and `ls tools/bench/tests/*.mjs \| wc -l` is what exists |
+| the `bench` arm names the five files | It named six when `828037e` added `paths_test.mjs`. The pattern `[a-z_]` cannot match a digit. `grep -o 'tools/bench/tests/[A-Za-z0-9_]*\.mjs' bin/ocelli.sh \| sort -u` is what the arm names, and `ls tools/bench/tests/*.mjs` is what exists |
 
 **F-011's `**Tests added.**` breakdown does not sum to its own headline.** The
 entry says 64 added and then lists 42 unit, 10 tolerance fixture, 5 VOI
@@ -3039,8 +3036,7 @@ guard that reads its AST to be shaped around the old layout.
 HLD section 22's "device loss is a real state, not an error path" is a mechanism
 rather than a sentence. **It does not close section 22's other two clauses.**
 That bullet says to rebuild "the device and all resources, and restore viewport
-state from the shell's copy", and this workspace has no texture, buffer,
-pipeline or viewport type to rebuild. `Recovered` is the struct F-038, F-039 and
+state from the shell's copy". `Recovered` is the struct F-038, F-039 and
 F-040 extend so they do not have to change `recover`'s signature.
 
 **What was built.** `probe::resolve_adapter` retains the adapter the tier
@@ -3154,16 +3150,15 @@ because the closure returns a constant and the assertion is on the call count.
 **What this closes.** DICOM PS3.3 C.11 stages 1 to 3 now evaluate on the GPU,
 from HLD section 18.4's uniform, and the shader's output is checked against
 `ocelli-pixel` on a real adapter. **It does not close decision D7**: the oracle
-still has no Ocelli renderer to compare against, because there is no frame. What
-it closes is the arithmetic half, and F-038's render graph and F-040's texture
-upload are what make a frame out of it.
+still has no Ocelli renderer to compare against. What
+it closes is the arithmetic half. F-038 renders into a caller-supplied texture
+view and acquires no surface.
 
 **The shader carries no entry point, and that is a departure from the plan.**
 The plan said "a fragment shader, so one shader serves both GPU tiers".
 `shaders/voi.wgsl` holds section 18.4's uniform and the LUT functions and stops
 there, because an entry point decides for every consumer how a stored value
-arrives and where a display value goes, and there is no texture type yet for one
-to arrive through. A consumer concatenates its own. **The file uses nothing HLD
+arrives and where a display value goes. A consumer concatenates its own. **The file uses nothing HLD
 section 7 denies tier B**, which `voi::tests` asserts by text and
 `the_shader_composes_into_a_render_pipeline_not_only_a_compute_one` asserts by
 building a real render pipeline from it.
@@ -3251,10 +3246,9 @@ mutation to justify it, and the test that does pin one says only what it pins.
 
 **What this closes.** HLD section 20's `Budgeted` and `Lru<K, V>`, over
 `alloc::collections::BTreeMap` and a monotonic `u64` tick, plus section 8's
-three tiers as `CacheTier` and `Pressure`. **It creates no value type.** An
-encoded byte run, a decoded frame and a GPU texture are F-032, F-033, F-036 and
-F-040, all S12 or S13, and a `Budgeted` implementation for a texture that no
-texture type exists to be is a `bytes()` nobody can check.
+three tiers as `CacheTier` and `Pressure`. **It creates no value type.**
+`DecodedFrame`, `Brick` and `Volume` landed in later stories. An encoded byte
+run and a GPU texture are still not production `Budgeted` values.
 
 **`insert` returns `Admission<K, V>`, which is deviation D-24.** Section 20
 returns `Vec<(K, V)>` documented as "the entries evicted to make room", and
@@ -3289,9 +3283,9 @@ identically while its GPU tier simply has no entries.
 **Size.** `ci/wasm-size-budget.json` does not move. `ocelli-wasm` does not reach
 `ocelli-cache`.
 
-**Ten review passes, and nine tests exist because of what they found.** The six
+**Ten review passes, and the tests that exist because of what they found.** The six
 mandated mutations were each observed red on their named test. The reviewers ran
-roughly 140 more and **nine left the suite green**: the evicted vector's
+roughly 140 more and these left the suite green: the evicted vector's
 ordering, all three sites that re-read `V::bytes()`, a refusal bumping recency,
 `is_empty` computed from `used` rather than from the entry count, a deferred
 release of a displaced value, and a dropped Samples per Pixel in a fixture. Each
@@ -3314,3 +3308,83 @@ failing, and the integrator owns those four files. The three-way merge itself
 was clean: one overlapping file, `Cargo.lock`, auto-merged, and the only shared
 prose was a single row of `docs/hld/DEVIATIONS.md` that the worker narrowed and
 this branch had not touched since the base.
+
+## F-032, Image cache with eviction events surfaced to JS, completed 2026-10-17
+
+**What was built.** The decoded tier's value type `DecodedFrame`, its `ImageCache` over F-031's `Lru` fixed to `CacheTier::Decoded`, one `CacheEvent` per `Admission` outcome with evicted, displaced and refused kept apart under D-24, and the 48-byte section 17.3 `RingEvent` encoding with kind numbers 1, 2 and 3 and a `u32::MAX` viewport sentinel. No ring is built and nothing reaches JavaScript, which the S12 design round decided for F-032 and F-034 together. F-101 in S16 carries the encoding across.
+
+**HLD sections implemented.** `docs/hld/06-memory-and-cache.md` section 8, `docs/hld/17-cache-and-allocation.md` section 20 as consumed by F-031, and `docs/hld/14-the-boundary-in-code.md` section 17.3 envelope only.
+**Deviations.** None new. D-24 is the widened return this story consumes.
+**Crates / packages modified.** `crates/ocelli-cache` only, plus `Cargo.lock` for its `bytemuck` and `ocelli-pixel` edges.
+**Tests added.** `crates/ocelli-cache/tests/image_cache.rs`. The property test is `events_account_for_the_bytes_the_cache_stopped_holding`. The ring layout is pinned by `ring_event_is_48_bytes_at_section_17_3_offsets` and `raw_payload_starts_at_byte_16`. The crate's tests passed, with clippy clean.
+**Fixture provenance.** No pixel arithmetic. Byte fixtures are hand-computed from Rows and Columns in DICOM PS3.3 C.7.6.3.1, a 512 by 512 sixteen-bit frame at 524,288 bytes, and the layout numbers come from HLD section 17.3.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec or pixel path.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. The decoded tier behaves identically on every tier and holds no GPU resource.
+**LLD updated.** `docs/lld/cache.md`.
+**Deviations from the design plan.** The plan's fixed-capacity allocation sentence was false and was corrected during review pass 1. `CacheEvents` wraps a `Vec`, allocates on the insert path as `Lru::insert` does, and one insert can produce many events.
+**Notes for future sessions.** Three independent review passes converged 3/1, 0/1, 0/0. The mutations that mattered were kind renumbering, which pass 1 found green and is now pinned by `kind_numbers_are_pinned_to_the_wire_values`, and the tier mutation, which pass 2 found green and is now asserted.
+
+## F-038, Render graph and frame scheduler with dirty tracking, completed 2026-10-17
+
+**What was built.** HLD section 22's `Pass` enum and pipeline key as types, a `RenderGraph` that registers viewports at fixed capacity, compiles only the composite stack pipeline at creation, tracks five dirty sources per viewport set in Rust, encodes each dirty viewport once in registration order into one encoder and submits exactly once, with a `submissions` counter as the observable half of that rule. A viewport whose blend has no shader body reports unavailable and keeps its dirt. `set_voi` is the single VOI write route and validates state, pass and rebind before it reads the chain. `Recovered` now carries `GraphResources`, `recover`'s signature is unchanged, and installing a recovery drops every per-viewport object the dead device owned until the caller rebinds views. No surface is acquired and no texture is uploaded. Decision D7 stays open.
+
+**HLD sections implemented.** `docs/hld/19-render-graph.md` section 22, `docs/hld/05-rendering.md` section 7 scheduling and tier bullets, and `docs/hld/23-performance-rules.md` section 26 for this story's half.
+**Deviations.** None new. D-04, D-07, D-12, D-13 and D-14 cited unchanged.
+**Crates / packages modified.** `crates/ocelli-render` only.
+**Tests added.** Floor tests in `crates/ocelli-render/src/graph.rs` and `tests/graph.rs`. Ignored device tests in `tests/graph.rs` and `tests/graph_voi.rs`. The half-float rows separate LINEAR at 0.50125 from LINEAR_EXACT at 0.5, which an 8-bit target cannot.
+**Fixture provenance.** DICOM PS3.3 C.11.2.1.2, C.11.2.1.3.2 and C.11.2.1.3.1 via section 18.3, with D-13 applied to LINEAR at the centre.
+**Verification.** Feature profile plus the gpu gate, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec or pixel path.
+**Tier coverage.** A: full, exercised. B: full by construction under D-12, never exercised by any gate, and claimed as such. C: unavailable and reported, since tier Cpu holds no device.
+**LLD updated.** `docs/lld/gpu-ownership.md` and new `docs/lld/render-graph.md`.
+**Deviations from the design plan.** `install_recovered` takes the extra step the plan's text implied but did not state: per-viewport GPU objects are dropped and the caller rebinds views, because a bind group from a dead device cannot be carried into a pass on its replacement. `set_voi` gained a `ViewportNotRebound` answer for that state. The bench gate also caught the plan's bench row: `render.first_frame` ends at a presented-frame ring event, which does not exist until F-039, F-040 and F-101 land, so `tools/bench/subjects.json` now names F-101 as the subject story rather than giving F-038 a runner that could only time a readback.
+**Notes for future sessions.** Four review passes converged 4/6, 1/2, 0/1, 0/0. The findings that mattered were all test-reachability: tier in the lookup, the VOI route, and recovery objects. `FRAME` and pipeline work in F-039 and F-040 build on caller-supplied targets and caller ticks, and F-042 is the first story that can exercise tier B.
+
+## F-033, Volume cache and progressive volume assembly, completed 2026-10-17
+
+**What was built.** Volume assembly in `ocelli-volume`: grouping by FrameOfReferenceUID and ImageOrientationPatient, sorting by position projected on the slice normal from PS3.3 C.7.6.2.1.1, spacing as the median projected gap refused past 0.5 per cent, shear detected from the inter-slice vector with no tilt tag read, section 19's `Volume` over one contiguous `VoxelStore`, a one-entry level axis, `SlicePresence` under D-25, progressive `place` with the sorted arrival order retained on the volume, and a `VolumeCache` in the decoded tier with its own budget. SpacingBetweenSlices and SliceThickness are not read anywhere in the crate.
+
+**HLD sections implemented.** `docs/hld/16-volume-representation.md` section 19, `docs/hld/06-memory-and-cache.md` section 8, `docs/hld/27-phase1-hooks.md` section 38 level axis.
+**Deviations.** D-25, the hand-rolled `SlicePresence` in place of `bitvec::BitVec`. Cited unchanged: none.
+**Crates / packages modified.** `crates/ocelli-volume`, and two direction-cosine accessors in `crates/ocelli-pixel`.
+**Tests added.** `crates/ocelli-volume/tests/assembly.rs`, 14 tests including an oblique fixture whose normal separates projected position from the IPP z component, and a randomised uniform series recovering its generating spacing within 1e-9 mm.
+**Fixture provenance.** Hand-computed from DICOM PS3.3 C.7.6.2.1.1, with gaps and positions chosen so a tag reader, a mean and a z-sort each fail.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path.
+**Tier coverage.** A: n/a, the volume is host memory. B: n/a, same reason, with tier B's 256 3D-texture floor noted for F-040. C: full, tier C assembles the same volume with no device.
+**LLD updated.** New `docs/lld/volumes.md`, its row in `docs/lld/README.md`, and the volume cache in `docs/lld/cache.md`.
+**Deviations from the design plan.** Assembly gained three refusals the plan implied but did not name: `InconsistentSpacing` for differing in-plane spacing or a multi-sample layout, `UnsupportedVoxelKind` for kinds section 19 cannot name, and an `order` field so a caller places arriving slices at their sorted positions without re-deriving the projection.
+**Notes for future sessions.** Three review passes converged 4/6, 0/1, 0/0. The defect that mattered most was test reachability: every fixture used axial cosines, so a z-component sort passed the whole suite until an oblique fixture landed. F-036 converts between this crate's `VoxelKind` and its own in `ocelli-cache`, and F-051 is the first caller of `place`.
+
+## F-034, Memory-pressure telemetry and JS-visible budget controls, completed 2026-10-17
+
+**What was built.** Pressure bands and budget control in `ocelli-cache`. `Pressure::band` places a tier in Low, Elevated or Critical by comparing `used * 2` with `budget` and `used * 10` with `budget * 9` in `u64`, with a zero budget Low when empty and Critical when it holds bytes. `TierCounters` folds an `Admission`, counting evictions and refusals and ignoring a displacement, and the counts saturate. `Lru::set_budget` evicts least recently used until `used` fits, and a budget of zero empties the tier. `TelemetryEvent` encodes a band crossing as kind 4 and a budget change as kind 5 into F-032's 48-byte `RingEvent`, with `viewport` `u32::MAX`. A pressure payload does not carry `evicted_bytes`. No ring is built and nothing reaches JavaScript.
+
+**HLD sections implemented.** `docs/hld/17-cache-and-allocation.md` section 20, `docs/hld/06-memory-and-cache.md` section 8, and `docs/hld/14-the-boundary-in-code.md` section 17.3 envelope only.
+**Deviations.** None. `set_budget` fills the open part of section 20's listing, as `get`, `remove` and `pressure` already did.
+**Crates / packages modified.** `crates/ocelli-cache` only.
+**Tests added.** `crates/ocelli-cache/tests/telemetry.rs`, 12 tests. The band fixture is hand-computed for budget 300 at 149, 150, 269 and 270. The pressure fixture writes tier Gpu, used 262144 and budget 524288 as little-endian bytes.
+**Fixture provenance.** No pixel arithmetic and no geometry arithmetic. The wire bytes and the band edges are hand-computed from HLD section 17.3 and from the integer fractions in the design plan.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec or pixel path.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. The bands and the budget are host-side byte accounting and behave the same on every tier.
+**LLD updated.** `docs/lld/cache.md` and its row in `docs/lld/README.md`. No `docs/lld/events.md`, because no event-kind registry was added.
+**Deviations from the design plan.** `BudgetChanged` carries `evicted_bytes` and `dropped` because the plan's payload table requires those fields and the enum sketch omitted them. `evicted_bytes` sums `Budgeted::bytes` of the returned values, because `Admission` does not return the size stored at admission.
+**Notes for future sessions.** Four review passes converged 1/0, 1/0, 1/0, 0/0. The code defect was a zero-budget drain that left a recently read zero-byte entry, now guarded by `a_recently_read_zero_byte_entry_still_leaves_at_budget_zero`. The later defects were false sentences about what F-034 counts, and the fix was to delete them. Two nitpicks remain. `evicted_bytes` re-reads `Budgeted::bytes`, and the Encoded wire code 0 is not pinned by a test. F-101 builds the ring.
+
+## F-036, Chunked residency model and brick addressing in the cache, completed 2026-10-17
+
+**What was built.** Brick addressing and residency in `ocelli-cache`. `BrickGrid::new` chooses the edge from bytes per voxel, 128 for eight-bit and 64 for sixteen-bit and for four-byte float, and that match is the only place the numbers live. The grid is a ceiling division on each axis. A brick coordinate is a floor division. An edge brick keeps its true extent, and `Brick::bytes` is the host buffer length. `index_of` and `byte_offset` compute section 19's layout with checked `u64` products and return `BrickError` when a product does not fit in `u64` or the address does not fit in `usize`. `BrickCache` is one `Lru` on `CacheTier::Gpu`. `missing` lists absent keys in `index_of` order and does not touch recency. An empty grid is not resident. `Volume::brick_grid` converts `VoxelKind` and does not keep a second decomposition. There is no size threshold, no texture upload and no prefetch.
+
+**HLD sections implemented.** `docs/hld/06-memory-and-cache.md` section 8, `docs/hld/16-volume-representation.md` section 19, `docs/hld/17-cache-and-allocation.md` section 20, `docs/hld/26-differentiating-capabilities.md` section 30, and `docs/hld/27-phase1-hooks.md` section 38. Decision D11, chunked residency is the only path.
+**Deviations.** None.
+**Crates / packages modified.** `crates/ocelli-cache` and `crates/ocelli-volume`.
+**Tests added.** `crates/ocelli-cache/tests/bricks.rs`, 22 tests, and `crates/ocelli-volume/tests/brick_width.rs`, 2 tests. The 512 by 512 by 600 sixteen-bit fixture places voxel 200, 130, 599 in brick 3, 2, 9. That brick's origin, voxel 192, 128, 576, is at byte offset 302121344. The 500 by 300 by 130 eight-bit fixture gives the last brick extent 116, 44, 2 and 10208 bytes.
+**Fixture provenance.** Hand-computed from DICOM PS3.3 C.7.6.3.1 for the image dimensions and C.7.6.2.1.1 for the axis order, and from HLD section 19's byte layout. The overflow fixtures are products past `u32::MAX` and past `u64::MAX`, computed before the assertions.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec or pixel path.
+**Tier coverage.** A: full, host arithmetic, and a 128 edge is inside the 2048 3D-texture limit. B: full, and a 128 edge is inside the 256 floor, so a longer axis is more bricks rather than a split brick. C: full, the same code, with the GPU tier holding host bricks because nothing uploads them yet.
+**LLD updated.** `docs/lld/cache.md`, `docs/lld/volumes.md`, and both rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The plan says every brick of the 512 volume is 524288 bytes. Slice count 600 is not a multiple of 64, so the last z brick is extent 64, 64, 24 and 196608 bytes. Interior bricks are 524288. The plan says a `u32` intermediate wraps the 512 fixture. That offset fits in `u32`. The wrap pin is dims 65536 by 65536 by 2, whose byte offset is 4294967296. A product that does not fit in `u64` is `BrickError` on axis 2. The plan's two-variant enum has no third failure for a width overflow.
+**Notes for future sessions.** Three review passes converged 2/1, 0/1, 0/0. The address path panicked in debug and returned a wrapped or saturated `Ok` in release until `checked_linear`. The residency test stayed green under `Lru::get` until the grid had two axes and the later scan key was inserted first. `Volume::brick_grid` had no caller until `brick_width.rs` built a volume. An empty grid was untested until `an_empty_grid_is_not_resident`. Two nitpicks remain. The property draws dimensions from 1 to 24 and never crosses a brick edge, and the `ceil_div` and `div_edge` fallbacks cannot run for an edge of 64 or 128. F-040 uploads a brick and removes the host copy in the same step.

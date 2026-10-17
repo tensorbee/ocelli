@@ -1,7 +1,7 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-X014
-**Last updated:** 2026-09-10
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-X014
+**Last updated:** 2026-10-17
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -13,20 +13,10 @@ Until the harness existed the rule was unenforceable, because there was nothing
 to measure with, and a rule with no instrument is satisfied by whoever is
 confident. `tools/bench` is the instrument. This file is the design behind it.
 
-**It is an instrument and not a report.** Two of its eleven subjects have a
-runner and a recorded number. Eight are blocked on a story that has not landed,
-because there is no renderer, no worker and no boundary, which is decision D7
-holding: the oracle and the instruments exist before the port code. One
-subject has landed but has no honest runner. `tier.startup_microbenchmark`
-has no runner after F-004. The harness reports it as `unavailable` with reason
-`no_runner` and records no number for it. F-024 supplies the first concrete
-decoder and the `decode.frame` runner.
-
-**`bin/ocelli.sh bench --list` is the authority on that split and this
-paragraph is not.** It reports each subject's blocking story and that story's
-current backlog status, so it moves when the backlog moves. A count written
-here goes stale the first time a story lands, which is exactly what happened to
-the sentence this one replaces.
+**It is an instrument and not a report.** `bin/ocelli.sh bench --list` is the
+authority on each subject's blocking story and that story's backlog status.
+It moves when the backlog moves. A count of runners or recorded numbers written
+here goes stale the first time a story lands.
 
 ## The defect it exists to prevent
 
@@ -36,13 +26,16 @@ this project's "quietly wrong" shape moved from pixels onto cost, and it is
 worse in one respect: a wrong pixel can be diffed against an oracle, and a wrong
 duration cannot be diffed against anything.
 
-Discipline is not a mechanism against it, so two things are refused
-mechanically by `scripts/bench_check.py`, which is the `bench` gate:
+Discipline is not a mechanism against it, so `scripts/bench_check.py`, which
+is the `bench` gate, refuses:
 
-1. a runner file for a subject whose story has not landed, because a runner for
-   a subject that does not exist can only be timing a stub, and
-2. an entry in `ci/bench-baseline.json` for such a subject, which is where an
-   invented number would come to rest.
+1. a runner file for a subject whose story is pending, archived or superseded,
+   because a runner for a subject that does not exist can only be timing a stub,
+2. an entry in `ci/bench-baseline.json` for a subject in one of those three
+   statuses, which is where an invented number would come to rest, and
+3. a missing runner on a done story, and on a row that names no story. A done
+   story requires the permanent instrument. A row that names no story exists
+   today and must have one.
 
 ## The HLD states no performance target, and this harness invents none
 
@@ -75,7 +68,7 @@ machine that recorded it, and against nothing else.
 | `tools/bench/src/state.mjs` | the four states, and the one that throws |
 | `tools/bench/src/hostclass.mjs` | the fingerprint and the comparability rule |
 | `tools/bench/src/record.mjs` | the run record, the comparison, the re-baseline |
-| `tools/bench/src/runners/` | one file per subject that has a runner. A row whose `subject_story` is `null` must have one. A row whose story has landed may not have one yet, which is `no_runner` |
+| `tools/bench/src/runners/` | one file per subject that has a runner. A row whose `subject_story` is `null` must have one. A done story must have one. An in-progress story may lack one, which the harness reports as `no_runner` |
 | `tools/bench/page/` | the page that times a cold start, `window.__bench` |
 | `tools/bench/tests/` | node suites named exactly by both `npm test` in `tools/bench` and the `bench` arm of `bin/ocelli.sh gate`. The already-running path suite compares both lists with the files on disk, so adding an unregistered suite fails. The browser test inside `cold_start_test.mjs` is opted into with `OCELLI_BENCH_BROWSER=1` |
 | `ci/bench-baseline.json` | tracked, the recorded measurement per subject per host class |
@@ -102,8 +95,9 @@ Adding a measurement when its story lands is a data edit plus one runner file.
 No part of the driver, the record format or the gate changes.
 
 The driver is also guarded directly. `run_test.mjs` reaches every argument
-refusal in `parseArgs` and the refusal of a runner whose subject story is not
-done. `runSubjects` is the exported production seam used by that test, with no
+refusal in `parseArgs` and the refusal of one pending runner. The message
+requires that story to be in progress or done. `runSubjects` is the exported
+production seam used by that test, with no
 test wrapper or duplicate decision path. The exact-list assertion above makes
 the new suite part of both executable definitions of the bench tests.
 
@@ -141,45 +135,21 @@ beside the story number rather than the number alone.
 | `measured` | a runner exists, it ran, and the record carries a number and a host class |
 | `unavailable` | there is no number, and the record says why. When a story blocks the subject the record names that F-ID |
 | `incomparable` | a number exists and the recorded baseline was taken on a different host class or with a different instrument, so no comparison is made |
-| refused | a number for a subject whose story has not landed. Not a state, an exception, and the gate refuses the tracked half of the same mistake |
+| refused | a number for a pending, archived or superseded subject. Not a state, an exception, and the gate refuses the tracked half of the same mistake |
 
 `unavailable` carries a reason as well as a state. `no_subject` names the
-blocking story. `no_runner` means the subject exists and nobody has written the
-runner yet, which is the honest state between a story landing and its runner
-arriving. `runner_failed` carries the failure rather than swallowing it.
+blocking story. `no_runner` means the subject exists and the runner file is
+absent. `runner_failed` carries the failure rather than swallowing it.
 
-**A `no_runner` row does not fail the gate**, deliberately. Requiring a runner
-the moment a story is marked done would fail the CI floor on the day an
-unrelated story completes, for a reason nobody in that story can act on. What
-the gate requires is a runner for a row whose `subject_story` is `null`, which
-is the registry saying the subject exists today. **A row whose story is DONE
-and whose runner has not been written is not that case**, and the wording here
-used to read as though it were, which would have made
-`tier.startup_microbenchmark` a gate failure the day F-004 landed. It is
-`unavailable` with reason `no_runner` instead, which is what the opening
-section calls the awkward eleventh row.
-
-## The state of every subject at merge
-
-| Subject | State | Blocked on |
-|---------|-------|------------|
-| `wasm.cold_start` | **measured** | nothing, this is the deliverable number |
-| `decode.frame` | **measured** | nothing. F-024 supplies the first concrete decoder and runner |
-| `decode.transfer_syntax.htj2k` | unavailable | F-027 (E4.5), S09, a P0 kill criterion |
-| `decode.transfer_syntax.jpegls` | unavailable | F-028 (E4.6), S09, a P0 kill criterion |
-| `render.first_frame` | unavailable | F-038 (E6.2), S12, and F-037 (E6.1), S11 |
-| `interaction.window_level_drag` | unavailable | F-101 (E16.2), the boundary and event ring, S16 |
-| `interaction.scroll` | unavailable | F-101 (E16.2), S16 |
-| `session.cpu_interactive` | unavailable | F-X003 (X1.3), S16 |
-| `session.cpu_idle` | unavailable | F-X003 (X1.3), S16 |
-| `cine.frame_change_rate` | unavailable | F-X003 (X1.3), S16 |
-| `tier.startup_microbenchmark` | unavailable, reason `no_runner` | nothing. F-004 (E1.4), S03 is **done**, and no runner has been written |
+**A missing runner fails the gate when the row names no story, and when the
+story is done.** An in-progress story may still lack a runner. A pending,
+archived or superseded story must not have one. The refusing branch is
+`check_runners` in `scripts/bench_check.py`.
 
 `docs/sprints/allocation.json`'s note on F-006 is "Numbers feed the P0 kill
-criteria". Exactly two stories carry that marker, F-027 and F-028, both are
-codec questions and both are about decode, so the numbers that marker points at
-are the three decode rows. First frame and interaction latency feed no kill
-criterion this repository has written down.
+criteria". Exactly two stories carry that marker, F-027 and F-028. Both are
+codec questions and both are about decode. First frame and interaction latency
+feed no kill criterion this repository has written down.
 
 ## The cold-start measurement
 
@@ -358,10 +328,10 @@ that means nothing.
 **A floor gate, `bench`, that asserts the instrument and never a duration.** It
 costs no GPU and no browser, it is deterministic, and it cannot be satisfied by
 intention. `scripts/bench_check.py` asserts that every registry row parses, that
-every `subject_story` resolves to a real F-ID, that every row naming no story has
-a runner and every row whose story is not done has none, that no runner file
-exists without a registry row, that no baseline entry exists for a subject whose
-story is not done, that every baseline entry names a host class and a tolerance
+every `subject_story` resolves to a real F-ID, that a row naming no story has
+a runner, that a done story has a runner, that a story which is not in progress
+or done has neither a runner nor a baseline entry, that no runner file
+exists without a registry row, that every baseline entry names a host class and a tolerance
 with its provenance, and that the two harnesses' playwright pins are equal.
 
 **The node suites carry one assertion the Python gate does not.** `INCREASE_MEANS`
@@ -379,11 +349,12 @@ That gate then runs the guard's own negative cases and the node suites, all of t
 seventh review pass**, and all three were found by mutating the source rather
 than by reading it.
 
-- **A subject is measurable only at `in-progress` or `done`.** Pending,
-  archived and superseded rows remain unavailable. In-progress permits a real
-  runner and baseline during independent review. Done requires a runner, so
-  status cannot substitute for permanent evidence. Python and JavaScript carry
-  the same explicit five-status table and tests.
+- **A named story is measurable only at `in-progress` or `done`.** A row that
+  names no story is measurable too. Pending, archived and superseded rows
+  remain unavailable. In-progress permits a real runner and baseline during
+  independent review. A done story must have a runner, and so must a row that
+  names no story, so status cannot substitute for permanent evidence. Python
+  and JavaScript carry the same explicit five-status table and tests.
 
 F-026 adds `decode.transfer_syntax.jpeg2000` without replacing the standing
 JPEG `decode.frame` subject. Its release runner measures one `.91` decode of
@@ -502,10 +473,10 @@ would be no clause.
 **The path rules decide whether the harness measures anything, and nothing
 executed them until the S03 review's eighth pass.** `run.mjs` asks
 `existsSync(runnerPath(id))` for every subject, so a `runnerBasename` that
-stopped replacing dots with underscores makes that false for the one subject
-that has a runner. Every subject then reports `unavailable / no_runner`,
-`failedRunners` is empty, `main` returns 0, and `bin/ocelli.sh bench` reports
-success having measured nothing. `isEntryPoint` produces the same outcome one
+stopped replacing dots with underscores makes that false for every subject
+whose id contains a dot. A subject that exists and whose runner file is then
+missed reports `unavailable / no_runner`, `failedRunners` is empty, `main`
+returns 0, and `bin/ocelli.sh bench` reports success having measured nothing. `isEntryPoint` produces the same outcome one
 level up, which is what its own comment describes. Both rules, and the two
 shapes that break the obvious `import.meta.url === argv[1]` idiom, a path
 needing percent-encoding and a path reached through a symlink, are asserted in
@@ -518,15 +489,15 @@ its `no_runner` note from `runnerBasename` rather than from a second
 `replaceAll(".", "_")`, because a note naming a path the gate does not look at
 is the unseen runner the anti-fabrication rule is about.
 
-**Six, and the count has moved twice, which is why it is written with the
-command that prints it rather than as a number.** It reached five in the S03
-review's fourth pass and six in the eighth, when `paths_test.mjs` joined the
-arm in the same commit that added the paragraph above. A count in prose beside
-a list in a shell script goes stale the next time the list changes, and it did.
-`grep -o 'tools/bench/tests/[a-z_]*\.mjs' bin/ocelli.sh | sort -u | wc -l` is
-what the `bench` arm names, and `ls tools/bench/tests/*.mjs | wc -l` is what
-exists. They agree today, and the whole point of the two commands is that a
-reader can see whether they still do.
+**The count of bench test files is not written here, because it has moved.**
+It reached five in the S03 review's fourth pass and six in the eighth, when
+`paths_test.mjs` joined the arm in the same commit that added the paragraph
+above. A count in prose beside a list in a shell script goes stale the next
+time the list changes, and it did. The pattern `[a-z_]` cannot match a digit,
+so it drops `decode_htj2k_test.mjs` and `decode_jpeg2000_test.mjs`.
+`grep -o 'tools/bench/tests/[A-Za-z0-9_]*\.mjs' bin/ocelli.sh | sort -u` is
+what the `bench` arm names, and `ls tools/bench/tests/*.mjs` is what exists.
+Compare the two lists rather than trusting a number.
 
 The fourth pass was `cold_start_test.mjs`.
 It holds seven tests and only the last
@@ -601,9 +572,7 @@ runner, and not a property of the instrument.** Adding the resolved tier to the
 host class, or to a comparison key beside it, is that story's design decision,
 because the runner that reports a tier is the first thing that can put one in
 the record. Until then a subject measured on two tiers on one machine would be
-compared as if it were one population, which is why the three tier-C rows and
-`tier.startup_microbenchmark` below have no runner rather than an approximate
-one.
+compared as if it were one population.
 
 `session.cpu_interactive`, `session.cpu_idle` and `cine.frame_change_rate` are
 tier-C rows and they exist from this story, because `docs/spikes/A7-tier-c.md`
@@ -617,8 +586,9 @@ one would move a resolved spike's acceptance criteria without saying so.
 `tier.startup_microbenchmark` is F-004's, recorded here and not reimplemented.
 They are two artefacts sharing a word: F-004's runs on every production session
 and returns a tier, this one is a development instrument that returns a recorded
-number. The runner, when it is written, invokes F-004's own instrument and reads
-`crates/ocelli-render/src/probe.rs`'s output.
+number. Its runner invokes F-004's fill-rate instrument,
+`measures_a_fill_rate_on_this_machine`, and reads the pixel rate that test
+prints.
 
 ## What is deliberately absent
 

@@ -12,3 +12,14 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# F-033. The volume carries `ocelli-pixel`'s validated planes, `ocelli-core`'s
+# world points, the decoded tier's frames and budget from `ocelli-cache`, and
+# glam's double-precision vectors for the projected-position arithmetic.
+glam.workspace = true
+thiserror = { workspace = true }
+ocelli-cache = { path = "../ocelli-cache" }
+ocelli-core = { path = "../ocelli-core" }
+ocelli-pixel = { path = "../ocelli-pixel" }
+
+[dev-dependencies]
+proptest = { workspace = true }

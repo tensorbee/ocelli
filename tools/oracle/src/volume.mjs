@@ -20,9 +20,8 @@
 // is not a record of anything.
 //
 // **This module decides nothing about what Ocelli should do with a non-uniform
-// series.** No volume builder exists, decision D7 holds, and no HLD section
-// states a refusal policy. What this makes is the reference output that makes
-// that decision checkable.
+// series.** No HLD section states a refusal policy. What this makes is the
+// reference output that makes that decision checkable.
 
 import { readFileSync } from "node:fs";
 

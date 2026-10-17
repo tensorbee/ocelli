@@ -1,9 +1,11 @@
-// A subject whose story is not done resolves to `unavailable` and never to a
-// number.
+// A subject whose story is pending, archived or superseded resolves to
+// `unavailable` and never to a number. An in-progress or done story may
+// resolve to `measured`.
 //
 // This is the anti-fabrication rule at run time. `scripts/bench_check.py` holds
-// the tracked half, refusing a runner file and a baseline entry, and this holds
-// the half that decides what a record may say.
+// the tracked half. It refuses a runner and a baseline entry for a story that
+// is not in progress or done, and it refuses a done story with no runner.
+// This file holds the half that decides what a record may say.
 
 import assert from "node:assert/strict";
 import test from "node:test";

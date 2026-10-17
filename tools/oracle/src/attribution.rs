@@ -1356,8 +1356,9 @@ mod tests {
     // `!geometry.is_empty()` narrowing on the volume-divergence rung was
     // watched by exactly one thing: the mutation
     // `plus-three-on-one-pixel-of-a-reformat`, whose `Target::MeasuredReformat`
-    // resolves through a `BTreeSet` and therefore landed on the one divergent
-    // subject only because `real` sorts before `synthetic`. Reverting the
+    // resolves through a `BTreeSet` and therefore landed on a subject that
+    // carries a declared divergence only because `real` sorts before
+    // `synthetic`. Reverting the
     // narrowing left `cargo test -p ocelli-oracle` green, and adding one
     // synthetic subject whose identifier sorted first would have left the
     // mutation green too.

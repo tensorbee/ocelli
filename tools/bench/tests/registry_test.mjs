@@ -254,9 +254,10 @@ test("in-progress and done stories are measurable, over every status", () => {
   //
   // The expectation is a table and deliberately not `status === "done"`
   // recomputed here, which would assert the implementation against itself.
-  // Its authority is `scripts/bench_check.py`, which refuses a runner file and
-  // a baseline entry on `status != "done"` twice over, and this module's own
-  // header rule that a rule living on one side only is a defect.
+  // Its authority is `scripts/bench_check.py`. Measurable means in-progress
+  // or done. The gate refuses a runner and a baseline entry for any other
+  // status, and it refuses a done story with no runner. This module's own
+  // header rule is that a rule living on one side only is a defect.
   const MEASURABLE = {
     pending: false,
     "in-progress": true,

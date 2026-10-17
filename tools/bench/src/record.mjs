@@ -42,8 +42,8 @@ export const WORSE = "worse";
 /**
  * What an INCREASE means, per unit in `tools/bench/subjects.json`.
  *
- * **Seven of the eleven registry rows are durations and four are not**, which
- * is why this table exists rather than a hardcoded rule. `direction` used to be
+ * **Not every registry row is a duration**, which is why this table exists
+ * rather than a hardcoded rule. `direction` used to be
  * `delta > 0 ? "slower" : "faster"` for every subject, so a
  * `tier.startup_microbenchmark` figure in `pixels_per_second` that HALVED
  * would have been printed as `faster`, and `cine.frame_change_rate` in

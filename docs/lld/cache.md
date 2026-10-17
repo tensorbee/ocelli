@@ -1,13 +1,15 @@
 # Cache
 
-**F-IDs that contributed:** F-031
-**Last updated:** 2026-09-14
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-036
+**Last updated:** 2026-10-17
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
 section 20's `Budgeted` trait and `Lru<K, V>`, made into `crates/ocelli-cache`.
 
-This crate holds sizes and never contents it understands. It names no pixel
-type, links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
+This crate holds sizes and one decoded value type whose contents it carries
+without interpreting. `DecodedFrame` holds an `ocelli-pixel` description and
+plane as validated evidence and a sample buffer it never reads as pixels. The
+crate links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
 
 ## The types
 
@@ -18,6 +20,10 @@ type, links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
 | `Admission<K, V>` | What one `insert` evicted, displaced or refused. Deviation D-24 |
 | `CacheTier` | Section 8's three tiers, `Encoded`, `Decoded` and `Gpu` |
 | `Pressure` | One tier's reading: the tier, the bytes used and the budget |
+| `DecodedFrame` | F-032. The decoded tier's value type. Its `bytes` is the sample buffer length |
+| `ImageCache` | F-032. An `Lru<FrameKey, DecodedFrame>` fixed to the decoded tier, returning events |
+| `CacheEvent` | F-032. One variant per `Admission` field: `Evicted`, `Displaced`, `Refused` |
+| `RingEvent` | F-032. Section 17.3's 48-byte event envelope, `#[repr(C)]` and `Pod` |
 
 ## What `bytes` means, which is the promise the budget keeps
 
@@ -123,7 +129,7 @@ a caller to measure one against.
 `alloc::collections::BTreeMap` is the map because the crate is `no_std` and
 `alloc` has no `HashMap`. The `K: Ord + Clone` bound is what that map needs.
 
-## Three tiers, three caches
+## The caches and their tiers
 
 `CacheTier` is carried by the cache rather than by the value, because the cost
 of an eviction belongs to the budget an entry was admitted against. `Lru::new`
@@ -131,15 +137,100 @@ takes it and `Pressure` reports it. **`Admission` does not carry it**, because a
 caller emitting an eviction event already knows which cache it called `insert`
 on, and a field repeating that would be a second place for it to be wrong.
 
-**There is no type holding all three tiers.** They hold three different value
-types, so one struct over them would need three type parameters with one
-instantiation each. Three tiers is three `Lru` values, created by the stories
-that have a value type to put in them.
+**There is no type holding all three tiers.** Production caches are not one
+`Lru` per tier. `ImageCache` and `VolumeCache` are both `CacheTier::Decoded`.
+`BrickCache` is `CacheTier::Gpu`. No production cache is `CacheTier::Encoded`.
 
-**None of the three value types exists yet.** Encoded bytes, decoded frames and
-GPU textures arrive with F-032, F-033, F-036 and F-040, and each implements
-`Budgeted` for itself. That is also why there is no `wgpu` dependency here: this
-crate never sees a texture, only its size.
+**Two value types live in this crate.** F-032 built the decoded tier's
+`DecodedFrame` and its `ImageCache`. F-036 built `Brick` and `BrickCache` on
+the GPU tier, and `bytes` is the host buffer length. F-033's `Volume`
+implements `Budgeted` in `ocelli-volume` and keeps a second decoded-tier
+`Lru` there, so a volume cannot spend the frame budget. Encoded bytes are
+the transient tier HLD section 8 drops when a frame decodes. F-031 left
+`CacheTier::Encoded` as a discriminant and no production cache uses it.
+GPU textures are F-040 and F-043. There is no `wgpu`
+dependency here: this crate never sees a texture, only its size.
+
+## The decoded tier and its events, F-032
+
+`ImageCache::insert` converts the `Admission` into `CacheEvents`, displaced
+first because `Lru` releases the previous value before eviction begins, then
+the evictions in least recently used order. **The three variants are never
+collapsed.**
+
+`CacheEvent::encode` writes the event into section 17.3's `RingEvent`: kind
+1, 2 and 3 for evicted, displaced and refused, `viewport` as `u32::MAX`
+because an eviction belongs to no viewport and zero is a valid viewport id,
+and a payload of series, instance, frame and bytes, little-endian, with the
+last eight bytes reserved and zero. The numbers are the wire contract until
+F-103 decides whether event kinds get a registry, so a test pins each one.
+
+**No ring is built and nothing reaches JavaScript.** The ring in linear
+memory is F-101 in S16. This story stops at the tested encoding, which the
+S12 design round decided for F-032 and F-034 together, and `CacheEvents`
+wraps a `Vec` that allocates on the insert path as `Lru::insert` does. One
+insert can produce many events when it evicts many entries, and none are
+dropped to fit a fixed capacity.
+
+## The volume cache, F-033
+
+`Volume::bytes` is the length of its one contiguous store. `VolumeCache` is
+`Lru<VolumeKey, Volume>` constructed on `CacheTier::Decoded` with the budget
+the caller passed, and it exposes `insert`, `get`, `remove` and `pressure`
+without adding a second eviction policy. The grouping, the projected spacing
+and the refusals live in `docs/lld/volumes.md`. This crate still holds no
+volume type and still does not read a voxel.
+
+## Pressure bands and budget controls, F-034
+
+`Pressure::band` places a reading in `Low`, `Elevated` or `Critical`. The
+edges are half and nine tenths of that tier's own budget, compared as
+`used * 2` against `budget` and `used * 10` against `budget * 9`, in `u64`.
+A budget of zero is `Low` when it holds nothing and `Critical` when it holds
+bytes. `PressureBand::crossing` returns one `TelemetryEvent::Pressure` when
+the band has changed and nothing when it has not. The caller keeps the last
+reported band.
+
+`TierCounters` folds `Admission` between readings. An eviction counts, a
+refusal counts, and a displacement counts as neither. The counts saturate.
+`evicted_bytes` sums `Budgeted::bytes` of the evicted values.
+
+`Lru::set_budget` evicts least recently used first until `used` fits the new
+budget. A budget of zero empties the tier, zero-byte entries included.
+Growing, and setting the budget the tier already has, evict nothing. The
+caller emits the returned evictions first and a `BudgetChanged`
+event after them.
+
+Both events encode into the same 48-byte `RingEvent` F-032 defined. Pressure
+is kind 4 and a budget change is kind 5, `viewport` is `u32::MAX`, and the
+payload is little-endian. A pressure event does not carry `evicted_bytes`.
+No ring is built and nothing reaches JavaScript, which remains F-101.
+
+`budget`, `pressure`, `len` and `band` do not move the use tick. A reading
+is still not a use.
+
+## Brick addressing and residency, F-036
+
+`BrickGrid::new` is the only place the edge is chosen. Eight-bit samples take
+128. Sixteen-bit samples and four-byte floats take 64. The grid is a ceiling
+division on each axis. A brick coordinate is a floor division. An edge brick
+keeps its true extent, and `Brick::bytes` is the buffer length, so a partial
+brick does not report a full cube.
+
+`byte_offset` is section 19's layout, `((z * dims[1] + y) * dims[0] + x) *
+bytes_per_voxel`. Each product is a checked `u64`, then narrowed once. A
+product that does not fit in `u64`, or an address that does not fit in
+`usize`, is `BrickError`, never a wrapped index and never a panic. `index_of`
+is the same order at brick scale, x fastest, then y, then z.
+
+`BrickCache` is one `Lru` on `CacheTier::Gpu`. `missing` lists absent keys in
+`index_of` order and does not touch recency. `is_resident` is that list being
+empty for a grid that has at least one brick. There is no whole-volume path
+and no size threshold. `Admission` from `insert` is returned to the caller.
+This story emits no eviction event.
+
+`Volume::brick_grid` in `ocelli-volume` converts that crate's `VoxelKind` and
+calls `BrickGrid::new`. The volume does not keep a second decomposition.
 
 ## Allocation, and the render loop
 
@@ -148,9 +239,9 @@ HLD section 20's first bullet forbids allocation in the render loop, and its own
 not a render-loop call.** Insertion happens on the decode and upload paths, and
 the render loop's cache interaction is `get`.
 
-**`insert` is the only method on `Lru` that allocates.** That is the rule, and
-it is stated as one because the alternative is a list of the other eight
-maintained in three files, which is how a true sentence becomes a stale one.
+**`insert` and `set_budget` are the methods on `Lru` that allocate.** A shrink
+allocates when it pushes an eviction. A grow and a repeated budget push
+nothing. The other methods do not build a `Vec`.
 
 **`insert` can allocate**, and the doc comment on it says so, because the
 sentence a later story needs is the one that stops it calling this per frame.
@@ -173,20 +264,23 @@ key owns memory. That was measured at one with a `u32` key and two with a
 `String` key. The clone is what ends the scan's borrow of the map before the
 removal, and it is why `K: Clone` is on the type.
 
-**Every other method on `Lru` measured zero**, `get` and `remove` on a hit and
-on a miss alike, and so did an insert that was refused.
+**Every other method that existed for that measurement returned zero**, `get`
+and `remove` on a hit and on a miss alike, and so did an insert that was
+refused. `set_budget` was not in that run. A shrink that evicts pays for the
+same two things an evicting insert pays for, the `Vec` push and the clone of
+the victim key. A grow pushes nothing and clones nothing.
 
 ## Tiers A, B and C
 
-Not applicable, all three. There is no rendering or compute feature here to
-degrade: the crate holds no GPU code and creates no device, and the GPU tier is
-a budget in bytes and a `CacheTier` discriminant. A tier C session's encoded and
-decoded tiers are identical to a tier A session's, and its GPU tier simply has
-no entries.
+Brick addressing is full on A, B and C. It is host arithmetic, and the crate
+still creates no device and holds no shader. Tier B's 256 texture floor holds
+a 128 edge, and a longer volume axis is more bricks. Tier C runs the same
+code. The GPU tier then holds host bricks, because nothing uploads them yet.
+Encoded bytes are not in this crate. A tier C session's decoded tier matches
+a tier A session's.
 
 ## What is not here
 
 No staging-buffer pool, which is section 20's fourth bullet and belongs to the
-upload path. No brick addressing, which is section 7's bricking bullet and is
-F-036. No `bytemuck::cast_slice`, which is section 20's third bullet and is
-about reinterpreting pixel buffers this crate does not hold.
+upload path. No `bytemuck::cast_slice`, which is section 20's third bullet.
+No frustum selection, no prefetch, no indirection texture and no GPU upload.
