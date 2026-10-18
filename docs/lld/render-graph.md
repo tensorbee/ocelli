@@ -1,6 +1,6 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040
+**F-IDs that contributed:** F-038, F-039, F-040, F-042
 **Last updated:** 2026-10-18
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
@@ -15,7 +15,7 @@ HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 | `ViewportId` | A newtype, so an index cannot transpose at a call site |
 | `RenderGraph` | Registered viewports, their dirt, and the pipelines compiled at creation |
 | `FrameOutcome` | `Submitted`, `Noop`, `DeviceLost` or `Unavailable` |
-| `Upload` | Extent of the `R32Float` stored-sample texture owned by a viewport |
+| `Upload` | Extent of the preserving float stored-sample texture owned by a viewport |
 | `UploadError` | Format refusal, a wrong sample length, or a viewport with no stored texture |
 
 ## The rules that hold
@@ -24,6 +24,14 @@ HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 shader body. A lookup for any other pass, blend and tier combination reports
 unavailable rather than aliasing composite, which is deviation D-07's honesty
 rule applied to a blend mode.
+
+**Tier B compiles that same fragment module.** The source is `VOI_WGSL`
+followed by the graph fragment shader. The three window functions stay the
+F-041 text. `PipelineKey` is still pass, blend and tier. Compute and storage
+are a lookup family beside the key, and they have no body on either GPU tier.
+`pipeline_family_compiled` is false for those families.
+`request_outcome` returns `Unavailable` and does not hand back the fragment
+pipeline. `tick` asks for the fragment family.
 
 **One submission per submitted frame.** A tick encodes each dirty viewport
 once into one encoder and submits once, and `submissions` counts them. That
@@ -41,16 +49,20 @@ stored texture. Validation runs state first and the chain last, in the order
 own answer.
 
 **Stored samples upload with `write_texture`.** `register_stored` asks
-`adapter.get_texture_format_features` for `R32Float` and creates that texture
-in the viewport's GPU slot, beside the uniform buffer. `TEXTURE_BINDING` or
-`COPY_DST` absent is `UploadError::FormatUnavailable`. No other format is
-substituted. `upload_stored` copies the caller `&[f32]` with
-`bytemuck::cast_slice` and `queue.write_texture`. Samples are stored values
-and are not clamped. The length must be width times height. A wrong length
-returns before the copy and before `uploads` changes. A matching extent
-reuses the texture. A different extent replaces it at that call, which is a
-data change and not a frame-loop allocation. The tick only binds the view it
-already holds.
+`adapter.get_texture_format_features` for `R32Float`, then `Rg32Float`, then
+`Rgba32Float`. A format is usable when it has `TEXTURE_BINDING` and
+`COPY_DST`. `R32Float` wins on every tier when it is usable. Tier B may take
+the next usable float format. Tier A does not substitute. If none qualify the
+call is `UploadError::FormatUnavailable`. `Rgba8Unorm` is not a candidate.
+A wider format packs each sample into `.r` and writes zeros in the other
+channels at upload time, which is not a frame-loop allocation. The `R32Float`
+path copies the caller `&[f32]` with `bytemuck::cast_slice` and
+`queue.write_texture`. Samples are stored values and are not clamped. The
+length must be width times height. A wrong length returns before the copy and
+before `uploads` changes. A matching extent reuses the texture. A different
+extent replaces it at that call, which is a data change and not a frame-loop
+allocation. The tick only binds the view it already holds. Rebind checks the
+format the slot remembered.
 
 **`uploads` counts sample uploads, not window changes.** A new sample slice
 increments it by one and sets `Dirty.data`. `set_voi` leaves it unchanged.
@@ -105,14 +117,23 @@ not strictly positive are refused. The function touches no GPU.
 | Tier | Stored upload |
 |------|----------------|
 | A, WebGPU | Full, `R32Float` |
-| B, WebGL2 | Full when the device can sample `R32Float`. Otherwise unavailable, with no substitute format |
+| B, WebGL2 | `R32Float` when it can be sampled and copied. Otherwise `Rg32Float` or `Rgba32Float`. If none of the three qualify, unavailable. `Rgba8Unorm` is not used |
 | C, CPU | Unavailable. Tier C has no device and no texture. The CPU path remains `LutChain::map_into` |
 
 ## What this does not do
 
 No staging-buffer pool is built.
 `write_texture` takes the caller slice. The oracle still has no Ocelli frame
-to judge, so decision D7 stays open. Tier B has never been exercised by a
-gate. F-042 is its first test. Mip, MinIp and Average wait for F-054, which
-depends on F-052. LabelmapEdgeProjection waits for F-067. The carried LINEAR
-out-of-range finding is left where F-041 recorded it.
+to judge, so decision D7 stays open. F-042 drew the section 18.3 rows on
+tier B. Headless Chromium WebGL2, Playwright 1.62.1 from `tools/oracle`, with
+ANGLE on Metal and not SwiftShader. The renderer string was
+`ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)`.
+The stored format was `R32Float`. LINEAR read back
+`[0.0, 127.819565, 255.0, 63.909782]` against `LutChain::map_into`
+`[0.0, 127.81955, 255.0, 63.909775]`. LINEAR_EXACT read back
+`[0.0, 127.5, 255.0, 63.75]` on both sides. The gap at input 40 stayed.
+`LINEAR_EXACT` at input -160 was `0.0`. The script exited 0. Native
+`Backends::GL` found no adapter. That miss is not the tier B run. Mip, MinIp
+and Average wait for F-054, which depends on F-052. LabelmapEdgeProjection
+waits for F-067. The carried LINEAR out-of-range finding is left where F-041
+recorded it.

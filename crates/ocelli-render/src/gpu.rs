@@ -281,19 +281,21 @@ impl GpuContext {
 
     /// The instance this device was opened from.
     ///
-    /// Crate-private. [`GpuContext::attach_target`] is the only call that
-    /// creates a surface, and it uses this handle.
+    /// Crate-private. [`GpuContext::attach_target`] creates the product
+    /// surface from this handle.
     pub(crate) fn instance(&self) -> &wgpu::Instance {
         &self.instance
     }
 
     /// Create a surface from the instance that produced this device.
     ///
-    /// This method's body is the only `create_surface` call in the workspace.
-    /// The target is whatever the caller can turn into a
-    /// [`wgpu::SurfaceTarget`]: an offscreen canvas on wasm, named in
-    /// `ocelli-wasm`, or a window on a native entry point. A second instance
-    /// is not constructed here.
+    /// This is the product path. The WebGL tier probe creates a surface
+    /// earlier, because WebGL2 `request_adapter` requires a compatible
+    /// surface before a device exists, and this method is only reachable
+    /// after [`crate::probe::ResolvedAdapter::open`]. The target is whatever
+    /// the caller can turn into a [`wgpu::SurfaceTarget`]: an offscreen
+    /// canvas on wasm, named in `ocelli-wasm`, or a window on a native entry
+    /// point. A second instance is not constructed here.
     ///
     /// # Errors
     ///

@@ -1,6 +1,6 @@
 # GPU ownership
 
-**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-038, F-039, F-041, F-X001
+**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-038, F-039, F-041, F-042, F-X001
 **Last updated:** 2026-10-18
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
@@ -243,7 +243,7 @@ state from the shell's copy."
 | Decide whether a device is opened at all | `caps::opens_a_device` | Total match. Tiers A and B yes, tier C no |
 | Keep the winning adapter | `probe::resolve_adapter` | Returns `ResolvedAdapter`, or nothing for tier C |
 | Open the one long-lived device | `ResolvedAdapter::open` | The second and last `request_device` in the workspace |
-| Create a surface | `GpuContext::attach_target` | The only `create_surface`. Uses the instance stored on the context |
+| Create a surface | `GpuContext::attach_target` and `probe::resolve_webgl` | `attach_target` uses the instance stored on the context. `resolve_webgl` calls `create_surface` before `request_adapter`, because WebGL2 needs a surface and no device exists yet. Both calls are in `ocelli-render` |
 | Configure that surface | `GpuContext::configure_viewport` | First format `get_capabilities` reports that can be a render attachment |
 | Observe a loss | the callback `GpuContext::new` registers | Writes one `LossSlot`, first loss wins |
 | Decide whether to rebuild | `caps::recovers_from` | Total match. `Unknown` yes, `Destroyed` no |
@@ -334,9 +334,14 @@ can open a device at all. F-037 measured the mutation: replacing that line with
 --ignored` at exit 0, 6 passed and 0 failed, on the aarch64-apple-darwin Metal
 adapter in `ci/tier-thresholds.json`. A tier A adapter exceeds the WebGPU
 defaults, so asking for them succeeds and the mutation is invisible. **Only a
-downlevel adapter separates the two, and HLD section 7's tier B has never been
-exercised by anything in this project.** F-042 is the WebGL2 story and F-X002 is
-the story that gets a software adapter into a test.
+downlevel adapter separates the two.** F-042 exercised tier B on headless
+Chromium WebGL2. The renderer was
+`ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)`.
+Status `drew`, tier B, format `R32Float`, decided by `AdapterType`. The
+section 18.3 rows matched `LutChain::map_into` within 0.001. Native
+`Backends::GL` found no adapter. The ignored test printed
+`native Backends::GL found no adapter. This is not a tier B run.` F-X002
+remains the story that gets a software adapter into a test.
 
 ## Surfaces
 
@@ -402,9 +407,11 @@ source rather than carrying an exemption list, so these two left the check by
 construction.
 
 **F-039 is the first edge from `ocelli-wasm` to `ocelli-render`.** The wasm
-module therefore reaches wgpu and Naga. `attach_target` in `ocelli-render` is
-the only `create_surface` call. `ocelli-wasm` names `OffscreenCanvas` and does
-not contain that substring. `web-sys` is a dependency of `ocelli-wasm` only.
+module therefore reaches wgpu and Naga. `attach_target` creates a surface for
+a device that already exists. `resolve_webgl` creates one earlier, before
+`request_adapter`, because WebGL2 cannot request an adapter without a surface.
+Both calls are in `ocelli-render`. `ocelli-wasm` names `OffscreenCanvas` and
+does not contain that substring. `web-sys` is a dependency of `ocelli-wasm` only.
 `ocelli-render` does not name `web_sys`. The size budget is re-baselined from
 the measurement in `ci/wasm-size-budget.json`. `docs/lld/build-targets.md`
 records that number. Gate A4 stays open.

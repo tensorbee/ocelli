@@ -28,8 +28,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::caps::{
-    AdapterFacts, FailedAdapter, FillRate, FillRateBands, ProbeOutcome, Resolution, SimdSupport,
-    Tier, TierRequest, TierSignals, candidate_order, classify,
+    AdapterFacts, DecidedBy, FailedAdapter, FillRate, FillRateBands, ProbeOutcome, Resolution,
+    SimdSupport, Tier, TierRequest, TierSignals, candidate_order, classify,
 };
 use crate::gpu::{DeviceError, GpuContext};
 
@@ -276,10 +276,31 @@ async fn detect(request: TierRequest, clock: &mut dyn FnMut() -> u64) -> Detecte
         wgpu::InstanceDescriptor::new_without_display_handle(),
     )
     .await;
+    detect_from(
+        instance,
+        None,
+        request,
+        wgpu::GlFenceBehavior::Normal,
+        clock,
+    )
+    .await
+}
 
-    let mut adapters = enumerate(&instance).await;
+/// The detection pass after an instance exists.
+///
+/// `surface` is `None` on the production path. WebGL2's `request_adapter`
+/// requires a compatible surface, so [`resolve_webgl`] passes the canvas
+/// surface here and nowhere else. Native enumeration ignores it.
+async fn detect_from(
+    instance: wgpu::Instance,
+    surface: Option<&wgpu::Surface<'_>>,
+    request: TierRequest,
+    fence: wgpu::GlFenceBehavior,
+    clock: &mut dyn FnMut() -> u64,
+) -> Detected {
+    let mut adapters = enumerate(&instance, surface).await;
     let facts: Vec<AdapterFacts> = adapters.iter().map(facts_of).collect();
-    let probed = measure_candidates(&adapters, &facts, clock).await;
+    let probed = measure_candidates(&adapters, &facts, fence, clock).await;
     let chosen = probed.chosen;
 
     let signals = TierSignals {
@@ -380,19 +401,13 @@ impl ResolvedAdapter {
             // tier B session fails to start at all. `measure_candidates` makes
             // the same choice for the probe device and for the same reason.
             //
-            // NO TEST IN THIS REPOSITORY CATCHES A REGRESSION HERE, and that is
-            // measured rather than assumed. F-037 replaced this line with
-            // `wgpu::Limits::default()` and `cargo test -p ocelli-render --test
-            // device -- --ignored` stayed at exit 0, 6 passed and 0 failed, on
-            // the aarch64-apple-darwin Metal adapter in
-            // `ci/tier-thresholds.json`. A tier A adapter exceeds the WebGPU
-            // defaults, so asking for them succeeds and the mutation is
-            // invisible. Only a downlevel adapter separates the two, and HLD
-            // section 7's tier B has never been exercised by anything in this
-            // project. F-042 is the WebGL2 story and F-X002 is the story that
-            // gets a software adapter into a test, and until one of them lands
-            // the only thing watching this line is the human check
-            // `docs/hld/24-agent-code-standards.md` section 27.3 requires.
+            // F-037 measured that `Limits::default()` still opens the Metal
+            // adapter in `ci/tier-thresholds.json`, so a tier A run cannot
+            // police this line. F-042 opens the WebGL2 device through this
+            // same `adapter.limits()` call and does not pass
+            // `Limits::default()`. The measurement is in
+            // `docs/lld/tier-resolution.md`. F-X002 remains the story that
+            // gets a software adapter into a test.
             required_limits: self.adapter.limits(),
             ..Default::default()
         };
@@ -414,21 +429,165 @@ impl ResolvedAdapter {
     }
 }
 
+/// A WebGL instance that was asked for an adapter against a real surface.
+///
+/// The surface has to exist before `request_adapter`. wgpu 30.0.1 documents
+/// that `RequestAdapterOptions::default()` does not succeed for WebGL2.
+/// Production [`resolve`] still passes no surface, which is the WebGPU path.
+#[derive(Debug)]
+pub enum WebGlProbe {
+    /// The GL instance offered no adapter, or the surface could not be created.
+    NoAdapter {
+        /// wgpu's diagnostic, or the reason enumeration stopped.
+        reason: String,
+    },
+    /// An adapter opened and the combination rule resolved tier C.
+    ///
+    /// A software rasteriser that presents WebGL2 is this variant. It is not
+    /// a tier B run.
+    Demoted {
+        /// The renderer string the decision was reached about.
+        name: String,
+        /// Which step of the combination rule produced tier C.
+        decided_by: DecidedBy,
+    },
+    /// Tier A or B, with the adapter retained and the surface still alive.
+    ///
+    /// Boxed so the no-adapter variant stays small.
+    Opened(Box<WebGlOpened>),
+}
+
+/// The adapter [`resolve_webgl`] kept, and the surface it was requested against.
+#[derive(Debug)]
+pub struct WebGlOpened {
+    /// The session adapter. [`ResolvedAdapter::open`] is the long-lived device.
+    pub adapter: ResolvedAdapter,
+    /// Kept alive for the request that needed it. Drawing does not present it.
+    pub surface: wgpu::Surface<'static>,
+}
+
+/// Resolve tier B on a GL-only instance.
+///
+/// `request_device` is still [`ResolvedAdapter::open`], which asks for
+/// `adapter.limits()`. The probe device inside detection is dropped before
+/// this returns. The surface is created here because WebGL2 cannot request
+/// an adapter without one, and [`GpuContext::attach_target`] needs a device
+/// that does not exist yet.
+pub async fn resolve_webgl(
+    target: impl Into<wgpu::SurfaceTarget<'static>>,
+    clock: &mut dyn FnMut() -> u64,
+) -> WebGlProbe {
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::GL;
+    // wgpu-types 30.0.1 documents this for WebGL `device.poll`. Chromium clamps
+    // `clientWaitSync` to 0, so a normal fence makes `PollType::Wait` return
+    // Timeout before the map callback runs. `AutoFinish` marks the submission
+    // complete at submit. The map still copies with `getBufferSubData`, which
+    // waits for `readPixels`. Production `detect` keeps the default fence and
+    // still records a completion the first poll already observes.
+    // `fill_rate_after_wait` drops a rate only for the fence value passed
+    // from here. `classify` then sees an unknown benchmark and consults
+    // adapter type, then the renderer string, then keeps the candidate.
+    #[cfg(target_arch = "wasm32")]
+    {
+        descriptor.backend_options.gl.fence_behavior = wgpu::GlFenceBehavior::AutoFinish;
+    }
+    let fence = descriptor.backend_options.gl.fence_behavior;
+    let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
+    let surface = match instance.create_surface(target) {
+        Ok(surface) => surface,
+        Err(error) => {
+            return WebGlProbe::NoAdapter {
+                reason: error.to_string(),
+            };
+        }
+    };
+    let detected = detect_from(instance, Some(&surface), TierRequest::Auto, fence, clock).await;
+    if !crate::caps::opens_a_device(&detected.resolution.caps) {
+        if let Some(candidate) = detected.resolution.evidence.candidate.as_ref() {
+            return WebGlProbe::Demoted {
+                name: candidate.name.clone(),
+                decided_by: detected.resolution.evidence.decided_by,
+            };
+        }
+        return WebGlProbe::NoAdapter {
+            reason: "the WebGL instance offered no adapter that opens a device".to_owned(),
+        };
+    }
+    match (detected.adapter, detected.instance) {
+        (Some(adapter), Some(instance)) => WebGlProbe::Opened(Box::new(WebGlOpened {
+            adapter: ResolvedAdapter {
+                instance,
+                adapter,
+                resolution: detected.resolution,
+            },
+            surface,
+        })),
+        _ => WebGlProbe::NoAdapter {
+            reason: "the WebGL tier opened no adapter".to_owned(),
+        },
+    }
+}
+
+/// Enumerate a native GL-only instance.
+///
+/// wgpu-hal 30.0.1's `gles` module is for Linux and Android with EGL. On a
+/// host where that backend finds nothing this returns `None`. That miss is
+/// not a tier B run. The browser run is [`resolve_webgl`].
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn resolve_native_gl(clock: &mut dyn FnMut() -> u64) -> Option<ResolvedAdapter> {
+    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgpu::Backends::GL;
+    let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
+    let detected = detect_from(
+        instance,
+        None,
+        TierRequest::Auto,
+        wgpu::GlFenceBehavior::Normal,
+        clock,
+    )
+    .await;
+    if !crate::caps::opens_a_device(&detected.resolution.caps) {
+        return None;
+    }
+    match (detected.adapter, detected.instance) {
+        (Some(adapter), Some(instance)) => Some(ResolvedAdapter {
+            instance,
+            adapter,
+            resolution: detected.resolution,
+        }),
+        _ => None,
+    }
+}
+
 /// Every adapter the instance offers.
 ///
 /// Natively that is enumeration across all backends, which is the only way to
 /// see both an A-candidate and a B-candidate on the same host.
 #[cfg(not(target_arch = "wasm32"))]
-async fn enumerate(instance: &wgpu::Instance) -> Vec<wgpu::Adapter> {
+async fn enumerate(
+    instance: &wgpu::Instance,
+    _surface: Option<&wgpu::Surface<'_>>,
+) -> Vec<wgpu::Adapter> {
     instance.enumerate_adapters(wgpu::Backends::all()).await
 }
 
 /// In a browser, enumeration is not meaningful: the platform hands out one
 /// adapter for the options it was asked with, so asking is the only route.
+///
+/// `surface` is `None` for production WebGPU resolution. WebGL2 sets it,
+/// because `RequestAdapterOptions::default()` does not succeed there.
 #[cfg(target_arch = "wasm32")]
-async fn enumerate(instance: &wgpu::Instance) -> Vec<wgpu::Adapter> {
+async fn enumerate(
+    instance: &wgpu::Instance,
+    surface: Option<&wgpu::Surface<'_>>,
+) -> Vec<wgpu::Adapter> {
+    let options = wgpu::RequestAdapterOptions {
+        compatible_surface: surface,
+        ..Default::default()
+    };
     instance
-        .request_adapter(&wgpu::RequestAdapterOptions::default())
+        .request_adapter(&options)
         .await
         .into_iter()
         .collect()
@@ -547,6 +706,7 @@ struct Probed {
 async fn measure_candidates(
     adapters: &[wgpu::Adapter],
     facts: &[AdapterFacts],
+    fence: wgpu::GlFenceBehavior,
     clock: &mut dyn FnMut() -> u64,
 ) -> Probed {
     let attempted = attempt_candidates(facts, |index| {
@@ -596,7 +756,7 @@ async fn measure_candidates(
             index,
             value: (device, queue),
         } => {
-            let fill_rate = measure(&device, &queue, clock);
+            let fill_rate = measure(&device, &queue, fence, clock);
             // The probe device and queue are dropped HERE, at the end of this
             // scope, before anything opens the long-lived one. The module
             // header's "there is never a moment when two devices exist" is this
@@ -660,6 +820,7 @@ const fn full_pass_is_affordable(calibration_nanos: u64) -> bool {
 fn measure(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
+    fence: wgpu::GlFenceBehavior,
     clock: &mut dyn FnMut() -> u64,
 ) -> Option<FillRate> {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -671,7 +832,7 @@ fn measure(
     // measurement that would otherwise be timing a shader compile.
     let pipeline = build_pipeline(device, &shader);
 
-    measure_with(&mut |edge, passes| run(device, queue, &pipeline, edge, passes, clock))
+    measure_with(&mut |edge, passes| run(device, queue, &pipeline, edge, passes, fence, clock))
 }
 
 /// [`RUN_PLAN`], issued in order, and the figure that comes out of it.
@@ -772,6 +933,7 @@ fn run(
     pipeline: &wgpu::RenderPipeline,
     edge: Edge,
     passes: Passes,
+    fence: wgpu::GlFenceBehavior,
     clock: &mut dyn FnMut() -> u64,
 ) -> Option<FillRate> {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -833,12 +995,32 @@ fn run(
         }
     }
     let elapsed_nanos = clock().saturating_sub(started);
+    // Every texel of the target is covered by the oversized triangle exactly
+    // once per pass, so this is the fragment count and not an estimate.
+    // A completion the first poll already observes is still a fill rate on
+    // the default fence. Only the `AutoFinish` value from `resolve_webgl`
+    // is refused here.
+    fill_rate_after_wait(fragments(edge, passes), elapsed_nanos, fence)
+}
 
+/// Record a timed completion, unless the fence is `AutoFinish`.
+///
+/// `resolve_webgl` is the only caller that passes `AutoFinish`. That option
+/// stores the fence value at submit, so `on_submitted_work_done` runs on the
+/// next poll and the elapsed time is not GPU work. Returning it would be
+/// `SoftwareVerdict::Hardware` and `DecidedBy::Benchmark`. `None` leaves the
+/// benchmark unknown. The default fence returns the rate, including when the
+/// first poll already observed completion.
+fn fill_rate_after_wait(
+    pixels_shaded: u64,
+    elapsed_nanos: u64,
+    fence: wgpu::GlFenceBehavior,
+) -> Option<FillRate> {
+    if fence.is_auto_finish() {
+        return None;
+    }
     Some(FillRate {
-        // Every texel of the target is covered by the oversized triangle
-        // exactly once per pass, so this is the fragment count and not an
-        // estimate.
-        pixels_shaded: fragments(edge, passes),
+        pixels_shaded,
         elapsed_nanos,
     })
 }
@@ -847,10 +1029,32 @@ fn run(
 mod tests {
     use super::{
         AttemptOutcome, CALIBRATION_BUDGET_NANOS, CALIBRATION_EDGE, CALIBRATION_PASSES, Edge,
-        FULL_EDGE, FULL_PASSES, Passes, RUN_PLAN, WORKLOAD_WGSL, attempt_candidates, fragments,
-        full_pass_is_affordable, measure_with,
+        FULL_EDGE, FULL_PASSES, Passes, RUN_PLAN, WORKLOAD_WGSL, attempt_candidates,
+        fill_rate_after_wait, fragments, full_pass_is_affordable, measure_with,
     };
-    use crate::caps::{AdapterFacts, FillRate};
+    use crate::caps::{AdapterFacts, FillRate, FillRateBands, SoftwareVerdict};
+
+    #[test]
+    fn an_autofinish_completion_is_not_a_hardware_fill_rate() {
+        let pixels = fragments(FULL_EDGE, FULL_PASSES);
+        let elapsed = 1_000_000;
+        let forged = FillRate {
+            pixels_shaded: pixels,
+            elapsed_nanos: elapsed,
+        };
+        assert_eq!(
+            forged.verdict(&FillRateBands::RECORDED),
+            SoftwareVerdict::Hardware
+        );
+        assert!(
+            fill_rate_after_wait(pixels, elapsed, wgpu::GlFenceBehavior::AutoFinish).is_none(),
+            "an AutoFinish completion was recorded as a hardware fill rate"
+        );
+        assert_eq!(
+            fill_rate_after_wait(pixels, elapsed, wgpu::GlFenceBehavior::Normal),
+            Some(forged)
+        );
+    }
 
     fn fallback_facts() -> Vec<AdapterFacts> {
         vec![

@@ -50,6 +50,7 @@ pub mod extent;
 pub mod gpu;
 pub mod graph;
 pub mod probe;
+pub mod tier_b;
 pub mod voi;
 
 pub use caps::{
@@ -63,10 +64,16 @@ pub use gpu::{
     SurfaceError,
 };
 pub use graph::{
-    BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineKey, RenderGraph,
-    STORED_FORMAT, SegPass, StackPass, Upload, UploadError, ViewportId, VolumePass,
+    BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineFamily, PipelineKey,
+    RenderGraph, STORED_FORMAT, SegPass, StackPass, Upload, UploadError, ViewportId, VolumePass,
+    tier_b_fragment_module,
 };
-pub use probe::{Edge, Passes, ResolvedAdapter, resolve, resolve_adapter};
+#[cfg(not(target_arch = "wasm32"))]
+pub use probe::resolve_native_gl;
+pub use probe::{
+    Edge, Passes, ResolvedAdapter, WebGlOpened, WebGlProbe, resolve, resolve_adapter, resolve_webgl,
+};
+pub use tier_b::{Section183Error, Section183Pixels, read_section_18_3, stored_format_name};
 pub use voi::{VOI_WGSL, VoiParams, VoiParamsError};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which

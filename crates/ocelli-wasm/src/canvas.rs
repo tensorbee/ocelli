@@ -362,6 +362,208 @@ fn performance_now_millis() -> f64 {
     value.as_f64().unwrap_or(0.0)
 }
 
+/// Draw the four section 18.3 rows on a GL-only instance and return JSON.
+///
+/// The named user is `tools/tier-b/run.mjs`. The shipped module does not
+/// carry `tier-b-probe`, so this export is absent from the measured artefact.
+/// The readback is the test. It is not a product path.
+#[cfg(feature = "tier-b-probe")]
+#[wasm_bindgen(js_name = tierBSection183)]
+pub async fn tier_b_section_183(canvas: OffscreenCanvas) -> String {
+    use ocelli_render::{
+        Section183Error, Tier, WebGlProbe, read_section_18_3, resolve_webgl, stored_format_name,
+    };
+
+    let mut clock = browser_clock();
+    let probe = resolve_webgl(wgpu::SurfaceTarget::OffscreenCanvas(canvas), &mut clock).await;
+    match probe {
+        WebGlProbe::NoAdapter { reason } => {
+            json_report("no-adapter", "", "", "", "", &reason, None)
+        }
+        WebGlProbe::Demoted { name, decided_by } => json_report(
+            "demoted",
+            "C",
+            &name,
+            "",
+            decided_label(decided_by),
+            "the WebGL adapter resolved tier C",
+            None,
+        ),
+        WebGlProbe::Opened(opened) => {
+            let tier = tier_label(opened.adapter.resolution().caps.tier);
+            let renderer = match opened.adapter.resolution().evidence.candidate.as_ref() {
+                Some(candidate) => candidate.name.clone(),
+                None => String::new(),
+            };
+            let decided = decided_label(opened.adapter.resolution().evidence.decided_by);
+            let mut context = match opened.adapter.open().await {
+                Ok(context) => context,
+                Err(error) => {
+                    return json_report(
+                        "unavailable",
+                        tier,
+                        &renderer,
+                        "",
+                        decided,
+                        &error.to_string(),
+                        None,
+                    );
+                }
+            };
+            if context.caps().tier == Tier::Cpu {
+                return json_report(
+                    "demoted",
+                    "C",
+                    &renderer,
+                    "",
+                    decided,
+                    "open resolved tier C",
+                    None,
+                );
+            }
+            match read_section_18_3(&mut context, &opened.adapter) {
+                Ok(pixels) => json_report(
+                    "drew",
+                    tier_label(context.caps().tier),
+                    &renderer,
+                    stored_format_name(pixels.format),
+                    decided,
+                    "",
+                    Some(&pixels),
+                ),
+                Err(Section183Error::Unavailable) => json_report(
+                    "unavailable",
+                    tier_label(context.caps().tier),
+                    &renderer,
+                    "",
+                    decided,
+                    "no preserving format or the colour target cannot be read as f32",
+                    None,
+                ),
+                Err(Section183Error::TierC) => json_report(
+                    "demoted",
+                    "C",
+                    &renderer,
+                    "",
+                    decided,
+                    "the graph is unavailable on tier C",
+                    None,
+                ),
+                Err(Section183Error::NotSubmitted) => json_report(
+                    "unavailable",
+                    tier_label(context.caps().tier),
+                    &renderer,
+                    "",
+                    decided,
+                    "the frame was not submitted",
+                    None,
+                ),
+                Err(Section183Error::Readback(reason)) => json_report(
+                    "unavailable",
+                    tier_label(context.caps().tier),
+                    &renderer,
+                    "",
+                    decided,
+                    &reason,
+                    None,
+                ),
+            }
+        }
+    }
+}
+
+#[cfg(feature = "tier-b-probe")]
+fn tier_label(tier: ocelli_render::Tier) -> &'static str {
+    match tier {
+        ocelli_render::Tier::A => "A",
+        ocelli_render::Tier::B => "B",
+        ocelli_render::Tier::Cpu => "C",
+    }
+}
+
+#[cfg(feature = "tier-b-probe")]
+fn decided_label(decided: ocelli_render::DecidedBy) -> &'static str {
+    match decided {
+        ocelli_render::DecidedBy::Override => "Override",
+        ocelli_render::DecidedBy::NoAdapter => "NoAdapter",
+        ocelli_render::DecidedBy::NoDevice => "NoDevice",
+        ocelli_render::DecidedBy::Benchmark => "Benchmark",
+        ocelli_render::DecidedBy::AdapterType => "AdapterType",
+        ocelli_render::DecidedBy::RendererString => "RendererString",
+        ocelli_render::DecidedBy::CandidateKept => "CandidateKept",
+    }
+}
+
+#[cfg(feature = "tier-b-probe")]
+fn json_report(
+    status: &str,
+    tier: &str,
+    renderer: &str,
+    format: &str,
+    decided_by: &str,
+    reason: &str,
+    pixels: Option<&ocelli_render::Section183Pixels>,
+) -> String {
+    let (linear, exact, cpu_linear, cpu_exact) = match pixels {
+        Some(pixels) => (
+            json_row(&pixels.linear),
+            json_row(&pixels.linear_exact),
+            json_row(&pixels.cpu_linear),
+            json_row(&pixels.cpu_linear_exact),
+        ),
+        None => (
+            "[0,0,0,0]".to_owned(),
+            "[0,0,0,0]".to_owned(),
+            "[0,0,0,0]".to_owned(),
+            "[0,0,0,0]".to_owned(),
+        ),
+    };
+    format!(
+        "{{\"status\":\"{}\",\"tier\":\"{}\",\"renderer\":\"{}\",\"format\":\"{}\",\"decidedBy\":\"{}\",\"reason\":\"{}\",\"linear\":{},\"exact\":{},\"cpuLinear\":{},\"cpuExact\":{}}}",
+        json_escape(status),
+        json_escape(tier),
+        json_escape(renderer),
+        json_escape(format),
+        json_escape(decided_by),
+        json_escape(reason),
+        linear,
+        exact,
+        cpu_linear,
+        cpu_exact,
+    )
+}
+
+#[cfg(feature = "tier-b-probe")]
+fn json_row(values: &[f32; 4]) -> String {
+    let mut text = String::from("[");
+    let mut first = true;
+    for value in values {
+        if !first {
+            text.push(',');
+        }
+        first = false;
+        text.push_str(&format!("{value:?}"));
+    }
+    text.push(']');
+    text
+}
+
+#[cfg(feature = "tier-b-probe")]
+fn json_escape(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            other if other.is_control() => out.push(' '),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// Saturating conversion for the browser clock.
 ///
 /// `std::time::Instant` panics on this target, and an `as` cast is denied.

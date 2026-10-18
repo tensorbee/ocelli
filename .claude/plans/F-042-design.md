@@ -104,7 +104,7 @@ None.
 
 ## LLD impact
 
-`docs/lld/tier-resolution.md` and `docs/lld/render-graph.md`. The text that says tier B has never been exercised is replaced with what this story actually ran, including a native GL miss if that is the measurement.
+`docs/lld/tier-resolution.md`, `docs/lld/render-graph.md`, and `docs/lld/gpu-ownership.md`. The text that says tier B has never been exercised is replaced with what this story actually ran, including a native GL miss if that is the measurement. The ownership page also names the second `create_surface`, which is `resolve_webgl`.
 
 ## Open questions
 

@@ -286,6 +286,10 @@ Repository bootstrap. Nothing is published.
   size times device pixel ratio, rounded per axis. Resize reconfigures that
   surface and does not upload pixels again. A session on the CPU tier reports
   the surface unavailable and does not draw a substitute.
+- Tier B draws the composite stack through WebGL2. The fragment module is
+  the existing window shader, and a compute or storage request reports
+  unavailable. On this host a headless Chromium WebGL2 context matched the
+  CPU LUT chain within 0.001. The readback fence is not used as a fill rate.
 - The LUT chain's WGSL shader, evaluating DICOM PS3.3 C.11's first three stages
   from a thirty-two-byte uniform, so a window or level change writes those
   bytes and nothing else. The shader makes no LUT decision, because

@@ -46,9 +46,13 @@ a milestone boundary.
   operator's decision. S13 is the first sprint that uploads samples and presets
   for display. A story that begins consuming `Display` values should know the
   range is not a guarantee.
-- **Tier B has still never been exercised**, by anything, in any sprint. F-042
-  is the story that has to. Until it lands, a tier B row that says full is a
-  claim about a path nobody has run.
+- **Tier B was exercised by F-042.** Headless Chromium WebGL2 drew the section
+  18.3 rows. Renderer
+  `ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)`.
+  Status `drew`, tier B, format `R32Float`, decided by `AdapterType`. The rows
+  matched `LutChain::map_into` within 0.001. Native `Backends::GL` found no
+  adapter. The ignored test printed
+  `native Backends::GL found no adapter. This is not a tier B run.`
 - **The wasm size budget records 1,999,061 bytes.** `ci/wasm-size-budget.json`
   records that size. Its `bearing_on_gate_A4` field says this is the first time
   the module reaches wgpu and Naga and that the number does not close A4.

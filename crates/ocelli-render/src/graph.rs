@@ -9,8 +9,10 @@
 //! `Surface::get_current_texture`, and `present` runs after that submit, not
 //! per viewport. A viewport with no surface keeps the caller-supplied view
 //! from F-038. F-040 uploads stored samples with `write_texture` into an
-//! `R32Float` texture created at registration. The oracle still has no Ocelli
-//! frame to judge. Decision D7 stays open.
+//! `R32Float` texture created at registration. F-042 keeps that format when
+//! the adapter can sample it, and on tier B may store `Rg32Float` or
+//! `Rgba32Float` so `textureLoad` still returns the stored `f32`. The oracle
+//! still has no Ocelli frame to judge. Decision D7 stays open.
 
 use ocelli_pixel::LutChain;
 use wgpu::util::DeviceExt;
@@ -110,7 +112,8 @@ pub enum PassKind {
 pub struct ViewportId(pub u32);
 
 /// Section 22's pipeline cache key, transcribed into a type: pass kind, blend
-/// mode and tier.
+/// mode and tier. The tier field is the variant axis. F-042 does not add a
+/// field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PipelineKey {
     /// The pass kind.
@@ -119,6 +122,21 @@ pub struct PipelineKey {
     pub blend: BlendMode,
     /// The resolved tier the pipeline was compiled for.
     pub tier: Tier,
+}
+
+/// Which shader shape a key is being asked for.
+///
+/// The fragment shape is the stack composite body. Compute and storage are
+/// tier A shapes. On tier B they are not compiled, and a lookup does not
+/// return the fragment pipeline in their place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PipelineFamily {
+    /// Vertex and fragment. Legal on tier A and tier B.
+    Fragment,
+    /// A compute entry point. Not compiled on tier B.
+    Compute,
+    /// A storage-buffer pipeline. Not compiled on tier B.
+    Storage,
 }
 
 /// One viewport's dirt, five flags named from section 22 word for word.
@@ -212,11 +230,13 @@ pub enum GraphError {
     StoredNeedsRebind,
 }
 
-/// The only format stored samples are uploaded as.
+/// Preferred stored-sample format. The constant stays `R32Float`.
 ///
-/// A device that cannot sample it reports [`UploadError::FormatUnavailable`].
-/// `Rgba8Unorm` is not a substitute, because quantising the samples would be
-/// a different number.
+/// `selected_stored_format` accepts this format on every tier when it has
+/// `TEXTURE_BINDING` and `COPY_DST`. Tier A reports
+/// [`UploadError::FormatUnavailable`] when it does not. Tier B may then use
+/// `Rg32Float` and, only if that also lacks those usages, `Rgba32Float`.
+/// `Rgba8Unorm` is not a candidate.
 pub const STORED_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 
 /// Extent of the `R32Float` texture created for one viewport's stored samples.
@@ -242,6 +262,36 @@ impl Upload {
             return Err(UploadError::FormatUnavailable);
         }
         Ok(upload)
+    }
+
+    /// Choose a stored-sample format that `textureLoad` returns as `f32`.
+    ///
+    /// `features` is `[R32Float, Rg32Float, Rgba32Float]`, in that order.
+    /// `R32Float` wins on every tier when it can be sampled and written.
+    /// Tier B may use the next float format when `R32Float` cannot. Tier A
+    /// does not substitute. `Rgba8Unorm` is not a candidate, because
+    /// normalising the samples would be a different number.
+    pub fn preserving_format(
+        tier: Tier,
+        features: [wgpu::TextureFormatFeatures; 3],
+    ) -> Result<wgpu::TextureFormat, UploadError> {
+        let formats = [
+            wgpu::TextureFormat::R32Float,
+            wgpu::TextureFormat::Rg32Float,
+            wgpu::TextureFormat::Rgba32Float,
+        ];
+        for (index, format) in formats.into_iter().enumerate() {
+            let Some(feature) = features.get(index) else {
+                continue;
+            };
+            if !binding_available(*feature) {
+                continue;
+            }
+            if format == wgpu::TextureFormat::R32Float || tier == Tier::B {
+                return Ok(format);
+            }
+        }
+        Err(UploadError::FormatUnavailable)
     }
 
     fn from_extent(width: u32, height: u32) -> Result<Self, UploadError> {
@@ -291,12 +341,45 @@ fn binding_available(features: wgpu::TextureFormatFeatures) -> bool {
     features.allowed_usages.contains(needed)
 }
 
+/// Channels a preserving format stores, with the sample in `.r`.
+///
+/// `R16Float` is not here. It is not the stored `f32` after `textureLoad`.
+fn stored_float_channels(format: wgpu::TextureFormat) -> Option<u32> {
+    match format {
+        wgpu::TextureFormat::R32Float => Some(1),
+        wgpu::TextureFormat::Rg32Float => Some(2),
+        wgpu::TextureFormat::Rgba32Float => Some(4),
+        _ => None,
+    }
+}
+
+fn stored_bytes_per_row(width: u32, format: wgpu::TextureFormat) -> Result<u32, UploadError> {
+    let channels = stored_float_channels(format).ok_or(UploadError::FormatUnavailable)?;
+    let bytes_per_texel = channels.checked_mul(4).ok_or(UploadError::ExtentOverflow)?;
+    width
+        .checked_mul(bytes_per_texel)
+        .ok_or(UploadError::ExtentOverflow)
+}
+
+/// The first preserving format this adapter can sample, in F-040's order.
+fn selected_stored_format(
+    adapter: &wgpu::Adapter,
+    tier: Tier,
+) -> Result<wgpu::TextureFormat, UploadError> {
+    let features = [
+        adapter.get_texture_format_features(wgpu::TextureFormat::R32Float),
+        adapter.get_texture_format_features(wgpu::TextureFormat::Rg32Float),
+        adapter.get_texture_format_features(wgpu::TextureFormat::Rgba32Float),
+    ];
+    Upload::preserving_format(tier, features)
+}
+
 /// Why a stored-sample upload did not write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum UploadError {
-    /// `R32Float` cannot be sampled or filled, and no other format is used.
+    /// No sampled float format keeps the stored value as `f32`.
     #[error(
-        "R32Float cannot be sampled or written on this adapter, and no other format is substituted"
+        "no float format can be sampled and copied while textureLoad still returns the stored value"
     )]
     FormatUnavailable,
     /// `samples.len()` is not `width * height`. Nothing was written.
@@ -353,19 +436,37 @@ fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
 }
 ";
 
+/// The fragment module tier B compiles, and the module tier A compiles too.
+///
+/// `VOI_WGSL` is included unchanged. The three window functions are not
+/// re-typed here. The entry point samples a float texture with `textureLoad`
+/// and has no compute entry and no storage buffer.
+pub fn tier_b_fragment_module() -> String {
+    format!("{VOI_WGSL}{GRAPH_WGSL}")
+}
+
 /// One registered viewport's decision state.
 struct SlotState {
     dirty: Dirty,
     pass: Pass,
     /// Extent of the owned stored texture, remembered across a device rebuild.
     stored: Option<Upload>,
+    /// The preserving format chosen for that texture. Absent when the
+    /// viewport has no owned stored texture.
+    stored_format: Option<wgpu::TextureFormat>,
 }
 
-/// The `R32Float` texture F-040 owns for one viewport.
+/// The stored-sample texture one viewport owns.
+///
+/// The format is `R32Float` when the adapter can sample it. On tier B a
+/// wider float format is used only when that is the format that still
+/// returns the stored `f32` from `textureLoad`. `Rgba8Unorm` is never stored
+/// here.
 struct StoredTexture {
     texture: wgpu::Texture,
     width: u32,
     height: u32,
+    format: wgpu::TextureFormat,
 }
 
 /// One registered viewport's GPU resources, created at registration.
@@ -396,6 +497,7 @@ impl Registry {
                     dirty: Dirty::full(),
                     pass,
                     stored: None,
+                    stored_format: None,
                 });
                 return Ok(ViewportId(
                     u32::try_from(index).map_err(|_| GraphError::CapacityExhausted)?,
@@ -422,13 +524,28 @@ impl Registry {
     }
 }
 
-/// Find a compiled pipeline by its full key, tier included.
+/// One compiled pipeline: section 22's key plus the shader family.
+///
+/// The family is not a new key field. It is how a compute request is kept
+/// from matching the fragment body that shares the pass, blend and tier.
+struct CompiledKey {
+    key: PipelineKey,
+    family: PipelineFamily,
+}
+
+/// Find a compiled pipeline by its full key, tier included, and its family.
 ///
 /// A free function over the key list so the lookup rule is testable with no
 /// adapter. Dropping `tier` from the comparison returns another tier's
-/// pipeline, and the unit test beside this function goes red on that.
-fn pipeline_index(keys: &[PipelineKey], key: &PipelineKey) -> Option<usize> {
-    keys.iter().position(|held| held == key)
+/// pipeline, and dropping `family` returns the fragment pipeline for a
+/// compute request. The unit tests beside this function go red on either.
+fn pipeline_index(
+    keys: &[CompiledKey],
+    key: &PipelineKey,
+    family: PipelineFamily,
+) -> Option<usize> {
+    keys.iter()
+        .position(|held| held.key == *key && held.family == family)
 }
 
 /// A surface bound to one viewport. The colour attachment is acquired from
@@ -449,7 +566,7 @@ pub struct RenderGraph {
     /// Surface textures acquired for this frame, presented after the submit.
     /// Capacity is fixed at creation so a tick does not grow it.
     frame_textures: Vec<Option<wgpu::SurfaceTexture>>,
-    keys: Vec<PipelineKey>,
+    keys: Vec<CompiledKey>,
     pipelines: Vec<wgpu::RenderPipeline>,
     uniform_layout: wgpu::BindGroupLayout,
     source_layout: wgpu::BindGroupLayout,
@@ -467,12 +584,44 @@ const COMPILED_PASS: PassKind = PassKind::Stack;
 const COMPILED_BLEND: BlendMode = BlendMode::Composite;
 
 impl RenderGraph {
-    /// Whether this story compiles a pipeline for a key.
+    /// Whether this story compiles a fragment pipeline for a key.
     ///
     /// Only the composite stack pipeline has a shader body, at any tier.
     /// Every other key is declared, and the frame path reports it unavailable.
+    /// A compute or storage request is [`RenderGraph::pipeline_family_compiled`],
+    /// which is false on tier B and is not this predicate.
     pub fn pipeline_compiled(key: &PipelineKey) -> bool {
         key.pass == COMPILED_PASS && key.blend == COMPILED_BLEND
+    }
+
+    /// Whether `family` has a compiled body for `key`.
+    ///
+    /// Fragment is the composite stack body. Compute and storage have no body
+    /// in this story, on either GPU tier. On tier B that refusal is the
+    /// section 7 rule: the fragment pipeline is not returned in their place.
+    pub fn pipeline_family_compiled(key: &PipelineKey, family: PipelineFamily) -> bool {
+        match family {
+            PipelineFamily::Fragment => Self::pipeline_compiled(key),
+            PipelineFamily::Compute | PipelineFamily::Storage => false,
+        }
+    }
+
+    /// The frame outcome of asking for `family` on `key` when no viewport
+    /// has been encoded yet.
+    ///
+    /// A compute or storage family is [`FrameOutcome::Unavailable`]. It is
+    /// not a submitted frame that bound the fragment pipeline. `tick` uses
+    /// the same family check before it binds anything.
+    pub fn request_outcome(
+        key: &PipelineKey,
+        family: PipelineFamily,
+        viewport: ViewportId,
+    ) -> FrameOutcome {
+        if Self::pipeline_family_compiled(key, family) {
+            FrameOutcome::Noop
+        } else {
+            FrameOutcome::Unavailable { viewport }
+        }
     }
 
     /// How many frame submissions this graph has issued.
@@ -549,11 +698,13 @@ impl RenderGraph {
     ) -> (
         wgpu::BindGroupLayout,
         wgpu::BindGroupLayout,
-        Vec<PipelineKey>,
+        Vec<CompiledKey>,
         Vec<wgpu::RenderPipeline>,
     ) {
         let device = ctx.device();
-        let source = format!("{VOI_WGSL}{GRAPH_WGSL}");
+        // Tier B's compiled module is this fragment text. Tier A compiles the
+        // same text. A compute module is not built for either tier.
+        let source = tier_b_fragment_module();
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ocelli render graph"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -589,10 +740,13 @@ impl RenderGraph {
             bind_group_layouts: &[Some(&uniform_layout), Some(&source_layout)],
             immediate_size: 0,
         });
-        let key = PipelineKey {
-            pass: COMPILED_PASS,
-            blend: COMPILED_BLEND,
-            tier,
+        let key = CompiledKey {
+            key: PipelineKey {
+                pass: COMPILED_PASS,
+                blend: COMPILED_BLEND,
+                tier,
+            },
+            family: PipelineFamily::Fragment,
         };
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("ocelli render graph composite"),
@@ -622,8 +776,8 @@ impl RenderGraph {
         (uniform_layout, source_layout, vec![key], vec![pipeline])
     }
 
-    fn pipeline(&self, key: &PipelineKey) -> Option<&wgpu::RenderPipeline> {
-        pipeline_index(&self.keys, key).and_then(|index| self.pipelines.get(index))
+    fn pipeline(&self, key: &PipelineKey, family: PipelineFamily) -> Option<&wgpu::RenderPipeline> {
+        pipeline_index(&self.keys, key, family).and_then(|index| self.pipelines.get(index))
     }
 
     /// Register a viewport rendering `pass` into `target` from `source`.
@@ -654,13 +808,15 @@ impl RenderGraph {
         Ok(id)
     }
 
-    /// Register `pass` into `target` and create its `R32Float` stored texture.
+    /// Register `pass` into `target` and create its stored-sample texture.
     ///
-    /// The texture is created here, at registration, after
-    /// `adapter.get_texture_format_features` for [`STORED_FORMAT`]. A missing
-    /// `TEXTURE_BINDING` or `COPY_DST` returns
-    /// [`UploadError::FormatUnavailable`] and does not substitute another
-    /// format. The slot starts fully dirty. Nothing is copied yet, so
+    /// The texture is created here, at registration.
+    /// [`selected_stored_format`] asks the adapter for `R32Float`, then
+    /// `Rg32Float`, then `Rgba32Float`. `R32Float` is used on every tier when
+    /// it can be sampled and written. Tier B may use the next float format
+    /// when `R32Float` cannot, because `textureLoad` still returns the stored
+    /// value as `f32`. Tier A does not substitute. `Rgba8Unorm` is never
+    /// chosen. The slot starts fully dirty. Nothing is copied yet, so
     /// [`RenderGraph::uploads`] stays put.
     ///
     /// # Errors
@@ -679,10 +835,8 @@ impl RenderGraph {
         height: u32,
         pass: Pass,
     ) -> Result<ViewportId, UploadError> {
-        let features = adapter
-            .wgpu_adapter()
-            .get_texture_format_features(STORED_FORMAT);
-        let upload = Upload::stored(features, width, height)?;
+        let format = selected_stored_format(adapter.wgpu_adapter(), self.tier)?;
+        let upload = Upload::from_extent(width, height)?;
         let voi = voi_of(&pass);
         let id = self
             .registry
@@ -690,13 +844,15 @@ impl RenderGraph {
             .map_err(|_| UploadError::CapacityExhausted)?;
         if let Some(state) = self.registry.state_mut(id) {
             state.stored = Some(upload);
+            state.stored_format = Some(format);
         }
-        let texture = create_stored_texture(ctx.device(), upload);
+        let texture = create_stored_texture(ctx.device(), upload, format);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let stored = StoredTexture {
             texture,
             width: upload.width(),
             height: upload.height(),
+            format,
         };
         let slot = self.create_gpu_slot(ctx, target, &view, voi, Some(stored));
         if let Some(held) = self
@@ -935,8 +1091,10 @@ impl RenderGraph {
     ///
     /// [`UploadError::UnknownViewport`] for an id this graph never issued.
     /// [`UploadError::NotStored`] when the viewport has no owned texture.
-    /// [`UploadError::FormatUnavailable`] when `R32Float` can no longer be
-    /// sampled or written, in which case the slot stays empty.
+    /// [`UploadError::FormatUnavailable`] when the format chosen at
+    /// registration can no longer be sampled or written, in which case the
+    /// slot stays empty. The check is that remembered format, not a fresh
+    /// search.
     pub fn rebind_stored(
         &mut self,
         ctx: &GpuContext,
@@ -944,7 +1102,7 @@ impl RenderGraph {
         id: ViewportId,
         target: wgpu::TextureView,
     ) -> Result<(), UploadError> {
-        let (upload, voi) = {
+        let (upload, voi, format) = {
             let state = self
                 .registry
                 .states
@@ -952,20 +1110,20 @@ impl RenderGraph {
                 .and_then(Option::as_ref)
                 .ok_or(UploadError::UnknownViewport)?;
             let upload = state.stored.ok_or(UploadError::NotStored)?;
-            (upload, voi_of(&state.pass))
+            let format = state.stored_format.ok_or(UploadError::FormatUnavailable)?;
+            (upload, voi_of(&state.pass), format)
         };
-        let features = adapter
-            .wgpu_adapter()
-            .get_texture_format_features(STORED_FORMAT);
+        let features = adapter.wgpu_adapter().get_texture_format_features(format);
         if !binding_available(features) {
             return Err(UploadError::FormatUnavailable);
         }
-        let texture = create_stored_texture(ctx.device(), upload);
+        let texture = create_stored_texture(ctx.device(), upload, format);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let stored = StoredTexture {
             texture,
             width: upload.width(),
             height: upload.height(),
+            format,
         };
         let slot = self.create_gpu_slot(ctx, target, &view, voi, Some(stored));
         if let Some(held) = self
@@ -1066,8 +1224,10 @@ impl RenderGraph {
     /// length must be `width * height`. A wrong length returns before the copy
     /// and before [`RenderGraph::uploads`] changes. A matching extent reuses
     /// the texture. A different extent replaces it at this call, after asking
-    /// the adapter for [`STORED_FORMAT`] features again. The copy uses
-    /// `bytemuck::cast_slice` on the caller slice and allocates no buffer.
+    /// the adapter for the format registration remembered. The `R32Float` copy
+    /// uses `bytemuck::cast_slice` on the caller slice and allocates no
+    /// buffer. A wider float format pads the `.r` sample at this call, which
+    /// is an upload and not a frame.
     /// `uploads` increments by one and `Dirty.data` is set. Samples are not
     /// clamped.
     ///
@@ -1090,8 +1250,10 @@ impl RenderGraph {
         samples: &[f32],
     ) -> Result<(), UploadError> {
         let current = self.remembered(id)?;
+        let format = self.remembered_format(id)?;
         let upload = Upload::from_extent(width, height)?;
         upload.accepts(samples)?;
+        stored_bytes_per_row(upload.width(), format)?;
         let slot_present = self
             .gpu
             .get(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1101,13 +1263,11 @@ impl RenderGraph {
             return Err(UploadError::NotRebound);
         }
         if current.width() != upload.width() || current.height() != upload.height() {
-            let features = adapter
-                .wgpu_adapter()
-                .get_texture_format_features(STORED_FORMAT);
+            let features = adapter.wgpu_adapter().get_texture_format_features(format);
             if !binding_available(features) {
                 return Err(UploadError::FormatUnavailable);
             }
-            self.replace_stored(ctx, id, upload)?;
+            self.replace_stored(ctx, id, upload, format)?;
         }
         self.write_slot(ctx, id, upload, samples)?;
         self.uploads += 1;
@@ -1130,13 +1290,27 @@ impl RenderGraph {
         }
     }
 
+    fn remembered_format(&self, id: ViewportId) -> Result<wgpu::TextureFormat, UploadError> {
+        match self
+            .registry
+            .states
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+        {
+            None => Err(UploadError::UnknownViewport),
+            Some(state) if state.stored.is_none() => Err(UploadError::NotStored),
+            Some(state) => state.stored_format.ok_or(UploadError::FormatUnavailable),
+        }
+    }
+
     fn replace_stored(
         &mut self,
         ctx: &GpuContext,
         id: ViewportId,
         upload: Upload,
+        format: wgpu::TextureFormat,
     ) -> Result<(), UploadError> {
-        let texture = create_stored_texture(ctx.device(), upload);
+        let texture = create_stored_texture(ctx.device(), upload, format);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_source = self.bind_source_group(ctx.device(), &view);
         let slot = self
@@ -1149,6 +1323,7 @@ impl RenderGraph {
             texture,
             width: upload.width(),
             height: upload.height(),
+            format,
         });
         Ok(())
     }
@@ -1169,7 +1344,7 @@ impl RenderGraph {
         if stored.width != upload.width() || stored.height != upload.height() {
             return Err(UploadError::WrongLength);
         }
-        write_stored_samples(ctx.queue(), &stored.texture, upload, samples)
+        write_stored_samples(ctx.queue(), &stored.texture, upload, stored.format, samples)
     }
 
     /// Reinstall the resources a recovery rebuilt, marking every viewport
@@ -1244,7 +1419,7 @@ impl RenderGraph {
                 tier: self.tier,
             };
             let rebound = self.gpu.get(index).and_then(Option::as_ref).is_some();
-            if self.pipeline(&key).is_some() && rebound {
+            if self.pipeline(&key, PipelineFamily::Fragment).is_some() && rebound {
                 any_encodable = true;
             } else if first_unavailable.is_none() {
                 first_unavailable = Some(ViewportId(u32::try_from(index).unwrap_or(u32::MAX)));
@@ -1339,7 +1514,8 @@ impl RenderGraph {
                     tier,
                 }
             };
-            let Some(pipeline) = pipeline_index(keys, &key).and_then(|found| pipelines.get(found))
+            let Some(pipeline) = pipeline_index(keys, &key, PipelineFamily::Fragment)
+                .and_then(|found| pipelines.get(found))
             else {
                 continue;
             };
@@ -1410,7 +1586,7 @@ fn viewport_encodable(
     registry: &Registry,
     gpu: &[Option<GpuSlot>],
     pipelines: &[wgpu::RenderPipeline],
-    keys: &[PipelineKey],
+    keys: &[CompiledKey],
     tier: Tier,
     index: usize,
 ) -> bool {
@@ -1425,7 +1601,7 @@ fn viewport_encodable(
         blend: state.pass.blend(),
         tier,
     };
-    let compiled = pipeline_index(keys, &key)
+    let compiled = pipeline_index(keys, &key, PipelineFamily::Fragment)
         .and_then(|found| pipelines.get(found))
         .is_some();
     let rebound = gpu.get(index).and_then(Option::as_ref).is_some();
@@ -1448,7 +1624,11 @@ fn voi_of(pass: &Pass) -> VoiParams {
     }
 }
 
-fn create_stored_texture(device: &wgpu::Device, upload: Upload) -> wgpu::Texture {
+fn create_stored_texture(
+    device: &wgpu::Device,
+    upload: Upload,
+    format: wgpu::TextureFormat,
+) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("ocelli stored samples"),
         size: wgpu::Extent3d {
@@ -1459,7 +1639,7 @@ fn create_stored_texture(device: &wgpu::Device, upload: Upload) -> wgpu::Texture
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: STORED_FORMAT,
+        format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     })
@@ -1469,45 +1649,83 @@ fn write_stored_samples(
     queue: &wgpu::Queue,
     texture: &wgpu::Texture,
     upload: Upload,
+    format: wgpu::TextureFormat,
     samples: &[f32],
 ) -> Result<(), UploadError> {
-    let Some(bytes_per_row) = upload.width().checked_mul(4) else {
-        return Err(UploadError::ExtentOverflow);
+    let bytes_per_row = stored_bytes_per_row(upload.width(), format)?;
+    let channels = stored_float_channels(format).ok_or(UploadError::FormatUnavailable)?;
+    let copy = wgpu::TexelCopyTextureInfo {
+        texture,
+        mip_level: 0,
+        origin: wgpu::Origin3d::ZERO,
+        aspect: wgpu::TextureAspect::All,
     };
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        bytemuck::cast_slice(samples),
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(bytes_per_row),
-            rows_per_image: Some(upload.height()),
-        },
-        wgpu::Extent3d {
-            width: upload.width(),
-            height: upload.height(),
-            depth_or_array_layers: 1,
-        },
-    );
+    let layout = wgpu::TexelCopyBufferLayout {
+        offset: 0,
+        bytes_per_row: Some(bytes_per_row),
+        rows_per_image: Some(upload.height()),
+    };
+    let extent = wgpu::Extent3d {
+        width: upload.width(),
+        height: upload.height(),
+        depth_or_array_layers: 1,
+    };
+    if channels == 1 {
+        queue.write_texture(copy, bytemuck::cast_slice(samples), layout, extent);
+        return Ok(());
+    }
+    let channel_count = usize::try_from(channels).map_err(|_| UploadError::ExtentOverflow)?;
+    let padded_len = samples
+        .len()
+        .checked_mul(channel_count)
+        .ok_or(UploadError::ExtentOverflow)?;
+    let mut padded = Vec::new();
+    padded.resize(padded_len, 0.0);
+    for (index, sample) in samples.iter().copied().enumerate() {
+        let Some(slot) = index.checked_mul(channel_count) else {
+            return Err(UploadError::ExtentOverflow);
+        };
+        let Some(cell) = padded.get_mut(slot) else {
+            return Err(UploadError::ExtentOverflow);
+        };
+        *cell = sample;
+    }
+    queue.write_texture(copy, bytemuck::cast_slice(&padded), layout, extent);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Dirty, Registry, SlotState, pipeline_index};
+    use super::{CompiledKey, Dirty, Registry, SlotState, pipeline_index};
     use crate::caps::Tier;
-    use crate::graph::{BlendMode, Pass, PassKind, PipelineKey, VolumePass};
+    use crate::graph::{
+        BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RenderGraph, Upload,
+        UploadError, ViewportId, VolumePass,
+    };
+
+    fn sampleable() -> wgpu::TextureFormatFeatures {
+        wgpu::TextureFormatFeatures {
+            allowed_usages: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            flags: wgpu::TextureFormatFeatureFlags::empty(),
+        }
+    }
+
+    fn unsampleable() -> wgpu::TextureFormatFeatures {
+        wgpu::TextureFormatFeatures {
+            allowed_usages: wgpu::TextureUsages::COPY_SRC,
+            flags: wgpu::TextureFormatFeatureFlags::empty(),
+        }
+    }
 
     #[test]
     fn pipeline_lookup_never_returns_another_tiers_pipeline() {
-        let keys = [PipelineKey {
-            pass: PassKind::Stack,
-            blend: BlendMode::Composite,
-            tier: Tier::A,
+        let keys = [CompiledKey {
+            key: PipelineKey {
+                pass: PassKind::Stack,
+                blend: BlendMode::Composite,
+                tier: Tier::A,
+            },
+            family: PipelineFamily::Fragment,
         }];
         assert_eq!(
             pipeline_index(
@@ -1516,7 +1734,8 @@ mod tests {
                     pass: PassKind::Stack,
                     blend: BlendMode::Composite,
                     tier: Tier::A,
-                }
+                },
+                PipelineFamily::Fragment,
             ),
             Some(0)
         );
@@ -1527,10 +1746,97 @@ mod tests {
                     pass: PassKind::Stack,
                     blend: BlendMode::Composite,
                     tier: Tier::B,
-                }
+                },
+                PipelineFamily::Fragment,
             ),
             None
         );
+    }
+
+    /// A compute or storage request is not the fragment pipeline.
+    ///
+    /// Section 7: tier B is fragment shaders only. The lookup keeps the
+    /// family, so index 0 is not returned for either of the other two.
+    #[test]
+    fn a_compute_or_storage_key_is_not_the_fragment_pipeline() {
+        let key = PipelineKey {
+            pass: PassKind::Stack,
+            blend: BlendMode::Composite,
+            tier: Tier::B,
+        };
+        let keys = [CompiledKey {
+            key,
+            family: PipelineFamily::Fragment,
+        }];
+        assert_eq!(
+            pipeline_index(&keys, &key, PipelineFamily::Fragment),
+            Some(0)
+        );
+        assert_eq!(pipeline_index(&keys, &key, PipelineFamily::Compute), None);
+        assert_eq!(pipeline_index(&keys, &key, PipelineFamily::Storage), None);
+        assert!(RenderGraph::pipeline_compiled(&key));
+        assert!(RenderGraph::pipeline_family_compiled(
+            &key,
+            PipelineFamily::Fragment
+        ));
+        assert!(!RenderGraph::pipeline_family_compiled(
+            &key,
+            PipelineFamily::Compute
+        ));
+        assert!(!RenderGraph::pipeline_family_compiled(
+            &key,
+            PipelineFamily::Storage
+        ));
+        let viewport = ViewportId(3);
+        assert_eq!(
+            RenderGraph::request_outcome(&key, PipelineFamily::Compute, viewport),
+            FrameOutcome::Unavailable { viewport }
+        );
+        assert_eq!(
+            RenderGraph::request_outcome(&key, PipelineFamily::Storage, viewport),
+            FrameOutcome::Unavailable { viewport }
+        );
+        assert!(!matches!(
+            RenderGraph::request_outcome(&key, PipelineFamily::Fragment, viewport),
+            FrameOutcome::Unavailable { .. }
+        ));
+    }
+
+    /// PS3.3 values stay `f32` after `textureLoad`. `Rgba8Unorm` is not a
+    /// candidate. Tier A does not substitute when `R32Float` cannot be sampled.
+    #[test]
+    fn preserving_format_keeps_r32_and_refuses_a_tier_a_substitute() {
+        let features = [sampleable(), sampleable(), sampleable()];
+        assert_eq!(
+            Upload::preserving_format(Tier::A, features),
+            Ok(wgpu::TextureFormat::R32Float)
+        );
+        assert_eq!(
+            Upload::preserving_format(Tier::B, features),
+            Ok(wgpu::TextureFormat::R32Float)
+        );
+        let missing = [unsampleable(), sampleable(), sampleable()];
+        assert_eq!(
+            Upload::preserving_format(Tier::A, missing),
+            Err(UploadError::FormatUnavailable)
+        );
+        assert_eq!(
+            Upload::preserving_format(Tier::B, missing),
+            Ok(wgpu::TextureFormat::Rg32Float)
+        );
+        let rgba_only = [unsampleable(), unsampleable(), sampleable()];
+        assert_eq!(
+            Upload::preserving_format(Tier::B, rgba_only),
+            Ok(wgpu::TextureFormat::Rgba32Float)
+        );
+        let none = [unsampleable(), unsampleable(), unsampleable()];
+        assert_eq!(
+            Upload::preserving_format(Tier::B, none),
+            Err(UploadError::FormatUnavailable)
+        );
+        let chosen = Upload::preserving_format(Tier::B, missing);
+        assert!(chosen.is_ok());
+        assert_ne!(chosen.ok(), Some(wgpu::TextureFormat::Rgba8Unorm));
     }
 
     #[test]

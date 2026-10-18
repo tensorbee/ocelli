@@ -82,6 +82,11 @@ wasm-bindgen-futures = "=0.4.77"
 # artefact that `bin/ocelli.sh wasm` measures does not carry the feature and
 # therefore has no way to be asked to panic.
 panic-probe = []
+# F-042. The WebGL2 section 18.3 probe. The named user is
+# `tools/tier-b/run.mjs`, which builds a second module with this feature into
+# `target/tier-b-probe`. The module `bin/ocelli.sh wasm` measures does not
+# carry the feature.
+tier-b-probe = []
 
 [dependencies]
 # HLD section 4's crate table puts the error model in ocelli-core, and F-005's
