@@ -413,6 +413,18 @@ impl AdapterFacts {
     }
 }
 
+/// Whether these adapter strings are lavapipe.
+///
+/// Mesa names the Vulkan device `llvmpipe`. Both spellings count, in `name`,
+/// `driver` or `driver_info`, without regard to case. SwiftShader is a
+/// different rasteriser and does not count. A hardware name does not count.
+#[must_use]
+pub fn fallback_is_lavapipe(name: &str, driver: &str, driver_info: &str) -> bool {
+    let haystack = format!("{name} {driver} {driver_info}");
+    let haystack = haystack.to_lowercase();
+    haystack.contains("lavapipe") || haystack.contains("llvmpipe")
+}
+
 /// How preferable one adapter's own claim about itself is. Used only to break
 /// ties within a candidate class, never to decide hardware against software.
 fn device_type_rank(device_type: wgpu::DeviceType) -> u8 {
@@ -2495,5 +2507,31 @@ mod detection_tests {
     #[test]
     fn simd_support_is_not_applicable_off_wasm() {
         assert_eq!(SimdSupport::build_target(), SimdSupport::NotApplicable);
+    }
+}
+
+/// F-X002 layer 2. The strings are the ones spike A7 names for lavapipe.
+/// SwiftShader is layer 3 and must not satisfy this predicate.
+#[cfg(test)]
+mod lavapipe_predicate {
+    use super::fallback_is_lavapipe;
+
+    #[test]
+    fn lavapipe_and_llvmpipe_match_in_any_field() {
+        assert!(fallback_is_lavapipe("lavapipe", "", ""));
+        assert!(fallback_is_lavapipe("LAVAPIPE", "", ""));
+        assert!(fallback_is_lavapipe("", "llvmpipe", ""));
+        assert!(fallback_is_lavapipe("", "", "Mesa LLVMPipe"));
+    }
+
+    #[test]
+    fn swiftshader_apple_and_empty_are_not_lavapipe() {
+        assert!(!fallback_is_lavapipe(
+            "ANGLE (Google, SwiftShader Device)",
+            "",
+            ""
+        ));
+        assert!(!fallback_is_lavapipe("Apple M4 Max", "", ""));
+        assert!(!fallback_is_lavapipe("", "", ""));
     }
 }

@@ -1051,6 +1051,7 @@ name = "ocelli-render"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "ocelli-cache",
  "ocelli-core",
  "ocelli-pixel",
  "pollster",

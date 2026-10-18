@@ -315,4 +315,18 @@ Repository bootstrap. Nothing is published.
   sixteen-bit samples and for four-byte floats. An edge brick keeps its true
   extent, and its cost is the host buffer length. Residency is the set of
   brick keys present on the GPU tier. An address that does not fit is an
-  error rather than a wrapped index. Nothing is uploaded to a texture yet.
+  error rather than a wrapped index.
+- Brick upload is the default path for every volume, including one that fits
+  in a single brick. Each ready brick is a 3D texture at its own extent and
+  sample format. Eight-bit samples use `R8Uint`, unsigned sixteen-bit uses
+  `R16Uint`, signed sixteen-bit uses `R16Sint`, and float uses `R32Float`.
+  An edge brick is not padded to a cube. A window change writes the VOI
+  uniform and does not upload the bricks again. Tier C reports unavailable
+  and creates no texture. An extent or a format the device cannot sample
+  reports unavailable and does not substitute another image.
+- Two GPU-less render runs that are not the oracle. Lavapipe is a fallback
+  adapter probe on ubuntu-latest, and a missing record runs that probe. The
+  only other accepted record is an explicit drop with a reason, which does
+  not print a pass. Headless Chrome with SwiftShader is the nightly run, and
+  it passes only when the renderer string contains SwiftShader and the tier
+  is C.

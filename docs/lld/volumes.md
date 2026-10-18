@@ -1,7 +1,7 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036
-**Last updated:** 2026-10-17
+**F-IDs that contributed:** F-033, F-036, F-043
+**Last updated:** 2026-10-18
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
 `ImagePositionPatient` projected on the slice normal, DICOM PS3.3
@@ -90,13 +90,20 @@ Admission, eviction and pressure are `Lru`'s, on the decoded tier.
 ## Tiers A, B and C
 
 Not applicable for A and B. The volume is host memory and this crate creates
-no device. Tier B's 256-deep 3D-texture floor is an upload concern for
-F-040. Tier C assembles the same volume, because there is no device path to
-diverge from.
+no device. The brick upload in `ocelli-render` refuses an axis longer than
+the device's reported 3D limit. The pinned tier B floor for that limit is
+256, which is the size a brick edge of 128 is guaranteed to fit. This crate
+does not clamp the reported limit and does not apply the check. Tier C
+assembles the same volume, because there is no device path to diverge from.
 
 ## What this does not do
 
 A volume enumerates bricks through `BrickGrid` from `ocelli-cache`, via
-`Volume::brick_grid`. It does not keep a second decomposition. No reslice
-onto a viewport, which is a later geometry story. No texture upload, which
-is F-040. Pixels stay in the store and do not cross the worker boundary.
+`Volume::brick_grid`. It does not keep a second decomposition.
+`Volume::ready_bricks` lists brick coordinates whose slices have all landed,
+in `index_of` order, x fastest. A brick whose z range includes an absent
+slice is left out, because uploading it would invent zeros. The renderer
+does not read `SlicePresence`. No reslice onto a viewport, which is a later
+geometry story. This crate still creates no texture. Upload of a ready brick
+is `ocelli-render`. Pixels stay in the store and do not cross the worker
+boundary.

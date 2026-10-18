@@ -16,7 +16,7 @@ use alloc::vec::Vec;
 
 use glam::{DMat3, DVec3};
 use ocelli_cache::{
-    BrickGrid, BrickWidth, Budgeted, CacheTier, DecodedFrame, Lru, Pressure, SeriesId,
+    BrickGrid, BrickSample, BrickWidth, Budgeted, CacheTier, DecodedFrame, Lru, Pressure, SeriesId,
 };
 use ocelli_core::{Pt, World};
 use ocelli_pixel::{ImageOrientationPatient, PixelRepresentation};
@@ -63,6 +63,21 @@ impl From<VoxelKind> for BrickWidth {
             VoxelKind::U8 => Self::EightBit,
             VoxelKind::I16 | VoxelKind::U16 => Self::SixteenBit,
             VoxelKind::F32 => Self::Float32,
+        }
+    }
+}
+
+impl From<VoxelKind> for BrickSample {
+    /// Signed and unsigned sixteen-bit samples stay distinct.
+    ///
+    /// [`BrickWidth`] collapses them because they share an edge. The upload
+    /// format cannot, which is PS3.3 C.7.6.3 Pixel Representation.
+    fn from(kind: VoxelKind) -> Self {
+        match kind {
+            VoxelKind::U8 => Self::U8,
+            VoxelKind::I16 => Self::I16,
+            VoxelKind::U16 => Self::U16,
+            VoxelKind::F32 => Self::F32,
         }
     }
 }
@@ -549,6 +564,60 @@ impl Volume {
     pub fn is_complete(&self) -> bool {
         self.present_count() == self.dims[2]
     }
+
+    /// Brick coordinates whose slices have all landed, x fastest.
+    ///
+    /// That order is [`BrickGrid::index_of`]. A brick whose z range includes
+    /// an absent slice is left out. Uploading it would invent zeros the study
+    /// does not contain. The renderer does not read [`SlicePresence`].
+    pub fn ready_bricks(&self) -> Vec<[u32; 3]> {
+        let grid = self.brick_grid();
+        let [gx, gy, gz] = grid.grid;
+        let mut ready = Vec::new();
+        let mut z = 0u32;
+        while z < gz {
+            let mut y = 0u32;
+            while y < gy {
+                let mut x = 0u32;
+                while x < gx {
+                    let brick = [x, y, z];
+                    if brick_is_ready(&grid, &self.present, brick) {
+                        ready.push(brick);
+                    }
+                    x += 1;
+                }
+                y += 1;
+            }
+            z += 1;
+        }
+        ready
+    }
+}
+
+/// Every slice of `brick` has landed, and the brick has a real extent.
+fn brick_is_ready(grid: &BrickGrid, present: &SlicePresence, brick: [u32; 3]) -> bool {
+    let Ok(origin) = grid.origin_of(brick) else {
+        return false;
+    };
+    let Ok(extent) = grid.extent_of(brick) else {
+        return false;
+    };
+    let [ex, ey, ez] = extent;
+    if ex == 0 || ey == 0 || ez == 0 {
+        return false;
+    }
+    let [_, _, oz] = origin;
+    let Some(end) = oz.checked_add(ez) else {
+        return false;
+    };
+    let mut slice = oz;
+    while slice < end {
+        if !present.test(slice) {
+            return false;
+        }
+        slice += 1;
+    }
+    true
 }
 
 impl Budgeted for Volume {

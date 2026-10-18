@@ -1,6 +1,6 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-044
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044
 **Last updated:** 2026-10-18
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
@@ -148,6 +148,30 @@ still runs with no device. It is CSS size times device pixel ratio, rounded
 half away from zero per axis, then saturated to `u32`. A strictly positive
 CSS axis that rounds to 0 becomes 1. Non-finite inputs and a ratio that is
 not strictly positive are refused. The function touches no GPU.
+
+**Bricks upload at true extent.** `upload_brick` copies one `Brick` into a
+`TextureDimension::D3` texture. The format is `R8Uint` for `U8`, `R16Uint`
+for `U16`, `R16Sint` for `I16`, and `R32Float` for `F32`. `Unorm` is not a
+candidate. A format other than that mapping is `FormatUnavailable`, and no
+second format is tried. Tier C returns `Unavailable` before a format is named
+and before a texture is created, and the host brick is given back. An axis of
+0 is `EmptyExtent`. An axis longer than `max_texture_dimension_3d`, or a row
+whose byte count does not fit in `u32`, is `ExtentUnavailable`. The pinned
+tier B floor for that limit is 256. A brick edge of 128 fits. A longer volume
+axis is more bricks. `bytes_per_row` is the brick width times the sample
+width. The texture extent is the brick extent. An edge brick is not padded
+to a cube. The accepted buffer length is the voxel count times the sample
+width. Any other length is `WrongLength` and returns before `create_texture`.
+
+**`brick_uploads` counts brick uploads, not window changes.** A successful
+upload increments it by one and replaces any texture already held for that
+`BrickKey`. `set_voi` writes the thirty-two uniform bytes and does not
+increment `brick_uploads`, `uploads`, or `lut_uploads`. `install_recovered`
+drops the brick textures and does not increment the counter. Phase 1 keeps
+every uploaded texture. There is no byte-budget eviction of those textures.
+Frustum selection, LOD, the indirection texture and prefetch are HLD section
+30 and are not built. The host brick is not inserted into `BrickCache` after
+a successful copy.
 
 ## Tiers
 

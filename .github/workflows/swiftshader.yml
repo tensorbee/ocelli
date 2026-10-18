@@ -1,0 +1,33 @@
+name: SwiftShader
+
+# F-X002 layer 3. Nightly or by hand. Not a pull-request job and not a gate
+# in `bin/ocelli.sh`. This is the run that speaks for a GPU-less browser
+# session. It is not lavapipe and it is not the oracle.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
+
+jobs:
+  swiftshader:
+    name: Headless Chrome
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: wasm-pack 0.15.0
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - name: Playwright Chromium
+        working-directory: tools/oracle
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+      - name: SwiftShader session
+        run: node tools/swiftshader/run.mjs

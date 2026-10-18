@@ -12,6 +12,9 @@
 //! height 1, created when a preset or a palette is selected. `set_voi` does
 //! not upload that texture either. `lut_uploads` counts the colour upload.
 //! `uploads` stays the stored-sample counter.
+//! **F-043 (E6.7, S14) uploads each ready brick** as a 3D texture at the
+//! brick's own sample format and true extent. `set_voi` does not upload
+//! those textures. `brick_uploads` counts them.
 //! **F-039 (E6.3, S13) attaches a surface** from the same `wgpu::Instance`
 //! the adapter was opened on, and sizes the backing store with
 //! [`extent::device_extent`].
@@ -49,6 +52,7 @@
 //! needs `std`. That is part of deviation D-10 and it is recorded there rather
 //! than left as an unexplained absence.
 
+pub mod brick_upload;
 pub mod caps;
 pub mod colour;
 pub mod extent;
@@ -58,6 +62,7 @@ pub mod probe;
 pub mod tier_b;
 pub mod voi;
 
+pub use brick_upload::{BrickPlan, BrickUploadError, brick_bytes_match, brick_format, brick_plan};
 pub use caps::{
     AdapterFacts, Caps, DecidedBy, FailedAdapter, FillRate, FillRateBands, OverrideOutcome,
     ProbeOutcome, Resolution, SimdSupport, SoftwareVerdict, Tier, TierEvidence, TierRequest,
