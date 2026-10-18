@@ -17,7 +17,8 @@
  *
  * F-021 publishes the bounded DICOMweb client and response sink API below.
  * F-035 publishes the section 24 handoff from `bulk.ts`.
- * F-100 and F-101 own the later session-facing viewer and wasm boundary APIs.
+ * F-100 publishes the viewport, scene and tool types from `viewport.ts`.
+ * F-101 still owns the live wasm command channel and event ring.
  */
 
 export {
@@ -76,6 +77,32 @@ export {
   sharedMemoryAvailable,
   wasmSimd128Supported,
 } from "./capabilities.js";
+
+export {
+  CAMERA_COMPONENTS,
+  COLORMAPS,
+  INVERT,
+  STACK_COMMANDS,
+  TIER_AVAILABILITY,
+  TIER_C_DRAWING,
+  VIEWPORT_STATE_FIELDS,
+  VOI_FUNCTIONS,
+  WINDOW_PRESETS,
+  viewportId,
+} from "./viewport.js";
+export type {
+  Camera,
+  Colormap,
+  Invert,
+  Scene,
+  StackCommand,
+  StackViewport,
+  TierAvailability,
+  ToolBinding,
+  ViewportId,
+  VoiFunction,
+  WindowPreset,
+} from "./viewport.js";
 
 /** Package version, kept in step with the crate versions by `/release`. */
 export const VERSION = "0.1.0";

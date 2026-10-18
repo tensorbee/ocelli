@@ -1,6 +1,6 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100
 **Last updated:** 2026-10-18
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
@@ -14,8 +14,9 @@ What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
 `@ocelli/react` remains a scaffold. `@ocelli/core` now also publishes F-021's
 bounded DICOMweb transport and one-write response-sink contract, and F-035's
-decode-to-render handoff. F-100 still owns the session-facing public viewer
-API and F-101 still owns its live wasm boundary.
+decode-to-render handoff. F-100 publishes `viewport.ts`, which is the
+viewport, scene and tool types and not the wasm boundary. F-101 still owns
+that boundary.
 
 ### What is in the `@ocelli/core` tarball today
 
@@ -34,6 +35,7 @@ F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
 | `panic.ts` | `readPanicRecord`, and the panic record's layout |
 | `fatal.ts` | `CoreStatus` and the never-returns-to-ok latch |
 | `capabilities.ts` | The shell-side probes `wasmSimd128Supported` and `sharedMemoryAvailable`, and the committed SIMD module they validate |
+| `viewport.ts` | F-100's viewport, scene and tool types. No wasm call and no pixels |
 
 `docs/lld/errors.md` specifies `errors.ts`, `panic.ts` and `fatal.ts`, and
 `docs/lld/tier-resolution.md` specifies `capabilities.ts`. What belongs to

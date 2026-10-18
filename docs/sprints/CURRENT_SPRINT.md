@@ -13,7 +13,7 @@ tool surface.
 | F-046 | E7.2 | Window/level, VOI presets, invert, colormap | Rust+TS | 3w | pending |
 | F-047 | E7.3 | Stack scroll, prefetch strategy, image sequencing | Rust+TS | 3w | pending |
 | F-049 | E7.5 | Calibration, spacing and gantry-tilt correction | Rust+TS | 2w | pending |
-| F-100 | E16.1 | API design: viewport, scene and tool surface, documented | TS | 4w | pending |
+| F-100 | E16.1 | API design: viewport, scene and tool surface, documented | TS | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.

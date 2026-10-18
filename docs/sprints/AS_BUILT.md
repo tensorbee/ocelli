@@ -3500,3 +3500,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/tier-resolution.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** None.
 **Notes for future sessions.** Three review passes converged 1/0, 0/0, 0/0. The first defect was that the layer-record tests never called `main`, so a missing file that exited 0 stayed green and the workflow would skip the probe. The floor then failed lint because the SwiftShader script's node and browser names were not globals. The block names the same four the tier B probe names, and it sets no rule. The local lavapipe probe exited 2. That is not a drop. `ci/lavapipe-layer.json` stays absent until a real ubuntu-latest failure is the recorded drop. Layer 2 is not a GPU-less browser session.
+
+## F-100, API design: viewport, scene and tool surface, documented, completed 2026-10-18
+
+**What was built.** `@ocelli/core` names the scene, the stack viewport and the eleven stack commands. A scene is an ordered list of viewport ids and holds no pixels and no device. `StackViewport` carries the sixteen camera numbers, window centre, window width, the VOI function, the slice index and length, a colormap, an optional preset and an explicit invert shape. Drawing availability is `available`, `degraded` or `unavailable`. Tier C drawing is `unavailable`. Nothing in this module calls wasm.
+
+**HLD sections implemented.** `docs/hld/02-standing-decisions.md` section 2.1, `docs/hld/07-concurrency-and-typescript.md` section 10, `docs/hld/04-boundary-and-data-path.md` section 5, and `docs/hld/14-the-boundary-in-code.md` sections 17.1, 17.3 and 17.4. The wire is documented and not built. F-101 owns the copy.
+**Deviations.** None.
+**Crates / packages modified.** `packages/core`.
+**Tests added.** Six unit tests in `packages/core/src/viewport.test.ts`. The publication list in `packages/core/src/index.test.ts` names the new runtime exports.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path.
+**Tier coverage.** A: n/a. This story does not draw. B: n/a. C: n/a for code. The documented drawing answer is unavailable until F-X003.
+**LLD updated.** `docs/lld/public-api.md`, `docs/lld/typescript-packaging.md`, and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The approved plan named drawing availability `full` or `unavailable`. The published values are `available`, `degraded` and `unavailable`, the three states in `docs/lld/feature-availability.md`. The plan word `full` is published as `available`. Tier C drawing stays `unavailable`. This story declares no drawing fallback. `ViewportId` is a branded number minted by `viewportId`. `Invert` is `identity` or `inverse`.
+**Notes for future sessions.** Three review passes converged 2/3, 0/0, 0/0. Pass 1 left the publication test red and said F-045, F-046 and F-047 already wrote the readback. Pass 2 was clean apart from the padding field transcribed as `pad`. Pass 3 reviewed the correction to `_pad`. F-101 still owns the live command channel. `packages/react` stays a scaffold.

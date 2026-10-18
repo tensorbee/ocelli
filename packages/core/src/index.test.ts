@@ -20,7 +20,9 @@ import { coreAvailable, VERSION } from "./index.js";
  * Only value exports are observable here. The type-only exports (`BulkSink`,
  * `WasmMemory`, `HandoffMeta`, `FrameMessage`, `DrainResult`, `OcelliEvent`,
  * `OcelliRecord`, `RecordOperands`, `PanicMemory`, `PanicRecord`,
- * `CoreStatus`) are erased
+ * `CoreStatus`, `Camera`, `Colormap`, `Invert`, `Scene`, `StackCommand`,
+ * `StackViewport`, `TierAvailability`, `ToolBinding`, `ViewportId`,
+ * `VoiFunction`, `WindowPreset`) are erased
  * before this runs, and `npx tsc` is what watches those.
  *
  * Adding an export is a deliberate act, so adding a line here is the cost of
@@ -65,6 +67,17 @@ const PUBLISHED: readonly string[] = [
   "moduleValidates",
   "sharedMemoryAvailable",
   "wasmSimd128Supported",
+  // ./viewport.js, HLD 17.4 and the stack command set
+  "CAMERA_COMPONENTS",
+  "COLORMAPS",
+  "INVERT",
+  "STACK_COMMANDS",
+  "TIER_AVAILABILITY",
+  "TIER_C_DRAWING",
+  "VIEWPORT_STATE_FIELDS",
+  "VOI_FUNCTIONS",
+  "WINDOW_PRESETS",
+  "viewportId",
   // this file
   "VERSION",
   "coreAvailable",

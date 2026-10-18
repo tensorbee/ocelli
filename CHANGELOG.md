@@ -330,3 +330,7 @@ Repository bootstrap. Nothing is published.
   not print a pass. Headless Chrome with SwiftShader is the nightly run, and
   it passes only when the renderer string contains SwiftShader and the tier
   is C.
+- Viewport, scene and tool types in `@ocelli/core`. The eleven stack
+  commands, the section 17.4 readback fields, and drawing availability of
+  `available`, `degraded` or `unavailable` are named here. The wasm command
+  channel is still unbuilt.
