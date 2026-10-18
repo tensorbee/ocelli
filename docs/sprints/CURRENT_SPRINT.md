@@ -1,19 +1,17 @@
-# Current sprint, S15
+# Current sprint, S16
 
 **Milestone**: M4, the public API, the boundary, and the stack viewport.
-**Branch**: `sprint/s15`
+**Branch**: `sprint/s16`
 **Opened**: 2026-10-18
-**Goal**: Show one series in a stack viewport, window it and scroll it, correct
-spacing from the measured geometry, and write down the viewport, scene and
-tool surface.
+**Goal**: Distinguish canvas, world and index, open the command channel and
+the polled event ring, and raster the stack on the CPU from the one LUT
+chain, with the settled frame as the one a tier bound is measured on.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-045 | E7.1 | Stack viewport: display, fit, pan, zoom, rotate, flip | Rust+TS | 4w | done |
-| F-046 | E7.2 | Window/level, VOI presets, invert, colormap | Rust+TS | 3w | done |
-| F-047 | E7.3 | Stack scroll, prefetch strategy, image sequencing | Rust+TS | 3w | done |
-| F-049 | E7.5 | Calibration, spacing and gantry-tilt correction | Rust+TS | 2w | done |
-| F-100 | E16.1 | API design: viewport, scene and tool surface, documented | TS | 4w | done |
+| F-048 | E7.4 | Coordinate transforms: canvas / world / index | Rust+TS | 3w | pending |
+| F-101 | E16.2 | wasm boundary: command channel, event ring buffer, state readback | TS | 5w | pending |
+| F-X003 | X1.3 | CPU raster for the stack viewport, progressive refinement, and the tier A against C bound | Rust+TS | 6w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -23,44 +21,55 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S15 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S16 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S14 closed M3. Brick upload is the path for every volume, and the two
-GPU-less runs exist. S15 is the first sprint of M4. A stack viewport shows
-one frame, windows it and scrolls it. The spacing on that view comes from
-the geometry F-020 measured. F-100 writes the viewport, scene and tool
-surface as a new API.
+S15 closed the first sprint of M4. A stack viewport shows one frame, windows
+it, scrolls it in stored order, and places it with measured spacing. F-100
+documents the viewport, scene and tool surface as a new API. S16 continues
+M4. F-048 keeps canvas points, world points and indices from being
+interchangeable. F-101 builds the three channels across the wasm boundary.
+F-X003 draws that same stack on the CPU from the LUT chain that already
+exists, and the frame a measurement uses is the settled one.
 
 M4 runs from S15 through S17. The plan calls this the Phase 1 credibility
 gate, because the three-channel boundary is real and a stack viewport diffs
 clean against cornerstone3D. Opening the sprint does not make that diff
 exist. The oracle still has no Ocelli renderer to compare a full viewer
-against. Decision D7 holds.
-
-Closing M3 did not publish. The cadence names 0.3.0 for that milestone.
-D-22 still refuses the release check. This open publishes nothing.
+against. Decision D7 holds. Closing S15 did not complete M4, and this open
+publishes nothing.
 
 ## What is carried in
 
+- **S15 left a stack camera, a presentation, stored-order scroll, and a
+  measured placement.** Fit, pan, zoom, rotate and flip do not rewrite
+  stored samples. Scroll does not display a neighbour. `apply_placement`
+  stores displayed spacing and the measured index shift and does not draw.
+  It does not read the gantry tilt tag. F-048 and F-X003 extend that view.
+  They do not replace it with a second mapping.
+- **The command channel was left for this sprint.** F-100 names the public
+  surface. `coreAvailable` still returns false. TypeScript does not hold a
+  second camera matrix. The command names F-100 wrote stay.
+- **Two accepted nitpicks stay.** F-045 did not drive a negative image
+  coordinate from the GPU tests. F-046 left `PresentationError::Unavailable`
+  in place. Neither is scheduled here.
 - **An open finding against `ocelli-pixel`'s own arithmetic**, recorded in
   `docs/lld/pixel-pipeline.md` by F-041 and **not scheduled**. A legal
   `LINEAR` chain returns a value outside its declared output range at one
   input per window, identically on CPU and GPU, because PS3.3 C.11.2.1.2's
   formula in `f32` does not reproduce its own breakpoint. It has no F-ID.
-  F-046 drives the existing window uniform. Clamping the finding so a
-  readback matches is a tolerance change.
+  Clamping the finding so a readback matches is a tolerance change. F-X003
+  reuses that chain and does not paper over the finding.
 - **Tier B greyscale has been drawn.** F-042 ran the section 18.3 rows on
   this host through headless Chromium WebGL2 and matched `LutChain::map_into`
   within 0.001, format `R32Float`. A tier B colour LUT readback was not run.
-  That comparison is not one of these five stories. The ignored native
-  `Backends::GL` test found no adapter on this host, and that miss is not a
-  tier B pass.
-- **The wasm size budget records 1,999,061 bytes.** The S14 sprint gate
-  measured the product module at 2,011,491 bytes, inside the 5 percent
-  ceiling. The budget file was not moved. `bearing_on_gate_A4` in
+  The ignored native `Backends::GL` test found no adapter on this host, and
+  that miss is not a tier B pass.
+- **The wasm size budget records 1,999,061 bytes.** F-045 recorded a release
+  module of 2,012,345 bytes against that baseline, inside the ceiling of
+  2,099,014. The budget file was not moved by S15. `bearing_on_gate_A4` in
   `ci/wasm-size-budget.json` says this number does not close A4, and cold
   start was not remeasured. The 2.3 ms figure belongs to the 16,388-byte
   module from F-006.
@@ -69,76 +78,75 @@ D-22 still refuses the release check. This open publishes nothing.
   mechanism behind it. Found by S11's sprint review, outside that sprint's
   diff, and carrying no F-ID. The write is the only hit in
   `scripts/sprint_workflow.py`.
-- **M3 is complete and its release was not taken.** The cadence names 0.3.0.
-  The workspace version is still 0.1.0. M1 was never published, and M2's
-  release is still due. `/release` step 5 runs
+- **M3 is complete and its release was not taken. M4 is not complete.** The
+  cadence names 0.3.0 for M3. The workspace version is still 0.1.0. M1 was
+  never published, and M2's release is still due. `/release` step 5 runs
   `python3 scripts/pin_and_size_check.py --require-redistribution`, and that
   command refuses while `openjph-core` 0.1.0 carries no BSD notice material,
   which is D-22. None of that blocks a story here. All of it blocks
-  publication.
-- **M3 added no measured duration.** Every M3 row in `SPRINT_TRACKER.md`
-  reads `not measured`. The capacity points remain the S03 and S06 closes,
-  and this close does not invent a ratio from them.
+  publication. No release is due at this open.
+- **No new measured duration.** Every M3 row in `SPRINT_TRACKER.md` reads
+  `not measured`, and the S15 rows do too. The capacity points remain the
+  S03 and S06 closes. This open does not invent a ratio and does not
+  recalculate capacity.
 - **F-X011** remains pending because its evidence needs a second physical
   machine. **ICC** is still unimplemented, the other half of HLD section 18's
   stage-4 row. The multi-component JPEG-LS corpus row exists.
   Multi-component JPEG-LS decoding is still owed.
 - **The oracle has no Ocelli renderer to compare a full viewer against.**
-  F-X021 writes the candidate record and depends on F-012 and F-052. It is
-  not this sprint. Decision D7 holds.
+  F-049 ran the oracle over the reference half and that run is not a viewer
+  comparison. F-X021 writes the candidate record and depends on F-012 and
+  F-052. It is not this sprint. Decision D7 holds.
 
 ## The defect class this sprint is exposed to
 
-**A view transform that rewrites samples or mixes spaces.** Fit, pan, zoom,
-rotate and flip change how the frame is drawn. They do not rewrite stored
-samples. HLD section 16 makes canvas points, world points and voxel indices
-different types, because cornerstone's `number[]` mixes them. F-048, in S16,
-owns those transforms. F-045 must not add a second point type as a bare
-number list, and a canvas pan is not a patient-space translation.
+**Mixing canvas, world and index.** HLD section 16 makes those three
+different types, because a bare number list mixes them. A canvas pan is not
+a patient translation. There is no half-voxel offset. `PixelSpacing::new`
+takes row millimetres then column millimetres. `View::set_spacing` takes
+column millimetres then row millimetres. F-048 owns the conversions. F-X003
+places the same frame on the CPU and must use that mapping. A second formula
+is the quietly wrong pixel.
 
-**A window applied twice.** The LUT chain already lives in `ocelli-pixel`
-and in the thirty-two-byte uniform. F-046 drives that uniform. Windowing a
-`Display` value, or uploading the frame or the bricks again when the window
-changes, is the quietly wrong pixel. A chain driven by a VOI LUT sequence
-stays unavailable rather than being replaced by the linear values the
-sequence overrode.
+**Pixels crossing the boundary, or an event delivered per callback.**
+Decisions D2, D3 and D4. Three channels and nothing else. Typed commands go
+down. Raw bytes go down into linear memory. Events come up through a ring
+drained once per frame. `wasm-bindgen` stays in `ocelli-wasm`. Decision D1
+already refuses a cornerstone-shaped drop-in, and F-100 wrote that surface.
+F-101 builds the channels. It does not reshape the cornerstone event
+catalogue. That catalogue is F-103.
 
-**A prefetched frame shown as the current one.** Scroll selects the frame
-on screen. Prefetch fills the image cache F-032 already has. The neighbour
-that arrived early is not the frame the index names.
-
-**Shear taken from the gantry tilt tag.** F-020 measures stack shear from
-the image positions and keeps calibrated spacing distinct from uncalibrated
-spacing. `docs/lld/volumes.md` does not read the gantry tilt tag. F-049
-applies that geometry. Reading the tag as the shear, or treating imager
-pixel spacing as patient millimetres, is the defect.
-
-**A cornerstone-shaped surface.** Decision D1 is a new API. F-100 documents
-the viewport, scene and tool surface. A drop-in shim is the rejected
-alternative. The command channel and the event ring are F-101 in S16, and
-this sprint does not build them.
+**A second LUT, or a refining frame presented as settled.** HLD section 18
+says the arithmetic exists once, in `ocelli-pixel`. The CPU path reuses that
+implementation. It does not reimplement the chain and it does not run the
+shader as a second copy. Tier C must not quietly produce a different image.
+Reduced resolution applies during a window or level drag or a scroll. Full
+resolution returns on settle. The settled frame is what the tier A against C
+bound is measured on. An interaction frame is not that frame. The user must
+be able to tell the two apart, because a measurement taken from a frame that
+is still refining is the defect.
 
 ## What done means
 
-- **F-045** displays one frame of a stack on the surface F-039 acquired.
-  Fit, pan, zoom, rotate and flip change the view and do not rewrite stored
-  samples. Coordinate transforms are F-048. Camera and presentation-state
-  serialisation are F-050. The CPU raster of this viewport is F-X003. A tier
-  that cannot draw the view reports unavailable and does not substitute
-  another image.
-- **F-046** changes window, level, invert and colormap through the existing
-  LUT uniform and the colour table F-044 uploads. A window change writes
-  thirty-two bytes and does not upload the frame or the bricks again. The
-  chain runs once. A preset does not add a second arithmetic.
-- **F-047** scrolls the stack in its stored order. Prefetch uses the image
-  cache and does not display a frame the scroll index did not select.
-  Volume brick prefetch in HLD section 30 is not this story.
-- **F-049** corrects the stack view with the spacing and the measured shear
-  F-020 already produced. The gantry tilt tag is not the shear. Calibrated
-  and uncalibrated spacing stay distinct. Volume assembly is not rebuilt
-  here.
-- **F-100** documents the viewport, scene and tool surface as a new API. It
-  does not implement the wasm command channel or the event ring.
+- **F-048** converts between canvas, world and index through one mapping.
+  The three stay non-interchangeable. A canvas pan is not a patient
+  translation. There is no half-voxel offset. Spacing follows the argument
+  order of the type that already stores it. Camera and presentation-state
+  serialisation are F-050. This story does not upload pixels and does not
+  add a second point type as a bare number list.
+- **F-101** sends typed commands down, copies raw bytes into linear memory
+  down, and drains the event ring once per frame. Pixels do not cross.
+  There is no JS callback per event. State readback returns the declared
+  state and not a pixel buffer. `wasm-bindgen` appears only in
+  `ocelli-wasm`. Framework bindings are F-102. The reshaped event catalogue
+  is F-103. Type generation from Rust definitions is F-104.
+- **F-X003** rasters the stack viewport on the CPU with the LUT chain in
+  `ocelli-pixel`. A window or level drag, or a scroll, may draw a reduced
+  resolution, and settle draws the full frame. The settled frame is the one
+  the tier A against C bound uses. A refining frame is visibly not settled.
+  A tier that cannot draw reports unavailable. Inner loops may use wasm
+  SIMD128, and the no-SIMD runtime is measured separately. Interactive cost
+  and idle cost are reported separately. CPU MPR is F-X004.
 - **Every story declares all three tier rows**, and "n/a" is a real answer
   that an omitted row is not.
 - `wasm-bindgen` remains confined to `ocelli-wasm`, pixels do not cross the
@@ -147,18 +155,17 @@ this sprint does not build them.
 
 ## Dependency order and the shared resources
 
-F-045 depends on F-039. F-046 depends on F-041. F-047 depends on F-032.
-F-049 depends on F-020. F-100 depends on nothing. All four of those
-dependencies are `done`. No story in this sprint depends on another story
-in this sprint, so no story begins blocked.
+F-048 depends on F-045. F-101 depends on F-100. F-X003 depends on F-029,
+F-045 and F-X001. All of those dependencies are `done`. No story in this
+sprint depends on another story in this sprint, so no story begins blocked.
 
-F-048 in S16 depends on F-045. F-101 in S16 depends on F-100. F-X003 in S16
-depends on F-045. None of those three is in this sprint.
+F-050 in S17 depends on F-048. F-102 and F-103 in S17 depend on F-101.
+F-X004 depends on F-X003 and is not this sprint.
 
-**One viewport, and the GPU.** F-045, F-046, F-047 and F-049 share the
-stack viewport's source, its shader bindings and any device test. F-100
-names the surface those four must not each invent. The designs land before
-any of them is implemented.
+**One mapping, one LUT chain, and one boundary.** F-048 and F-X003 both
+place and draw one stack frame, so they share the canvas, world and index
+mapping and the LUT chain in `ocelli-pixel`. F-101 is the only crossing
+those two may use. The designs land before any of them is implemented.
 
 ## Standing expectations
 
