@@ -343,3 +343,6 @@ Repository bootstrap. Nothing is published.
   width pairs. A preset does not replace a modality or VOI LUT sequence.
   Invert sets an explicit presentation shape. A window change does not
   change the colormap.
+- Stack scroll in stored frame order. Prefetch names the neighbour below
+  and the neighbour above. A missing selected frame returns no samples.
+  Probing whether a neighbour is resident does not refresh it.

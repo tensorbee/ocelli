@@ -21,7 +21,10 @@ glam.workspace = true
 # F-046. Presets call `VoiTransform::new` and rebuild `LutChain`. This crate
 # does not take wgpu and does not depend on ocelli-render.
 ocelli-pixel = { path = "../ocelli-pixel" }
+# F-047. Scroll reads the decoded LRU. It does not build a second cache.
+ocelli-cache = { path = "../ocelli-cache" }
 
 [dev-dependencies]
 ocelli-core = { path = "../ocelli-core" }
+ocelli-cache = { path = "../ocelli-cache" }
 ocelli-pixel = { path = "../ocelli-pixel" }

@@ -1,6 +1,6 @@
 # Viewport
 
-**F-IDs that contributed:** F-045, F-046
+**F-IDs that contributed:** F-045, F-046, F-047
 **Last updated:** 2026-10-18
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
@@ -88,7 +88,27 @@ Tier A and tier B consume the rebuilt chain through the existing VOI uniform.
 Tier C runs the same `LutChain`. Drawing on tier C stays unavailable. A
 colormap on tier C indexes the same preset bytes, after `map_into`.
 
+## Scroll
+
+`StackSequence` holds `FrameKey` values in the order the caller stored them.
+It does not read image position, instance number or slice location.
+`scroll_by` adds a signed delta and clamps to the list. It does not wrap.
+An empty sequence has no index. `samples_for_upload` calls `ImageCache::get`
+for the selected key only. A miss is `NotResident` and returns no neighbour
+bytes. An empty sequence is `Empty`.
+
+Prefetch radius is one. `prefetch_keys` is the index minus one and the index
+plus one, when those indices exist. It does not decode and it does not
+upload. `ImageCache::contains` is the probe that does not refresh a
+neighbour. A prefetch insert does not set `Dirty.slice`. This module does
+not edit the render graph.
+
+Tier A and tier B upload the selected samples through the existing stored
+texture path. This module does not draw. Tier C selects from the host
+cache. Drawing stays unavailable.
+
 ## What this file does not own
 
-Slice scroll is F-047. The measured index shift is F-049. The TypeScript
-names are F-100. This crate does not depend on wgpu.
+The measured index shift is F-049. The TypeScript names are F-100. This
+crate does not depend on wgpu. Volume brick prefetch in HLD section 30 is
+not this module.

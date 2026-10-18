@@ -1071,6 +1071,7 @@ name = "ocelli-viewport"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "ocelli-cache",
  "ocelli-core",
  "ocelli-pixel",
 ]

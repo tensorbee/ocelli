@@ -11,7 +11,7 @@ tool surface.
 |------|----------|-------|-------|-----|--------|
 | F-045 | E7.1 | Stack viewport: display, fit, pan, zoom, rotate, flip | Rust+TS | 4w | done |
 | F-046 | E7.2 | Window/level, VOI presets, invert, colormap | Rust+TS | 3w | done |
-| F-047 | E7.3 | Stack scroll, prefetch strategy, image sequencing | Rust+TS | 3w | pending |
+| F-047 | E7.3 | Stack scroll, prefetch strategy, image sequencing | Rust+TS | 3w | done |
 | F-049 | E7.5 | Calibration, spacing and gantry-tilt correction | Rust+TS | 2w | pending |
 | F-100 | E16.1 | API design: viewport, scene and tool surface, documented | TS | 4w | done |
 
