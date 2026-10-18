@@ -90,9 +90,11 @@ Admission, eviction and pressure are `Lru`'s, on the decoded tier.
 ## Tiers A, B and C
 
 Not applicable for A and B. The volume is host memory and this crate creates
-no device. Tier B's 3D texture limit of 256 is enforced by the brick upload
-in `ocelli-render`, not by this crate. Tier C assembles the same volume,
-because there is no device path to diverge from.
+no device. The brick upload in `ocelli-render` refuses an axis longer than
+the device's reported 3D limit. The pinned tier B floor for that limit is
+256, which is the size a brick edge of 128 is guaranteed to fit. This crate
+does not clamp the reported limit and does not apply the check. Tier C
+assembles the same volume, because there is no device path to diverge from.
 
 ## What this does not do
 
