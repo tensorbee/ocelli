@@ -15,8 +15,9 @@
 //! uploads a colour LUT into a separate `Rgba8Unorm` texture of height 1.
 //! F-043 uploads each ready brick as its own 3D texture at the brick's true
 //! extent. `set_voi` does not upload that texture either. `brick_uploads`
-//! counts the brick upload. The oracle still has no Ocelli frame to judge.
-//! Decision D7 stays open.
+//! counts the brick upload. F-045 writes the sixteen camera floats at group 0
+//! binding 2. `set_view` does not write the VOI uniform. The oracle still has
+//! no Ocelli frame to judge. Decision D7 stays open.
 
 use ocelli_cache::{Brick, BrickKey};
 use ocelli_pixel::LutChain;
@@ -252,6 +253,12 @@ pub const STORED_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 /// Colour table format. Height 1. Not a stored-sample candidate.
 const COLOUR_LUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
+/// Column-major identity. Registration writes this, so a viewport that never
+/// calls `set_view` samples the fragment coordinate unchanged.
+const IDENTITY_CAMERA: [f32; 16] = [
+    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+];
+
 /// Extent of the `R32Float` texture created for one viewport's stored samples.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Upload {
@@ -421,10 +428,11 @@ pub enum UploadError {
 /// The fragment entry appended to `VOI_WGSL` at module build.
 ///
 /// Group 0 binding 0 is section 18.4's and stays reserved by `voi.wgsl`.
-/// Group 0 binding 1 is the colour-table address. Group 1 binding 0 is the
-/// caller's stored-value texture. Group 1 binding 1 is the `Rgba8Unorm`
-/// colour table. Both textures are read with `textureLoad`. No sampler
-/// state decides anything and no compute or storage buffer appears.
+/// Group 0 binding 1 is the colour-table address. Group 0 binding 2 is the
+/// column-major camera matrix. Group 1 binding 0 is the caller's
+/// stored-value texture. Group 1 binding 1 is the `Rgba8Unorm` colour table.
+/// Both textures are read with `textureLoad`. No sampler state decides
+/// anything and no compute or storage buffer appears.
 ///
 /// `colour.mode` 2 indexes the table by the stored sample and does not call
 /// `lut_chain`. `colour.mode` 1 calls `lut_chain` and indexes by that display
@@ -439,6 +447,7 @@ struct ColourParams {
 };
 
 @group(0) @binding(1) var<uniform> colour : ColourParams;
+@group(0) @binding(2) var<uniform> camera : mat4x4<f32>;
 @group(1) @binding(0) var stored_tex : texture_2d<f32>;
 @group(1) @binding(1) var colour_lut : texture_2d<f32>;
 
@@ -468,7 +477,14 @@ fn vs_main(@builtin(vertex_index) index : u32) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
-    let texel = vec2<i32>(i32(at.x), i32(at.y));
+    let mapped = camera * vec4<f32>(at.x, at.y, 0.0, 1.0);
+    let dims = textureDimensions(stored_tex);
+    // A negative coordinate has to be rejected before `i32` truncation.
+    // Truncation toward zero would otherwise select texel 0.
+    if (mapped.x < 0.0 || mapped.y < 0.0 || mapped.x >= f32(dims.x) || mapped.y >= f32(dims.y)) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    let texel = vec2<i32>(i32(mapped.x), i32(mapped.y));
     let stored = textureLoad(stored_tex, texel, 0).r;
     if (colour.mode == 2u) {
         let index = table_index(stored - f32(colour.origin), colour.last);
@@ -521,6 +537,8 @@ struct SlotState {
     stored_format: Option<wgpu::TextureFormat>,
     /// The colour table selected for this viewport. Absent until a selection.
     colour: Option<HeldColour>,
+    /// Column-major camera. Identity until `set_view`.
+    camera: [f32; 16],
 }
 
 /// The stored-sample texture one viewport owns.
@@ -544,6 +562,7 @@ struct GpuSlot {
     source: wgpu::TextureView,
     uniform: wgpu::Buffer,
     colour_uniform: wgpu::Buffer,
+    camera: wgpu::Buffer,
     colour_texture: wgpu::Texture,
     bind_uniform: wgpu::BindGroup,
     bind_source: wgpu::BindGroup,
@@ -571,6 +590,7 @@ impl Registry {
                     stored: None,
                     stored_format: None,
                     colour: None,
+                    camera: IDENTITY_CAMERA,
                 });
                 return Ok(ViewportId(
                     u32::try_from(index).map_err(|_| GraphError::CapacityExhausted)?,
@@ -736,6 +756,49 @@ impl RenderGraph {
         self.bricks.uploads()
     }
 
+    /// Dirt flags for a registered viewport.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::UnknownViewport`] for an id this graph never issued.
+    pub fn dirty(&self, id: ViewportId) -> Result<Dirty, GraphError> {
+        self.slot_state(id).map(|state| state.dirty)
+    }
+
+    /// The sixteen camera floats last stored for this viewport.
+    ///
+    /// Registration stores the identity. [`RenderGraph::set_view`] replaces
+    /// them. The shader reads the same bytes from group 0 binding 2.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::UnknownViewport`] for an id this graph never issued.
+    pub fn camera(&self, id: ViewportId) -> Result<[f32; 16], GraphError> {
+        self.slot_state(id).map(|state| state.camera)
+    }
+
+    /// The VOI uniform a stack viewport will draw with.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::UnknownViewport`] for an id this graph never issued.
+    /// [`GraphError::PassHasNoUniform`] for a pass with no VOI uniform.
+    pub fn voi_params(&self, id: ViewportId) -> Result<VoiParams, GraphError> {
+        let state = self.slot_state(id)?;
+        if !matches!(state.pass, Pass::Stack(_)) {
+            return Err(GraphError::PassHasNoUniform);
+        }
+        Ok(voi_of(&state.pass))
+    }
+
+    fn slot_state(&self, id: ViewportId) -> Result<&SlotState, GraphError> {
+        self.registry
+            .states
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .ok_or(GraphError::UnknownViewport)
+    }
+
     /// The 3D texture held for `key`, when an upload has been accepted and
     /// not dropped by a restore.
     pub fn brick_texture(&self, key: &BrickKey) -> Option<&wgpu::Texture> {
@@ -828,7 +891,7 @@ impl RenderGraph {
         };
         let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ocelli graph uniform"),
-            entries: &[uniform_binding(0), uniform_binding(1)],
+            entries: &[uniform_binding(0), uniform_binding(1), uniform_binding(2)],
         });
         // `textureLoad` has no sampler. A non-filterable float binding accepts
         // the stored float formats and `Rgba8Unorm`.
@@ -909,7 +972,7 @@ impl RenderGraph {
     ) -> Result<ViewportId, GraphError> {
         let voi = voi_of(&pass);
         let id = self.registry.register(pass)?;
-        let slot = self.create_gpu_slot(ctx, target, source, voi, None, None);
+        let slot = self.create_gpu_slot(ctx, target, source, (voi, IDENTITY_CAMERA), None, None);
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -965,7 +1028,14 @@ impl RenderGraph {
             height: upload.height(),
             format,
         };
-        let slot = self.create_gpu_slot(ctx, target, view, voi, Some(stored), None);
+        let slot = self.create_gpu_slot(
+            ctx,
+            target,
+            view,
+            (voi, IDENTITY_CAMERA),
+            Some(stored),
+            None,
+        );
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -980,10 +1050,11 @@ impl RenderGraph {
         ctx: &GpuContext,
         target: wgpu::TextureView,
         source: wgpu::TextureView,
-        voi: VoiParams,
+        uniforms: (VoiParams, [f32; 16]),
         stored: Option<StoredTexture>,
         colour: Option<HeldColour>,
     ) -> GpuSlot {
+        let (voi, camera) = uniforms;
         let device = ctx.device();
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ocelli graph voi"),
@@ -997,6 +1068,11 @@ impl RenderGraph {
         let colour_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ocelli graph colour"),
             contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ocelli graph camera"),
+            contents: bytemuck::cast_slice(&camera),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let colour_texture = colour_texture_for(device, ctx.queue(), colour.as_ref());
@@ -1013,6 +1089,10 @@ impl RenderGraph {
                     binding: 1,
                     resource: colour_uniform.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: camera_buffer.as_entire_binding(),
+                },
             ],
         });
         let bind_source = self.bind_source_group(device, &source, &colour_view);
@@ -1021,6 +1101,7 @@ impl RenderGraph {
             source,
             uniform,
             colour_uniform,
+            camera: camera_buffer,
             colour_texture,
             bind_uniform,
             bind_source,
@@ -1198,7 +1279,7 @@ impl RenderGraph {
         target: wgpu::TextureView,
         source: wgpu::TextureView,
     ) -> Result<(), GraphError> {
-        let (voi, colour) = {
+        let (voi, camera, colour) = {
             let state = self
                 .registry
                 .states
@@ -1208,9 +1289,9 @@ impl RenderGraph {
             if state.stored.is_some() {
                 return Err(GraphError::StoredNeedsRebind);
             }
-            (voi_of(&state.pass), state.colour.clone())
+            (voi_of(&state.pass), state.camera, state.colour.clone())
         };
-        let slot = self.create_gpu_slot(ctx, target, source, voi, None, colour);
+        let slot = self.create_gpu_slot(ctx, target, source, (voi, camera), None, colour);
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1243,7 +1324,7 @@ impl RenderGraph {
         id: ViewportId,
         target: wgpu::TextureView,
     ) -> Result<(), UploadError> {
-        let (upload, voi, format, colour) = {
+        let (upload, voi, camera, format, colour) = {
             let state = self
                 .registry
                 .states
@@ -1252,7 +1333,13 @@ impl RenderGraph {
                 .ok_or(UploadError::UnknownViewport)?;
             let upload = state.stored.ok_or(UploadError::NotStored)?;
             let format = state.stored_format.ok_or(UploadError::FormatUnavailable)?;
-            (upload, voi_of(&state.pass), format, state.colour.clone())
+            (
+                upload,
+                voi_of(&state.pass),
+                state.camera,
+                format,
+                state.colour.clone(),
+            )
         };
         let features = adapter.wgpu_adapter().get_texture_format_features(format);
         if !binding_available(features) {
@@ -1266,7 +1353,7 @@ impl RenderGraph {
             height: upload.height(),
             format,
         };
-        let slot = self.create_gpu_slot(ctx, target, view, voi, Some(stored), colour);
+        let slot = self.create_gpu_slot(ctx, target, view, (voi, camera), Some(stored), colour);
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1356,6 +1443,64 @@ impl RenderGraph {
                 stack.voi = params;
             }
             state.dirty.voi = true;
+        }
+        Ok(())
+    }
+
+    /// Write the sixteen camera floats and mark the camera dirty.
+    ///
+    /// The bytes are HLD section 17.4's `camera` field, column-major. This
+    /// writes the 64-byte uniform at group 0 binding 2. It does not write
+    /// the VOI uniform, the colour uniform, the stored texture or a brick,
+    /// and it does not increment [`RenderGraph::uploads`],
+    /// [`RenderGraph::lut_uploads`] or [`RenderGraph::brick_uploads`].
+    ///
+    /// Validation follows [`RenderGraph::set_voi`]: an unknown id, then a
+    /// pass with no stack uniform, then a viewport whose GPU objects have
+    /// not been recreated.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::UnknownViewport`] for an id this graph never issued.
+    /// [`GraphError::PassHasNoUniform`] for a registered pass that is not a
+    /// stack. [`GraphError::ViewportNotRebound`] when a rebuild has not yet
+    /// recreated the slot.
+    pub fn set_view(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        camera: [f32; 16],
+    ) -> Result<(), GraphError> {
+        let is_stack = {
+            let state = self
+                .registry
+                .states
+                .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+                .and_then(Option::as_ref)
+                .ok_or(GraphError::UnknownViewport)?;
+            matches!(state.pass, Pass::Stack(_))
+        };
+        if !is_stack {
+            return Err(GraphError::PassHasNoUniform);
+        }
+        if self
+            .gpu
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .is_none()
+        {
+            return Err(GraphError::ViewportNotRebound);
+        }
+        let slot = self
+            .gpu
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .ok_or(GraphError::ViewportNotRebound)?;
+        ctx.queue()
+            .write_buffer(&slot.camera, 0, bytemuck::cast_slice(&camera));
+        if let Some(state) = self.registry.state_mut(id) {
+            state.camera = camera;
+            state.dirty.camera = true;
         }
         Ok(())
     }
@@ -1626,8 +1771,8 @@ impl RenderGraph {
         // uniform buffers, both bind groups, the stored-sample texture, the
         // colour table texture and the caller's views as bound.
         // They are dropped here, not carried into a pass on the new device.
-        // The registry keeps each pass, its last uniform values, the stored
-        // extent and the colour table bytes. The caller re-supplies a
+        // The registry keeps each pass, its last uniform values, the camera
+        // floats, the stored extent and the colour table bytes. The caller re-supplies a
         // caller-owned source through `rebind`, or recreates an owned texture
         // through `rebind_stored`. Either restore writes the colour bytes
         // again and does not increment `lut_uploads`.

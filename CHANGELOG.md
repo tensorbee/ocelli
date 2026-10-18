@@ -334,3 +334,7 @@ Repository bootstrap. Nothing is published.
   commands, the section 17.4 readback fields, and drawing availability of
   `available`, `degraded` or `unavailable` are named here. The wasm command
   channel is still unbuilt.
+- A stack camera. Fit, pan, zoom, rotation and flip compose about the image
+  centre on a y-down canvas. `set_view` uploads the sixteen column-major
+  floats and does not rewrite the window uniform. A fragment outside the
+  image is black.

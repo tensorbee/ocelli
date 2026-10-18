@@ -1,6 +1,6 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045
 **Last updated:** 2026-10-18
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
@@ -47,6 +47,18 @@ renders from. It does not increment `uploads` and it does not write the
 stored texture. Validation runs state first and the chain last, in the order
 `UnknownViewport`, `PassHasNoUniform`, `ViewportNotRebound`, then the chain's
 own answer.
+
+**The camera has one write route.** `set_view` writes sixteen column-major
+floats into the 64-byte uniform at group 0 binding 2 and sets `Dirty.camera`.
+It does not write the VOI uniform and it does not increment `uploads`,
+`lut_uploads` or `brick_uploads`. Registration stores the identity, so a
+viewport that never calls `set_view` samples the texel `i32` of the fragment
+position already selected. A fragment outside the stored texture is
+`(0, 0, 0, 1)` and does not run `lut_chain`. `mark_dirty` still accepts
+`camera`, because a resize sets that flag and keeps the stored matrix.
+Device-loss recovery drops the uniform and keeps the floats. `rebind` writes
+them into the new buffer. The matrix itself is `View::camera_matrix` in
+[viewport.md](viewport.md).
 
 **Stored samples upload with `write_texture`.** `register_stored` asks
 `adapter.get_texture_format_features` for `R32Float`, then `Rg32Float`, then
