@@ -346,3 +346,7 @@ Repository bootstrap. Nothing is published.
 - Stack scroll in stored frame order. Prefetch names the neighbour below
   and the neighbour above. A missing selected frame returns no samples.
   Probing whether a neighbour is resident does not refresh it.
+- Measured spacing and index shift on the stack view. The shift is the
+  displayed frame placed on the reference image position, in the
+  displayed frame's pixel size. A zero spacing contributes no shift.
+  Gantry tilt is not read as the shear.

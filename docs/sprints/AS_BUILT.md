@@ -3564,3 +3564,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/viewport.md`, `docs/lld/cache.md`, and their rows in `docs/lld/README.md`.
 **Deviations from the design plan.** `usize::from(u32)` is not implemented, so `key_at` uses `usize::try_from`. On this host and on wasm32 that conversion succeeds for every `u32`. It can fail only on a 16-bit `usize`. A stored index already fits that `usize` because the list length does. A length above `u32::MAX` makes `scroll_by` a no-op. This is not an HLD departure.
 **Notes for future sessions.** One review pass, 0 defects, 0 smells, 0 nitpicks. Returning a neighbour on a miss failed `a_miss_returns_no_neighbour_bytes` at `tests/scroll.rs:74`. Making `contains` call `get` evicted the wrong key. Both mutations were restored. `Lru::get` ticks on a miss and does not change eviction order of live keys. Oracle was not run for this story. F-049 calls `set_spacing` and `set_index_shift` and does not edit `view.rs`.
+
+## F-049, measured spacing and index shift, completed 2026-10-18
+
+**What was built.** `frame_shift` places the displayed image position on a plane whose origin is the reference image position and whose orientation, spacing and dimensions are the displayed frame's. It reads `ImagePlane::index_to_world` and the inverse. The column shift is inverse `x` and the row shift is inverse `y`. A normal component is not a canvas translation. A zero spacing contributes `0`. The unit extension that keeps the matrix invertible is not a pixel size. `apply_placement` stores the displayed column and row millimetres and those shifts. The reference is the first stored frame, passed by the caller. This story does not sort by image position, does not read gantry tilt, and does not edit the camera formula.
+
+**HLD sections implemented.** HLD section 16, the image plane already implemented by `ImagePlane::index_to_world`. PS3.3 C.7.6.2.1.1. Section 13's display-calibration trait is not this story.
+**Deviations.** none
+**Crates / packages modified.** `crates/ocelli-viewport`, `docs/lld/viewport.md`, `docs/lld/README.md`.
+**Tests added.** Eight integration tests in `crates/ocelli-viewport/tests/placement.rs`.
+**Fixture provenance.** Hand computed from PS3.3 C.7.6.2.1.1. Column index `1 / 0.5 = 2`. Row index `4 / 2 = 2`. A swapped spacing is `0.5` and `8`. Displayed `z = 5` stays `(2, 2)`. A 3 mm offset on a zero column spacing expects column shift `0`, not the unit-extension index `3`. The 2 by 2 fit into an 8 by 8 canvas is the existing physical-size result, scale `2` and x offset `3`. No pixel samples.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time. `bin/ocelli.sh gate oracle` was also run on this code and was green: identity over 102 views, 29 mutations, 0 not detected. The feature trailer does not list that gate. This story does not draw.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path.
+**Tier coverage.** A: full for the shift, because it is inside the camera matrix F-045 uploads. This story adds no wgpu call and did not redraw. B: the same matrix. C: the same two numbers and no device. Drawing stays unavailable.
+**LLD updated.** `docs/lld/viewport.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** Two review passes, 0 defects and 0 smells, 1 nitpick then 0. The nitpick was an opening sentence that said `frame_shift` stores the shift. Pass 2 saw the correction. Swapping the spacing failed the column assert with bits of `0.5` against `2`. Deleting the zero-column guard returned `3`. Removing `set_index_shift` made canvas x `0.5` against `1.5`. `view.rs` and `graph.rs` were not edited. Oracle was run and was not part of the feature profile.

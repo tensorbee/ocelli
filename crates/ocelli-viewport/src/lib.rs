@@ -3,12 +3,13 @@
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
 //! F-045 fills the camera. F-046 fills presentation state. F-047 fills
-//! stack scroll.
+//! stack scroll. F-049 fills measured spacing and the index shift.
 
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
 
+pub mod placement;
 pub mod presentation;
 pub mod scroll;
 pub mod view;

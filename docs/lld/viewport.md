@@ -1,12 +1,14 @@
 # Viewport
 
-**F-IDs that contributed:** F-045, F-046, F-047
+**F-IDs that contributed:** F-045, F-046, F-047, F-049
 **Last updated:** 2026-10-18
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
 `RenderGraph::set_view` uploads the sixteen floats `View::camera_matrix`
 returns. `Presentation` in the same crate holds the LUT chain and the
-colormap. It does not draw either.
+colormap. It does not draw either. `apply_placement` stores the
+displayed spacing and the measured index shift on that view. It does
+not draw.
 
 ## The types
 
@@ -107,8 +109,32 @@ Tier A and tier B upload the selected samples through the existing stored
 texture path. This module does not draw. Tier C selects from the host
 cache. Drawing stays unavailable.
 
+## Placement
+
+`frame_shift` places the displayed frame on the reference image position.
+The reference is the first frame of the stored sequence. Image position
+does not reorder that sequence. Orientation, spacing and dimensions come
+from the displayed frame. The column shift is the inverse `x` of
+`ImagePlane::index_to_world`. The row shift is the inverse `y`. The `z`
+component is not a canvas translation.
+
+PS3.3 C.7.6.2.1.1 is that existing function. This module does not write a
+second dot product. A zero spacing on a singleton axis contributes no
+shift. The `1.0` that keeps the matrix invertible is not a pixel size.
+
+`apply_placement` stores the displayed column and row millimetres through
+`set_spacing`, and the two shifts through `set_index_shift`. Imager pixel
+spacing is not an argument. Gantry tilt is not an argument. A sheared
+stack still returns a shift, because the positions already carry it.
+`Volume::assemble` is not called.
+
+Tier A and tier B upload the shift inside the camera matrix F-045 already
+writes. This module does not draw and does not edit the render graph.
+Tier C computes the same two numbers. Drawing stays unavailable.
+
 ## What this file does not own
 
-The measured index shift is F-049. The TypeScript names are F-100. This
-crate does not depend on wgpu. Volume brick prefetch in HLD section 30 is
-not this module.
+The TypeScript names are F-100. This crate does not depend on wgpu.
+Volume assembly and measured shear stay in `docs/lld/volumes.md`. This
+module does not read them. Volume brick prefetch in HLD section 30 is
+not the scroll module.
