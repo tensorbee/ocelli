@@ -301,6 +301,14 @@ impl ResolvedAdapter {
         &self.resolution
     }
 
+    /// The retained adapter, so texture creation can ask format features.
+    ///
+    /// Crate-private. A public handle would let a caller open a second device,
+    /// which is the thing this type exists to keep in one place.
+    pub(crate) fn wgpu_adapter(&self) -> &wgpu::Adapter {
+        &self.adapter
+    }
+
     /// Open the session's one long-lived device.
     ///
     /// **This and the probe's are the only two `request_device` calls in the

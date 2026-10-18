@@ -5,7 +5,9 @@
 //! F-001 creates the crate. F-008 gives it the device-ownership contract.
 //! F-004 resolves the tier, **F-037 (E6.1, S11) creates the long-lived device
 //! and makes device loss an observable state**, and **F-038 (E6.2, S12) adds
-//! the render graph and frame scheduler in `graph`**.
+//! the render graph and frame scheduler in `graph`**. **F-040 (E6.4, S13)
+//! uploads stored samples** into an `R32Float` texture created at
+//! registration. `set_voi` does not upload that texture again.
 //!
 //! The device lifecycle is split the same way tier resolution is. `caps` holds
 //! the two decisions, [`caps::opens_a_device`] and [`caps::recovers_from`],
@@ -55,8 +57,8 @@ pub use gpu::{
     DeviceError, DeviceLoss, DeviceState, GpuContext, GraphResources, Recovered, SharedEncoder,
 };
 pub use graph::{
-    BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineKey, RenderGraph, SegPass,
-    StackPass, ViewportId, VolumePass,
+    BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineKey, RenderGraph,
+    STORED_FORMAT, SegPass, StackPass, Upload, UploadError, ViewportId, VolumePass,
 };
 pub use probe::{Edge, Passes, ResolvedAdapter, resolve, resolve_adapter};
 pub use voi::{VOI_WGSL, VoiParams, VoiParamsError};

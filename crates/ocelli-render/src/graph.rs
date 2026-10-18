@@ -4,16 +4,18 @@
 //! pipeline it will use at creation, encodes each dirty viewport once per
 //! frame into one command encoder, and submits that encoder exactly once.
 //!
-//! **No surface is acquired and no texture is uploaded.** Presentation is
-//! F-039 and upload is F-040. A viewport renders into a caller-supplied
-//! texture view, from a caller-supplied stored-value texture. The oracle
-//! still has no Ocelli frame to judge. Decision D7 stays open.
+//! **No surface is acquired.** Presentation is F-039. F-040 uploads stored
+//! samples with `write_texture` into an `R32Float` texture created at
+//! registration. A viewport that does not own one still renders from a
+//! caller-supplied view. The oracle still has no Ocelli frame to judge.
+//! Decision D7 stays open.
 
 use ocelli_pixel::LutChain;
 use wgpu::util::DeviceExt;
 
 use crate::caps::Tier;
 use crate::gpu::{GpuContext, Recovered};
+use crate::probe::ResolvedAdapter;
 use crate::voi::{VOI_WGSL, VoiParams, VoiParamsError};
 
 /// HLD section 22's pass enum, exactly as transcribed.
@@ -202,6 +204,119 @@ pub enum GraphError {
     /// A viewport registered but not yet rebound after a device rebuild.
     #[error("this viewport is registered but has no GPU objects on this device, rebind it first")]
     ViewportNotRebound,
+    /// `rebind` was called on a viewport that owns a stored-sample texture.
+    #[error("this viewport owns a stored-sample texture, rebind it with rebind_stored")]
+    StoredNeedsRebind,
+}
+
+/// The only format stored samples are uploaded as.
+///
+/// A device that cannot sample it reports [`UploadError::FormatUnavailable`].
+/// `Rgba8Unorm` is not a substitute, because quantising the samples would be
+/// a different number.
+pub const STORED_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
+
+/// Extent of the `R32Float` texture created for one viewport's stored samples.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Upload {
+    width: u32,
+    height: u32,
+}
+
+impl Upload {
+    /// Decide an `R32Float` upload from adapter format features.
+    ///
+    /// `features` is what `get_texture_format_features` returned for
+    /// [`STORED_FORMAT`]. `TEXTURE_BINDING` or `COPY_DST` absent is
+    /// [`UploadError::FormatUnavailable`]. No other format is selected.
+    pub fn stored(
+        features: wgpu::TextureFormatFeatures,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, UploadError> {
+        let upload = Self::from_extent(width, height)?;
+        if !binding_available(features) {
+            return Err(UploadError::FormatUnavailable);
+        }
+        Ok(upload)
+    }
+
+    fn from_extent(width: u32, height: u32) -> Result<Self, UploadError> {
+        if width == 0 || height == 0 {
+            return Err(UploadError::EmptyExtent);
+        }
+        if width.checked_mul(4).is_none() {
+            return Err(UploadError::ExtentOverflow);
+        }
+        let width_us = usize::try_from(width).map_err(|_| UploadError::ExtentOverflow)?;
+        let height_us = usize::try_from(height).map_err(|_| UploadError::ExtentOverflow)?;
+        if width_us.checked_mul(height_us).is_none() {
+            return Err(UploadError::ExtentOverflow);
+        }
+        Ok(Self { width, height })
+    }
+
+    /// Width in texels.
+    pub const fn width(self) -> u32 {
+        self.width
+    }
+
+    /// Height in texels.
+    pub const fn height(self) -> u32 {
+        self.height
+    }
+
+    /// Whether `samples` is exactly one stored value per texel.
+    ///
+    /// A refusal means nothing is uploaded. The check does not write.
+    pub fn accepts(self, samples: &[f32]) -> Result<(), UploadError> {
+        let width = usize::try_from(self.width).map_err(|_| UploadError::ExtentOverflow)?;
+        let height = usize::try_from(self.height).map_err(|_| UploadError::ExtentOverflow)?;
+        let expected = width
+            .checked_mul(height)
+            .ok_or(UploadError::ExtentOverflow)?;
+        if samples.len() == expected {
+            Ok(())
+        } else {
+            Err(UploadError::WrongLength)
+        }
+    }
+}
+
+fn binding_available(features: wgpu::TextureFormatFeatures) -> bool {
+    let needed = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
+    features.allowed_usages.contains(needed)
+}
+
+/// Why a stored-sample upload did not write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum UploadError {
+    /// `R32Float` cannot be sampled or filled, and no other format is used.
+    #[error(
+        "R32Float cannot be sampled or written on this adapter, and no other format is substituted"
+    )]
+    FormatUnavailable,
+    /// `samples.len()` is not `width * height`. Nothing was written.
+    #[error("stored sample length is not width times height, so nothing was uploaded")]
+    WrongLength,
+    /// A viewport id this graph never issued.
+    #[error("viewport id was never registered with this graph")]
+    UnknownViewport,
+    /// The viewport was registered with a caller-supplied source view.
+    #[error("this viewport has no stored-sample texture")]
+    NotStored,
+    /// GPU objects were dropped and have not been recreated.
+    #[error("this viewport is registered but has no GPU objects on this device, rebind it first")]
+    NotRebound,
+    /// Width or height is zero, so there is no texture to create.
+    #[error("a stored texture extent is empty")]
+    EmptyExtent,
+    /// Width times height does not fit in the copy dimensions.
+    #[error("a stored texture extent does not fit the copy")]
+    ExtentOverflow,
+    /// Registration beyond the capacity fixed at creation.
+    #[error("viewport registration beyond the capacity fixed at graph creation")]
+    CapacityExhausted,
 }
 
 /// The fragment entry appended to `VOI_WGSL` at module build.
@@ -239,6 +354,15 @@ fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
 struct SlotState {
     dirty: Dirty,
     pass: Pass,
+    /// Extent of the owned stored texture, remembered across a device rebuild.
+    stored: Option<Upload>,
+}
+
+/// The `R32Float` texture F-040 owns for one viewport.
+struct StoredTexture {
+    texture: wgpu::Texture,
+    width: u32,
+    height: u32,
 }
 
 /// One registered viewport's GPU resources, created at registration.
@@ -247,6 +371,7 @@ struct GpuSlot {
     uniform: wgpu::Buffer,
     bind_uniform: wgpu::BindGroup,
     bind_source: wgpu::BindGroup,
+    stored: Option<StoredTexture>,
 }
 
 /// The pure registration and dirty registry, sized at creation.
@@ -267,6 +392,7 @@ impl Registry {
                 *slot = Some(SlotState {
                     dirty: Dirty::full(),
                     pass,
+                    stored: None,
                 });
                 return Ok(ViewportId(
                     u32::try_from(index).map_err(|_| GraphError::CapacityExhausted)?,
@@ -314,6 +440,8 @@ pub struct RenderGraph {
     format: wgpu::TextureFormat,
     tier: Tier,
     submissions: u64,
+    /// Successful `upload_stored` calls. `set_voi` does not touch this.
+    uploads: u64,
 }
 
 /// The one pass and blend this story gives a shader body. `compile` builds
@@ -338,6 +466,15 @@ impl RenderGraph {
     /// viewport would count its viewports instead of one.
     pub fn submissions(&self) -> u64 {
         self.submissions
+    }
+
+    /// How many stored-sample uploads have been written.
+    ///
+    /// One per successful [`RenderGraph::upload_stored`]. [`RenderGraph::set_voi`]
+    /// does not increment it, which is the observable half of "a window change
+    /// is thirty-two bytes, not a texture upload".
+    pub fn uploads(&self) -> u64 {
+        self.uploads
     }
 
     /// Create a graph over a live context, compiling its pipelines before it
@@ -371,6 +508,7 @@ impl RenderGraph {
             format,
             tier,
             submissions: 0,
+            uploads: 0,
         })
     }
 
@@ -474,21 +612,63 @@ impl RenderGraph {
         source: wgpu::TextureView,
         pass: Pass,
     ) -> Result<ViewportId, GraphError> {
-        let voi = match &pass {
-            Pass::Stack(stack) => stack.voi,
-            _ => VoiParams {
-                center: 0.0,
-                width: 1.0,
-                slope: 1.0,
-                intercept: 0.0,
-                ymin: 0.0,
-                ymax: 255.0,
-                fn_kind: 0,
-                invert: 0,
-            },
-        };
+        let voi = voi_of(&pass);
         let id = self.registry.register(pass)?;
-        let slot = self.create_gpu_slot(ctx, target, source, voi);
+        let slot = self.create_gpu_slot(ctx, target, &source, voi, None);
+        if let Some(held) = self
+            .gpu
+            .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
+        {
+            *held = Some(slot);
+        }
+        Ok(id)
+    }
+
+    /// Register `pass` into `target` and create its `R32Float` stored texture.
+    ///
+    /// The texture is created here, at registration, after
+    /// `adapter.get_texture_format_features` for [`STORED_FORMAT`]. A missing
+    /// `TEXTURE_BINDING` or `COPY_DST` returns
+    /// [`UploadError::FormatUnavailable`] and does not substitute another
+    /// format. The slot starts fully dirty. Nothing is copied yet, so
+    /// [`RenderGraph::uploads`] stays put.
+    ///
+    /// # Errors
+    ///
+    /// [`UploadError::FormatUnavailable`] when the format cannot be sampled
+    /// and written. [`UploadError::EmptyExtent`] or
+    /// [`UploadError::ExtentOverflow`] for an extent that cannot be a texture.
+    /// [`UploadError::CapacityExhausted`] beyond the capacity fixed at
+    /// creation, changing no existing slot.
+    pub fn register_stored(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        target: wgpu::TextureView,
+        width: u32,
+        height: u32,
+        pass: Pass,
+    ) -> Result<ViewportId, UploadError> {
+        let features = adapter
+            .wgpu_adapter()
+            .get_texture_format_features(STORED_FORMAT);
+        let upload = Upload::stored(features, width, height)?;
+        let voi = voi_of(&pass);
+        let id = self
+            .registry
+            .register(pass)
+            .map_err(|_| UploadError::CapacityExhausted)?;
+        if let Some(state) = self.registry.state_mut(id) {
+            state.stored = Some(upload);
+        }
+        let texture = create_stored_texture(ctx.device(), upload);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let stored = StoredTexture {
+            texture,
+            width: upload.width(),
+            height: upload.height(),
+        };
+        let slot = self.create_gpu_slot(ctx, target, &view, voi, Some(stored));
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -502,8 +682,9 @@ impl RenderGraph {
         &self,
         ctx: &GpuContext,
         target: wgpu::TextureView,
-        source: wgpu::TextureView,
+        source: &wgpu::TextureView,
         voi: VoiParams,
+        stored: Option<StoredTexture>,
     ) -> GpuSlot {
         let device = ctx.device();
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -519,20 +700,29 @@ impl RenderGraph {
                 resource: uniform.as_entire_binding(),
             }],
         });
-        let bind_source = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("ocelli graph source"),
-            layout: &self.source_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&source),
-            }],
-        });
+        let bind_source = self.bind_source_group(device, source);
         GpuSlot {
             target,
             uniform,
             bind_uniform,
             bind_source,
+            stored,
         }
+    }
+
+    fn bind_source_group(
+        &self,
+        device: &wgpu::Device,
+        source: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ocelli graph source"),
+            layout: &self.source_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(source),
+            }],
+        })
     }
 
     /// Release a viewport, clearing its slot for re-registration.
@@ -564,6 +754,8 @@ impl RenderGraph {
     /// # Errors
     ///
     /// [`GraphError::UnknownViewport`] for an unregistered id.
+    /// [`GraphError::StoredNeedsRebind`] when the viewport owns a stored
+    /// texture, which [`RenderGraph::rebind_stored`] recreates.
     pub fn rebind(
         &mut self,
         ctx: &GpuContext,
@@ -578,21 +770,64 @@ impl RenderGraph {
                 .get(usize::try_from(id.0).unwrap_or(usize::MAX))
                 .and_then(Option::as_ref)
                 .ok_or(GraphError::UnknownViewport)?;
-            match state.pass {
-                Pass::Stack(stack) => stack.voi,
-                _ => VoiParams {
-                    center: 0.0,
-                    width: 1.0,
-                    slope: 1.0,
-                    intercept: 0.0,
-                    ymin: 0.0,
-                    ymax: 255.0,
-                    fn_kind: 0,
-                    invert: 0,
-                },
+            if state.stored.is_some() {
+                return Err(GraphError::StoredNeedsRebind);
             }
+            voi_of(&state.pass)
         };
-        let slot = self.create_gpu_slot(ctx, target, source, voi);
+        let slot = self.create_gpu_slot(ctx, target, &source, voi, None);
+        if let Some(held) = self
+            .gpu
+            .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
+        {
+            *held = Some(slot);
+        }
+        Ok(())
+    }
+
+    /// Recreate the stored texture after a device rebuild.
+    ///
+    /// `install_recovered` dropped the texture with the rest of the slot. This
+    /// creates it again at the extent registration recorded and does not
+    /// increment [`RenderGraph::uploads`]. The caller then uploads samples.
+    ///
+    /// # Errors
+    ///
+    /// [`UploadError::UnknownViewport`] for an id this graph never issued.
+    /// [`UploadError::NotStored`] when the viewport has no owned texture.
+    /// [`UploadError::FormatUnavailable`] when `R32Float` can no longer be
+    /// sampled or written, in which case the slot stays empty.
+    pub fn rebind_stored(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        id: ViewportId,
+        target: wgpu::TextureView,
+    ) -> Result<(), UploadError> {
+        let (upload, voi) = {
+            let state = self
+                .registry
+                .states
+                .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+                .and_then(Option::as_ref)
+                .ok_or(UploadError::UnknownViewport)?;
+            let upload = state.stored.ok_or(UploadError::NotStored)?;
+            (upload, voi_of(&state.pass))
+        };
+        let features = adapter
+            .wgpu_adapter()
+            .get_texture_format_features(STORED_FORMAT);
+        if !binding_available(features) {
+            return Err(UploadError::FormatUnavailable);
+        }
+        let texture = create_stored_texture(ctx.device(), upload);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let stored = StoredTexture {
+            texture,
+            width: upload.width(),
+            height: upload.height(),
+        };
+        let slot = self.create_gpu_slot(ctx, target, &view, voi, Some(stored));
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -626,6 +861,8 @@ impl RenderGraph {
     ///
     /// This is the only route that sets the VOI flag, so a window change
     /// cannot update bytes without scheduling the frame that shows them.
+    /// It does not increment [`RenderGraph::uploads`] and it does not write
+    /// the stored texture.
     ///
     /// Validation runs state first and the chain last, so the answer names
     /// the first thing that is wrong in the order a caller can act on it.
@@ -683,6 +920,118 @@ impl RenderGraph {
         Ok(())
     }
 
+    /// Copy stored samples into the viewport's texture with `queue.write_texture`.
+    ///
+    /// `samples` are stored values, one per texel, not windowed values. The
+    /// length must be `width * height`. A wrong length returns before the copy
+    /// and before [`RenderGraph::uploads`] changes. A matching extent reuses
+    /// the texture. A different extent replaces it at this call, after asking
+    /// the adapter for [`STORED_FORMAT`] features again. The copy uses
+    /// `bytemuck::cast_slice` on the caller slice and allocates no buffer.
+    /// `uploads` increments by one and `Dirty.data` is set. Samples are not
+    /// clamped.
+    ///
+    /// # Errors
+    ///
+    /// [`UploadError::UnknownViewport`] for an id this graph never issued.
+    /// [`UploadError::NotStored`] when the viewport has no owned texture.
+    /// [`UploadError::WrongLength`] when `samples` does not cover the extent,
+    /// in which case nothing is written. [`UploadError::NotRebound`] when a
+    /// rebuild has not yet recreated the slot. [`UploadError::FormatUnavailable`]
+    /// when a new extent cannot be sampled, in which case the old texture
+    /// stays.
+    pub fn upload_stored(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        id: ViewportId,
+        width: u32,
+        height: u32,
+        samples: &[f32],
+    ) -> Result<(), UploadError> {
+        let current = self.remembered(id)?;
+        let upload = Upload::from_extent(width, height)?;
+        upload.accepts(samples)?;
+        let slot_present = self
+            .gpu
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .is_some();
+        if !slot_present {
+            return Err(UploadError::NotRebound);
+        }
+        if current.width() != upload.width() || current.height() != upload.height() {
+            let features = adapter
+                .wgpu_adapter()
+                .get_texture_format_features(STORED_FORMAT);
+            if !binding_available(features) {
+                return Err(UploadError::FormatUnavailable);
+            }
+            self.replace_stored(ctx, id, upload)?;
+        }
+        self.write_slot(ctx, id, upload, samples)?;
+        self.uploads += 1;
+        if let Some(state) = self.registry.state_mut(id) {
+            state.stored = Some(upload);
+            state.dirty.data = true;
+        }
+        Ok(())
+    }
+
+    fn remembered(&self, id: ViewportId) -> Result<Upload, UploadError> {
+        match self
+            .registry
+            .states
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+        {
+            None => Err(UploadError::UnknownViewport),
+            Some(state) => state.stored.ok_or(UploadError::NotStored),
+        }
+    }
+
+    fn replace_stored(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        upload: Upload,
+    ) -> Result<(), UploadError> {
+        let texture = create_stored_texture(ctx.device(), upload);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_source = self.bind_source_group(ctx.device(), &view);
+        let slot = self
+            .gpu
+            .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_mut)
+            .ok_or(UploadError::NotRebound)?;
+        slot.bind_source = bind_source;
+        slot.stored = Some(StoredTexture {
+            texture,
+            width: upload.width(),
+            height: upload.height(),
+        });
+        Ok(())
+    }
+
+    fn write_slot(
+        &self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        upload: Upload,
+        samples: &[f32],
+    ) -> Result<(), UploadError> {
+        let slot = self
+            .gpu
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .ok_or(UploadError::NotRebound)?;
+        let stored = slot.stored.as_ref().ok_or(UploadError::NotStored)?;
+        if stored.width != upload.width() || stored.height != upload.height() {
+            return Err(UploadError::WrongLength);
+        }
+        write_stored_samples(ctx.queue(), &stored.texture, upload, samples)
+    }
+
     /// Reinstall the resources a recovery rebuilt, marking every viewport
     /// fully dirty because every GPU object the old device owned is gone.
     pub fn install_recovered(&mut self, ctx: &GpuContext, recovered: &Recovered) {
@@ -700,11 +1049,14 @@ impl RenderGraph {
         self.keys = keys;
         self.pipelines = pipelines;
         // Every per-viewport object was created on the dead device: the
-        // uniform buffers, both bind groups and the caller's views as bound.
+        // uniform buffers, both bind groups, the stored-sample texture and the
+        // caller's views as bound.
         // They are dropped here, not carried into a pass on the new device.
-        // The registry keeps each pass and its last uniform values, the
-        // caller re-supplies views through `rebind`, and a viewport with no
-        // rebound slot reports unavailable in the tick and keeps its dirt.
+        // The registry keeps each pass, its last uniform values and the stored
+        // extent. The caller re-supplies a caller-owned source through
+        // `rebind`, or recreates an owned texture through `rebind_stored`.
+        // A viewport with no rebound slot reports unavailable in the tick
+        // and keeps its dirt.
         for slot in self.gpu.iter_mut() {
             *slot = None;
         }
@@ -815,6 +1167,70 @@ impl RenderGraph {
             passes: encoded,
         }
     }
+}
+
+fn voi_of(pass: &Pass) -> VoiParams {
+    match pass {
+        Pass::Stack(stack) => stack.voi,
+        _ => VoiParams {
+            center: 0.0,
+            width: 1.0,
+            slope: 1.0,
+            intercept: 0.0,
+            ymin: 0.0,
+            ymax: 255.0,
+            fn_kind: 0,
+            invert: 0,
+        },
+    }
+}
+
+fn create_stored_texture(device: &wgpu::Device, upload: Upload) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("ocelli stored samples"),
+        size: wgpu::Extent3d {
+            width: upload.width(),
+            height: upload.height(),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: STORED_FORMAT,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
+fn write_stored_samples(
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    upload: Upload,
+    samples: &[f32],
+) -> Result<(), UploadError> {
+    let Some(bytes_per_row) = upload.width().checked_mul(4) else {
+        return Err(UploadError::ExtentOverflow);
+    };
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        bytemuck::cast_slice(samples),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(bytes_per_row),
+            rows_per_image: Some(upload.height()),
+        },
+        wgpu::Extent3d {
+            width: upload.width(),
+            height: upload.height(),
+            depth_or_array_layers: 1,
+        },
+    );
+    Ok(())
 }
 
 #[cfg(test)]
