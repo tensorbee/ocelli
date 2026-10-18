@@ -4,8 +4,8 @@
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1,
 `docs/hld/15-lut-chain.md` sections 18 through 18.3, DICOM PS3.3 C.7.6.2,
 C.7.6.3, C.7.9 and C.11
-**F-IDs that contributed:** F-018, F-029, F-030, F-041
-**Last updated:** 2026-09-15
+**F-IDs that contributed:** F-018, F-029, F-030, F-041, F-044
+**Last updated:** 2026-10-18
 
 Living current-state document. It describes what the code does today.
 
@@ -449,13 +449,35 @@ HLD section 18.4's `invert : u32`. Tier C uses the same implementation as its
 authoritative pixel path, entering it through `LutChain::map_into` and
 `ColorTransform::map_into`. There is no tier-specific arithmetic copy.
 
-The colour stage adds no shader, uniform or `#[repr(C)]` struct. HLD 18.4's
-uniform covers stages 1 to 3 and says nothing about colour, so a palette texture
-layout and a colour-matrix uniform belong to the rendering story that has a
-reader for them.
+The colour stage in this crate adds no shader and no uniform. HLD 18.4's
+uniform covers stages 1 to 3 and stays thirty-two bytes. F-044 keeps that
+uniform as the LUT decision, including `invert`, and puts the colour table in
+`ocelli-render`.
+
+A preset is indexed by the display value `LutChain::map_into` already
+returned. The lookup does not apply greyscale normalisation on top of the
+texel, and it does not run modality, VOI, photometric interpretation or a
+second YBR conversion of its own. A palette texel is one call to
+`ColorTransform::map_into` on the stored sample, baked once into the bytes
+the renderer uploads. The shader does not walk the descriptor and does not
+run `lut_chain` for a palette. When no colour LUT is bound, the output stays
+the greyscale normalisation.
+
+The index clamp is a table address. Values at or below 0 use the first texel.
+Values at or above the last texel use that texel. The clamp is not applied to
+the value `LutChain` returns. The greyscale path still emits the unclamped
+LINEAR value recorded above. ICC is unavailable and is not passed through as
+device RGB. A palette on a monochrome photometric interpretation is
+unavailable, matching `ColorTransform`'s refusal. A preset on a palette image
+is unavailable.
+
+Tier C uses the same table bytes. A preset indexes them after
+`LutChain::map_into`. A palette goes through `ColorTransform::map_into`.
+There is no second palette formula. A tier B colour comparison was not run.
 
 `bin/ocelli.sh gate native` proves native linkage and shared-crate wasm
 compilation. The focused `cargo check -p ocelli-pixel --all-targets --target
 wasm32-unknown-unknown` isolates the pixel crate's wasm compile proof.
-`bin/ocelli.sh gate wasm` builds `ocelli-wasm`, which does not currently depend
-on `ocelli-pixel`, so it neither compiles nor executes this crate.
+`bin/ocelli.sh gate wasm` builds `ocelli-wasm`. That crate depends on
+`ocelli-render`, and `ocelli-render` depends on this crate, so the build
+compiles `ocelli-pixel`. The gate does not execute this crate's tests.

@@ -1,6 +1,6 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-044
 **Last updated:** 2026-10-18
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
@@ -67,6 +67,43 @@ format the slot remembered.
 **`uploads` counts sample uploads, not window changes.** A new sample slice
 increments it by one and sets `Dirty.data`. `set_voi` leaves it unchanged.
 
+**`lut_uploads` counts colour-table selections, not window changes.**
+`select_colour_lut` creates an `Rgba8Unorm` texture of height 1 and fills it
+once with `write_texture`. That increments `lut_uploads` by one. `uploads`
+stays the stored-sample counter. `set_voi` still writes thirty-two bytes. It
+does not write the colour texture and it does not increment `lut_uploads`.
+A device-loss restore writes the remembered table again and does not
+increment `lut_uploads`. The placeholder texture created at registration is
+not a selection and is not counted.
+
+Two keys, and they are not interchangeable. A preset is indexed by the
+display value `lut_chain` already produced. The texel replaces greyscale
+normalisation. The section 18.4 uniform stays the LUT decision, including
+`invert`. A palette is indexed by the stored sample, per deviation D-23.
+Its texels are `ColorTransform::map_into`, copied once. The shader does not
+walk the descriptor and does not run `lut_chain` for a palette. When no
+colour LUT is bound, mode 0 keeps the greyscale normalisation, and that path
+still emits the unclamped LINEAR value.
+
+An out-of-range display index uses the table endpoints. That clamp is not
+applied to the value `lut_chain` returns before the lookup. Palette on a
+monochrome photometric interpretation is unavailable. A preset on a palette
+image is unavailable. ICC is unavailable and is not passed through as device
+RGB. `Rgba8Unorm` here is the colour table. It is still not a stored-sample
+format.
+
+Tier A, on this host's default adapter, read `grey` at display 40 back as
+RGB 40, 40, 40 and the `stops` texels at 0, 128 and 255. Stored samples 9
+and 10 read back the first palette entry and stored 11 read back the second.
+`set_voi` left both `lut_uploads` and `uploads` unchanged across those
+windows. With no colour LUT bound, the carried LINEAR finding read back
+above 255, within `0.001` of `297.5000305175781`. That check is the existing
+shader tolerance on an `Rgba32Float` value. It is not an 8-bit comparison
+with tier B. A tier B colour LUT readback was not run, so the plan's tier A
+against tier B failure condition was not measured. The ignored native GL
+test was run and found no adapter. That miss is not a tier B colour pass.
+The section 18.3 tier B run below is the greyscale path only.
+
 **Recovery drops per-viewport objects.** A bind group or buffer from a dead
 device cannot be bound on its replacement, so `install_recovered` drops
 every per-viewport slot, adopts the recovered tier, and marks every viewport
@@ -75,8 +112,8 @@ A viewport that owns a stored texture is recreated through `rebind_stored`
 at the extent the registry still holds, and that call does not increment
 `uploads`. Held frame textures are dropped before the surfaces they came
 from. The shell still holds the canvases and supplies them again through
-`bind_surface`. The registry keeps each pass, its last uniform values and the
-stored extent, so nothing but GPU objects is rebuilt.
+`bind_surface`. The registry keeps each pass, its last uniform values, the stored
+extent and the colour table bytes, so nothing but GPU objects is rebuilt.
 
 **A bound surface is the colour attachment for that tick.** `bind_surface`
 records the surface and its extent and sets the camera flag. It does not call
@@ -118,7 +155,7 @@ not strictly positive are refused. The function touches no GPU.
 |------|----------------|
 | A, WebGPU | Full, `R32Float` |
 | B, WebGL2 | `R32Float` when it can be sampled and copied. Otherwise `Rg32Float` or `Rgba32Float`. If none of the three qualify, unavailable. `Rgba8Unorm` is not used |
-| C, CPU | Unavailable. Tier C has no device and no texture. The CPU path remains `LutChain::map_into` |
+| C, CPU | Unavailable as a texture. No device. A preset indexes the same bytes after `LutChain::map_into`. A palette uses `ColorTransform::map_into`. |
 
 ## What this does not do
 

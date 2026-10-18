@@ -107,7 +107,7 @@ None. D-23 is applied as written. ICC stays unimplemented and reports unavailabl
 
 ## LLD impact
 
-`docs/lld/pixel-pipeline.md`, for the upload and the two keys. `docs/lld/render-graph.md`, for the LUT texture and the counter.
+`docs/lld/pixel-pipeline.md`, for the upload and the two keys. `docs/lld/render-graph.md`, for the LUT texture and the counter. `docs/lld/README.md`, because the index rows for those two files mirror their headers.
 
 ## Open questions
 

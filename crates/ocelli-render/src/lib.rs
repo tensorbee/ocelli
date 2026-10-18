@@ -8,6 +8,10 @@
 //! the render graph and frame scheduler in `graph`**. **F-040 (E6.4, S13)
 //! uploads stored samples** into an `R32Float` texture created at
 //! registration. `set_voi` does not upload that texture again.
+//! **F-044 (E6.8, S13) uploads a colour LUT** as an `Rgba8Unorm` texture of
+//! height 1, created when a preset or a palette is selected. `set_voi` does
+//! not upload that texture either. `lut_uploads` counts the colour upload.
+//! `uploads` stays the stored-sample counter.
 //! **F-039 (E6.3, S13) attaches a surface** from the same `wgpu::Instance`
 //! the adapter was opened on, and sizes the backing store with
 //! [`extent::device_extent`].
@@ -46,6 +50,7 @@
 //! than left as an unexplained absence.
 
 pub mod caps;
+pub mod colour;
 pub mod extent;
 pub mod gpu;
 pub mod graph;
@@ -58,6 +63,7 @@ pub use caps::{
     ProbeOutcome, Resolution, SimdSupport, SoftwareVerdict, Tier, TierEvidence, TierRequest,
     TierSignals, candidate_order, classify, compute_available, opens_a_device, recovers_from,
 };
+pub use colour::{ColourLut, ColourLutError, PresetId};
 pub use extent::{ExtentError, device_extent};
 pub use gpu::{
     DeviceError, DeviceLoss, DeviceState, GpuContext, GraphResources, Recovered, SharedEncoder,

@@ -290,6 +290,12 @@ Repository bootstrap. Nothing is published.
   the existing window shader, and a compute or storage request reports
   unavailable. On this host a headless Chromium WebGL2 context matched the
   CPU LUT chain within 0.001. The readback fence is not used as a fill rate.
+- A colour lookup and a two-table preset library. `grey` maps a display
+  value to the same value on each channel. `stops` is black, red and white
+  at indices 0, 128 and 255. A palette is indexed by the stored sample.
+  A window change writes the thirty-two-byte VOI uniform and does not
+  upload the table again. Palette on a monochrome image, a preset on a
+  palette image, and an ICC profile report unavailable.
 - The LUT chain's WGSL shader, evaluating DICOM PS3.3 C.11's first three stages
   from a thirty-two-byte uniform, so a window or level change writes those
   bytes and nothing else. The shader makes no LUT decision, because

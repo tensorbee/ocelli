@@ -11,13 +11,15 @@
 //! from F-038. F-040 uploads stored samples with `write_texture` into an
 //! `R32Float` texture created at registration. F-042 keeps that format when
 //! the adapter can sample it, and on tier B may store `Rg32Float` or
-//! `Rgba32Float` so `textureLoad` still returns the stored `f32`. The oracle
-//! still has no Ocelli frame to judge. Decision D7 stays open.
+//! `Rgba32Float` so `textureLoad` still returns the stored `f32`. F-044
+//! uploads a colour LUT into a separate `Rgba8Unorm` texture of height 1.
+//! The oracle still has no Ocelli frame to judge. Decision D7 stays open.
 
 use ocelli_pixel::LutChain;
 use wgpu::util::DeviceExt;
 
 use crate::caps::Tier;
+use crate::colour::{ColourLut, ColourParams};
 use crate::gpu::{GpuContext, Recovered, SurfaceError, first_render_attachment};
 use crate::probe::ResolvedAdapter;
 use crate::voi::{VOI_WGSL, VoiParams, VoiParamsError};
@@ -228,6 +230,9 @@ pub enum GraphError {
     /// `rebind` was called on a viewport that owns a stored-sample texture.
     #[error("this viewport owns a stored-sample texture, rebind it with rebind_stored")]
     StoredNeedsRebind,
+    /// `Rgba8Unorm` cannot be sampled and copied, or the table has no texels.
+    #[error("the colour LUT texture cannot be sampled and copied")]
+    ColourUnavailable,
 }
 
 /// Preferred stored-sample format. The constant stays `R32Float`.
@@ -238,6 +243,9 @@ pub enum GraphError {
 /// `Rg32Float` and, only if that also lacks those usages, `Rgba32Float`.
 /// `Rgba8Unorm` is not a candidate.
 pub const STORED_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
+
+/// Colour table format. Height 1. Not a stored-sample candidate.
+const COLOUR_LUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// Extent of the `R32Float` texture created for one viewport's stored samples.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -408,11 +416,43 @@ pub enum UploadError {
 /// The fragment entry appended to `VOI_WGSL` at module build.
 ///
 /// Group 0 binding 0 is section 18.4's and stays reserved by `voi.wgsl`.
-/// Group 1 binding 0 is the caller's stored-value texture, read with
-/// `textureLoad`, which is the tier B legal fragment path: no sampler state
-/// decides anything and no compute or storage buffer appears.
+/// Group 0 binding 1 is the colour-table address. Group 1 binding 0 is the
+/// caller's stored-value texture. Group 1 binding 1 is the `Rgba8Unorm`
+/// colour table. Both textures are read with `textureLoad`. No sampler
+/// state decides anything and no compute or storage buffer appears.
+///
+/// `colour.mode` 2 indexes the table by the stored sample and does not call
+/// `lut_chain`. `colour.mode` 1 calls `lut_chain` and indexes by that display
+/// value. Mode 0 is the greyscale normalisation, and it still emits the
+/// unclamped display value.
 const GRAPH_WGSL: &str = r"
+struct ColourParams {
+    mode : u32,
+    origin : i32,
+    last : u32,
+    pad : u32,
+};
+
+@group(0) @binding(1) var<uniform> colour : ColourParams;
 @group(1) @binding(0) var stored_tex : texture_2d<f32>;
+@group(1) @binding(1) var colour_lut : texture_2d<f32>;
+
+// Same address as `display_index` in `colour.rs`. The value is not modified.
+// A non-finite value uses texel 0. Values at or below 0 use texel 0.
+// Values at or above `last` use texel `last`. Anything between truncates
+// toward zero, which is WGSL's `i32(value)` on this range.
+fn table_index(value : f32, last : u32) -> i32 {
+    if ((value - value) != 0.0) {
+        return 0;
+    }
+    if (!(value > 0.0)) {
+        return 0;
+    }
+    if (value >= f32(last)) {
+        return i32(last);
+    }
+    return i32(value);
+}
 
 @vertex
 fn vs_main(@builtin(vertex_index) index : u32) -> @builtin(position) vec4<f32> {
@@ -425,11 +465,21 @@ fn vs_main(@builtin(vertex_index) index : u32) -> @builtin(position) vec4<f32> {
 fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
     let texel = vec2<i32>(i32(at.x), i32(at.y));
     let stored = textureLoad(stored_tex, texel, 0).r;
+    if (colour.mode == 2u) {
+        let index = table_index(stored - f32(colour.origin), colour.last);
+        return textureLoad(colour_lut, vec2<i32>(index, 0), 0);
+    }
     let display = lut_chain(stored);
+    if (colour.mode == 1u) {
+        let index = table_index(display, colour.last);
+        return textureLoad(colour_lut, vec2<i32>(index, 0), 0);
+    }
     // Normalise the display value into the colour target range. The full
     // declared output range maps to 0 to 1 whatever its magnitude, because
     // the target is a colour and the range is a value scale, and a zero range
     // has no normalisation, so it writes black rather than dividing by zero.
+    // This path does not clamp `display`. A LINEAR body outside `[ymin, ymax]`
+    // stays outside it.
     let range = voi.ymax - voi.ymin;
     let unit = select(0.0, (display - voi.ymin) / range, range > 0.0);
     return vec4<f32>(unit, unit, unit, 1.0);
@@ -445,6 +495,16 @@ pub fn tier_b_fragment_module() -> String {
     format!("{VOI_WGSL}{GRAPH_WGSL}")
 }
 
+/// Colour table bytes remembered across a device rebuild.
+///
+/// Restoring the texture does not increment `lut_uploads`. That counter
+/// counts a selection.
+#[derive(Clone)]
+struct HeldColour {
+    params: ColourParams,
+    bytes: Vec<u8>,
+}
+
 /// One registered viewport's decision state.
 struct SlotState {
     dirty: Dirty,
@@ -454,6 +514,8 @@ struct SlotState {
     /// The preserving format chosen for that texture. Absent when the
     /// viewport has no owned stored texture.
     stored_format: Option<wgpu::TextureFormat>,
+    /// The colour table selected for this viewport. Absent until a selection.
+    colour: Option<HeldColour>,
 }
 
 /// The stored-sample texture one viewport owns.
@@ -472,7 +534,12 @@ struct StoredTexture {
 /// One registered viewport's GPU resources, created at registration.
 struct GpuSlot {
     target: wgpu::TextureView,
+    /// The stored-sample view bound at group 1. Rebuilt when either texture
+    /// object changes. Caller-owned views have no texture beside this one.
+    source: wgpu::TextureView,
     uniform: wgpu::Buffer,
+    colour_uniform: wgpu::Buffer,
+    colour_texture: wgpu::Texture,
     bind_uniform: wgpu::BindGroup,
     bind_source: wgpu::BindGroup,
     stored: Option<StoredTexture>,
@@ -498,6 +565,7 @@ impl Registry {
                     pass,
                     stored: None,
                     stored_format: None,
+                    colour: None,
                 });
                 return Ok(ViewportId(
                     u32::try_from(index).map_err(|_| GraphError::CapacityExhausted)?,
@@ -575,6 +643,8 @@ pub struct RenderGraph {
     submissions: u64,
     /// Successful `upload_stored` calls. `set_voi` does not touch this.
     uploads: u64,
+    /// Successful `select_colour_lut` calls. `set_voi` does not touch this.
+    lut_uploads: u64,
 }
 
 /// The one pass and blend this story gives a shader body. `compile` builds
@@ -642,6 +712,15 @@ impl RenderGraph {
         self.uploads
     }
 
+    /// How many colour LUT uploads have been written.
+    ///
+    /// One per successful [`RenderGraph::select_colour_lut`].
+    /// [`RenderGraph::set_voi`] does not increment it, and neither does a
+    /// restore after device loss.
+    pub fn lut_uploads(&self) -> u64 {
+        self.lut_uploads
+    }
+
     /// The colour format the pipelines were compiled for.
     ///
     /// A surface whose first renderable format differs from this is refused
@@ -688,6 +767,7 @@ impl RenderGraph {
             tier,
             submissions: 0,
             uploads: 0,
+            lut_uploads: 0,
         })
     }
 
@@ -709,31 +789,35 @@ impl RenderGraph {
             label: Some("ocelli render graph"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
         });
+        let uniform_binding = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
         let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ocelli graph uniform"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
+            entries: &[uniform_binding(0), uniform_binding(1)],
         });
+        // `textureLoad` has no sampler. A non-filterable float binding accepts
+        // the stored float formats and `Rgba8Unorm`.
+        let texture_binding = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
         let source_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ocelli graph source"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            }],
+            entries: &[texture_binding(0), texture_binding(1)],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("ocelli render graph"),
@@ -798,7 +882,7 @@ impl RenderGraph {
     ) -> Result<ViewportId, GraphError> {
         let voi = voi_of(&pass);
         let id = self.registry.register(pass)?;
-        let slot = self.create_gpu_slot(ctx, target, &source, voi, None);
+        let slot = self.create_gpu_slot(ctx, target, source, voi, None, None);
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -854,7 +938,7 @@ impl RenderGraph {
             height: upload.height(),
             format,
         };
-        let slot = self.create_gpu_slot(ctx, target, &view, voi, Some(stored));
+        let slot = self.create_gpu_slot(ctx, target, view, voi, Some(stored), None);
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -868,9 +952,10 @@ impl RenderGraph {
         &self,
         ctx: &GpuContext,
         target: wgpu::TextureView,
-        source: &wgpu::TextureView,
+        source: wgpu::TextureView,
         voi: VoiParams,
         stored: Option<StoredTexture>,
+        colour: Option<HeldColour>,
     ) -> GpuSlot {
         let device = ctx.device();
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -878,18 +963,38 @@ impl RenderGraph {
             contents: bytemuck::bytes_of(&voi),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        let params = colour
+            .as_ref()
+            .map(|held| held.params)
+            .unwrap_or(ColourParams::NONE);
+        let colour_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ocelli graph colour"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let colour_texture = colour_texture_for(device, ctx.queue(), colour.as_ref());
+        let colour_view = colour_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_uniform = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("ocelli graph voi"),
             layout: &self.uniform_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: colour_uniform.as_entire_binding(),
+                },
+            ],
         });
-        let bind_source = self.bind_source_group(device, source);
+        let bind_source = self.bind_source_group(device, &source, &colour_view);
         GpuSlot {
             target,
+            source,
             uniform,
+            colour_uniform,
+            colour_texture,
             bind_uniform,
             bind_source,
             stored,
@@ -900,14 +1005,21 @@ impl RenderGraph {
         &self,
         device: &wgpu::Device,
         source: &wgpu::TextureView,
+        colour: &wgpu::TextureView,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("ocelli graph source"),
             layout: &self.source_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(source),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(source),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(colour),
+                },
+            ],
         })
     }
 
@@ -1059,7 +1171,7 @@ impl RenderGraph {
         target: wgpu::TextureView,
         source: wgpu::TextureView,
     ) -> Result<(), GraphError> {
-        let voi = {
+        let (voi, colour) = {
             let state = self
                 .registry
                 .states
@@ -1069,9 +1181,9 @@ impl RenderGraph {
             if state.stored.is_some() {
                 return Err(GraphError::StoredNeedsRebind);
             }
-            voi_of(&state.pass)
+            (voi_of(&state.pass), state.colour.clone())
         };
-        let slot = self.create_gpu_slot(ctx, target, &source, voi, None);
+        let slot = self.create_gpu_slot(ctx, target, source, voi, None, colour);
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1085,7 +1197,9 @@ impl RenderGraph {
     ///
     /// `install_recovered` dropped the texture with the rest of the slot. This
     /// creates it again at the extent registration recorded and does not
-    /// increment [`RenderGraph::uploads`]. The caller then uploads samples.
+    /// increment [`RenderGraph::uploads`] or [`RenderGraph::lut_uploads`].
+    /// A colour table the registry still holds is written again here. The
+    /// caller then uploads samples.
     ///
     /// # Errors
     ///
@@ -1102,7 +1216,7 @@ impl RenderGraph {
         id: ViewportId,
         target: wgpu::TextureView,
     ) -> Result<(), UploadError> {
-        let (upload, voi, format) = {
+        let (upload, voi, format, colour) = {
             let state = self
                 .registry
                 .states
@@ -1111,7 +1225,7 @@ impl RenderGraph {
                 .ok_or(UploadError::UnknownViewport)?;
             let upload = state.stored.ok_or(UploadError::NotStored)?;
             let format = state.stored_format.ok_or(UploadError::FormatUnavailable)?;
-            (upload, voi_of(&state.pass), format)
+            (upload, voi_of(&state.pass), format, state.colour.clone())
         };
         let features = adapter.wgpu_adapter().get_texture_format_features(format);
         if !binding_available(features) {
@@ -1125,7 +1239,7 @@ impl RenderGraph {
             height: upload.height(),
             format,
         };
-        let slot = self.create_gpu_slot(ctx, target, &view, voi, Some(stored));
+        let slot = self.create_gpu_slot(ctx, target, view, voi, Some(stored), colour);
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1159,8 +1273,9 @@ impl RenderGraph {
     ///
     /// This is the only route that sets the VOI flag, so a window change
     /// cannot update bytes without scheduling the frame that shows them.
-    /// It does not increment [`RenderGraph::uploads`] and it does not write
-    /// the stored texture.
+    /// It does not increment [`RenderGraph::uploads`] or
+    /// [`RenderGraph::lut_uploads`], and it does not write the stored
+    /// texture or the colour table.
     ///
     /// Validation runs state first and the chain last, so the answer names
     /// the first thing that is wrong in the order a caller can act on it.
@@ -1214,6 +1329,88 @@ impl RenderGraph {
                 stack.voi = params;
             }
             state.dirty.voi = true;
+        }
+        Ok(())
+    }
+
+    /// Upload a colour table into an `Rgba8Unorm` texture of height 1.
+    ///
+    /// The texture is created here, at selection, and filled once with
+    /// `write_texture`. [`RenderGraph::set_voi`] does not write it again and
+    /// does not increment [`RenderGraph::lut_uploads`]. This call increments
+    /// that counter by one. [`RenderGraph::uploads`] stays put. `Dirty.data`
+    /// is set so a clean viewport redraws. The VOI flag is not set here.
+    ///
+    /// A preset is indexed by the display value `lut_chain` already produced.
+    /// A palette is indexed by the stored sample. The bytes are the table
+    /// [`ColourLut`] already baked, so the shader does not walk the descriptor.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::UnknownViewport`] for an id this graph never issued.
+    /// [`GraphError::ViewportNotRebound`] when a rebuild has not yet
+    /// recreated the slot. [`GraphError::ColourUnavailable`] when
+    /// `Rgba8Unorm` cannot be sampled and copied, or the table has no texels.
+    /// Nothing is counted in that case.
+    pub fn select_colour_lut(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        id: ViewportId,
+        lut: &ColourLut,
+    ) -> Result<(), GraphError> {
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        let known = self
+            .registry
+            .states
+            .get(index)
+            .and_then(Option::as_ref)
+            .is_some();
+        if !known {
+            return Err(GraphError::UnknownViewport);
+        }
+        let rebound = self.gpu.get(index).and_then(Option::as_ref).is_some();
+        if !rebound {
+            return Err(GraphError::ViewportNotRebound);
+        }
+        let features = adapter
+            .wgpu_adapter()
+            .get_texture_format_features(COLOUR_LUT_FORMAT);
+        if !binding_available(features) {
+            return Err(GraphError::ColourUnavailable);
+        }
+        let bytes = lut.texture_bytes();
+        let Some(width) = colour_texel_count(bytes) else {
+            return Err(GraphError::ColourUnavailable);
+        };
+        let params = ColourParams::from_lut(lut);
+        let texture = create_colour_texture(ctx.device(), width);
+        write_colour_lut(ctx.queue(), &texture, bytes, width);
+        let colour_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_source = {
+            let slot = self
+                .gpu
+                .get(index)
+                .and_then(Option::as_ref)
+                .ok_or(GraphError::ViewportNotRebound)?;
+            self.bind_source_group(ctx.device(), &slot.source, &colour_view)
+        };
+        let slot = self
+            .gpu
+            .get_mut(index)
+            .and_then(Option::as_mut)
+            .ok_or(GraphError::ViewportNotRebound)?;
+        ctx.queue()
+            .write_buffer(&slot.colour_uniform, 0, bytemuck::bytes_of(&params));
+        slot.bind_source = bind_source;
+        slot.colour_texture = texture;
+        self.lut_uploads += 1;
+        if let Some(state) = self.registry.state_mut(id) {
+            state.colour = Some(HeldColour {
+                params,
+                bytes: bytes.to_vec(),
+            });
+            state.dirty.data = true;
         }
         Ok(())
     }
@@ -1312,12 +1509,22 @@ impl RenderGraph {
     ) -> Result<(), UploadError> {
         let texture = create_stored_texture(ctx.device(), upload, format);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_source = self.bind_source_group(ctx.device(), &view);
+        let colour_view = {
+            let slot = self
+                .gpu
+                .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+                .and_then(Option::as_ref)
+                .ok_or(UploadError::NotRebound)?;
+            slot.colour_texture
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        };
+        let bind_source = self.bind_source_group(ctx.device(), &view, &colour_view);
         let slot = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
             .and_then(Option::as_mut)
             .ok_or(UploadError::NotRebound)?;
+        slot.source = view;
         slot.bind_source = bind_source;
         slot.stored = Some(StoredTexture {
             texture,
@@ -1364,12 +1571,14 @@ impl RenderGraph {
         self.keys = keys;
         self.pipelines = pipelines;
         // Every per-viewport object was created on the dead device: the
-        // uniform buffers, both bind groups, the stored-sample texture and the
-        // caller's views as bound.
+        // uniform buffers, both bind groups, the stored-sample texture, the
+        // colour table texture and the caller's views as bound.
         // They are dropped here, not carried into a pass on the new device.
-        // The registry keeps each pass, its last uniform values and the stored
-        // extent. The caller re-supplies a caller-owned source through
-        // `rebind`, or recreates an owned texture through `rebind_stored`.
+        // The registry keeps each pass, its last uniform values, the stored
+        // extent and the colour table bytes. The caller re-supplies a
+        // caller-owned source through `rebind`, or recreates an owned texture
+        // through `rebind_stored`. Either restore writes the colour bytes
+        // again and does not increment `lut_uploads`.
         // Surfaces were configured on the dead device. The frame texture is
         // dropped before the surface it came from. The shell still holds the
         // canvases and supplies them again through `bind_surface`.
@@ -1622,6 +1831,79 @@ fn voi_of(pass: &Pass) -> VoiParams {
             invert: 0,
         },
     }
+}
+
+fn colour_texel_count(bytes: &[u8]) -> Option<u32> {
+    if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
+        return None;
+    }
+    u32::try_from(bytes.len() / 4).ok()
+}
+
+fn create_colour_texture(device: &wgpu::Device, width: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("ocelli colour lut"),
+        size: wgpu::Extent3d {
+            width,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: COLOUR_LUT_FORMAT,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
+fn write_colour_lut(queue: &wgpu::Queue, texture: &wgpu::Texture, bytes: &[u8], width: u32) {
+    let Some(row) = width.checked_mul(4) else {
+        return;
+    };
+    if usize::try_from(row).ok() != Some(bytes.len()) {
+        return;
+    }
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        bytes,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(row),
+            rows_per_image: Some(1),
+        },
+        wgpu::Extent3d {
+            width,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+    );
+}
+
+/// A selected table, or a 1x1 placeholder so group 1 binding 1 exists.
+///
+/// The placeholder is mode 0 and is not sampled. Creating it does not
+/// increment `lut_uploads`.
+fn colour_texture_for(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    held: Option<&HeldColour>,
+) -> wgpu::Texture {
+    if let Some((held, width)) =
+        held.and_then(|held| colour_texel_count(&held.bytes).map(|width| (held, width)))
+    {
+        let texture = create_colour_texture(device, width);
+        write_colour_lut(queue, &texture, &held.bytes, width);
+        return texture;
+    }
+    let texture = create_colour_texture(device, 1);
+    write_colour_lut(queue, &texture, &[0, 0, 0, 255], 1);
+    texture
 }
 
 fn create_stored_texture(
