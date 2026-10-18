@@ -324,3 +324,9 @@ Repository bootstrap. Nothing is published.
   uniform and does not upload the bricks again. Tier C reports unavailable
   and creates no texture. An extent or a format the device cannot sample
   reports unavailable and does not substitute another image.
+- Two GPU-less render runs that are not the oracle. Lavapipe is a fallback
+  adapter probe on ubuntu-latest, and a missing record runs that probe. The
+  only other accepted record is an explicit drop with a reason, which does
+  not print a pass. Headless Chrome with SwiftShader is the nightly run, and
+  it passes only when the renderer string contains SwiftShader and the tier
+  is C.

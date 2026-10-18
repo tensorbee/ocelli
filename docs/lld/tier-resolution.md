@@ -1,6 +1,6 @@
 # Tier resolution
 
-**F-IDs that contributed:** F-004, F-037, F-039, F-042, F-X001, F-X016
+**F-IDs that contributed:** F-004, F-037, F-039, F-042, F-X001, F-X002, F-X016
 **Last updated:** 2026-10-18
 
 How a session decides whether it is tier A, tier B or tier C, and how it
@@ -588,3 +588,44 @@ Native `resolve_native_gl` found no adapter. The ignored test printed
 `native Backends::GL found no adapter. This is not a tier B run.` wgpu-hal
 30.0.1's `gles` backend is Linux and Android with EGL. That miss is not a
 tier B run.
+
+## F-X002, the two GPU-less runs
+
+Layer 1 is the adapter-free cargo test. This story does not rebuild it.
+
+Layer 2 is `fallback_is_lavapipe` in `caps.rs` and
+`crates/ocelli-render/examples/lavapipe_probe.rs`. The predicate matches
+`lavapipe` and `llvmpipe` in the adapter name, driver or driver info, without
+regard to case. `SwiftShader`, `Apple` and an empty string do not match. The
+example requests an adapter with `force_fallback_adapter` and does not call
+`request_device`. Exit 0 is a match. Exit 1 is some other adapter. Exit 2 is
+no adapter. `gate gpu` does not run the example.
+
+`scripts/lavapipe_layer.py` reads `ci/lavapipe-layer.json`. A missing file
+means the probe is required. The only other accepted document is a drop with
+a non-empty reason. `pass`, `skip` and an empty reason are refused. A drop
+prints `layer 2 dropped: <reason>` and does not run the probe. The workflow
+is `.github/workflows/lavapipe.yml`. It is not a job in
+`.github/workflows/ci.yml`. Deviation D-04 is unchanged.
+
+On this machine `cargo run -p ocelli-render --example lavapipe_probe` exited
+2. The probe reported that Metal had no fallback adapter and that Vulkan
+support was not compiled in. That exit is not a pass. No
+`ci/lavapipe-layer.json` was written. The first `ubuntu-latest` run is the
+measurement spike A7 asked for.
+
+Layer 3 is `node tools/swiftshader/run.mjs`. It builds `ocelli-wasm` with the
+`tier-b-probe` feature and launches Playwright Chromium from `tools/oracle`
+with `--use-gl=angle`, `--use-angle=swiftshader` and
+`--enable-unsafe-swiftshader`. It does not import the comparator and it does
+not open the corpus. Exit 0 requires the renderer string to contain
+`SwiftShader` and the tier to be C. A SwiftShader string with any other tier
+is exit 1. Anything else is exit 3. `.github/workflows/swiftshader.yml` runs
+nightly and on `workflow_dispatch`. It is not a pull-request job and it is
+not a gate in `bin/ocelli.sh`.
+
+The local run exited 0. Status `demoted`, tier `C`, decided by `AdapterType`.
+Renderer
+`ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0) (0x0000C0DE)), SwiftShader driver)`.
+The reason was `the WebGL adapter resolved tier C`. No pixels were compared.
+The run is not the oracle and not lavapipe.

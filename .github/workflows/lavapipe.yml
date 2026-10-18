@@ -1,0 +1,54 @@
+name: Lavapipe
+
+# F-X002 layer 2. This is not the CI floor. `.github/workflows/ci.yml` forbids
+# a GPU job, and this file is not one of its jobs. Deviation D-04 is unchanged.
+#
+# A missing `ci/lavapipe-layer.json` runs the probe. A dropped record prints
+# its reason and does not run the probe. The last log line is either
+# `lavapipe resolved` or `layer 2 dropped: <reason>`. Exit 2 from the probe
+# is a failed measurement, not a pass. Layer 2 is not a GPU-less browser
+# session and it is not the oracle.
+
+on:
+  push:
+    branches: ["main", "sprint/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lavapipe:
+    name: Fallback adapter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Install the lavapipe ICD
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers
+          icd=$(find /usr/share/vulkan/icd.d \( -iname '*lvp*' -o -iname '*lavapipe*' \) -print -quit)
+          if [ -z "$icd" ]; then
+            echo "lavapipe ICD was not installed"
+            exit 1
+          fi
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+          echo "using $icd"
+      - name: Probe or record the drop
+        run: |
+          set +e
+          python3 scripts/lavapipe_layer.py
+          code=$?
+          if [ "$code" -eq 0 ]; then
+            exit 0
+          fi
+          if [ "$code" -ne 10 ]; then
+            exit "$code"
+          fi
+          cargo run -p ocelli-render --example lavapipe_probe
+          probe=$?
+          if [ "$probe" -eq 0 ]; then
+            echo "lavapipe resolved"
+            exit 0
+          fi
+          exit "$probe"

@@ -29,7 +29,7 @@ row here in the same hand.
 | [build-targets.md](build-targets.md) | The wasm pipeline, the size budget, the cross-target proof and the isolation invariant | F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-X008 |
 | [gpu-ownership.md](gpu-ownership.md) | One device, one queue, one owner. The section 31 contract | F-004, F-005, F-008, F-037, F-038, F-039, F-041, F-042, F-X001 |
 | [render-graph.md](render-graph.md) | `crates/ocelli-render` graph and frame scheduler: passes, dirt, one submit per frame, stored-sample upload, and brick upload | F-038, F-039, F-040, F-042, F-043, F-044 |
-| [tier-resolution.md](tier-resolution.md) | How a session resolves tier A, B or C, the fill-rate probe and the operator override | F-004, F-037, F-039, F-042, F-X001, F-X016 |
+| [tier-resolution.md](tier-resolution.md) | How a session resolves tier A, B or C, the fill-rate probe, the operator override, and the two GPU-less runs | F-004, F-037, F-039, F-042, F-X001, F-X002, F-X016 |
 | [feature-availability.md](feature-availability.md) | The three-state contract every tier-gated feature declares | F-037, F-041, F-X001 |
 | [errors.md](errors.md) | The error model, the code registry, the panic record and structured logging | F-005, F-039, F-X001, F-X017 |
 | [typescript-packaging.md](typescript-packaging.md) | What the npm packages publish, and what proves it | F-003, F-004, F-005, F-021, F-X017, F-035 |

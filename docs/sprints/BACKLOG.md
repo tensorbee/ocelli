@@ -168,7 +168,7 @@ One budgeted cache, one wgpu device, the LUT chain running as a shader stage on 
 | F-042 | E6.6 | S13 | WebGL2 fallback and tier-B shader variants | Rust | 5w | F-041 | done |
 | F-043 | E6.7 | S14 | Chunked brick residency as the default upload path | Rust | 4w | F-040 | done |
 | F-044 | E6.8 | S13 | Colour LUT / transfer function upload and preset library | Rust | 2w | F-041 | done |
-| F-X002 | X1.2 | S14 | Three-layer GPU-less render testing: lavapipe in CI and Chrome with SwiftShader nightly | Build | 3w | F-037 | pending |
+| F-X002 | X1.2 | S14 | Three-layer GPU-less render testing: lavapipe in CI and Chrome with SwiftShader nightly | Build | 3w | F-037 | done |
 
 ### M4, Public API, the boundary, and the stack viewport
 
