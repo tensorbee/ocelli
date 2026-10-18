@@ -3436,3 +3436,35 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/pixel-pipeline.md`, `docs/lld/render-graph.md`, and their rows in `docs/lld/README.md`.
 **Deviations from the design plan.** The plan says a tier B result that differs from tier A by more than 0.001 after the shared 8-bit quantisation is a failure. That pair was not produced. The plan's Tests table does not list a tier B colour draw, and review did not treat the omission as a defect. The size budget was not moved.
 **Notes for future sessions.** Two review passes converged 3/0 and 0/0. Pass 1 was three documentation defects. Pass 2 mutated the `stops` texel at index 128 from red to green and the CPU test exited 101, then the constant was restored. The product module stayed inside the recorded size tolerance. The budget file was not edited.
+
+## F-035, Zero-copy handoff from decode worker to renderer, completed 2026-10-18
+
+**What was built.** `exportDecodedFrame` copies a decoded frame out of wasm memory into a fresh ArrayBuffer. `acceptTransferredFrame` checks that length against `HandoffMeta` and copies into the render sink in the section 17.2 order. `transferredFrameMessage` returns the section 24 frame message and its transfer list, and it does not post the message. The zero-copy hop is that transfer. The bulk channel still copies, because a view retained across a wasm memory growth detaches. `HandoffMeta` is 24 bytes and little-endian.
+
+**HLD sections implemented.** `docs/hld/04-boundary-and-data-path.md` sections 5.2 and 6, `docs/hld/14-the-boundary-in-code.md` section 17.2, and `docs/hld/21-worker-protocol.md` section 24.
+**Deviations.** None.
+**Crates / packages modified.** `crates/ocelli-cache` and `packages/core`.
+**Tests added.** Growth, length refusal and transfer-list tests in `packages/core/src/bulk.test.ts`. Two `HandoffMeta` tests in `crates/ocelli-cache/src/image.rs`.
+**Fixture provenance.** No pixel arithmetic. The bytes are copied unchanged. The little-endian layout is checked against the hand-written image of the field values.
+**Verification.** Feature profile recorded on the integrated feature commit. The worker worktree had no corpus data.
+**Corpus.** Absent on that feature commit, because the worker worktree had no `corpus/data`.
+**Tier coverage.** A: n/a. B: n/a. C: n/a. No GPU object is created.
+**LLD updated.** `docs/lld/typescript-packaging.md` and `docs/lld/cache.md`.
+**Deviations from the design plan.** None.
+**Notes for future sessions.** One review pass, 0 defects and 0 smells, with one nitpick. The wide-`usize` arm of `check_buffer` does not run in the 64-bit host tests. This delivery record lands after the feature commit, which is why the entry follows later stories.
+
+## F-040, Texture upload path, decode straight to write_texture, completed 2026-10-18
+
+**What was built.** `upload_stored` writes a caller slice of stored `f32` samples with `write_texture` and counts that write. `set_voi` still writes the thirty-two-byte uniform and does not count an upload. The preferred texture format is `R32Float`. As landed, this story refuses the upload when that format cannot be bound and copied into, and it does not substitute another format. Samples stay stored values. The window runs in the existing shader.
+
+**HLD sections implemented.** `docs/hld/15-lut-chain.md` sections 18.3 and 18.4, `docs/hld/19-render-graph.md` section 22, and `docs/hld/04-boundary-and-data-path.md` section 6.
+**Deviations.** None.
+**Crates / packages modified.** `crates/ocelli-render`.
+**Tests added.** One CPU test for a wrong length and a missing binding. Three ignored GPU tests in `crates/ocelli-render/tests/upload.rs`, including the section 18.3 rows.
+**Fixture provenance.** DICOM PS3.3 C.11.2.1.2 and C.11.2.1.3.2. Centre 40 and width 400. The four stored inputs are -160, 40, 240 and -60. LINEAR at the centre is about 127.81955 and LINEAR_EXACT is 127.5. Input -160 under LINEAR_EXACT is 0.000, which is D-13. Tolerance 0.001.
+**Verification.** Feature profile recorded on the worker commit. The integration commit brought that reviewed tree onto the sprint branch and did not re-record the gates. The worker worktree had no corpus data. Floor gates that need Node or pydicom were skipped on that worktree and were not listed as passes.
+**Corpus.** Absent on the worker feature commit, because that worktree had no `corpus/data`.
+**Tier coverage.** A: full. The ignored test opened this host's adapter and matched the section 18.3 rows within 0.001. B: full when the device can sample `R32Float`, otherwise unavailable. This story does not substitute a wider format. The later tier B rule is the F-042 entry. C: unavailable. No device and no texture. The CPU path remains `LutChain::map_into`.
+**LLD updated.** `docs/lld/render-graph.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** None in the story as landed. F-042 later allows `Rg32Float` and `Rgba32Float` on tier B when `R32Float` cannot be sampled. That rule is recorded in the F-042 entry and is not part of this one.
+**Notes for future sessions.** One review pass, 0 defects, 0 smells and 0 nitpicks. Lint, types, packages and corpus-tests did not run in the worker worktree. The integration commit has no provenance trailer because its tree is not the worker tree.

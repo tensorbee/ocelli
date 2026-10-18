@@ -282,6 +282,11 @@ Repository bootstrap. Nothing is published.
   them. A blend mode with no shader reports itself unavailable instead of
   rendering the wrong one, and a rebuilt device restores the graph's
   pipelines while the caller re-supplies its viewport textures.
+- A decoded frame leaves one wasm instance as a fresh ArrayBuffer. The
+  worker transfer is the zero-copy hop. The bulk channel copies once out
+  and once in, because a view retained across a memory growth detaches.
+- Stored samples upload with `write_texture`. A window change writes the
+  thirty-two-byte VOI uniform and does not upload the samples again.
 - An OffscreenCanvas in the render worker, sized in device pixels as CSS
   size times device pixel ratio, rounded per axis. Resize reconfigures that
   surface and does not upload pixels again. A session on the CPU tier reports
