@@ -39,8 +39,9 @@ pub const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 
 /// The built core's version, as the shell sees it.
 ///
-/// This is the module's entire exported surface until F-101 (E16.2) builds the
-/// boundary, and it exists for two reasons that are both about measurement
+/// The product module also exports the panic record and the two canvas
+/// functions. F-101 (E16.2) still owns the rest of the boundary. This
+/// function remains for two reasons that are both about measurement
 /// rather than about features.
 ///
 /// The first is that a wasm module with no export measures nothing. HLD

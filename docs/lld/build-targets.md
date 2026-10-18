@@ -85,12 +85,13 @@ That is the same defect class as widening a tolerance to make a test pass.
 
 ### The exported surface
 
-Four functions, listed in the table under "The exported surface, and the panic
-probe" below. `ocelli_version()` returns the workspace version and the other
-three are the panic record of HLD section 23. The boundary itself arrives with
-F-101 (E16.2).
+Six functions, listed in the table under "The exported surface, and the panic
+probe" below. `ocelli_version()` returns the workspace version. Three exports
+are the panic record of HLD section 23. `attachOffscreenCanvas` and
+`resizeOffscreenCanvas` are the render worker's canvas. The rest of the
+boundary arrives with F-101 (E16.2).
 
-It exists for measurement rather than for features. Fat LTO with `strip =
+`ocelli_version` exists for measurement rather than for features. Fat LTO with `strip =
 true` lets the linker discard anything unreachable, so a module with no
 exported root would measure the size of nothing. It also meets a real seam:
 `packages/core/src/index.ts` carries a `VERSION` constant and a

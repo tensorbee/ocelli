@@ -24,8 +24,9 @@ grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S13 / {print $2, $9}'
 
 ## What this sprint is
 
-**S12 scheduled a frame and presented none.** The graph draws into a
-caller-supplied texture view and acquires no surface. S13 is the handoff and
+**S12 scheduled a frame and presented none.** S13's graph acquires an
+OffscreenCanvas when one is bound, and a viewport with no surface still
+draws into a caller-supplied texture view. S13 is the handoff and
 the first surface: F-035 carries bytes from a decode worker to the renderer,
 F-039 puts an OffscreenCanvas in the one render worker and sizes it in device
 pixels, F-040 uploads decoded samples with `write_texture`, F-042 is the first
@@ -85,8 +86,9 @@ where it lives. HLD section 5 builds the typed-array view immediately before
 the write and discards it after. Any wasm memory growth relocates the backing
 buffer and detaches every outstanding view. A module-level
 `Uint8Array` over `wasm.memory.buffer` then writes a detached buffer, or
-throws far from the cause. The handoff is a pointer and a length. The pixels
-do not become JavaScript objects, which is decision D3.
+throws far from the cause. The handoff copies into a fresh ArrayBuffer.
+Two wasm instances cannot share a pointer. The pixels do not become
+JavaScript objects, which is decision D3.
 
 **A texture upload standing in for a uniform.** HLD section 18.4's window and
 level are thirty-two bytes. F-040 uploads decoded samples, once. Re-uploading
