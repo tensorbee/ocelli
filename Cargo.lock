@@ -1054,6 +1054,7 @@ dependencies = [
  "ocelli-cache",
  "ocelli-core",
  "ocelli-pixel",
+ "ocelli-viewport",
  "pollster",
  "proptest",
  "thiserror",
@@ -1068,6 +1069,12 @@ version = "0.1.0"
 [[package]]
 name = "ocelli-viewport"
 version = "0.1.0"
+dependencies = [
+ "glam",
+ "ocelli-cache",
+ "ocelli-core",
+ "ocelli-pixel",
+]
 
 [[package]]
 name = "ocelli-volume"

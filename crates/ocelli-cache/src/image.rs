@@ -391,6 +391,13 @@ impl ImageCache {
         self.decoded.get(key)
     }
 
+    /// Whether the key is live. This is not a use, so it does not change
+    /// which frame leaves next.
+    #[must_use]
+    pub fn contains(&self, key: &FrameKey) -> bool {
+        self.decoded.contains_key(key)
+    }
+
     /// Explicitly release a frame. Not an eviction, and emits no event.
     pub fn remove(&mut self, key: &FrameKey) -> Option<DecodedFrame> {
         self.decoded.remove(key)

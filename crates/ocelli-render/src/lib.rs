@@ -68,7 +68,7 @@ pub use caps::{
     ProbeOutcome, Resolution, SimdSupport, SoftwareVerdict, Tier, TierEvidence, TierRequest,
     TierSignals, candidate_order, classify, compute_available, opens_a_device, recovers_from,
 };
-pub use colour::{ColourLut, ColourLutError, PresetId};
+pub use colour::{ColourLut, ColourLutError, PresetId, colour_lut_for};
 pub use extent::{ExtentError, device_extent};
 pub use gpu::{
     DeviceError, DeviceLoss, DeviceState, GpuContext, GraphResources, Recovered, SharedEncoder,

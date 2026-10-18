@@ -330,3 +330,23 @@ Repository bootstrap. Nothing is published.
   not print a pass. Headless Chrome with SwiftShader is the nightly run, and
   it passes only when the renderer string contains SwiftShader and the tier
   is C.
+- Viewport, scene and tool types in `@ocelli/core`. The eleven stack
+  commands, the section 17.4 readback fields, and drawing availability of
+  `available`, `degraded` or `unavailable` are named here. The wasm command
+  channel is still unbuilt.
+- A stack camera. Fit, pan, zoom, rotation and flip compose about the image
+  centre on a y-down canvas. `set_view` uploads the sixteen column-major
+  floats and does not rewrite the window uniform. A fragment outside the
+  image is black.
+- Window presets, invert and a colormap on the stack viewport. Soft tissue
+  is the section 18.3 LINEAR window. Lung and bone are named centre and
+  width pairs. A preset does not replace a modality or VOI LUT sequence.
+  Invert sets an explicit presentation shape. A window change does not
+  change the colormap.
+- Stack scroll in stored frame order. Prefetch names the neighbour below
+  and the neighbour above. A missing selected frame returns no samples.
+  Probing whether a neighbour is resident does not refresh it.
+- Measured spacing and index shift on the stack view. The shift is the
+  displayed frame placed on the reference image position, in the
+  displayed frame's pixel size. A zero spacing contributes no shift.
+  Gantry tilt is not read as the shear.

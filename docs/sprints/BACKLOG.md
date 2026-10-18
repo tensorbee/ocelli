@@ -176,13 +176,13 @@ The three-channel boundary is real and a stack viewport diffs clean against corn
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-045 | E7.1 | S15 | Stack viewport: display, fit, pan, zoom, rotate, flip | Rust+TS | 4w | F-039 | pending |
-| F-046 | E7.2 | S15 | Window/level, VOI presets, invert, colormap | Rust+TS | 3w | F-041 | pending |
-| F-047 | E7.3 | S15 | Stack scroll, prefetch strategy, image sequencing | Rust+TS | 3w | F-032 | pending |
+| F-045 | E7.1 | S15 | Stack viewport: display, fit, pan, zoom, rotate, flip | Rust+TS | 4w | F-039 | done |
+| F-046 | E7.2 | S15 | Window/level, VOI presets, invert, colormap | Rust+TS | 3w | F-041 | done |
+| F-047 | E7.3 | S15 | Stack scroll, prefetch strategy, image sequencing | Rust+TS | 3w | F-032 | done |
 | F-048 | E7.4 | S16 | Coordinate transforms: canvas / world / index | Rust+TS | 3w | F-045 | pending |
-| F-049 | E7.5 | S15 | Calibration, spacing and gantry-tilt correction | Rust+TS | 2w | F-020 | pending |
+| F-049 | E7.5 | S15 | Calibration, spacing and gantry-tilt correction | Rust+TS | 2w | F-020 | done |
 | F-050 | E7.6 | S17 | Camera, display-area and presentation-state serialisation | Rust+TS | 3w | F-048 | pending |
-| F-100 | E16.1 | S15 | API design: viewport, scene and tool surface, documented | TS | 4w | - | pending |
+| F-100 | E16.1 | S15 | API design: viewport, scene and tool surface, documented | TS | 4w | - | done |
 | F-101 | E16.2 | S16 | wasm boundary: command channel, event ring buffer, state readback | TS | 5w | F-100 | pending |
 | F-102 | E16.3 | S17 | Framework bindings (React first) | TS | 3w | F-101 | pending |
 | F-103 | E16.4 | S17 | Event model: the ~103 cornerstone events, re-shaped and documented | TS | 4w | F-101 | pending |

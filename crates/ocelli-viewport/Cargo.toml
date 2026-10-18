@@ -12,3 +12,19 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# F-045. Pan is `Pt<Canvas>` from HLD section 16. This crate does not take wgpu.
+ocelli-core = { path = "../ocelli-core" }
+# `f64::sin_cos` is std-only, and this crate is `no_std`. glam's libm backend
+# is the one `ocelli-pixel` already uses for the same reason. The workspace
+# entry keeps default features off.
+glam.workspace = true
+# F-046. Presets call `VoiTransform::new` and rebuild `LutChain`. This crate
+# does not take wgpu and does not depend on ocelli-render.
+ocelli-pixel = { path = "../ocelli-pixel" }
+# F-047. Scroll reads the decoded LRU. It does not build a second cache.
+ocelli-cache = { path = "../ocelli-cache" }
+
+[dev-dependencies]
+ocelli-core = { path = "../ocelli-core" }
+ocelli-cache = { path = "../ocelli-cache" }
+ocelli-pixel = { path = "../ocelli-pixel" }

@@ -126,6 +126,40 @@ fn eviction_payload_round_trips_little_endian() {
 }
 
 #[test]
+fn contains_does_not_refresh_the_oldest_key() -> Result<(), ocelli_pixel::PixelError> {
+    // Budget 300. Three 100-byte frames. The first is the oldest. `contains`
+    // must not make it the newest, so the next 100-byte insert still evicts it.
+    let mut cache = ImageCache::new(300);
+    let oldest = key(1, 1, 0);
+    assert!(
+        cache
+            .insert(oldest, make_frame(10, 5, 16, vec![1_u8; 100])?)
+            .is_empty()
+    );
+    assert!(
+        cache
+            .insert(key(1, 2, 0), make_frame(10, 5, 16, vec![2_u8; 100])?)
+            .is_empty()
+    );
+    assert!(
+        cache
+            .insert(key(1, 3, 0), make_frame(10, 5, 16, vec![3_u8; 100])?)
+            .is_empty()
+    );
+    assert!(cache.contains(&oldest));
+    let events = cache.insert(key(1, 4, 0), make_frame(10, 5, 16, vec![4_u8; 100])?);
+    assert_eq!(
+        events.events(),
+        [CacheEvent::Evicted {
+            key: oldest,
+            bytes: 100
+        }]
+    );
+    assert!(!cache.contains(&oldest));
+    Ok(())
+}
+
+#[test]
 fn one_insert_evicting_two_yields_two_evicted_in_order() -> Result<(), ocelli_pixel::PixelError> {
     // Budget 250. Two 100-byte frames live, one 200-byte insert evicts both,
     // least recently used first.

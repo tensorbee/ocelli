@@ -3500,3 +3500,83 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/tier-resolution.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** None.
 **Notes for future sessions.** Three review passes converged 1/0, 0/0, 0/0. The first defect was that the layer-record tests never called `main`, so a missing file that exited 0 stayed green and the workflow would skip the probe. The floor then failed lint because the SwiftShader script's node and browser names were not globals. The block names the same four the tier B probe names, and it sets no rule. The local lavapipe probe exited 2. That is not a drop. `ci/lavapipe-layer.json` stays absent until a real ubuntu-latest failure is the recorded drop. Layer 2 is not a GPU-less browser session.
+
+## F-100, API design: viewport, scene and tool surface, documented, completed 2026-10-18
+
+**What was built.** `@ocelli/core` names the scene, the stack viewport and the eleven stack commands. A scene is an ordered list of viewport ids and holds no pixels and no device. `StackViewport` carries the sixteen camera numbers, window centre, window width, the VOI function, the slice index and length, a colormap, an optional preset and an explicit invert shape. Drawing availability is `available`, `degraded` or `unavailable`. Tier C drawing is `unavailable`. Nothing in this module calls wasm.
+
+**HLD sections implemented.** `docs/hld/02-standing-decisions.md` section 2.1, `docs/hld/07-concurrency-and-typescript.md` section 10, `docs/hld/04-boundary-and-data-path.md` section 5, and `docs/hld/14-the-boundary-in-code.md` sections 17.1, 17.3 and 17.4. The wire is documented and not built. F-101 owns the copy.
+**Deviations.** None.
+**Crates / packages modified.** `packages/core`.
+**Tests added.** Six unit tests in `packages/core/src/viewport.test.ts`. The publication list in `packages/core/src/index.test.ts` names the new runtime exports.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path.
+**Tier coverage.** A: n/a. This story does not draw. B: n/a. C: n/a for code. The documented drawing answer is unavailable until F-X003.
+**LLD updated.** `docs/lld/public-api.md`, `docs/lld/typescript-packaging.md`, and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The approved plan named drawing availability `full` or `unavailable`. The published values are `available`, `degraded` and `unavailable`, the three states in `docs/lld/feature-availability.md`. The plan word `full` is published as `available`. Tier C drawing stays `unavailable`. This story declares no drawing fallback. `ViewportId` is a branded number minted by `viewportId`. `Invert` is `identity` or `inverse`.
+**Notes for future sessions.** Three review passes converged 2/3, 0/0, 0/0. Pass 1 left the publication test red and said F-045, F-046 and F-047 already wrote the readback. Pass 2 was clean apart from the padding field transcribed as `pad`. Pass 3 reviewed the correction to `_pad`. F-101 still owns the live command channel. `packages/react` stays a scaffold.
+
+## F-045, stack viewport camera, completed 2026-10-18
+
+**What was built.** `View` maps one stack image onto the canvas. Fit letterboxes the axis-aligned bounds after spacing, flip and clockwise rotation. Pan, zoom and the index shift then move that image. `camera_matrix` is the column-major inverse. `RenderGraph::set_view` writes those sixteen floats to group 0 binding 2 and sets `Dirty.camera`. Registration stores the identity. A fragment outside the stored texture is black and does not run the LUT chain.
+
+**HLD sections implemented.** `docs/hld/13-core-types.md` section 16, the canvas axis. `docs/hld/14-the-boundary-in-code.md` section 17.4, the sixteen camera floats. `docs/hld/19-render-graph.md` section 22, `Dirty.camera`. Fit, pan, zoom, rotation and flip are the F-045 plan. The HLD names the camera and does not specify those operations.
+**Deviations.** none
+**Crates / packages modified.** `crates/ocelli-viewport`, `crates/ocelli-render`, `Cargo.lock`, `docs/lld/viewport.md`, `docs/lld/render-graph.md`, `docs/lld/README.md`.
+**Tests added.** Ten integration tests in `crates/ocelli-viewport/tests/view.rs`. Three ignored GPU tests in `crates/ocelli-render/tests/view.rs`. The existing section 18.3 expected row was not edited.
+**Fixture provenance.** The view rows are hand-computed from the approved composition and cite HLD section 16 for the canvas axis. They are not a DICOM pixel formula. The GPU rows use the existing centre 40 width 400 window, PS3.3 C.11.2.1.2, only to tell black from a windowed stored zero. That window was not recomputed here.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path.
+**Tier coverage.** A: full. Auto opened tier A. A width-1 image in a width-2 target read red 128 then black. A translate of 10 read black. The section 18.3 row stayed `[0, 128, 255, 64]`. B: the same fragment module. `node tools/tier-b/run.mjs` drew section 18.3 on tier B, format `R32Float`, within 0.001, decided by adapter type. That draw does not call `set_view`, so it is the identity camera. Native GL found no adapter, and that miss is not a tier B pass. The outside-image branch ran on tier A. C: drawing unavailable. `RenderGraph::new` returns `TierCUnavailable`. `View` has no device.
+**LLD updated.** `docs/lld/viewport.md`, `docs/lld/render-graph.md`, and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The Approach section says the crate depends on `ocelli-core` only. `f64::sin_cos` is not in `core` and the crate stays `no_std`, so the workspace `glam` libm backend was added. `ocelli-pixel` already uses that backend. Exact quarter turns do not call `glam`, because `cos` of a right angle is not a zero bit. This is not an HLD departure.
+**Notes for future sessions.** One review pass, 0 defects, 0 smells, 1 nitpick. The nitpick is that the GPU rows cross the high edge and not a negative image coordinate. The shader still rejects a negative coordinate before `i32` truncation. The release wasm build during the wasm gate was 2,012,345 bytes. Baseline 1,999,061. Ceiling 2,099,014. The budget file was not moved. F-046, F-047 and F-049 add their own modules. F-049 calls `set_spacing` and `set_index_shift` and does not edit `view.rs`.
+
+## F-046, window presets, invert and colormap, completed 2026-10-18
+
+**What was built.** `Presentation` holds a `LutChain` and a `Colormap`. A preset or `set_window` rebuilds stage 2 through `VoiTransform::new` and keeps the modality transform, the presentation evidence and the output range. `soft_tissue` is centre 40 and width 400, `LINEAR`. `lung` is centre -600 and width 1500. `bone` is centre 300 and width 1500. Both are `LINEAR`. A preset on a modality or VOI LUT sequence returns `Sequence` and leaves the chain. `set_invert` stores an explicit presentation shape and does not combine it with `MONOCHROME1`. `colour_lut_for` maps `Grey` and `Stops` onto `PresetId` and calls `ColourLut::preset`. This crate does not call `set_voi`.
+
+**HLD sections implemented.** `docs/hld/15-lut-chain.md` section 18, the chain that already exists in `ocelli-pixel`. Section 18.3, the soft-tissue window. Section 18.4, the uniform a preset fills and does not replace. Lung and bone are the F-046 plan. The HLD names no preset library.
+**Deviations.** none
+**Crates / packages modified.** `crates/ocelli-viewport`, `crates/ocelli-render`, `Cargo.lock`, `docs/lld/viewport.md`, `docs/lld/pixel-pipeline.md`, `docs/lld/README.md`.
+**Tests added.** Seven integration tests in `crates/ocelli-viewport/tests/presentation.rs`. One unit test in `crates/ocelli-render` that both colormap variants select the matching preset and that palette colour stays unavailable.
+**Fixture provenance.** The four soft-tissue display rows are the literals already locked in `crates/ocelli-pixel/tests/voi.rs`. They cite PS3.3 C.11.2.1.2 and deviation D-13. This story does not recompute them. Lung and bone assert the plan's centre, width and `LINEAR`. They are not a clinical standard and not a DICOM formula.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path.
+**Tier coverage.** A: full through the existing `set_voi` path. This story adds no wgpu call and did not redraw. B: the same uniform. F-042 already drew the section 18.3 rows on WebGL2. C: `LutChain` runs with no device. Drawing stays unavailable.
+**LLD updated.** `docs/lld/viewport.md`, `docs/lld/pixel-pipeline.md`, and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** `Modality` has no `PartialEq`, so the readback test compares `to_bits` of the public field. `PresentationError::Unavailable` is the residual `PixelError` arm. The plan names `Sequence` and `InvalidWindow`. The extra variant keeps the match total without `unwrap` or `panic`. Pass 2 left it as a nitpick. It is not an HLD departure.
+**Notes for future sessions.** Two review passes, 1 defect then 0, 0 smells, 1 nitpick on each pass. Pass 1 showed that discarding the window function left the suite green. The domain test now reads `window()` back. Width `0.5` is refused for `LINEAR` and stored for `LINEAR_EXACT` and `SIGMOID`. Forcing `Linear` then failed at the `LinearExact` readback. Changing soft-tissue width from 400 to 401 turned the input `-160` row red (`0.3187497` against `0`). The centre row stayed inside `0.001` (delta about `0.00079`) and was not the row that failed. The tolerance was not changed. `lut.rs` and `voi.wgsl` were not edited. Oracle was not run for this story. F-047 and F-049 add their own modules. F-049 calls `set_spacing` and `set_index_shift` and does not edit `view.rs`.
+
+## F-047, stack scroll in stored order, completed 2026-10-18
+
+**What was built.** `StackSequence` stores `FrameKey` values in the order the caller supplied and a `u32` index. `scroll_by` clamps and does not wrap. `prefetch_keys` is the index minus one and plus one. Slot 0 is the lower neighbour and slot 1 is the higher. The selected key is not included. `samples_for_upload` calls `ImageCache::get` only for the selected key. A miss is `NotResident` and returns no neighbour bytes. An empty sequence is `Empty`. `ImageCache::contains` forwards to `Lru::contains_key` and does not update recency. This story does not edit the render graph and does not set `Dirty.slice`.
+
+**HLD sections implemented.** `docs/hld/06-memory-and-cache.md` section 8, the decoded LRU this type reads. `docs/hld/19-render-graph.md` section 22, `Dirty.slice` already exists and a prefetch insert does not set it. `docs/hld/14-the-boundary-in-code.md` section 17.4, the index this story stores. Section 30 volume brick prefetch is not this path.
+**Deviations.** none
+**Crates / packages modified.** `crates/ocelli-viewport`, `crates/ocelli-cache`, `Cargo.lock`, `docs/lld/viewport.md`, `docs/lld/cache.md`, `docs/lld/README.md`.
+**Tests added.** Five integration tests in `crates/ocelli-viewport/tests/scroll.rs`. One integration test in `crates/ocelli-cache/tests/image_cache.rs` that `contains` does not refresh the oldest key.
+**Fixture provenance.** No pixel arithmetic. The tests use synthetic one-pixel frames and key order. They cite no DICOM formula.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path.
+**Tier coverage.** A: n/a for drawing. The caller uploads selected samples through the existing stored-texture path. This story adds no wgpu call and did not redraw. B: same. C: selection is a host-cache lookup. Drawing stays unavailable.
+**LLD updated.** `docs/lld/viewport.md`, `docs/lld/cache.md`, and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** `usize::from(u32)` is not implemented, so `key_at` uses `usize::try_from`. On this host and on wasm32 that conversion succeeds for every `u32`. It can fail only on a 16-bit `usize`. A stored index already fits that `usize` because the list length does. A length above `u32::MAX` makes `scroll_by` a no-op. This is not an HLD departure.
+**Notes for future sessions.** One review pass, 0 defects, 0 smells, 0 nitpicks. Returning a neighbour on a miss failed `a_miss_returns_no_neighbour_bytes` at `tests/scroll.rs:74`. Making `contains` call `get` evicted the wrong key. Both mutations were restored. `Lru::get` ticks on a miss and does not change eviction order of live keys. Oracle was not run for this story. F-049 calls `set_spacing` and `set_index_shift` and does not edit `view.rs`.
+
+## F-049, measured spacing and index shift, completed 2026-10-18
+
+**What was built.** `frame_shift` places the displayed image position on a plane whose origin is the reference image position and whose orientation, spacing and dimensions are the displayed frame's. It reads `ImagePlane::index_to_world` and the inverse. The column shift is inverse `x` and the row shift is inverse `y`. A normal component is not a canvas translation. A zero spacing contributes `0`. The unit extension that keeps the matrix invertible is not a pixel size. `apply_placement` stores the displayed column and row millimetres and those shifts. The reference is the first stored frame, passed by the caller. This story does not sort by image position, does not read gantry tilt, and does not edit the camera formula.
+
+**HLD sections implemented.** HLD section 16, the image plane already implemented by `ImagePlane::index_to_world`. PS3.3 C.7.6.2.1.1. Section 13's display-calibration trait is not this story.
+**Deviations.** none
+**Crates / packages modified.** `crates/ocelli-viewport`, `docs/lld/viewport.md`, `docs/lld/README.md`.
+**Tests added.** Eight integration tests in `crates/ocelli-viewport/tests/placement.rs`.
+**Fixture provenance.** Hand computed from PS3.3 C.7.6.2.1.1. Column index `1 / 0.5 = 2`. Row index `4 / 2 = 2`. A swapped spacing is `0.5` and `8`. Displayed `z = 5` stays `(2, 2)`. A 3 mm offset on a zero column spacing expects column shift `0`, not the unit-extension index `3`. The 2 by 2 fit into an 8 by 8 canvas is the existing physical-size result, scale `2` and x offset `3`. No pixel samples.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time. `bin/ocelli.sh gate oracle` was also run on this code and was green: identity over 102 views, 29 mutations, 0 not detected. The feature trailer does not list that gate. This story does not draw.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path.
+**Tier coverage.** A: full for the shift, because it is inside the camera matrix F-045 uploads. This story adds no wgpu call and did not redraw. B: the same matrix. C: the same two numbers and no device. Drawing stays unavailable.
+**LLD updated.** `docs/lld/viewport.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** Two review passes, 0 defects and 0 smells, 1 nitpick then 0. The nitpick was an opening sentence that said `frame_shift` stores the shift. Pass 2 saw the correction. Swapping the spacing failed the column assert with bits of `0.5` against `2`. Deleting the zero-column guard returned `3`. Removing `set_index_shift` made canvas x `0.5` against `1.5`. `view.rs` and `graph.rs` were not edited. Oracle was run and was not part of the feature profile.

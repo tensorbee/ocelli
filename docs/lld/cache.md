@@ -1,6 +1,6 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047
 **Last updated:** 2026-10-18
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
@@ -121,6 +121,7 @@ routinely and asserts nothing about order.
 `insert` and `get` set an entry's tick. **`contains_key`, `pressure`, `len`, `is_empty` and `would_admit`
 do not**, because a telemetry reading is not a use, and a cache whose pressure
 signal changed what leaves next would be a cache nobody could measure.
+`ImageCache::contains` forwards to `contains_key` and does not update recency.
 
 Finding the smallest tick is a scan of a `BTreeMap`. That is deliberate rather
 than overlooked: a map and a counter is the smallest thing that is obviously
