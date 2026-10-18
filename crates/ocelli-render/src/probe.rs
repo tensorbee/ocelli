@@ -153,7 +153,7 @@ pub(crate) const WORKLOAD_WGSL: &str = include_str!("fill_rate.wgsl");
 /// recorded outcome, which is deviation D-07's honesty rule applied to the
 /// resolver itself.
 pub async fn resolve(request: TierRequest, clock: &mut dyn FnMut() -> u64) -> Resolution {
-    detect(request, clock).await.0
+    detect(request, clock).await.resolution
 }
 
 /// Resolve the session's tier and KEEP the adapter that won.
@@ -203,14 +203,22 @@ pub async fn resolve_adapter(
     request: TierRequest,
     clock: &mut dyn FnMut() -> u64,
 ) -> Option<ResolvedAdapter> {
-    let (resolution, adapter) = detect(request, clock).await;
-    if !crate::caps::opens_a_device(&resolution.caps) {
+    let detected = detect(request, clock).await;
+    if !crate::caps::opens_a_device(&detected.resolution.caps) {
         return None;
     }
-    adapter.map(|adapter| ResolvedAdapter {
-        adapter,
-        resolution,
-    })
+    match (detected.adapter, detected.instance) {
+        (Some(adapter), Some(instance)) => Some(ResolvedAdapter {
+            instance,
+            adapter,
+            resolution: detected.resolution,
+        }),
+        // A tier that opens a device and an adapter with no instance cannot
+        // happen: the instance is created before enumeration, and the tier C
+        // override returns before either. The match keeps the two together
+        // so a surface cannot be built from a different instance later.
+        _ => None,
+    }
 }
 
 /// The detection pass both public entry points share.
@@ -219,10 +227,15 @@ pub async fn resolve_adapter(
 /// was one. Extracted so [`resolve`] and [`resolve_adapter`] cannot disagree
 /// about how a tier is decided, which is the one thing about this module that
 /// must not exist twice.
-async fn detect(
-    request: TierRequest,
-    clock: &mut dyn FnMut() -> u64,
-) -> (Resolution, Option<wgpu::Adapter>) {
+struct Detected {
+    resolution: Resolution,
+    adapter: Option<wgpu::Adapter>,
+    /// The instance that enumerated `adapter`. Absent only on the tier C
+    /// override, which returns before any instance exists.
+    instance: Option<wgpu::Instance>,
+}
+
+async fn detect(request: TierRequest, clock: &mut dyn FnMut() -> u64) -> Detected {
     // An override of tier C short-circuits everything: no instance, no
     // adapter, no device, no benchmark. That is the estate D-07 names getting
     // its startup cost back.
@@ -248,7 +261,11 @@ async fn detect(
     // here. The test needs a real adapter to bite, so it is `#[ignore]`d and
     // `bin/ocelli.sh gate gpu` runs it.
     if request.requested() == Some(Tier::Cpu) {
-        return (classify(&TierSignals::unprobed(), request), None);
+        return Detected {
+            resolution: classify(&TierSignals::unprobed(), request),
+            adapter: None,
+            instance: None,
+        };
     }
 
     // `new_instance_with_webgpu_detection` rather than `Instance::new`,
@@ -276,11 +293,17 @@ async fn detect(
     // value and the rest are dropped with the vector. Order does not survive,
     // and nothing after this point reads the vector.
     //
-    // Dropping `instance` here is safe. `wgpu::Adapter` holds a refcounted
-    // handle to the same context, so the adapter outlives the instance value.
+    // The instance is retained. `wgpu::Adapter` holds a refcounted handle, so
+    // the adapter would stay valid if this value were dropped, but a surface
+    // is created from the instance that produced the adapter. Dropping it
+    // here would force `attach_target` to build a second one.
     let adapter =
         chosen.and_then(|index| (index < adapters.len()).then(|| adapters.swap_remove(index)));
-    (resolution, adapter)
+    Detected {
+        resolution,
+        adapter,
+        instance: Some(instance),
+    }
 }
 
 /// The adapter a session resolved on, retained so a lost device can be rebuilt.
@@ -290,6 +313,9 @@ async fn detect(
 /// call it again later without a second detection pass.
 #[derive(Debug)]
 pub struct ResolvedAdapter {
+    /// The instance `adapter` was enumerated from. [`GpuContext`] keeps a
+    /// clone of this handle, which is the same instance, not a second one.
+    instance: wgpu::Instance,
     adapter: wgpu::Adapter,
     resolution: Resolution,
 }
@@ -307,6 +333,25 @@ impl ResolvedAdapter {
     /// which is the thing this type exists to keep in one place.
     pub(crate) fn wgpu_adapter(&self) -> &wgpu::Adapter {
         &self.adapter
+    }
+
+    /// The instance this adapter was enumerated from.
+    ///
+    /// Crate-private so a caller cannot build a surface from it except
+    /// through [`GpuContext::attach_target`], which uses the clone `open`
+    /// stored.
+    pub(crate) fn instance(&self) -> &wgpu::Instance {
+        &self.instance
+    }
+
+    /// Whether `context` was opened from this adapter's instance.
+    ///
+    /// A surface created from any other instance is not the surface of this
+    /// adapter. [`ResolvedAdapter::open`] stores a clone of the handle, and
+    /// `wgpu::Instance` equality is identity of that handle.
+    #[must_use]
+    pub fn opened_from_this_instance(&self, context: &GpuContext) -> bool {
+        context.instance() == self.instance()
     }
 
     /// Open the session's one long-lived device.
@@ -357,7 +402,15 @@ impl ResolvedAdapter {
             .await
             // `RequestDeviceError` exposes its reason only through `Display`.
             .map_err(|error| DeviceError::Refused(error.to_string()))?;
-        Ok(GpuContext::new(device, queue, self.resolution.caps))
+        // A clone of the refcounted handle, not a second instance. The
+        // surface has to be created from the instance that produced this
+        // adapter, and the context is what `attach_target` is called on.
+        Ok(GpuContext::new(
+            self.instance.clone(),
+            device,
+            queue,
+            self.resolution.caps,
+        ))
     }
 }
 

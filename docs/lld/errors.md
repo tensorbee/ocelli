@@ -4,8 +4,8 @@
 `packages/core/src/{errors,panic,fatal,bulk,ring}.ts`, `ci/error-codes.json`
 **Normative source**: `docs/hld/20-errors-and-panics.md` section 23, with
 `docs/hld/14-the-boundary-in-code.md` sections 17.2, 17.3 and 17.4
-**F-IDs that contributed:** F-005, F-X001, F-X017
-**Last updated:** 2026-09-06
+**F-IDs that contributed:** F-005, F-039, F-X001, F-X017
+**Last updated:** 2026-10-18
 
 Living current-state document. It describes what the code does today.
 
@@ -300,7 +300,7 @@ land inside a UTF-8 sequence, and the shell decodes leniently, which turns a
 split code point into one replacement character rather than into an exception
 thrown while it is already handling a dead instance.
 
-### Four exports, and three of them are called exactly once
+### Panic-path exports, and three of them are called exactly once
 
 | Export | Called |
 |--------|--------|
@@ -308,6 +308,11 @@ thrown while it is already handling a dead instance.
 | `install_panic_hook()` | Once, by a worker, before any other call |
 | `panic_record_ptr()` | Once, straight after instantiation. Cached |
 | `panic_record_len()` | Once, straight after instantiation. Cached |
+
+`install_panic_hook`, `panic_record_ptr` and `panic_record_len` are the three
+called exactly once. The module also exports `attachOffscreenCanvas` and
+`resizeOffscreenCanvas`, which are F-039, are not part of this panic path, and
+are specified in `docs/lld/build-targets.md`.
 
 **This is the whole reason the design works.** After the trap the shell needs
 no call into the instance at all, which is section 23's "must not be reused"

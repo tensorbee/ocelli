@@ -4,17 +4,19 @@
 //! pipeline it will use at creation, encodes each dirty viewport once per
 //! frame into one command encoder, and submits that encoder exactly once.
 //!
-//! **No surface is acquired.** Presentation is F-039. F-040 uploads stored
-//! samples with `write_texture` into an `R32Float` texture created at
-//! registration. A viewport that does not own one still renders from a
-//! caller-supplied view. The oracle still has no Ocelli frame to judge.
-//! Decision D7 stays open.
+//! **F-039 acquires a surface per viewport that has one.** `tick` still
+//! submits once. A viewport with a surface draws into
+//! `Surface::get_current_texture`, and `present` runs after that submit, not
+//! per viewport. A viewport with no surface keeps the caller-supplied view
+//! from F-038. F-040 uploads stored samples with `write_texture` into an
+//! `R32Float` texture created at registration. The oracle still has no Ocelli
+//! frame to judge. Decision D7 stays open.
 
 use ocelli_pixel::LutChain;
 use wgpu::util::DeviceExt;
 
 use crate::caps::Tier;
-use crate::gpu::{GpuContext, Recovered};
+use crate::gpu::{GpuContext, Recovered, SurfaceError, first_render_attachment};
 use crate::probe::ResolvedAdapter;
 use crate::voi::{VOI_WGSL, VoiParams, VoiParamsError};
 
@@ -167,7 +169,8 @@ pub enum FrameOutcome {
         /// Passes encoded into the submission.
         passes: u32,
     },
-    /// Nothing was dirty. No encoder was created and nothing was submitted.
+    /// Nothing was submitted. Either nothing was dirty, or every dirty
+    /// surface viewport failed to yield a texture and its dirt stays.
     Noop,
     /// The device is lost. No dirt was consumed.
     DeviceLost,
@@ -428,11 +431,24 @@ fn pipeline_index(keys: &[PipelineKey], key: &PipelineKey) -> Option<usize> {
     keys.iter().position(|held| held == key)
 }
 
+/// A surface bound to one viewport. The colour attachment is acquired from
+/// it inside `tick` and is not stored on [`GpuSlot`].
+struct AttachedSurface {
+    surface: wgpu::Surface<'static>,
+    width: u32,
+    height: u32,
+}
+
 /// The render graph: registered viewports, their dirt, and the pipelines
 /// compiled at creation.
 pub struct RenderGraph {
     registry: Registry,
     gpu: Vec<Option<GpuSlot>>,
+    /// Parallel to `gpu`. `None` keeps F-038's caller-supplied colour view.
+    surfaces: Vec<Option<AttachedSurface>>,
+    /// Surface textures acquired for this frame, presented after the submit.
+    /// Capacity is fixed at creation so a tick does not grow it.
+    frame_textures: Vec<Option<wgpu::SurfaceTexture>>,
     keys: Vec<PipelineKey>,
     pipelines: Vec<wgpu::RenderPipeline>,
     uniform_layout: wgpu::BindGroupLayout,
@@ -477,6 +493,14 @@ impl RenderGraph {
         self.uploads
     }
 
+    /// The colour format the pipelines were compiled for.
+    ///
+    /// A surface whose first renderable format differs from this is refused
+    /// rather than drawn with the wrong attachment format.
+    pub fn color_format(&self) -> wgpu::TextureFormat {
+        self.format
+    }
+
     /// Create a graph over a live context, compiling its pipelines before it
     /// returns, and register them for device-loss recovery.
     ///
@@ -498,9 +522,15 @@ impl RenderGraph {
         ctx.register_graph_resources(restored);
         let mut gpu = Vec::new();
         gpu.resize_with(capacity, || None);
+        let mut surfaces = Vec::new();
+        surfaces.resize_with(capacity, || None);
+        let mut frame_textures = Vec::new();
+        frame_textures.resize_with(capacity, || None);
         Ok(Self {
             registry: Registry::new(capacity),
             gpu,
+            surfaces,
+            frame_textures,
             keys,
             pipelines,
             uniform_layout,
@@ -735,11 +765,121 @@ impl RenderGraph {
         if !self.registry.remove(id) {
             return Err(GraphError::UnknownViewport);
         }
-        if let Some(slot) = self
-            .gpu
-            .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
-        {
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        // The frame texture borrows the surface, so it goes first.
+        if let Some(held) = self.frame_textures.get_mut(index) {
+            *held = None;
+        }
+        if let Some(held) = self.surfaces.get_mut(index) {
+            *held = None;
+        }
+        if let Some(slot) = self.gpu.get_mut(index) {
             *slot = None;
+        }
+        Ok(())
+    }
+
+    /// Bind `surface` to a registered viewport.
+    ///
+    /// `tick` acquires that surface's current texture as the colour attachment
+    /// and presents it after the frame's single submit. The view is not stored
+    /// on the slot and is not installed through [`RenderGraph::rebind`]: a
+    /// surface texture is only valid until it is presented, and `rebind` on a
+    /// viewport that owns stored samples returns
+    /// [`GraphError::StoredNeedsRebind`] before it would keep a view. A
+    /// viewport with no surface keeps the caller-supplied view from F-038.
+    /// This does not increment [`RenderGraph::uploads`].
+    ///
+    /// The caller configures `surface` before this, at `extent`. `tick` calls
+    /// `get_current_texture`, which panics on a surface that was never
+    /// configured.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::UnknownViewport`] for an id this graph never issued.
+    pub fn bind_surface(
+        &mut self,
+        id: ViewportId,
+        surface: wgpu::Surface<'static>,
+        extent: (u32, u32),
+    ) -> Result<(), GraphError> {
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        if self
+            .registry
+            .states
+            .get(index)
+            .and_then(Option::as_ref)
+            .is_none()
+        {
+            return Err(GraphError::UnknownViewport);
+        }
+        if let Some(held) = self.frame_textures.get_mut(index) {
+            *held = None;
+        }
+        let Some(slot) = self.surfaces.get_mut(index) else {
+            return Err(GraphError::UnknownViewport);
+        };
+        *slot = Some(AttachedSurface {
+            surface,
+            width: extent.0,
+            height: extent.1,
+        });
+        if let Some(state) = self.registry.state_mut(id) {
+            state.dirty.camera = true;
+        }
+        Ok(())
+    }
+
+    /// Reconfigure a bound surface to `extent` and drop its previous texture.
+    ///
+    /// The held frame texture is dropped before `configure`, because wgpu
+    /// panics when a surface texture from this surface is still alive.
+    /// [`RenderGraph::rebind`] and [`RenderGraph::rebind_stored`] are not
+    /// called, so a stored-sample texture stays where it is and
+    /// [`RenderGraph::uploads`] does not change. The next tick draws the new
+    /// extent because the camera flag is set here.
+    ///
+    /// # Errors
+    ///
+    /// [`SurfaceError::NotAttached`] when this viewport has no surface.
+    /// [`SurfaceError::FormatDiffers`] when the format the surface would use
+    /// is not the format the graph was compiled for, in which case the
+    /// previous configuration is left in place. The other [`SurfaceError`]
+    /// variants are those [`GpuContext::configure_viewport`] returns.
+    pub fn reconfigure_surface(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        id: ViewportId,
+        extent: (u32, u32),
+    ) -> Result<(), SurfaceError> {
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        if let Some(held) = self.frame_textures.get_mut(index) {
+            *held = None;
+        }
+        let attached = self
+            .surfaces
+            .get(index)
+            .and_then(Option::as_ref)
+            .ok_or(SurfaceError::NotAttached)?;
+        let capabilities = attached.surface.get_capabilities(adapter.wgpu_adapter());
+        let format = first_render_attachment(&capabilities.formats, |format| {
+            adapter
+                .wgpu_adapter()
+                .get_texture_format_features(format)
+                .allowed_usages
+        })
+        .ok_or(SurfaceError::NoRenderAttachment)?;
+        if format != self.format {
+            return Err(SurfaceError::FormatDiffers);
+        }
+        ctx.configure_viewport(&attached.surface, adapter, extent)?;
+        if let Some(Some(attached)) = self.surfaces.get_mut(index) {
+            attached.width = extent.0;
+            attached.height = extent.1;
+        }
+        if let Some(state) = self.registry.state_mut(id) {
+            state.dirty.camera = true;
         }
         Ok(())
     }
@@ -1055,10 +1195,19 @@ impl RenderGraph {
         // The registry keeps each pass, its last uniform values and the stored
         // extent. The caller re-supplies a caller-owned source through
         // `rebind`, or recreates an owned texture through `rebind_stored`.
+        // Surfaces were configured on the dead device. The frame texture is
+        // dropped before the surface it came from. The shell still holds the
+        // canvases and supplies them again through `bind_surface`.
         // A viewport with no rebound slot reports unavailable in the tick
         // and keeps its dirt.
         for slot in self.gpu.iter_mut() {
             *slot = None;
+        }
+        for held in &mut self.frame_textures {
+            *held = None;
+        }
+        for held in &mut self.surfaces {
+            *held = None;
         }
         for state in self.registry.states.iter_mut().flatten() {
             state.dirty = Dirty::full();
@@ -1071,8 +1220,15 @@ impl RenderGraph {
     /// registration order into one encoder, and submits exactly once. Dirt
     /// clears only after a successful encode. A viewport whose pass has no
     /// compiled pipeline keeps its dirt and is reported unavailable.
+    ///
+    /// A viewport with a surface draws into `get_current_texture` for this
+    /// tick. `present` runs after the single submit, once per acquired
+    /// texture, not per viewport inside the encoder. A surface that does not
+    /// yield a texture keeps its dirt and is not drawn into the caller-supplied
+    /// view. A viewport with no surface keeps that view.
     pub fn tick(&mut self, ctx: &GpuContext) -> FrameOutcome {
         if matches!(ctx.state(), crate::gpu::DeviceState::Lost(_)) {
+            self.discard_frame_textures();
             return FrameOutcome::DeviceLost;
         }
         let mut first_unavailable: Option<ViewportId> = None;
@@ -1102,17 +1258,76 @@ impl RenderGraph {
                 None => FrameOutcome::Noop,
             };
         }
-        // Encode only viewports whose pipeline exists. Unavailable ones keep
-        // their dirt, checked again below when clearing.
+        self.acquire_dirty_surfaces();
+        self.encode_frame(ctx, first_unavailable)
+    }
+
+    fn discard_frame_textures(&mut self) {
+        for held in &mut self.frame_textures {
+            *held = None;
+        }
+    }
+
+    /// Acquire a current texture for each dirty surface viewport that can encode.
+    ///
+    /// Success and Suboptimal are both drawable. Every other status drops the
+    /// result, which discards it, and leaves the slot empty so the encode
+    /// skips that viewport without clearing its dirt.
+    fn acquire_dirty_surfaces(&mut self) {
+        self.discard_frame_textures();
+        let tier = self.tier;
+        let RenderGraph {
+            registry,
+            gpu,
+            surfaces,
+            frame_textures,
+            pipelines,
+            keys,
+            ..
+        } = self;
+        for index in 0..registry.states.len() {
+            if !viewport_encodable(registry, gpu, pipelines, keys, tier, index) {
+                continue;
+            }
+            let Some(attached) = surfaces.get(index).and_then(Option::as_ref) else {
+                continue;
+            };
+            let texture = match attached.surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(texture)
+                | wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
+                _ => continue,
+            };
+            if let Some(slot) = frame_textures.get_mut(index) {
+                *slot = Some(texture);
+            }
+        }
+    }
+
+    fn encode_frame(
+        &mut self,
+        ctx: &GpuContext,
+        first_unavailable: Option<ViewportId>,
+    ) -> FrameOutcome {
+        let tier = self.tier;
+        let RenderGraph {
+            registry,
+            gpu,
+            surfaces,
+            frame_textures,
+            pipelines,
+            keys,
+            submissions,
+            ..
+        } = self;
         let mut encoder = ctx
             .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("ocelli render graph frame"),
             });
         let mut encoded: u32 = 0;
-        for index in 0..self.registry.states.len() {
+        for index in 0..registry.states.len() {
             let key = {
-                let Some(state) = self.registry.states.get(index).and_then(Option::as_ref) else {
+                let Some(state) = registry.states.get(index).and_then(Option::as_ref) else {
                     continue;
                 };
                 if !state.dirty.any() {
@@ -1121,20 +1336,34 @@ impl RenderGraph {
                 PipelineKey {
                     pass: state.pass.kind(),
                     blend: state.pass.blend(),
-                    tier: self.tier,
+                    tier,
                 }
             };
-            let Some(pipeline) = self.pipeline(&key) else {
+            let Some(pipeline) = pipeline_index(keys, &key).and_then(|found| pipelines.get(found))
+            else {
                 continue;
             };
-            let Some(slot) = self.gpu.get(index).and_then(Option::as_ref) else {
+            let Some(slot) = gpu.get(index).and_then(Option::as_ref) else {
                 continue;
             };
+            let has_surface = surfaces.get(index).and_then(Option::as_ref).is_some();
+            let surface_view = frame_textures
+                .get(index)
+                .and_then(Option::as_ref)
+                .map(|held| {
+                    held.texture
+                        .create_view(&wgpu::TextureViewDescriptor::default())
+                });
+            if has_surface && surface_view.is_none() {
+                continue;
+            }
+            let caller = &slot.target;
+            let view = surface_view.as_ref().unwrap_or(caller);
             {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("ocelli render graph pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &slot.target,
+                        view,
                         depth_slice: None,
                         resolve_target: None,
                         ops: wgpu::Operations {
@@ -1150,23 +1379,57 @@ impl RenderGraph {
                 pass.draw(0..3, 0..1);
             }
             encoded += 1;
-            if let Some(state) = self.registry.states.get_mut(index).and_then(Option::as_mut) {
+            if let Some(state) = registry.states.get_mut(index).and_then(Option::as_mut) {
                 state.dirty.clear();
             }
         }
         if encoded == 0 {
+            for held in frame_textures.iter_mut() {
+                *held = None;
+            }
             return match first_unavailable {
                 Some(viewport) => FrameOutcome::Unavailable { viewport },
                 None => FrameOutcome::Noop,
             };
         }
         ctx.queue().submit(std::iter::once(encoder.finish()));
-        self.submissions += 1;
+        *submissions += 1;
+        for held in frame_textures.iter_mut() {
+            if let Some(texture) = held.take() {
+                ctx.queue().present(texture);
+            }
+        }
         FrameOutcome::Submitted {
             viewports: encoded,
             passes: encoded,
         }
     }
+}
+
+fn viewport_encodable(
+    registry: &Registry,
+    gpu: &[Option<GpuSlot>],
+    pipelines: &[wgpu::RenderPipeline],
+    keys: &[PipelineKey],
+    tier: Tier,
+    index: usize,
+) -> bool {
+    let Some(state) = registry.states.get(index).and_then(Option::as_ref) else {
+        return false;
+    };
+    if !state.dirty.any() {
+        return false;
+    }
+    let key = PipelineKey {
+        pass: state.pass.kind(),
+        blend: state.pass.blend(),
+        tier,
+    };
+    let compiled = pipeline_index(keys, &key)
+        .and_then(|found| pipelines.get(found))
+        .is_some();
+    let rebound = gpu.get(index).and_then(Option::as_ref).is_some();
+    compiled && rebound
 }
 
 fn voi_of(pass: &Pass) -> VoiParams {

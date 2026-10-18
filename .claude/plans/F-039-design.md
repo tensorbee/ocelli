@@ -103,11 +103,11 @@ None. `docs/hld/B-parity-surface.md` has no `Covered by` column.
 
 ## Deviations
 
-None. D-12 is followed by keeping the browser type out of `ocelli-render`. D-14's `webgl` feature is already on that crate and is not changed.
+None. D-12 is followed by keeping the browser type out of `ocelli-render`. D-14's `webgl` feature is already on that crate and is not changed. The Why cell's measured-cost clause was updated.
 
 ## LLD impact
 
-`docs/lld/gpu-ownership.md`, `docs/lld/render-graph.md`, `docs/lld/build-targets.md`. The size budget file is updated from the measurement, not from a guess.
+`docs/lld/gpu-ownership.md`, `docs/lld/render-graph.md`, `docs/lld/build-targets.md`, `docs/lld/tier-resolution.md`, `docs/lld/benchmarks.md`, `docs/lld/errors.md`. The size budget file is updated from the measurement, not from a guess.
 
 ## Open questions
 

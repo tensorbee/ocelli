@@ -1,7 +1,7 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-X014
-**Last updated:** 2026-10-17
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-X014
+**Last updated:** 2026-10-18
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -158,18 +158,17 @@ tolerance. `ci/bench-baseline.json` carries the figure, the host class, the
 instrument versions, the artefact's digest and the reasoning for both the value
 and the tolerance.
 
-Appendix A gate A4 has two halves. F-002 measured the first, recording 14,104
-bytes, which F-005 re-baselined to 16,388. **The second half, cold start, had
-never been measured at all.** This is that half, and it is not a fabricated
-workload: it is the actual release artefact doing the actual thing a browser
-does at session start.
+Appendix A gate A4 has two halves. The size half is recorded in
+`ci/wasm-size-budget.json` at 1,999,061 bytes, the F-039 measurement of the
+release module that reaches wgpu and Naga. **The cold-start half is the 2.3 ms
+figure above, and that figure is the F-006 measurement.** Cold start was not
+remeasured after F-039. 2.3 ms is not a measurement of the current module.
 
-**It is not an answer to gate A4 and must not be read as one.** The same caveat
-`docs/lld/build-targets.md` puts on the size number applies here unchanged. A4
-estimates 3 to 8 MB uncompressed with Naga dominating, and this module holds
-four exported functions, no wgpu and no Naga. **A4 stays open.** The figure is a
-regression baseline for the build-out phase, and re-baselining is expected
-repeatedly, each one naming its design plan.
+**It is not an answer to gate A4 and must not be read as one.** A4 estimates
+3 to 8 MB uncompressed with Naga dominating, and it also names cold start.
+The current release module exports six functions and contains Naga.
+**A4 stays open.** The 2.3 ms figure remains the F-006 regression baseline
+until a later story measures cold start on this module.
 
 ### How it is taken
 

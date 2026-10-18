@@ -1084,8 +1084,13 @@ dependencies = [
 name = "ocelli-wasm"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "ocelli-core",
+ "ocelli-render",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
 ]
 
 [[package]]

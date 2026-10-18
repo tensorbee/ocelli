@@ -1,7 +1,7 @@
 # GPU ownership
 
-**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-038, F-041, F-X001
-**Last updated:** 2026-10-17
+**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-038, F-039, F-041, F-X001
+**Last updated:** 2026-10-18
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
 mechanism. The quote below alters that bullet in one place, splitting its
@@ -22,8 +22,8 @@ here before anything uses it.
 |------|-------|-----------|
 | `Tier` | `ocelli-render` | `A` WebGPU, `B` WebGL2 downlevel, `Cpu` under deviation D-07 |
 | `Caps` | `ocelli-render` | HLD section 22's struct, field for field, plus the third tier |
-| `GpuContext` | `ocelli-render` | The device, the queue, the caps and the loss slot, owned together |
-| `ResolvedAdapter` | `ocelli-render` | The adapter the tier resolved on, retained so a lost device can be rebuilt. Holds no device |
+| `GpuContext` | `ocelli-render` | The instance, the device, the queue, the caps and the loss slot, owned together |
+| `ResolvedAdapter` | `ocelli-render` | The adapter the tier resolved on and the instance that produced it. Retained so a lost device can be rebuilt and a surface can be created from that same instance. Holds no device |
 | `DeviceState` | `ocelli-render` | `Live`, or `Lost` with the reason and wgpu's text. HLD section 22's "real state" |
 | `DeviceError` | `ocelli-render` | `Refused`, `NotLost`, `Unrecoverable` |
 | `Recovered` | `ocelli-render` | What a rebuild produced: caps, and from F-038 the graph resources it restored |
@@ -212,7 +212,10 @@ for that situation and not two. See `docs/lld/errors.md`.
   hands the result to this constructor, so the decision about WHICH device to
   open stays in `probe` beside the tier resolution it comes from, and this type
   still only owns a device that exists. See "The device lifecycle" below.
-  F-039 is E6.3 in S13 and is OffscreenCanvas.
+  F-039 stores the instance `probe` built on `ResolvedAdapter` and clones it
+  onto `GpuContext` inside `open`. `attach_target` creates a surface from that
+  instance. A second instance is not built for a surface. The CPU override
+  returns before instance creation and creates nothing.
 - **It does not detect `Caps`.** `caps.rs` defined the type because section
   31's `Kernel::workgroup` takes a `&Caps` and a hook expressed in types needs
   the types. **F-004 has since filled it**, in the same file plus
@@ -240,6 +243,8 @@ state from the shell's copy."
 | Decide whether a device is opened at all | `caps::opens_a_device` | Total match. Tiers A and B yes, tier C no |
 | Keep the winning adapter | `probe::resolve_adapter` | Returns `ResolvedAdapter`, or nothing for tier C |
 | Open the one long-lived device | `ResolvedAdapter::open` | The second and last `request_device` in the workspace |
+| Create a surface | `GpuContext::attach_target` | The only `create_surface`. Uses the instance stored on the context |
+| Configure that surface | `GpuContext::configure_viewport` | First format `get_capabilities` reports that can be a render attachment |
 | Observe a loss | the callback `GpuContext::new` registers | Writes one `LossSlot`, first loss wins |
 | Decide whether to rebuild | `caps::recovers_from` | Total match. `Unknown` yes, `Destroyed` no |
 | Rebuild | `GpuContext::recover` | Re-opens on the same adapter, returns `Recovered` |
@@ -284,8 +289,9 @@ reason stops the build rather than letting it inherit an answer nobody chose.
 
 **What recovery does not restore.** `Recovered` carries the rebuilt device's
 `Caps` and, when a graph registered them, the `GraphResources` the rebuild
-restored. It does not carry a canvas or a texture. F-039 and F-040 extend
-this struct rather than `recover`'s signature.
+restored. It does not carry a canvas or a texture. `install_recovered` drops
+held frame textures and then the surfaces. The shell still holds the canvases
+and supplies them again through `bind_surface`.
 
 **`caps` cannot currently differ from the pre-loss `caps`**, and this paragraph
 said it could until the F-037 review's second pass. `ResolvedAdapter::open`
@@ -332,6 +338,30 @@ downlevel adapter separates the two, and HLD section 7's tier B has never been
 exercised by anything in this project.** F-042 is the WebGL2 story and F-X002 is
 the story that gets a software adapter into a test.
 
+## Surfaces
+
+F-039. One `GpuContext` serves every viewport. There is no context pool and no
+second `request_device` for a canvas.
+
+`device_extent` lives in `ocelli-render` and touches no GPU. Each axis is
+`f64::round` of CSS size times device pixel ratio, then a saturating
+conversion to `u32`. A strictly positive CSS axis that rounds to 0 becomes 1.
+Non-finite inputs are refused. A ratio that is not strictly positive is
+refused. CSS 100 by 50 at ratio 2 is 200 by 100. Using the CSS size as the
+backing store fails that case.
+
+`attach_target` takes `impl Into<wgpu::SurfaceTarget<'_>>`.
+`configure_viewport` does not hard-code `Rgba8Unorm` or `Bgra8Unorm`. Present
+mode and alpha mode are the first the surface reports. An empty extent is
+refused before `configure`. On tier C the wasm export sets the canvas bitmap
+from `device_extent` and returns without calling `attach_target`.
+
+`ocelli-wasm` exports `attachOffscreenCanvas` and `resizeOffscreenCanvas`. The
+export builds `SurfaceTarget::OffscreenCanvas` and calls `attach_target`.
+Decode workers load the same module and are not required to call either
+export. The viewport table in that crate is an index of capacity 8. It is not
+the session F-101 owns.
+
 ## Deviations D-10 and D-12
 
 ### D-12, wgpu reaches wasm-bindgen and nothing can stop it
@@ -371,6 +401,10 @@ endorsing it. `scripts/no_std_check.py` reads the attribute from each crate's
 source rather than carrying an exemption list, so these two left the check by
 construction.
 
-`ocelli-wasm` does not depend on `ocelli-render`, so **the wasm size budget is
-unaffected by this story**. The first story that makes the wasm module reach
-wgpu is the one that re-baselines it and says why.
+**F-039 is the first edge from `ocelli-wasm` to `ocelli-render`.** The wasm
+module therefore reaches wgpu and Naga. `attach_target` in `ocelli-render` is
+the only `create_surface` call. `ocelli-wasm` names `OffscreenCanvas` and does
+not contain that substring. `web-sys` is a dependency of `ocelli-wasm` only.
+`ocelli-render` does not name `web_sys`. The size budget is re-baselined from
+the measurement in `ci/wasm-size-budget.json`. `docs/lld/build-targets.md`
+records that number. Gate A4 stays open.

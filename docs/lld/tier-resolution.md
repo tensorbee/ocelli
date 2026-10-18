@@ -1,7 +1,7 @@
 # Tier resolution
 
-**F-IDs that contributed:** F-004, F-037, F-X001, F-X016
-**Last updated:** 2026-09-14
+**F-IDs that contributed:** F-004, F-037, F-039, F-X001, F-X016
+**Last updated:** 2026-10-18
 
 How a session decides whether it is tier A, tier B or tier C, and how it
 records why. This describes what the code does today.
@@ -448,29 +448,17 @@ at all, and HLD section 7's tier B could never resolve in a browser. A tier the
 resolver can never return is not a tier.
 
 The pin and the workspace entry are untouched and only the consuming crate's
-feature set changes, which is the shape deviation D-09 set for glam. Measured
-cost today is zero bytes, because `ocelli-wasm` does not depend on
-`ocelli-render` and so never reaches wgpu, so the size budget moves only when
-the render path is wired in from S11. That crate had an empty
-`[dependencies]` table when this was written and F-005 has since added
-`ocelli-core` to it, which changes the premise and not the conclusion.
+feature set changes, which is the shape deviation D-09 set for glam. F-039
+makes `ocelli-wasm` depend on `ocelli-render` and on `wgpu`. The attach export
+calls `resolve_adapter`. The release module exports six functions and contains
+Naga. `ci/wasm-size-budget.json` records 1,999,061 bytes for that module. Cold
+start was not remeasured. The 2.3 ms figure is still the F-006 measurement of
+the earlier module.
 
 ## What this story deliberately does not do
 
-- **It does not wire tier resolution into `ocelli-wasm`.** That module has no
-  dependency on `ocelli-render` and so never reaches wgpu. The boundary is
-  E16.2 in S16. Wiring it now would add an entry point nothing calls and
-  re-baseline the wasm size budget for a feature with no user. F-004 touches
-  `ci/wasm-size-budget.json` not at all.
-
-  **This said "no browser path of the resolver can run before F-037 in S11",
-  and F-037 has landed without changing the situation.** It built the
-  long-lived device inside `ocelli-render` and took the same decision F-004
-  was given in S03: the edge to `ocelli-wasm` is still not there, so the
-  browser path still cannot run and `ci/wasm-size-budget.json` still RECORDS
-  16,388 bytes. That is the recorded budget rather than a fresh measurement.
-  F-039, E6.3 in S13, is the first story with a reason to add it, and
-  `ci/wasm-size-budget.json` now says so where it used to say S11.
+- **It does not wire tier resolution into `ocelli-wasm`.** That is F-004's
+  limit. F-039 later added that edge, described above.
 - **It does not create a long-lived device.** The probe device is transient
   and `GpuContext` is still built by whoever owns one. **F-037 has since built
   the long-lived one**, as `probe::resolve_adapter` plus

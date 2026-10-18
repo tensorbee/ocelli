@@ -49,11 +49,11 @@ a milestone boundary.
 - **Tier B has still never been exercised**, by anything, in any sprint. F-042
   is the story that has to. Until it lands, a tier B row that says full is a
   claim about a path nobody has run.
-- **The wasm size budget has not moved.** `ci/wasm-size-budget.json` records
-  16388 bytes, and its `bearing_on_gate_A4` field says the number that bears on
-  gate A4 arrives with F-039. `ocelli-wasm` still reaches `ocelli-core` and
-  nothing else. A dependency added only to move the number is a dependency
-  with no user.
+- **The wasm size budget records 1,999,061 bytes.** `ci/wasm-size-budget.json`
+  records that size. Its `bearing_on_gate_A4` field says this is the first time
+  the module reaches wgpu and Naga and that the number does not close A4.
+  `ocelli-wasm` depends on `ocelli-core`, `ocelli-render` and `wgpu`. The
+  dependency has a user, the OffscreenCanvas attach path.
 - **`max_review_passes` is written by `sprint_workflow.py init` and read by
   nothing**, so `/run-sprint`'s "mark the sprint blocked" branch has no
   mechanism behind it. Found by S11's sprint review, outside that sprint's

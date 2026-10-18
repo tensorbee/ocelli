@@ -29,7 +29,7 @@
       "tiers": ["n/a"],
       "subject_story": null,
       "feeds": ["A4"],
-      "note": "Release profile only. HLD 15.2's opt-level z, fat LTO, codegen-units 1, panic abort and strip apply to release, so a dev-profile cold start is a different number and not a smaller one. This is the second half of gate A4, whose first half F-002 measured as a byte count. It is NOT an answer to A4: the module holds four exported functions, no wgpu and no Naga, and A4 estimates 3 to 8 MB uncompressed with Naga dominating. A4 stays open."
+      "note": "Release profile only. HLD 15.2's opt-level z, fat LTO, codegen-units 1, panic abort and strip apply to release, so a dev-profile cold start is a different number and not a smaller one. This is the second half of gate A4. The release module exports six functions and contains Naga. The recorded size is 1,999,061 bytes. Cold start of this module was not remeasured. A4 estimates 3 to 8 MB uncompressed with Naga dominating. A4 stays open."
     },
     {
       "id": "decode.frame",

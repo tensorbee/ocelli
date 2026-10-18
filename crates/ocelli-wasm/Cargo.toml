@@ -32,12 +32,8 @@ crate-type = ["cdylib", "rlib"]
 # `rustc --print cfg --target wasm32-unknown-unknown | grep target_feature`
 # reports, one flag per default feature, with `nontrapping-fptoint` written in
 # wasm-opt's spelling. Re-run that command if the toolchain moves.
-#
-# Only --enable-bulk-memory is needed to build TODAY, because this module is
-# one function and emits nothing else. The other five are here because the
-# module they will have to validate is the one F-101 and the render stories
-# build, and discovering each missing flag one failed build at a time is worse
-# than reading them off rustc once.
+# F-039 is the first story whose module reaches wgpu, so the flags are no
+# longer only for a later story.
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = [
   "-O",
@@ -66,6 +62,13 @@ wasm-opt = [
 # Pinned exactly in [workspace.dependencies]. `scripts/pin_and_size_check.py`
 # refuses a range form here for the same reason it refuses one for wgpu.
 wasm-bindgen = { workspace = true }
+# The same versions wgpu 30.0.1 already resolves. They stay in this target
+# table so a native crate cannot name the browser types through the workspace.
+web-sys = { version = "=0.3.104", features = ["OffscreenCanvas"] }
+js-sys = "=0.3.104"
+# Async exports become promises through this crate. Pinned to the version
+# already in Cargo.lock beside wasm-bindgen 0.2.127.
+wasm-bindgen-futures = "=0.4.77"
 
 [features]
 # HLD section 23's panic behaviour cannot be observed from a native test:
@@ -83,7 +86,16 @@ panic-probe = []
 [dependencies]
 # HLD section 4's crate table puts the error model in ocelli-core, and F-005's
 # panic record writes ErrorCode::Panicked's number into linear memory. This is
-# the first time ocelli-wasm depends on another crate in the workspace, and it
-# is the larger half of the size-budget move recorded in
-# ci/wasm-size-budget.json.
+# the first time ocelli-wasm depends on another crate in the workspace. The
+# dependency is F-005's panic record and is not the move
+# ci/wasm-size-budget.json now records.
 ocelli-core = { path = "../ocelli-core" }
+# F-039. The first edge from this crate to the renderer. Decode workers load
+# the module and do not call the canvas exports. The size cost is the number
+# gate A4 reserved for this story, recorded in ci/wasm-size-budget.json.
+ocelli-render = { path = "../ocelli-render" }
+# `SurfaceTarget::OffscreenCanvas` is the safe constructor, and D-12 keeps the
+# canvas type out of ocelli-render, so this crate is the one that names the
+# target. The device is still created only in ocelli-render. The workspace pin
+# is the one ocelli-render already uses, webgl included by feature unification.
+wgpu = { workspace = true }
