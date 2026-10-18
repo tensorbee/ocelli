@@ -4,7 +4,7 @@
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1,
 `docs/hld/15-lut-chain.md` sections 18 through 18.3, DICOM PS3.3 C.7.6.2,
 C.7.6.3, C.7.9 and C.11
-**F-IDs that contributed:** F-018, F-029, F-030, F-041, F-044
+**F-IDs that contributed:** F-018, F-029, F-030, F-041, F-044, F-046
 **Last updated:** 2026-10-18
 
 Living current-state document. It describes what the code does today.
@@ -189,6 +189,11 @@ validated with. A VOI LUT Sequence reports DICOM PS3.3 C.11.2.1.1's
 largest entry present. `LutDescriptor` retains that bound from construction, so
 the entry-size-to-range mapping exists once, inside the validation that refuses
 every other entry size.
+
+Window presets are not a stage and they do not live in this crate.
+`Presentation::apply_preset` and `Presentation::set_window` in
+`ocelli-viewport` call `VoiTransform::new` and keep the output range the chain
+already has. They add no formula.
 
 ## Presentation stage
 

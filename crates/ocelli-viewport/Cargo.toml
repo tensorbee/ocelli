@@ -18,6 +18,10 @@ ocelli-core = { path = "../ocelli-core" }
 # is the one `ocelli-pixel` already uses for the same reason. The workspace
 # entry keeps default features off.
 glam.workspace = true
+# F-046. Presets call `VoiTransform::new` and rebuild `LutChain`. This crate
+# does not take wgpu and does not depend on ocelli-render.
+ocelli-pixel = { path = "../ocelli-pixel" }
 
 [dev-dependencies]
 ocelli-core = { path = "../ocelli-core" }
+ocelli-pixel = { path = "../ocelli-pixel" }

@@ -1,11 +1,12 @@
-# Viewport camera
+# Viewport
 
-**F-IDs that contributed:** F-045
+**F-IDs that contributed:** F-045, F-046
 **Last updated:** 2026-10-18
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
 `RenderGraph::set_view` uploads the sixteen floats `View::camera_matrix`
-returns.
+returns. `Presentation` in the same crate holds the LUT chain and the
+colormap. It does not draw either.
 
 ## The types
 
@@ -64,8 +65,30 @@ Tier A and tier B sample through the same fragment module. Tier C drawing
 stays unavailable. `RenderGraph::new` returns `TierCUnavailable`. The `View`
 math runs with no device. CPU raster is F-X003.
 
+## Presentation
+
+`Presentation` holds a `LutChain` and a `Colormap`. A preset or `set_window`
+rebuilds stage 2 through `VoiTransform::new` and keeps the modality transform,
+the presentation evidence and the output range. `soft_tissue` is centre 40
+and width 400, `LINEAR`. `lung` is centre -600 and width 1500. `bone` is
+centre 300 and width 1500. Both of those are `LINEAR` as well. None of the
+three adds a formula.
+
+A preset on a modality LUT sequence or a VOI LUT sequence returns
+`PresentationError::Sequence` and leaves the chain in place. `set_invert`
+stores an explicit `PresentationLutEvidence::Shape` and rebuilds the chain.
+An explicit shape is not combined with `MONOCHROME1`. `set_colormap` stores
+`Grey` or `Stops`. A window change does not change it.
+
+One match in `ocelli-render`, `colour_lut_for`, maps `Colormap` to `PresetId`
+and calls `ColourLut::preset`. This crate does not depend on `ocelli-render`
+and does not call `set_voi` or `upload_stored`.
+
+Tier A and tier B consume the rebuilt chain through the existing VOI uniform.
+Tier C runs the same `LutChain`. Drawing on tier C stays unavailable. A
+colormap on tier C indexes the same preset bytes, after `map_into`.
+
 ## What this file does not own
 
-Presentation state is F-046. Slice scroll is F-047. The measured index shift
-is F-049. The TypeScript names are F-100. This crate does not call `set_voi`
-and does not depend on wgpu.
+Slice scroll is F-047. The measured index shift is F-049. The TypeScript
+names are F-100. This crate does not depend on wgpu.

@@ -2,10 +2,11 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
-//! F-045 fills the camera. Presentation state is a later story.
+//! F-045 fills the camera. F-046 fills presentation state.
 
 #![cfg_attr(not(test), no_std)]
 
+pub mod presentation;
 pub mod view;
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which

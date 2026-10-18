@@ -63,6 +63,9 @@ ocelli-cache = { path = "../ocelli-cache" }
 # so the `Pod` derive on section 18.4's `#[repr(C)]` uniform is how its bytes
 # reach a buffer. This is the workspace entry's FIRST consumer.
 bytemuck = { workspace = true }
+# F-046. One match from the viewport colormap onto `PresetId`. The viewport
+# crate does not depend on this one, and this match does not create a device.
+ocelli-viewport = { path = "../ocelli-viewport" }
 
 [dev-dependencies]
 # `resolve` is `async fn`, because `request_adapter` and `request_device` are

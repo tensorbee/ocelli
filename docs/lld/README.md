@@ -21,7 +21,7 @@ row here in the same hand.
 |------|------|-------|
 | [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001, F-005, F-018 |
 | [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-020, F-021, F-025 |
-| [pixel-pipeline.md](pixel-pipeline.md) | Image-plane evidence, stored-value extraction, and all four stages of DICOM PS3.3 C.11: modality, VOI, presentation and colour | F-018, F-029, F-030, F-041, F-044 |
+| [pixel-pipeline.md](pixel-pipeline.md) | Image-plane evidence, stored-value extraction, and all four stages of DICOM PS3.3 C.11: modality, VOI, presentation and colour | F-018, F-029, F-030, F-041, F-044, F-046 |
 | [dicomweb.md](dicomweb.md) | TypeScript DICOMweb transport and the pure Rust response contract | F-021 |
 | [nifti-ingest.md](nifti-ingest.md) | NIfTI-1.1 header, affine, coordinate conversion, and payload validation | F-022 |
 | [codecs.md](codecs.md) | Explicit decoder registration, capability, exact Transfer Syntax UID dispatch, native normalization, RLE, JPEG and JPEG 2000 decode | F-023, F-024, F-025, F-026, F-027, F-028, F-030 |
@@ -29,7 +29,7 @@ row here in the same hand.
 | [build-targets.md](build-targets.md) | The wasm pipeline, the size budget, the cross-target proof and the isolation invariant | F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-X008 |
 | [gpu-ownership.md](gpu-ownership.md) | One device, one queue, one owner. The section 31 contract | F-004, F-005, F-008, F-037, F-038, F-039, F-041, F-042, F-X001 |
 | [render-graph.md](render-graph.md) | `crates/ocelli-render` graph and frame scheduler: passes, dirt, one submit per frame, stored-sample upload, and brick upload | F-038, F-039, F-040, F-042, F-043, F-044, F-045 |
-| [viewport.md](viewport.md) | Stack camera, fit, and the matrix `set_view` uploads | F-045 |
+| [viewport.md](viewport.md) | Stack camera, presentation state, and the matrix `set_view` uploads | F-045, F-046 |
 | [tier-resolution.md](tier-resolution.md) | How a session resolves tier A, B or C, the fill-rate probe, the operator override, and the two GPU-less runs | F-004, F-037, F-039, F-042, F-X001, F-X002, F-X016 |
 | [feature-availability.md](feature-availability.md) | The three-state contract every tier-gated feature declares | F-037, F-041, F-X001 |
 | [errors.md](errors.md) | The error model, the code registry, the panic record and structured logging | F-005, F-039, F-X001, F-X017 |

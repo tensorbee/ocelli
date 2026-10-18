@@ -177,7 +177,7 @@ The three-channel boundary is real and a stack viewport diffs clean against corn
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
 | F-045 | E7.1 | S15 | Stack viewport: display, fit, pan, zoom, rotate, flip | Rust+TS | 4w | F-039 | done |
-| F-046 | E7.2 | S15 | Window/level, VOI presets, invert, colormap | Rust+TS | 3w | F-041 | pending |
+| F-046 | E7.2 | S15 | Window/level, VOI presets, invert, colormap | Rust+TS | 3w | F-041 | done |
 | F-047 | E7.3 | S15 | Stack scroll, prefetch strategy, image sequencing | Rust+TS | 3w | F-032 | pending |
 | F-048 | E7.4 | S16 | Coordinate transforms: canvas / world / index | Rust+TS | 3w | F-045 | pending |
 | F-049 | E7.5 | S15 | Calibration, spacing and gantry-tilt correction | Rust+TS | 2w | F-020 | pending |

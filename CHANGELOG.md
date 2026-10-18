@@ -338,3 +338,8 @@ Repository bootstrap. Nothing is published.
   centre on a y-down canvas. `set_view` uploads the sixteen column-major
   floats and does not rewrite the window uniform. A fragment outside the
   image is black.
+- Window presets, invert and a colormap on the stack viewport. Soft tissue
+  is the section 18.3 LINEAR window. Lung and bone are named centre and
+  width pairs. A preset does not replace a modality or VOI LUT sequence.
+  Invert sets an explicit presentation shape. A window change does not
+  change the colormap.

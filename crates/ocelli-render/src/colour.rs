@@ -15,6 +15,7 @@ use ocelli_pixel::{
     ColorTransform, DecodedLayout, DecodedPhotometric, LutChain, PaletteColorLut,
     PhotometricInterpretation, PixelDataEncoding, PlanarConfiguration, Rgb, SampleLayout,
 };
+use ocelli_viewport::presentation::Colormap;
 
 /// `grey` or `stops`. No clinical name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +220,25 @@ impl ColourLut {
     }
 }
 
+/// Map [`Colormap`] onto the two preset tables and build that table.
+///
+/// Palette colour stays [`ColourLutError::Unavailable`], because a preset is
+/// indexed by a display value and a palette image has none.
+///
+/// # Errors
+///
+/// [`ColourLutError::Unavailable`] when `photometric` is palette colour.
+pub fn colour_lut_for(
+    colormap: Colormap,
+    photometric: PhotometricInterpretation,
+) -> Result<ColourLut, ColourLutError> {
+    let id = match colormap {
+        Colormap::Grey => PresetId::Grey,
+        Colormap::Stops => PresetId::Stops,
+    };
+    ColourLut::preset(id, photometric)
+}
+
 fn preset_bytes(id: PresetId) -> Vec<u8> {
     let mut bytes = vec![0_u8; 256 * 4];
     for index in 0..256_u16 {
@@ -414,5 +434,29 @@ mod tests {
         assert_eq!(std::mem::size_of::<super::ColourParams>(), 16);
         assert_eq!(super::ColourParams::NONE.pad, 0);
         assert_eq!(super::ColourParams::NONE.mode, 0);
+    }
+
+    #[test]
+    fn a_colormap_selects_the_matching_preset() {
+        use ocelli_pixel::PhotometricInterpretation;
+        use ocelli_viewport::presentation::Colormap;
+
+        let grey = super::colour_lut_for(Colormap::Grey, PhotometricInterpretation::Monochrome2);
+        assert!(grey.is_ok());
+        let Ok(grey) = grey else {
+            unreachable!("asserted immediately above");
+        };
+        assert_eq!(grey.preset_id(), Some(super::PresetId::Grey));
+
+        let stops = super::colour_lut_for(Colormap::Stops, PhotometricInterpretation::Monochrome2);
+        assert!(stops.is_ok());
+        let Ok(stops) = stops else {
+            unreachable!("asserted immediately above");
+        };
+        assert_eq!(stops.preset_id(), Some(super::PresetId::Stops));
+
+        let palette =
+            super::colour_lut_for(Colormap::Grey, PhotometricInterpretation::PaletteColor);
+        assert!(matches!(palette, Err(super::ColourLutError::Unavailable)));
     }
 }
