@@ -13,11 +13,16 @@
 //! the adapter can sample it, and on tier B may store `Rg32Float` or
 //! `Rgba32Float` so `textureLoad` still returns the stored `f32`. F-044
 //! uploads a colour LUT into a separate `Rgba8Unorm` texture of height 1.
-//! The oracle still has no Ocelli frame to judge. Decision D7 stays open.
+//! F-043 uploads each ready brick as its own 3D texture at the brick's true
+//! extent. `set_voi` does not upload that texture either. `brick_uploads`
+//! counts the brick upload. The oracle still has no Ocelli frame to judge.
+//! Decision D7 stays open.
 
+use ocelli_cache::{Brick, BrickKey};
 use ocelli_pixel::LutChain;
 use wgpu::util::DeviceExt;
 
+use crate::brick_upload::{BrickResidency, BrickUploadError, brick_format};
 use crate::caps::Tier;
 use crate::colour::{ColourLut, ColourParams};
 use crate::gpu::{GpuContext, Recovered, SurfaceError, first_render_attachment};
@@ -645,6 +650,8 @@ pub struct RenderGraph {
     uploads: u64,
     /// Successful `select_colour_lut` calls. `set_voi` does not touch this.
     lut_uploads: u64,
+    /// One 3D texture per uploaded brick. `set_voi` does not touch this.
+    bricks: BrickResidency,
 }
 
 /// The one pass and blend this story gives a shader body. `compile` builds
@@ -721,6 +728,25 @@ impl RenderGraph {
         self.lut_uploads
     }
 
+    /// How many brick uploads have been written.
+    ///
+    /// One per successful [`RenderGraph::upload_brick`]. A refusal, a window
+    /// change and a device-loss restore do not increment it.
+    pub fn brick_uploads(&self) -> u64 {
+        self.bricks.uploads()
+    }
+
+    /// The 3D texture held for `key`, when an upload has been accepted and
+    /// not dropped by a restore.
+    pub fn brick_texture(&self, key: &BrickKey) -> Option<&wgpu::Texture> {
+        self.bricks.texture(key)
+    }
+
+    /// The texture size of `key`, which is the brick extent that was uploaded.
+    pub fn brick_extent(&self, key: &BrickKey) -> Option<[u32; 3]> {
+        self.bricks.extent_of(key)
+    }
+
     /// The colour format the pipelines were compiled for.
     ///
     /// A surface whose first renderable format differs from this is refused
@@ -768,6 +794,7 @@ impl RenderGraph {
             submissions: 0,
             uploads: 0,
             lut_uploads: 0,
+            bricks: BrickResidency::new(),
         })
     }
 
@@ -1273,9 +1300,9 @@ impl RenderGraph {
     ///
     /// This is the only route that sets the VOI flag, so a window change
     /// cannot update bytes without scheduling the frame that shows them.
-    /// It does not increment [`RenderGraph::uploads`] or
-    /// [`RenderGraph::lut_uploads`], and it does not write the stored
-    /// texture or the colour table.
+    /// It does not increment [`RenderGraph::uploads`],
+    /// [`RenderGraph::lut_uploads`] or [`RenderGraph::brick_uploads`], and
+    /// it does not write the stored texture, the colour table or a brick.
     ///
     /// Validation runs state first and the chain last, so the answer names
     /// the first thing that is wrong in the order a caller can act on it.
@@ -1554,6 +1581,31 @@ impl RenderGraph {
         write_stored_samples(ctx.queue(), &stored.texture, upload, stored.format, samples)
     }
 
+    /// Copy one brick into a 3D texture at its true extent.
+    ///
+    /// The bytes are the volume's container bytes. They are not windowed.
+    /// The format is [`brick_format`] for `brick.sample`, and features are
+    /// read for that format only. A second upload of `key` replaces the
+    /// texture and increments [`RenderGraph::brick_uploads`] again. On
+    /// refusal the brick is returned and the counter stays put, so a tier C
+    /// caller can keep the host buffer.
+    ///
+    /// # Errors
+    ///
+    /// [`BrickUploadError`], with the brick returned alongside it. Nothing
+    /// is created in that case.
+    pub fn upload_brick(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        key: BrickKey,
+        brick: Brick,
+    ) -> Result<(), (Brick, BrickUploadError)> {
+        let format = brick_format(brick.sample);
+        let features = adapter.wgpu_adapter().get_texture_format_features(format);
+        self.bricks.upload(ctx, format, features, key, brick)
+    }
+
     /// Reinstall the resources a recovery rebuilt, marking every viewport
     /// fully dirty because every GPU object the old device owned is gone.
     pub fn install_recovered(&mut self, ctx: &GpuContext, recovered: &Recovered) {
@@ -1584,9 +1636,13 @@ impl RenderGraph {
         // canvases and supplies them again through `bind_surface`.
         // A viewport with no rebound slot reports unavailable in the tick
         // and keeps its dirt.
+        // Brick textures were created on the dead device. They are dropped
+        // here and `brick_uploads` is not incremented. The caller supplies
+        // the bricks again through `upload_brick`.
         for slot in self.gpu.iter_mut() {
             *slot = None;
         }
+        self.bricks.clear();
         for held in &mut self.frame_textures {
             *held = None;
         }

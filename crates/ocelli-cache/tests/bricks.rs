@@ -6,8 +6,8 @@
 //! is HLD section 19.
 
 use ocelli_cache::{
-    Admission, Brick, BrickCache, BrickError, BrickGrid, BrickKey, BrickWidth, Budgeted, CacheTier,
-    VolumeId,
+    Admission, Brick, BrickCache, BrickError, BrickGrid, BrickKey, BrickSample, BrickWidth,
+    Budgeted, CacheTier, VolumeId,
 };
 use proptest::prelude::*;
 
@@ -52,7 +52,7 @@ fn an_edge_brick_reports_its_true_extent_and_its_true_bytes() {
     // 500 - 3 * 128 = 116, 300 - 2 * 128 = 44, 130 - 128 = 2.
     assert_eq!(grid.extent_of([3, 2, 1]), Ok([116, 44, 2]));
     // 116 * 44 * 2 = 10_208 samples at one byte, not 128 cubed.
-    let brick = cut_filled(&grid, [3, 2, 1], 1);
+    let brick = cut_filled(&grid, [3, 2, 1], BrickSample::U8);
     assert_eq!(brick.extent, [116, 44, 2]);
     assert_eq!(brick.samples.len(), 10_208);
     assert_eq!(brick.bytes(), 10_208);
@@ -74,7 +74,7 @@ fn a_one_brick_volume_uses_the_same_constructor() {
         brick: [0, 0, 0],
     };
     assert_eq!(missing.first().copied(), Some(key));
-    let _ = cache.insert(key, cut_filled(&grid, [0, 0, 0], 1));
+    let _ = cache.insert(key, cut_filled(&grid, [0, 0, 0], BrickSample::U8));
     assert!(cache.missing(volume, &grid).is_empty());
     assert!(cache.is_resident(volume, &grid));
 }
@@ -93,16 +93,18 @@ fn a_sixteen_bit_volume_decomposes_at_edge_64() {
     let interior = cut_filled(
         &BrickGrid::new([64, 64, 64], BrickWidth::SixteenBit),
         [0, 0, 0],
-        2,
+        BrickSample::U16,
     );
     assert_eq!(interior.bytes(), 524_288);
+    assert_eq!(interior.sample, BrickSample::U16);
     let edge = cut_filled(
         &BrickGrid::new([64, 64, 24], BrickWidth::SixteenBit),
         [0, 0, 0],
-        2,
+        BrickSample::U16,
     );
     assert_eq!(edge.extent, [64, 64, 24]);
     assert_eq!(edge.bytes(), 196_608);
+    assert_eq!(edge.sample, BrickSample::U16);
     // 512 * 512 * 600 * 2 = 314_572_800, above a 256 MiB budget of 268_435_456.
     let volume_bytes = 512usize * 512 * 600 * 2;
     assert_eq!(volume_bytes, 314_572_800);
@@ -211,8 +213,8 @@ fn missing_follows_index_order_and_is_not_a_use() {
         level: 0,
         brick: [1, 0, 0],
     };
-    let _ = cache.insert(later, cut_filled(&grid, later.brick, 1));
-    let _ = cache.insert(earlier, cut_filled(&grid, earlier.brick, 1));
+    let _ = cache.insert(later, cut_filled(&grid, later.brick, BrickSample::U8));
+    let _ = cache.insert(earlier, cut_filled(&grid, earlier.brick, BrickSample::U8));
     let after = cache.missing(volume, &grid);
     assert_eq!(after.len(), 2);
     assert_eq!(brick_at(&after, 0), [0, 0, 0]);
@@ -264,7 +266,7 @@ fn eviction_removes_the_least_recently_used_brick_and_clears_residency() {
         brick: [0, 0, 0],
     };
     let mut cache = BrickCache::new(8);
-    let _ = cache.insert(key, cut_filled(&grid, [0, 0, 0], 1));
+    let _ = cache.insert(key, cut_filled(&grid, [0, 0, 0], BrickSample::U8));
     assert!(cache.is_resident(volume, &grid));
     let other = BrickKey {
         volume: VolumeId(5),
@@ -351,13 +353,49 @@ fn a_cut_copies_the_row_at_the_section_19_offset() {
     if let Some(slot) = volume.get_mut(offset) {
         *slot = 7;
     }
-    let brick = match Brick::cut(&grid, [1, 0, 0], &volume, 1) {
+    let brick = match Brick::cut(&grid, [1, 0, 0], &volume, BrickSample::U8) {
         Ok(brick) => brick,
         Err(_) => brick_bytes(0),
     };
     // 200 - 128 = 72. The second row of the brick starts at sample 72.
     assert_eq!(brick.extent, [72, 2, 1]);
+    assert_eq!(brick.sample, BrickSample::U8);
     assert_eq!(brick.samples.get(72).copied(), Some(7));
+}
+
+#[test]
+fn cut_keeps_the_sample_kind_and_float_is_four_bytes() {
+    // PS3.3 C.7.6.3 Pixel Representation. The same two bytes are signed or
+    // unsigned, and the kind cut stored is the one the caller passed.
+    // F32 is four bytes per voxel. 2 voxels are 8 bytes, and byte 4 is the
+    // first byte of the second voxel.
+    assert_eq!(BrickSample::F32.bytes_per_voxel(), 4);
+    let grid = BrickGrid::new([1, 1, 1], BrickWidth::SixteenBit);
+    let volume = vec![0x00, 0x80];
+    let signed = match Brick::cut(&grid, [0, 0, 0], &volume, BrickSample::I16) {
+        Ok(brick) => brick,
+        Err(_) => brick_bytes(0),
+    };
+    let unsigned = match Brick::cut(&grid, [0, 0, 0], &volume, BrickSample::U16) {
+        Ok(brick) => brick,
+        Err(_) => brick_bytes(0),
+    };
+    assert_eq!(signed.samples, unsigned.samples);
+    assert_eq!(signed.sample, BrickSample::I16);
+    assert_eq!(unsigned.sample, BrickSample::U16);
+    let float_grid = BrickGrid::new([2, 1, 1], BrickWidth::Float32);
+    let mut floats = vec![0u8; 8];
+    if let Some(slot) = floats.get_mut(4) {
+        *slot = 9;
+    }
+    let float_brick = match Brick::cut(&float_grid, [0, 0, 0], &floats, BrickSample::F32) {
+        Ok(brick) => brick,
+        Err(_) => brick_bytes(0),
+    };
+    assert_eq!(float_brick.sample, BrickSample::F32);
+    assert_eq!(float_brick.extent, [2, 1, 1]);
+    assert_eq!(float_brick.bytes(), 8);
+    assert_eq!(float_brick.samples.get(4).copied(), Some(9));
 }
 
 #[test]
@@ -367,16 +405,16 @@ fn float_bricks_take_the_sixteen_bit_edge() {
     assert_eq!(grid.grid, [1, 1, 1]);
 }
 
-fn cut_filled(grid: &BrickGrid, brick: [u32; 3], bytes_per_voxel: usize) -> Brick {
+fn cut_filled(grid: &BrickGrid, brick: [u32; 3], sample: BrickSample) -> Brick {
     let [dx, dy, dz] = grid.dims;
     let voxels = u64::from(dx) * u64::from(dy) * u64::from(dz);
-    let width = u64::try_from(bytes_per_voxel).unwrap_or(0);
+    let width = u64::try_from(sample.bytes_per_voxel()).unwrap_or(0);
     let len = match usize::try_from(voxels.saturating_mul(width)) {
         Ok(len) => len,
         Err(_) => return brick_bytes(0),
     };
     let volume = vec![0u8; len];
-    match Brick::cut(grid, brick, &volume, bytes_per_voxel) {
+    match Brick::cut(grid, brick, &volume, sample) {
         Ok(brick) => brick,
         Err(_) => brick_bytes(0),
     }
@@ -401,6 +439,7 @@ fn brick_bytes(len: usize) -> Brick {
     Brick {
         extent: [1, 1, 1],
         samples: vec![0; len],
+        sample: BrickSample::U8,
     }
 }
 

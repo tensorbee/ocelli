@@ -54,6 +54,9 @@ ocelli-pixel = { path = "../ocelli-pixel" }
 # `ocelli-pixel`. Naming them here is the readback comparison, which is the
 # test and not a product path.
 ocelli-core = { path = "../ocelli-core" }
+# F-043. The brick key and the host bytes live in ocelli-cache. The 3D texture
+# lives in this crate. The cache crate does not gain a wgpu dependency.
+ocelli-cache = { path = "../ocelli-cache" }
 # F-041. HLD section 20's third bullet, by name: "Use bytemuck::cast_slice for
 # reinterpreting pixel buffers. Hand-written transmutes are unsafe code with no
 # upside here." `unsafe` is allow-listed to two files and neither is this crate,

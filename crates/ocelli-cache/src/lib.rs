@@ -10,7 +10,8 @@
 //! **Encoded bytes are not here.** Section 8's tiers hold encoded bytes,
 //! decoded frames and GPU textures. F-032 added the decoded tier's
 //! `DecodedFrame` and its `ImageCache` in `image`. F-036 added `Brick` on the
-//! GPU tier: a host buffer whose cost is residency, not a texture. There is
+//! GPU tier: a host buffer whose cost is residency, not a texture. F-043's
+//! upload takes that brick by value and drops it after the copy. There is
 //! still no `wgpu` dependency, because this crate never sees a texture, only
 //! its size.
 
@@ -24,7 +25,9 @@ pub mod lru;
 pub mod telemetry;
 pub mod tier;
 
-pub use brick::{Brick, BrickCache, BrickError, BrickGrid, BrickKey, BrickWidth, VolumeId};
+pub use brick::{
+    Brick, BrickCache, BrickError, BrickGrid, BrickKey, BrickSample, BrickWidth, VolumeId,
+};
 pub use image::{
     CacheEvent, CacheEvents, DecodedFrame, FrameKey, HandoffError, HandoffMeta, ImageCache,
     KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, RingEvent,

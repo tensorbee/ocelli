@@ -3468,3 +3468,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/render-graph.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** None in the story as landed. F-042 later allows `Rg32Float` and `Rgba32Float` on tier B when `R32Float` cannot be sampled. That rule is recorded in the F-042 entry and is not part of this one.
 **Notes for future sessions.** One review pass, 0 defects, 0 smells and 0 nitpicks. Lint, types, packages and corpus-tests did not run in the worker worktree. The integration commit has no provenance trailer because its tree is not the worker tree.
+
+## F-043, Chunked brick residency as the default upload path, completed 2026-10-18
+
+**What was built.** `upload_brick` copies each ready brick into a 3D texture at that brick's true extent. The format follows the sample kind. `U8` is `R8Uint`, `U16` is `R16Uint`, `I16` is `R16Sint`, and `F32` is `R32Float`. A volume that fits in one brick still uploads as a brick. There is no size threshold. `set_voi` writes the thirty-two-byte uniform and does not upload again. Tier C returns the brick and creates no texture. An extent or a format the device cannot sample is unavailable, and no other image is substituted.
+
+**HLD sections implemented.** `docs/hld/05-rendering.md` section 7, `docs/hld/06-memory-and-cache.md` section 8, `docs/hld/16-volume-representation.md` section 19, `docs/hld/17-cache-and-allocation.md` section 20, and `docs/hld/27-phase1-hooks.md` section 38. Decision D11. Section 30's frustum, LOD, indirection texture and prefetch are not this story.
+**Deviations.** None.
+**Crates / packages modified.** `crates/ocelli-cache`, `crates/ocelli-volume`, `crates/ocelli-render`, and `Cargo.lock`.
+**Tests added.** `crates/ocelli-render/tests/brick_upload.rs` has four unit tests and one ignored GPU test. `crates/ocelli-volume/tests/ready_bricks.rs` has four tests. `crates/ocelli-cache/tests/bricks.rs` gained the sample-kind assertions and `cut_keeps_the_sample_kind_and_float_is_four_bytes`.
+**Fixture provenance.** DICOM PS3.3 C.7.6.3 for row-major layout and for Pixel Representation. The 3 by 3 by 3 ramp is values 0 through 26, x fastest. The edge brick of a 130 by 1 by 1 eight-bit volume has width 2. The same two bytes `0x00 0x80` select `R16Sint` or `R16Uint` according to the sample kind. Upload copies container bytes and does not window them.
+**Verification.** Feature profile, staged tree, gates recorded in the verify ledger at commit time. The release wasm build measured during implementation was 2,011,457 bytes. Budget 1,999,061. Ceiling 2,099,014. The budget file was not moved.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path.
+**Tier coverage.** A: full on this host's adapter. The ignored test uploaded the ramp and the width-2 edge brick and read the stored bytes back. `set_voi` left `brick_uploads` and those texels unchanged. B: the pure plan accepts a brick inside the pinned downlevel 3D limit of 256 and refuses an axis of 257. A brick edge of 128 fits. This machine's device test resolved tier A, so tier B was not a device upload. C: unavailable. `brick_plan` returns `Unavailable` before naming a format, and no texture is created.
+**LLD updated.** `docs/lld/render-graph.md`, `docs/lld/cache.md`, `docs/lld/volumes.md`, and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** None.
+**Notes for future sessions.** Three review passes converged 4/0, 1/0, 0/0. The first four defects were tests and two doc comments that stayed green when the code was wrong. The product upload path was not changed to close them. Pass 2 found one remaining false sentence, and pass 3 found the corrected comment true. Phase 1 does not evict GPU brick textures to a byte budget. The carried LINEAR finding was not clamped. F-036's note named F-040 as the brick upload. F-040 uploads a 2D stored slice. This story is the brick upload.

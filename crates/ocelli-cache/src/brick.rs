@@ -16,6 +16,43 @@ use crate::{Admission, Budgeted, CacheTier, Lru, Pressure};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VolumeId(pub u64);
 
+/// The sample a brick stores, including the sign sixteen-bit data needs.
+///
+/// [`BrickWidth`] collapses the two sixteen-bit kinds because they share an
+/// edge. The upload format cannot. `I16` and `U16` are different numbers
+/// with the same bytes, which is PS3.3 C.7.6.3 Pixel Representation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BrickSample {
+    /// Unsigned eight-bit. Edge 128.
+    U8,
+    /// Signed sixteen-bit. Edge 64.
+    I16,
+    /// Unsigned sixteen-bit. Edge 64.
+    U16,
+    /// Thirty-two-bit float. Edge 64.
+    F32,
+}
+
+impl BrickSample {
+    /// Bytes one voxel occupies.
+    pub const fn bytes_per_voxel(self) -> usize {
+        match self {
+            Self::U8 => 1,
+            Self::I16 | Self::U16 => 2,
+            Self::F32 => 4,
+        }
+    }
+
+    /// The edge class. Signed and unsigned sixteen-bit samples share it.
+    pub const fn width(self) -> BrickWidth {
+        match self {
+            Self::U8 => BrickWidth::EightBit,
+            Self::I16 | Self::U16 => BrickWidth::SixteenBit,
+            Self::F32 => BrickWidth::Float32,
+        }
+    }
+}
+
 /// The sample width that chooses a brick edge.
 ///
 /// Signed and unsigned sixteen-bit samples are one width. The volume crate
@@ -253,6 +290,8 @@ pub struct Brick {
     pub extent: [u32; 3],
     /// The allocated samples, contiguous in x and packed across rows.
     pub samples: Vec<u8>,
+    /// Which integer or float those bytes are. The width alone cannot say.
+    pub sample: BrickSample,
 }
 
 impl Brick {
@@ -260,7 +299,9 @@ impl Brick {
     ///
     /// A brick is contiguous in x and strided in y and z. The copy is the
     /// only place the volume layout and the brick layout meet, and it is an
-    /// assembly call, not a render-loop call.
+    /// assembly call, not a render-loop call. `sample` is the kind those bytes
+    /// are, and it is stored on the brick. Signed and unsigned sixteen-bit
+    /// samples share a byte width and do not share an upload format.
     ///
     /// # Errors
     ///
@@ -270,11 +311,12 @@ impl Brick {
         grid: &BrickGrid,
         brick: [u32; 3],
         volume: &[u8],
-        bytes_per_voxel: usize,
+        sample: BrickSample,
     ) -> Result<Self, BrickError> {
         let extent = grid.extent_of(brick)?;
         let [ex, ey, ez] = extent;
         let [ox, oy, oz] = grid.origin_of(brick)?;
+        let bytes_per_voxel = sample.bytes_per_voxel();
         let row = match usize::try_from(ex)
             .ok()
             .and_then(|count| count.checked_mul(bytes_per_voxel))
@@ -337,7 +379,11 @@ impl Brick {
             }
             dz += 1;
         }
-        Ok(Self { extent, samples })
+        Ok(Self {
+            extent,
+            samples,
+            sample,
+        })
     }
 }
 
@@ -350,8 +396,10 @@ impl Budgeted for Brick {
 
 /// Resident bricks for one GPU budget.
 ///
-/// The bytes are still a host buffer. F-040 removes that buffer in the step
-/// that uploads it, so one brick is never counted against two budgets.
+/// The bytes are still a host buffer. F-043's upload takes the brick by
+/// value and drops it after the copy, so one brick is not counted here and
+/// in a texture. A refused upload returns the brick and the caller may
+/// insert it, which is the tier C path.
 pub struct BrickCache {
     bricks: Lru<BrickKey, Brick>,
 }

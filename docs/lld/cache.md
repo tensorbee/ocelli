@@ -1,6 +1,6 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043
 **Last updated:** 2026-10-18
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
@@ -255,6 +255,16 @@ This story emits no eviction event.
 `Volume::brick_grid` in `ocelli-volume` converts that crate's `VoxelKind` and
 calls `BrickGrid::new`. The volume does not keep a second decomposition.
 
+`Brick` carries `BrickSample`: `U8`, `I16`, `U16` and `F32`. `I16` and `U16`
+share `BrickWidth::SixteenBit` and a two-byte width. They do not share an
+upload format. `F32` is four bytes and uses the edge of 64. `Brick::cut`
+copies the volume rows and stores the sample the caller passed.
+
+`BrickCache` still holds host bytes. A successful upload in `ocelli-render`
+takes the brick by value and the caller drops it, so those bytes are not
+also counted in this cache. A refused upload returns the brick and the
+caller may insert it. This crate still links no wgpu.
+
 ## Allocation, and the render loop
 
 HLD section 20's first bullet forbids allocation in the render loop, and its own
@@ -298,12 +308,13 @@ the victim key. A grow pushes nothing and clones nothing.
 Brick addressing is full on A, B and C. It is host arithmetic, and the crate
 still creates no device and holds no shader. Tier B's 256 texture floor holds
 a 128 edge, and a longer volume axis is more bricks. Tier C runs the same
-code. The GPU tier then holds host bricks, because nothing uploads them yet.
-Encoded bytes are not in this crate. A tier C session's decoded tier matches
-a tier A session's.
+code. The GPU tier of this cache holds host bricks. A texture is not one of
+its values. Encoded bytes are not in this crate. A tier C session's decoded
+tier matches a tier A session's.
 
 ## What is not here
 
 No staging-buffer pool, which is section 20's fourth bullet and belongs to the
 upload path. No `bytemuck::cast_slice`, which is section 20's third bullet.
-No frustum selection, no prefetch, no indirection texture and no GPU upload.
+No frustum selection, no prefetch and no indirection texture. This crate
+still does not upload a texture.

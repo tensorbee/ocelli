@@ -8,7 +8,7 @@ layers that a pull request and a nightly browser can run.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-043 | E6.7 | Chunked brick residency as the default upload path | Rust | 4w | pending |
+| F-043 | E6.7 | Chunked brick residency as the default upload path | Rust | 4w | done |
 | F-X002 | X1.2 | Three-layer GPU-less render testing: lavapipe in CI and Chrome with SwiftShader nightly | Build | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
