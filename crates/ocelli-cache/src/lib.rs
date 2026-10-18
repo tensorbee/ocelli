@@ -26,8 +26,9 @@ pub mod tier;
 
 pub use brick::{Brick, BrickCache, BrickError, BrickGrid, BrickKey, BrickWidth, VolumeId};
 pub use image::{
-    CacheEvent, CacheEvents, DecodedFrame, FrameKey, ImageCache, KIND_BUDGET_CHANGED,
-    KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, RingEvent, SeriesId,
+    CacheEvent, CacheEvents, DecodedFrame, FrameKey, HandoffError, HandoffMeta, ImageCache,
+    KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, RingEvent,
+    SeriesId,
 };
 pub use lru::{Admission, Budgeted, Lru};
 pub use telemetry::{CacheTelemetry, TelemetryEvent, TierCounters, TierTelemetry};

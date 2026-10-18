@@ -1,7 +1,7 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017
-**Last updated:** 2026-09-09
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035
+**Last updated:** 2026-10-18
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
@@ -13,19 +13,21 @@ What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 | `@ocelli/react` | The React binding | `@ocelli/core` at an exact version |
 
 `@ocelli/react` remains a scaffold. `@ocelli/core` now also publishes F-021's
-bounded DICOMweb transport and one-write response-sink contract. F-100 still
-owns the session-facing public viewer API and F-101 still owns its live wasm
-boundary.
+bounded DICOMweb transport and one-write response-sink contract, and F-035's
+decode-to-render handoff. F-100 still owns the session-facing public viewer
+API and F-101 still owns its live wasm boundary.
 
 ### What is in the `@ocelli/core` tarball today
 
 Everything under `packages/core/src` compiles into `dist`. Public modules are
-re-exported from `index.ts`, including F-021's DICOMweb client, request options,
-errors, response kinds, sink contract, and one-write helper.
+re-exported from `index.ts`, including F-021's DICOMweb client, request
+options, errors, response kinds, sink contract, and one-write helper, and
+F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
+`transferredFrameMessage`.
 
 | Module | Holds |
 |--------|-------|
-| `bulk.ts` | Frame writes and the F-021 one-write DICOMweb response sink contract |
+| `bulk.ts` | Frame writes, the F-021 one-write DICOMweb response sink, and the F-035 decode-to-render handoff |
 | `dicomweb.ts` | Bounded WADO-RS, WADO-URI, and QIDO-RS request construction, validation, authentication, cancellation, and response transfer |
 | `ring.ts` | The event ring's consumer side |
 | `errors.ts` | The error-code mirror, the message table, `decodeRecord` |
@@ -59,11 +61,22 @@ file-scoped, and the specification already expected two. This repository had
 one only because nothing else needed linear memory yet.
 
 `bulk.ts` writes bytes down, between an `alloc` and the `commit` that takes
-ownership back. `panic.ts` reads the panic record up, after the instance has
-trapped, which is the safest possible instance of the hazard the rule guards:
-no wasm code can run, so memory cannot grow between the view's construction and
-its last use. The discipline is kept anyway. The view is built inside the
-function, used immediately, and neither stored nor returned.
+ownership back. F-035 keeps the handoff in this file. `exportDecodedFrame`
+copies one decoded range out into a fresh `ArrayBuffer` for section 24's
+worker transfer, and the view exists only for that copy.
+`acceptTransferredFrame` is the render-worker side of the same hop. It uses
+`writeFrame`'s order, which is `alloc`, then a view, then `set`, then
+`commit_frame`. A buffer length that disagrees with `meta.bytes` throws
+before that copy. `transferredFrameMessage` returns the section 24 frame
+message and the transfer list `[buffer]`. It does not call `postMessage` and
+it does not build a view. A third production file is still not granted, so
+none of these moved out of `bulk.ts`.
+
+`panic.ts` reads the panic record up, after the instance has trapped, which
+is the safest possible instance of the hazard the rule guards. No wasm code
+can run, so memory cannot grow between the view's construction and its last
+use. The discipline is kept anyway. The view is built inside the function,
+used immediately, and neither stored nor returned.
 
 **Widening the list is a design-plan decision** and `.claude/plans/
 F-005-design.md` item F is the one that added the second entry. **A third

@@ -1,11 +1,15 @@
 import { describe as group, expect, it } from "vitest";
 
 import {
+  acceptTransferredFrame,
+  exportDecodedFrame,
+  transferredFrameMessage,
   writeDicomwebResponse,
   writeFrame,
   type BulkSink,
   type DicomwebResponseKind,
   type DicomwebResponseSink,
+  type HandoffMeta,
   type WasmMemory,
 } from "./bulk.js";
 
@@ -43,23 +47,24 @@ import {
  * either throws or lands somewhere nothing will ever read. A view built after
  * the `alloc` is a view over the buffer the core is now using.
  *
- * **Seven of the eight tests below therefore run against a sink that grows,
- * and the eighth deliberately does not.** Rewriting the body into
+ * **Seven of the eight `writeFrame` tests run against a sink that grows,
+ * and `writes only inside the allocation` deliberately does not.** Rewriting
+ * that function into
  *
  *   const heap = new Uint8Array(wasm.memory.buffer);
  *   const ptr = session.alloc(bytes.byteLength);
  *   heap.set(bytes, ptr);
  *
- * turns those seven red and leaves `writes only inside the allocation` green,
- * measured: `npx vitest run packages/core/src/bulk.test.ts` reports
- * `7 failed | 1 passed (8)` and exits 1. That eighth test is about bounds
- * rather than about ordering, and bounds need a memory whose surrounding
- * bytes survive the call so they can be read back. A growing `alloc` returns
- * a pointer into a fresh page, where there are no neighbouring bytes to
- * disturb and nothing to assert. So it fixes `alloc` at 4096 inside an
- * already-allocated two-page memory and checks the eight bytes either side of
- * the write. It passes under both shapes and is evidence of nothing about
- * ordering, which is exactly why the other seven do not follow its pattern.
+ * turns those seven red and leaves the bounds test green. Measured when the
+ * `writeFrame` group was the whole file: `npx vitest run
+ * packages/core/src/bulk.test.ts` reported `7 failed | 1 passed (8)` and
+ * exited 1. The bounds test needs a memory whose surrounding bytes survive
+ * the call so they can be read back. A growing `alloc` returns a pointer
+ * into a fresh page, where there are no neighbouring bytes to disturb and
+ * nothing to assert. So it fixes `alloc` at 4096 inside an already-allocated
+ * two-page memory and checks the eight bytes either side of the write. It
+ * passes under both shapes and is evidence of nothing about ordering, which
+ * is exactly why the other seven do not follow its pattern.
  */
 
 const PAGE_BYTES = 65536;
@@ -351,5 +356,154 @@ group("writeDicomwebResponse, HLD 17.2 and PS3.18", () => {
     expect(commits).toHaveLength(1);
     expect(Array.from(commits[0]?.bytes ?? [])).toEqual(Array.from(bytes));
     expect(commits[0]?.kind).toBe(kind);
+  });
+});
+
+/** An `ArrayBuffer` of exactly `bytes.byteLength`, not a view onto `bytes`. */
+function exactBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
+/**
+ * HLD section 24's copy out of the decode instance, and section 17.2's trap.
+ *
+ * The first call reads bytes already in linear memory and must return a fresh
+ * `ArrayBuffer`. `memory.grow` then detaches that backing buffer. The second
+ * call must return the bytes written after the growth. A view taken on the
+ * first call and kept, including a module-level binding filled on first use,
+ * is detached by the growth, so the second read throws or copies nothing this
+ * test accepts.
+ *
+ * Measured mutation, reverted. `exportDecodedFrame` kept
+ * `retainedView ??= new Uint8Array(wasm.memory.buffer)` and copied from that
+ * view. `npx vitest run packages/core/src/bulk.test.ts` reported
+ * `1 failed | 12 passed (13)` and exited 1. The red test was this one, with
+ * `TypeError: Cannot perform Construct on a detached ArrayBuffer`.
+ */
+group("exportDecodedFrame, HLD 17.2 and section 24", () => {
+  it("returns the second call's bytes after wasm memory grows", () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 8 });
+    const wasm: WasmMemory = { memory };
+    const first = pattern(64);
+    new Uint8Array(memory.buffer, 0, first.byteLength).set(first);
+
+    const firstOut = exportDecodedFrame(wasm, 0, first.byteLength);
+
+    expect(firstOut).toBeInstanceOf(ArrayBuffer);
+    expect(firstOut).not.toBe(memory.buffer);
+    expect(firstOut.byteLength).toBe(first.byteLength);
+    expect(Array.from(new Uint8Array(firstOut))).toEqual(Array.from(first));
+
+    const grown = memory.grow(1);
+    expect(grown).toBe(1);
+
+    const second = pattern(48).map((b) => b ^ 0xff);
+    const ptr = PAGE_BYTES;
+    new Uint8Array(memory.buffer, ptr, second.byteLength).set(second);
+
+    const secondOut = exportDecodedFrame(wasm, ptr, second.byteLength);
+
+    expect(secondOut).toBeInstanceOf(ArrayBuffer);
+    expect(secondOut).not.toBe(memory.buffer);
+    expect(secondOut).not.toBe(firstOut);
+    expect(secondOut.byteLength).toBe(second.byteLength);
+    expect(Array.from(new Uint8Array(secondOut))).toEqual(Array.from(second));
+    expect(Array.from(new Uint8Array(firstOut))).toEqual(Array.from(first));
+  });
+});
+
+/**
+ * The render-worker copy. Section 17.2's order is `alloc`, then a view, then
+ * `set`, then `commit_frame`. The length check is the plan's refusal and it
+ * happens before that copy. `bytes` is the length. The other identity fields
+ * are deliberately equal to the buffer length in the refusal, and deliberately
+ * not equal to it in the copy, so the wrong field cannot satisfy both.
+ *
+ * Measured mutation, reverted. The copy built
+ * `new Uint8Array(wasm.memory.buffer)` before `alloc` and wrote through that
+ * view. The same vitest command reported `1 failed | 12 passed (13)` and
+ * exited 1. The red test was `finishes the copy before commit_frame`, with
+ * `TypeError: Cannot perform %TypedArray%.prototype.set on a detached ArrayBuffer`.
+ */
+group("acceptTransferredFrame, HLD 17.2", () => {
+  it("finishes the copy before commit_frame", () => {
+    const { wasm, sink, commits } = growingSink();
+    const bytes = pattern(128);
+    const buffer = exactBuffer(bytes);
+    const meta: HandoffMeta = {
+      series: 7,
+      instance: 3,
+      frame: 2,
+      bytes: bytes.byteLength,
+    };
+
+    acceptTransferredFrame(wasm, sink, buffer, meta);
+
+    const commit = at(commits, 0);
+    expect(Array.from(commit.seen)).toEqual(Array.from(bytes));
+    expect(commit.len).toBe(128);
+    expect(commit.ptr).toBe(PAGE_BYTES);
+    expect(commit.meta).toBe(meta);
+    expect(Array.from(new Uint8Array(buffer))).toEqual(Array.from(bytes));
+  });
+
+  it("throws before any copy when the length disagrees", () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 4 });
+    const asked: number[] = [];
+    let commits = 0;
+    const sink: BulkSink = {
+      alloc(len: number): number {
+        asked.push(len);
+        return 0;
+      },
+      commit_frame(): void {
+        commits += 1;
+      },
+    };
+    const buffer = new ArrayBuffer(8);
+    const meta: HandoffMeta = {
+      series: 8,
+      instance: 8,
+      frame: 8,
+      bytes: 7,
+    };
+
+    expect(() => acceptTransferredFrame({ memory }, sink, buffer, meta)).toThrow(
+      "handoff length 8 disagrees with meta.bytes 7",
+    );
+    expect(asked).toEqual([]);
+    expect(commits).toBe(0);
+  });
+});
+
+/**
+ * Section 24, decode to render. The message is `{ kind:'frame', frameId,
+ * buffer, meta }` and the transfer list is `[buffer]`. This package does not
+ * call `postMessage`.
+ */
+group("transferredFrameMessage, HLD section 24", () => {
+  it("returns kind frame and lists the same buffer for transfer", () => {
+    const buffer = exactBuffer(pattern(4));
+    const meta: HandoffMeta = {
+      series: 9,
+      instance: 8,
+      frame: 7,
+      bytes: 4,
+    };
+
+    const handed = transferredFrameMessage(11, buffer, meta);
+    const listed = handed.transfer[0];
+    if (listed === undefined) {
+      throw new Error("transfer list was empty");
+    }
+
+    expect(handed.message.kind).toBe("frame");
+    expect(handed.message.frameId).toBe(11);
+    expect(handed.message.buffer).toBe(buffer);
+    expect(handed.message.meta).toBe(meta);
+    expect(handed.transfer).toHaveLength(1);
+    expect(listed).toBe(buffer);
   });
 });

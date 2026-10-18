@@ -63,13 +63,13 @@ render -> main : drained event ring [copy]
 
 ## What the specification does not cover
 
-1. **F-101 owns the live `Session`.** Section 17.2's `alloc` and `commit_frame` are the boundary story in S16. This story does not add those exports. `packages/core/src/bulk.ts` already speaks to a `BulkSink` stand-in, and the new functions use that same stand-in.
+1. **F-101 owns the live `Session`.** Section 17.2's `alloc` and `commit_frame` are the boundary story in S16. This story does not add those exports. `packages/core/src/bulk.ts` already speaks to a `BulkSink` stand-in. `acceptTransferredFrame` uses that stand-in. `exportDecodedFrame` reads `WasmMemory` only. `transferredFrameMessage` touches neither.
 
 2. **Two wasm instances cannot share linear memory.** Decision D5 forbids `SharedArrayBuffer`. A decoded frame therefore cannot move by pointer. Section 24's transferred `ArrayBuffer` is the specified hop. Producing that buffer requires one copy out of the decode instance. The transfer itself copies nothing. The render instance then copies once into its own linear memory, through the section 17.2 order, and drops the JavaScript buffer. A design that skipped the render-side copy and called `write_texture` from JavaScript would keep the pixels as a JavaScript view, which section 6 forbids. `write_texture` itself is F-040.
 
 3. **The story title says zero-copy, and section 17.2 is a copy.** The zero-copy edge is the worker transfer in section 24. The copies are the two bulk-channel crossings the separate instances force. Collapsing the hop into a `Uint8Array` that outlives the call fails decision D3, which is pixels never crossing the boundary as JavaScript objects. The returned value is an `ArrayBuffer` destined for `postMessage` transfer, not a retained view.
 
-4. **No third file may build a view over `wasm.memory.buffer`.** `eslint.config.js` allows that in `bulk.ts` and `panic.ts` only. The header of `bulk.ts` says a third production entry is a design-plan decision. This plan does not take it. Both new functions live in `bulk.ts`.
+4. **No third file may build a view over `wasm.memory.buffer`.** `eslint.config.js` allows that in `bulk.ts` and `panic.ts` only. The header of `bulk.ts` says a third production entry is a design-plan decision. This plan does not take it. `exportDecodedFrame`, `acceptTransferredFrame` and `transferredFrameMessage` all live in `bulk.ts`.
 
 5. **`meta` has no specified layout beyond the name.** This story carries `FrameKey` plus the byte length, as `HandoffMeta` in `ocelli-cache`, which already owns `FrameKey` from F-032. It carries no samples. Samples stay in the transferred buffer.
 
