@@ -18,15 +18,19 @@ import { coreAvailable, VERSION } from "./index.js";
  * check.
  *
  * Only value exports are observable here. The type-only exports (`BulkSink`,
- * `WasmMemory`, `DrainResult`, `OcelliEvent`, `OcelliRecord`,
- * `RecordOperands`, `PanicMemory`, `PanicRecord`, `CoreStatus`) are erased
+ * `WasmMemory`, `HandoffMeta`, `FrameMessage`, `DrainResult`, `OcelliEvent`,
+ * `OcelliRecord`, `RecordOperands`, `PanicMemory`, `PanicRecord`,
+ * `CoreStatus`) are erased
  * before this runs, and `npx tsc` is what watches those.
  *
  * Adding an export is a deliberate act, so adding a line here is the cost of
  * publishing one.
  */
 const PUBLISHED: readonly string[] = [
-  // ./bulk.js, HLD 17.2
+  // ./bulk.js, HLD 17.2 and section 24
+  "acceptTransferredFrame",
+  "exportDecodedFrame",
+  "transferredFrameMessage",
   "writeDicomwebResponse",
   "writeFrame",
   // ./dicomweb.js, PS3.18 sections 9.1.2, 10.4, and 10.6
@@ -116,6 +120,9 @@ describe("@ocelli/core", () => {
    * became a re-exported constant would satisfy the set and not this.
    */
   it("publishes bulk, DICOMweb, and event entry points as callables", () => {
+    expect(typeof core.acceptTransferredFrame).toBe("function");
+    expect(typeof core.exportDecodedFrame).toBe("function");
+    expect(typeof core.transferredFrameMessage).toBe("function");
     expect(typeof core.writeDicomwebResponse).toBe("function");
     expect(typeof core.writeFrame).toBe("function");
     expect(typeof core.DicomwebClient).toBe("function");

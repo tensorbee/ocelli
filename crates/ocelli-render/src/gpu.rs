@@ -56,6 +56,50 @@ pub enum DeviceError {
     Unrecoverable(DeviceLostReason),
 }
 
+/// Why a surface could not be attached or configured.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SurfaceError {
+    /// `create_surface` failed. The text is wgpu's diagnostic.
+    #[error("the surface could not be created: {0}")]
+    Create(String),
+    /// Width or height is 0, and configuring a surface of that size panics.
+    #[error("a surface extent is empty")]
+    EmptyExtent,
+    /// No reported format can be a render attachment.
+    #[error("the surface reported no format that can be a render attachment")]
+    NoRenderAttachment,
+    /// The surface reported no present mode.
+    #[error("the surface reported no present mode")]
+    NoPresentMode,
+    /// The surface reported no alpha mode.
+    #[error("the surface reported no alpha mode")]
+    NoAlphaMode,
+    /// The viewport has no surface to reconfigure.
+    #[error("this viewport has no surface")]
+    NotAttached,
+    /// The format the surface would use is not the format the graph was compiled for.
+    ///
+    /// Returned before `configure`, so the previous configuration stays.
+    #[error("the surface format is not the format the graph was compiled for")]
+    FormatDiffers,
+}
+
+/// The first reported format whose usages include a render attachment.
+///
+/// The plan does not hard-code `Rgba8Unorm` or `Bgra8Unorm`. `formats` is the
+/// order `Surface::get_capabilities` reported. `allowed` is what the adapter
+/// says that format may be used for.
+#[must_use]
+pub fn first_render_attachment(
+    formats: &[wgpu::TextureFormat],
+    mut allowed: impl FnMut(wgpu::TextureFormat) -> wgpu::TextureUsages,
+) -> Option<wgpu::TextureFormat> {
+    formats
+        .iter()
+        .copied()
+        .find(|format| allowed(*format).contains(wgpu::TextureUsages::RENDER_ATTACHMENT))
+}
+
 /// A device loss, as the callback recorded it.
 ///
 /// HLD section 22: "**Device loss is a real state, not an error path.**" This
@@ -183,6 +227,10 @@ fn record_loss(slot: &Mutex<Option<DeviceLoss>>, loss: DeviceLoss) {
 /// which device to open, so they belong to the type that owns one.
 #[derive(Debug)]
 pub struct GpuContext {
+    /// The instance the adapter was enumerated from. Surfaces are created
+    /// from this value and from no other. It is a clone of the handle
+    /// [`crate::probe::ResolvedAdapter`] retained, not a second instance.
+    instance: wgpu::Instance,
     device: Device,
     queue: Queue,
     caps: Caps,
@@ -215,19 +263,107 @@ impl GpuContext {
     /// is no window in which a context exists and is unobserved, and no second
     /// constructor that forgets.
     #[must_use]
-    pub fn new(device: Device, queue: Queue, caps: Caps) -> Self {
+    pub fn new(instance: wgpu::Instance, device: Device, queue: Queue, caps: Caps) -> Self {
         let lost: LossSlot = Arc::new(Mutex::new(None));
         let sink = Arc::clone(&lost);
         device.set_device_lost_callback(move |reason, message| {
             record_loss(&sink, DeviceLoss { reason, message });
         });
         Self {
+            instance,
             device,
             queue,
             caps,
             graph: None,
             lost,
         }
+    }
+
+    /// The instance this device was opened from.
+    ///
+    /// Crate-private. [`GpuContext::attach_target`] creates the product
+    /// surface from this handle.
+    pub(crate) fn instance(&self) -> &wgpu::Instance {
+        &self.instance
+    }
+
+    /// Create a surface from the instance that produced this device.
+    ///
+    /// This is the product path. The WebGL tier probe creates a surface
+    /// earlier, because WebGL2 `request_adapter` requires a compatible
+    /// surface before a device exists, and this method is only reachable
+    /// after [`crate::probe::ResolvedAdapter::open`]. The target is whatever
+    /// the caller can turn into a [`wgpu::SurfaceTarget`]: an offscreen
+    /// canvas on wasm, named in `ocelli-wasm`, or a window on a native entry
+    /// point. A second instance is not constructed here.
+    ///
+    /// # Errors
+    ///
+    /// [`SurfaceError::Create`] when wgpu refuses the target.
+    pub fn attach_target<'window>(
+        &self,
+        target: impl Into<wgpu::SurfaceTarget<'window>>,
+    ) -> Result<wgpu::Surface<'window>, SurfaceError> {
+        self.instance
+            .create_surface(target)
+            .map_err(|error| SurfaceError::Create(error.to_string()))
+    }
+
+    /// Configure `surface` for `extent` and return the format it will draw.
+    ///
+    /// The format is the first one [`wgpu::Surface::get_capabilities`] reports
+    /// that can be a render attachment. It is not a hard-coded
+    /// `Rgba8Unorm` or `Bgra8Unorm`. Present mode and alpha mode are the first
+    /// values the surface reports, for the same reason.
+    ///
+    /// # Errors
+    ///
+    /// [`SurfaceError::EmptyExtent`] when either axis is 0, because
+    /// `Surface::configure` panics on an empty swap chain.
+    /// [`SurfaceError::NoRenderAttachment`] when no reported format can be
+    /// drawn to. [`SurfaceError::NoPresentMode`] or
+    /// [`SurfaceError::NoAlphaMode`] when the surface reports none.
+    pub fn configure_viewport(
+        &self,
+        surface: &wgpu::Surface<'_>,
+        adapter: &ResolvedAdapter,
+        extent: (u32, u32),
+    ) -> Result<wgpu::TextureFormat, SurfaceError> {
+        let (width, height) = extent;
+        if width == 0 || height == 0 {
+            return Err(SurfaceError::EmptyExtent);
+        }
+        let capabilities = surface.get_capabilities(adapter.wgpu_adapter());
+        let format = first_render_attachment(&capabilities.formats, |format| {
+            adapter
+                .wgpu_adapter()
+                .get_texture_format_features(format)
+                .allowed_usages
+        })
+        .ok_or(SurfaceError::NoRenderAttachment)?;
+        let present_mode = capabilities
+            .present_modes
+            .first()
+            .copied()
+            .ok_or(SurfaceError::NoPresentMode)?;
+        let alpha_mode = capabilities
+            .alpha_modes
+            .first()
+            .copied()
+            .ok_or(SurfaceError::NoAlphaMode)?;
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
+            width,
+            height,
+            desired_maximum_frame_latency: 2,
+            present_mode,
+            alpha_mode,
+            view_formats: Vec::new(),
+        };
+        surface.configure(self.device(), &config);
+        Ok(format)
     }
 
     /// Register the graph resources a rebuild must restore.
@@ -422,6 +558,45 @@ pub type SharedEncoder<'a> = &'a mut CommandEncoder;
 
 #[cfg(test)]
 mod tests {
+    use super::first_render_attachment;
+
+    /// The first reported format wins when it can be a render attachment.
+    ///
+    /// `Rgba8UnormSrgb` is neither of the two formats a hard-coded choice
+    /// would name. A helper that returns `Rgba8Unorm` or `Bgra8Unorm` fails
+    /// this row.
+    #[test]
+    fn the_first_renderable_format_is_not_a_hard_coded_choice() {
+        let formats = [
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureFormat::Bgra8Unorm,
+        ];
+        let chosen = first_render_attachment(&formats, |_| wgpu::TextureUsages::RENDER_ATTACHMENT);
+        assert_eq!(chosen, Some(wgpu::TextureFormat::Rgba8UnormSrgb));
+    }
+
+    /// A leading format that cannot be a render attachment is skipped.
+    /// Taking `formats.first()` unconditionally would answer `R32Float`.
+    #[test]
+    fn a_format_that_cannot_be_attached_is_skipped() {
+        let formats = [
+            wgpu::TextureFormat::R32Float,
+            wgpu::TextureFormat::Rgba8Unorm,
+        ];
+        let chosen = first_render_attachment(&formats, |format| {
+            if format == wgpu::TextureFormat::Rgba8Unorm {
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+            } else {
+                wgpu::TextureUsages::TEXTURE_BINDING
+            }
+        });
+        assert_eq!(chosen, Some(wgpu::TextureFormat::Rgba8Unorm));
+        assert_eq!(
+            first_render_attachment(&[], |_| wgpu::TextureUsages::RENDER_ATTACHMENT),
+            None
+        );
+    }
+
     /// `wgpu::Device` is `Clone`, and this project's contract has to be
     /// written knowing that.
     ///

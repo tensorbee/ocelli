@@ -1,40 +1,40 @@
-# Current sprint, S12
+# Current sprint, S13
 
 **Milestone**: M3, the cache and the renderer.
-**Branch**: `sprint/s12`
-**Opened**: 2026-09-15
-**Goal**: Turn S11's three components into things a session can use. The cache
-gets its consumers, its events and its brick addressing, and the renderer gets
-the graph that schedules a frame.
+**Branch**: `sprint/s13`
+**Opened**: 2026-10-17
+**Goal**: Move a decoded frame from the decode worker onto a surface the render
+worker owns, on both GPU tiers, without a pixel becoming a JavaScript object.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-032 | E5.2 | Image cache with eviction events surfaced to JS | Rust | 2w | pending |
-| F-033 | E5.3 | Volume cache and progressive volume assembly | Rust | 4w | pending |
-| F-034 | E5.4 | Memory-pressure telemetry and JS-visible budget controls | Rust | 2w | pending |
-| F-036 | E5.6 | Chunked residency model and brick addressing in the cache | Rust | 4w | pending |
-| F-038 | E6.2 | Render graph and frame scheduler with dirty tracking | Rust | 4w | pending |
+| F-035 | E5.5 | Zero-copy handoff strategy from decode worker to renderer | Rust | 2w | pending |
+| F-039 | E6.3 | OffscreenCanvas in a render worker; resize and DPR handling | Rust | 3w | pending |
+| F-040 | E6.4 | Texture upload path: decode straight to write_texture | Rust | 4w | pending |
+| F-042 | E6.6 | WebGL2 fallback and tier-B shader variants | Rust | 5w | pending |
+| F-044 | E6.8 | Colour LUT / transfer function upload and preset library | Rust | 2w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together:
 
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S12 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S13 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-**S11 built three components and connected none of them.** It created the first
-long-lived `wgpu::Device`, a budgeted LRU holding no value type, and a shader
-with no frame to run in. S12 is where each acquires a consumer: F-032 and F-033
-give the cache the tiers it was built for, F-036 gives it the brick addressing
-HLD section 38 calls a Phase 1 hook, F-034 makes its pressure visible to the
-shell, and F-038 gives the renderer the graph that decides when to draw.
+**S12 scheduled a frame and presented none.** S13's graph acquires an
+OffscreenCanvas when one is bound, and a viewport with no surface still
+draws into a caller-supplied texture view. S13 is the handoff and
+the first surface: F-035 carries bytes from a decode worker to the renderer,
+F-039 puts an OffscreenCanvas in the one render worker and sizes it in device
+pixels, F-040 uploads decoded samples with `write_texture`, F-042 is the first
+code that has to run on tier B, and F-044 uploads a colour lookup and a preset
+library.
 
-**A frame still does not reach a canvas at the close of this sprint.** F-039's
-OffscreenCanvas and F-040's texture upload are S13, and they are what put pixels
-on a surface. What changes here is that the pieces stop being independent.
+M3 runs from S11 through S14. This sprint does not finish it, and a release is
+a milestone boundary.
 
 ## What is carried in
 
@@ -44,128 +44,122 @@ on a surface. What changes here is that the pieces stop being independent.
   window, identically on CPU and GPU, because PS3.3 C.11.2.1.2's formula in
   `f32` does not reproduce its own breakpoint. It has no F-ID, because creating
   one moves the backlog's identity and the sprint plan's arithmetic and is the
-  operator's decision. **Nothing in S12 touches that arithmetic**, and a story
-  that begins consuming `Display` values should know the range is not a
-  guarantee.
-- **Tier B has still never been exercised**, by anything, in any sprint. F-037
-  and F-041 both wrote for it and neither could try it. F-042 is the WebGL2
-  story and it is S13. F-038's pipelines are the next code written for a tier
-  nobody has run on.
-- **The wasm size budget has not moved**, and still records 16,388 bytes.
-  `ocelli-wasm` reaches `ocelli-core` and nothing else. Appendix A gate A4's
-  measurement arrives with F-039 in S13, which `ci/wasm-size-budget.json` now
-  says rather than naming S11.
+  operator's decision. S13 is the first sprint that uploads samples and presets
+  for display. A story that begins consuming `Display` values should know the
+  range is not a guarantee.
+- **Tier B was exercised by F-042.** Headless Chromium WebGL2 drew the section
+  18.3 rows. Renderer
+  `ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)`.
+  Status `drew`, tier B, format `R32Float`, decided by `AdapterType`. The rows
+  matched `LutChain::map_into` within 0.001. Native `Backends::GL` found no
+  adapter. The ignored test printed
+  `native Backends::GL found no adapter. This is not a tier B run.`
+- **The wasm size budget records 1,999,061 bytes.** `ci/wasm-size-budget.json`
+  records that size. Its `bearing_on_gate_A4` field says this is the first time
+  the module reaches wgpu and Naga and that the number does not close A4.
+  `ocelli-wasm` depends on `ocelli-core`, `ocelli-render` and `wgpu`. The
+  dependency has a user, the OffscreenCanvas attach path.
 - **`max_review_passes` is written by `sprint_workflow.py init` and read by
   nothing**, so `/run-sprint`'s "mark the sprint blocked" branch has no
-  mechanism behind it. Found by S11's sprint review, outside that sprint's diff,
-  and carrying no F-ID.
+  mechanism behind it. Found by S11's sprint review, outside that sprint's
+  diff, and carrying no F-ID.
 - **M2's release is still due and still cannot be taken.** `/release` step 5
   refuses while `openjph-core` 0.1.0 carries no BSD notice material, which is
-  D-22, and M1's `0.1.0` was never published. Neither blocks a story here, both
-  block publication, and the gap widens every milestone.
+  D-22, and M1's `0.1.0` was never published. S12 did not finish M3, so closing
+  it did not make a release due. Neither blocks a story here. Both block
+  publication.
 - **F-X011** remains pending because its evidence needs a second physical
   machine. **ICC** is still unimplemented, the other half of HLD section 18's
   stage-4 row. **Multi-component JPEG-LS decoding** is still owed, with a corpus
   row measuring the refusal.
-- **The oracle still has no Ocelli renderer to compare against**, and F-038 does
-  not close that either. The graph renders into a caller-supplied texture view
-  and acquires no surface, so decision D7 holds.
+- **The oracle still has no Ocelli renderer to compare against.** F-040 uploads
+  a texture the graph can sample. It does not write the candidate record.
+  F-X021 activates that gate and depends on F-012 and F-052. Decision D7 holds.
 
 ## The defect class this sprint is exposed to
 
-**S11 could be wrong in a way only hardware catches. S12 can be wrong in a way
-only a second study catches.**
+**S12 could be wrong in a way a second study catches. S13 can be wrong in a
+way a screenshot will not show.**
 
-**Slice spacing taken from a tag.** This is the one to fear, and F-033 is where
-it lives. `SpacingBetweenSlices` is frequently absent and frequently wrong, and
-`SliceThickness` is the reconstructed slab and may overlap or gap. **The ground
-truth is the difference between consecutive `ImagePositionPatient` values
-projected onto the slice normal**, and nothing else. Reading the tag on an
-overlapping-reconstruction CT compresses the volume along z by a constant
-factor, which makes every sagittal and coronal reformat wrong while the axial
-view looks perfect, and no measurement tool flags it. Sorting by
-`InstanceNumber` or `SliceLocation` rather than by projected position is the
-same defect one step earlier.
+**A view kept across an allocation.** This is the one to fear, and F-035 is
+where it lives. HLD section 5 builds the typed-array view immediately before
+the write and discards it after. Any wasm memory growth relocates the backing
+buffer and detaches every outstanding view. A module-level
+`Uint8Array` over `wasm.memory.buffer` then writes a detached buffer, or
+throws far from the cause. The handoff copies into a fresh ArrayBuffer.
+Two wasm instances cannot share a pointer. The pixels do not become
+JavaScript objects, which is decision D3.
 
-**Non-uniform spacing averaged rather than refused.** Dose-modulated and
-multi-slab acquisitions really do produce variable gaps. A volume model that
-assumes uniform spacing must detect and refuse, not silently average. Gantry
-tilt makes the volume a sheared parallelepiped rather than a box, which F-020
-already established must be **detected from the geometry** rather than read from
-`GantryDetectorTilt`.
+**A texture upload standing in for a uniform.** HLD section 18.4's window and
+level are thirty-two bytes. F-040 uploads decoded samples, once. Re-uploading
+the image on a window change, or uploading values the shader will window
+again, is the quietly wrong pixel. At the centre of a soft-tissue CT window,
+`LINEAR` and `LINEAR_EXACT` differ by 0.32 of 255. Invisible in a screenshot.
+Immediately visible in a pixel diff.
 
-**A series is not a volume.** It can hold two orientations, a localiser mixed
-with axials, and duplicate positions. F-033 groups by `FrameOfReferenceUID` and
-`ImageOrientationPatient` before it assembles anything, or it builds one volume
-out of two.
+**CSS pixels on a high-density display.** F-039. A canvas whose backing store
+is the CSS size, on a display whose `devicePixelRatio` is not 1, looks slightly
+soft and reads as acceptable. One `GPUDevice` serves every viewport. There is
+no context pool. A resize that leaves the previous target in place draws the
+new frame into the old rectangle.
 
-**A JS callback per eviction.** Decision **D4** is that events are polled from a
-ring once per frame and never delivered as a callback per event, and F-032 and
-F-034 are the first stories with a real event to emit. An eviction handler that
-crosses the boundary per eviction is the hot-path crossing D4 exists to remove,
-and it will look correct because it works.
+**Tier B returning another number.** F-042. Tier B is fragment shaders only.
+No compute and no storage buffers. The 3D texture floor is 256. A variant that
+compiles and produces a different value from tier A is a failure of decision
+D6, which says compute degrades and never fails. A feature that cannot run on
+the resolved tier reports unavailable. It never quietly produces a different
+result, which is deviation D-07.
 
-**And pixels still do not cross the boundary**, which is decision D3. A cache
-surfacing eviction events surfaces the event and not the frame.
-
-**Chunked residency is the default path, not a fallback.** Deviation **D-11**
-says so in terms. F-036 written as an optimisation that engages above a
-threshold is the architecture the HLD explicitly refused, and section 7's own
-figure is why: a 512 by 512 by 600 sixteen-bit series is roughly 300 MB against
-a guaranteed maximum buffer of 256 MiB, so the chunked path is the ordinary one.
-
-**One submit per frame, across all viewports.** HLD section 22, and F-038 is the
-first code that can break it. So is "pipelines compile at init, never
-mid-frame", and so is section 20's "no allocation in the render loop", which
-until now has been a rule with no render loop to apply to. **F-038 is where
-those three stop being aspirations.**
-
-**Device loss rebuilds resources, and F-037 deliberately did not.** Section 22
-asks for the device and all resources. F-037 rebuilt the device and returned
-`Recovered` carrying only `Caps`, because no resource type existed. F-038 is the
-first story that creates resources a rebuild has to restore, so it extends
-`Recovered` rather than changing `recover`'s signature.
+**A colour lookup applied to samples that were already converted.** F-044. The
+colour stage runs once, against the decoder's own reported output space. A
+preset that runs a conversion again, or that indexes a table with a windowed
+value when the table is keyed on the stored value, has the right shape and the
+wrong colours. That is the shape of deviation D-23.
 
 ## What done means
 
-- **F-032** surfaces evictions the cache already reports. `Lru::insert` returns
-  `Admission` with `evicted`, `displaced` and `refused` distinguished, which is
-  deviation D-24 and exists precisely so these become three different events.
-  Collapsing them at the boundary throws away what F-031 was built to preserve.
-- **F-033** derives spacing from projected `ImagePositionPatient`, refuses
-  non-uniform spacing rather than averaging it, and groups by frame of reference
-  and orientation before assembling. **Every one of those is a fixture with
-  hand-computed values citing its PS3.3 section**, and the spacing fixture uses
-  a series whose tag and whose projected spacing disagree, because one where
-  they agree cannot tell the two implementations apart.
-- **F-034** reports pressure per tier, which is what `CacheTier` and `Pressure`
-  are for, and crosses the boundary through the ring rather than a callback.
-- **F-036** makes bricking the ordinary path and says so in its design plan, per
-  D-11. A threshold above which it engages is a deviation and needs a row.
-- **F-038** issues one `queue.submit()` per frame across all viewports, compiles
-  every pipeline at init, allocates nothing in the render loop, and extends
-  `Recovered` with the resources a device rebuild must restore.
-- **Every one of the five declares all three tier rows**, and "n/a" is a real
-  answer that an omitted row is not.
+- **F-035** builds the view at the write and does not retain it. A fixture
+  grows wasm memory between two uses. Keeping the view fails that fixture.
+  Collapsing the handoff into a copied `Uint8Array` that outlives the call
+  fails decision D3.
+- **F-039** owns the OffscreenCanvas in the render worker. Resize and
+  `devicePixelRatio` both replace the backing store. One device serves the
+  viewports.
+- **F-040** writes decoded samples with `write_texture`. A window or level
+  change updates the uniform and does not re-upload the image. The bytes do
+  not cross into JavaScript.
+- **F-042** resolves tier B and runs the shader variants that tier can run.
+  What the tier cannot run reports unavailable and does not alias the tier A
+  pipeline.
+- **F-044** uploads a lookup and a preset. It does not re-derive modality, VOI
+  or photometric interpretation. The uniform still carries the resolved
+  decision.
+- **Every story declares all three tier rows**, and "n/a" is a real answer
+  that an omitted row is not.
 - `wasm-bindgen` remains confined to `ocelli-wasm`, pixels do not cross the
-  boundary, and `ocelli-render` remains the only crate that may create a device.
+  boundary, and `ocelli-render` remains the only crate that may create a
+  device.
 
 ## Dependency order and the shared resources
 
-F-032, F-033, F-034 and F-036 all depend on F-031. F-038 depends on F-037. All
-of those are `done`, so no story begins blocked and there is no order between
-the five.
+F-035 depends on F-033. F-039 and F-040 depend on F-037. F-042 and F-044
+depend on F-041. F-033, F-037 and F-041 are `done`, so no story begins blocked.
+No story in this sprint depends on another story in this sprint.
 
 **Two exclusive resources, and they are not the same one.**
 
-**`crates/ocelli-cache`** is written by four of the five stories. They cannot
-share a wave without conflicting on the same source files, whatever the worker
-count says. F-038 touches `ocelli-render` and can run beside any one of them.
+**`crates/ocelli-render`** is where F-039, F-040, F-042 and F-044 land. They
+cannot share a wave without conflicting on the same source files, whatever the
+worker count says.
 
-**The GPU**, for F-038 alone this sprint. The rule S11 established holds: two
-workers running device tests concurrently on one machine contend for the adapter
-and produce timeouts that read exactly like rendering failures. The `gpu` gate
+**The GPU**, for those four. The rule S11 established holds: two workers
+running device tests concurrently on one machine contend for the adapter and
+produce timeouts that read exactly like rendering failures. The `gpu` gate
 runs `--test-threads=1` for the same reason inside one process.
+
+**F-035** is the memory-view contract between a decode worker and that
+renderer. It can be designed beside the render stories. If its implementation
+edits `ocelli-render`, it joins their queue.
 
 ## Standing expectations
 

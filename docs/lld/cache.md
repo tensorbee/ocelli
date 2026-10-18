@@ -1,7 +1,7 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-036
-**Last updated:** 2026-10-17
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036
+**Last updated:** 2026-10-18
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
 section 20's `Budgeted` trait and `Lru<K, V>`, made into `crates/ocelli-cache`.
@@ -24,6 +24,8 @@ crate links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
 | `ImageCache` | F-032. An `Lru<FrameKey, DecodedFrame>` fixed to the decoded tier, returning events |
 | `CacheEvent` | F-032. One variant per `Admission` field: `Evicted`, `Displaced`, `Refused` |
 | `RingEvent` | F-032. Section 17.3's 48-byte event envelope, `#[repr(C)]` and `Pod` |
+| `HandoffMeta` | F-035. Frame identity plus the sample length a section 24 transfer must match. `#[repr(C)]`, little-endian, no samples |
+| `HandoffError` | F-035. `Length` when the buffer length is not `HandoffMeta.bytes` |
 
 ## What `bytes` means, which is the promise the budget keeps
 
@@ -171,6 +173,27 @@ S12 design round decided for F-032 and F-034 together, and `CacheEvents`
 wraps a `Vec` that allocates on the insert path as `Lru::insert` does. One
 insert can produce many events when it evicts many entries, and none are
 dropped to fit a fixed capacity.
+
+## Decode-to-render handoff, F-035
+
+`HandoffMeta` sits beside `FrameKey`. `key` returns that identity. The fields
+are `series`, `instance`, `frame` and `bytes`. `bytes` is the sample length
+the transferred buffer must match. There is no sample field and no heap.
+
+`#[repr(C)]` lays the fields out with `series` at 0, `instance` at 8, `frame`
+at 12 and `bytes` at 16. `SeriesId` is `#[repr(transparent)]` so the series
+field is one `u64` in that layout. The wire image is 24 bytes, little-endian,
+through `to_le_bytes` and `from_le_bytes`. Little-endian is the section 17.1
+wire rule, not the host's endianness.
+
+`check_buffer` returns `HandoffError::Length` when `buffer.len()` is not
+`bytes`. It copies nothing. A length that matches is accepted, and zero
+matches only an empty buffer. A `bytes` value that does not fit in `usize`
+disagrees with every buffer.
+
+The shell side of the same hop is `packages/core/src/bulk.ts`, which is one
+of the two files allowed to view wasm linear memory. F-101 still owns the
+live `Session` that would connect the two.
 
 ## The volume cache, F-033
 

@@ -1,7 +1,7 @@
 # Tier resolution
 
-**F-IDs that contributed:** F-004, F-037, F-X001, F-X016
-**Last updated:** 2026-09-14
+**F-IDs that contributed:** F-004, F-037, F-039, F-042, F-X001, F-X016
+**Last updated:** 2026-10-18
 
 How a session decides whether it is tier A, tier B or tier C, and how it
 records why. This describes what the code does today.
@@ -448,29 +448,17 @@ at all, and HLD section 7's tier B could never resolve in a browser. A tier the
 resolver can never return is not a tier.
 
 The pin and the workspace entry are untouched and only the consuming crate's
-feature set changes, which is the shape deviation D-09 set for glam. Measured
-cost today is zero bytes, because `ocelli-wasm` does not depend on
-`ocelli-render` and so never reaches wgpu, so the size budget moves only when
-the render path is wired in from S11. That crate had an empty
-`[dependencies]` table when this was written and F-005 has since added
-`ocelli-core` to it, which changes the premise and not the conclusion.
+feature set changes, which is the shape deviation D-09 set for glam. F-039
+makes `ocelli-wasm` depend on `ocelli-render` and on `wgpu`. The attach export
+calls `resolve_adapter`. The release module exports six functions and contains
+Naga. `ci/wasm-size-budget.json` records 1,999,061 bytes for that module. Cold
+start was not remeasured. The 2.3 ms figure is still the F-006 measurement of
+the earlier module.
 
 ## What this story deliberately does not do
 
-- **It does not wire tier resolution into `ocelli-wasm`.** That module has no
-  dependency on `ocelli-render` and so never reaches wgpu. The boundary is
-  E16.2 in S16. Wiring it now would add an entry point nothing calls and
-  re-baseline the wasm size budget for a feature with no user. F-004 touches
-  `ci/wasm-size-budget.json` not at all.
-
-  **This said "no browser path of the resolver can run before F-037 in S11",
-  and F-037 has landed without changing the situation.** It built the
-  long-lived device inside `ocelli-render` and took the same decision F-004
-  was given in S03: the edge to `ocelli-wasm` is still not there, so the
-  browser path still cannot run and `ci/wasm-size-budget.json` still RECORDS
-  16,388 bytes. That is the recorded budget rather than a fresh measurement.
-  F-039, E6.3 in S13, is the first story with a reason to add it, and
-  `ci/wasm-size-budget.json` now says so where it used to say S11.
+- **It does not wire tier resolution into `ocelli-wasm`.** That is F-004's
+  limit. F-039 later added that edge, described above.
 - **It does not create a long-lived device.** The probe device is transient
   and `GpuContext` is still built by whoever owns one. **F-037 has since built
   the long-lived one**, as `probe::resolve_adapter` plus
@@ -551,3 +539,52 @@ red, which is HLD 27.3's third bullet and is recorded per row in
 | `an_unknown_loss_recovers_and_a_destroy_does_not` | `caps.rs` | `recovers_from` ignoring the reason, in either direction. Both rows named for the same reason. Getting `Destroyed` wrong makes a shutdown path rebuild behind itself |
 | `exactly_one_loss_reason_recovers` | `caps.rs` | The same decision, counted, so an implementation answering the same for both reasons fails here as well as above. It does **not** catch a third `DeviceLostReason`: the array it counts over names two variants, so a third would simply not be tested. What catches a third is `recovers_from`'s match having no wildcard arm, which makes it fail to compile, and no runtime test substitutes for that |
 | `the_first_loss_reported_is_the_one_kept` | `gpu.rs` | `record_loss` losing its `is_none` guard. A second report about the same dead device would overwrite the reason `recovers_from` decides on, turning a recoverable session into one that refuses. It drives the production function rather than rebuilding the rule, which is why `record_loss` is a free function at all: reaching it through `GpuContext` needs a device, and this runs in the floor |
+
+## F-042, the WebGL2 run
+
+Production `detect` is unchanged. It still short-circuits CPU before any
+instance, then asks for an adapter with no surface. `request_device` still
+passes `adapter.limits()`.
+
+`resolve_webgl` is the tier B probe. It builds a GL-only instance, so
+`BROWSER_WEBGPU` is absent and the browser path cannot collapse onto WebGPU.
+WebGL2 `request_adapter` needs a compatible surface, so the surface is created
+before the adapter request. `GpuContext::attach_target` cannot do that,
+because it needs a device that does not exist yet. The probe device is still
+dropped before the long-lived `open`.
+
+On wasm that instance sets `GlFenceBehavior::AutoFinish` and passes that
+value into detection. wgpu-types 30.0.1 documents it for WebGL `device.poll`.
+Chromium clamps `clientWaitSync` to 0, so a normal fence makes
+`PollType::Wait` return Timeout before the map callback runs. `AutoFinish`
+marks the submission complete at submit. The readback still copies with
+`getBufferSubData`. `fill_rate_after_wait` records a completion on the
+default fence, including one the first poll already observes. It records
+nothing when the fence value is `AutoFinish`, so this probe is not a fill
+rate and `classify` does not record `DecidedBy::Benchmark` for it. The
+benchmark stays unknown. The existing classifier then uses adapter type,
+then the renderer string, then keeps the candidate. Production `detect`
+passes the default fence.
+
+The run was `node tools/tier-b/run.mjs` after
+`wasm-pack build crates/ocelli-wasm --target web --out-dir target/tier-b-probe -- --features tier-b-probe`.
+Playwright 1.62.1 came from `tools/oracle`. Chromium was launched with
+`--use-gl=angle --use-angle=metal --ignore-gpu-blocklist --enable-webgl --enable-webgl2`.
+SwiftShader was not used. The export is behind the `tier-b-probe` feature.
+The named user is `tools/tier-b/run.mjs`. The measured module does not carry
+it.
+
+The script exited 0. Status `drew`, tier `B`, format `R32Float`, decided by
+`AdapterType`. Renderer
+`ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)`.
+LINEAR was `[0.0, 127.819565, 255.0, 63.909782]` against the CPU chain
+`[0.0, 127.81955, 255.0, 63.909775]`. LINEAR_EXACT was
+`[0.0, 127.5, 255.0, 63.75]` on both sides. Input -160 stayed `0.0`. The
+centre-window gap stayed. The colour target was `Rgba32Float` and the
+comparison multiplied the unit by 255. That readback is the test, not a
+product path.
+
+Native `resolve_native_gl` found no adapter. The ignored test printed
+`native Backends::GL found no adapter. This is not a tier B run.` wgpu-hal
+30.0.1's `gles` backend is Linux and Android with EGL. That miss is not a
+tier B run.

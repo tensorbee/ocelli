@@ -158,16 +158,16 @@ One budgeted cache, one wgpu device, the LUT chain running as a shader stage on 
 | F-032 | E5.2 | S12 | Image cache with eviction events surfaced to JS | Rust | 2w | F-031 | done |
 | F-033 | E5.3 | S12 | Volume cache and progressive volume assembly | Rust | 4w | F-031 | done |
 | F-034 | E5.4 | S12 | Memory-pressure telemetry and JS-visible budget controls | Rust | 2w | F-031 | done |
-| F-035 | E5.5 | S13 | Zero-copy handoff strategy from decode worker to renderer | Rust | 2w | F-033 | pending |
+| F-035 | E5.5 | S13 | Zero-copy handoff strategy from decode worker to renderer | Rust | 2w | F-033 | done |
 | F-036 | E5.6 | S12 | Chunked residency model and brick addressing in the cache | Rust | 4w | F-031 | done |
 | F-037 | E6.1 | S11 | ocelli-render: device init, capability tiering, device-lost recovery | Rust | 4w | F-004 | done |
 | F-038 | E6.2 | S12 | Render graph and frame scheduler with dirty tracking | Rust | 4w | F-037 | done |
-| F-039 | E6.3 | S13 | OffscreenCanvas in a render worker; resize and DPR handling | Rust | 3w | F-037 | pending |
-| F-040 | E6.4 | S13 | Texture upload path: decode straight to write_texture | Rust | 4w | F-037 | pending |
+| F-039 | E6.3 | S13 | OffscreenCanvas in a render worker; resize and DPR handling | Rust | 3w | F-037 | done |
+| F-040 | E6.4 | S13 | Texture upload path: decode straight to write_texture | Rust | 4w | F-037 | done |
 | F-041 | E6.5 | S11 | WGSL LUT-chain shader | Rust | 4w | F-029 | done |
-| F-042 | E6.6 | S13 | WebGL2 fallback and tier-B shader variants | Rust | 5w | F-041 | pending |
+| F-042 | E6.6 | S13 | WebGL2 fallback and tier-B shader variants | Rust | 5w | F-041 | done |
 | F-043 | E6.7 | S14 | Chunked brick residency as the default upload path | Rust | 4w | F-040 | pending |
-| F-044 | E6.8 | S13 | Colour LUT / transfer function upload and preset library | Rust | 2w | F-041 | pending |
+| F-044 | E6.8 | S13 | Colour LUT / transfer function upload and preset library | Rust | 2w | F-041 | done |
 | F-X002 | X1.2 | S14 | Three-layer GPU-less render testing: lavapipe in CI and Chrome with SwiftShader nightly | Build | 3w | F-037 | pending |
 
 ### M4, Public API, the boundary, and the stack viewport

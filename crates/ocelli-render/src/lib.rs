@@ -5,7 +5,16 @@
 //! F-001 creates the crate. F-008 gives it the device-ownership contract.
 //! F-004 resolves the tier, **F-037 (E6.1, S11) creates the long-lived device
 //! and makes device loss an observable state**, and **F-038 (E6.2, S12) adds
-//! the render graph and frame scheduler in `graph`**.
+//! the render graph and frame scheduler in `graph`**. **F-040 (E6.4, S13)
+//! uploads stored samples** into an `R32Float` texture created at
+//! registration. `set_voi` does not upload that texture again.
+//! **F-044 (E6.8, S13) uploads a colour LUT** as an `Rgba8Unorm` texture of
+//! height 1, created when a preset or a palette is selected. `set_voi` does
+//! not upload that texture either. `lut_uploads` counts the colour upload.
+//! `uploads` stays the stored-sample counter.
+//! **F-039 (E6.3, S13) attaches a surface** from the same `wgpu::Instance`
+//! the adapter was opened on, and sizes the backing store with
+//! [`extent::device_extent`].
 //!
 //! The device lifecycle is split the same way tier resolution is. `caps` holds
 //! the two decisions, [`caps::opens_a_device`] and [`caps::recovers_from`],
@@ -41,9 +50,12 @@
 //! than left as an unexplained absence.
 
 pub mod caps;
+pub mod colour;
+pub mod extent;
 pub mod gpu;
 pub mod graph;
 pub mod probe;
+pub mod tier_b;
 pub mod voi;
 
 pub use caps::{
@@ -51,14 +63,23 @@ pub use caps::{
     ProbeOutcome, Resolution, SimdSupport, SoftwareVerdict, Tier, TierEvidence, TierRequest,
     TierSignals, candidate_order, classify, compute_available, opens_a_device, recovers_from,
 };
+pub use colour::{ColourLut, ColourLutError, PresetId};
+pub use extent::{ExtentError, device_extent};
 pub use gpu::{
     DeviceError, DeviceLoss, DeviceState, GpuContext, GraphResources, Recovered, SharedEncoder,
+    SurfaceError,
 };
 pub use graph::{
-    BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineKey, RenderGraph, SegPass,
-    StackPass, ViewportId, VolumePass,
+    BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineFamily, PipelineKey,
+    RenderGraph, STORED_FORMAT, SegPass, StackPass, Upload, UploadError, ViewportId, VolumePass,
+    tier_b_fragment_module,
 };
-pub use probe::{Edge, Passes, ResolvedAdapter, resolve, resolve_adapter};
+#[cfg(not(target_arch = "wasm32"))]
+pub use probe::resolve_native_gl;
+pub use probe::{
+    Edge, Passes, ResolvedAdapter, WebGlOpened, WebGlProbe, resolve, resolve_adapter, resolve_webgl,
+};
+pub use tier_b::{Section183Error, Section183Pixels, read_section_18_3, stored_format_name};
 pub use voi::{VOI_WGSL, VoiParams, VoiParamsError};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which

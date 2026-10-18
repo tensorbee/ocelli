@@ -9,6 +9,9 @@
 //! **No ring is built here and nothing reaches JavaScript.** Section 17.3's
 //! ring is F-101 in S16. This story stops at the tested encoding, which the
 //! S12 design round decided for F-032 and F-034 together.
+//!
+//! F-035 adds [`HandoffMeta`] beside [`FrameKey`]. It carries the frame
+//! identity and the sample length of a section 24 transfer, and no samples.
 
 use alloc::vec::Vec;
 
@@ -24,6 +27,9 @@ use crate::tier::{CacheTier, Pressure};
 /// `Ord` for the `BTreeMap` `Lru` is built on and a per-frame string comparison
 /// on the decode path is a cost with no reader. Assigning an id to a UID
 /// belongs to whoever owns a study, which is not this crate.
+///
+/// `#[repr(transparent)]` keeps this one `u64` in [`HandoffMeta`]'s C layout.
+#[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SeriesId(pub u64);
 
@@ -46,6 +52,129 @@ impl FrameKey {
             instance,
             frame,
         }
+    }
+}
+
+/// Identity and sample length for one section 24 transfer.
+///
+/// `FrameKey` is the identity. `bytes` is the sample length the transferred
+/// buffer must match. The samples stay in that buffer. This value has no heap.
+///
+/// `#[repr(C)]` puts `series` at 0, `instance` at 8, `frame` at 12 and `bytes`
+/// at 16. [`Self::to_le_bytes`] is the wire image. Little-endian is section
+/// 17.1's rule, not an assumption about the host.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HandoffMeta {
+    /// The series the frame belongs to.
+    pub series: SeriesId,
+    /// The instance number within the series.
+    pub instance: u32,
+    /// The frame number within the instance.
+    pub frame: u32,
+    /// The sample length the transfer must match. Not the samples.
+    pub bytes: u64,
+}
+
+/// A transferred buffer whose length is not the length [`HandoffMeta`] declared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HandoffError {
+    /// `buffer.len()` is not `expected`. `actual` is that length as `u64`.
+    Length { expected: u64, actual: u64 },
+}
+
+impl HandoffMeta {
+    /// Wire length of [`Self::to_le_bytes`].
+    pub const BYTES: usize = 24;
+
+    /// Assemble a handoff from the frame identity and its sample length.
+    #[must_use]
+    pub const fn new(series: SeriesId, instance: u32, frame: u32, bytes: u64) -> Self {
+        Self {
+            series,
+            instance,
+            frame,
+            bytes,
+        }
+    }
+
+    /// The frame identity. The sample length is not part of it.
+    #[must_use]
+    pub const fn key(self) -> FrameKey {
+        FrameKey::new(self.series, self.instance, self.frame)
+    }
+
+    /// The 24-byte little-endian image of the four fields.
+    #[must_use]
+    pub const fn to_le_bytes(self) -> [u8; Self::BYTES] {
+        let [s0, s1, s2, s3, s4, s5, s6, s7] = self.series.0.to_le_bytes();
+        let [i0, i1, i2, i3] = self.instance.to_le_bytes();
+        let [f0, f1, f2, f3] = self.frame.to_le_bytes();
+        let [b0, b1, b2, b3, b4, b5, b6, b7] = self.bytes.to_le_bytes();
+        [
+            s0, s1, s2, s3, s4, s5, s6, s7, i0, i1, i2, i3, f0, f1, f2, f3, b0, b1, b2, b3, b4, b5,
+            b6, b7,
+        ]
+    }
+
+    /// Read the image [`Self::to_le_bytes`] wrote.
+    #[must_use]
+    pub const fn from_le_bytes(raw: [u8; Self::BYTES]) -> Self {
+        let [
+            s0,
+            s1,
+            s2,
+            s3,
+            s4,
+            s5,
+            s6,
+            s7,
+            i0,
+            i1,
+            i2,
+            i3,
+            f0,
+            f1,
+            f2,
+            f3,
+            b0,
+            b1,
+            b2,
+            b3,
+            b4,
+            b5,
+            b6,
+            b7,
+        ] = raw;
+        Self {
+            series: SeriesId(u64::from_le_bytes([s0, s1, s2, s3, s4, s5, s6, s7])),
+            instance: u32::from_le_bytes([i0, i1, i2, i3]),
+            frame: u32::from_le_bytes([f0, f1, f2, f3]),
+            bytes: u64::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7]),
+        }
+    }
+
+    /// Refuse a buffer whose length is not [`Self::bytes`].
+    ///
+    /// The samples stay in `buffer`. This value does not copy them.
+    ///
+    /// # Errors
+    ///
+    /// [`HandoffError::Length`] when the lengths disagree. A `bytes` value
+    /// that does not fit in `usize` disagrees with every buffer.
+    pub fn check_buffer(self, buffer: &[u8]) -> Result<(), HandoffError> {
+        let same = match usize::try_from(self.bytes) {
+            Ok(expected) => expected == buffer.len(),
+            Err(_too_wide) => false,
+        };
+        if same {
+            return Ok(());
+        }
+        let actual = u64::try_from(buffer.len()).unwrap_or(u64::MAX);
+        Err(HandoffError::Length {
+            expected: self.bytes,
+            actual,
+        })
     }
 }
 
@@ -270,5 +399,84 @@ impl ImageCache {
     /// The decoded tier's pressure signal. Telemetry, not a use.
     pub fn pressure(&self) -> Pressure {
         self.decoded.pressure()
+    }
+}
+
+#[cfg(test)]
+mod handoff_tests {
+    use super::{FrameKey, HandoffError, HandoffMeta, SeriesId};
+
+    /// `0x0102_0304_0506_0708` little-endian is `08 07 06 05 04 03 02 01`.
+    /// `0xA0B0_C0D0` little-endian is `D0 C0 B0 A0`.
+    /// `0x1122_3344` little-endian is `44 33 22 11`.
+    /// `524_288 = 0x0008_0000`, eight bytes little-endian, is
+    /// `00 00 08 00 00 00 00 00`.
+    const WIRE: [u8; 24] = [
+        0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0xD0, 0xC0, 0xB0, 0xA0, 0x44, 0x33, 0x22,
+        0x11, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    fn sample() -> HandoffMeta {
+        HandoffMeta::new(
+            SeriesId(0x0102_0304_0506_0708),
+            0xA0B0_C0D0,
+            0x1122_3344,
+            524_288,
+        )
+    }
+
+    #[test]
+    fn fields_round_trip_little_endian() {
+        let meta = sample();
+        assert_eq!(core::mem::size_of::<HandoffMeta>(), HandoffMeta::BYTES);
+        assert_eq!(HandoffMeta::BYTES, 24);
+        assert_eq!(core::mem::align_of::<HandoffMeta>(), 8);
+        assert_eq!(core::mem::offset_of!(HandoffMeta, series), 0);
+        assert_eq!(core::mem::offset_of!(HandoffMeta, instance), 8);
+        assert_eq!(core::mem::offset_of!(HandoffMeta, frame), 12);
+        assert_eq!(core::mem::offset_of!(HandoffMeta, bytes), 16);
+        assert_eq!(meta.to_le_bytes(), WIRE);
+        assert_eq!(HandoffMeta::from_le_bytes(WIRE), meta);
+        assert_eq!(
+            meta.key(),
+            FrameKey::new(SeriesId(0x0102_0304_0506_0708), 0xA0B0_C0D0, 0x1122_3344,)
+        );
+    }
+
+    #[test]
+    fn refuses_a_length_that_disagrees_with_the_buffer() {
+        // `instance` is 2 and `frame` is 3. Only `bytes` is the length.
+        let meta = HandoffMeta::new(SeriesId(9), 2, 3, 4);
+        assert_eq!(meta.check_buffer(&[0, 0, 0, 0]), Ok(()));
+        assert_eq!(
+            meta.check_buffer(&[0, 0]),
+            Err(HandoffError::Length {
+                expected: 4,
+                actual: 2,
+            })
+        );
+        assert_eq!(
+            meta.check_buffer(&[0, 0, 0]),
+            Err(HandoffError::Length {
+                expected: 4,
+                actual: 3,
+            })
+        );
+        assert_eq!(
+            meta.check_buffer(&[0, 0, 0, 0, 0]),
+            Err(HandoffError::Length {
+                expected: 4,
+                actual: 5,
+            })
+        );
+        let empty = HandoffMeta::new(SeriesId(9), 2, 3, 0);
+        assert_eq!(empty.check_buffer(&[]), Ok(()));
+        assert_eq!(
+            empty.check_buffer(&[0]),
+            Err(HandoffError::Length {
+                expected: 0,
+                actual: 1,
+            })
+        );
     }
 }

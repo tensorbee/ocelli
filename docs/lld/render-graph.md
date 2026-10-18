@@ -1,7 +1,7 @@
 # Render graph
 
-**F-IDs that contributed:** F-038
-**Last updated:** 2026-10-17
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-044
+**Last updated:** 2026-10-18
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
@@ -15,6 +15,8 @@ HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 | `ViewportId` | A newtype, so an index cannot transpose at a call site |
 | `RenderGraph` | Registered viewports, their dirt, and the pipelines compiled at creation |
 | `FrameOutcome` | `Submitted`, `Noop`, `DeviceLost` or `Unavailable` |
+| `Upload` | Extent of the preserving float stored-sample texture owned by a viewport |
+| `UploadError` | Format refusal, a wrong sample length, or a viewport with no stored texture |
 
 ## The rules that hold
 
@@ -22,6 +24,14 @@ HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 shader body. A lookup for any other pass, blend and tier combination reports
 unavailable rather than aliasing composite, which is deviation D-07's honesty
 rule applied to a blend mode.
+
+**Tier B compiles that same fragment module.** The source is `VOI_WGSL`
+followed by the graph fragment shader. The three window functions stay the
+F-041 text. `PipelineKey` is still pass, blend and tier. Compute and storage
+are a lookup family beside the key, and they have no body on either GPU tier.
+`pipeline_family_compiled` is false for those families.
+`request_outcome` returns `Unavailable` and does not hand back the fragment
+pipeline. `tick` asks for the fragment family.
 
 **One submission per submitted frame.** A tick encodes each dirty viewport
 once into one encoder and submits once, and `submissions` counts them. That
@@ -33,21 +43,134 @@ than hidden behind a submitted mixed frame.
 **VOI has one write route.** `set_voi` writes the thirty-two uniform bytes
 and sets the VOI flag together, and `mark_dirty` refuses a VOI mark. A window
 change therefore cannot schedule a frame without updating the bytes it
-renders from. Validation runs state first and the chain last, in the order
+renders from. It does not increment `uploads` and it does not write the
+stored texture. Validation runs state first and the chain last, in the order
 `UnknownViewport`, `PassHasNoUniform`, `ViewportNotRebound`, then the chain's
 own answer.
+
+**Stored samples upload with `write_texture`.** `register_stored` asks
+`adapter.get_texture_format_features` for `R32Float`, then `Rg32Float`, then
+`Rgba32Float`. A format is usable when it has `TEXTURE_BINDING` and
+`COPY_DST`. `R32Float` wins on every tier when it is usable. Tier B may take
+the next usable float format. Tier A does not substitute. If none qualify the
+call is `UploadError::FormatUnavailable`. `Rgba8Unorm` is not a candidate.
+A wider format packs each sample into `.r` and writes zeros in the other
+channels at upload time, which is not a frame-loop allocation. The `R32Float`
+path copies the caller `&[f32]` with `bytemuck::cast_slice` and
+`queue.write_texture`. Samples are stored values and are not clamped. The
+length must be width times height. A wrong length returns before the copy and
+before `uploads` changes. A matching extent reuses the texture. A different
+extent replaces it at that call, which is a data change and not a frame-loop
+allocation. The tick only binds the view it already holds. Rebind checks the
+format the slot remembered.
+
+**`uploads` counts sample uploads, not window changes.** A new sample slice
+increments it by one and sets `Dirty.data`. `set_voi` leaves it unchanged.
+
+**`lut_uploads` counts colour-table selections, not window changes.**
+`select_colour_lut` creates an `Rgba8Unorm` texture of height 1 and fills it
+once with `write_texture`. That increments `lut_uploads` by one. `uploads`
+stays the stored-sample counter. `set_voi` still writes thirty-two bytes. It
+does not write the colour texture and it does not increment `lut_uploads`.
+A device-loss restore writes the remembered table again and does not
+increment `lut_uploads`. The placeholder texture created at registration is
+not a selection and is not counted.
+
+Two keys, and they are not interchangeable. A preset is indexed by the
+display value `lut_chain` already produced. The texel replaces greyscale
+normalisation. The section 18.4 uniform stays the LUT decision, including
+`invert`. A palette is indexed by the stored sample, per deviation D-23.
+Its texels are `ColorTransform::map_into`, copied once. The shader does not
+walk the descriptor and does not run `lut_chain` for a palette. When no
+colour LUT is bound, mode 0 keeps the greyscale normalisation, and that path
+still emits the unclamped LINEAR value.
+
+An out-of-range display index uses the table endpoints. That clamp is not
+applied to the value `lut_chain` returns before the lookup. Palette on a
+monochrome photometric interpretation is unavailable. A preset on a palette
+image is unavailable. ICC is unavailable and is not passed through as device
+RGB. `Rgba8Unorm` here is the colour table. It is still not a stored-sample
+format.
+
+Tier A, on this host's default adapter, read `grey` at display 40 back as
+RGB 40, 40, 40 and the `stops` texels at 0, 128 and 255. Stored samples 9
+and 10 read back the first palette entry and stored 11 read back the second.
+`set_voi` left both `lut_uploads` and `uploads` unchanged across those
+windows. With no colour LUT bound, the carried LINEAR finding read back
+above 255, within `0.001` of `297.5000305175781`. That check is the existing
+shader tolerance on an `Rgba32Float` value. It is not an 8-bit comparison
+with tier B. A tier B colour LUT readback was not run, so the plan's tier A
+against tier B failure condition was not measured. The ignored native GL
+test was run and found no adapter. That miss is not a tier B colour pass.
+The section 18.3 tier B run below is the greyscale path only.
 
 **Recovery drops per-viewport objects.** A bind group or buffer from a dead
 device cannot be bound on its replacement, so `install_recovered` drops
 every per-viewport slot, adopts the recovered tier, and marks every viewport
-fully dirty. The caller re-supplies views through `rebind`. The registry
-keeps each pass and its last uniform values, so nothing but GPU objects is
-rebuilt.
+fully dirty. The caller re-supplies a caller-owned source through `rebind`.
+A viewport that owns a stored texture is recreated through `rebind_stored`
+at the extent the registry still holds, and that call does not increment
+`uploads`. Held frame textures are dropped before the surfaces they came
+from. The shell still holds the canvases and supplies them again through
+`bind_surface`. The registry keeps each pass, its last uniform values, the stored
+extent and the colour table bytes, so nothing but GPU objects is rebuilt.
+
+**A bound surface is the colour attachment for that tick.** `bind_surface`
+records the surface and its extent and sets the camera flag. It does not call
+`rebind` and it does not increment `uploads`. `tick` calls
+`get_current_texture` for each dirty surface viewport that can encode.
+Success and Suboptimal are drawn. Any other status leaves the slot empty,
+keeps the dirt, and does not draw the caller-supplied placeholder. `present`
+runs after the single submit, once per acquired texture, in registration
+order. A viewport with no surface keeps the caller-supplied view from F-038.
+If nothing was encoded, held textures are dropped without `present` and
+nothing is submitted.
+
+**Resize does not go through `rebind`.** `reconfigure_surface` drops any held
+frame texture, then configures the surface at the new extent when the format
+still matches the graph. A format that would differ returns
+`SurfaceError::FormatDiffers` before `configure`, so the previous
+configuration stays. `rebind` and `rebind_stored` are not called. A
+stored-sample texture stays where it is and `uploads` does not change. The
+camera flag is set so the next tick draws the new extent. `rebind` on a
+viewport that owns stored samples still returns
+`GraphError::StoredNeedsRebind`, and `rebind_stored` still recreates that
+texture without incrementing `uploads`.
+
+Native tests have no canvas. They replace a caller-supplied offscreen texture
+through `rebind` and `rebind_stored`. That is the path a viewport with no
+surface already has. A real surface texture cannot be stored across frames,
+so the browser path acquires and presents inside `tick`.
+
+**Tier C opens no surface.** `RenderGraph::new` still returns
+`TierCUnavailable` on CPU. `attach_target` is not called. `device_extent`
+still runs with no device. It is CSS size times device pixel ratio, rounded
+half away from zero per axis, then saturated to `u32`. A strictly positive
+CSS axis that rounds to 0 becomes 1. Non-finite inputs and a ratio that is
+not strictly positive are refused. The function touches no GPU.
+
+## Tiers
+
+| Tier | Stored upload |
+|------|----------------|
+| A, WebGPU | Full, `R32Float` |
+| B, WebGL2 | `R32Float` when it can be sampled and copied. Otherwise `Rg32Float` or `Rgba32Float`. If none of the three qualify, unavailable. `Rgba8Unorm` is not used |
+| C, CPU | Unavailable as a texture. No device. A preset indexes the same bytes after `LutChain::map_into`. A palette uses `ColorTransform::map_into`. |
 
 ## What this does not do
 
-No surface is acquired, which is F-039. No texture is uploaded, which is
-F-040. The oracle still has no Ocelli frame to judge, so decision D7 stays
-open. Tier B is full by construction and has never been
-exercised by a gate: F-042 is its first test. Mip, MinIp and Average wait
-for F-054, which depends on F-052. LabelmapEdgeProjection waits for F-067.
+No staging-buffer pool is built.
+`write_texture` takes the caller slice. The oracle still has no Ocelli frame
+to judge, so decision D7 stays open. F-042 drew the section 18.3 rows on
+tier B. Headless Chromium WebGL2, Playwright 1.62.1 from `tools/oracle`, with
+ANGLE on Metal and not SwiftShader. The renderer string was
+`ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)`.
+The stored format was `R32Float`. LINEAR read back
+`[0.0, 127.819565, 255.0, 63.909782]` against `LutChain::map_into`
+`[0.0, 127.81955, 255.0, 63.909775]`. LINEAR_EXACT read back
+`[0.0, 127.5, 255.0, 63.75]` on both sides. The gap at input 40 stayed.
+`LINEAR_EXACT` at input -160 was `0.0`. The script exited 0. Native
+`Backends::GL` found no adapter. That miss is not the tier B run. Mip, MinIp
+and Average wait for F-054, which depends on F-052. LabelmapEdgeProjection
+waits for F-067. The carried LINEAR out-of-range finding is left where F-041
+recorded it.

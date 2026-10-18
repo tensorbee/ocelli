@@ -49,6 +49,11 @@ thiserror = { workspace = true }
 # nothing. Section 4's crate table forbids no direction and this is the one
 # section 18 implies.
 ocelli-pixel = { path = "../ocelli-pixel" }
+# F-042. `read_section_18_3` calls `LutChain::map_into`, whose arguments are
+# `Stored` and `Display`. The types already reach this crate through
+# `ocelli-pixel`. Naming them here is the readback comparison, which is the
+# test and not a product path.
+ocelli-core = { path = "../ocelli-core" }
 # F-041. HLD section 20's third bullet, by name: "Use bytemuck::cast_slice for
 # reinterpreting pixel buffers. Hand-written transmutes are unsafe code with no
 # upside here." `unsafe` is allow-listed to two files and neither is this crate,
@@ -57,11 +62,6 @@ ocelli-pixel = { path = "../ocelli-pixel" }
 bytemuck = { workspace = true }
 
 [dev-dependencies]
-# F-041. `tests/voi_shader.rs` compares the shader's output against
-# `LutChain::map_into`, whose signature is in `Stored` and `Display` from
-# `ocelli-core`. Dev-only: the shipped surface reaches `ocelli-core` through
-# `ocelli-pixel` and does not name it.
-ocelli-core = { path = "../ocelli-core" }
 # `resolve` is `async fn`, because `request_adapter` and `request_device` are
 # futures in the pinned wgpu, and a native test needs something to drive it.
 # Dev-only, so it never enters the shipped surface, which is the same argument

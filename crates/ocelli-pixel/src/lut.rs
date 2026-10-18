@@ -18,6 +18,9 @@ pub struct LutDescriptor {
     /// `bits_per_entry`, so the mapping from entry size to range exists once,
     /// inside the validation that refuses every other entry size.
     largest_representable_value: f32,
+    /// PS3.3 C.7.6.3.1.5's second descriptor value, kept as the `i32` the
+    /// caller passed so a later reader does not have to invert the `f32`.
+    first_mapped_input: i32,
 }
 
 impl LutDescriptor {
@@ -75,6 +78,7 @@ impl LutDescriptor {
             values,
             bits_per_entry,
             largest_representable_value: largest_value,
+            first_mapped_input,
         })
     }
 
@@ -98,8 +102,13 @@ impl LutDescriptor {
     ///
     /// Resolved, so a declared `0` has already become 65,536 here. Palette
     /// colour compares this across its three channels.
-    pub(crate) fn entry_count(&self) -> usize {
+    pub fn entry_count(&self) -> usize {
         self.values.len()
+    }
+
+    /// PS3.3 C.7.6.3.1.5's second value, the first stored pixel value mapped.
+    pub const fn first_mapped_input(&self) -> i32 {
+        self.first_mapped_input
     }
 
     /// The first mapped input, as bits so it is comparable.

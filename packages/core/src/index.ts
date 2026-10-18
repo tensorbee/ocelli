@@ -16,14 +16,23 @@
  * What does NOT live here: anything a pixel touches.
  *
  * F-021 publishes the bounded DICOMweb client and response sink API below.
+ * F-035 publishes the section 24 handoff from `bulk.ts`.
  * F-100 and F-101 own the later session-facing viewer and wasm boundary APIs.
  */
 
-export { writeDicomwebResponse, writeFrame } from "./bulk.js";
+export {
+  acceptTransferredFrame,
+  exportDecodedFrame,
+  transferredFrameMessage,
+  writeDicomwebResponse,
+  writeFrame,
+} from "./bulk.js";
 export type {
   BulkSink,
   DicomwebResponseKind,
   DicomwebResponseSink,
+  FrameMessage,
+  HandoffMeta,
   WasmMemory,
 } from "./bulk.js";
 

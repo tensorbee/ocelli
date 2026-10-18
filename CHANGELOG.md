@@ -102,10 +102,11 @@ Repository bootstrap. Nothing is published.
   `crates/ocelli-wasm/pkg` through `wasm-pack` under HLD section 15.2's release
   profile, and the `wasm` gate measures that artefact against a recorded size
   budget in `ci/wasm-size-budget.json`. First measurement 14,104 bytes, and
-  16,388 after F-005 added the panic hook, with the delta and its cause
-  attributed in that file. Both are baselines for regression detection and
-  neither is an answer to Appendix A gate A4, whose estimate is a little over
-  two orders of magnitude larger, 183x at its low end and 488x at its high one.
+  16,388 after F-005 added the panic hook. The file now records 1,999,061 bytes
+  for the render edge, from 16,388. The 183x and 488x figures described the
+  16,388 byte module. This module is about 1.5 times under the 3 MB low end of
+  the Appendix A gate A4 estimate. A4 stays open because cold start was not
+  remeasured.
 - The cross-target build proof, `bin/ocelli.sh native` and the `native` gate.
   It links the `ocelli-desktop` and `ocelli-server` entry points, builds every
   shared crate for both wasm32 and the host, and compares resolved features
@@ -281,6 +282,25 @@ Repository bootstrap. Nothing is published.
   them. A blend mode with no shader reports itself unavailable instead of
   rendering the wrong one, and a rebuilt device restores the graph's
   pipelines while the caller re-supplies its viewport textures.
+- A decoded frame leaves one wasm instance as a fresh ArrayBuffer. The
+  worker transfer is the zero-copy hop. The bulk channel copies once out
+  and once in, because a view retained across a memory growth detaches.
+- Stored samples upload with `write_texture`. A window change writes the
+  thirty-two-byte VOI uniform and does not upload the samples again.
+- An OffscreenCanvas in the render worker, sized in device pixels as CSS
+  size times device pixel ratio, rounded per axis. Resize reconfigures that
+  surface and does not upload pixels again. A session on the CPU tier reports
+  the surface unavailable and does not draw a substitute.
+- Tier B draws the composite stack through WebGL2. The fragment module is
+  the existing window shader, and a compute or storage request reports
+  unavailable. On this host a headless Chromium WebGL2 context matched the
+  CPU LUT chain within 0.001. The readback fence is not used as a fill rate.
+- A colour lookup and a two-table preset library. `grey` maps a display
+  value to the same value on each channel. `stops` is black, red and white
+  at indices 0, 128 and 255. A palette is indexed by the stored sample.
+  A window change writes the thirty-two-byte VOI uniform and does not
+  upload the table again. Palette on a monochrome image, a preset on a
+  palette image, and an ICC profile report unavailable.
 - The LUT chain's WGSL shader, evaluating DICOM PS3.3 C.11's first three stages
   from a thirty-two-byte uniform, so a window or level change writes those
   bytes and nothing else. The shader makes no LUT decision, because

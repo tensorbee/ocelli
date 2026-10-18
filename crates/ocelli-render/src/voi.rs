@@ -230,16 +230,33 @@ mod tests {
 
     /// **Tier B legality, as far as a text check can carry it.**
     ///
-    /// HLD section 7 gives tier B "fragment shaders only, no compute, no
-    /// storage buffers". This file has none of the three. It is a weak check
-    /// and it is the only one available: nothing in this repository has ever
-    /// run on tier B, which `docs/sprints/CURRENT_SPRINT.md` names as this
-    /// sprint's exposure, and a text assertion is not a downlevel adapter.
+    /// HLD section 7 gives tier B fragment shaders only, no compute and no
+    /// storage buffers. This file has none of those. The text check does not
+    /// execute the shader. The WebGL2 execution is the Playwright probe
+    /// recorded in `docs/lld/render-graph.md`.
     #[test]
     fn the_shader_uses_nothing_tier_b_lacks() {
         assert!(!VOI_WGSL.contains("@compute"));
         assert!(!VOI_WGSL.contains("var<storage"));
         assert!(!VOI_WGSL.contains("atomic"));
         assert!(!VOI_WGSL.contains("workgroup"));
+    }
+
+    /// The fragment variant includes `VOI_WGSL` unchanged.
+    ///
+    /// One definition of each window function. The entry point samples with
+    /// `textureLoad`. There is no compute entry and no storage buffer, and
+    /// the three functions are not re-typed in the graph module.
+    #[test]
+    fn the_tier_b_module_includes_voi_unchanged() {
+        let module = crate::graph::tier_b_fragment_module();
+        assert!(module.starts_with(VOI_WGSL));
+        assert_eq!(module.matches("fn voi_linear(").count(), 1);
+        assert_eq!(module.matches("fn voi_linear_exact(").count(), 1);
+        assert_eq!(module.matches("fn voi_sigmoid(").count(), 1);
+        assert!(module.contains("@fragment"));
+        assert!(module.contains("textureLoad"));
+        assert!(!module.contains("@compute"));
+        assert!(!module.contains("var<storage"));
     }
 }

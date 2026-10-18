@@ -132,6 +132,20 @@ impl PaletteColorLut {
             b: self.blue.lookup(stored.0),
         }
     }
+
+    /// Number of entries, already resolved so a declared `0` is 65,536.
+    ///
+    /// The three channels agreed on this in [`PaletteColorLut::new`].
+    pub fn entry_count(&self) -> usize {
+        self.red.entry_count()
+    }
+
+    /// PS3.3 C.7.6.3.1.5's first stored pixel value mapped.
+    ///
+    /// Shared by the three channels. [`ColorTransform::map_into`] applies it.
+    pub fn first_mapped_input(&self) -> i32 {
+        self.red.first_mapped_input()
+    }
 }
 
 /// The colour space a frame's samples are actually in, after decoder evidence.

@@ -296,6 +296,40 @@ const config = tseslint.config(
     rules: reactHooks.configs.recommended.rules,
   },
   {
+    // F-039's browser proof. The file runs under node and the callback it
+    // hands to Playwright runs in the oracle Chromium, so both sets of
+    // globals are named. It is not a wasm memory view and it does not touch
+    // the allowance list above.
+    files: ["packages/core/offscreen-canvas.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        URL: "readonly",
+        document: "readonly",
+        Worker: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        Error: "readonly",
+      },
+    },
+  },
+  {
+    // F-042's WebGL2 proof. The file runs under node. The callback it
+    // hands to Playwright runs in Chromium, so both sets of globals are
+    // named. It is not a wasm memory view and it does not touch the
+    // allowance list.
+    files: ["tools/tier-b/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        URL: "readonly",
+        document: "readonly",
+      },
+    },
+  },
+  {
     // The repository's own node scripts. Plain ESM JavaScript, run by
     // `bin/ocelli.sh`, never bundled and never shipped. The globals are listed
     // rather than pulled from a `globals` package, for the reason the oracle

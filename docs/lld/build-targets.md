@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-X008
-**Last updated:** 2026-09-10
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-X008
+**Last updated:** 2026-10-18
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -85,12 +85,13 @@ That is the same defect class as widening a tolerance to make a test pass.
 
 ### The exported surface
 
-Four functions, listed in the table under "The exported surface, and the panic
-probe" below. `ocelli_version()` returns the workspace version and the other
-three are the panic record of HLD section 23. The boundary itself arrives with
-F-101 (E16.2).
+Six functions, listed in the table under "The exported surface, and the panic
+probe" below. `ocelli_version()` returns the workspace version. Three exports
+are the panic record of HLD section 23. `attachOffscreenCanvas` and
+`resizeOffscreenCanvas` are the render worker's canvas. The rest of the
+boundary arrives with F-101 (E16.2).
 
-It exists for measurement rather than for features. Fat LTO with `strip =
+`ocelli_version` exists for measurement rather than for features. Fat LTO with `strip =
 true` lets the linker discard anything unreachable, so a module with no
 exported root would measure the size of nothing. It also meets a real seam:
 `packages/core/src/index.ts` carries a `VERSION` constant and a
@@ -247,30 +248,21 @@ first measurement would be either meaningless or immediately wrong.
 
 **First measurement: 14,104 bytes**, on 2026-09-04.
 
-**Current baseline: 16,388 bytes**, re-baselined by F-005 on 2026-09-05. The
-delta is 2,284 bytes, which is 16.2 per cent and therefore over the tolerance,
-and it was declared rather than discovered. `ci/wasm-size-budget.json` carries
-the attribution and the two measurements it rests on:
+**Current baseline: 1,999,061 bytes**, re-baselined by F-039 on 2026-10-18.
+`bin/ocelli.sh wasm` measured `crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm` at
+that size, and `--accept-size` printed 1.91 MiB. The previous recorded
+baseline was 16,388 bytes, from F-005. That parent commit was not rebuilt.
+The delta against the recorded number is 1,982,673 bytes.
+`ci/wasm-size-budget.json` carries the same from, to and cause.
 
-- Base commit `d74ad3a` rebuilt on the same toolchain reproduces 14,104 bytes
-  exactly, so the delta is F-005's and not drift.
-- Raising the panic record's `MESSAGE_CAPACITY` from 512 to 1,536 bytes leaves
-  the module **byte-identical** at 16,388, because a zeroed static needs no
-  data segment. So the 528-byte record costs the module nothing, and
-  `ocelli-core` becoming a dependency of `ocelli-wasm` for the first time costs
-  nothing measurable either, since the only thing reached is one enum
-  discriminant and fat LTO drops the rest.
-
-**What the delta actually is** is the panic hook's code:
-`std::panic::set_hook`, the boxed closure it takes, the `core::fmt` machinery
-that formats the panic location, and the `Any` downcast that reads the payload.
-It has no bearing on gate A4, whose estimate is three orders of magnitude
-larger and dominated by Naga.
+**What the delta is** is the first edge from `ocelli-wasm` to `ocelli-render`,
+which pulls in wgpu and Naga. That is the number the previous budget text
+assigned to F-039.
 
 **That number is not an answer to Appendix A gate A4 and must not be read as
 one.** A4 asks whether binary size and cold start land within budget and
-estimates 3 to 8 MB uncompressed with Naga dominating. This module contains
-four exported functions, no wgpu and no Naga. A4 stays open.
+estimates 3 to 8 MB uncompressed with Naga dominating. 1,999,061 bytes is the
+first measurement of that edge. Cold start was not remeasured. A4 stays open.
 
 ### The other half of A4, cold start
 
@@ -282,13 +274,11 @@ rather than from inside the module, so `crates/` gained not one line. The figure
 and everything about how it was taken are in `ci/bench-baseline.json`, and the
 design is `docs/lld/benchmarks.md`.
 
-**The same caveat applies to it, unchanged, and it is the reason both halves
-live in one place rather than in two documents.** A module holding four exported
-functions, no wgpu and no Naga tells you nothing about the cold start of a
-feature-complete module, exactly as its 16 KB tells you nothing about A4's 3 to
-8 MB. Separating the two numbers is how one of them eventually gets read as
-answering the gate. **A4 stays open**, and 2.3 ms is a regression baseline for
-the build-out phase.
+**The same caveat applies to it, and it is the reason both halves live in one
+place rather than in two documents.** F-039 changed the module. The 2.3 ms
+figure was not remeasured, so it still describes the module from before wgpu
+and Naga were reached. **A4 stays open**, and 2.3 ms remains a regression
+baseline until a later story measures cold start again.
 
 **Re-baselining is expected, repeatedly, for the whole build-out phase.** A 5%
 tolerance on a 14 KB module is blown by the first story that adds anything
@@ -300,8 +290,9 @@ other thing once the module is feature-complete.
 
 ## The exported surface, and the panic probe
 
-The module exports four functions of ours, up from one. wasm-bindgen
-adds its own, and `memory`, which are the glue's and not this table's.
+The module exports six functions of ours. wasm-bindgen adds its own, and
+`memory`, which are the glue's and not this table's. Decode workers load the
+same module and are not required to call the two canvas exports.
 
 | Export | Called |
 |--------|--------|
@@ -309,11 +300,14 @@ adds its own, and `memory`, which are the glue's and not this table's.
 | `install_panic_hook()` | Once, by a worker, before any other call |
 | `panic_record_ptr()` | Once, straight after instantiation. Cached |
 | `panic_record_len()` | Once, straight after instantiation. Cached |
+| `attachOffscreenCanvas(viewport, canvas, cssWidth, cssHeight, dpr)` | A render worker, when a canvas is transferred. F-039 |
+| `resizeOffscreenCanvas(viewport, canvas, cssWidth, cssHeight, dpr)` | The same worker, when CSS size or device pixel ratio changes. F-039 |
 
-The last three are F-005's, and `docs/lld/errors.md` is where they are
-specified. The property that matters for this file is that **none of them is
-called after a trap**, so the panic path adds no post-trap requirement on the
-module.
+`install_panic_hook`, `panic_record_ptr` and `panic_record_len` are F-005's,
+and `docs/lld/errors.md` is where they are specified. The property that
+matters for those three is that **none of them is called after a trap**, so
+the panic path adds no post-trap requirement on the module.
+`attachOffscreenCanvas` and `resizeOffscreenCanvas` are F-039.
 
 **`wasm32-unknown-unknown` is `panic = "abort"` in every profile**, not only in
 the release profile HLD section 15.2 sets it in, because it is the target's own
@@ -388,11 +382,13 @@ pulls in on wasm32 are already target-gated inside wgpu's own manifest.
 `cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))` tables, so
 the host tree does not reach them.
 
-**Measured cost today is zero bytes**, because `ocelli-wasm` does not depend on
-`ocelli-render` and so never reaches wgpu, whatever else it depends on. It had
-an empty `[dependencies]` table when this was written and F-005 has since added
-`ocelli-core`, which changes the premise and not the conclusion. The size budget
-moves only when the render path is wired in from S11.
+**Measured cost of reaching wgpu from the wasm module is the F-039 delta.**
+`ocelli-wasm` depends on `ocelli-render` and on `wgpu`, so the release module
+reaches wgpu and Naga. The measurement above is 1,999,061 bytes against the
+recorded baseline of 16,388. The parent commit was not rebuilt. Device
+creation stays in `ocelli-render`. `ocelli-wasm` names
+`SurfaceTarget::OffscreenCanvas` because D-12 keeps that browser type out of
+`ocelli-render`. `web-sys` is a dependency of `ocelli-wasm` only.
 
 ### `ocelli-native` now depends on `ocelli-render`
 
