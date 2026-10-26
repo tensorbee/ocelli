@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-X008
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-101, F-X003, F-X008
+**Last updated:** 2026-10-26
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -85,11 +85,16 @@ That is the same defect class as widening a tolerance to make a test pass.
 
 ### The exported surface
 
-Six functions, listed in the table under "The exported surface, and the panic
-probe" below. `ocelli_version()` returns the workspace version. Three exports
-are the panic record of HLD section 23. `attachOffscreenCanvas` and
-`resizeOffscreenCanvas` are the render worker's canvas. The rest of the
-boundary arrives with F-101 (E16.2).
+The panic probe table below still names the six exports from F-005 and F-039.
+F-101 adds `alloc`, `bulk_ticket`, `release_bulk`, `apply_commands`,
+`commit_frame`, `configure_stack`, `commit_selected_frame`, `copy_state`,
+`drain_events` and `ring_capacity` on wasm32, plus the CPU canvas set
+`bindCpuCanvas`, `resizeCpuCanvas`, `publishCpuCanvas`, `publishCpuColor` and
+`publishCpuInteraction`. There is no `ring_ptr` and no pixel getter. A pointer
+would be a view over linear memory, and the drain export copies bytes out
+instead. `coreAvailable()` stays false until a built module is loaded.
+The size budget file is not edited here. A release measurement has not been
+taken for this boundary.
 
 `ocelli_version` exists for measurement rather than for features. Fat LTO with `strip =
 true` lets the linker discard anything unreachable, so a module with no
@@ -290,9 +295,12 @@ other thing once the module is feature-complete.
 
 ## The exported surface, and the panic probe
 
-The module exports six functions of ours. wasm-bindgen adds its own, and
-`memory`, which are the glue's and not this table's. Decode workers load the
-same module and are not required to call the two canvas exports.
+The module exports twenty-one functions of ours. wasm-bindgen adds its own,
+and `memory`, which are the glue's and not this table's. The table below names
+the six that predate F-101, which are the measurement root, the panic probe and
+the two render-target calls. The F-101 boundary and CPU canvas exports are
+listed in the section above. Decode workers load the same module and are not
+required to call the two render-target exports.
 
 | Export | Called |
 |--------|--------|

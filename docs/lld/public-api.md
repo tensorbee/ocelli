@@ -1,12 +1,13 @@
 # Public API
 
-**F-IDs that contributed:** F-100
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-100, F-101, F-X003
+**Last updated:** 2026-10-26
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
-F-101 implements the wire. This file names what that wire will carry.
+F-101 built the wire. This file names what that wire carries. The wire lives
+in `ocelli-viewport`, `ocelli-wasm` and `@ocelli/core`, not in this file.
 
-## The boundary this file does not build
+## The boundary wire this file documents
 
 HLD section 17.1 packs commands little-endian:
 
@@ -29,9 +30,10 @@ flags: u32
 _pad: [u32; 3]
 ```
 
-`flags` bit 0 is invert, bit 1 is loading, bit 2 is error. This layout is
-the readback contract. Nothing in this sprint copies the struct into
-JavaScript.
+`flags` bit 0 is invert, bit 1 is loading, bit 2 is error. Bit 3, value 8,
+means refining. `readViewportState` reads a 96-byte copy into plain numbers.
+`drainRing` reads a copied event buffer. Neither function views wasm memory.
+`coreAvailable()` stays false until a built module is loaded.
 
 ## Scene and stack viewport
 
@@ -47,8 +49,11 @@ It does not draw.
 
 Drawing availability is `available`, `degraded` or `unavailable`, the three
 states in `feature-availability.md`. The plan word `full` is published as
-`available`. Tier C drawing is `unavailable`. The CPU raster is F-X003. This
-story declares no drawing fallback, so the tier C answer is `unavailable`.
+`available`. The stack viewport's GPU drawing is `unavailable` on tier C, and
+`TIER_C_DRAWING` publishes that answer. The CPU raster path, F-X003, draws
+tier C through the CPU canvas exports. It is a separate surface rather than a
+fallback declared by this story, so the stack viewport's answer stays
+`unavailable`.
 
 The VOI function is `linear`, `linear_exact` or `sigmoid`. Those names map
 to `VoiFunction::Linear`, `VoiFunction::LinearExact` and
@@ -82,3 +87,27 @@ model. Annotation tools are not in the set.
 
 `packages/core/src/viewport.ts` exports the types. It does not call wasm.
 `packages/react` stays a scaffold. F-102 owns framework bindings.
+
+## Minimal resident stack initialization
+
+The operator approved this F-101 extension on 2026-10-19. `writeStack` writes
+ordered `StackFrameKey` records through the existing ticketed bulk buffer.
+Each record is little-endian u64 series, u32 instance and u32 frame. An empty
+or malformed sequence is refused before replacing the viewport stack.
+`configure_stack(ticket, len)` consumes only its current allocation ticket
+and returns a nonzero stack epoch. Reconfiguration invalidates the selected
+source and exposes loading.
+
+`FrameCommitMeta` optionally carries both `stackIndex` and `stackEpoch`.
+The public metadata adapter routes them to
+`commit_selected_frame(ticket, len, viewport, columns, rows, index, epoch)`.
+Only the selected index in the installed epoch can commit. After Scroll
+changes the selected index, the previous sample buffer is unavailable for
+rendering. The existing bitmap stays while loading. A refused stale frame
+does not become the neighbour's pixels. A legacy `commit_frame` is refused
+while a nonempty stack is configured. Frame pixels remain worker-owned.
+This is resident selection, not F-052 series loading, decoding or prefetch.
+
+`writeCommands` obtains its immediate memory view after allocation, because
+allocation may grow wasm memory. It delegates ticket authorization to the
+existing command sink. No command ID or 96-byte readback layout changed.

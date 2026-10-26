@@ -450,10 +450,11 @@ resolver can never return is not a tier.
 The pin and the workspace entry are untouched and only the consuming crate's
 feature set changes, which is the shape deviation D-09 set for glam. F-039
 makes `ocelli-wasm` depend on `ocelli-render` and on `wgpu`. The attach export
-calls `resolve_adapter`. The release module exports six functions and contains
-Naga. `ci/wasm-size-budget.json` records 1,999,061 bytes for that module. Cold
-start was not remeasured. The 2.3 ms figure is still the F-006 measurement of
-the earlier module.
+calls `resolve_adapter`. The F-039 release module exported six functions and
+contains Naga. `ci/wasm-size-budget.json` records 1,999,061 bytes for that
+module. The current module exports twenty-one functions and has not been
+remeasured. Cold start was not remeasured. The 2.3 ms figure is still the
+F-006 measurement of the earlier module.
 
 ## What this story deliberately does not do
 

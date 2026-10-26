@@ -1,11 +1,12 @@
 # Viewport
 
-**F-IDs that contributed:** F-045, F-046, F-047, F-049
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-101, F-X003, F-X022
+**Last updated:** 2026-10-26
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
-`RenderGraph::set_view` uploads the sixteen floats `View::camera_matrix`
-returns. `Presentation` in the same crate holds the LUT chain and the
+`RenderGraph::set_view` uploads the CSS matrix `View::camera_matrix` returns
+plus the device pixel ratio, twenty floats in one 80-byte uniform.
+`Presentation` in the same crate holds the LUT chain and the
 colormap. It does not draw either. `apply_placement` stores the
 displayed spacing and the measured index shift on that view. It does
 not draw.
@@ -41,31 +42,80 @@ split equally on that axis. Before the first `fit`, the anchor is the image
 centre and `fit_scale` is 1, so a default view at spacing 1 is the identity.
 
 `camera_matrix` is the inverse of that map, column-major `f32`. The fragment
-shader multiplies `(at.x, at.y, 0, 1)` by it and truncates with `i32` toward
+shader divides the device position by the device pixel ratio first, then
+multiplies `(css_x, css_y, 0, 1)` by it and truncates with `i32` toward
 zero. A zero spacing on one axis keeps the other axis and that axis's shift.
 A map with no extent writes the image centre. Neither path writes a
 non-finite value. Narrowing `f64` to `f32` is ties-to-even. It is not a
 Rust `as` cast.
 
+## Canvas, index and world
+
+`canvas_to_index` and `index_to_canvas` use the same f64 composition.
+Image x and y are the index plus one half. DICOM PS3.3 C.7.6.2.1.1 puts
+integer column `i` and row `j` on the pixel centre, and image space stores
+the corner of texel `(0, 0)`. Index `(0, 0, 0)` stays Image Position Patient.
+The half texel is not added in millimetres.
+
+`canvas_to_world` reads rows and columns from the `ImagePlane` and then
+applies `ImagePlane::index_to_world`. `world_to_canvas` is the inverse.
+A display map that is not invertible returns `CoordinateError::Singular`.
+The rank-one fallback inside `camera_matrix` is not a measurement.
+
+`Pt<Canvas>` stays in CSS pixels. A device coordinate divides by the same
+dpr as `device_extent` once, through `css_from_device`, before this mapping.
+`View` does not store device pixels. The GPU camera uniform stores that CSS
+map and the same ratio. The fragment shader divides a device-pixel position
+by the ratio before the CSS multiply. The 96-byte state copy below keeps a
+64-byte camera matrix and does not grow to match the GPU uniform.
+
+## Commands and the ring
+
+`StackViewport::apply_commands` parses the whole little-endian buffer before
+it writes. The envelope is `[u16 kind][u16 viewport_id][u32 payload_len]`
+and then the payload. Kind 0 is invalid. Ids 1 to 11 are Fit, Pan, Zoom,
+Rotate, FlipHorizontal, FlipVertical, SetWindow, ApplyPreset, SetInvert,
+SetColormap and Scroll. A structural or semantic failure, including
+`SetWindow` on a VOI sequence, leaves the view, the presentation and the
+scroll unchanged. The limit is 64 commands and 4096 bytes.
+
+`write_state` copies 96 bytes. Camera is at 0, centre at 64, width at 68,
+slice at 72, count at 76, flags at 80, and three zero words at 84. Flag bit
+3, value 8, means refining. `EventRing` keeps 256 events. Kind 6 is
+Presented. Its payload is generation, drawn width, drawn height and flags.
+The drawn extent is the reduced grid during interaction and the full device
+on settle. A full ring drops the new event. `copy_pending` writes a 16-byte header whose
+first word is the pending count, then the events in order, and advances.
+Cache kinds 1 to 5 are not produced here.
+
 ## What the GPU stores
 
-Registration writes the identity matrix into a 64-byte uniform at group 0
-binding 2. `set_view` replaces those bytes and sets `Dirty.camera`. It does
-not write the VOI uniform, the colour uniform, the stored texture or a brick.
-`uploads`, `lut_uploads` and `brick_uploads` stay put. A fragment outside
-`[0, columns)` by `[0, rows)` writes `(0, 0, 0, 1)` and does not run
-`lut_chain`. A negative coordinate is rejected before `i32` truncation, so
-it does not select texel 0.
+Registration writes an 80-byte `DeviceCamera` at group 0 binding 2. The
+first 64 bytes are the identity CSS matrix. The next four floats are the
+scale. `.x` is the device pixel ratio `1.0` and the rest is padding.
+`set_view` takes the CSS matrix and a ratio, replaces those 80 bytes, and
+sets `Dirty.camera`. It does not write the VOI uniform, the colour uniform,
+the stored texture or a brick. `uploads`, `lut_uploads` and `brick_uploads`
+stay put. The shader divides the fragment by the stored ratio before the
+CSS multiply. A fragment outside `[0, columns)` by `[0, rows)` writes
+`(0, 0, 0, 1)` and does not run `lut_chain`. A negative coordinate is
+rejected before `i32` truncation, so it does not select texel 0.
 
 The vertex shader stays the full-target triangle. The pipeline is compiled
 at graph creation. There is no mid-frame compile. Device-loss recovery drops
-the uniform and keeps the floats. `rebind` writes them into the new buffer.
+the uniform and keeps the CSS matrix and the ratio. `rebind` writes them
+into the new 80-byte buffer. The viewport state readback stays 96 bytes.
+Its camera field stays the 64-byte CSS matrix at offset 0.
 
 ## Tiers
 
-Tier A and tier B sample through the same fragment module. Tier C drawing
-stays unavailable. `RenderGraph::new` returns `TierCUnavailable`. The `View`
-math runs with no device. CPU raster is F-X003.
+Tier A and tier B sample through the same fragment module. `RenderGraph::new`
+returns `TierCUnavailable` and does not draw on CPU. `CpuRaster` draws tier C
+with `View::canvas_to_index` and `LutChain`. Grey and Stops use the existing
+preset tables. Palette and RGB use `ColorTransform` when the decoder reports
+a supported space. ICC and any other unsupported space report unavailable.
+Interactive and idle cost are unmeasured. No representative GPU-less host
+was available.
 
 ## Presentation
 
@@ -76,8 +126,11 @@ and width 400, `LINEAR`. `lung` is centre -600 and width 1500. `bone` is
 centre 300 and width 1500. Both of those are `LINEAR` as well. None of the
 three adds a formula.
 
-A preset on a modality LUT sequence or a VOI LUT sequence returns
-`PresentationError::Sequence` and leaves the chain in place. `set_invert`
+A preset on a modality LUT sequence returns `PresentationError::Sequence`.
+A manual window keeps that modality sequence, because the rebuild clones it.
+A preset or `set_window` on a VOI LUT sequence returns the same error before
+a new window is built. The chain, photometric interpretation, evidence and
+colormap stay as they were. `set_invert`
 stores an explicit `PresentationLutEvidence::Shape` and rebuilds the chain.
 An explicit shape is not combined with `MONOCHROME1`. `set_colormap` stores
 `Grey` or `Stops`. A window change does not change it.
@@ -87,8 +140,9 @@ and calls `ColourLut::preset`. This crate does not depend on `ocelli-render`
 and does not call `set_voi` or `upload_stored`.
 
 Tier A and tier B consume the rebuilt chain through the existing VOI uniform.
-Tier C runs the same `LutChain`. Drawing on tier C stays unavailable. A
-colormap on tier C indexes the same preset bytes, after `map_into`.
+Tier C runs the same `LutChain` inside `CpuRaster`. A colormap indexes the
+same preset bytes through `map_preset_into`. The display value is not clamped
+before that index. ICC stays unavailable.
 
 ## Scroll
 
@@ -107,7 +161,7 @@ not edit the render graph.
 
 Tier A and tier B upload the selected samples through the existing stored
 texture path. This module does not draw. Tier C selects from the host
-cache. Drawing stays unavailable.
+cache. `CpuRaster` is the draw. This module still does not call it.
 
 ## Placement
 
@@ -130,7 +184,7 @@ stack still returns a shift, because the positions already carry it.
 
 Tier A and tier B upload the shift inside the camera matrix F-045 already
 writes. This module does not draw and does not edit the render graph.
-Tier C computes the same two numbers. Drawing stays unavailable.
+Tier C computes the same two numbers. `CpuRaster` samples with that view.
 
 ## What this file does not own
 

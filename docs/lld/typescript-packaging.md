@@ -1,7 +1,7 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-X003
+**Last updated:** 2026-10-26
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
@@ -15,8 +15,8 @@ What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 `@ocelli/react` remains a scaffold. `@ocelli/core` now also publishes F-021's
 bounded DICOMweb transport and one-write response-sink contract, and F-035's
 decode-to-render handoff. F-100 publishes `viewport.ts`, which is the
-viewport, scene and tool types and not the wasm boundary. F-101 still owns
-that boundary.
+viewport, scene and tool types. F-101 adds `commands.ts` and the copied
+ring drain. `coreAvailable()` stays false until a built module is loaded.
 
 ### What is in the `@ocelli/core` tarball today
 
@@ -30,7 +30,8 @@ F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
 |--------|-------|
 | `bulk.ts` | Frame writes, the F-021 one-write DICOMweb response sink, and the F-035 decode-to-render handoff |
 | `dicomweb.ts` | Bounded WADO-RS, WADO-URI, and QIDO-RS request construction, validation, authentication, cancellation, and response transfer |
-| `ring.ts` | The event ring's consumer side |
+| `ring.ts` | The event ring's consumer side, including `drainRing` over a copied buffer |
+| `commands.ts` | Little-endian packing of the eleven stack commands and one submit per frame |
 | `errors.ts` | The error-code mirror, the message table, `decodeRecord` |
 | `panic.ts` | `readPanicRecord`, and the panic record's layout |
 | `fatal.ts` | `CoreStatus` and the never-returns-to-ok latch |
@@ -82,8 +83,9 @@ used immediately, and neither stored nor returned.
 
 **Widening the list is a design-plan decision** and `.claude/plans/
 F-005-design.md` item F is the one that added the second entry. **A third
-production file is not granted.** `packages/core/src/ring.ts` will need one
-when F-101 gives it a real ring to drain, and that is F-101's plan to argue.
+production file is not granted.** F-101 did not ask for one. It drained the
+ring by copying bytes out, so `packages/core/src/ring.ts` reads a copied
+buffer and never builds a view over linear memory.
 
 ## There is no bundler, and that is a decision rather than an omission
 

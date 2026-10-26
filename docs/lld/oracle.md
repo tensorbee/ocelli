@@ -1,8 +1,8 @@
 # The oracle, reference half
 
 **F-IDs that contributed:** F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008,
-F-X009, F-X012, F-X013, F-026
-**Last updated:** 2026-10-17
+F-X009, F-X012, F-X013, F-X003, F-026
+**Last updated:** 2026-10-26
 
 HLD section 11 names cornerstone3D as the reference the differential harness
 measures against, and decision D7 makes the oracle the thing that exists before
@@ -75,8 +75,9 @@ is its design.
 F-012 makes that directory contract explicit through `ocelli-compare gate`.
 It requires two distinct resolved directories and reports judged views,
 unmeasured views, absent views, unsupported source rows and declared volume
-refusals as separate counts. It does not add an Ocelli producer. F-X021 owns
-that activation after F-052.
+refusals as separate counts. F-X003 writes a bounded monochrome stack
+candidate directory and points that existing command at it. F-X021 still owns
+full viewer activation after F-052. Colour pixels are not scored here.
 
 ## The pins, and deviation D-11
 
@@ -1196,3 +1197,53 @@ with a different interpreter from the one the operator asked for is its own
 quiet failure. With it unset the implicit candidates are `.venv/bin/python`
 then `python3`, and one that cannot import pydicom is passed over. Running out
 of candidates is a failure and never a skip.
+
+## S16 bounded native candidates and paired diagnosis
+
+`produce_applicable` draws matched settled monochrome stacks with CpuRaster.
+`produce_tier_a` opens the resolved native tier A adapter and draws the same
+stack set through RenderGraph with the declared Grey LUT. It refuses tier B
+and CPU resolution. Readback belongs to the native oracle, not the public
+shell. Device limits are checked before allocating targets. Readback waits
+are bounded. Candidate run metadata records `ocelliCandidateExecution`
+separately from the inherited reference environment.
+
+Run each producer, then the unchanged comparator:
+
+```sh
+bin/ocelli.sh cargo run --release -p ocelli-oracle --example produce_stack -- tools/oracle/out corpus/data tools/oracle/compare-out/codex-tier-c
+bin/ocelli.sh cargo run --release -p ocelli-oracle --example produce_stack -- tools/oracle/out corpus/data tools/oracle/compare-out/codex-tier-a tier-a
+bin/ocelli.sh compare gate --reference tools/oracle/compare-out/codex-tier-c/candidate --candidate tools/oracle/compare-out/codex-tier-a/candidate --out tools/oracle/compare-out/codex-tier-a-c
+```
+
+Producer exit 2 preserves failed or unmeasured pixel results. It is not a
+successful numerical gate. After the display-code rounding repair the
+tier A/C run is byte-identical on all 84 produced frames, with render hash
+`95ac9185be70be670e29a62bdafeec2180f287785bf99658fa3aa50218d45aa4` on both
+sides. It has 67 pixel passes, zero pixel failures and 17 unmeasured views.
+The pre-repair run bounded the same frames to one output code, with every
+pixel within one LSB and maximum informative signed mean
+0.0037249936353526015. Its gate still refuses the coverage contract. AC5
+remains open. The cornerstone comparison remains red with 39 passes, 28 pixel
+failures and 17 unmeasured views, from
+`tools/oracle/compare-out/tier-c-rounding-gate/compare.json`. Do not replace
+one verdict with the other or relax the shared census to make this bounded
+subset green.
+
+`node tools/oracle/diagnose-sigmoid.mjs` builds a deterministic synthetic
+shoulder ramp, renders the installed pinned reference and the real CPU
+candidate, and records both alongside the PS3.3 C.11.2.1.3.1 equation. It
+observed 17 mismatching samples out of 20. Ocelli follows width 0.5 within
+one output code. The pinned reference's rendered codes at the five points the
+F-X012 record names are 5, 30, 127, 225 and 250, which also fit width 0.5
+within one output code. The installed transfer-function path is not settled
+by those codes. The traced `toLowHighRange` result is lower 39.75 and upper
+39.25, and the installed `createSigmoidRGBTransferFunction` on that range
+statically yields codes that fit width 1.5. The rendered codes and the
+transfer-function path therefore disagree, and the reference's applied width
+stays unresolved pending an oracle run. The earlier claim that the rendered
+reference followed width 1.5 is withdrawn. The remaining
+reference-versus-candidate difference is therefore not explained by a settled
+SIGMOID width mismatch. Do not change DICOM arithmetic or the parity policy to
+settle it. The remaining interior quantization, letterbox and nonsquare edge
+residuals remain unattributed. All rendered corpus outputs stay ignored.

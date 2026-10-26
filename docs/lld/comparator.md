@@ -1,7 +1,7 @@
 # The comparator, the oracle's judging half
 
-**F-IDs that contributed:** F-011, F-012, F-013, F-015, F-X012
-**Last updated:** 2026-10-17
+**F-IDs that contributed:** F-011, F-012, F-013, F-015, F-X012, F-X003
+**Last updated:** 2026-10-26
 
 HLD section 11 says the harness "pushes the same study through both stacks and
 compares frames within a written per-modality tolerance, with metadata diffed
@@ -1273,9 +1273,11 @@ Named, because each is somebody's story.
 - Re-rendering the saturated rows at a wider window, or a magnified render for
   the two decimated rows. Both change `render-params.json` and therefore every
   reference frame.
-- The Ocelli producer for all current views. F-X021 activates the required
-  candidate record after F-052 supplies the orthographic viewport. Under D-04,
-  CI validates that local record and does not render the ignored corpus.
+- The Ocelli producer for all current views. F-X003 writes settled CPU frames
+  for the monochrome stack rows its raster can draw and hands those directories
+  to `ocelli-compare gate`. F-X021 still activates the full candidate record
+  after F-052. Colour stays unscored. Under D-04, CI validates the local
+  comparator record and does not render the ignored corpus.
 
 ## Verification-ledger evidence
 
@@ -1296,4 +1298,5 @@ behind.
 
 `assert --require-comparison` and `check-commit --require-comparison` are the
 local and CI readers. F-012 deliberately leaves them dormant in the ordinary
-profiles because no Ocelli producer exists. F-X021 activates the requirement.
+profiles. A bounded monochrome candidate directory does not activate that
+requirement. F-X021 still does, after F-052.

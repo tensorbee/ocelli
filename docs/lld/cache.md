@@ -1,7 +1,7 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101
+**Last updated:** 2026-10-26
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
 section 20's `Budgeted` trait and `Lru<K, V>`, made into `crates/ocelli-cache`.
@@ -168,8 +168,10 @@ and a payload of series, instance, frame and bytes, little-endian, with the
 last eight bytes reserved and zero. The numbers are the wire contract until
 F-103 decides whether event kinds get a registry, so a test pins each one.
 
-**No ring is built and nothing reaches JavaScript.** The ring in linear
-memory is F-101 in S16. This story stops at the tested encoding, which the
+**This crate still does not own a ring and still does not reach JavaScript.**
+F-101's `EventRing` lives in `ocelli-viewport` and reuses this `RingEvent`
+layout. Kind 6 is Presented. Kinds 1 to 5 are unchanged. This story stops at
+the tested encoding, which the
 S12 design round decided for F-032 and F-034 together, and `CacheEvents`
 wraps a `Vec` that allocates on the insert path as `Lru::insert` does. One
 insert can produce many events when it evicts many entries, and none are
@@ -193,8 +195,9 @@ matches only an empty buffer. A `bytes` value that does not fit in `usize`
 disagrees with every buffer.
 
 The shell side of the same hop is `packages/core/src/bulk.ts`, which is one
-of the two files allowed to view wasm linear memory. F-101 still owns the
-live `Session` that would connect the two.
+of the two files allowed to view wasm linear memory. F-101's `Session` in
+`ocelli-wasm` is the live owner of one outstanding allocation. A commit
+releases that allocation on success and on refusal.
 
 ## The volume cache, F-033
 

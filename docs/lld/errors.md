@@ -4,8 +4,8 @@
 `packages/core/src/{errors,panic,fatal,bulk,ring}.ts`, `ci/error-codes.json`
 **Normative source**: `docs/hld/20-errors-and-panics.md` section 23, with
 `docs/hld/14-the-boundary-in-code.md` sections 17.2, 17.3 and 17.4
-**F-IDs that contributed:** F-005, F-039, F-X001, F-X017
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-005, F-039, F-X001, F-X017, F-101
+**Last updated:** 2026-10-26
 
 Living current-state document. It describes what the code does today.
 
@@ -415,12 +415,12 @@ adds `view.byteOffset` when it slices, a `DataView` starting at byte 0 makes
 that term zero, and the real ring never starts at the beginning of linear
 memory.
 
-**The wire contract half remains uncheckable and that is honest rather than
-covered.** `HEADER_BYTES` and `EVENT_STRIDE` are documented against
-`crates/ocelli-wasm/src/ring.rs`, which does not exist, so nothing can compare
-these numbers to the producer. What is now checked is the arithmetic against
-the layout HLD 17.3 specifies. F-101 lands the Rust side, and a fixture
-generated from it is what closes the other half.
+**The wire contract half is checked on both sides.** `HEADER_BYTES` and
+`EVENT_STRIDE` are documented against `crates/ocelli-viewport/src/ring.rs`.
+`crates/ocelli-viewport/tests/ring.rs` asserts the producer's own 16-byte
+header and 48-byte stride with literals rather than with the TypeScript
+constants, and this file asserts the same layout from HLD 17.3. The two
+fixtures therefore meet at the specification instead of moving together.
 
 F-X017 closes the spelling-based rule's measured escapes with a local
 type-aware ESLint rule. For a typed-array or `DataView` construction it asks
@@ -507,11 +507,11 @@ table turns it into a sentence. That is what makes it structured rather than a
 string, it keeps format strings out of a measured binary, and a line costs no
 allocation, which the render loop requires.
 
-**What exists today is the format and the registry.** The production sink is
-the event ring, and `crates/ocelli-wasm/src/ring.rs` does not exist. F-101 adds
-the one call site that pushes the same thirty-two bytes into it. Fixing the
-format now and the transport later is the right order, because the format is
-what both sides have to agree on and the transport is one function.
+**What exists today is the format, the registry and the transport.** The
+production sink is `EventRing` in `crates/ocelli-viewport/src/ring.rs`. F-101
+pushes the same thirty-two bytes into it as kind 6 Presented, and the shell
+reads a copied buffer rather than a view over linear memory. The format and
+the transport are now the same contract rather than two halves.
 
 ### Two ring rules, stated here so F-101 inherits them
 
@@ -594,8 +594,9 @@ untrusted bytes.
 
 Named, because an omission and a decision read identically later.
 
-- `crates/ocelli-wasm/src/ring.rs`, and the `ViewportState` of section 17.4.
-  F-101.
+- The ring and the `ViewportState` of section 17.4 as error-reporting paths.
+  They are built in `crates/ocelli-viewport` by F-101, and this area only
+  names the codes they carry.
 - Worker creation, teardown or replacement. F-101, and there are no workers.
 - The shell's replayable copy of viewport state. F-100 designs the public API.
 - Any mapping of a DICOM, codec or render error. Those codes arrive with the

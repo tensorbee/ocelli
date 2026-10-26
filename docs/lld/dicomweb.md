@@ -1,7 +1,7 @@
 # DICOMweb
 
-**F-IDs that contributed:** F-021
-**Last updated:** 2026-09-09
+**F-IDs that contributed:** F-021, F-101
+**Last updated:** 2026-10-26
 
 The DICOMweb path has two explicit owners. `@ocelli/core` owns HTTP fetch,
 authentication injection, status handling, content negotiation, and
@@ -60,9 +60,11 @@ the complete response once, and commits once with a `DicomwebResponseKind`.
 The kinds are QIDO JSON, WADO-URI Part 10, WADO-RS instances with a boundary,
 and WADO-RS frames with a boundary and media type.
 
-The sink is an interface exercised by fixtures. F-101 owns the live Session
-command and `commit_dicomweb_response` implementation. F-021 does not expose a
-new wasm function or invent Part 10 ingress ahead of that story.
+The sink is an interface exercised by fixtures. F-101 built the live Session
+command channel, its ticketed allocation and its frame commit. It did not
+build `commit_dicomweb_response`, and F-021 still exposes no wasm function and
+invents no Part 10 ingress. That response commit is an open boundary gap with
+no scheduled F-ID, recorded here rather than left as an implied promise.
 
 ## Rust source contract
 

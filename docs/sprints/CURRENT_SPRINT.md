@@ -9,9 +9,11 @@ chain, with the settled frame as the one a tier bound is measured on.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-048 | E7.4 | Coordinate transforms: canvas / world / index | Rust+TS | 3w | pending |
-| F-101 | E16.2 | wasm boundary: command channel, event ring buffer, state readback | TS | 5w | pending |
-| F-X003 | X1.3 | CPU raster for the stack viewport, progressive refinement, and the tier A against C bound | Rust+TS | 6w | pending |
+| F-048 | E7.4 | Coordinate transforms: canvas / world / index | Rust+TS | 3w | done |
+| F-101 | E16.2 | wasm boundary: command channel, event ring buffer, state readback | TS | 5w | done |
+| F-X003 | X1.3 | CPU raster for the stack viewport, progressive refinement, and the tier A against C bound | Rust+TS | 6w | carried |
+| F-X022 | Y1.17 | Preserve selected VOI sequences across manual window changes | Rust | 1w | done |
+| F-X023 | Y1.18 | Reconcile closure inventory and harden shared sprint preparation | Build | 2w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -20,7 +22,7 @@ second command:
 
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
-grep -c '^| F-' docs/sprints/CURRENT_SPRINT.md
+grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
 grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S16 / {print $2, $9}'
 ```
 
@@ -73,11 +75,11 @@ publishes nothing.
   `ci/wasm-size-budget.json` says this number does not close A4, and cold
   start was not remeasured. The 2.3 ms figure belongs to the 16,388-byte
   module from F-006.
-- **`max_review_passes` is written by `sprint_workflow.py init` and read by
-  nothing**, so `/run-sprint`'s "mark the sprint blocked" branch has no
-  mechanism behind it. Found by S11's sprint review, outside that sprint's
-  diff, and carrying no F-ID. The write is the only hit in
-  `scripts/sprint_workflow.py`.
+- **`max_review_passes` is stored but not automatically enforced by the
+  backing script.** S11 carried this process gap. The shared instructions make the
+  run-sprint host responsible for counting whole-sprint passes and invoking
+  `set-phase blocked` at the configured limit. The per-feature microscope
+  loop remains uncapped. No automatic script transition is claimed.
 - **M3 is complete and its release was not taken. M4 is not complete.** The
   cadence names 0.3.0 for M3. The workspace version is still 0.1.0. M1 was
   never published, and M2's release is still due. `/release` step 5 runs
@@ -147,17 +149,40 @@ is still refining is the defect.
   A tier that cannot draw reports unavailable. Inner loops may use wasm
   SIMD128, and the no-SIMD runtime is measured separately. Interactive cost
   and idle cost are reported separately. CPU MPR is F-X004.
+- **F-X022** refuses a manual window on a selected VOI LUT sequence and
+  leaves the whole presentation unchanged, including the colormap and the
+  evidence. A manual window on a modality sequence preserves it. A named
+  preset still refuses a modality sequence. This is the approved
+  selected-chain policy and is stricter than PS3.3 C.11.2.1.2.2's
+  alternative views. It does not upload samples or colour textures.
+- **F-X023** makes `close-preflight` compare scratch membership with the
+  allocation and completed states with the backlog, adds `/prepare-sprint`
+  as a preparation-only command, and hardens the canonical instructions
+  around numbered acceptance, independent composition cases, staged
+  metadata and invalidated receipts. Regenerated adapters match their
+  canonical sources. No parallel tracker and no copied normative spec.
 - **Every story declares all three tier rows**, and "n/a" is a real answer
   that an omitted row is not.
 - `wasm-bindgen` remains confined to `ocelli-wasm`, pixels do not cross the
   boundary, and `ocelli-render` remains the only crate that may create a
   device.
 
+## Carried forward from S16
+
+- **F-X003** is carried because AC6 requires a representative GPU-less incumbent host, the operator has confirmed none is available, and no local diagnostic is accepted as that measurement. The interactive and idle CPU cost divided by wall time, its noise floor and an accepted budget therefore cannot be taken. AC5's coverage verdict is also still red: the tier A against C comparison is 67 matched, 0 pixel failures and 17 unmeasured with byte-identical frames, and that is recorded honestly, but the global census was seeded from a reference-only run and this subset run measures 14 more views, so the verdict is `coverage-loss`. Resume when a representative host, an incumbent workload and an accepted budget exist.
+
+These are explicit carry-forwards, not completed stories. F-X003's backlog row
+stays `in-progress`, and the CPU raster it delivered is not claimed as a
+completed acceptance.
+
 ## Dependency order and the shared resources
 
 F-048 depends on F-045. F-101 depends on F-100. F-X003 depends on F-029,
-F-045 and F-X001. All of those dependencies are `done`. No story in this
-sprint depends on another story in this sprint, so no story begins blocked.
+F-045 and F-X001. All of those backlog dependencies are `done`. No backlog
+cell in this sprint names another story in this sprint, so no story begins
+blocked by that column. The approved F-048, F-101 and F-X003 plans still
+run serially, because they share `View`, the canvas binding and the command
+protocol.
 
 F-050 in S17 depends on F-048. F-102 and F-103 in S17 depend on F-101.
 F-X004 depends on F-X003 and is not this sprint.
@@ -183,3 +208,55 @@ generators.
 A feature that cannot run on the resolved tier **reports unavailable**. It
 never quietly produces a different result, which is HLD section 31's rule
 generalised by D-07.
+
+## Audit intake and preparation, 2026-10-18
+
+The S13 to S15 audit is `.claude/reviews/S13-S15-audit-pass-1.md`. F-X022
+and F-X023 add 3 estimated engineer-weeks to the original 14 in this sprint.
+xAI model implemented the shared VOI-sequence refusal and the closure
+inventory and backlog-status checks. F-X022 is complete with a clean
+independent pass in `.claude/reviews/F-X022-presentation-pass-1.md`.
+F-X023 is complete after four independent passes, with the final sprint
+verification pending. Its closure pass in
+`.claude/reviews/F-X023-closure-pass-1.md` approved AC1 to AC3 only. The
+instruction passes are in `.claude/reviews/F-X023-instruction-pass-2.md`,
+`.claude/reviews/F-X023-instruction-pass-3.md` and
+`.claude/reviews/F-X023-instruction-pass-4.md`, and pass 4 is clean on the
+instruction remediation. Those passes are not a whole-sprint review. The
+implementer does not supply the whole-sprint review.
+F-048 and F-101 are complete. F-101's remediation closed the pass 4 to pass 7
+findings and pass 7 is clean. F-X003 is carried because its representative
+GPU-less host was unavailable and its coverage verdict is `coverage-loss`.
+Tier A against C and the GPU-less interactive and idle costs stay unmet.
+
+The execution order for those three remains shared coordinate mapping, common
+boundary, then CPU raster and final integration. The allocation's absence of
+an intra-sprint dependency does not establish that those consumers can be
+implemented independently. F-X003 requires actual tier A/C evidence, a bounded
+stack candidate producer or explicit replanning of the later F-X021
+dependency, and measured GPU-less interactive and idle costs. No
+representative CPU-baseline host is available, so that acceptance criterion
+remains unmet. No measurement was invented here.
+
+Remote issue and PR refresh returned no open entries. No external action was
+taken. The carried LINEAR finding, ICC, second-machine evidence and release
+notice blocker keep their existing disposition. No tolerance or baseline moved.
+
+## Codex takeover, 2026-10-19
+
+The operator assigned remaining implementation to Codex and approved minimal
+resident-stack initialization in F-101. Independent review is explicitly
+deferred. F-048, F-101 and F-X003 remain in progress. F-X022 and F-X023 remain
+pending. No feature is completed and S16 remains open.
+
+The scroll benchmark now selects a different resident key through the real
+wasm boundary. Release worker benchmarks exercise first frame, pointer batch,
+scroll, changed-frame cine and idle scheduling. A CPU collector exists, but
+there is still no representative GPU-less incumbent host or accepted budget.
+The native tier A/C candidate comparison has zero pixel failures across its
+67 measured views and 17 unmeasured views. Its coverage gate is still red.
+Cornerstone parity remains red. Details, current checks and the independent
+review handoff are in `.claude/reviews/S16-codex-completion-evidence.md`.
+
+The takeover's fresh issue and PR refresh both returned HTTP 401. Current
+remote intake is unperformed. The earlier empty lists remain historical.
