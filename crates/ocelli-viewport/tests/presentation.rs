@@ -330,3 +330,99 @@ fn the_preset_rows_are_not_copied_from_a_readback() {
     assert_close(displayed.0, 127.819_55);
     let _kept: Display = presentation.chain().apply(Stored(40.0));
 }
+
+fn voi_sequence_presentation() -> Presentation {
+    // PS3.3 C.11.2.1.1. Three entries, first mapped input 0, 8 bits.
+    // The sequence is what the chain selected. The window pair is not.
+    let voi = VoiTransform::new(
+        Some(lut_again()),
+        &[40.0],
+        &[400.0],
+        0,
+        VoiFunction::Linear,
+        0.0,
+        255.0,
+    );
+    assert!(voi.is_ok());
+    let Ok(voi) = voi else {
+        unreachable!("asserted immediately above")
+    };
+    let photometric = PhotometricInterpretation::Monochrome1;
+    let evidence = PresentationLutEvidence::Absent;
+    Presentation::new(
+        chain(rescale(), voi, photometric, evidence),
+        photometric,
+        evidence,
+        Colormap::Stops,
+    )
+}
+
+#[test]
+fn a_manual_window_on_a_voi_sequence_is_refused() {
+    let before = voi_sequence_presentation();
+    assert!(before.chain().voi().window().is_none());
+    for function in [
+        VoiFunction::Linear,
+        VoiFunction::LinearExact,
+        VoiFunction::Sigmoid,
+    ] {
+        let mut presentation = before.clone();
+        assert_eq!(
+            presentation.set_window(40.0, 400.0, function),
+            Err(PresentationError::Sequence)
+        );
+        assert_eq!(presentation, before);
+    }
+    let mut named = before.clone();
+    assert_eq!(
+        named.apply_preset(WindowPreset::SoftTissue),
+        Err(PresentationError::Sequence)
+    );
+    assert_eq!(named, before);
+}
+
+#[test]
+fn a_manual_window_keeps_a_modality_sequence() {
+    // PS3.3 C.11.1. The sequence [1, 2, 3] is selected over slope 9 and
+    // intercept 99. Stored input 1 is the second entry, value 2. The
+    // competing rescale would produce 108.
+    let modality = ModalityTransform::new(Some(lut_again()), Some(9.0), Some(99.0));
+    assert!(modality.is_ok());
+    let Ok(modality) = modality else {
+        unreachable!("asserted immediately above")
+    };
+    assert!(modality.rescale().is_none());
+    let photometric = PhotometricInterpretation::Monochrome2;
+    let evidence = PresentationLutEvidence::Absent;
+    let mut presentation = Presentation::new(
+        chain(
+            modality,
+            window(0.0, 1.0, VoiFunction::Linear, 0.0, 255.0),
+            photometric,
+            evidence,
+        ),
+        photometric,
+        evidence,
+        Colormap::Grey,
+    );
+    let before_modality = presentation.chain().modality().clone();
+    assert!(
+        presentation
+            .set_window(40.0, 400.0, VoiFunction::Linear)
+            .is_ok()
+    );
+    assert_eq!(presentation.chain().modality(), &before_modality);
+    let mapped = presentation.chain().modality().apply(Stored(1.0));
+    assert_eq!(mapped.0.to_bits(), 2.0_f32.to_bits());
+    assert_ne!(mapped.0.to_bits(), 108.0_f32.to_bits());
+    assert_eq!(
+        presentation.chain().voi().window(),
+        Some((40.0, 400.0, VoiFunction::Linear))
+    );
+    let preserved = presentation.clone();
+    assert_eq!(
+        presentation.apply_preset(WindowPreset::SoftTissue),
+        Err(PresentationError::Sequence)
+    );
+    assert_eq!(presentation, preserved);
+}

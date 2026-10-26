@@ -48,10 +48,11 @@ pub enum Colormap {
     Stops,
 }
 
-/// Why a presentation change was refused. The stored chain is unchanged.
+/// Why a presentation change was refused. The stored presentation is unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresentationError {
-    /// A preset would replace a modality or VOI LUT sequence.
+    /// A preset would replace a modality or VOI LUT sequence, or a manual
+    /// window would replace a VOI LUT sequence.
     Sequence,
     /// The width is outside [`VoiTransform::new`]'s domain for this function.
     InvalidWindow,
@@ -98,12 +99,12 @@ impl Presentation {
     /// # Errors
     ///
     /// [`PresentationError::Sequence`] when stage 1 is a modality LUT sequence
-    /// or stage 2 is a VOI LUT sequence. The stored chain is left in place.
-    /// [`PresentationError::InvalidWindow`] when [`VoiTransform::new`] refuses
-    /// the preset width. [`PresentationError::Unavailable`] when the rebuilt
-    /// chain is refused for any other reason.
+    /// or stage 2 is a VOI LUT sequence. The stored presentation is left in
+    /// place. [`PresentationError::InvalidWindow`] when [`VoiTransform::new`]
+    /// refuses the preset width. [`PresentationError::Unavailable`] when the
+    /// rebuilt chain is refused for any other reason.
     pub fn apply_preset(&mut self, preset: WindowPreset) -> Result<(), PresentationError> {
-        if self.chain.voi().window().is_none() || self.chain.modality().rescale().is_none() {
+        if self.chain.modality().rescale().is_none() {
             return Err(PresentationError::Sequence);
         }
         self.replace_window(preset.center(), preset.width(), VoiFunction::Linear)
@@ -116,10 +117,13 @@ impl Presentation {
     ///
     /// # Errors
     ///
+    /// [`PresentationError::Sequence`] when stage 2 is a VOI LUT sequence.
+    /// A modality LUT sequence is kept and is not a refusal here.
     /// [`PresentationError::InvalidWindow`] when the width is outside
     /// [`VoiTransform::new`]'s domain. [`PresentationError::Unavailable`] when
-    /// the rebuilt chain is refused for any other reason. Either refusal
-    /// leaves the stored chain in place.
+    /// the rebuilt chain is refused for any other reason. Any refusal leaves
+    /// the chain, the photometric interpretation, the presentation evidence
+    /// and the colormap in place.
     pub fn set_window(
         &mut self,
         center: f32,
@@ -167,12 +171,26 @@ impl Presentation {
         self.colormap
     }
 
+    /// Whether the stored evidence is an explicit inverse shape.
+    ///
+    /// `MONOCHROME1` is not this flag. Flag bit 0 of the readback state is.
+    #[must_use]
+    pub const fn explicit_inverse(&self) -> bool {
+        matches!(
+            self.evidence,
+            PresentationLutEvidence::Shape(PresentationLutShape::Inverse)
+        )
+    }
+
     fn replace_window(
         &mut self,
         center: f32,
         width: f32,
         function: VoiFunction,
     ) -> Result<(), PresentationError> {
+        if self.chain.voi().window().is_none() {
+            return Err(PresentationError::Sequence);
+        }
         let (ymin, ymax) = self.chain.voi().output_range();
         let voi = match VoiTransform::new(None, &[center], &[width], 0, function, ymin, ymax) {
             Ok(voi) => voi,
