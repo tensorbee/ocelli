@@ -115,6 +115,71 @@ outside the two declared extension points. A wrapper that only forwards.
   `count(anchor) == 1` passes on an already-edited file and the block lands
   twice. No formatter catches a duplicated comment.
 
+## Finding quality and bounded coverage
+
+Every blocking finding names severity, reviewed source, path/line, concrete
+trigger, expected/actual result, normative contract, affected consumers and
+the smallest meaningful regression. Reproduce it where practical. Label an
+unconfirmed concern as such. A smell needs a specific failure mechanism or
+maintenance hazard, not file size or a preference for another abstraction.
+
+Do not manufacture findings to appear thorough. A clean report names the
+entry points, state combinations and observations checked, alongside what was
+not exercised. Historical receipts and tests run now are separate columns.
+The original author's identity cannot be established from a generated trailer
+alone, and a small audit sample cannot establish a general model ranking.
+
+## Composition challenge and review identity
+
+Inspect unchanged consumers of changed providers. Challenge at least one
+important acceptance claim with an independently derived discriminating case,
+including cross-story interactions. Check every mutation route's refusal
+policy, defaults, units and state preservation. Tests for one entry point do
+not prove another, even when both share a constructor.
+
+For candidate producers, trace comparison metadata back to the executed
+candidate state. Change one camera or presentation input on a nonconstant
+synthetic frame. The resulting pixels must respond as specified or the
+producer must refuse that unsupported input. Identical copied sidecars do not
+establish equivalent rendering geometry or parameters.
+
+For cached or settled output, compare an incompatible request before and
+after settlement. An idle shortcut must not turn a refused request into
+success or remember an unusable mode. Follow each refusal with a valid
+operation through the public caller to expose hidden configuration changes.
+
+Record reviewed commit/range or staged tree, actual reviewer and author,
+commands, selected test membership, exit status and environment. Separate
+reproduced defects, plausible concerns, already-carried findings and external
+failures. A no-adapter return or ignored test is not exercised GPU evidence.
+CPU/GPU agreement and a reference/comparator self-test are not DICOM or viewer
+parity by themselves.
+
+The reviewer records findings and returns control. Implementation remediates,
+then a fresh independent pass reviews changed material. Preserve old findings
+and failed attempts. If an independent reviewer cannot be invoked, leave a
+concrete handoff and unmet review gate. Never attribute self-review to another
+participant. Reports must state the bounded clean coverage and limitations.
+
+At a new target boundary, challenge the real generated exports with the
+published caller. Counter tokens in a native test do not validate address
+reuse in wasm. Allocation refusal must stop before the caller writes bytes.
+Trace device/CSS conversion through the shader or canvas consumer, not a
+helper test that performs the missing conversion itself. A failed attempt to
+open an adapter is an environment result, separate from arithmetic evidence.
+
+For idle suppression and refinement, begin with settled state, mutate through
+the public session and follow invalidation through the next draw and event.
+Inspect source dimensions larger than the target. Check allocation claims
+across the full call path, including owned LUT and sequence clones. A counter
+incremented only by one buffer owner cannot establish zero allocations.
+
+On a repair pass, distinguish closed prior findings, remaining implementation
+and new failures. Replay the original trigger and one adjacent failure or
+duplicate-operation case through the real caller. For visible state, inspect
+the sink after refusal as well as after recovery. Matching native counters
+do not prove a canvas, surface or other external resource was preserved.
+
 ## Output
 
 Write `.claude/reviews/F-XXX-<aspect>-pass-N.md`:
@@ -122,8 +187,17 @@ Write `.claude/reviews/F-XXX-<aspect>-pass-N.md`:
 ```markdown
 # F-XXX review, pass N
 
-**Reviewed**: {diff range or working tree}
+**Reviewed**: {full commit/range or staged tree, plus any unstaged paths}
+**Author / reviewer**: {actual participants and independence limitations}
 **Result**: {N defects, N smells, N nitpicks}
+
+## Acceptance challenged
+{AC IDs, consumer/state combinations, independently derived expectations and
+which plausible wrong behavior the observations reject.}
+
+## Evidence
+| Command / selected cases | Source and input identity | Executed now / prior receipt | Exit and observation |
+|--------------------------|---------------------------|------------------------------|----------------------|
 
 ## Defects
 ### D1, {title}
@@ -131,13 +205,30 @@ Write `.claude/reviews/F-XXX-<aspect>-pass-N.md`:
 **What**: {the wrong behaviour}
 **Why it is wrong**: {cite the HLD section or DICOM section}
 **Evidence**: {the command run and its output, or the mutation tried}
+**Scope and regression**: {affected consumers, present on current HEAD or
+only historical, smallest meaningful regression and uncertainty}
 
 ## Smells
 ## Nitpicks
 ## Verified clean
 {What was checked and found correct. Says what the pass covered, so a later
 reader can tell a clean pass from a shallow one.}
+
+## Limitations and handoff
+{Unexercised paths, unavailable resources, unresolved ACs, next owner/action.
+Separate a clean bounded review from completed acceptance or sprint readiness.}
 ```
 
 The `## Verified clean` section is not padding. Without it a clean pass and a
 pass that looked at nothing produce identical reports.
+
+Pin the supplied review tree before edits. A request to review the index does
+not include unstaged changes. If guidance or review artefacts change during
+the pass, report their paths separately. Stage only owned material when the
+workflow calls for it, then identify the new tree and its remaining review and
+verification needs. Never attach the old tree's receipt to the new union.
+
+Independence is per changed material. A reviewer who authored earlier workflow
+preparation may independently review another participant's repair, but cannot
+approve their own preparation as an independent whole-sprint pass. Name that
+boundary and leave the remaining assignment open.

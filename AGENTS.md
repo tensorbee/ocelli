@@ -37,7 +37,7 @@ Before changing code or tracked documentation, read `CLAUDE.md` and
 - No em-dash and no prose semicolon in enforced Markdown or commit messages.
 - **Do not commit or push unless the invoked workflow explicitly includes that
   action.** Never add an agent co-author trailer. The provenance trailers
-  `Ocelli-Verify` and `Ocelli-Generated-By` are written by the pre-commit hook
+  `Ocelli-Verify` and `Ocelli-Generated-By` are written by the commit-msg hook
   from the verify ledger, never by hand.
 
 ## Commands

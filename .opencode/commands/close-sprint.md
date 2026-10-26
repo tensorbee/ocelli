@@ -6,7 +6,7 @@ description: "Close a sprint. Validates readiness, merges to main, creates the s
 
 Canonical source: `.claude/commands/close-sprint.md`.
 
-Source SHA-256: `2f480ff4a06e2e027ff8c939c2d3a3b38ae715cabd360ea0c23d3ec32e105d47`.
+Source SHA-256: `204ab23eb0b6b1b0dd9f97f22282b450c8fdde61448adcf20e7ee69974ad48ca`.
 
 Arguments: $ARGUMENTS
 

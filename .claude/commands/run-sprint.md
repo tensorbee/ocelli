@@ -56,6 +56,13 @@ not stop to ask whether to launch them.
 `python3 scripts/sprint_workflow.py` is the resumable state authority. Reuse an
 existing `.claude/scratch/SNN-run.json` rather than restarting.
 
+`--max-review-passes` is an orchestration limit. The host running this
+command counts whole-sprint passes and calls `set-phase blocked` when that
+limit is reached with actionable findings. sprint_workflow.py stores the
+configuration and does not enforce that transition. Per-feature microscope
+reviews retain their separate uncapped loop. Do not report an automatic cap
+that the backing script does not implement.
+
 ## 1. Initialise
 
 1. Read `CLAUDE.md`, `AGENTS.md`, `.claude/WORKFLOW.md`, `CURRENT_SPRINT.md`.
@@ -75,7 +82,10 @@ existing `.claude/scratch/SNN-run.json` rather than restarting.
    cannot be edited concurrently, and stories touching the same HLD section.
 4. **Ask one consolidated set of questions.** Group a shared decision once and
    name every affected story.
-5. Apply each answer to every affected plan and set `**Status**: approved`.
+5. Apply each answer to every affected plan. Set `**Status**: approved` only
+   when design readiness is satisfied. An answer that a host is unavailable
+   records a constraint, not a passed measurement or a settled threshold.
+   Preserve material open decisions as draft with the exact unblock condition.
 6. If no material questions exist, approve without pausing.
 7. Commit all approved plans together as `SNN, approve sprint designs`. This
    restores a clean worktree and gives every worker the same planning base.
@@ -140,20 +150,26 @@ waves.
 
 ## 5. Consolidated verification
 
-After every branch is integrated:
+After every branch is integrated, stage the final owned content and invalidate
+any earlier receipt before the new attempt:
 
 ```bash
+python3 scripts/verify_ledger.py invalidate
 bin/ocelli.sh gate --sprint
 ```
+
+On failure, record `record-verification --profile sprint --result fail` with
+actual gate and corpus results. Do not retain an earlier success as the latest
+applicable evidence. The success records below apply only after a passing run.
 
 **Run the whole set, not the diff-selected subset.** The per-story checks were
 scoped to one story's changes. This run is the first time the sprint's changes
 are seen together, and the interactions are the point.
 
-The sprint profile differs from `--all` in one state only. On S01, while F-010
-is still pending in S02, the absent oracle is a named skip because S01 builds
-the corpus the oracle consumes and contains no port code. `--all` remains
-strict, and every later sprint must run the oracle.
+The sprint and all profiles select the same gates. The S01 bootstrap
+exception was removed by F-010 and cannot qualify a current run.
+Stage the actual integrated union before gates and record only executed checks.
+Metadata edits after this run invalidate its tree identity.
 
 Record a passing run in both evidence stores:
 

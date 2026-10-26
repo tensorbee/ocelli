@@ -114,7 +114,7 @@ jobs:
       # no type can: a crate creating a device it never puts in a GpuContext.
       - run: ci/check-device-ownership.sh
       # HLD 27.2 R5, two permitted files.
-      - run: python3 scripts/unsafe_allowlist_check.py
+      - run: bin/ocelli.sh gate unsafe
       # HLD 15.2 and 27.2 R4, wgpu pinned exactly.
       - run: python3 scripts/pin_and_size_check.py
       # D-09. A wasm32 build still succeeds when a no_std crate reaches std.

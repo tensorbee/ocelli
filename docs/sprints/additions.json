@@ -88,6 +88,36 @@
         "F-X003"
       ],
       "notes": "A DECISION story, not an implementation one. Interactive volume ray-casting on CPU is very likely not achievable inside a GPU-less session's CPU budget, and the expected outcome is that VOLUME_3D reports UNAVAILABLE on tier C. That is a legitimate outcome and it is the whole point of the feature-availability contract in F-X001. What it must NOT do is the third thing: a slow CPU path that quietly produces a different image from the GPU one. Whichever way it goes, the shell must say so to the user in terms a radiologist can act on, because a 3D tab that is simply absent is a support call and a 3D tab that renders wrongly is a patient-safety issue."
+    },
+    {
+      "fid": "F-X022",
+      "ref": "Y1.17",
+      "phase": "P1",
+      "milestone": "M4",
+      "epic": "EY Sprint follow-ups",
+      "story": "Preserve selected VOI sequences across manual window changes",
+      "layer": "Rust",
+      "weeks": 1,
+      "sprint": "S16",
+      "depends_fids": [
+        "F-046"
+      ],
+      "notes": "S13-S15 audit D1. Share the VOI sequence refusal between manual and named windows. Preserve state on refusal, preserve modality sequences on manual window updates, and retain ordinary window behavior. No tolerance change."
+    },
+    {
+      "fid": "F-X023",
+      "ref": "Y1.18",
+      "phase": "P1",
+      "milestone": "M4",
+      "epic": "EY Sprint follow-ups",
+      "story": "Reconcile closure inventory and harden shared sprint preparation",
+      "layer": "Build",
+      "weeks": 2,
+      "sprint": "S16",
+      "depends_fids": [
+        "F-X018"
+      ],
+      "notes": "S13-S15 audit D2 and explicit operator request. Compare run state to allocation and completed states to backlog. Add negative probes and a prepare-only workflow. Strengthen consumer maps, final metadata verification and independent review handoffs. No commit or push authorized by this task."
     }
   ]
 }

@@ -240,8 +240,12 @@ slope and intercept.** Not "in addition to". Applying both double-transforms.
 **potentially multi-valued** with matching indices. `VOILUTFunction` (0028,1056)
 is `LINEAR`, `LINEAR_EXACT` or `SIGMOID`, defaulting to `LINEAR`.
 
-A `VOILUTSequence` (0028,3010), when present, takes precedence over the window
-values.
+PS3.3 C.11.2.1.2.2 permits a VOI LUT or window pair as alternative views,
+with only one applied at a time. Ocelli's constructor selects the sequence
+when present. Preserving that selected chain through presets and manual window
+commands is a project policy, not a DICOM prohibition on explicit alternative
+selection. Review all mutation entry points for the same refusal and unchanged
+state. Sharing a constructor alone does not prove that caller policy agrees.
 
 **The three functions. Copy these exactly.**
 

@@ -4183,6 +4183,48 @@
         "F-012",
         "F-052"
       ]
+    },
+    {
+      "fid": "F-X022",
+      "eid": "Y1.17",
+      "phase": "P1",
+      "epic": "EY Sprint follow-ups",
+      "epic_key": "EY",
+      "story": "Preserve selected VOI sequences across manual window changes",
+      "layer": "Rust",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids_declared": [
+        "F-046"
+      ],
+      "notes": "S13-S15 audit D1. Share the VOI sequence refusal between manual and named windows. Preserve state on refusal, preserve modality sequences on manual window updates, and retain ordinary window behavior. No tolerance change.",
+      "milestone": "M4",
+      "sprint": "S16",
+      "added": true,
+      "depends_fids": [
+        "F-046"
+      ]
+    },
+    {
+      "fid": "F-X023",
+      "eid": "Y1.18",
+      "phase": "P1",
+      "epic": "EY Sprint follow-ups",
+      "epic_key": "EY",
+      "story": "Reconcile closure inventory and harden shared sprint preparation",
+      "layer": "Build",
+      "weeks": 2,
+      "depends_eids": [],
+      "depends_fids_declared": [
+        "F-X018"
+      ],
+      "notes": "S13-S15 audit D2 and explicit operator request. Compare run state to allocation and completed states to backlog. Add negative probes and a prepare-only workflow. Strengthen consumer maps, final metadata verification and independent review handoffs. No commit or push authorized by this task.",
+      "milestone": "M4",
+      "sprint": "S16",
+      "added": true,
+      "depends_fids": [
+        "F-X018"
+      ]
     }
   ]
 }

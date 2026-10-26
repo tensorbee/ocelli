@@ -19,7 +19,14 @@ feature-local changes to the worker branch, and does not touch sprint totals.
    a DICOM section.
 4. Any deviation the work relied on has a `D-NN` row in
    `docs/hld/DEVIATIONS.md`.
-5. The working tree contains no `.dcm` and no build artefact.
+5. Staged and tracked content contains no DICOM or build artefact. The ignored
+   corpus remains behind its manifest and is never staged. Run the existing
+   content guard on the set it actually checks.
+6. Every numbered acceptance row is satisfied by its declared evidence, or
+   its scope was explicitly changed through the normal approved design or
+   replanning process. A clean bounded repair review does not complete an
+   unperformed measurement, missing instrument or unsupported consumer. Keep
+   the story open rather than writing done metadata around those gaps.
 
 ## Steps
 
@@ -35,7 +42,15 @@ feature-local changes to the worker branch, and does not touch sprint totals.
 5. **Sprint state**, `python3 scripts/sprint_workflow.py mark-feature F-XXX
    --state completed`.
 6. **LLD update**, step 9 below.
-7. **Commit.** The pre-commit hook appends the provenance trailers from the
+7. **Final-state verification.** After all completion and LLD edits, stage
+   only owned changes with `git add`. Run the affected metadata checks and
+   the required `/verify` profile on that final staged state, then record.
+   Earlier verification before these edits is stale. Do not weaken a metadata
+   check or mark unresolved capability complete. Reconcile allocation, backlog,
+   current sprint, tracker, AS_BUILT, plans, LLD and actual acceptance evidence.
+8. **Commit, only when this workflow was invoked with that authority.** A
+   preparation or audit referencing this document does not invoke completion.
+   The commit-msg hook appends the provenance trailers from the
    verify ledger. Do not write them by hand.
 
 ```text

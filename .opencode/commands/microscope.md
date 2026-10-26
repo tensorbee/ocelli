@@ -6,7 +6,7 @@ description: "Independently review one F-ID's diff against the normative HLD and
 
 Canonical source: `.claude/commands/microscope.md`.
 
-Source SHA-256: `c0ccf1562e496008bbc208576655173fe91627306934fa56152496eddbfa0cec`.
+Source SHA-256: `f6205378e41ac22ffef085a355c4884a0b5b8e77d6356c31869a145af3b49327`.
 
 Arguments: $ARGUMENTS
 

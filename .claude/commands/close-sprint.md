@@ -19,9 +19,11 @@ Refuse if any fails:
    `CURRENT_SPRINT.md`. Record the latter in run state with
    `python3 scripts/sprint_workflow.py mark-feature F-XXX --state carried`.
 2. `python3 scripts/sprint_workflow.py close-preflight SNN` passes. It requires
-   the latest sprint-scope review to be clean at the current HEAD tree, the
-   latest sprint-profile verification to pass at that same tree, and a clean
-   working tree.
+   the scratch feature set to equal the sprint allocation, every completed
+   story to be `done` in the backlog, a carried story to keep its recorded
+   reason, the latest sprint-scope review to be clean at the current HEAD
+   tree, the latest sprint-profile verification to pass at that same tree,
+   and a clean working tree.
 3. `bin/ocelli.sh gate --sprint` is green at the current HEAD. It runs the
    same gates as `--all`. The S01 pre-oracle skip that used to be the one
    difference was removed by F-010, which built the oracle.

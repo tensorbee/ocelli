@@ -2592,6 +2592,37 @@ def sprint_state(box: Sandbox) -> str:
     return fids[0]
 
 
+def _mark_allocated_backlog_done(box: Sandbox, fids: list[str]) -> None:
+    """Mark this sprint's backlog rows done inside the disposable repository."""
+    text = box.read("docs/sprints/BACKLOG.md")
+    found: set[str] = set()
+    new_lines: list[str] = []
+    for line in text.splitlines():
+        matched = next((fid for fid in fids if line.startswith(f"| {fid} |")), None)
+        if matched is None:
+            new_lines.append(line)
+            continue
+        parts = line.split("|")
+        if len(parts) < 3 or not parts[-2].strip():
+            raise AssertionError(f"backlog row for {matched} has no status cell")
+        if parts[-2].strip() != "done":
+            parts[-2] = " done "
+            line = "|".join(parts)
+        found.add(matched)
+        new_lines.append(line)
+    missing = sorted(set(fids) - found)
+    if missing:
+        raise AssertionError(f"backlog has no row for {missing}")
+    updated = "\n".join(new_lines) + ("\n" if text.endswith("\n") else "")
+    if updated == text:
+        return
+    box.write("docs/sprints/BACKLOG.md", updated)
+    box.stage_all()
+    result = box.git("commit", "-q", "-m", "probe backlog done", check=False)
+    if result.returncode != 0:
+        raise AssertionError(result.stderr or result.stdout or "backlog commit failed")
+
+
 def _write_close_state(
         box: Sandbox,
         *,
@@ -2608,6 +2639,9 @@ def _write_close_state(
     allocation = json.loads(box.read("docs/sprints/allocation.json"))
     fids = sorted(s["fid"] for s in allocation["stories"]
                   if s.get("sprint") == name)
+    if not fids:
+        raise AssertionError(f"allocation.json puts no story in {name}")
+    _mark_allocated_backlog_done(box, fids)
     tree = box.git("write-tree").stdout.strip()
     data: dict[str, object] = {
         "sprint": name,
@@ -2768,6 +2802,73 @@ def _close_unrecorded_carry(box: Sandbox) -> None:
 
 def _close_recorded_carry(box: Sandbox) -> None:
     _close_carried(box, recorded=True)
+
+
+def _close_state_path(box: Sandbox) -> tuple[str, Path, dict]:
+    sprint = re.search(r"^#\s+Current sprint,\s*(S[\d.]+)",
+                       box.read("docs/sprints/CURRENT_SPRINT.md"), re.M)
+    if sprint is None:
+        raise AssertionError("CURRENT_SPRINT.md names no sprint")
+    name = sprint.group(1)
+    path = box.path / ".claude" / "scratch" / f"{name}-run.json"
+    if not path.exists():
+        _write_close_state(box)
+    return name, path, json.loads(path.read_text())
+
+
+def _close_missing_inventory(box: Sandbox) -> None:
+    _name, path, data = _close_state_path(box)
+    features = data["features"]
+    if not features:
+        raise AssertionError("close state has no features to remove")
+    del features[sorted(features)[0]]
+    box.write(str(path.relative_to(box.path)), json.dumps(data, indent=1) + "\n")
+
+
+def _close_extra_inventory(box: Sandbox) -> None:
+    _name, path, data = _close_state_path(box)
+    data["features"]["F-999"] = {
+        "state": "completed",
+        "reviews": [{"pass": 1, "defects": 0, "smells": 0, "nitpicks": 0}],
+    }
+    box.write(str(path.relative_to(box.path)), json.dumps(data, indent=1) + "\n")
+
+
+def _close_pending_backlog(box: Sandbox) -> None:
+    name, path, data = _close_state_path(box)
+    allocation = json.loads(box.read("docs/sprints/allocation.json"))
+    fids = sorted(story["fid"] for story in allocation["stories"]
+                  if story.get("sprint") == name)
+    if not fids:
+        raise AssertionError(f"allocation.json puts no story in {name}")
+    fid = fids[0]
+    text = box.read("docs/sprints/BACKLOG.md")
+    flipped = False
+    lines: list[str] = []
+    for line in text.splitlines():
+        if not flipped and line.startswith(f"| {fid} |"):
+            parts = line.split("|")
+            if parts[-2].strip() != "done":
+                raise AssertionError(
+                    f"{fid} backlog status is {parts[-2].strip()!r}, not done")
+            parts[-2] = " pending "
+            line = "|".join(parts)
+            flipped = True
+        lines.append(line)
+    if not flipped:
+        raise AssertionError(f"backlog has no row for {fid}")
+    box.write("docs/sprints/BACKLOG.md", "\n".join(lines) + "\n")
+    box.stage_all()
+    result = box.git("commit", "-q", "-m", "probe backlog pending", check=False)
+    if result.returncode != 0:
+        raise AssertionError(result.stderr or result.stdout or "pending commit failed")
+    tree = box.git("write-tree").stdout.strip()
+    for review in data.get("sprint_reviews", []):
+        review["tree"] = tree
+    for verification in data.get("verifications", []):
+        if verification.get("profile") == "sprint":
+            verification["tree"] = tree
+    box.write(str(path.relative_to(box.path)), json.dumps(data, indent=1) + "\n")
 
 
 def _handoff(box: Sandbox, branch: str) -> None:
@@ -6194,16 +6295,15 @@ def _the_unsafe_gate_named_only_in_a_comment(box: Sandbox) -> None:
     probe changes is which work the `unsafe` arm does.
     """
     runner = box.read("bin/ocelli.sh")
-    line = next(l for l in runner.splitlines()
-                if re.match(r"^\s*unsafe\)", l))
+    raw = re.search(r"(?ms)^([ \t]*)unsafe\).*?;;", runner)
+    assert raw is not None, "the unsafe arm must exist for this probe"
     replacement = next(
         c for c in _ci_arm_commands(box, "prose") if c.startswith("python3 "))
-    box.substitute(
-        "bin/ocelli.sh", line,
-        f"{line[:line.index('unsafe)')]}unsafe)      {replacement} ;;"
-        f"  # python3 scripts/unsafe_allowlist_check.py")
+    box.substitute("bin/ocelli.sh", raw.group(0),
+                   f"{raw.group(1)}unsafe) {replacement} ;;"
+                   " # python3 scripts/unsafe_allowlist_check.py")
     workflow = box.read(WORKFLOW_PATH)
-    wanted = "- run: python3 scripts/unsafe_allowlist_check.py"
+    wanted = "- run: bin/ocelli.sh gate unsafe"
     step = next(l for l in workflow.splitlines() if l.strip() == wanted)
     box.substitute(WORKFLOW_PATH, step + "\n", "")
 
@@ -6503,6 +6603,7 @@ GUARDS: tuple[Guard, ...] = (
                 "moved from its record, a vendored package with no record at "
                 "all, and a record naming a package that is not in the tree.",
         claims=("*",),
+        covered_by=("scripts/tests/test_unsafe_allowlist_check.py, run by the unsafe gate",),
         probes=(
             Probe("unsafe.vendored-count-moved", _unsafe_in_a_vendored_package,
                   script("python3", "scripts/unsafe_allowlist_check.py"),
@@ -8950,13 +9051,30 @@ GUARDS: tuple[Guard, ...] = (
                   Invoke("sprint_workflow close-preflight",
                          _close_preflight),
                   "is ready to close", polarity="accept"),
+            Probe("sprint-lifecycle.close-missing-inventory",
+                  _close_missing_inventory,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "feature inventory differs from allocation"),
+            Probe("sprint-lifecycle.close-extra-inventory",
+                  _close_extra_inventory,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "feature inventory differs from allocation"),
+            Probe("sprint-lifecycle.close-pending-backlog",
+                  _close_pending_backlog,
+                  Invoke("sprint_workflow close-preflight",
+                         _close_preflight),
+                  "is completed in run state but backlog status is pending"),
         ),
         limit="The remaining lifecycle branches belong to init, feature "
               "state transitions and release notes. The close probes build "
               "ignored sprint state from allocation.json and use the "
               "sandbox's real staged tree, so legacy, missing, dirty, stale, "
               "failed, carried and current evidence are exercised without "
-              "touching the developer's run state.",
+              "touching the developer's run state. The inventory probes change "
+              "ignored scratch only. The pending probe commits one sandbox "
+              "backlog row back to pending and refreshes both receipt trees.",
     ),
 
     # -- the error registry, the benchmarks and the corpus -----------------
@@ -10799,6 +10917,66 @@ GUARDS: tuple[Guard, ...] = (
         refuses="A run state the harness cannot resume from.",
         claims=("*",),
         covered_by=("tools/bench/tests/state_test.mjs",),
+    ),
+    Guard(
+        id="bench.session",
+        file="tools/bench/src/browser_session.mjs",
+        gate="bench",
+        spec="HLD section 26 and F-X003 AC6",
+        refuses="A stale release artifact, invalid CPU interval or process "
+                "inventory, unrelated host attestation, missing publication "
+                "or a workload that did not change frames.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/run_test.mjs",),
+        limit="Counter, host and argument controls run in the floor. Actual "
+              "served-byte tampering, missing kind 6, constant cine, pointer "
+              "and scroll publication controls run with OCELLI_BENCH_BROWSER=1. "
+              "Startup and pointer/scroll failure propagation are defensive "
+              "paths, not an independently fault-injected proof for each "
+              "message. No missing physical-host acceptance is inferred.",
+    ),
+    Guard(
+        id="bench.session.page",
+        file="tools/bench/page/session.mjs",
+        gate="bench",
+        spec="HLD sections 5.1, 5.3 and 26",
+        refuses="Publication without kind 6 or a changed resident key.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/run_test.mjs",),
+        limit="The opted-in Chromium suite covers absent kind 6 and actual "
+              "pointer/scroll publication. Defensive worker-error propagation "
+              "and the second key check are not separately fault injected.",
+    ),
+    Guard(
+        id="bench.session.worker",
+        file="tools/bench/page/session-worker.mjs",
+        gate="bench",
+        spec="HLD sections 5.1, 5.3 and 26",
+        refuses="A refused command batch, unchanged scroll selection, or "
+                "constant cine canvas presented as a measurement.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/run_test.mjs",),
+        limit="The opted-in Chromium suite challenges a constant actual "
+              "canvas and observes first, batch and selected-stack success. "
+              "Malformed harness operation dispatch and each refused wasm "
+              "command are not individually injected in that suite. Session "
+              "command refusal is separately covered by the explicit wasm "
+              "boundary suite, not by the benchmark's floor test.",
+    ),
+    Guard(
+        id="oracle.sigmoid-diagnostic",
+        file="tools/oracle/diagnose-sigmoid.mjs",
+        gate="-",
+        spec="DICOM PS3.3 C.11.2.1.3.1",
+        refuses="An unavailable paired diagnostic environment.",
+        claims=("*",),
+        kind="not-a-guard",
+        reason="A standalone synthetic diagnosis, invoked by no gate or CI "
+               "step. Its pin and render refusals prevent an invalid local "
+               "experiment, not repository acceptance. The permanent native "
+               "pixel fixtures remain the normative regression. A successful "
+               "diagnosis does not qualify the red corpus or coverage gate.",
+        owner="F-X003",
     ),
     Guard(
         id="bench.runner",

@@ -6,7 +6,7 @@ description: "Mark an F-ID in progress, create its branch context and test stubs
 
 Canonical source: `.claude/commands/start-feature.md`.
 
-Source SHA-256: `ebae7b8d3ad86de999e62022d2b0068e4eea70faa522417fbeafac35084ff79b`.
+Source SHA-256: `4376719ebea6747b7ac72e90f41df06b358ba4334534095fb94eed13eadf2ccf`.
 
 Arguments: $ARGUMENTS
 
