@@ -55,6 +55,7 @@
 pub mod brick_upload;
 pub mod caps;
 pub mod colour;
+pub mod cpu;
 pub mod extent;
 pub mod gpu;
 pub mod graph;
@@ -69,7 +70,8 @@ pub use caps::{
     TierSignals, candidate_order, classify, compute_available, opens_a_device, recovers_from,
 };
 pub use colour::{ColourLut, ColourLutError, PresetId, colour_lut_for};
-pub use extent::{ExtentError, device_extent};
+pub use cpu::{CpuRaster, RasterColor, RasterError, RasterGrid, RasterQuality, RasterResult};
+pub use extent::{ExtentError, css_from_device, device_extent};
 pub use gpu::{
     DeviceError, DeviceLoss, DeviceState, GpuContext, GraphResources, Recovered, SharedEncoder,
     SurfaceError,
@@ -77,7 +79,7 @@ pub use gpu::{
 pub use graph::{
     BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineFamily, PipelineKey,
     RenderGraph, STORED_FORMAT, SegPass, StackPass, Upload, UploadError, ViewportId, VolumePass,
-    tier_b_fragment_module,
+    device_camera_words, tier_b_fragment_module,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use probe::resolve_native_gl;

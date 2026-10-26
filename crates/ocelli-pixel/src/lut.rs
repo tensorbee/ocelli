@@ -1,13 +1,27 @@
 //! Modality and VOI LUT stages from DICOM PS3.3 C.11.
 
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 use glam::Vec2;
 use ocelli_core::{Display, Modality, Stored};
+
+/// Clones of [`LutDescriptor`]. Each one copies both owned buffers.
+static LUT_DESCRIPTOR_CLONES: AtomicUsize = AtomicUsize::new(0);
+
+/// How many [`LutDescriptor`] values have been cloned.
+///
+/// A draw that clones a presentation increments this. The raster's own
+/// allocation counter cannot see those buffers.
+#[must_use]
+pub fn lut_descriptor_clones() -> usize {
+    LUT_DESCRIPTOR_CLONES.load(Ordering::Relaxed)
+}
 
 use crate::{PixelError, stored_pixel::PhotometricInterpretation};
 
 /// Validated LUT Descriptor and its setup-time-owned LUT Data.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct LutDescriptor {
     inputs: Vec<f32>,
     values: Vec<f32>,
@@ -21,6 +35,19 @@ pub struct LutDescriptor {
     /// PS3.3 C.7.6.3.1.5's second descriptor value, kept as the `i32` the
     /// caller passed so a later reader does not have to invert the `f32`.
     first_mapped_input: i32,
+}
+
+impl Clone for LutDescriptor {
+    fn clone(&self) -> Self {
+        LUT_DESCRIPTOR_CLONES.fetch_add(1, Ordering::Relaxed);
+        Self {
+            inputs: self.inputs.clone(),
+            values: self.values.clone(),
+            bits_per_entry: self.bits_per_entry,
+            largest_representable_value: self.largest_representable_value,
+            first_mapped_input: self.first_mapped_input,
+        }
+    }
 }
 
 impl LutDescriptor {

@@ -39,6 +39,18 @@ impl StackSequence {
         }
     }
 
+    /// How many frames are stored. A length that does not fit `u32` saturates.
+    #[must_use]
+    pub fn len(&self) -> u32 {
+        u32::try_from(self.keys.len()).unwrap_or(u32::MAX)
+    }
+
+    /// Whether the sequence has no frames.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+
     /// The selected index, or [`None`] when the sequence is empty.
     #[must_use]
     pub fn index(&self) -> Option<u32> {

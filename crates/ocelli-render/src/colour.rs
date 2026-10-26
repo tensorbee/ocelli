@@ -341,13 +341,26 @@ fn bake(transform: &ColorTransform, origin: i32, end: i32) -> Result<Vec<u8>, Co
 /// Table address. `display` itself is not modified.
 ///
 /// Values at or below 0 use texel 0. Values at or above `last` use texel
-/// `last`. A finite value in between uses the greatest integer that is not
-/// greater than it, which is what WGSL `i32(value)` does for this range.
+/// `last`. A finite value in between uses the NEAREST integer, ties up.
+///
+/// Rounding rather than truncating is not a preference. The pinned reference
+/// quantises its colour table with `Math.floor(value * 255 + 0.5)` and reads
+/// it back through an 8-bit texture, so it rounds. Deviation D-11 makes that
+/// reference the definition of correct, and truncation darkens every frame by
+/// about half a display code on the informative region, which HLD 25.1's
+/// signed-mean bound of `0.1` rejects. `byte_from_channel` already rounds for
+/// the colour path, so truncating here was also an internal inconsistency.
+/// `table_index` in `graph.rs` applies the same rule in WGSL.
 fn display_index(display: f32, last: u32) -> u32 {
     if !display.is_finite() || display <= 0.0 {
         return 0;
     }
-    if display >= f32_from_u32(last) {
+    let last_f = f32_from_u32(last);
+    if display >= last_f {
+        return last;
+    }
+    let rounded = display + 0.5;
+    if rounded >= last_f {
         return last;
     }
     let mut lo = 0_u32;
@@ -358,7 +371,7 @@ fn display_index(display: f32, last: u32) -> u32 {
             break;
         }
         let mid = lo + step / 2;
-        if f32_from_u32(mid) <= display {
+        if f32_from_u32(mid) <= rounded {
             lo = mid;
         } else {
             hi = mid;
