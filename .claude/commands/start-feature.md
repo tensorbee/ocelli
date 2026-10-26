@@ -26,11 +26,14 @@ Refuse if any fails:
    F-094 is `work/f-094-claude` and never `work/f094-claude`.
 2. Set the backlog row to `in-progress`, and record it in sprint state with
    `python3 scripts/sprint_workflow.py mark-feature F-XXX --state in-progress`.
-3. **Create the test stubs before the implementation files.** For any story
+3. **Copy the acceptance inventory into the progress note.** Name the test
+   selection, external evidence owner, source identity and unresolved dependency.
+   A draft plan with material questions cannot start implementation.
+4. **Create the test stubs before the implementation files.** For any story
    doing pixel or geometry arithmetic, write the fixture with its expected
    values transcribed from the plan's normative-source section, and watch it
    fail. A stub that passes on an empty implementation is not a stub.
-4. Open `.claude/scratch/F-XXX-progress.md` with the plan's summary, the
+5. Open `.claude/scratch/F-XXX-progress.md` with the plan's summary, the
    branch, and the first action.
-5. Report the plan's `## Boundary and tier` block back, so the constraints are
+6. Report the plan's `## Boundary and tier` block back, so the constraints are
    in front of you rather than three files away.

@@ -70,7 +70,7 @@ GATES=(
   "content|no|no DICOM and no build artefacts tracked"
   "backlog|no|BACKLOG, SPRINT_PLAN, tracker and as-built agree"
   "deviations|no|every HLD deviation declared and still true"
-  "skills|no|Codex adapters match canonical sources and marked examples run"
+  "skills|no|Codex and OpenCode adapters match canonical sources and marked examples run"
   "lint|no|eslint, including the cached-wasm-view ban (HLD 17.2)"
   "types|no|tsc --build across the TypeScript workspaces"
   "wasm|no|wasm-pack build and the size budget (E1.2, gate A4)"
@@ -84,7 +84,7 @@ GATES=(
   "quirk-mutations|no|checker-owned quirk mutations fail at their fixed boundaries"
   "corpus-tests|no|the corpus generator and coverage suites, a skip fails it"
   "corpus|no|corpus coverage over the codec registry, then presence and digests"
-  "gpu|YES|ocelli-render's #[ignore]d tests, the hardware tier (E6.1, E6.5, D-04)"
+  "gpu|YES|native renderer ignored tests and tier A oracle candidate proof (D-04)"
   "oracle|YES|the differential corpus against cornerstone3D (HLD 11, D7)"
 )
 
@@ -103,7 +103,9 @@ run_gate() {
     clippy)      cargo clippy --workspace --all-targets -- -D warnings ;;
     test)        cargo test --workspace ;;
     bindgen)     ci/check-bindgen-isolation.sh ;;
-    unsafe)      python3 scripts/unsafe_allowlist_check.py ;;
+    unsafe)      python3 scripts/unsafe_allowlist_check.py &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_unsafe_allowlist_check.py ;;
     pins)        python3 scripts/pin_and_size_check.py ;;
     nostd)       python3 scripts/no_std_check.py ;;
     # F-005. The guard, then its own negative cases. Chained on `&&` for the
@@ -341,7 +343,9 @@ run_gate() {
     # exactly like rendering failures. Most of the tests here open one, the
     # default harness runs them on one thread per core, and the gate was
     # therefore doing inside itself what the wave plan forbids between workers.
-    gpu)         cargo test -p ocelli-render -- --ignored --test-threads=1 ;;
+    gpu)         cargo test -p ocelli-render -- --ignored --test-threads=1 &&
+                 cargo test -p ocelli-oracle --lib gpu_candidate -- \
+                   --ignored --test-threads=1 ;;
     oracle)      "$0" oracle && "$0" compare ;;
     *)           echo "unknown gate: $name" >&2; return 2 ;;
   esac
@@ -663,7 +667,8 @@ case "$command" in
     # An argument is passed straight through. F-012's candidate-evidence form
     # is `bin/ocelli.sh compare gate --reference REF --candidate CANDIDATE`.
     # It requires two distinct resolved directories and never defaults the
-    # candidate to the reference. F-X021 connects it to Ocelli output.
+    # candidate to the reference. F-X003 writes those directories for the
+    # monochrome stack rows. F-X021 still owns full viewer activation.
     if [ ! -d tools/oracle/out ]; then
       echo "There is no oracle output to compare." >&2
       echo "Run: bin/ocelli.sh oracle" >&2

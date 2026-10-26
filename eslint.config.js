@@ -232,6 +232,7 @@ const config = tseslint.config(
         projectService: {
           allowDefaultProject: [
             "vitest.config.ts",
+            "vitest.boundary.config.ts",
             "examples/viewer-react/vite.config.ts",
           ],
         },

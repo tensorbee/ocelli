@@ -239,6 +239,12 @@ pub enum GraphError {
     /// `Rgba8Unorm` cannot be sampled and copied, or the table has no texels.
     #[error("the colour LUT texture cannot be sampled and copied")]
     ColourUnavailable,
+    /// A device pixel ratio that is not finite and strictly positive, or that
+    /// narrows to a non-positive `f32`.
+    #[error(
+        "the device pixel ratio must be finite, strictly positive and narrow to a positive f32"
+    )]
+    DevicePixelRatio,
 }
 
 /// Preferred stored-sample format. The constant stays `R32Float`.
@@ -258,6 +264,34 @@ const COLOUR_LUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const IDENTITY_CAMERA: [f32; 16] = [
     1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
 ];
+
+/// CSS camera plus the device-to-CSS scale the fragment shader divides by.
+///
+/// `scale.x` is the device pixel ratio. The other lanes are padding so the
+/// uniform stays a multiple of 16 bytes.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct DeviceCamera {
+    css: [f32; 16],
+    scale: [f32; 4],
+}
+
+fn device_camera(css: [f32; 16], dpr: f64) -> DeviceCamera {
+    DeviceCamera {
+        css,
+        scale: [ocelli_viewport::view::f32_from_f64(dpr), 0.0, 0.0, 0.0],
+    }
+}
+
+/// The 20 floats uploaded for one camera. Index 16 is the device pixel ratio.
+#[must_use]
+pub fn device_camera_words(css: [f32; 16], dpr: f64) -> [f32; 20] {
+    let uploaded = device_camera(css, dpr);
+    let mut words = [0.0_f32; 20];
+    words[..16].copy_from_slice(&uploaded.css);
+    words[16..].copy_from_slice(&uploaded.scale);
+    words
+}
 
 /// Extent of the `R32Float` texture created for one viewport's stored samples.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -447,14 +481,19 @@ struct ColourParams {
 };
 
 @group(0) @binding(1) var<uniform> colour : ColourParams;
-@group(0) @binding(2) var<uniform> camera : mat4x4<f32>;
+struct DeviceCamera {
+    css: mat4x4<f32>,
+    scale: vec4<f32>,
+}
+@group(0) @binding(2) var<uniform> camera : DeviceCamera;
 @group(1) @binding(0) var stored_tex : texture_2d<f32>;
 @group(1) @binding(1) var colour_lut : texture_2d<f32>;
 
 // Same address as `display_index` in `colour.rs`. The value is not modified.
 // A non-finite value uses texel 0. Values at or below 0 use texel 0.
-// Values at or above `last` use texel `last`. Anything between truncates
-// toward zero, which is WGSL's `i32(value)` on this range.
+// Values at or above `last` use texel `last`. Anything between uses the
+// NEAREST integer, ties up. `i32` truncates toward zero, so the half is added
+// before the conversion. See `display_index` for why the reference rounds.
 fn table_index(value : f32, last : u32) -> i32 {
     if ((value - value) != 0.0) {
         return 0;
@@ -462,10 +501,15 @@ fn table_index(value : f32, last : u32) -> i32 {
     if (!(value > 0.0)) {
         return 0;
     }
-    if (value >= f32(last)) {
+    let last_f = f32(last);
+    if (value >= last_f) {
         return i32(last);
     }
-    return i32(value);
+    let rounded = value + 0.5;
+    if (rounded >= last_f) {
+        return i32(last);
+    }
+    return i32(rounded);
 }
 
 @vertex
@@ -477,7 +521,10 @@ fn vs_main(@builtin(vertex_index) index : u32) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
-    let mapped = camera * vec4<f32>(at.x, at.y, 0.0, 1.0);
+    let scale = camera.scale.x;
+    let css_x = select(at.x, at.x / scale, scale > 0.0);
+    let css_y = select(at.y, at.y / scale, scale > 0.0);
+    let mapped = camera.css * vec4<f32>(css_x, css_y, 0.0, 1.0);
     let dims = textureDimensions(stored_tex);
     // A negative coordinate has to be rejected before `i32` truncation.
     // Truncation toward zero would otherwise select texel 0.
@@ -537,8 +584,10 @@ struct SlotState {
     stored_format: Option<wgpu::TextureFormat>,
     /// The colour table selected for this viewport. Absent until a selection.
     colour: Option<HeldColour>,
-    /// Column-major camera. Identity until `set_view`.
+    /// Column-major CSS camera. Identity until `set_view`.
     camera: [f32; 16],
+    /// Device pixels per CSS pixel uploaded beside the CSS camera.
+    dpr: f64,
 }
 
 /// The stored-sample texture one viewport owns.
@@ -591,6 +640,7 @@ impl Registry {
                     stored_format: None,
                     colour: None,
                     camera: IDENTITY_CAMERA,
+                    dpr: 1.0,
                 });
                 return Ok(ViewportId(
                     u32::try_from(index).map_err(|_| GraphError::CapacityExhausted)?,
@@ -972,7 +1022,8 @@ impl RenderGraph {
     ) -> Result<ViewportId, GraphError> {
         let voi = voi_of(&pass);
         let id = self.registry.register(pass)?;
-        let slot = self.create_gpu_slot(ctx, target, source, (voi, IDENTITY_CAMERA), None, None);
+        let slot =
+            self.create_gpu_slot(ctx, target, source, (voi, IDENTITY_CAMERA, 1.0), None, None);
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1032,7 +1083,7 @@ impl RenderGraph {
             ctx,
             target,
             view,
-            (voi, IDENTITY_CAMERA),
+            (voi, IDENTITY_CAMERA, 1.0),
             Some(stored),
             None,
         );
@@ -1050,11 +1101,12 @@ impl RenderGraph {
         ctx: &GpuContext,
         target: wgpu::TextureView,
         source: wgpu::TextureView,
-        uniforms: (VoiParams, [f32; 16]),
+        uniforms: (VoiParams, [f32; 16], f64),
         stored: Option<StoredTexture>,
         colour: Option<HeldColour>,
     ) -> GpuSlot {
-        let (voi, camera) = uniforms;
+        let (voi, camera, dpr) = uniforms;
+        let uploaded = device_camera(camera, dpr);
         let device = ctx.device();
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ocelli graph voi"),
@@ -1072,7 +1124,7 @@ impl RenderGraph {
         });
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ocelli graph camera"),
-            contents: bytemuck::cast_slice(&camera),
+            contents: bytemuck::bytes_of(&uploaded),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let colour_texture = colour_texture_for(device, ctx.queue(), colour.as_ref());
@@ -1279,7 +1331,7 @@ impl RenderGraph {
         target: wgpu::TextureView,
         source: wgpu::TextureView,
     ) -> Result<(), GraphError> {
-        let (voi, camera, colour) = {
+        let (voi, camera, dpr, colour) = {
             let state = self
                 .registry
                 .states
@@ -1289,9 +1341,14 @@ impl RenderGraph {
             if state.stored.is_some() {
                 return Err(GraphError::StoredNeedsRebind);
             }
-            (voi_of(&state.pass), state.camera, state.colour.clone())
+            (
+                voi_of(&state.pass),
+                state.camera,
+                state.dpr,
+                state.colour.clone(),
+            )
         };
-        let slot = self.create_gpu_slot(ctx, target, source, (voi, camera), None, colour);
+        let slot = self.create_gpu_slot(ctx, target, source, (voi, camera, dpr), None, colour);
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1324,7 +1381,7 @@ impl RenderGraph {
         id: ViewportId,
         target: wgpu::TextureView,
     ) -> Result<(), UploadError> {
-        let (upload, voi, camera, format, colour) = {
+        let (upload, voi, camera, dpr, format, colour) = {
             let state = self
                 .registry
                 .states
@@ -1337,6 +1394,7 @@ impl RenderGraph {
                 upload,
                 voi_of(&state.pass),
                 state.camera,
+                state.dpr,
                 format,
                 state.colour.clone(),
             )
@@ -1353,7 +1411,8 @@ impl RenderGraph {
             height: upload.height(),
             format,
         };
-        let slot = self.create_gpu_slot(ctx, target, view, (voi, camera), Some(stored), colour);
+        let slot =
+            self.create_gpu_slot(ctx, target, view, (voi, camera, dpr), Some(stored), colour);
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1447,13 +1506,14 @@ impl RenderGraph {
         Ok(())
     }
 
-    /// Write the sixteen camera floats and mark the camera dirty.
+    /// Write the CSS camera and the device pixel ratio, and mark the camera dirty.
     ///
-    /// The bytes are HLD section 17.4's `camera` field, column-major. This
-    /// writes the 64-byte uniform at group 0 binding 2. It does not write
-    /// the VOI uniform, the colour uniform, the stored texture or a brick,
-    /// and it does not increment [`RenderGraph::uploads`],
-    /// [`RenderGraph::lut_uploads`] or [`RenderGraph::brick_uploads`].
+    /// The CSS bytes stay HLD section 17.4's `camera` field, column-major.
+    /// The fragment shader divides the device fragment by `dpr` once before
+    /// multiplying by that matrix. This does not write the VOI uniform, the
+    /// colour uniform, the stored texture or a brick, and it does not
+    /// increment [`RenderGraph::uploads`], [`RenderGraph::lut_uploads`] or
+    /// [`RenderGraph::brick_uploads`].
     ///
     /// Validation follows [`RenderGraph::set_voi`]: an unknown id, then a
     /// pass with no stack uniform, then a viewport whose GPU objects have
@@ -1464,12 +1524,14 @@ impl RenderGraph {
     /// [`GraphError::UnknownViewport`] for an id this graph never issued.
     /// [`GraphError::PassHasNoUniform`] for a registered pass that is not a
     /// stack. [`GraphError::ViewportNotRebound`] when a rebuild has not yet
-    /// recreated the slot.
+    /// recreated the slot. [`GraphError::DevicePixelRatio`] when `dpr` is not
+    /// finite, not strictly positive, or does not narrow to a positive `f32`.
     pub fn set_view(
         &mut self,
         ctx: &GpuContext,
         id: ViewportId,
         camera: [f32; 16],
+        dpr: f64,
     ) -> Result<(), GraphError> {
         let is_stack = {
             let state = self
@@ -1491,15 +1553,20 @@ impl RenderGraph {
         {
             return Err(GraphError::ViewportNotRebound);
         }
+        if !crate::extent::usable_ratio(dpr) {
+            return Err(GraphError::DevicePixelRatio);
+        }
         let slot = self
             .gpu
             .get(usize::try_from(id.0).unwrap_or(usize::MAX))
             .and_then(Option::as_ref)
             .ok_or(GraphError::ViewportNotRebound)?;
+        let uploaded = device_camera(camera, dpr);
         ctx.queue()
-            .write_buffer(&slot.camera, 0, bytemuck::cast_slice(&camera));
+            .write_buffer(&slot.camera, 0, bytemuck::bytes_of(&uploaded));
         if let Some(state) = self.registry.state_mut(id) {
             state.camera = camera;
+            state.dpr = dpr;
             state.dirty.camera = true;
         }
         Ok(())

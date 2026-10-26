@@ -1,7 +1,7 @@
 # GPU ownership
 
-**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-038, F-039, F-041, F-042, F-X001
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-038, F-039, F-041, F-042, F-X001, F-101
+**Last updated:** 2026-10-26
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
 mechanism. The quote below alters that bullet in one place, splitting its
@@ -198,11 +198,12 @@ does not yet map to stable boundary operands.
 **Both variants now have a stable number at the boundary**, added by F-005:
 `ErrorCode::Unavailable` is 700 and `ErrorCode::Workgroup` is 701, registered
 in `ci/error-codes.json` inside `ocelli-compute`'s declared range of 700 to
-799. The Rust types are unchanged and no conversion is written yet, because
-nothing crosses the boundary until F-101. What the numbers buy today is that a
-tier C session reports a tier A feature unavailable in exactly the encoding a
-tier A session would use to report a device loss, so the shell needs one path
-for that situation and not two. See `docs/lld/errors.md`.
+799. The Rust types are unchanged and no conversion is written yet. F-101 built
+the boundary, but the `ComputeError` to record conversion still has no
+scheduled F-ID. What the numbers buy today is that a tier C session reports a
+tier A feature unavailable in exactly the encoding a tier A session would use
+to report a device loss, so the shell needs one path for that situation and
+not two. See `docs/lld/errors.md`.
 
 ## What this story deliberately does not do
 

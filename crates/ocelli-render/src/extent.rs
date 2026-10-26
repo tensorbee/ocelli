@@ -9,9 +9,21 @@ pub enum ExtentError {
     /// A CSS length or the device pixel ratio was NaN or infinite.
     #[error("a backing-store input is not finite")]
     NonFinite,
-    /// The device pixel ratio was zero or negative.
-    #[error("device pixel ratio must be strictly positive")]
+    /// The device pixel ratio was zero or negative, or a positive ratio
+    /// narrowed to a non-positive `f32` and so cannot be carried by the GPU
+    /// camera uniform.
+    #[error("device pixel ratio must be positive and narrow to a positive f32")]
     NonPositiveRatio,
+}
+
+/// Whether a device pixel ratio can be carried by the GPU camera uniform.
+///
+/// Finite, strictly positive, and narrows to a positive `f32`. The CPU extent
+/// and CSS functions and `RenderGraph::set_view` all use this predicate, so
+/// the CPU and GPU paths cannot disagree about the same input.
+#[must_use]
+pub fn usable_ratio(dpr: f64) -> bool {
+    dpr.is_finite() && dpr > 0.0 && ocelli_viewport::view::f32_from_f64(dpr) > 0.0
 }
 
 /// Device-pixel extent of a CSS box at `dpr`.
@@ -22,15 +34,41 @@ pub enum ExtentError {
 /// positive CSS axis whose rounded product is 0 becomes 1, so a visible
 /// element does not get an empty backing store. A non-finite input is
 /// [`ExtentError::NonFinite`]. A device pixel ratio that is not strictly
-/// positive is [`ExtentError::NonPositiveRatio`].
+/// positive, or that narrows to a non-positive `f32` and so cannot be carried
+/// by the GPU camera uniform, is [`ExtentError::NonPositiveRatio`].
 pub fn device_extent(css_width: f64, css_height: f64, dpr: f64) -> Result<(u32, u32), ExtentError> {
     if !css_width.is_finite() || !css_height.is_finite() || !dpr.is_finite() {
         return Err(ExtentError::NonFinite);
     }
-    if dpr <= 0.0 {
+    if !usable_ratio(dpr) {
         return Err(ExtentError::NonPositiveRatio);
     }
     Ok((axis_extent(css_width, dpr), axis_extent(css_height, dpr)))
+}
+
+/// CSS pixel coordinate for one device pixel position.
+///
+/// This is the inverse direction of [`device_extent`]'s scale, without that
+/// function's rounding. A fragment at a device position divides by the same
+/// dpr once before a CSS camera mapping. A second division is a different point.
+///
+/// # Errors
+///
+/// [`ExtentError::NonFinite`] when either input is not finite or the quotient
+/// is not finite. [`ExtentError::NonPositiveRatio`] when `dpr` is not strictly
+/// positive or does not narrow to a positive `f32`.
+pub fn css_from_device(device: f64, dpr: f64) -> Result<f64, ExtentError> {
+    if !device.is_finite() || !dpr.is_finite() {
+        return Err(ExtentError::NonFinite);
+    }
+    if !usable_ratio(dpr) {
+        return Err(ExtentError::NonPositiveRatio);
+    }
+    let css = device / dpr;
+    if !css.is_finite() {
+        return Err(ExtentError::NonFinite);
+    }
+    Ok(css)
 }
 
 fn axis_extent(css: f64, dpr: f64) -> u32 {
@@ -84,7 +122,20 @@ fn saturating_u32(value: f64) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExtentError, device_extent};
+    use super::{ExtentError, css_from_device, device_extent, usable_ratio};
+
+    /// The one ratio policy the CPU extent and the GPU camera both use.
+    #[test]
+    fn a_ratio_is_usable_only_when_it_narrows_to_a_positive_f32() {
+        assert!(usable_ratio(1.0));
+        assert!(usable_ratio(1.25));
+        assert!(usable_ratio(2.0));
+        assert!(!usable_ratio(0.0));
+        assert!(!usable_ratio(-1.0));
+        assert!(!usable_ratio(f64::NAN));
+        assert!(!usable_ratio(f64::INFINITY));
+        assert!(!usable_ratio(f64::MIN_POSITIVE / 2.0));
+    }
 
     /// CSS 100 by 50 at the three ratios the story names.
     ///
@@ -96,6 +147,25 @@ mod tests {
     /// halfway cases away from zero, so 62.5 becomes 63.
     #[test]
     fn extent_at_dpr_one_two_and_one_and_a_quarter() {
+        assert_eq!(css_from_device(100.0, 1.0), Ok(100.0));
+        assert_eq!(css_from_device(200.0, 2.0), Ok(100.0));
+        assert_eq!(css_from_device(125.0, 1.25), Ok(100.0));
+        assert_eq!(
+            css_from_device(1.0, 0.0),
+            Err(ExtentError::NonPositiveRatio)
+        );
+        // A positive subnormal dpr narrows to a non-positive f32 and cannot be
+        // carried by the GPU camera uniform. Refusing it keeps the CPU and GPU
+        // paths from disagreeing about the same input.
+        let subnormal = f64::MIN_POSITIVE / 2.0;
+        assert_eq!(
+            css_from_device(1.0, subnormal),
+            Err(ExtentError::NonPositiveRatio)
+        );
+        assert_eq!(
+            device_extent(1.0, 1.0, subnormal),
+            Err(ExtentError::NonPositiveRatio)
+        );
         assert_eq!(device_extent(100.0, 50.0, 1.0), Ok((100, 50)));
         assert_eq!(device_extent(100.0, 50.0, 2.0), Ok((200, 100)));
         assert_eq!(device_extent(100.0, 50.0, 1.25), Ok((125, 63)));

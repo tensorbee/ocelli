@@ -444,3 +444,85 @@ standard, not the browser.
       case is for
 - [ ] Any expected value derived from it was computed from PS3.3, not from
       Ocelli's output
+
+## 10. Fixture and composition evidence for handoff
+
+Before implementing an arithmetic change, name the PS3.3 section, synthetic
+input, independently derived expected values and the competing wrong formula
+the case rejects. Record the source identity and exact selected test. Observe
+old-source semantic RED and repaired-source GREEN. A missing API compiler
+error is not evidence of a wrong pixel. Retain controlled mutation output
+separately, and restore the mutation before the final gates.
+
+For a shared chain or geometry provider, exercise at least one important
+combination through its actual consumer: manual and named window changes on
+a selected VOI sequence, signed samples through an upload format, or oblique
+anisotropic spacing through the viewport mapping. A correct helper output
+does not prove the consumer supplied the right context. Keep normative
+expected values independent of both the helper and renderer.
+
+Record native, plain wasm, SIMD, GPU-adapter and browser observations
+separately. Reference-only oracle output and comparator self-tests cannot
+qualify an Ocelli candidate frame. Missing adapter, host or baseline means
+unperformed evidence with a named owner, never an invented sample or wider
+tolerance. Only permitted synthetic inputs and corpus identifiers appear in
+reports. No patient metadata or burned-in annotations are copied.
+
+For a controlled mutation, record the exact changed branch or constant, source
+identity, selected test, expected semantic assertion and observed failure.
+Use an isolated copy when another writer or reviewer owns the checkout.
+Restore the source and rerun the same selection. A compiler error, missing
+adapter or unrelated fixture error does not demonstrate mutation sensitivity.
+Link this record from the existing feature handoff, with implementation,
+independent review and external measurement statuses recorded separately.
+
+Raster fixtures name source rows/columns, target extent and CSS/device scale
+separately. Include a supported source larger than its destination when
+downsampling is claimed. Derive at least one composed canvas point without
+calling the same view helper as the adapter under test. An unclamped display
+probe establishes arithmetic only. It does not establish final RGBA bytes,
+canvas presentation, generation invalidation or adapter-specific sampling.
+
+For a renderer operation that must preserve a frame, observe actual RGBA,
+including alpha, canvas extent, generation/refining and event count before
+and after success, refusal and an identical repeated request. A native cache
+flag alone cannot reveal that the canvas was cleared. Keep synthetic pixel
+expectations independent of the renderer and label each observation's scope.
+
+## 11. Candidate production and corpus comparison
+
+Before claiming renderer coverage, trace selected manifest rows through the
+actual Ocelli candidate producer into the existing comparator. Record permitted
+manifest identifiers, selected and compared counts, and each unsupported,
+failed or unrun disposition without exposing patient data. A passing reference
+render or one synthetic comparator call does not exercise that producer.
+
+Match input frame, presentation parameters, geometry and output extent across
+candidate and reference. Include a synthetic positive control and a deliberately
+wrong candidate that the comparator rejects. Keep producer execution evidence
+separate from comparator sensitivity and numerical acceptance. A missing GPU
+observation does not account for an unimplemented candidate path. Preserve the
+pixel boundary when adding the path. Do not export pixels to the public shell
+to make the comparison convenient.
+
+Candidate sidecars describe the applied candidate state. Reusing reference
+input facts is distinct from asserting that its camera, transform or selected
+presentation was executed. Derive or verify those fields against the candidate
+path, and refuse unsupported states explicitly. Use a nonconstant synthetic
+frame to challenge zoom, placement or another material parameter before
+interpreting corpus pixel differences.
+
+Trace how the reference produced each field before composing it. A camera
+readback and its flip flag can describe one already-applied operation. They
+are not necessarily two commands to replay. Derive the complete applied basis
+and keep internal raster coefficients distinct from the reference field's
+meaning. A fixture built directly from an assumed command interpretation is
+not independent proof of the readback contract.
+
+When a candidate comparison is red, group failures by observed signature:
+input/layout refusal, parameter or geometry mismatch, in-image arithmetic or
+quantization, and background or letterbox behavior. Retain the original run
+and failed row inventory. Reduce a representative from each material group to
+a hand-derived synthetic case, then establish which layer is wrong. A red
+pixel predicate is not yet an attribution to the renderer. Do not change
+tolerances, sampling, applicability or expected baselines to absorb failures.

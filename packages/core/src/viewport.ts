@@ -28,16 +28,17 @@ export type StackCommand = (typeof STACK_COMMANDS)[number];
  * Drawing availability for the resolved tier.
  *
  * The three states are the contract in `docs/lld/feature-availability.md`.
- * The plan word `full` is published as `available`. Tier C drawing stays
- * `unavailable` until F-X003. `degraded` is a declared fallback, and this
- * story declares none.
+ * The plan word `full` is published as `available`. The stack viewport's GPU
+ * drawing is `unavailable` on tier C. The CPU canvas path, F-X003, draws tier
+ * C as a separate surface. `degraded` is a declared fallback, and this story
+ * declares none.
  */
 export const TIER_AVAILABILITY = ["available", "degraded", "unavailable"] as const;
 
 /** One of `available`, `degraded` or `unavailable`. */
 export type TierAvailability = (typeof TIER_AVAILABILITY)[number];
 
-/** The documented tier C drawing answer. */
+/** The documented tier C GPU drawing answer for the stack viewport. */
 export const TIER_C_DRAWING: TierAvailability = "unavailable";
 
 /** How many numbers HLD section 17.4 stores in `camera`. */
@@ -172,4 +173,75 @@ export interface ToolBinding {
   readonly tool: string;
   /** The command the tool issues. */
   readonly command: StackCommand;
+}
+
+/** Section 17.4's readback, in bytes. */
+export const VIEWPORT_STATE_BYTES = 96;
+
+/** Flag bit 0. Explicit inverse. `MONOCHROME1` is not this bit. */
+export const FLAG_INVERT = 1;
+
+/** Flag bit 1. A load is in progress. */
+export const FLAG_LOADING = 2;
+
+/** Flag bit 2. The viewport is in error. */
+export const FLAG_ERROR = 4;
+
+/** Flag bit 3. A reduced frame is on screen. F-X003 sets it. */
+export const FLAG_REFINING = 8;
+
+/**
+ * Section 17.4 as copied out of the core.
+ *
+ * The buffer is a copy. This function does not view wasm linear memory.
+ */
+export interface ViewportReadback {
+  readonly camera: Camera;
+  readonly voiCenter: number;
+  readonly voiWidth: number;
+  readonly sliceIndex: number;
+  readonly numSlices: number;
+  readonly flags: number;
+}
+
+/**
+ * Read one copied 96-byte state block.
+ *
+ * Returns null when the copy is not 96 bytes. A later wasm growth cannot
+ * detach this result, because the numbers have been read into plain values.
+ */
+export function readViewportState(copied: Uint8Array): ViewportReadback | null {
+  if (copied.byteLength !== VIEWPORT_STATE_BYTES) {
+    return null;
+  }
+  const view = new DataView(copied.buffer, copied.byteOffset, copied.byteLength);
+  return {
+    camera: cameraAt(view),
+    voiCenter: view.getFloat32(64, true),
+    voiWidth: view.getFloat32(68, true),
+    sliceIndex: view.getUint32(72, true),
+    numSlices: view.getUint32(76, true),
+    flags: view.getUint32(80, true),
+  };
+}
+
+function cameraAt(view: DataView): Camera {
+  return [
+    view.getFloat32(0, true),
+    view.getFloat32(4, true),
+    view.getFloat32(8, true),
+    view.getFloat32(12, true),
+    view.getFloat32(16, true),
+    view.getFloat32(20, true),
+    view.getFloat32(24, true),
+    view.getFloat32(28, true),
+    view.getFloat32(32, true),
+    view.getFloat32(36, true),
+    view.getFloat32(40, true),
+    view.getFloat32(44, true),
+    view.getFloat32(48, true),
+    view.getFloat32(52, true),
+    view.getFloat32(56, true),
+    view.getFloat32(60, true),
+  ];
 }

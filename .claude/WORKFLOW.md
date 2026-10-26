@@ -5,10 +5,12 @@ It is opinionated and load-bearing. **When in doubt, this file wins over any
 other document except `docs/hld/`**, which is normative on what to build.
 This file is normative on how.
 
-It works identically under Claude Code and Codex. The `.claude` directory name
-is historical, not an ownership marker: plans, reviews, commands and handoffs
-are agent-neutral tracked artefacts. Codex loads `AGENTS.md` and the generated
-adapters under `.agents/skills/`.
+It works identically under Claude Code, Codex and OpenCode. The `.claude`
+directory name is historical, not an ownership marker: plans, reviews, commands
+and handoffs are agent-neutral tracked artefacts. Codex loads `AGENTS.md` and
+the generated adapters under `.agents/skills/`. OpenCode loads the same
+adapters as skills and its slash commands from the generated
+`.opencode/commands/`.
 
 ## The one thing this project is actually about
 
@@ -30,7 +32,7 @@ whole argument for building the oracle before the code it validates.
 1. /run-sprint                     Design every unfinished F-ID first
 2. answer consolidated questions   One decision round, then autonomy
 3. autonomous execution            Safe parallel waves, or serial at width 1
-4. consolidated verification       Impacted crates once, plus triggered gates
+4. consolidated verification       Full sprint profile over final staged union
 5. sprint-review loop              Fix and repeat until substance is clean
 6. /close-sprint SNN --next SMM    Merge, tag, next sprint
 ```
@@ -53,6 +55,65 @@ not `completed`. The close preflight accepts that state only when the story has
 a non-empty reason under `## Carried forward from SNN` in
 `CURRENT_SPRINT.md`. Carried stories do not require a feature review because no
 implementation is being claimed.
+
+## Preparation and evidence boundaries
+
+`/prepare-sprint` performs read-only source inspection and writes intake,
+detailed plans and handoffs only. It stops before product implementation,
+verification receipts and Git publication. It does not invoke `/run-sprint`
+or change `/complete-feature --prepare`'s worker-handoff contract.
+
+Every design maps affected consumers, shared providers and caller-specific
+policy, then numbers observable acceptance criteria and their evidence stage.
+For risky combinations, name the plausible wrong implementation each control
+rejects. Review must challenge at least one acceptance claim through a
+consumer or lifecycle combination the original tests did not establish.
+Shared constructors alone do not prove shared refusal policy.
+
+Review identities name actual participants. The author does not supply their
+own independent approval. If an independent reviewer is unavailable, preserve
+the concrete diff, checks and handoff, and leave completion open.
+
+Keep implementation, acceptance, independent review and verification as
+separate claims in handoffs. Each claim names its source identity and evidence.
+A green gate does not supply independent review. A clean bounded review does
+not supply an unavailable measurement. An author of shared preparation can
+review a different author's repair, while their own changed material still
+requires another reviewer. These are host responsibilities unless a backing
+tool explicitly enforces them.
+
+Acceptance handoffs distinguish failed behavior, missing implementation and
+unavailable external observations. Keep each row's disposition and next owner
+explicit. A missing host does not account for an unimplemented runner, canvas
+binding or candidate producer. Native substitutes and actual wasm/browser
+observations remain distinct, especially where ownership tokens differ.
+
+Use audit findings to refine the canonical instructions continuously. In the
+existing review or handoff, connect the finding to its permanent regression
+and the instruction that should prevent recurrence. If that instruction
+already covers it, identify the missed execution step rather than adding a
+duplicate rule. New guidance needs independent review and adapter sync.
+Distinguish an observed failure from a preventive gap. Missing implementation
+needs a concrete next action, not only a repeated statement that it is open.
+
+Cross-target verification includes the explicit suites required by `/verify`
+for the changed boundary or canvas path, alongside the normal profile. Their
+build chain, source identity and execution results belong in the feature
+evidence. Default test discovery is not evidence for an excluded target suite.
+Completion requires the acceptance inventory, not only a clean repair pass.
+
+Completion metadata is part of the checked tree. After ledger, LLD, status or
+plan edits, stage the final owned content, run affected checks and the required
+profile, then record evidence. Use real staging, never intent-to-add. Set
+OCELLI_AGENT or pass --agent. Do not reuse a receipt across a tree change.
+Invalidate an existing receipt before a verification attempt, so a failed
+rerun cannot leave the previous green receipt applicable. Record sprint
+failures in run state as failures, not as successes with a prose caveat.
+
+Before closure, `close-preflight` compares scratch membership with the
+allocation and completed states with backlog status. A matching receipt does
+not replace that inventory. Intake added after init still needs an explicit
+run-state reconciliation that keeps existing feature progress and history.
 
 ## Atomic feature rhythm
 
@@ -87,6 +148,7 @@ implementation is being claimed.
 | Living architecture | `docs/lld/*.md` | `/complete-feature` step 9 | Evolves |
 | Corpus manifest | `corpus/manifest.tsv` | `scripts/corpus_check.py --add` | Live |
 | Codex adapters | `.agents/skills/` | `scripts/sync_agent_skills.py` | Generated, tracked |
+| OpenCode commands | `.opencode/commands/` | `scripts/sync_agent_skills.py` | Generated, tracked |
 
 ## The gate
 
@@ -116,7 +178,9 @@ gate, at which point it was wrong without anything noticing.
 
 **There are now two gates that need a GPU**, and `oracle` is no longer the only
 one. `gpu` was added by F-037 and runs every `#[ignore]`d test in
-`ocelli-render`. That is the whole definition of the set, and it is
+`ocelli-render`. F-X003 adds the ignored native oracle candidate proof in
+`ocelli-oracle::gpu_candidate`. Both selections run serially and require
+actual adapter evidence for their stated proof. The render selection is
 deliberately not glossed as "the ones needing an adapter": most of them do, and
 at least one is ignored because its MUTATION only dies where adapters exist
 rather than because it needs one to run. It exists because
@@ -160,9 +224,10 @@ Three mechanisms carry the load instead, and all three are mechanical:
 
 1. **`/verify` records its result against the TREE hash** in
    `.claude/verify-ledger.json`.
-2. **`.githooks/pre-commit` reads that ledger** for the staged tree and appends
-   the `Ocelli-Verify` trailer it finds there. A trailer cannot be hand-written,
-   because the hook only emits one a real gate run recorded.
+2. **`.githooks/commit-msg` reads that ledger** for the staged tree and writes
+   its provenance trailers. Pre-commit warns about a missing receipt and
+   permits mid-story commits. Pre-push checks the head's trailer. A workflow
+   record must describe actual executed gates, it does not run them itself.
 3. **CI re-reads the trailer** on the pushed head with
    `scripts/verify_ledger.py check-commit`, asserts the trailer's tree matches
    the commit's tree, and fails on a red or missing corpus record. This costs
@@ -271,7 +336,7 @@ Ocelli-Generated-By: {agent}
 ```
 
 The two trailers are HLD section 27.2 R6, the provenance requirement. They are
-written by the pre-commit hook from the verify ledger, not by hand. **No agent
+written by the commit-msg hook from the verify ledger, not by hand. **No agent
 co-author trailer.**
 
 ## Parallel work

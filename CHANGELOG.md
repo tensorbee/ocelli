@@ -350,3 +350,25 @@ Repository bootstrap. Nothing is published.
   displayed frame placed on the reference image position, in the
   displayed frame's pixel size. A zero spacing contributes no shift.
   Gantry tilt is not read as the shear.
+- Typed coordinate adapters between CSS canvas points, DICOM patient points and
+  voxel indices. The half texel enters once in index space, a singular display
+  map is an error rather than a fallback, and a canvas point is never treated
+  as a patient translation. The camera uniform carries the device pixel ratio
+  and the fragment shader divides the fragment position once before the CSS
+  matrix.
+- A manual window change on a selected VOI LUT sequence is refused and leaves
+  the whole presentation unchanged, matching the named-preset policy. A
+  modality LUT sequence is preserved by a manual window and still refuses a
+  named preset.
+- A wasm boundary with a typed command channel that applies every command or
+  none, a ticketed bulk allocation for frames and stacks, a 256-event ring
+  drained as a copy once per frame, and a 96-byte state readback into
+  JavaScript-owned storage. No pixel buffer is exposed and there is no
+  per-event callback. A reduced interactive draw publishes a device-sized
+  presentation buffer by integer cell coverage.
+- A close preflight that compares the run-state inventory with the sprint
+  allocation, refuses a completed story whose backlog row is not done, and
+  reports a recorded carry separately. A canonical prepare-sprint command
+  stops before product implementation, verification receipts or publication.
+  The unsafe gate audits the complete staged index and the verify ledger
+  reports whether a receipt existed before invalidation.

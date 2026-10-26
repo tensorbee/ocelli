@@ -6,7 +6,9 @@
 //! the operations the HLD names a camera for and does not specify. They
 //! follow the F-045 plan.
 
-use ocelli_core::{Canvas, Pt};
+use glam::{DMat4, DVec4};
+use ocelli_core::{Canvas, Index, Pt, Transform, World};
+use ocelli_pixel::ImagePlane;
 
 /// A scale about the fitted centre. Distinct from [`Radians`] so the two
 /// cannot be swapped at a call.
@@ -50,6 +52,22 @@ impl Radians {
 pub enum ViewError {
     /// `Pt<Canvas>.z` was not zero. A slice index cannot hide in a pan.
     PanZ,
+}
+
+/// Why a measurement transform could not be built.
+///
+/// [`View::camera_matrix`] may still return a finite raster fallback. That
+/// fallback is not a patient or index measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoordinateError {
+    /// The f64 display map is not invertible, or a composed component is not finite.
+    Singular,
+}
+
+/// The two directions of one invertible display map.
+struct IndexMaps {
+    to_canvas: Transform<Index, Canvas>,
+    to_index: Transform<Canvas, Index>,
 }
 
 /// Pan, zoom, rotation, flip, spacing and the index shift of one stack view.
@@ -217,7 +235,8 @@ impl View {
     /// Column-major matrix from a canvas pixel to an image coordinate.
     ///
     /// This is the inverse of [`Self::image_to_canvas`]. The fragment shader
-    /// multiplies `(at.x, at.y, 0, 1)` by it. A zero spacing on one axis
+    /// divides the device position by the device pixel ratio first, then
+    /// multiplies `(css_x, css_y, 0, 1)` by it. A zero spacing on one axis
     /// keeps the other axis and that axis's shift. A map with no extent
     /// writes the image centre. Neither path writes a non-finite value.
     #[must_use]
@@ -323,7 +342,128 @@ impl View {
         }
         (max_x * 2.0, max_y * 2.0)
     }
+
+    /// Canvas CSS pixels to a voxel index.
+    ///
+    /// Image x and y are the index plus one half. DICOM PS3.3 C.7.6.2.1.1
+    /// puts the integer index on the pixel centre, and image space stores the
+    /// corner. Index z follows canvas z. Columns and rows are the grid `fit`
+    /// used. This function does not write the view.
+    ///
+    /// # Errors
+    ///
+    /// [`CoordinateError::Singular`] when the f64 map is not invertible or a
+    /// component is not finite. The rank-one raster fallback is not used.
+    pub fn canvas_to_index(
+        &self,
+        columns: u32,
+        rows: u32,
+    ) -> Result<Transform<Canvas, Index>, CoordinateError> {
+        Ok(self.index_maps(columns, rows)?.to_index)
+    }
+
+    /// Voxel index to canvas CSS pixels. The same half-texel rule as
+    /// [`Self::canvas_to_index`].
+    ///
+    /// # Errors
+    ///
+    /// [`CoordinateError::Singular`] on the same maps as [`Self::canvas_to_index`].
+    pub fn index_to_canvas(
+        &self,
+        columns: u32,
+        rows: u32,
+    ) -> Result<Transform<Index, Canvas>, CoordinateError> {
+        Ok(self.index_maps(columns, rows)?.to_canvas)
+    }
+
+    /// Canvas CSS pixels to patient millimetres.
+    ///
+    /// The grid is [`ImagePlane::dimensions`]. Patient space is
+    /// [`ImagePlane::index_to_world`]. No half-voxel is added in millimetres.
+    ///
+    /// The plane's dimensions must be the grid `fit` used. `View` does not
+    /// store that grid, so a plane with a different one silently produces a
+    /// wrong canvas point.
+    ///
+    /// # Errors
+    ///
+    /// [`CoordinateError::Singular`] when the display map is singular.
+    pub fn canvas_to_world(
+        &self,
+        plane: &ImagePlane,
+    ) -> Result<Transform<Canvas, World>, CoordinateError> {
+        let dims = plane.dimensions();
+        let to_index = self.canvas_to_index(dims.columns(), dims.rows())?;
+        Ok(to_index.then(&plane.index_to_world()))
+    }
+
+    /// Patient millimetres to canvas CSS pixels.
+    ///
+    /// The plane's dimensions must be the grid `fit` used. `View` does not
+    /// store that grid, so a plane with a different one silently produces a
+    /// wrong canvas point.
+    ///
+    /// # Errors
+    ///
+    /// [`CoordinateError::Singular`] when the display map is singular or the
+    /// plane inverse is not finite.
+    pub fn world_to_canvas(
+        &self,
+        plane: &ImagePlane,
+    ) -> Result<Transform<World, Canvas>, CoordinateError> {
+        let dims = plane.dimensions();
+        let to_canvas = self.index_to_canvas(dims.columns(), dims.rows())?;
+        let world_to_index = plane.index_to_world().inverse();
+        let probe = world_to_index.apply(Pt::<World>::new(0.0, 0.0, 0.0));
+        if !probe.x.is_finite() || !probe.y.is_finite() || !probe.z.is_finite() {
+            return Err(CoordinateError::Singular);
+        }
+        Ok(world_to_index.then(&to_canvas))
+    }
+
+    /// Index-to-canvas matrix, then its inverse.
+    ///
+    /// `INDEX_TO_IMAGE_CENTRE` is the only place the half texel enters. A
+    /// mutation of that constant must fail the centre fixture.
+    fn index_maps(&self, columns: u32, rows: u32) -> Result<IndexMaps, CoordinateError> {
+        let (centre_x, centre_y) = centre(columns, rows);
+        let (p, q, r, u) = self.basis();
+        let det = p * u - q * r;
+        let (translate_x, translate_y) = self.translation(columns, rows);
+        if !linear_is_invertible(p, q, r, u, det, translate_x, translate_y) {
+            return Err(CoordinateError::Singular);
+        }
+        let image_x = translate_x - p * centre_x - q * centre_y;
+        let image_y = translate_y - r * centre_x - u * centre_y;
+        let origin_x = image_x + INDEX_TO_IMAGE_CENTRE * p + INDEX_TO_IMAGE_CENTRE * q;
+        let origin_y = image_y + INDEX_TO_IMAGE_CENTRE * r + INDEX_TO_IMAGE_CENTRE * u;
+        if !origin_x.is_finite() || !origin_y.is_finite() {
+            return Err(CoordinateError::Singular);
+        }
+        let forward = Transform::<Index, Canvas>::from_mat4(DMat4::from_cols(
+            DVec4::new(p, r, 0.0, 0.0),
+            DVec4::new(q, u, 0.0, 0.0),
+            DVec4::new(0.0, 0.0, 1.0, 0.0),
+            DVec4::new(origin_x, origin_y, 0.0, 1.0),
+        ));
+        let back = forward.inverse();
+        let probe = back.apply(Pt::<Canvas>::new(0.0, 0.0, 0.0));
+        if !probe.x.is_finite() || !probe.y.is_finite() || !probe.z.is_finite() {
+            return Err(CoordinateError::Singular);
+        }
+        Ok(IndexMaps {
+            to_canvas: forward,
+            to_index: back,
+        })
+    }
 }
+
+/// Image coordinate of index `(0, 0)`. PS3.3 C.7.6.2.1.1 places that index
+/// on the pixel centre. Image space stores the corner of texel `(0, 0)`.
+///
+/// This is the one place the half texel enters. `ocelli-render`'s CPU raster
+/// imports it rather than defining a second constant.
+pub const INDEX_TO_IMAGE_CENTRE: f64 = 0.5;
 
 fn centre(columns: u32, rows: u32) -> (f64, f64) {
     (f64_from_u32(columns) * 0.5, f64_from_u32(rows) * 0.5)
@@ -470,7 +610,7 @@ fn f64_from_u32(value: u32) -> f64 {
 /// The view math stays `f64`. Rounding is ties-to-even. A magnitude past the
 /// finite `f32` range becomes the signed infinity. Subnormal `f64` values are
 /// below every `f32` subnormal and become a signed zero.
-fn f32_from_f64(value: f64) -> f32 {
+pub fn f32_from_f64(value: f64) -> f32 {
     if value.is_nan() {
         return f32::from_bits(0x7fc0_0000);
     }

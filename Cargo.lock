@@ -1031,11 +1031,20 @@ dependencies = [
 name = "ocelli-oracle"
 version = "0.1.0"
 dependencies = [
+ "dicom-core",
+ "ocelli-codec",
+ "ocelli-core",
+ "ocelli-dicom",
+ "ocelli-pixel",
+ "ocelli-render",
+ "ocelli-viewport",
+ "pollster",
  "proptest",
  "serde",
  "serde_json",
  "sha2",
  "thiserror",
+ "wgpu",
 ]
 
 [[package]]
@@ -1093,8 +1102,11 @@ name = "ocelli-wasm"
 version = "0.1.0"
 dependencies = [
  "js-sys",
+ "ocelli-cache",
  "ocelli-core",
+ "ocelli-pixel",
  "ocelli-render",
+ "ocelli-viewport",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

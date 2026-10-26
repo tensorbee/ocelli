@@ -81,15 +81,13 @@ def strip_noise(text: str) -> str:
 
 
 def rust_files(staged: bool) -> list[Path]:
-    cmd = (["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"]
-           if staged else ["git", "ls-files"])
-    try:
-        out = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
-                             check=True).stdout
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return []
-    return [ROOT / n for n in out.splitlines()
-            if n.endswith(".rs") and (ROOT / n).is_file()]
+    # The complete index includes unchanged vendored packages. A changed-name
+    # subset cannot establish the recorded dependency audit surface.
+    out = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT,
+                         capture_output=True, text=True, check=True).stdout
+    return [ROOT / n for n in out.split("\0")
+            if n.endswith(".rs") and (staged or (ROOT / n).is_file())]
+
 
 
 def main() -> int:
@@ -100,13 +98,22 @@ def main() -> int:
     problems = []
     checked = 0
     vendored: dict[str, int] = {}
-    for path in rust_files(args.staged):
+    try:
+        paths = rust_files(args.staged)
+    except (subprocess.CalledProcessError, OSError):
+        print("FAIL: Rust source inventory is unavailable")
+        return 1
+    for path in paths:
         rel = path.relative_to(ROOT).as_posix()
         if rel in ALLOWED:
             continue
         try:
-            source = strip_noise(path.read_text(encoding="utf-8"))
-        except (UnicodeDecodeError, OSError):
+            text = (subprocess.run(["git", "show", f":{rel}"], cwd=ROOT,
+                                   capture_output=True, text=True, check=True).stdout
+                    if args.staged else path.read_text(encoding="utf-8"))
+            source = strip_noise(text)
+        except (UnicodeDecodeError, OSError, subprocess.CalledProcessError):
+            problems.append(f"{rel}: source is unreadable")
             continue
         if rel.startswith(VENDOR_ROOT):
             package = rel[len(VENDOR_ROOT):].split("/", 1)[0]

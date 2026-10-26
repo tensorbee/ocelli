@@ -281,7 +281,7 @@ _S11 to S14, 15 stories, 51 engineer-weeks._
 
 The three-channel boundary is real and a stack viewport diffs clean against cornerstone3D. This is the Phase 1 credibility gate.
 
-_S15 to S17, 12 stories, 44 engineer-weeks._
+_S15 to S17, 14 stories, 47 engineer-weeks._
 
 #### Sprint S15
 
@@ -297,13 +297,15 @@ _S15 to S17, 12 stories, 44 engineer-weeks._
 
 #### Sprint S16
 
-**Goal**: Coordinate transforms: canvas / world / index, wasm boundary: command channel, event ring buffer, state readback, CPU raster for the stack viewport, progressive refinement, and the tier A against C bound.
+**Goal**: Coordinate transforms: canvas / world / index, wasm boundary: command channel, event ring buffer, state readback, CPU raster for the stack viewport, progressive refinement, and the tier A against C bound, Preserve selected VOI sequences across manual window changes, Reconcile closure inventory and harden shared sprint preparation.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
 | F-048 | E7.4 | Coordinate transforms: canvas / world / index | Rust+TS | 3w |
 | F-101 | E16.2 | wasm boundary: command channel, event ring buffer, state readback | TS | 5w |
 | F-X003 | X1.3 | CPU raster for the stack viewport, progressive refinement, and the tier A against C bound | Rust+TS | 6w |
+| F-X022 | Y1.17 | Preserve selected VOI sequences across manual window changes | Rust | 1w |
+| F-X023 | Y1.18 | Reconcile closure inventory and harden shared sprint preparation | Build | 2w |
 
 #### Sprint S17
 
@@ -889,3 +891,18 @@ _S66 to S72, 7 stories, 74 engineer-weeks._
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
 | F-149 | E35.7 | Multi-server data sources within one study | Rust | 8w |
+
+## S16 audit intake, 2026-10-18
+
+F-X022 and F-X023 add 3 estimated engineer-weeks to S16's existing 14.
+These are planning estimates, not measured elapsed time. No existing story
+was silently removed or marked done. Both repairs were implemented after this
+intake. F-X022 is complete. F-X023 is complete after four independent passes.
+The historical findings stay in `.claude/reviews/S13-S15-audit-pass-1.md`.
+No open issues or PRs were returned by the read-only remote refresh. The
+remaining S16 product work is the final sprint verification and the
+whole-sprint review. xAI model was the selected implementation model. The
+independent passes are recorded in
+`.claude/reviews/F-X023-instruction-pass-2.md`,
+`.claude/reviews/F-X023-instruction-pass-3.md` and
+`.claude/reviews/F-X023-instruction-pass-4.md`.

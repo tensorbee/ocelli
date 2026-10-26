@@ -31,6 +31,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import backlog_check
+
 ROOT = Path(__file__).resolve().parent.parent
 SCRATCH = ROOT / ".claude" / "scratch"
 HANDOFFS = ROOT / ".claude" / "handoffs"
@@ -357,6 +359,28 @@ def cmd_close_preflight(args: argparse.Namespace) -> int:
     sprint = args.sprint or active_sprint()
     data = load(sprint)
     problems = []
+
+    expected = {story["fid"] for story in planned_features(sprint)}
+    actual = set(data["features"])
+    if not expected or expected != actual:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        problems.append(
+            "feature inventory differs from allocation: "
+            f"missing={missing}, extra={extra}"
+        )
+
+    rows = backlog_check.backlog_rows()
+    for fid, feature in sorted(data["features"].items()):
+        if feature["state"] != "completed":
+            continue
+        row = rows.get(fid)
+        status = row["cells"][-2] if row is not None and len(row["cells"]) >= 2 else ""
+        if row is None or status != "done":
+            problems.append(
+                f"{fid} is completed in run state but backlog status is "
+                f"{status or 'missing'}"
+            )
 
     closure_states = {"completed", "carried"}
     incomplete = sorted(fid for fid, f in data["features"].items()

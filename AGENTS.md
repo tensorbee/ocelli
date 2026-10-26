@@ -37,7 +37,7 @@ Before changing code or tracked documentation, read `CLAUDE.md` and
 - No em-dash and no prose semicolon in enforced Markdown or commit messages.
 - **Do not commit or push unless the invoked workflow explicitly includes that
   action.** Never add an agent co-author trailer. The provenance trailers
-  `Ocelli-Verify` and `Ocelli-Generated-By` are written by the pre-commit hook
+  `Ocelli-Verify` and `Ocelli-Generated-By` are written by the commit-msg hook
   from the verify ledger, never by hand.
 
 ## Commands
@@ -148,7 +148,9 @@ this project's hot path.
 
 ## Skills
 
-One workflow, two hosts. `.claude/commands/*.md` and `.claude/skills/*/SKILL.md`
-stay canonical, and `scripts/sync_agent_skills.py` generates the adapters Codex
-discovers under `.agents/skills/`. Do not edit a generated adapter. Change the
+One workflow, three hosts. `.claude/commands/*.md` and
+`.claude/skills/*/SKILL.md` stay canonical, and `scripts/sync_agent_skills.py`
+generates the adapters Codex discovers under `.agents/skills/` and the slash
+commands OpenCode discovers under `.opencode/commands/`. OpenCode also reads
+`.agents/skills/` as skills. Do not edit a generated adapter. Change the
 canonical file and re-run the sync, then `--check`.

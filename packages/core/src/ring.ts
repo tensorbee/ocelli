@@ -8,13 +8,15 @@
  *
  * Fixed 48-byte stride, so this side is arithmetic and not deserialisation.
  *
- * Scaffold. F-101 (E16.2) implements it against the real ring.
+ * F-101 (E16.2) built the producer in `crates/ocelli-viewport/src/ring.rs`.
+ * `drainRing` reads a buffer that `drain_events` already copied out, never a
+ * view over wasm linear memory.
  */
 
-/** `RingHeader` in `ocelli-wasm/src/ring.rs`, four u32 fields. */
+/** `RingHeader` in `ocelli-viewport/src/ring.rs`, four u32 fields. */
 export const HEADER_BYTES = 16;
 
-/** `Event` in `ocelli-wasm/src/ring.rs`: u32 + u32 + u64 + [u8; 32]. */
+/** `Event` in `ocelli-viewport/src/ring.rs`: u32 + u32 + u64 + [u8; 32]. */
 export const EVENT_STRIDE = 48;
 
 export interface OcelliEvent {
@@ -52,4 +54,34 @@ export function readEvent(view: DataView, offset: number): OcelliEvent {
       ),
     ),
   };
+}
+
+/**
+ * Drain one copied ring buffer.
+ *
+ * `copied` is the bytes `drain_events` already copied out. This reads that
+ * copy. It does not take a view over wasm linear memory. The copy's first
+ * word is the pending count and its tail word is 0, so the events are a
+ * linear prefix. A buffer shorter than the declared events yields none.
+ */
+export function drainRing(copied: Uint8Array): DrainResult {
+  if (copied.byteLength < HEADER_BYTES) {
+    return { events: [], dropped: 0 };
+  }
+  const view = new DataView(
+    copied.buffer,
+    copied.byteOffset,
+    copied.byteLength,
+  );
+  const pending = view.getUint32(0, true);
+  const dropped = view.getUint32(12, true);
+  const bytes = HEADER_BYTES + pending * EVENT_STRIDE;
+  if (copied.byteLength < bytes) {
+    return { events: [], dropped };
+  }
+  const events: OcelliEvent[] = [];
+  for (let index = 0; index < pending; index += 1) {
+    events.push(readEvent(view, HEADER_BYTES + index * EVENT_STRIDE));
+  }
+  return { events, dropped };
 }

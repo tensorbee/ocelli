@@ -1,7 +1,7 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003
+**Last updated:** 2026-10-26
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
@@ -48,17 +48,24 @@ stored texture. Validation runs state first and the chain last, in the order
 `UnknownViewport`, `PassHasNoUniform`, `ViewportNotRebound`, then the chain's
 own answer.
 
-**The camera has one write route.** `set_view` writes sixteen column-major
-floats into the 64-byte uniform at group 0 binding 2 and sets `Dirty.camera`.
-It does not write the VOI uniform and it does not increment `uploads`,
-`lut_uploads` or `brick_uploads`. Registration stores the identity, so a
-viewport that never calls `set_view` samples the texel `i32` of the fragment
-position already selected. A fragment outside the stored texture is
-`(0, 0, 0, 1)` and does not run `lut_chain`. `mark_dirty` still accepts
-`camera`, because a resize sets that flag and keeps the stored matrix.
-Device-loss recovery drops the uniform and keeps the floats. `rebind` writes
-them into the new buffer. The matrix itself is `View::camera_matrix` in
-[viewport.md](viewport.md).
+**The camera has one write route.** `set_view` takes the CSS matrix and a
+device pixel ratio. It writes the 80-byte `DeviceCamera` into the uniform at
+group 0 binding 2 and sets `Dirty.camera`. The uniform is sixteen column-major
+CSS floats followed by four scale lanes. Lane `.x` is the device pixel ratio.
+The other three lanes are padding. The fragment shader divides the
+device-pixel position by that ratio before it multiplies by the CSS matrix.
+Registration writes the identity CSS matrix and ratio `1.0` through
+`device_camera`. `set_view` replaces those 80 bytes from the same helper. It
+does not write the VOI uniform and it does not increment `uploads`,
+`lut_uploads` or `brick_uploads`. A viewport that never calls `set_view`
+still has that identity camera from registration. A fragment outside the
+stored texture is `(0, 0, 0, 1)` and does not run `lut_chain`. `mark_dirty`
+still accepts `camera`, because a resize sets that flag and keeps the stored
+matrix and ratio. Device-loss recovery drops the uniform and keeps the CSS
+floats and the ratio. `rebind` writes them into the new buffer as the same
+80-byte `DeviceCamera`. The CSS matrix itself is `View::camera_matrix` in
+[viewport.md](viewport.md). The 96-byte viewport state copy keeps its own
+64-byte camera field. That readback is not this uniform.
 
 **Stored samples upload with `write_texture`.** `register_stored` asks
 `adapter.get_texture_format_features` for `R32Float`, then `Rg32Float`, then
@@ -126,6 +133,8 @@ at the extent the registry still holds, and that call does not increment
 from. The shell still holds the canvases and supplies them again through
 `bind_surface`. The registry keeps each pass, its last uniform values, the stored
 extent and the colour table bytes, so nothing but GPU objects is rebuilt.
+The kept camera is the CSS matrix and the device pixel ratio. `rebind`
+writes those into a new 80-byte `DeviceCamera` uniform.
 
 **A bound surface is the colour attachment for that tick.** `bind_surface`
 records the surface and its extent and sets the camera flag. It does not call
@@ -158,8 +167,12 @@ so the browser path acquires and presents inside `tick`.
 `TierCUnavailable` on CPU. `attach_target` is not called. `device_extent`
 still runs with no device. It is CSS size times device pixel ratio, rounded
 half away from zero per axis, then saturated to `u32`. A strictly positive
-CSS axis that rounds to 0 becomes 1. Non-finite inputs and a ratio that is
-not strictly positive are refused. The function touches no GPU.
+CSS axis that rounds to 0 becomes 1. Non-finite inputs, a ratio that is not
+strictly positive, and a positive ratio whose `f32` narrowing is not positive
+are refused. That last condition keeps the CPU extent and the GPU camera
+uniform on one policy. The function touches no GPU. F-X003 does
+not make this graph draw. `CpuRaster` is a separate scalar path. It is not a
+software device and it does not call `RenderGraph::new`.
 
 **Bricks upload at true extent.** `upload_brick` copies one `Brick` into a
 `TextureDimension::D3` texture. The format is `R8Uint` for `U8`, `R16Uint`

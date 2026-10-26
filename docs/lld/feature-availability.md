@@ -1,7 +1,7 @@
 # Feature availability
 
-**F-IDs that contributed:** F-037, F-041, F-X001
-**Last updated:** 2026-09-15
+**F-IDs that contributed:** F-037, F-041, F-X001, F-X003
+**Last updated:** 2026-10-26
 
 The contract every tier-gated feature declares, and the distinction between a
 working primary path, a declared fallback and an unavailable feature. This is
@@ -29,6 +29,7 @@ of any of them.
 | `caps::opens_a_device` | F-037 in `ocelli-render` | Whether the session has a GPU device at all. Tier C has none, so every GPU-requiring feature is `Unavailable` there by construction rather than by each feature checking |
 | `DeviceState` and `GpuContext::recover` | F-037 in `ocelli-render` | A lost device is an OBSERVED state rather than a later call failing, so a feature can report unavailable for the right reason while a rebuild is pending |
 | `VoiParams::from_chain` | F-041 in `ocelli-render` | The first feature-level refusal of this shape: a chain driven by a Modality LUT Sequence or a VOI LUT Sequence has no HLD section 18.4 uniform to be expressed in, so the GPU path is `Unavailable` and tier C is `Available` through `LutChain::map_into`. The two error variants name WHICH stage, because a caller reporting the feature unavailable has to say |
+| `CpuRaster` | F-X003 in `ocelli-render` | Tier C stack drawing. Monochrome uses `LutChain` and the preset tables. Palette and RGB use `ColorTransform` for a supported space. ICC reports unavailable. `RenderGraph::new` still returns `TierCUnavailable`. Representative-host interactive and idle acceptance remains unmeasured |
 
 The detailed resolver and evidence rules remain in
 [tier-resolution.md](tier-resolution.md). This file begins after that one
@@ -148,8 +149,9 @@ registry. It carries no stable operands today. There is no conversion from
 
 This story does not assign the record's three `u64` operands to a feature
 identifier, required tier and resolved tier. It also does not invent numeric
-tier encodings. F-101 owns the dependency-safe boundary conversion when a real
-producer, ring and shell consumer exist. That design must choose the stable
+tier encodings. F-101 built the real producer, ring and shell consumer. The
+dependency-safe boundary conversion from `ComputeError` to the core record is
+still unbuilt and has no scheduled F-ID. That design must choose the stable
 identities and add cross-language tests together. Until then, producers keep
 typed context in-process and must not encode ad hoc integers into the record.
 
@@ -171,7 +173,7 @@ a change to its states.
 
 ## What this contract does not build
 
-- A CPU rasteriser, stack viewport, MPR path or volume renderer.
+- A CPU rasteriser, stack viewport, MPR path or volume renderer. F-X003 later draws the stack in `CpuRaster`. That raster is not this contract. MPR and volume rendering remain unbuilt here.
 - A feature enum or registry for work that has not landed.
 - Stable unavailable operands or numeric tier encodings.
 - A `From<ComputeError>` conversion or a new crate dependency.

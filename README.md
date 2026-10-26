@@ -114,6 +114,7 @@ docs/hld/           the authoritative Markdown specification
 docs/sprints/       backlog, sprint plan, trackers
 .claude/            the workflow: commands, skills, plans, reviews
 .agents/skills/     generated Codex adapters for the same workflow
+.opencode/commands/ generated OpenCode slash commands for the same workflow
 ```
 
 ## Getting started
@@ -144,9 +145,10 @@ rather than tuned per failure.
 
 ## Workflow
 
-One workflow, two hosts. Claude Code reads `.claude/commands/`, Codex reads the
-generated adapters in `.agents/skills/`. They are the same instructions and a
-gate refuses them when they drift.
+One workflow, three hosts. Claude Code reads `.claude/commands/`, Codex reads
+the generated adapters in `.agents/skills/`, and OpenCode reads those as skills
+and its slash commands from the generated `.opencode/commands/`. They are the
+same instructions and a gate refuses them when they drift.
 
 ```text
 /design F-XXX  ->  /start-feature  ->  /implement-feature

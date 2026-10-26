@@ -1019,6 +1019,19 @@ def entry_for(tree: str) -> dict | None:
     return load().get(tree)
 
 
+def cmd_invalidate(args: argparse.Namespace) -> int:
+    """Begin a new attempt without leaving an earlier green receipt reusable."""
+    tree = args.tree or staged_tree()
+    data = load()
+    removed = data.pop(tree, None)
+    save(data)
+    if removed is None:
+        print(f"no verification receipt for tree {tree[:12]}, nothing to invalidate")
+    else:
+        print(f"invalidated verification for tree {tree[:12]}")
+    return 0
+
+
 def cmd_assert(args: argparse.Namespace) -> int:
     tree = args.tree or staged_tree()
     entry = entry_for(tree)
@@ -1136,6 +1149,10 @@ def main() -> int:
     p.add_argument("--agent", default="")
     p.add_argument("--comparison-report", default="")
     p.set_defaults(func=cmd_record)
+
+    p = sub.add_parser("invalidate")
+    p.add_argument("--tree")
+    p.set_defaults(func=cmd_invalidate)
 
     p = sub.add_parser("assert")
     p.add_argument("--tree")

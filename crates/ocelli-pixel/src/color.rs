@@ -283,6 +283,26 @@ impl ColorTransform {
     /// chroma pair.
     pub fn map_into(&self, source: &[Stored], destination: &mut [Rgb]) -> Result<(), PixelError> {
         let pixels = destination.len();
+        self.accept_source(source, pixels)?;
+        for (index, output) in destination.iter_mut().enumerate() {
+            *output = self.pixel(source, index, pixels);
+        }
+        Ok(())
+    }
+
+    /// Accept one frame's stored samples before any destination write.
+    ///
+    /// `pixels` is the frame's pixel count. [`Self::map_into`] passes the
+    /// destination length. A caller that has not allocated the destination
+    /// yet can use the same rule.
+    ///
+    /// # Errors
+    ///
+    /// [`PixelError::SourceLength`] when the source is not exactly one frame
+    /// for the resolved space. [`PixelError::SubsampledChromaAlignment`] when
+    /// a 4:2:2 space is asked for an odd number of pixels.
+    /// [`PixelError::LengthOverflow`] when the expected sample count overflows.
+    pub fn accept_source(&self, source: &[Stored], pixels: usize) -> Result<(), PixelError> {
         if self.space.is_subsampled() && !pixels.is_multiple_of(2) {
             return Err(PixelError::SubsampledChromaAlignment);
         }
@@ -291,10 +311,6 @@ impl ColorTransform {
             .ok_or(PixelError::LengthOverflow)?;
         if source.len() != expected {
             return Err(PixelError::SourceLength);
-        }
-
-        for (index, output) in destination.iter_mut().enumerate() {
-            *output = self.pixel(source, index, pixels);
         }
         Ok(())
     }

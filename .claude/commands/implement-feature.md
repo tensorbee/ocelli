@@ -47,6 +47,60 @@ So:
    revert. A test that passes both ways is not a test. HLD 27.3 asks a human
    to check exactly this, so do not make them find it.
 
+## Acceptance execution record
+
+Before editing, list the plan's acceptance rows with their tests and stages.
+Keep the current trigger, expected result and old-source identity beside each
+regression. Observe semantic RED before the fix. A compiler rejecting an API
+that does not exist yet proves the scaffold is absent, not the intended bug.
+After the fix retain GREEN for the same case and inputs, then run the planned
+mutation/negative control. Keep failures and environment limitations visible.
+
+Follow the plan's consumer map through every affected entry point. A shared
+constructor does not guarantee that callers apply equivalent refusal policy,
+units, defaults or context. Test combinations chosen by the design, including
+unchanged consumers and lifecycle transitions, before broad verification.
+Do not add a Cartesian product or assertion that merely repeats the code.
+
+If a dependency or criterion proves unavailable, implement independent work
+and record the exact unmet criterion and owner. Do not mark a whole story done
+because its easy subset passes. Proposed patches from an audit are starting
+material to inspect and reproduce, not accepted implementation evidence.
+
+Record each acceptance row as evidenced, failed, implementation missing or
+external observation unavailable, with its next action and owner. Missing
+canvas wiring, a candidate producer or a runner body is implementation work.
+Do not describe it solely as a missing host or adapter. A runner that always
+throws proves refusal handling, not readiness to measure on an equipped host.
+
+For each missing implementation, name the owning function or module, the
+smallest next deliverable and its discriminating check in the existing
+acceptance record. Separately name any missing collector configuration and
+external host. At handoff, choose the next dependency-ready implementation
+step within the authorized scope. A repair-only assignment may stop at its
+declared boundary, but its handoff must distinguish that boundary from a
+technical blocker. Do not repeatedly hand back "keep open" as the next action
+for work that can be implemented. Do not start unapproved scope to fill a gap.
+
+For a new wasm boundary, execute the generated module with the public shell
+caller and its adapter. Test alloc returning 0 before any write, release and
+reallocation at the same address, malformed and duplicate calls, and memory
+growth. Host-only sessions remain a separate evidence column. For rendering,
+test the first successful settled draw followed by a successful command, new
+source and resize. Verify updated pixels and event identity as applicable.
+
+For each repaired lifecycle, replay the original reproducer, its valid
+control and the next failure boundary through the public caller. Include an
+identical repeated request and rejected configuration. Inspect the external
+sink as well as cached state. A bitmap setter can clear visible content even
+when the stored dimensions do not change. Preserve pixels, ownership and
+generation until the declared commit point, or retain a correct retry path.
+
+A review handoff names the complete build/test command chain for each target
+artifact and when it was rebuilt. Keep explicit suites outside default npm
+test in that list. Link each changed acceptance row to its permanent proof
+and state whether it covers an internal helper or the public production path.
+
 ## 3. Rules that bite in this codebase
 
 - **`as` casts.** `cast_possible_truncation`, `cast_precision_loss` and
@@ -90,7 +144,7 @@ Plus, selected by what the diff touches:
 |------------------|----------|
 | any crate manifest or dependency | `bin/ocelli.sh gate bindgen pins` |
 | any `unsafe`, or a new `.rs` file | `bin/ocelli.sh gate unsafe` |
-| a shader, a pipeline or a tier decision | `bin/ocelli.sh gate wasm` and exercise BOTH tiers |
+| a shader, a pipeline or a tier decision | `bin/ocelli.sh gate wasm`, exercise applicable A/B/C paths and verify declared unavailable behavior |
 | pixel or geometry arithmetic | `bin/ocelli.sh gate oracle` |
 | `packages/` or `examples/` | `npm run lint && npm run typecheck` |
 | `docs/hld/` or sprint planning data | `bin/ocelli.sh gate backlog deviations` |
@@ -121,6 +175,15 @@ comparing failures by name.
 Keep `.claude/scratch/F-XXX-progress.md` current: the exact last green command,
 current failures, changed areas, next action. Before handing off, that file is
 what the next agent reads first.
+
+The handoff names full base/HEAD and staged tree when applicable, staged and
+unstaged paths, the ACs implemented and still unmet, and exact evidence paths.
+Keep semantic RED, repaired GREEN and mutation results individually with
+source/input identities and own exit statuses. State which checks ran now and
+which are prior receipts. Name independent-review status separately from
+implementation status. Never leave an old "fix not implemented" handoff as
+the only current account after implementing the repair. Preserve the earlier
+attempt as history and add the current disposition.
 
 ## Finish
 

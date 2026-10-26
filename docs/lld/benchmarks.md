@@ -1,7 +1,7 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-X014
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-101, F-X003, F-X014
+**Last updated:** 2026-10-26
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -166,7 +166,8 @@ remeasured after F-039. 2.3 ms is not a measurement of the current module.
 
 **It is not an answer to gate A4 and must not be read as one.** A4 estimates
 3 to 8 MB uncompressed with Naga dominating, and it also names cold start.
-The current release module exports six functions and contains Naga.
+The F-039 release module that this measurement names exported six functions
+and contains Naga. The current release module exports twenty-one functions.
 **A4 stays open.** The 2.3 ms figure remains the F-006 regression baseline
 until a later story measures cold start on this module.
 
@@ -574,13 +575,58 @@ the record. Until then a subject measured on two tiers on one machine would be
 compared as if it were one population.
 
 `session.cpu_interactive`, `session.cpu_idle` and `cine.frame_change_rate` are
-tier-C rows and they exist from this story, because `docs/spikes/A7-tier-c.md`
-says F-006 "must measure tier C from the start, including CPU cost per session".
-Idle is a separate row from interactive because A7.3 says they answer to
-different people and only one is negotiable. All three are `unavailable` and
-blocked on F-X003, because `docs/spikes/GATES.md` makes the two remaining A7
-figures acceptance criteria on F-X002 and F-X003, and a story that quietly took
-one would move a resolved spike's acceptance criteria without saying so.
+tier-C rows. `docs/spikes/A7-tier-c.md` says F-006 must measure tier C from the
+start, including CPU cost per session. Idle is a separate row from interactive
+because A7.3 says they answer to different people and only one is negotiable.
+`docs/spikes/GATES.md` makes the two remaining A7 figures acceptance criteria
+on F-X002 and F-X003. The permanent runners now use a dedicated Chromium
+instance, release wasm, and a worker-owned 128 by 128 OffscreenCanvas at DPR 1.
+The CPU collector sums `SystemInfo.getProcessInfo.cpuTime` deltas over every
+process in that instance, divided by wall seconds. Counter rollback, invalid
+values and a changed process inventory refuse the observation. Snapshot-call
+midpoints define the wall interval. The result records boundary uncertainty
+and workload wall time separately. This includes browser overhead, rather
+than pretending to isolate Rust CPU time.
+
+Interactive CPU dispatches DOM pointer events, batches commands on RAF and
+settles after the workload. Idle schedules no drawing and checks zero changed
+frames. Cine alternates two predecoded synthetic frames and verifies actual
+black and white canvas pixels inside the owning worker before measurement.
+Pixels do not reach the shell. These fixtures do not model an incumbent
+workload or establish its noise floor.
+
+`render.first_frame`, `interaction.window_level_drag` and `interaction.scroll`
+name F-101. The first starts before dispatching a fresh typed Fit and ends at
+its presented event drained on a later RAF. Drag starts at an actual Playwright
+pointer event. Scroll starts at a wheel event, applies Scroll to a configured
+two-key stack, commits the newly selected resident frame and observes a later
+ring drain. Latency reports the median after one warm-up. Tier A and B are
+not measured by these runners. The instrument identity explicitly names C.
+The native `presented_frame` example remains a separate diagnostic.
+
+Release artifact reuse requires matching wasm, served-byte and source digests in ignored
+`tools/bench/out/session-artifact.json`. Source identity includes transitive
+workspace and vendor sources. Served identity includes wasm glue and compiled
+core bytes. A default run rebuilds. Shared instrument code is under
+`tools/bench/src/browser_session.mjs`, outside the registry-only runner directory. Neither a
+source digest nor a local timing is a verification receipt.
+
+CPU acceptance runners require `OCELLI_CPU_BASELINE_HOST` to name a JSON file
+with `representativeGpuLess: true`, a nonempty `incumbent` description and
+`host` matching every `HOST_CLASS_FIELDS` field from `hostClass(os)`. This is
+operator attestation of physical-host suitability. Disabling the browser GPU
+alone does not establish it. The operator has no such host available. Normal
+CPU subjects therefore refuse without a number. Programmatic
+`runBrowserSession(subject, { diagnostic: true })` permits local instrument
+checks and explicitly sets `representativeHostAcceptance: false`. It does not
+write a baseline. Collect the incumbent under the same workload and include
+its noise floor before accepting any CPU budget.
+
+Run the actual release browser controls with:
+
+```sh
+OCELLI_BENCH_BROWSER=1 node --test tools/bench/tests/run_test.mjs
+```
 
 `tier.startup_microbenchmark` is F-004's, recorded here and not reimplemented.
 They are two artefacts sharing a word: F-004's runs on every production session

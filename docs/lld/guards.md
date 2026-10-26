@@ -1,7 +1,7 @@
 # The guard harness
 
-**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020
-**Last updated:** 2026-09-14
+**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023
+**Last updated:** 2026-10-26
 
 A guard is any refusal this repository can produce: a script that exits 1, a
 hook that rejects a commit, a gate that fails.
@@ -449,6 +449,13 @@ Close also distinguishes completed work from an explicit carry-forward. A
 `CURRENT_SPRINT.md`. It does not need a feature review, because the state makes
 no implementation claim. A refusal covers an unrecorded carry-forward and an
 accept control covers a carried story whose tracked reason is present.
+
+The same command compares scratch feature keys with the stories
+`planned_features` reads for that sprint. An empty allocation, a missing
+story or an extra story is refused, and the message names the sorted missing
+and extra F-IDs. A completed scratch story must have backlog status `done`.
+A missing backlog row is refused on that same check. A carried story is not
+required to be `done`.
 
 ### Explicit sets and handoff grammar
 
@@ -1187,3 +1194,25 @@ must turn the checker red.
   enforces it. Decision 11 of the design plan records the finding and says the
   enablement check belongs in `/verify` rather than in CI, because CI has no
   clone to check.
+
+## Verification attempts
+
+`verify_ledger.py invalidate` removes only the selected tree's receipt before
+a new verification attempt. A failed attempt cannot reuse that removed green
+entry. The verification workflow calls it before gates and records failures
+separately in sprint state. Running an arbitrary shell command alone does not
+automatically invalidate evidence. This is an explicit workflow step.
+
+`close-preflight` refuses an empty allocation, a scratch set that is not the
+allocation, and a completed scratch story whose backlog status is not `done`.
+A carried story stays on the recorded-reason path.
+
+## Staged unsafe source identity
+
+`unsafe_allowlist_check.py --staged` audits the full index and reads each
+Rust blob from that index. It includes unchanged vendored packages. The
+working-tree mode retains tracked-file working-byte inspection. Inventory
+and blob-read errors fail closed. Neither mode changes the two permitted
+source paths or recorded vendored construct counts. The unsafe gate runs
+`test_unsafe_allowlist_check.py` temporary-repository controls as well as the
+guard. A clean working file cannot hide an unsafe staged blob.
