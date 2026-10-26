@@ -16,12 +16,8 @@
 //! # What it compares today
 //!
 //! Decision D7 is that the validation oracle exists before the port code, and
-//! this story does not break it. The comparator has no second side of the
-//! corpus to compare against. A stub renderer was refused: its frames would
-//! prove only that the stub and the comparator agree.
-//!
-//! So the comparator is a function of two directories, and today those two
-//! directories are filled by three things, none of which is a renderer.
+//! this story does not break it. The hand fixtures, the identity run and the
+//! mutation catalogue still prove the comparator without a GPU.
 //!
 //! 1. **Hand-constructed fixture frame pairs**, in `tests/`, whose divergence
 //!    is known by construction because both sides' bytes are written out by
@@ -36,12 +32,16 @@
 //!    real reference frames with the verdict each must produce written down
 //!    beside it. That is what proves detection at corpus scale.
 //!
-//! **The candidate side is a directory contract, not a call into a renderer.**
-//! When the port lands, the Ocelli half writes `<id>.raw` and `<id>.json` in
-//! the shape `docs/lld/oracle.md` already specifies, points the comparator at
-//! it, and nothing here changes. That is also what makes deviation D-07's
-//! tier A against tier C divergence bound this same binary with two candidate
-//! directories and no reference, at no additional cost.
+//! **The corpus candidate side is a directory.** `produce` writes `<id>.raw`
+//! and `<id>.json` for each monochrome stack row the CPU raster can draw, in
+//! the shape `docs/lld/oracle.md` already specifies. `ocelli-compare gate`
+//! reads that directory. The loader does not change. Colour rows are recorded
+//! and are not scored. F-X021 still owns full viewer activation. Tier A is
+//! not opened here.
+//!
+//! `candidate` remains the synthetic control. It rasters one hand-built
+//! monochrome window and passes that settled frame to `compare_view`. It does
+//! not write a corpus row and it does not open an adapter.
 //!
 //! # The tolerance policy
 //!
@@ -53,10 +53,13 @@
 //! changing one is a diff a reviewer sees.
 
 pub mod attribution;
+pub mod candidate;
 pub mod frame;
 pub mod geometry;
+mod gpu_candidate;
 pub mod metadata;
 pub mod mutations;
+pub mod produce;
 pub mod render_hash;
 pub mod report;
 pub mod sidecar;

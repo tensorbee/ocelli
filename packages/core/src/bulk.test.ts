@@ -6,12 +6,33 @@ import {
   transferredFrameMessage,
   writeDicomwebResponse,
   writeFrame,
+  writeCommands,
+  writeStack,
   type BulkSink,
   type DicomwebResponseKind,
   type DicomwebResponseSink,
   type HandoffMeta,
   type WasmMemory,
 } from "./bulk.js";
+
+it("command writes acquire memory after allocation growth and never write on refusal", () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const bytes = new Uint8Array([1, 2, 3]);
+  let applied = 0;
+  const sink = {
+    alloc() { memory.grow(1); return 65536; },
+    apply_commands(ptr: number, len: number) {
+      expect(ptr).toBe(65536);
+      expect(Array.from(new Uint8Array(memory.buffer, ptr, len))).toEqual([1, 2, 3]);
+      applied += 1;
+      return 1;
+    },
+  };
+  expect(writeCommands({ memory }, sink, bytes)).toBe(1);
+  expect(applied).toBe(1);
+  expect(writeCommands({ memory }, { ...sink, alloc: () => 0 }, bytes)).toBe(0);
+  expect(applied).toBe(1);
+});
 
 /**
  * HLD section 17.2, the bulk channel and its trap.
@@ -163,6 +184,73 @@ function pattern(len: number): Uint8Array {
 }
 
 group("writeFrame, HLD 17.2", () => {
+  it("validates ticket-sink metadata before allocation", () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 2 });
+    let allocs = 0;
+    let released = 0;
+    const sink: BulkSink = {
+      alloc(): number {
+        allocs += 1;
+        return 8;
+      },
+      allocationTicket(): number {
+        return 7;
+      },
+      commitAllocated(): number {
+        return 1;
+      },
+      commit_frame(): number {
+        return 1;
+      },
+      releaseAllocated(ticket: number): void {
+        released = ticket;
+      },
+    };
+
+    expect(() =>
+      writeFrame({ memory }, sink, pattern(4), {
+        viewport: "bad",
+        columns: 1,
+        rows: 1,
+        generation: 1,
+      }),
+    ).toThrow("viewport is not a u32");
+    expect(allocs).toBe(0);
+    expect(released).toBe(0);
+  });
+
+  it("releases the captured ticket when the copy throws", () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 2 });
+    const released: number[] = [];
+    const sink: BulkSink = {
+      alloc(): number {
+        return memory.buffer.byteLength + 8;
+      },
+      allocationTicket(): number {
+        return 11;
+      },
+      commitAllocated(): number {
+        return 1;
+      },
+      commit_frame(): number {
+        return 1;
+      },
+      releaseAllocated(ticket: number): void {
+        released.push(ticket);
+      },
+    };
+
+    expect(() =>
+      writeFrame({ memory }, sink, pattern(4), {
+        viewport: 1,
+        columns: 1,
+        rows: 1,
+        generation: 1,
+      }),
+    ).toThrow(RangeError);
+    expect(released).toEqual([11]);
+  });
+
   /**
    * The rule itself. The allocation grows linear memory, so the bytes reach
    * the core only if the view was built after the allocation returned.
@@ -317,6 +405,28 @@ group("writeFrame, HLD 17.2", () => {
    * The source is the caller's, and the caller keeps it. A copy into linear
    * memory must not disturb it.
    */
+  it("refuses a zero allocation before any view or commit", () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 2 });
+    new Uint8Array(memory.buffer, 0, 8).fill(0x5a);
+    let commits = 0;
+    const sink: BulkSink = {
+      alloc(): number {
+        return 0;
+      },
+      commit_frame(): void {
+        commits += 1;
+      },
+    };
+
+    expect(() => writeFrame({ memory }, sink, pattern(8), null)).toThrow(
+      "allocation refused",
+    );
+    expect(commits).toBe(0);
+    expect(Array.from(new Uint8Array(memory.buffer, 0, 8))).toEqual(
+      Array(8).fill(0x5a),
+    );
+  });
+
   it("leaves the caller's bytes alone", () => {
     const { wasm, sink } = growingSink();
     const bytes = pattern(64);
@@ -356,6 +466,30 @@ group("writeDicomwebResponse, HLD 17.2 and PS3.18", () => {
     expect(commits).toHaveLength(1);
     expect(Array.from(commits[0]?.bytes ?? [])).toEqual(Array.from(bytes));
     expect(commits[0]?.kind).toBe(kind);
+  });
+
+  it("refuses a zero allocation before the response commit", () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 2 });
+    new Uint8Array(memory.buffer, 0, 4).fill(0x11);
+    let commits = 0;
+    const sink: DicomwebResponseSink = {
+      alloc(): number {
+        return 0;
+      },
+      commit_dicomweb_response(): void {
+        commits += 1;
+      },
+    };
+
+    expect(() =>
+      writeDicomwebResponse({ memory }, sink, new Uint8Array([1, 2, 3, 4]), {
+        type: "qido-json",
+      }),
+    ).toThrow("allocation refused");
+    expect(commits).toBe(0);
+    expect(Array.from(new Uint8Array(memory.buffer, 0, 4))).toEqual(
+      Array(4).fill(0x11),
+    );
   });
 });
 
@@ -439,13 +573,17 @@ group("acceptTransferredFrame, HLD 17.2", () => {
       bytes: bytes.byteLength,
     };
 
-    acceptTransferredFrame(wasm, sink, buffer, meta);
+    const target = { viewport: 1, columns: 16, rows: 8, generation: 3 };
+    acceptTransferredFrame(wasm, sink, buffer, meta, target);
 
     const commit = at(commits, 0);
     expect(Array.from(commit.seen)).toEqual(Array.from(bytes));
     expect(commit.len).toBe(128);
     expect(commit.ptr).toBe(PAGE_BYTES);
-    expect(commit.meta).toBe(meta);
+    expect(commit.meta).toEqual({ handoff: meta, ...target });
+    expect(
+      (commit.meta as { readonly handoff: HandoffMeta }).handoff,
+    ).toBe(meta);
     expect(Array.from(new Uint8Array(buffer))).toEqual(Array.from(bytes));
   });
 
@@ -470,11 +608,81 @@ group("acceptTransferredFrame, HLD 17.2", () => {
       bytes: 7,
     };
 
-    expect(() => acceptTransferredFrame({ memory }, sink, buffer, meta)).toThrow(
-      "handoff length 8 disagrees with meta.bytes 7",
-    );
+    expect(() =>
+      acceptTransferredFrame(
+        { memory },
+        sink,
+        buffer,
+        meta,
+        { viewport: 1, columns: 1, rows: 1, generation: 1 },
+      ),
+    ).toThrow("handoff length 8 disagrees with meta.bytes 7");
     expect(asked).toEqual([]);
     expect(commits).toBe(0);
+  });
+
+  it("refuses a zero allocation before the transferred copy", () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 2 });
+    new Uint8Array(memory.buffer, 0, 4).fill(0x22);
+    let commits = 0;
+    const sink: BulkSink = {
+      alloc(): number {
+        return 0;
+      },
+      commit_frame(): void {
+        commits += 1;
+      },
+    };
+    const buffer = exactBuffer(pattern(4));
+    const meta: HandoffMeta = {
+      series: 1,
+      instance: 1,
+      frame: 1,
+      bytes: 4,
+    };
+
+    expect(() =>
+      acceptTransferredFrame(
+        { memory },
+        sink,
+        buffer,
+        meta,
+        { viewport: 1, columns: 1, rows: 1, generation: 1 },
+      ),
+    ).toThrow("allocation refused");
+    expect(commits).toBe(0);
+    expect(Array.from(new Uint8Array(memory.buffer, 0, 4))).toEqual(
+      Array(4).fill(0x22),
+    );
+  });
+
+  it("refuses a target without a u32 viewport before allocation", () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 2 });
+    let allocs = 0;
+    const sink: BulkSink = {
+      alloc(): number {
+        allocs += 1;
+        return 8;
+      },
+      commit_frame(): void {},
+    };
+    const buffer = exactBuffer(pattern(4));
+    const meta: HandoffMeta = {
+      series: 1,
+      instance: 1,
+      frame: 0,
+      bytes: 4,
+    };
+
+    expect(() =>
+      acceptTransferredFrame({ memory }, sink, buffer, meta, {
+        viewport: "bad" as unknown as number,
+        columns: 1,
+        rows: 1,
+        generation: 1,
+      }),
+    ).toThrow("viewport is not a u32");
+    expect(allocs).toBe(0);
   });
 });
 
@@ -506,4 +714,34 @@ group("transferredFrameMessage, HLD section 24", () => {
     expect(handed.transfer).toHaveLength(1);
     expect(listed).toBe(buffer);
   });
+});
+
+it("writes each stack key as little-endian series, instance and frame", () => {
+  const memory = new WebAssembly.Memory({ initial: 2 });
+  const at = 65536;
+  let seen: number[] = [];
+  const wasm = {
+    memory,
+    alloc() { return at; },
+    bulk_ticket() { return 77; },
+    release_bulk(ticket: number) {
+      expect(ticket).toBe(77);
+      return 1;
+    },
+    configure_stack(ticket: number, len: number) {
+      expect(ticket).toBe(77);
+      expect(len).toBe(32);
+      seen = Array.from(new Uint8Array(memory.buffer, at, len));
+      return 5;
+    },
+  };
+  const epoch = writeStack(wasm, [
+    { series: 0x0102_0304_0506_0708n, instance: 9, frame: 4 },
+    { series: 1n, instance: 2, frame: 3 },
+  ]);
+  expect(epoch).toBe(5);
+  expect(seen).toEqual([
+    0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x09, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+  ]);
 });

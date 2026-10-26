@@ -8,9 +8,10 @@
 // actual thing a browser does at session start, and nothing here substitutes a
 // proxy for a subject that does not exist.
 //
-// **Cold start of this module was not remeasured.** The release module exports
-// six functions and contains Naga. The recorded size is 1,999,061 bytes. A4
-// stays open. The 2.3 ms figure is the F-006 measurement of the earlier module.
+// **Cold start of this module was not remeasured.** The F-039 release module
+// exported six functions and contains Naga. The current module exports
+// twenty-one functions. The recorded size is 1,999,061 bytes. A4 stays open.
+// The 2.3 ms figure is the F-006 measurement of the earlier module.
 
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -334,10 +335,11 @@ export async function run({ outDir, build = true }) {
       profile: "release",
       version: expectedVersion,
       caveat:
-        "The release module exports six functions and contains Naga. The " +
-        "recorded size is 1,999,061 bytes. Cold start of this module was not " +
-        "remeasured. Appendix A gate A4 estimates 3 to 8 MB uncompressed with " +
-        "Naga dominating. A4 stays open.",
+        "The F-039 release module exported six functions and contains Naga. " +
+        "The current module exports twenty-one functions. The recorded size " +
+        "is 1,999,061 bytes. Cold start of this module was not remeasured. " +
+        "Appendix A gate A4 estimates 3 to 8 MB uncompressed with Naga " +
+        "dominating. A4 stays open.",
       not_measured:
         "A user's true cold start, which includes the network fetch of an " +
         "uncached artefact over a real link and a browser process that was " +

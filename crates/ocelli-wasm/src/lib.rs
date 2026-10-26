@@ -14,6 +14,8 @@
 //! `src/ring.rs` is one of the two files in the repository permitted to
 //! contain `unsafe` (HLD section 27.2 R5). The other is
 //! `ocelli-core/src/cast.rs`. `scripts/unsafe_allowlist_check.py` enforces it.
+//! F-101 does not create that file. The ring is safe and lives in
+//! `ocelli-viewport`. This crate checks tokens against an owned `Vec`.
 //!
 //! F-005 adds `src/panic.rs`, which is section 23's panic path. It contains no
 //! `unsafe`: the fixed record is written through atomics, which need only a
@@ -23,12 +25,16 @@
 //! F-039 adds `canvas`, compiled only for wasm32. It names the offscreen
 //! canvas and calls into `ocelli-render`, which owns the device. Decode
 //! workers load this same module and are not required to call those exports.
-//! F-101 still builds the session boundary.
+//! F-101's session is `session`. `coreAvailable()` in the package stays false
+//! until a built module is loaded.
 
 #[cfg(target_arch = "wasm32")]
 mod canvas;
 
 pub mod panic;
+mod session;
+
+pub use session::{FrameMeta, MAX_BULK_BYTES, Session, SessionError};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;

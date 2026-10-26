@@ -18,23 +18,31 @@
  * F-021 publishes the bounded DICOMweb client and response sink API below.
  * F-035 publishes the section 24 handoff from `bulk.ts`.
  * F-100 publishes the viewport, scene and tool types from `viewport.ts`.
- * F-101 still owns the live wasm command channel and event ring.
+ * F-101 publishes command packing and the copied ring drain. `coreAvailable()`
+ * stays false until a built module is loaded.
  */
 
 export {
   acceptTransferredFrame,
   exportDecodedFrame,
+  sessionBulkSink,
   transferredFrameMessage,
   writeDicomwebResponse,
   writeFrame,
+  writeCommands,
+  writeStack,
 } from "./bulk.js";
 export type {
   BulkSink,
+  FrameCommitMeta,
   DicomwebResponseKind,
   DicomwebResponseSink,
   FrameMessage,
   HandoffMeta,
+  SessionBulkExports,
   WasmMemory,
+  StackFrameKey,
+  SessionStackExports,
 } from "./bulk.js";
 
 export { DicomwebClient, DicomwebError } from "./dicomweb.js";
@@ -44,8 +52,22 @@ export type {
   QidoSearchOptions,
 } from "./dicomweb.js";
 
-export { readEvent, EVENT_STRIDE, HEADER_BYTES } from "./ring.js";
+export { drainRing, readEvent, EVENT_STRIDE, HEADER_BYTES } from "./ring.js";
 export type { DrainResult, OcelliEvent } from "./ring.js";
+
+export {
+  COMMAND_ID,
+  packCommands,
+  packPointerFrame,
+  sessionCommandSink,
+  submitCommands,
+} from "./commands.js";
+export type {
+  CommandSink,
+  CommandWrite,
+  PackedCommand,
+  SessionCommandExports,
+} from "./commands.js";
 
 export {
   decodeRecord,
@@ -85,9 +107,15 @@ export {
   STACK_COMMANDS,
   TIER_AVAILABILITY,
   TIER_C_DRAWING,
+  FLAG_ERROR,
+  FLAG_INVERT,
+  FLAG_LOADING,
+  FLAG_REFINING,
+  VIEWPORT_STATE_BYTES,
   VIEWPORT_STATE_FIELDS,
   VOI_FUNCTIONS,
   WINDOW_PRESETS,
+  readViewportState,
   viewportId,
 } from "./viewport.js";
 export type {
@@ -100,6 +128,7 @@ export type {
   TierAvailability,
   ToolBinding,
   ViewportId,
+  ViewportReadback,
   VoiFunction,
   WindowPreset,
 } from "./viewport.js";

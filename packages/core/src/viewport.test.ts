@@ -7,13 +7,16 @@ import { describe, expect, it } from "vitest";
 import {
   CAMERA_COMPONENTS,
   COLORMAPS,
+  FLAG_REFINING,
   INVERT,
   STACK_COMMANDS,
   TIER_AVAILABILITY,
   TIER_C_DRAWING,
+  VIEWPORT_STATE_BYTES,
   VIEWPORT_STATE_FIELDS,
   VOI_FUNCTIONS,
   WINDOW_PRESETS,
+  readViewportState,
   viewportId,
 } from "./viewport.js";
 import type { Camera, ViewportId } from "./viewport.js";
@@ -55,7 +58,7 @@ describe("stack viewport API", () => {
     ]);
   });
 
-  it("records tier C drawing as unavailable", () => {
+  it("records tier C GPU drawing as unavailable for the stack viewport", () => {
     expect([...TIER_AVAILABILITY]).toEqual([
       "available",
       "degraded",
@@ -69,6 +72,23 @@ describe("stack viewport API", () => {
     expect([...WINDOW_PRESETS]).toEqual(["soft_tissue", "lung", "bone"]);
     expect([...VOI_FUNCTIONS]).toEqual(["linear", "linear_exact", "sigmoid"]);
     expect([...INVERT]).toEqual(["identity", "inverse"]);
+  });
+
+  it("reads a copied 96-byte state and refuses any other length", () => {
+    const bytes = new Uint8Array(VIEWPORT_STATE_BYTES);
+    const view = new DataView(bytes.buffer);
+    view.setFloat32(64, 40, true);
+    view.setFloat32(68, 400, true);
+    view.setUint32(72, 1, true);
+    view.setUint32(76, 3, true);
+    view.setUint32(80, FLAG_REFINING, true);
+    const read = readViewportState(bytes);
+    expect(read?.voiCenter).toBe(40);
+    expect(read?.voiWidth).toBe(400);
+    expect(read?.sliceIndex).toBe(1);
+    expect(read?.numSlices).toBe(3);
+    expect(read?.flags).toBe(8);
+    expect(readViewportState(bytes.slice(0, 95))).toBeNull();
   });
 
   it("keeps a viewport id distinct from a slice index", () => {

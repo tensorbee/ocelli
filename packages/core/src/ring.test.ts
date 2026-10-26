@@ -29,12 +29,14 @@ import { EVENT_STRIDE, HEADER_BYTES, readEvent } from "./ring.js";
  * ninth pass's own commit message says eight and two other places said two
  * and three, which is the defect this sentence replaces.
  *
- * **The wire contract itself is not yet checkable and the file says so.**
- * `crates/ocelli-wasm/src/ring.rs` does not exist, F-101 writes it, so
- * nothing here can compare these numbers against the producer. What this file
- * covers is the other half: that the arithmetic `ring.ts` performs matches the
- * layout the HLD specifies. When F-101 lands the Rust side, a fixture
- * generated from it replaces the hand-written bytes below and closes the gap.
+ * **The wire contract is checkable on both sides.** The producer is
+ * `crates/ocelli-viewport/src/ring.rs`, and
+ * `crates/ocelli-viewport/tests/ring.rs` asserts its own 16-byte header and
+ * 48-byte stride with literals rather than with these constants. This file
+ * covers the other half: that the arithmetic `ring.ts` performs matches the
+ * layout the HLD specifies. The hand-written bytes below stay hand-written
+ * for the reason above, so the two fixtures meet at HLD 17.3's layout instead
+ * of moving together.
  */
 
 /** `RingHeader`, four `u32` fields. HLD 17.3. */

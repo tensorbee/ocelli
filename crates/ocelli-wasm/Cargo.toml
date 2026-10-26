@@ -64,7 +64,7 @@ wasm-opt = [
 wasm-bindgen = { workspace = true }
 # The same versions wgpu 30.0.1 already resolves. They stay in this target
 # table so a native crate cannot name the browser types through the workspace.
-web-sys = { version = "=0.3.104", features = ["OffscreenCanvas"] }
+web-sys = { version = "=0.3.104", features = ["ImageData", "OffscreenCanvas", "OffscreenCanvasRenderingContext2d"] }
 js-sys = "=0.3.104"
 # Async exports become promises through this crate. Pinned to the version
 # already in Cargo.lock beside wasm-bindgen 0.2.127.
@@ -88,7 +88,11 @@ panic-probe = []
 # carry the feature.
 tier-b-probe = []
 
+[dev-dependencies]
+ocelli-pixel = { path = "../ocelli-pixel" }
+
 [dependencies]
+ocelli-cache = { path = "../ocelli-cache" }
 # HLD section 4's crate table puts the error model in ocelli-core, and F-005's
 # panic record writes ErrorCode::Panicked's number into linear memory. This is
 # the first time ocelli-wasm depends on another crate in the workspace. The
@@ -99,6 +103,9 @@ ocelli-core = { path = "../ocelli-core" }
 # the module and do not call the canvas exports. The size cost is the number
 # gate A4 reserved for this story, recorded in ci/wasm-size-budget.json.
 ocelli-render = { path = "../ocelli-render" }
+# F-101. The command batch and the event ring live in ocelli-viewport so the
+# native tests do not need wasm-bindgen. This crate owns the session slot.
+ocelli-viewport = { path = "../ocelli-viewport" }
 # `SurfaceTarget::OffscreenCanvas` is the safe constructor, and D-12 keeps the
 # canvas type out of ocelli-render, so this crate is the one that names the
 # target. The device is still created only in ocelli-render. The workspace pin

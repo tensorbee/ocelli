@@ -9,8 +9,10 @@
 
 extern crate alloc;
 
+pub mod commands;
 pub mod placement;
 pub mod presentation;
+pub mod ring;
 pub mod scroll;
 pub mod view;
 

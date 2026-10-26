@@ -14,10 +14,19 @@ workspace = true
 # the mechanism that makes generated Rust safe to merge at volume, so it is
 # infrastructure and not a phase.
 [dependencies]
+dicom-core = { workspace = true }
+ocelli-codec = { path = "../../crates/ocelli-codec" }
+ocelli-core = { path = "../../crates/ocelli-core" }
+ocelli-dicom = { path = "../../crates/ocelli-dicom" }
+ocelli-pixel = { path = "../../crates/ocelli-pixel" }
+ocelli-render = { path = "../../crates/ocelli-render" }
+ocelli-viewport = { path = "../../crates/ocelli-viewport" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
+wgpu = { workspace = true }
+pollster = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
