@@ -5,10 +5,12 @@ It is opinionated and load-bearing. **When in doubt, this file wins over any
 other document except `docs/hld/`**, which is normative on what to build.
 This file is normative on how.
 
-It works identically under Claude Code and Codex. The `.claude` directory name
-is historical, not an ownership marker: plans, reviews, commands and handoffs
-are agent-neutral tracked artefacts. Codex loads `AGENTS.md` and the generated
-adapters under `.agents/skills/`.
+It works identically under Claude Code, Codex and OpenCode. The `.claude`
+directory name is historical, not an ownership marker: plans, reviews, commands
+and handoffs are agent-neutral tracked artefacts. Codex loads `AGENTS.md` and
+the generated adapters under `.agents/skills/`. OpenCode loads the same
+adapters as skills and its slash commands from the generated
+`.opencode/commands/`.
 
 ## The one thing this project is actually about
 
@@ -87,6 +89,7 @@ implementation is being claimed.
 | Living architecture | `docs/lld/*.md` | `/complete-feature` step 9 | Evolves |
 | Corpus manifest | `corpus/manifest.tsv` | `scripts/corpus_check.py --add` | Live |
 | Codex adapters | `.agents/skills/` | `scripts/sync_agent_skills.py` | Generated, tracked |
+| OpenCode commands | `.opencode/commands/` | `scripts/sync_agent_skills.py` | Generated, tracked |
 
 ## The gate
 

@@ -921,6 +921,16 @@ def _stale_codex_adapter(box: Sandbox) -> None:
                "\nA line the adapter has not seen.\n")
 
 
+def _hand_edited_opencode_command(box: Sandbox) -> None:
+    box.substitute(".opencode/commands/verify.md",
+                   "Arguments: $ARGUMENTS", "Arguments: none")
+
+
+def _orphan_opencode_command(box: Sandbox) -> None:
+    box.write(".opencode/commands/stray.md",
+              "---\ndescription: No canonical source.\n---\n")
+
+
 def _changed_skill_example_digit(box: Sandbox) -> None:
     box.substitute(
         ".claude/skills/dicom-tooling/SKILL.md",
@@ -8743,14 +8753,22 @@ GUARDS: tuple[Guard, ...] = (
         id="skills",
         file="scripts/sync_agent_skills.py",
         gate="skills",
-        spec="`.claude/WORKFLOW.md`, one workflow and two hosts",
-        refuses="A Codex adapter that has fallen behind its canonical command "
-                "or skill file, or that has no canonical source at all.",
+        spec="`.claude/WORKFLOW.md`, one workflow and three hosts",
+        refuses="A Codex or OpenCode adapter that has fallen behind its "
+                "canonical command or skill file, or that has no canonical "
+                "source at all.",
         claims=("*",),
         probes=(
             Probe("skills.stale-adapter", _stale_codex_adapter,
                   script("python3", "scripts/sync_agent_skills.py", "--check"),
                   "is stale, its source changed"),
+            Probe("skills.hand-edited-opencode-command",
+                  _hand_edited_opencode_command,
+                  script("python3", "scripts/sync_agent_skills.py", "--check"),
+                  ".opencode/commands/verify.md is stale"),
+            Probe("skills.orphan-opencode-command", _orphan_opencode_command,
+                  script("python3", "scripts/sync_agent_skills.py", "--check"),
+                  ".opencode/commands/stray.md has no canonical source"),
         ),
     ),
     Guard(

@@ -70,7 +70,7 @@ GATES=(
   "content|no|no DICOM and no build artefacts tracked"
   "backlog|no|BACKLOG, SPRINT_PLAN, tracker and as-built agree"
   "deviations|no|every HLD deviation declared and still true"
-  "skills|no|Codex adapters match canonical sources and marked examples run"
+  "skills|no|Codex and OpenCode adapters match canonical sources and marked examples run"
   "lint|no|eslint, including the cached-wasm-view ban (HLD 17.2)"
   "types|no|tsc --build across the TypeScript workspaces"
   "wasm|no|wasm-pack build and the size budget (E1.2, gate A4)"
