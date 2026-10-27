@@ -11,7 +11,7 @@ definitions.
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-050 | E7.6 | Camera, display-area and presentation-state serialisation | Rust+TS | 3w | done |
-| F-102 | E16.3 | Framework bindings (React first) | TS | 3w | pending |
+| F-102 | E16.3 | Framework bindings (React first) | TS | 3w | done |
 | F-103 | E16.4 | Event model: the ~103 cornerstone events, re-shaped and documented | TS | 4w | done |
 | F-104 | E16.5 | TypeScript type generation from Rust definitions | TS | 4w | done |
 

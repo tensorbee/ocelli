@@ -10,6 +10,11 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- A React viewport binding. `createViewportPump` submits one packed command
+  buffer on a frame that has queued commands, drains the ring once, copies
+  state once and reports that copy only when a field changed. `OcelliViewport` takes a session prop and renders
+  a host element. A missing session is the absent state. The binding does not
+  draw.
 - A named event catalogue for the six ring kinds and the shell events, with
   one row per cornerstone3D 5.8.2 event. `decodeNamedEvent` reads the copied
   payload. Scroll, camera and window stay state. Unavailable rows name the

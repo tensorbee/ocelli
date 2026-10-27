@@ -7,7 +7,12 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   test: {
-    include: ["packages/*/src/**/*.test.ts", "examples/*/src/**/*.test.ts"],
+    include: [
+      "packages/*/src/**/*.test.ts",
+      "packages/*/src/**/*.test.tsx",
+      "examples/*/src/**/*.test.ts",
+      "examples/*/src/**/*.test.tsx",
+    ],
     // The wasm boundary file needs a built module. `npm run test` does not
     // build one. Run it with `npx vitest run --config vitest.boundary.config.ts`
     // after `wasm-pack build crates/ocelli-wasm --dev --target web --out-dir target/boundary-wasm`.

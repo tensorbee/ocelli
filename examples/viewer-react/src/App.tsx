@@ -1,5 +1,6 @@
-import { coreAvailable, VERSION } from "@ocelli/core";
+import { coreAvailable, VERSION, viewportId } from "@ocelli/core";
 import { OcelliViewport } from "@ocelli/react";
+import type { OcelliSession } from "@ocelli/react";
 
 /**
  * The example viewer.
@@ -10,10 +11,16 @@ import { OcelliViewport } from "@ocelli/react";
  *
  * A clean clone has no built wasm module, so the honest state is "core not
  * built" rather than a crash. F-002 (`bin/ocelli.sh wasm`) produces the
- * module, F-101 makes this panel show a frame.
+ * module. This story does not load that module. The factory returns null,
+ * and the viewport stays absent until a caller supplies a session.
  */
+function sessionFromModule(): OcelliSession | null {
+  return null;
+}
+
 export function App() {
   const ready = coreAvailable();
+  const session = sessionFromModule();
 
   return (
     <main>
@@ -34,16 +41,20 @@ export function App() {
             <code>crates/ocelli-wasm/pkg</code>, then reload.
           </p>
           <p>
-            Until F-101 lands there is no boundary to attach to, so the
-            viewport below mounts its host element and reports its state and
-            does nothing else. That is the whole of the current milestone.
+            The viewport below mounts its host element and reports the absent
+            state. It starts a frame pump only when a session is supplied.
           </p>
         </section>
       )}
 
       <section>
         <h2>Stack viewport</h2>
-        <OcelliViewport id="stack-1" className="viewport" />
+        <OcelliViewport
+          id="stack-1"
+          className="viewport"
+          viewport={viewportId(1)}
+          session={session}
+        />
       </section>
     </main>
   );

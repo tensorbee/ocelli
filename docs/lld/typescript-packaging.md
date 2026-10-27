@@ -1,6 +1,6 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-X003
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003
 **Last updated:** 2026-10-27
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
@@ -12,7 +12,10 @@ What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 | `@ocelli/core` | The TypeScript shell of HLD section 10 | none |
 | `@ocelli/react` | The React binding | `@ocelli/core` at an exact version |
 
-`@ocelli/react` remains a scaffold. `@ocelli/core` now also publishes F-021's
+`@ocelli/react` publishes the viewport pump, the hook and the host component.
+`jsdom` and `@testing-library/react` are workspace devDependencies used by the
+component test. Neither is a dependency of the published package. `@ocelli/core`
+now also publishes F-021's
 bounded DICOMweb transport and one-write response-sink contract, and F-035's
 decode-to-render handoff. F-100 publishes `viewport.ts`, which is the
 viewport, scene and tool types. F-101 adds `commands.ts` and the copied
@@ -122,8 +125,11 @@ specially. If a bundler is needed then, it is added then, with a named reason.
 bin/ocelli.sh gate packages
 ```
 
-Two things, in order. `vitest run` over `packages/*/src/**/*.test.ts`, then
-`scripts/package_check.py`.
+Two things, in order. `vitest run` over `packages/*/src/**/*.test.ts` and
+`packages/*/src/**/*.test.tsx`, then `scripts/package_check.py`. The component
+test opts into jsdom with a vitest environment comment, so the rest of the
+suite keeps the default environment. `npm run dev` starts with no session and
+shows the absent state.
 
 `vitest.config.ts` sets `passWithNoTests: false`. Vitest's default is to pass
 an empty run, and this project's rule is that a check which could not run must

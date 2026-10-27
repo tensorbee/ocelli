@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-X003
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003
 **Last updated:** 2026-10-27
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -111,7 +111,19 @@ sixty-three cornerstone tool classes are not these names. F-103 is the event
 model. Annotation tools are not in the set.
 
 `packages/core/src/viewport.ts` exports the types. It does not call wasm.
-`packages/react` stays a scaffold. F-102 owns framework bindings.
+
+## React binding
+
+`@ocelli/react` exports `OcelliViewport`, `useOcelliViewport` and
+`createViewportPump`. The component takes a session prop. There is no context
+and no module singleton. The pump enqueues commands. A frame with a non-empty queue submits one packed
+buffer through `writeCommands`. An empty queue does not. Every frame drains
+the ring once and dispatches F-103's named events. `checkpoint` reads
+`session.snapshot()` when the caller asks, and `restore` applies that record
+and then one `Scroll`. The host element is a `div` with `data-ocelli-viewport`
+and `data-ocelli-core`. This story does not render a canvas. The binding
+reports `TIER_C_DRAWING` because it does not resolve a GPU tier and must not
+claim a drawn image.
 
 ## Snapshot
 
