@@ -27,12 +27,18 @@ import {
   EVENT_STRIDE,
   FLAG_INVERT,
   INVERT_BYTE,
+  SNAPSHOT_ERROR,
+  SNAPSHOT_MAGIC,
   packCommands,
+  parseSnapshot,
   PRESET_BYTE,
   readViewportState,
   RING_EVENT_KIND,
   sessionBulkSink,
   sessionCommandSink,
+  restoreSessionSnapshot,
+  sessionSnapshot,
+  sessionSnapshotError,
   submitCommands,
   VOI_FUNCTION_BYTE,
   writeFrame,
@@ -57,6 +63,9 @@ interface BuiltExports {
   commit_selected_frame(ticket: number, len: number, viewport: number, columns: number, rows: number, index: number, epoch: number): number;
   copy_state(): Uint8Array;
   drain_events(): Uint8Array;
+  snapshot(): Uint8Array;
+  snapshot_error(): number;
+  restore_snapshot(bytes: Uint8Array): number;
   bindCpuCanvas(
     canvas: unknown,
     cssWidth: number,
@@ -128,6 +137,9 @@ async function loadModule(): Promise<BuiltExports> {
     ...exports,
     copy_state: glue.copy_state,
     drain_events: glue.drain_events,
+    snapshot: glue.snapshot,
+    snapshot_error: glue.snapshot_error,
+    restore_snapshot: glue.restore_snapshot,
   } as BuiltExports;
 }
 
@@ -583,6 +595,56 @@ describe("wasm session boundary", () => {
     expect(drained.events).toHaveLength(256);
     expect(drained.dropped).toBe(44);
     expect(drained.events[255]?.seq).toBe(255n);
+  });
+
+  it("round-trips a snapshot through the public helpers", async () => {
+    const wasm = await loadModule();
+    expect(
+      submit(
+        wasm,
+        packCommands(1, [
+          { kind: "Fit", width: 800, height: 600, columns: 512, rows: 512 },
+          { kind: "Pan", x: 12.5, y: -4 },
+          { kind: "Zoom", factor: 2 },
+          { kind: "SetWindow", centre: 40, width: 400, function: "linear" },
+          { kind: "SetInvert", invert: "inverse" },
+        ]),
+      ),
+    ).toBe(5);
+    const saved = sessionSnapshot(wasm);
+    expect(sessionSnapshotError(wasm)).toBe(0);
+    expect(saved.byteLength).toBeGreaterThan(0);
+    const parsed = parseSnapshot(saved);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.snapshot.magic).toBe(SNAPSHOT_MAGIC);
+    expect(parsed.snapshot.camera.panX).toBe(12.5);
+    expect(parsed.snapshot.camera.zoom).toBe(2);
+    expect(parsed.snapshot.presentation.evidence).toEqual({
+      kind: "shape",
+      shape: "inverse",
+    });
+    expect(new TextDecoder().decode(saved)).not.toContain("matrix");
+    const before = wasm.copy_state();
+    expect(
+      submit(wasm, packCommands(1, [{ kind: "Pan", x: 80, y: 80 }])),
+    ).toBe(1);
+    expect(restoreSessionSnapshot(wasm, saved)).toBe(0);
+    expect(sessionSnapshotError(wasm)).toBe(0);
+    expect(Array.from(wasm.copy_state())).toEqual(Array.from(before));
+    const refused = restoreSessionSnapshot(wasm, new TextEncoder().encode("{"));
+    expect(refused).toBe(SNAPSHOT_ERROR.Json);
+    expect(Array.from(wasm.copy_state())).toEqual(Array.from(before));
+    const version = JSON.parse(new TextDecoder().decode(saved)) as {
+      version: number;
+    };
+    version.version = 2;
+    expect(
+      restoreSessionSnapshot(wasm, new TextEncoder().encode(JSON.stringify(version))),
+    ).toBe(SNAPSHOT_ERROR.UnknownVersion);
+    expect(Array.from(wasm.copy_state())).toEqual(Array.from(before));
   });
 
   it("exports the cpu canvas blit and no pixel getter", async () => {

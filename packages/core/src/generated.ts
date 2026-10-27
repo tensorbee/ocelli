@@ -103,3 +103,16 @@ export const FLAG_INVERT = 1;
 export const FLAG_LOADING = 2;
 export const FLAG_ERROR = 4;
 export const FLAG_REFINING = 8;
+
+export const SNAPSHOT_MAGIC = "OCS1";
+export const SNAPSHOT_VERSION = 1;
+export const SNAPSHOT_ERROR = {
+  NonFinite: 1,
+  Encode: 2,
+  Json: 3,
+  BadMagic: 4,
+  UnknownVersion: 5,
+  BadEnum: 6,
+  BadLut: 7,
+  ChainUnavailable: 8,
+} as const;

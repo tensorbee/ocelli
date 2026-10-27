@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-X003
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-X003
 **Last updated:** 2026-10-27
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -12,11 +12,12 @@ wire carries. The wire lives in `ocelli-viewport`, `ocelli-wasm` and
 ## The generated boundary module
 
 `crates/ocelli-viewport/src/boundary.rs` is the one definition of the
-boundary's numbers. It holds the eleven command ids and payload lengths, the
-VOI function, preset, colormap and invert bytes, the flag bits, the
-`ViewportState` and `RingHeader` layouts, the event stride and field offsets,
-and the six ring kinds. `crates/ocelli-viewport/tests/typegen.rs` writes
-`packages/core/src/generated.ts` from those items and compares the committed
+command, state and ring numbers. It holds the eleven command ids and payload
+lengths, the VOI function, preset, colormap and invert bytes, the flag bits,
+the `ViewportState` and `RingHeader` layouts, the event stride and field
+offsets, and the six ring kinds. `snapshot.rs` is the one definition of the
+snapshot magic, version and error codes. `crates/ocelli-viewport/tests/typegen.rs`
+writes `packages/core/src/generated.ts` from both and compares the committed
 file byte for byte. A change to a Rust payload length or a struct field fails
 the `test` gate until the file is regenerated:
 
@@ -111,6 +112,23 @@ model. Annotation tools are not in the set.
 
 `packages/core/src/viewport.ts` exports the types. It does not call wasm.
 `packages/react` stays a scaffold. F-102 owns framework bindings.
+
+## Snapshot
+
+F-050 adds `snapshot`, `snapshot_error` and `restore_snapshot` on the wasm
+session, and `parseSnapshot`, `sessionSnapshot`, `sessionSnapshotError` and
+`restoreSessionSnapshot` in `@ocelli/core`.
+
+`snapshot` returns the UTF-8 JSON record as a copied array. An empty array
+is a refusal, and `snapshot_error` names it. Zero means the last snapshot
+succeeded. `restore_snapshot` returns zero on success and the same codes
+otherwise. A refused restore leaves the camera, the display area and the
+presentation unchanged. Scroll, flags and generation are not in the record.
+
+`parseSnapshot` refuses an unknown version, a bad magic, malformed JSON and
+an unknown field. `SNAPSHOT_MAGIC`, `SNAPSHOT_VERSION` and `SNAPSHOT_ERROR`
+come from `generated.ts`. The record stores camera inputs. It does not store
+the sixteen-number matrix that `readViewportState` copies.
 
 ## Minimal resident stack initialization
 

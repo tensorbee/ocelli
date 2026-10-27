@@ -5,6 +5,8 @@
 //! before any of it is written. `View`, presentation and scroll stay as they
 //! were when any command in the batch is refused.
 
+use alloc::vec::Vec;
+
 use ocelli_core::{Canvas, Pt};
 use ocelli_pixel::{
     LutChain, ModalityTransform, PhotometricInterpretation, PresentationLutEvidence, VoiFunction,
@@ -333,6 +335,40 @@ impl StackViewport {
         out.copy_from_slice(bytemuck::bytes_of(&state));
         Ok(())
     }
+
+    /// UTF-8 JSON for the camera, the display area and the presentation.
+    ///
+    /// Scroll, flags and generation are runtime state and are not included.
+    /// The record has no camera matrix.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::snapshot::SnapshotError::NonFinite`] when a stored value is
+    /// NaN or infinite. [`crate::snapshot::SnapshotError::Encode`] when the
+    /// serialiser refuses the record.
+    pub fn snapshot(&self) -> Result<Vec<u8>, crate::snapshot::SnapshotError> {
+        crate::snapshot::encode(self)
+    }
+
+    /// Replace the camera, the display area and the presentation.
+    ///
+    /// Scroll, flags, generation and the viewport id stay. A refusal assigns
+    /// nothing. The chain is rebuilt through [`ocelli_pixel::LutChain::new`].
+    ///
+    /// # Errors
+    ///
+    /// A [`crate::snapshot::SnapshotError`]. The stored view and presentation
+    /// are unchanged.
+    pub fn restore(&mut self, bytes: &[u8]) -> Result<(), crate::snapshot::SnapshotError> {
+        let decoded = crate::snapshot::decode(bytes)?;
+        self.view = decoded.view;
+        self.presentation = decoded.presentation;
+        self.columns = decoded.columns;
+        self.rows = decoded.rows;
+        self.css_width = decoded.css_width;
+        self.css_height = decoded.css_height;
+        Ok(())
+    }
 }
 
 struct Fitted {
@@ -583,4 +619,24 @@ fn read_f64(bytes: &[u8], at: usize) -> Result<f64, CommandError> {
     let mut buf = [0_u8; 8];
     buf.copy_from_slice(slot);
     Ok(f64::from_le_bytes(buf))
+}
+
+#[cfg(test)]
+mod snapshot_access {
+    use super::StackViewport;
+    use crate::snapshot::SnapshotError;
+    use crate::view::Zoom;
+
+    #[test]
+    fn a_non_finite_zoom_is_refused_before_any_bytes() {
+        let built = StackViewport::try_identity(1);
+        assert!(built.is_ok());
+        let Ok(mut viewport) = built else {
+            return;
+        };
+        viewport.view.set_zoom(Zoom::new(f64::NAN));
+        assert!(matches!(viewport.snapshot(), Err(SnapshotError::NonFinite)));
+        assert_eq!(viewport.generation(), 0);
+        assert_eq!(viewport.flags(), 0);
+    }
 }

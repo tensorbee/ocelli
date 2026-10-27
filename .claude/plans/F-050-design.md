@@ -101,9 +101,10 @@ Every item below is this plan's decision.
   probe measured 2,135,113 bytes against the current 2,099,014-byte ceiling,
   36,099 over. A flat probe measured 2,098,431, 583 under, which leaves no
   headroom for the real implementation. The operator chose a deliberate
-  re-baseline of `ci/wasm-size-budget.json` on 2026-10-27. The final module is
-  measured by `bin/ocelli.sh wasm` and recorded with its cause. Gate A4 is
-  unaffected because the recorded number never claimed to close it.
+  re-baseline of `ci/wasm-size-budget.json` on 2026-10-27. The release
+  measurement on 2026-10-27 is 2,151,196 bytes, from 1,999,061, a delta of
+  152,135. Gate A4 is unaffected because the recorded number never claimed
+  to close it.
 - **The version.** `SNAPSHOT_VERSION = 1`, a top-level `version` field beside a
   `magic` string. A reader refuses every other version rather than guessing.
   `serde`'s `deny_unknown_fields` refuses a field the version does not name.
@@ -579,10 +580,10 @@ consequence is the serde dependency and the size re-baseline recorded below.
 
 **Q2, answered 2026-10-27. The size re-baseline.** The operator chose to
 re-baseline `ci/wasm-size-budget.json` deliberately rather than switch to a
-binary record or shrink JSON under the ceiling. Measured: a faithful nested
-schema is 2,135,113 bytes against the 2,099,014-byte ceiling. The plan records
-the new base with its cause and keeps the note that the number does not close
-gate A4.
+binary record or shrink JSON under the ceiling. A faithful nested probe
+measured 2,135,113 bytes against the 2,099,014-byte ceiling. The release
+module measured on 2026-10-27 is 2,151,196 bytes. The budget file records
+that base, the cause, and the note that the number does not close gate A4.
 
 **Q3, written 2026-10-27. The deviation row.** The JSON choice needed a D-26
 row because `serde` and `serde_json` are not in HLD section 15.2's dependency

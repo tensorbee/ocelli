@@ -120,6 +120,14 @@ const PUBLISHED: readonly string[] = [
   "WINDOW_PRESETS",
   "readViewportState",
   "viewportId",
+  // ./snapshot.js, F-050
+  "SNAPSHOT_ERROR",
+  "SNAPSHOT_MAGIC",
+  "SNAPSHOT_VERSION",
+  "parseSnapshot",
+  "restoreSessionSnapshot",
+  "sessionSnapshot",
+  "sessionSnapshotError",
   // this file
   "VERSION",
   "coreAvailable",

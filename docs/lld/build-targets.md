@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-101, F-X003, F-X008
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008
+**Last updated:** 2026-10-27
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -253,21 +253,23 @@ first measurement would be either meaningless or immediately wrong.
 
 **First measurement: 14,104 bytes**, on 2026-09-04.
 
-**Current baseline: 1,999,061 bytes**, re-baselined by F-039 on 2026-10-18.
+**Current baseline: 2,151,196 bytes**, re-baselined by F-050 on 2026-10-27.
 `bin/ocelli.sh wasm` measured `crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm` at
-that size, and `--accept-size` printed 1.91 MiB. The previous recorded
-baseline was 16,388 bytes, from F-005. That parent commit was not rebuilt.
-The delta against the recorded number is 1,982,673 bytes.
-`ci/wasm-size-budget.json` carries the same from, to and cause.
+that size, 2.05 MiB. The previous recorded baseline was 1,999,061 bytes, from
+F-039 on 2026-10-18. The delta against that recorded number is 152,135 bytes.
+`ci/wasm-size-budget.json` carries the same from, to and cause. F-039's own
+record stays in that file under `previous`.
 
-**What the delta is** is the first edge from `ocelli-wasm` to `ocelli-render`,
-which pulls in wgpu and Naga. That is the number the previous budget text
-assigned to F-039.
+**What the delta is** is `serde_json` entering the shipped module. F-050 stores
+the camera inputs, the display area and the presentation as JSON. The operator
+chose that record on 2026-10-27. F-039 remains the first edge from
+`ocelli-wasm` to `ocelli-render`, which pulled in wgpu and Naga and moved the
+budget from 16,388 bytes to 1,999,061.
 
 **That number is not an answer to Appendix A gate A4 and must not be read as
 one.** A4 asks whether binary size and cold start land within budget and
-estimates 3 to 8 MB uncompressed with Naga dominating. 1,999,061 bytes is the
-first measurement of that edge. Cold start was not remeasured. A4 stays open.
+estimates 3 to 8 MB uncompressed with Naga dominating. 2,151,196 bytes is the
+F-050 measurement. Cold start was not remeasured. A4 stays open.
 
 ### The other half of A4, cold start
 
@@ -280,10 +282,11 @@ and everything about how it was taken are in `ci/bench-baseline.json`, and the
 design is `docs/lld/benchmarks.md`.
 
 **The same caveat applies to it, and it is the reason both halves live in one
-place rather than in two documents.** F-039 changed the module. The 2.3 ms
-figure was not remeasured, so it still describes the module from before wgpu
-and Naga were reached. **A4 stays open**, and 2.3 ms remains a regression
-baseline until a later story measures cold start again.
+place rather than in two documents.** F-039 changed the module, and F-050
+changed it again. The 2.3 ms figure was not remeasured, so it still describes
+the module from before wgpu and Naga were reached. **A4 stays open**, and
+2.3 ms remains a regression baseline until a later story measures cold start
+again.
 
 **Re-baselining is expected, repeatedly, for the whole build-out phase.** A 5%
 tolerance on a 14 KB module is blown by the first story that adds anything
@@ -295,7 +298,9 @@ other thing once the module is feature-complete.
 
 ## The exported surface, and the panic probe
 
-The module exports twenty-one functions of ours. wasm-bindgen adds its own,
+The module exports twenty-four functions of ours. F-050 added `snapshot`,
+`snapshot_error` and `restore_snapshot` to the twenty-one that were already
+there. wasm-bindgen adds its own,
 and `memory`, which are the glue's and not this table's. The table below names
 the six that predate F-101, which are the measurement root, the panic probe and
 the two render-target calls. The F-101 boundary and CPU canvas exports are
@@ -392,8 +397,8 @@ the host tree does not reach them.
 
 **Measured cost of reaching wgpu from the wasm module is the F-039 delta.**
 `ocelli-wasm` depends on `ocelli-render` and on `wgpu`, so the release module
-reaches wgpu and Naga. The measurement above is 1,999,061 bytes against the
-recorded baseline of 16,388. The parent commit was not rebuilt. Device
+reaches wgpu and Naga. F-039 measured 1,999,061 bytes against the recorded
+baseline of 16,388. The parent commit was not rebuilt. Device
 creation stays in `ocelli-render`. `ocelli-wasm` names
 `SurfaceTarget::OffscreenCanvas` because D-12 keeps that browser type out of
 `ocelli-render`. `web-sys` is a dependency of `ocelli-wasm` only.

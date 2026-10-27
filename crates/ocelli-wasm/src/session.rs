@@ -81,6 +81,8 @@ pub struct Session {
     /// Device-sized expansion of `cpu_rgba`. The canvas blits this buffer.
     cpu_present: Vec<u8>,
     stack_epoch: u32,
+    /// Last `snapshot` refusal. Zero after a successful snapshot.
+    snapshot_code: u32,
 }
 
 impl Session {
@@ -102,6 +104,7 @@ impl Session {
             cpu_rgba: Vec::new(),
             cpu_present: Vec::new(),
             stack_epoch: 0,
+            snapshot_code: 0,
         }
     }
 
@@ -406,6 +409,44 @@ impl Session {
         let generation = raster.begin_interaction();
         self.viewport.set_refining(raster.refining());
         self.viewport.set_generation(generation);
+    }
+
+    /// UTF-8 JSON for the camera, the display area and the presentation.
+    ///
+    /// An empty vector is a refusal. [`Self::snapshot_error`] names it.
+    /// Scroll, flags and generation are not in the record.
+    #[must_use]
+    pub fn snapshot(&mut self) -> Vec<u8> {
+        match self.viewport.snapshot() {
+            Ok(bytes) => {
+                self.snapshot_code = 0;
+                bytes
+            }
+            Err(error) => {
+                self.snapshot_code = error.number();
+                Vec::new()
+            }
+        }
+    }
+
+    /// The code from the last [`Self::snapshot`] call. Zero after a success.
+    ///
+    /// A restore does not change this. Its own return value is the restore code.
+    #[must_use]
+    pub const fn snapshot_error(&self) -> u32 {
+        self.snapshot_code
+    }
+
+    /// Restore a snapshot. Zero is success. Any other value is
+    /// [`ocelli_viewport::snapshot::SnapshotError::number`].
+    ///
+    /// A refusal leaves the viewport unchanged.
+    #[must_use]
+    pub fn restore_snapshot(&mut self, bytes: &[u8]) -> u32 {
+        match self.viewport.restore(bytes) {
+            Ok(()) => 0,
+            Err(error) => error.number(),
+        }
     }
 
     /// Copy the section 17.4 readback.
@@ -1097,6 +1138,28 @@ pub(crate) mod bind {
     #[wasm_bindgen(js_name = ring_capacity)]
     pub fn ring_capacity() -> u32 {
         RING_CAPACITY
+    }
+
+    /// Copied JSON. Empty when the session is missing or the record is refused.
+    #[wasm_bindgen(js_name = snapshot)]
+    pub fn snapshot() -> Vec<u8> {
+        with_session(super::Session::snapshot).unwrap_or_default()
+    }
+
+    /// Code from the last [`snapshot`]. Zero after a success and when no
+    /// session could be opened.
+    #[wasm_bindgen(js_name = snapshot_error)]
+    pub fn snapshot_error() -> u32 {
+        with_session(|session| session.snapshot_error()).unwrap_or(0)
+    }
+
+    /// Zero on success. A missing session is
+    /// [`ocelli_viewport::snapshot::SNAPSHOT_ERROR_CHAIN_UNAVAILABLE`],
+    /// which is not success.
+    #[wasm_bindgen(js_name = restore_snapshot)]
+    pub fn restore_snapshot(bytes: &[u8]) -> u32 {
+        with_session(|session| session.restore_snapshot(bytes))
+            .unwrap_or(ocelli_viewport::snapshot::SNAPSHOT_ERROR_CHAIN_UNAVAILABLE)
     }
 }
 

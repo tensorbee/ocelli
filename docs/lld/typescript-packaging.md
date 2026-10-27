@@ -1,6 +1,6 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-X003
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-X003
 **Last updated:** 2026-10-27
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
@@ -32,7 +32,8 @@ F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
 | `dicomweb.ts` | Bounded WADO-RS, WADO-URI, and QIDO-RS request construction, validation, authentication, cancellation, and response transfer |
 | `ring.ts` | The event ring's consumer side, including `drainRing` over a copied buffer |
 | `commands.ts` | Little-endian packing of the eleven stack commands and one submit per frame |
-| `generated.ts` | F-104's boundary constants and `StackCommand`, generated from `crates/ocelli-viewport/src/boundary.rs` |
+| `generated.ts` | F-104's boundary constants and `StackCommand`, plus the F-050 snapshot magic, version and error codes |
+| `snapshot.ts` | F-050's JSON parser and the session snapshot adapter |
 | `errors.ts` | The error-code mirror, the message table, `decodeRecord` |
 | `panic.ts` | `readPanicRecord`, and the panic record's layout |
 | `fatal.ts` | `CoreStatus` and the never-returns-to-ok latch |

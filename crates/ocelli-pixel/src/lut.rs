@@ -26,6 +26,8 @@ pub struct LutDescriptor {
     inputs: Vec<f32>,
     values: Vec<f32>,
     bits_per_entry: u8,
+    /// The descriptor's first value as declared. Zero still means 65,536.
+    declared_entry_count: u16,
     /// DICOM PS3.3 C.11.2.1.1's declared output range, upper bound.
     ///
     /// Retained from construction rather than re-derived from
@@ -44,6 +46,7 @@ impl Clone for LutDescriptor {
             inputs: self.inputs.clone(),
             values: self.values.clone(),
             bits_per_entry: self.bits_per_entry,
+            declared_entry_count: self.declared_entry_count,
             largest_representable_value: self.largest_representable_value,
             first_mapped_input: self.first_mapped_input,
         }
@@ -104,6 +107,7 @@ impl LutDescriptor {
             inputs,
             values,
             bits_per_entry,
+            declared_entry_count: entry_count,
             largest_representable_value: largest_value,
             first_mapped_input,
         })
@@ -131,6 +135,22 @@ impl LutDescriptor {
     /// colour compares this across its three channels.
     pub fn entry_count(&self) -> usize {
         self.values.len()
+    }
+
+    /// The descriptor's first value before the zero-means-65,536 rule.
+    ///
+    /// DICOM PS3.3 C.11.2.1.1. A later reader uses this rather than inverting
+    /// [`Self::entry_count`], which cannot tell a declared zero from 65,536.
+    pub const fn declared_entry_count(&self) -> u16 {
+        self.declared_entry_count
+    }
+
+    /// The LUT Data this descriptor was validated with.
+    ///
+    /// A read. It does not clone the descriptor, so
+    /// [`lut_descriptor_clones`] does not move.
+    pub fn values(&self) -> &[f32] {
+        &self.values
     }
 
     /// PS3.3 C.7.6.3.1.5's second value, the first stored pixel value mapped.
@@ -234,6 +254,16 @@ impl ModalityTransform {
         match &self.0 {
             ModalitySelection::Lut(_) => None,
             ModalitySelection::Rescale { slope, intercept } => Some((*slope, *intercept)),
+        }
+    }
+
+    /// The selected Modality LUT Sequence, or `None` when rescale was selected.
+    ///
+    /// An accessor over state already held. It does not apply the LUT.
+    pub const fn lut(&self) -> Option<&LutDescriptor> {
+        match &self.0 {
+            ModalitySelection::Lut(lut) => Some(lut),
+            ModalitySelection::Rescale { .. } => None,
         }
     }
 
@@ -361,6 +391,16 @@ impl VoiTransform {
                 function,
                 ..
             } => Some((*center, *width, *function)),
+        }
+    }
+
+    /// The selected VOI LUT Sequence, or `None` when a window was selected.
+    ///
+    /// An accessor over state already held. It does not apply the LUT.
+    pub const fn lut(&self) -> Option<&LutDescriptor> {
+        match &self.0 {
+            VoiSelection::Lut(lut) => Some(lut),
+            VoiSelection::Window { .. } => None,
         }
     }
 

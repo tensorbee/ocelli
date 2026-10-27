@@ -10,6 +10,9 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- A versioned JSON snapshot of one viewport's camera inputs, display area and
+  presentation. `snapshot` and `restore_snapshot` round-trip that record.
+  Scroll, flags and generation stay put, and the 96-byte readback is unchanged.
 - The boundary's TypeScript declarations are generated from the Rust layout.
   `packages/core/src/generated.ts` is written by
   `crates/ocelli-viewport/tests/typegen.rs` and checked byte for byte, so a

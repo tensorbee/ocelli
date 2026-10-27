@@ -1,7 +1,7 @@
 # Viewport
 
-**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-101, F-X003, F-X022
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-101, F-X003, F-X022
+**Last updated:** 2026-10-27
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
 `RenderGraph::set_view` uploads the CSS matrix `View::camera_matrix` returns
@@ -185,6 +185,40 @@ stack still returns a shift, because the positions already carry it.
 Tier A and tier B upload the shift inside the camera matrix F-045 already
 writes. This module does not draw and does not edit the render graph.
 Tier C computes the same two numbers. `CpuRaster` samples with that view.
+
+## Snapshot
+
+F-050 stores the camera inputs, the display area and the presentation as
+versioned UTF-8 JSON. The magic is `OCS1` and the only version this crate
+reads is `1`. A reader refuses every other version and every field that
+version does not name. The record does not store the inverse camera matrix.
+`View::camera_matrix` remains the only derivation. Scroll, the selected
+slice, the loading, error and refining flags, the generation and the device
+pixel ratio are runtime state. A restore leaves them where it found them.
+
+`StackViewport::snapshot` returns the bytes. `StackViewport::restore`
+decodes the whole record, rebuilds the chain through `LutChain::new`, and
+then assigns the view, the presentation and the CSS grid. A refusal assigns
+nothing. An unfitted record uses the image centre and a fit scale of one.
+A fitted record keeps the stored anchor and fit scale and does not call
+`fit`.
+
+A modality or VOI LUT sequence is stored as that sequence. It does not also
+carry the rescale or the window the sequence overrode. A declared LUT entry
+count of zero means 65,536 entries, DICOM PS3.3 C.11.2.1.1, and `values`
+carries the resolved entries. Presentation evidence stays absent, an
+explicit shape, or a sequence. Absent on `MONOCHROME1` is not stored as an
+explicit inverse. DICOM PS3.3 C.11.6 names the two shapes.
+
+The wasm exports are `snapshot`, `snapshot_error` and `restore_snapshot`.
+`snapshot` copies a byte vector and returns an empty vector on refusal.
+`snapshot_error` is the last encode code. Zero means the last snapshot
+succeeded. `restore_snapshot` returns zero on success and the error code
+otherwise. `packages/core/src/snapshot.ts` reads the magic, the version and
+the codes from `generated.ts`.
+
+The record is the same on tier A, tier B and tier C. Taking it does not
+open a device and does not upload a texture.
 
 ## What this file does not own
 

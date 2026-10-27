@@ -1,7 +1,7 @@
 # Tier resolution
 
-**F-IDs that contributed:** F-004, F-037, F-039, F-042, F-X001, F-X002, F-X016
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-004, F-037, F-039, F-042, F-050, F-X001, F-X002, F-X016
+**Last updated:** 2026-10-27
 
 How a session decides whether it is tier A, tier B or tier C, and how it
 records why. This describes what the code does today.
@@ -451,10 +451,11 @@ The pin and the workspace entry are untouched and only the consuming crate's
 feature set changes, which is the shape deviation D-09 set for glam. F-039
 makes `ocelli-wasm` depend on `ocelli-render` and on `wgpu`. The attach export
 calls `resolve_adapter`. The F-039 release module exported six functions and
-contains Naga. `ci/wasm-size-budget.json` records 1,999,061 bytes for that
-module. The current module exports twenty-one functions and has not been
-remeasured. Cold start was not remeasured. The 2.3 ms figure is still the
-F-006 measurement of the earlier module.
+contains Naga. F-039 recorded that module at 1,999,061 bytes.
+`ci/wasm-size-budget.json` now records 2,151,196 bytes, measured by F-050 on
+2026-10-27. The current module exports twenty-four functions. Cold start was
+not remeasured. The 2.3 ms figure is still the F-006 measurement of the
+earlier module.
 
 ## What this story deliberately does not do
 

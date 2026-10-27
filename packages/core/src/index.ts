@@ -162,6 +162,28 @@ export type {
   WindowPreset,
 } from "./viewport.js";
 
+export {
+  SNAPSHOT_ERROR,
+  SNAPSHOT_MAGIC,
+  SNAPSHOT_VERSION,
+  parseSnapshot,
+  restoreSessionSnapshot,
+  sessionSnapshot,
+  sessionSnapshotError,
+} from "./snapshot.js";
+export type {
+  CameraSnapshot,
+  DisplayAreaSnapshot,
+  EvidenceSnapshot,
+  ModalitySnapshot,
+  ParsedSnapshot,
+  PhotometricSnapshot,
+  PresentationSnapshot,
+  SessionSnapshotExports,
+  ViewportSnapshot,
+  VoiSnapshot,
+} from "./snapshot.js";
+
 /** Package version, kept in step with the crate versions by `/release`. */
 export const VERSION = "0.1.0";
 

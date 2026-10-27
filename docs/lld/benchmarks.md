@@ -1,7 +1,7 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-101, F-X003, F-X014
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014
+**Last updated:** 2026-10-27
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -159,15 +159,16 @@ instrument versions, the artefact's digest and the reasoning for both the value
 and the tolerance.
 
 Appendix A gate A4 has two halves. The size half is recorded in
-`ci/wasm-size-budget.json` at 1,999,061 bytes, the F-039 measurement of the
-release module that reaches wgpu and Naga. **The cold-start half is the 2.3 ms
+`ci/wasm-size-budget.json` at 2,151,196 bytes, the F-050 measurement of the
+release module. F-039 measured 1,999,061 bytes when the module first reached
+wgpu and Naga. **The cold-start half is the 2.3 ms
 figure above, and that figure is the F-006 measurement.** Cold start was not
-remeasured after F-039. 2.3 ms is not a measurement of the current module.
+remeasured after F-039 or F-050. 2.3 ms is not a measurement of the current module.
 
 **It is not an answer to gate A4 and must not be read as one.** A4 estimates
 3 to 8 MB uncompressed with Naga dominating, and it also names cold start.
 The F-039 release module that this measurement names exported six functions
-and contains Naga. The current release module exports twenty-one functions.
+and contains Naga. The current release module exports twenty-four functions.
 **A4 stays open.** The 2.3 ms figure remains the F-006 regression baseline
 until a later story measures cold start on this module.
 

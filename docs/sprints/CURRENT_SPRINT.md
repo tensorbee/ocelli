@@ -10,7 +10,7 @@ definitions.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-050 | E7.6 | Camera, display-area and presentation-state serialisation | Rust+TS | 3w | pending |
+| F-050 | E7.6 | Camera, display-area and presentation-state serialisation | Rust+TS | 3w | done |
 | F-102 | E16.3 | Framework bindings (React first) | TS | 3w | pending |
 | F-103 | E16.4 | Event model: the ~103 cornerstone events, re-shaped and documented | TS | 4w | pending |
 | F-104 | E16.5 | TypeScript type generation from Rust definitions | TS | 4w | done |
@@ -63,11 +63,11 @@ a full viewer against. Decision D7 holds. This open publishes nothing.
 - **Tier B greyscale has been drawn.** F-042 ran the section 18.3 rows on
   this host through headless Chromium WebGL2 and matched `LutChain::map_into`
   within 0.001, format `R32Float`. A tier B colour LUT readback was not run.
-- **The wasm size budget records 1,999,061 bytes.** S16 measured a release
-  module of 2,052,951 bytes against that baseline, inside the ceiling of
-  2,099,014. The budget file was not moved by S16. `bearing_on_gate_A4` in
-  `ci/wasm-size-budget.json` says this number does not close A4, and cold
-  start was not remeasured.
+- **The wasm size budget records 2,151,196 bytes.** F-050 measured the release
+  module on 2026-10-27 and re-baselined `ci/wasm-size-budget.json`. The
+  previous baseline was 1,999,061 bytes. S16 measured 2,052,951 bytes against
+  that older baseline and did not move the file. `bearing_on_gate_A4` says
+  this number does not close A4, and cold start was not remeasured.
 - **`max_review_passes` is stored but not automatically enforced by the
   backing script.** The shared instructions make the run-sprint host
   responsible for counting whole-sprint passes and invoking `set-phase
