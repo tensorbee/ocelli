@@ -203,7 +203,7 @@ Volumes assemble progressively, reslice obliquely and ray-cast on both tiers.
 | F-054 | E8.4 | S20 | Thick slab with composite, MIP, MinIP and average blend modes | Rust | 4w | F-052 | pending |
 | F-055 | E8.5 | S20 | Slice-position sync and frame-of-reference handling | Rust | 3w | F-052 | pending |
 | F-056 | E8.6 | S20 | Multi-volume fusion with per-volume opacity and colormap (PET-CT) | Rust | 4w | F-052 | pending |
-| F-057 | E8.7 | S19 | Progressive volume rendering while the series still loads | Rust | 3w | F-051 | pending |
+| F-057 | E8.7 | S19 | Progressive volume rendering while the series still loads | Rust | 3w | F-051 | done |
 | F-058 | E8.8 | S19 | Multiscale pyramid hooks in the volume model | Rust | 3w | F-051 | done |
 | F-059 | E9.1 | S19 | VOLUME_3D viewport with ray-cast direct volume rendering | Rust | 4w | F-051 | pending |
 | F-060 | E9.2 | S21 | Transfer-function editing surface and preset library | Rust | 3w | F-059 | pending |

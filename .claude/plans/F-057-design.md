@@ -87,9 +87,11 @@ impl Volume {
 impl RenderGraph {
     /// Upload each ready brick whose bytes changed. Stamps live beside brick
     /// residency and clear in the same function that drops brick textures.
+    /// `adapter` is the one `upload_brick` already takes.
     pub fn sync_volume(
         &mut self,
         ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
         volume_id: VolumeId,
         volume: &Volume,
     ) -> Result<ProgressReport, ProgressError>;
@@ -103,7 +105,7 @@ pub struct ProgressReport {
 }
 ```
 
-`VolumeError::BrickNotReady { brick: [u32; 3] }` is new. `VolumeError::SliceNotPresent { index: u32 }` is new. `ProgressError` wraps `BrickUploadError` and does not add a success path that drops the brick.
+`VolumeError::BrickNotReady { brick: [u32; 3] }` is new. `VolumeError::SliceNotPresent { index: u32 }` is new. `ProgressError` carries `BrickUploadError` and `VolumeError`. An upload refusal returns the cut brick. It does not add a success path that drops the brick.
 
 `present_slice_f32` decodes `U8`, little-endian `I16`, little-endian `U16`, or little-endian `F32`. It does not apply Bits Stored again. `place` already stored the container bytes. A signed 16-bit value uses `i16`, so `-3` stays `-3` and does not become `65533`.
 
@@ -177,7 +179,7 @@ Semantic RED: `cut_ready_brick` that ignores presence and calls `Brick::cut` on 
 
 Stamps are `BTreeMap<BrickKey, Vec<u8>>` on the graph beside `BrickResidency`. The value is the last uploaded brick bytes. `sync_volume` lists `ready_bricks`, cuts each, and calls `upload_brick` when the key is new or the bytes differ. It does not iterate the grid and upload the complement. The extra host copy is load-time state, not a render-loop allocation, and it is dropped in the same function that calls `self.bricks.clear()`.
 
-The render crate's `Cargo.toml` gains `ocelli-volume`. `lib.rs` gains `mod progressive`. `graph.rs` is not given a new pass. `upload_brick` stays the commit point. `sync_volume` and the stamp field live on `RenderGraph`.
+The render crate's `Cargo.toml` gains `ocelli-volume`. `lib.rs` gains `mod progressive`. `graph.rs` is not given a new pass. `upload_brick` stays the commit point. `sync_volume` and the stamp field live on `RenderGraph`. `sync_volume` delegates the walk to `sync_ready_bricks`, which refuses tier C before the walk and before any stamp write.
 
 Rejected alternatives:
 
@@ -245,7 +247,15 @@ None.
 
 ## LLD impact
 
-`docs/lld/volumes.md` gains `cut_ready_brick` and `present_slice_f32`. `docs/lld/render-graph.md` gains `sync_volume`, the stamp, and the rule that a missing brick texture means the slices have not all landed.
+`docs/lld/volumes.md` gains `cut_ready_brick` and `present_slice_f32`. `docs/lld/render-graph.md` gains `sync_volume` and the stamp. A brick `ready_bricks` omits is not uploaded. Recovery drops textures and stamps.
+
+## Fact correction
+
+`RenderGraph::upload_brick` takes `&ResolvedAdapter`. `get_texture_format_features` is a method of the wgpu adapter, and `GpuContext` does not store one. `sync_volume` takes the same reference and passes it through. This is not a second adapter and not a new pass.
+
+`RenderGraph::new` refuses tier C before a graph exists, so a floor test cannot call `sync_volume` on a device. `sync_ready_bricks` is the function `sync_volume` calls before any stamp write. The floor test drives it with `Tier::Cpu` and a stamp map. That is the same shape as `brick_plan`.
+
+A cut failure is `VolumeError`, because `BrickError` is not `thiserror` and cannot be `?` into the upload error. `ProgressError` carries that volume error. Tier C cuts nothing, so the upload error's brick is absent.
 
 ## Open questions
 

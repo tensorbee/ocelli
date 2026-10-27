@@ -1,7 +1,7 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057
+**Last updated:** 2026-10-27
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
@@ -192,11 +192,24 @@ width. Any other length is `WrongLength` and returns before `create_texture`.
 upload increments it by one and replaces any texture already held for that
 `BrickKey`. `set_voi` writes the thirty-two uniform bytes and does not
 increment `brick_uploads`, `uploads`, or `lut_uploads`. `install_recovered`
-drops the brick textures and does not increment the counter. Phase 1 keeps
+drops the brick textures and their stamps and does not increment the counter.
+Phase 1 keeps
 every uploaded texture. There is no byte-budget eviction of those textures.
 Frustum selection, LOD, the indirection texture and prefetch are HLD section
 30 and are not built. The host brick is not inserted into `BrickCache` after
 a successful copy.
+
+**Progressive upload is a ready brick.** `RenderGraph::sync_volume` walks
+`Volume::ready_bricks` and calls `upload_brick` when the level-0 bytes
+differ from the stamp. The stamp is those bytes. It is written only after
+the upload returns. A repeated sync of equal bytes does not increment
+`brick_uploads`. A brick the list omits gets no texture and no zeros.
+`install_recovered` drops the stamps with the textures, so the next sync
+uploads ready bricks again. Tier C returns `BrickUploadError::Unavailable`
+before a cut and before a stamp write. A grid product that does not fit in
+`u32` is `ProgressError::Grid`. Coarser levels are not uploaded.
+`ProgressReport` returns `present_count` and `dims[2]`. `sync_volume` takes
+the same `&ResolvedAdapter` `upload_brick` already requires.
 
 ## Tiers
 

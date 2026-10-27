@@ -16,7 +16,8 @@ use alloc::vec::Vec;
 
 use glam::{DMat3, DVec3};
 use ocelli_cache::{
-    BrickGrid, BrickSample, BrickWidth, Budgeted, CacheTier, DecodedFrame, Lru, Pressure, SeriesId,
+    Brick, BrickError, BrickGrid, BrickSample, BrickWidth, Budgeted, CacheTier, DecodedFrame, Lru,
+    Pressure, SeriesId,
 };
 use ocelli_core::{Pt, World};
 use ocelli_pixel::{ImageOrientationPatient, PixelRepresentation};
@@ -225,6 +226,26 @@ pub enum VolumeError {
     /// A coarser level whose dimensions or byte length cannot be stored.
     #[error("the coarser level does not fit behind level 0")]
     LevelShape,
+    /// `brick` is not in [`Volume::ready_bricks`].
+    #[error("brick {brick:?} still has an absent slice")]
+    BrickNotReady {
+        /// The brick coordinate that was refused.
+        brick: [u32; 3],
+    },
+    /// Slice `index` has not been placed.
+    #[error("slice {index} has not landed")]
+    SliceNotPresent {
+        /// The slice index that was refused.
+        index: u32,
+    },
+    /// [`ocelli_cache::Brick::cut`] refused the level 0 prefix.
+    #[error("the brick cut failed on axis {axis} at {value}")]
+    BrickCut {
+        /// The axis the cut named.
+        axis: u8,
+        /// The coordinate the cut refused.
+        value: u32,
+    },
 }
 
 /// One multiscale level. Level 0 is full resolution, and E8.8 adds entries.
@@ -651,6 +672,130 @@ impl Volume {
         }
         ready
     }
+
+    /// Copy one ready brick. A brick [`Volume::ready_bricks`] does not list
+    /// is refused.
+    ///
+    /// # Errors
+    ///
+    /// [`VolumeError::BrickNotReady`] when the brick still has an absent
+    /// slice. [`VolumeError::BrickCut`] when the level 0 prefix cannot be cut.
+    pub fn cut_ready_brick(&self, brick: [u32; 3]) -> Result<Brick, VolumeError> {
+        if !self.ready_bricks().contains(&brick) {
+            return Err(VolumeError::BrickNotReady { brick });
+        }
+        let grid = self.brick_grid();
+        let prefix = level0_prefix(self)?;
+        Brick::cut(&grid, brick, prefix, BrickSample::from(self.voxel)).map_err(brick_cut_error)
+    }
+
+    /// One present slice as little-endian container values in `f32`.
+    ///
+    /// `place` already stored the container. This does not apply Bits Stored
+    /// again. A signed container is `i16`, so the bytes `FD FF` stay `-3`.
+    ///
+    /// # Errors
+    ///
+    /// [`VolumeError::SliceNotPresent`] when the presence bit is clear,
+    /// including an index at or past the slice count.
+    /// [`VolumeError::SliceOutOfRange`] when that bit is set and the store
+    /// has no such slice.
+    pub fn present_slice_f32(&self, n: u32) -> Result<Vec<f32>, VolumeError> {
+        if !self.present.test(n) {
+            return Err(VolumeError::SliceNotPresent { index: n });
+        }
+        let bytes = self.data.slice(n).ok_or(VolumeError::SliceOutOfRange {
+            index: n,
+            count: self.dims[2],
+        })?;
+        decode_container(bytes, self.voxel)
+    }
+}
+
+fn level0_prefix(volume: &Volume) -> Result<&[u8], VolumeError> {
+    let mut count = 1usize;
+    for dim in volume.dims {
+        let wide = usize::try_from(dim).map_err(|_err| VolumeError::BrickCut {
+            axis: 0,
+            value: dim,
+        })?;
+        count = count.checked_mul(wide).ok_or(VolumeError::BrickCut {
+            axis: 0,
+            value: dim,
+        })?;
+    }
+    let len = count
+        .checked_mul(volume.voxel.bytes_per_voxel())
+        .ok_or(VolumeError::BrickCut { axis: 0, value: 0 })?;
+    volume
+        .data
+        .as_bytes()
+        .get(..len)
+        .ok_or(VolumeError::BrickCut { axis: 0, value: 0 })
+}
+
+fn brick_cut_error(error: BrickError) -> VolumeError {
+    let (axis, value) = match error {
+        BrickError::VoxelOutOfRange { axis, value }
+        | BrickError::BrickOutOfRange { axis, value } => (axis, value),
+    };
+    VolumeError::BrickCut { axis, value }
+}
+
+fn decode_container(bytes: &[u8], kind: VoxelKind) -> Result<Vec<f32>, VolumeError> {
+    let width = kind.bytes_per_voxel();
+    if width == 0 || !bytes.len().is_multiple_of(width) {
+        return Err(VolumeError::SliceSizeMismatch {
+            expected: width,
+            actual: bytes.len(),
+        });
+    }
+    let mut out = Vec::new();
+    let mut offset = 0usize;
+    while offset < bytes.len() {
+        let end = offset.saturating_add(width);
+        let Some(chunk) = bytes.get(offset..end) else {
+            return Err(VolumeError::SliceSizeMismatch {
+                expected: width,
+                actual: bytes.len(),
+            });
+        };
+        let value = match kind {
+            VoxelKind::U8 => f32::from(byte_at(chunk, 0, width, bytes.len())?),
+            VoxelKind::I16 => f32::from(i16::from_le_bytes(le_pair(chunk, width, bytes.len())?)),
+            VoxelKind::U16 => f32::from(u16::from_le_bytes(le_pair(chunk, width, bytes.len())?)),
+            VoxelKind::F32 => f32::from_le_bytes(le_quad(chunk, width, bytes.len())?),
+        };
+        out.push(value);
+        offset = end;
+    }
+    Ok(out)
+}
+
+fn byte_at(chunk: &[u8], index: usize, width: usize, actual: usize) -> Result<u8, VolumeError> {
+    chunk
+        .get(index)
+        .copied()
+        .ok_or(VolumeError::SliceSizeMismatch {
+            expected: width,
+            actual,
+        })
+}
+
+fn le_pair(chunk: &[u8], width: usize, actual: usize) -> Result<[u8; 2], VolumeError> {
+    Ok([
+        byte_at(chunk, 0, width, actual)?,
+        byte_at(chunk, 1, width, actual)?,
+    ])
+}
+
+fn le_quad(chunk: &[u8], width: usize, actual: usize) -> Result<[u8; 4], VolumeError> {
+    Ok([
+        byte_at(chunk, 0, width, actual)?,
+        byte_at(chunk, 1, width, actual)?,
+        byte_at(chunk, 2, width, actual)?,
+        byte_at(chunk, 3, width, actual)?,
+    ])
 }
 
 /// Every slice of `brick` has landed, and the brick has a real extent.

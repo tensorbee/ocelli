@@ -10,6 +10,11 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- A volume can be shown while slices are still arriving. `cut_ready_brick`
+  copies only a brick whose slices have all landed. `sync_volume` uploads
+  that brick once, and again when the bytes change. An absent slice is not
+  a texture of zeros. `present_slice_f32` returns a landed slice and refuses
+  one that has not.
 - The volume keeps a multiscale level axis. Level 0 stays full resolution.
   `append_level` stores a caller-supplied coarser level on the same
   allocation, and a missing level is an error. This story does not build

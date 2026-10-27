@@ -15,6 +15,8 @@
 //! **F-043 (E6.7, S14) uploads each ready brick** as a 3D texture at the
 //! brick's own sample format and true extent. `set_voi` does not upload
 //! those textures. `brick_uploads` counts them.
+//! **F-057 (E8.7, S19) calls that upload** for each ready brick whose bytes
+//! changed. An incomplete brick has no texture.
 //! **F-039 (E6.3, S13) attaches a surface** from the same `wgpu::Instance`
 //! the adapter was opened on, and sizes the backing store with
 //! [`extent::device_extent`].
@@ -60,6 +62,7 @@ pub mod extent;
 pub mod gpu;
 pub mod graph;
 pub mod probe;
+pub mod progressive;
 pub mod tier_b;
 pub mod voi;
 
@@ -86,6 +89,7 @@ pub use probe::resolve_native_gl;
 pub use probe::{
     Edge, Passes, ResolvedAdapter, WebGlOpened, WebGlProbe, resolve, resolve_adapter, resolve_webgl,
 };
+pub use progressive::{ProgressError, ProgressReport, sync_ready_bricks};
 pub use tier_b::{Section183Error, Section183Pixels, read_section_18_3, stored_format_name};
 pub use voi::{VOI_WGSL, VoiParams, VoiParamsError};
 

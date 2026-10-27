@@ -15,12 +15,17 @@
 //! uploads a colour LUT into a separate `Rgba8Unorm` texture of height 1.
 //! F-043 uploads each ready brick as its own 3D texture at the brick's true
 //! extent. `set_voi` does not upload that texture either. `brick_uploads`
-//! counts the brick upload. F-045 writes the sixteen camera floats at group 0
-//! binding 2. `set_view` does not write the VOI uniform. The oracle still has
-//! no Ocelli frame to judge. Decision D7 stays open.
+//! counts the brick upload. F-057 calls that upload for each ready brick
+//! whose bytes changed. An incomplete brick has no texture. F-045 writes
+//! the sixteen camera floats at group 0 binding 2. `set_view` does not
+//! write the VOI uniform. The oracle still has no Ocelli frame to judge.
+//! Decision D7 stays open.
 
-use ocelli_cache::{Brick, BrickKey};
+use std::collections::BTreeMap;
+
+use ocelli_cache::{Brick, BrickKey, VolumeId};
 use ocelli_pixel::LutChain;
+use ocelli_volume::Volume;
 use wgpu::util::DeviceExt;
 
 use crate::brick_upload::{BrickResidency, BrickUploadError, brick_format};
@@ -28,6 +33,7 @@ use crate::caps::Tier;
 use crate::colour::{ColourLut, ColourParams};
 use crate::gpu::{GpuContext, Recovered, SurfaceError, first_render_attachment};
 use crate::probe::ResolvedAdapter;
+use crate::progressive::{self, ProgressError, ProgressReport};
 use crate::voi::{VOI_WGSL, VoiParams, VoiParamsError};
 
 /// HLD section 22's pass enum, exactly as transcribed.
@@ -722,6 +728,9 @@ pub struct RenderGraph {
     lut_uploads: u64,
     /// One 3D texture per uploaded brick. `set_voi` does not touch this.
     bricks: BrickResidency,
+    /// Bytes last accepted for each brick. Cleared with the textures.
+    /// A missing key is not a texture of zeros.
+    brick_stamps: BTreeMap<BrickKey, Vec<u8>>,
 }
 
 /// The one pass and blend this story gives a shader body. `compile` builds
@@ -908,6 +917,7 @@ impl RenderGraph {
             uploads: 0,
             lut_uploads: 0,
             bricks: BrickResidency::new(),
+            brick_stamps: BTreeMap::new(),
         })
     }
 
@@ -1818,6 +1828,44 @@ impl RenderGraph {
         self.bricks.upload(ctx, format, features, key, brick)
     }
 
+    /// Upload each ready level-0 brick whose bytes changed.
+    ///
+    /// `adapter` is the one [`RenderGraph::upload_brick`] already requires.
+    /// This graph does not store a second one. Tier C is refused by
+    /// [`progressive::sync_ready_bricks`] before a cut and before a stamp
+    /// write. A brick `ready_bricks` omits is not uploaded and is not filled
+    /// with zeros. Recovery drops brick textures and their stamps, and the
+    /// next sync uploads ready bricks again.
+    ///
+    /// # Errors
+    ///
+    /// [`ProgressError`]. Bricks uploaded before a later refusal stay
+    /// resident, and their stamps stay. The refused brick is not stamped.
+    pub fn sync_volume(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        volume_id: VolumeId,
+        volume: &Volume,
+    ) -> Result<ProgressReport, ProgressError> {
+        let mut stamps = std::mem::take(&mut self.brick_stamps);
+        let outcome = progressive::sync_ready_bricks(
+            self.tier,
+            &mut stamps,
+            volume_id,
+            volume,
+            |key, brick| match self.upload_brick(ctx, adapter, key, brick) {
+                Ok(()) => Ok(()),
+                Err((brick, source)) => Err(ProgressError::Upload {
+                    brick: Some(brick),
+                    source,
+                }),
+            },
+        );
+        self.brick_stamps = stamps;
+        outcome
+    }
+
     /// Reinstall the resources a recovery rebuilt, marking every viewport
     /// fully dirty because every GPU object the old device owned is gone.
     pub fn install_recovered(&mut self, ctx: &GpuContext, recovered: &Recovered) {
@@ -1849,12 +1897,15 @@ impl RenderGraph {
         // A viewport with no rebound slot reports unavailable in the tick
         // and keeps its dirt.
         // Brick textures were created on the dead device. They are dropped
-        // here and `brick_uploads` is not incremented. The caller supplies
-        // the bricks again through `upload_brick`.
+        // here and `brick_uploads` is not incremented. The stamps of those
+        // bytes are dropped with them, so the next `sync_volume` uploads
+        // ready bricks again. The caller supplies the bricks through
+        // `upload_brick`.
         for slot in self.gpu.iter_mut() {
             *slot = None;
         }
         self.bricks.clear();
+        self.brick_stamps.clear();
         for held in &mut self.frame_textures {
             *held = None;
         }

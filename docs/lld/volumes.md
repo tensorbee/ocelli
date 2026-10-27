@@ -1,6 +1,6 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-058
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-057, F-058
 **Last updated:** 2026-10-27
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
@@ -94,6 +94,14 @@ counts it once. A write of the wrong length is `SliceSizeMismatch` before
 any range check. `Budgeted::bytes` is the store length. The level axis and
 the presence set are not counted again.
 
+`Volume::cut_ready_brick` copies one brick `ready_bricks` lists, from the
+level 0 prefix only. A coordinate that list omits is
+`VolumeError::BrickNotReady` and nothing is copied.
+`Volume::present_slice_f32` returns one present slice as little-endian
+container values in `f32`. A clear presence bit, including an index at or
+past the slice count, is `VolumeError::SliceNotPresent`. Bits Stored is not
+applied again. The bytes `FD FF` of an `I16` voxel stay `-3`.
+
 `VolumeCache` does not share `ImageCache`'s budget. One volume admitted
 against the frame budget would evict every frame a viewer is holding.
 Admission, eviction and pressure are `Lru`'s, on the decoded tier.
@@ -140,6 +148,6 @@ A volume enumerates bricks through `BrickGrid` from `ocelli-cache`, via
 in `index_of` order, x fastest. A brick whose z range includes an absent
 slice is left out, because uploading it would invent zeros. The renderer
 does not read `SlicePresence`. No reslice onto a viewport, which is a later
-geometry story. This crate still creates no texture. Upload of a ready brick
-is `ocelli-render`. Pixels stay in the store and do not cross the worker
-boundary.
+geometry story. This crate still creates no texture.
+`RenderGraph::sync_volume` in `ocelli-render` uploads a ready brick. Pixels
+stay in the store and do not cross the worker boundary.

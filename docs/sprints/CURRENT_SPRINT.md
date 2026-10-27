@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-052 | E8.2 | Orthographic viewport: axial, sagittal, coronal | Rust | 4w | pending |
-| F-057 | E8.7 | Progressive volume rendering while the series still loads | Rust | 3w | pending |
+| F-057 | E8.7 | Progressive volume rendering while the series still loads | Rust | 3w | done |
 | F-058 | E8.8 | Multiscale pyramid hooks in the volume model | Rust | 3w | done |
 | F-059 | E9.1 | VOLUME_3D viewport with ray-cast direct volume rendering | Rust | 4w | pending |
 
