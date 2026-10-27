@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-051 | E8.1 | Volume construction from a stack: geometry, orientation, spacing | Rust | 4w | pending |
+| F-051 | E8.1 | Volume construction from a stack: geometry, orientation, spacing | Rust | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -153,4 +153,4 @@ tree is `6fc40a9abcad`. `scripts/backlog_check.py`,
 green at this open. The S18 allocation row and the S18 plan table name the
 same F-ID. No new audit was run at this open.
 
-F-051 is pending. Its design plan is approved in `.claude/plans/F-051-design.md`.
+F-051 is done. Its design plan is approved in `.claude/plans/F-051-design.md`.
