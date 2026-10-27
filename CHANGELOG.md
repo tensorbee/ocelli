@@ -10,6 +10,10 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- A named event catalogue for the six ring kinds and the shell events, with
+  one row per cornerstone3D 5.8.2 event. `decodeNamedEvent` reads the copied
+  payload. Scroll, camera and window stay state. Unavailable rows name the
+  reason.
 - A versioned JSON snapshot of one viewport's camera inputs, display area and
   presentation. `snapshot` and `restore_snapshot` round-trip that record.
   Scroll, flags and generation stay put, and the 96-byte readback is unchanged.

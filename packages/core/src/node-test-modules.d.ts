@@ -1,9 +1,10 @@
 // Types for the package tests. The package has no @types/node dependency.
 // F-100 reads a fixture with readFileSync. The wasm boundary test reads the
-// built module and resolves its path.
+// built module and resolves its path. F-103 lists the package sources.
 
 declare module "node:fs" {
   export function readFileSync(path: string, encoding: "utf8"): string;
+  export function readdirSync(path: string): string[];
 }
 
 declare module "node:fs/promises" {

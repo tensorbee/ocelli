@@ -171,6 +171,14 @@ export {
   sessionSnapshot,
   sessionSnapshotError,
 } from "./snapshot.js";
+export {
+  CORNERSTONE_EVENT_COUNT,
+  CORNERSTONE_EVENT_MAP,
+  EVENT_DELIVERY,
+  OCELLI_EVENTS,
+  UNMAPPED_EVENTS,
+  decodeNamedEvent,
+} from "./events.js";
 export type {
   CameraSnapshot,
   DisplayAreaSnapshot,
@@ -183,6 +191,17 @@ export type {
   ViewportSnapshot,
   VoiSnapshot,
 } from "./snapshot.js";
+export type {
+  CacheBudgetChangedPayload,
+  CacheKeyPayload,
+  CachePressurePayload,
+  CornerstoneEventRow,
+  EventDelivery,
+  FramePresentedPayload,
+  OcelliEventName,
+  OcelliNamedEvent,
+  UnmappedEvent,
+} from "./events.js";
 
 /** Package version, kept in step with the crate versions by `/release`. */
 export const VERSION = "0.1.0";

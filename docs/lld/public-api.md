@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-X003
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-X003
 **Last updated:** 2026-10-27
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -129,6 +129,15 @@ presentation unchanged. Scroll, flags and generation are not in the record.
 an unknown field. `SNAPSHOT_MAGIC`, `SNAPSHOT_VERSION` and `SNAPSHOT_ERROR`
 come from `generated.ts`. The record stores camera inputs. It does not store
 the sixteen-number matrix that `readViewportState` copies.
+
+## Events
+
+F-103 publishes `decodeNamedEvent`, `OCELLI_EVENTS`, `CORNERSTONE_EVENT_MAP`,
+`CORNERSTONE_EVENT_COUNT`, `EVENT_DELIVERY` and `UNMAPPED_EVENTS`.
+
+`decodeNamedEvent` reads a copied ring event. It does not take a view over
+wasm memory. The layout and the 5.8.2 mapping are `docs/lld/events.md`. The
+ring stride, capacity and kinds are unchanged.
 
 ## Minimal resident stack initialization
 

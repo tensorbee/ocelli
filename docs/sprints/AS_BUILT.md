@@ -3676,3 +3676,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/viewport.md`, `docs/lld/public-api.md`, `docs/lld/typescript-packaging.md`, `docs/lld/build-targets.md`, `docs/lld/benchmarks.md`, `docs/lld/tier-resolution.md` and their rows in `docs/lld/README.md`.
 **Deviations from the design plan.** The release module is 2,151,196 bytes. The plan's nested probe was 2,135,113. The budget records the release measurement. This is not an HLD departure.
 **Notes for future sessions.** One review pass at 0 defects and 0 smells. The same session wrote the code and the review, which the operator directed after DeepSeek stalled. Forcing an unfitted restore to keep fit scale 4 failed `property_family_round_trips` at camera component 0, bits `1048576000` against `1065353216`. Restoring the force to 1 made that test pass. Cold start was not remeasured. Gate A4 stays open. F-103 and F-102 follow.
+
+## F-103, event model, completed 2026-10-27
+
+**What was built.** `@ocelli/core` names the six ring events and the shell events, and decodes a copied ring payload. The cornerstone map has one row for each installed 5.8.2 event, 50 core and 53 tool. `IMAGE_RENDERED` is `frame.presented`. `IMAGE_CACHE_IMAGE_REMOVED` is `cache.evicted`. `CACHE_SIZE_EXCEEDED` is `cache.pressure`. Displacement, refusal, budget change and element resize have no 5.8.2 name and stay on `UNMAPPED_EVENTS`. The oracle gate compares the map to the pinned enums.
+
+**HLD sections implemented.** Section 17.3, the envelope and the drain. Section 10, shell events stay in the shell. Decision D4.
+**Deviations.** None. The measured count matches Appendix B.
+**Crates / packages modified.** `packages/core`, `scripts/event_catalogue_check.py`, `scripts/guards/catalogue.py`, `bin/ocelli.sh`, `docs/runbooks/guard-verification.md`, and the LLD files named below.
+**Tests added.** Eight tests in `packages/core/src/events.test.ts`. The external check is `scripts/event_catalogue_check.py`. The floor probe `event-catalogue.short-map` deletes the `ERROR_EVENT` row.
+**Fixture provenance.** No pixel arithmetic. The cache-key fixture is series 7, instance 3, frame 5 and 4096 bytes, from `CacheEvent::encode`. The pressure fixture is tier 2, used 262144 and budget 524288, from `TelemetryEvent::encode`. The presented fixture is generation 9, 80 by 40 and flag 1, from `push_presented`.
+**Verification.** Feature profile on the staged tree, recorded in the verify ledger at commit time. The catalogue check with `--require-cornerstone` matched 50 core and 53 tool and exited 0.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path.
+**Tier coverage.** A: n/a. The catalogue performs no rendering. B: n/a. C: n/a.
+**LLD updated.** `docs/lld/events.md`, `docs/lld/public-api.md`, `docs/lld/typescript-packaging.md`, `docs/lld/comparator.md` and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The approved draft said 53 core events and 106 rows. The installed `Events.js` files at 5.8.2 have 50 and 53 keys. The implementation follows the files. Three ring kinds have no cornerstone name and are not forced onto a different event. The census required a claim for the new script, so the guard catalogue carries `event-catalogue` and a floor probe. The installed-enum comparison stays on the oracle gate. This is not an HLD departure.
+**Notes for future sessions.** Two review passes. Pass 1 reported 0 and the following floor found the unclaimed `FAIL:` at `scripts/event_catalogue_check.py`. Pass 2 is 0 defects and 0 smells after that claim. The same session wrote the code and the review, which the operator directed. Shifting the cache-key series read from offset 0 to offset 1 made `decodes_fixture_payloads` report series `216172782113783808n` against `7n`. Restoring offset 0 made that test pass. Deleting the `ERROR_EVENT` row made the catalogue check print `catalogue has 102 rows`. F-102 follows.

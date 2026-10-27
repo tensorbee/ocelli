@@ -128,6 +128,13 @@ const PUBLISHED: readonly string[] = [
   "restoreSessionSnapshot",
   "sessionSnapshot",
   "sessionSnapshotError",
+  // ./events.js, F-103
+  "CORNERSTONE_EVENT_COUNT",
+  "CORNERSTONE_EVENT_MAP",
+  "EVENT_DELIVERY",
+  "OCELLI_EVENTS",
+  "UNMAPPED_EVENTS",
+  "decodeNamedEvent",
   // this file
   "VERSION",
   "coreAvailable",

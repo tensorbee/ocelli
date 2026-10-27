@@ -33,10 +33,11 @@ row here in the same hand.
 | [tier-resolution.md](tier-resolution.md) | How a session resolves tier A, B or C, the fill-rate probe, the operator override, and the two GPU-less runs | F-004, F-037, F-039, F-042, F-050, F-X001, F-X002, F-X016 |
 | [feature-availability.md](feature-availability.md) | The three-state contract every tier-gated feature declares | F-037, F-041, F-X001, F-X003 |
 | [errors.md](errors.md) | The error model, the code registry, the panic record and structured logging | F-005, F-039, F-X001, F-X017, F-101 |
-| [typescript-packaging.md](typescript-packaging.md) | What the npm packages publish, and what proves it | F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-X003 |
-| [public-api.md](public-api.md) | Viewport, scene and tool types, and the copied command and state wire | F-100, F-101, F-104, F-050, F-X003 |
+| [typescript-packaging.md](typescript-packaging.md) | What the npm packages publish, and what proves it | F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-X003 |
+| [public-api.md](public-api.md) | Viewport, scene and tool types, the copied command and state wire, and the event names | F-100, F-101, F-104, F-050, F-103, F-X003 |
+| [events.md](events.md) | The event catalogue, the delivery classes and the 5.8.2 mapping | F-032, F-034, F-101, F-103 |
 | [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008, F-X009, F-X012, F-X013, F-X003, F-026 |
-| [comparator.md](comparator.md) | The harness's judging half: the tolerance predicate, the verdict vocabulary, the attribution ladder and the census | F-011, F-012, F-013, F-015, F-X012, F-X003 |
+| [comparator.md](comparator.md) | The harness's judging half: the tolerance predicate, the verdict vocabulary, the attribution ladder and the census | F-011, F-012, F-013, F-015, F-X012, F-X003, F-103 |
 | [benchmarks.md](benchmarks.md) | The benchmark harness of HLD section 26, its subject registry, the host class and the `bench` gate | F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014 |
 | [guards.md](guards.md) | The guard harness: discovery, the catalogue, the sandbox, the probe runner, the census and executable skill examples | F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023 |
 | [cache.md](cache.md) | `crates/ocelli-cache`: the budgeted LRU, brick addressing, what `Budgeted::bytes` promises, and section 8's three tiers | F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101 |

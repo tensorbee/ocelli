@@ -70,14 +70,16 @@ Every item below is this plan's decision.
 
 - **The catalogue.** Ocelli's own names, grouped by domain, with a delivery
   class of `ring`, `shell` or `unavailable`.
-- **The mapping.** One row per cornerstone3D 5.8.2 event, 53 core and 53 tool,
+- **The mapping.** One row per cornerstone3D 5.8.2 event, 50 core and 53 tool,
   each with an Ocelli name or `null`, a delivery class and a reason when the
   event is unavailable.
-- **The measured count.** The installed 5.8.2 enums carry 53 core events and 53
-  tool events, so 106, not the Appendix B figure of 50 plus 53. Appendix B's
-  count is left as the author measured it, and this story records the 5.8.2
-  count beside it. D-11 already says the Appendix B counts are re-checked
-  against 5.8.2 by `/parity`. This is a parity finding, not a deviation.
+- **The measured count.** The installed 5.8.2 enums carry 50 core events and 53
+  tool events, so 103. Appendix B's figure is 50 plus 53. An earlier draft of
+  this plan said 53 core. The files, counted by `Events["..."]` keys, do not.
+  Appendix B's count is left as the author measured it, and this story records
+  the file count beside it. D-11 already says the Appendix B counts are
+  re-checked against 5.8.2 by `/parity`. The counts agree. This is not a
+  deviation.
 - **The payload decoders.** Six ring kinds, each with a typed payload. The
   layouts are already fixed by `ocelli-cache`'s encoders and `ocelli-viewport`'s
   `push_presented`.
@@ -92,7 +94,7 @@ Every item below is this plan's decision.
 The ring delivers numeric kinds. `packages/core/src/ring.ts` returns
 `OcelliEvent` with a `kind: number` and a 32-byte `payload: Uint8Array`. A
 consumer has no name, no typed payload and no way to know which kinds the ring
-can produce. Cornerstone's catalogue is 106 names spread over two packages, and
+can produce. Cornerstone's catalogue is 103 names spread over two packages, and
 nothing in this repository says which of them Ocelli delivers, which belong to
 the shell, and which do not exist yet.
 
@@ -113,7 +115,7 @@ In scope:
 
 - `packages/core/src/events.ts`, the catalogue, the delivery classes, the
   named-event union and the payload decoders.
-- The 106-row cornerstone mapping, committed as a const table.
+- The 103-row cornerstone mapping, committed as a const table.
 - `scripts/event_catalogue_check.py`, the external comparison against the
   pinned 5.8.2 enums.
 - `docs/lld/events.md`, the catalogue and the mapping.
@@ -229,7 +231,7 @@ export interface CornerstoneEventRow {
 }
 
 export const CORNERSTONE_EVENT_MAP: readonly CornerstoneEventRow[];
-export const CORNERSTONE_EVENT_COUNT = 106;
+export const CORNERSTONE_EVENT_COUNT = 103;
 ```
 
 The shell events are declared with a producer or a deferred reason. The ring
@@ -276,7 +278,7 @@ Invariants that span consumers:
   producer emits. A `shell` row never crosses the boundary.
 - **No per-event callback.** The catalogue describes what a drained batch
   contains. It does not add a listener.
-- **The count is measured.** 53 core plus 53 tool from the installed 5.8.2
+- **The count is measured.** 50 core plus 53 tool from the installed 5.8.2
   enums. Appendix B's 50 plus 53 is recorded beside it.
 
 ## Ownership, commit and recovery
@@ -294,15 +296,15 @@ repeated decode is the same value.
 
 | ID | Trigger and expected behavior | Test / observation | Wrong implementation rejected | Evidence stage / owner |
 |----|-------------------------------|--------------------|-------------------------------|------------------------|
-| AC1 | The mapping has exactly 106 rows, 53 `core` and 53 `tool`, one per 5.8.2 event, each with a delivery class and an Ocelli name or a reason | `packages/core/src/events.test.ts`, `mapping_is_complete` | A catalogue that covers only the ring kinds and calls itself complete | implementation |
+| AC1 | The mapping has exactly 103 rows, 50 `core` and 53 `tool`, one per 5.8.2 event, each with a delivery class and an Ocelli name or a reason | `packages/core/src/events.test.ts`, `mapping_is_complete` | A catalogue that covers only the ring kinds and calls itself complete | implementation |
 | AC2 | Every Ocelli name is unique and appears in `OCELLI_EVENTS`, and every `OCELLI_EVENTS` entry has a mapping row, a declared shell producer or a deferred reason | Same file, `names_are_unique` | Two names for one event, or a name nothing delivers and nobody owns | implementation |
 | AC3 | Every ring kind 1 to 6 has exactly one `ring` row whose name matches the generated `RING_EVENT_KIND`, and no other row claims `ring` | Same file, `ring_kinds_match_generated` | A catalogue that names a kind the producer does not emit, or misses one | implementation |
 | AC4 | `decodeNamedEvent` decodes each of the six kinds to the documented fields and returns `null` for an unknown kind | Same file, `decodes_every_kind` and `refuses_unknown_kind` | A decoder that reads a magic offset or guesses a payload | implementation |
 | AC5 | A hand-computed payload for series 7, instance 3, frame 5 and 4096 bytes decodes to `{ series: 7n, instance: 3, frame: 5, bytes: 4096n }`, and a pressure payload decodes tier, used, budget, entries, evicted and refused at their documented offsets | Same file, `decodes_fixture_payloads`, citing `ocelli-cache`'s encoder comments and HLD section 17.3 | A decoder that reads the key at the wrong offset, which names the wrong frame | implementation |
-| AC6 | `scripts/event_catalogue_check.py --require-cornerstone` re-derives the 106 names from the pinned 5.8.2 enums and asserts set equality with the mapping. A missing or extra name fails with the name printed | The `oracle` gate's arm, after `tools/oracle/node_modules` is installed | A mapping that was hand-typed and drifted from 5.8.2 | integrated, needs the oracle stack |
+| AC6 | `scripts/event_catalogue_check.py --require-cornerstone` re-derives the 103 names from the pinned 5.8.2 enums and asserts set equality with the mapping. A missing or extra name fails with the name printed | The `oracle` gate's arm, after `tools/oracle/node_modules` is installed | A mapping that was hand-typed and drifted from 5.8.2 | integrated, needs the oracle stack |
 | AC7 | A cornerstone event with no mapping row fails AC6, and a mapping row with no cornerstone event fails AC6 | The same check | A completeness claim that only counts rows | integrated, needs the oracle stack |
 | AC8 | No module outside `events.ts` declares an Ocelli event name, and no module adds an `addEventListener` for a ring kind | A review of `packages/core/src` and `packages/react/src`, plus the internal test's import graph | A second catalogue, or a per-event callback that bypasses the ring | implementation |
-| AC9 | The mapping records the measured 53 plus 53 beside Appendix B's 50 plus 53, and the parity note names the difference | `docs/lld/events.md` and the mapping header | Silently rewriting the Appendix B count, or claiming 103 without a measurement | implementation |
+| AC9 | The mapping records the measured 50 plus 53 beside Appendix B's 50 plus 53, and the parity note names the earlier 53-core miscount | `docs/lld/events.md` and the mapping header | Silently rewriting the Appendix B count, or claiming a count the files do not hold | implementation |
 | AC10 | The catalogue does not change the ring's stride, capacity or kinds | `crates/ocelli-viewport/tests/ring.rs` stays green | A catalogue that renumbers a kind to fit a name | implementation |
 | AC11 | Tier rows: the catalogue is tier-independent and performs no rendering | This section | A catalogue that assumes a GPU tier | implementation |
 
@@ -425,9 +427,10 @@ quietly wrong observation rather than a crash.
 
 Appendix B row `Core events`, `50`, plus 53 tool events, re-shaped rather than
 copied. This story establishes the mapping and the delivery classification.
-The measured 5.8.2 count is 53 core and 53 tool, and the difference from
-Appendix B's 50 is recorded for `/parity`. The story does not claim that every
-cornerstone event has an Ocelli producer, and the `unavailable` rows say so.
+The measured 5.8.2 count is 50 core and 53 tool. An earlier draft said 53
+core. The difference from Appendix B is zero, and the miscount is recorded
+for `/parity`. The story does not claim that every cornerstone event has an
+Ocelli producer, and the `unavailable` rows say so.
 
 ## Deviations
 
