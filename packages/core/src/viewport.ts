@@ -3,26 +3,38 @@
  *
  * Decision D1, HLD section 2.1: a new API, not a cornerstone-shaped shim.
  * F-101 packs commands and copies state across the boundary. This module
- * names the values and does not call into wasm.
+ * names the values and does not call into wasm. F-104 generates the boundary
+ * numbers in `generated.ts`, so this file imports them rather than restating
+ * them.
  */
 
-/** Eleven stack commands, in the order the public API publishes them. */
-export const STACK_COMMANDS = [
-  "Fit",
-  "Pan",
-  "Zoom",
-  "Rotate",
-  "FlipHorizontal",
-  "FlipVertical",
-  "SetWindow",
-  "ApplyPreset",
-  "SetInvert",
-  "SetColormap",
-  "Scroll",
-] as const;
+import {
+  FLAG_ERROR,
+  FLAG_INVERT,
+  FLAG_LOADING,
+  FLAG_REFINING,
+  STACK_COMMANDS,
+  STATE_CAMERA_COMPONENT_BYTES,
+  STATE_CAMERA_COMPONENTS,
+  STATE_CAMERA_OFFSET,
+  STATE_FLAGS_OFFSET,
+  STATE_NUM_SLICES_OFFSET,
+  STATE_SLICE_INDEX_OFFSET,
+  STATE_VOI_CENTER_OFFSET,
+  STATE_VOI_WIDTH_OFFSET,
+  VIEWPORT_STATE_BYTES,
+} from "./generated.js";
+import type { StackCommand } from "./generated.js";
 
-/** One command a tool binding may name. */
-export type StackCommand = (typeof STACK_COMMANDS)[number];
+export {
+  FLAG_ERROR,
+  FLAG_INVERT,
+  FLAG_LOADING,
+  FLAG_REFINING,
+  STACK_COMMANDS,
+  VIEWPORT_STATE_BYTES,
+};
+export type { StackCommand };
 
 /**
  * Drawing availability for the resolved tier.
@@ -42,7 +54,7 @@ export type TierAvailability = (typeof TIER_AVAILABILITY)[number];
 export const TIER_C_DRAWING: TierAvailability = "unavailable";
 
 /** How many numbers HLD section 17.4 stores in `camera`. */
-export const CAMERA_COMPONENTS = 16;
+export const CAMERA_COMPONENTS = STATE_CAMERA_COMPONENTS;
 
 /**
  * Section 17.4's camera, column-major, sixteen numbers.
@@ -175,21 +187,6 @@ export interface ToolBinding {
   readonly command: StackCommand;
 }
 
-/** Section 17.4's readback, in bytes. */
-export const VIEWPORT_STATE_BYTES = 96;
-
-/** Flag bit 0. Explicit inverse. `MONOCHROME1` is not this bit. */
-export const FLAG_INVERT = 1;
-
-/** Flag bit 1. A load is in progress. */
-export const FLAG_LOADING = 2;
-
-/** Flag bit 2. The viewport is in error. */
-export const FLAG_ERROR = 4;
-
-/** Flag bit 3. A reduced frame is on screen. F-X003 sets it. */
-export const FLAG_REFINING = 8;
-
 /**
  * Section 17.4 as copied out of the core.
  *
@@ -217,31 +214,36 @@ export function readViewportState(copied: Uint8Array): ViewportReadback | null {
   const view = new DataView(copied.buffer, copied.byteOffset, copied.byteLength);
   return {
     camera: cameraAt(view),
-    voiCenter: view.getFloat32(64, true),
-    voiWidth: view.getFloat32(68, true),
-    sliceIndex: view.getUint32(72, true),
-    numSlices: view.getUint32(76, true),
-    flags: view.getUint32(80, true),
+    voiCenter: view.getFloat32(STATE_VOI_CENTER_OFFSET, true),
+    voiWidth: view.getFloat32(STATE_VOI_WIDTH_OFFSET, true),
+    sliceIndex: view.getUint32(STATE_SLICE_INDEX_OFFSET, true),
+    numSlices: view.getUint32(STATE_NUM_SLICES_OFFSET, true),
+    flags: view.getUint32(STATE_FLAGS_OFFSET, true),
   };
 }
 
 function cameraAt(view: DataView): Camera {
+  const at = (index: number): number =>
+    view.getFloat32(
+      STATE_CAMERA_OFFSET + index * STATE_CAMERA_COMPONENT_BYTES,
+      true,
+    );
   return [
-    view.getFloat32(0, true),
-    view.getFloat32(4, true),
-    view.getFloat32(8, true),
-    view.getFloat32(12, true),
-    view.getFloat32(16, true),
-    view.getFloat32(20, true),
-    view.getFloat32(24, true),
-    view.getFloat32(28, true),
-    view.getFloat32(32, true),
-    view.getFloat32(36, true),
-    view.getFloat32(40, true),
-    view.getFloat32(44, true),
-    view.getFloat32(48, true),
-    view.getFloat32(52, true),
-    view.getFloat32(56, true),
-    view.getFloat32(60, true),
+    at(0),
+    at(1),
+    at(2),
+    at(3),
+    at(4),
+    at(5),
+    at(6),
+    at(7),
+    at(8),
+    at(9),
+    at(10),
+    at(11),
+    at(12),
+    at(13),
+    at(14),
+    at(15),
   ];
 }

@@ -10,6 +10,11 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The boundary's TypeScript declarations are generated from the Rust layout.
+  `packages/core/src/generated.ts` is written by
+  `crates/ocelli-viewport/tests/typegen.rs` and checked byte for byte, so a
+  Rust command id, payload length, enum byte or state offset cannot drift
+  from the shell.
 - The Cargo workspace and the crates of HLD section 4's crate table, which
   `ls crates | wc -l` counts. Section 15.1's layout block is not that table and
   omits `ocelli-compute`. `wasm-bindgen` is confined to `ocelli-wasm` and

@@ -23,6 +23,10 @@ glam.workspace = true
 ocelli-pixel = { path = "../ocelli-pixel" }
 # F-047. Scroll reads the decoded LRU. It does not build a second cache.
 ocelli-cache = { path = "../ocelli-cache" }
+# F-104. `ViewportState` and `RingHeader` are `#[repr(C)]` `bytemuck::Pod`
+# layouts, so `write_state` and the ring copy a struct rather than restating
+# its offsets. Section 15.2 already lists `bytemuck`.
+bytemuck = { workspace = true }
 
 [dev-dependencies]
 ocelli-core = { path = "../ocelli-core" }

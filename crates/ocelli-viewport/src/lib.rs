@@ -9,6 +9,7 @@
 
 extern crate alloc;
 
+pub mod boundary;
 pub mod commands;
 pub mod placement;
 pub mod presentation;

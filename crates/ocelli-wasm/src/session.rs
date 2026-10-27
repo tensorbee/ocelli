@@ -408,7 +408,9 @@ impl Session {
         self.viewport.set_generation(generation);
     }
 
-    /// Copy the 96-byte readback. Returns 96, or 0 when `out` is the wrong length.
+    /// Copy the section 17.4 readback.
+    ///
+    /// Returns [`STATE_BYTES`] when `out` has that length, and 0 otherwise.
     #[must_use]
     pub fn copy_state(&self, out: &mut [u8]) -> u32 {
         if self.viewport.write_state(out).is_err() {
@@ -969,7 +971,9 @@ fn empty_bulk() -> &'static u8 {
 pub(crate) mod bind {
     use std::cell::RefCell;
 
-    use ocelli_viewport::commands::StackViewport;
+    use ocelli_viewport::boundary::{EVENT_HEADER_BYTES, EVENT_STRIDE};
+    use ocelli_viewport::commands::{STATE_BYTES, StackViewport};
+    use ocelli_viewport::ring::RING_CAPACITY;
     use wasm_bindgen::prelude::wasm_bindgen;
 
     use super::{FrameMeta, Session};
@@ -1038,9 +1042,13 @@ pub(crate) mod bind {
 
     #[wasm_bindgen(js_name = copy_state)]
     pub fn copy_state() -> Vec<u8> {
-        let mut out = vec![0_u8; 96];
+        let mut out = vec![0_u8; STATE_BYTES];
         let copied = with_session(|session| session.copy_state(&mut out)).unwrap_or(0);
-        if copied == 96 { out } else { Vec::new() }
+        if usize::try_from(copied).unwrap_or(0) == STATE_BYTES {
+            out
+        } else {
+            Vec::new()
+        }
     }
 
     #[wasm_bindgen(js_name = configure_stack)]
@@ -1078,7 +1086,9 @@ pub(crate) mod bind {
     /// There is no `ring_ptr`. A pointer would be a view over linear memory.
     #[wasm_bindgen(js_name = drain_events)]
     pub fn drain_events() -> Vec<u8> {
-        let mut out = vec![0_u8; 16 + 256 * 48];
+        let capacity = usize::try_from(RING_CAPACITY).unwrap_or(0);
+        let mut out =
+            vec![0_u8; EVENT_HEADER_BYTES.saturating_add(capacity.saturating_mul(EVENT_STRIDE))];
         let copied = with_session(|session| session.copy_ring(&mut out)).unwrap_or(0);
         out.truncate(copied);
         out
@@ -1086,7 +1096,7 @@ pub(crate) mod bind {
 
     #[wasm_bindgen(js_name = ring_capacity)]
     pub fn ring_capacity() -> u32 {
-        ocelli_viewport::ring::RING_CAPACITY
+        RING_CAPACITY
     }
 }
 

@@ -13,7 +13,7 @@ definitions.
 | F-050 | E7.6 | Camera, display-area and presentation-state serialisation | Rust+TS | 3w | pending |
 | F-102 | E16.3 | Framework bindings (React first) | TS | 3w | pending |
 | F-103 | E16.4 | Event model: the ~103 cornerstone events, re-shaped and documented | TS | 4w | pending |
-| F-104 | E16.5 | TypeScript type generation from Rust definitions | TS | 4w | pending |
+| F-104 | E16.5 | TypeScript type generation from Rust definitions | TS | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.

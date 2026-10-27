@@ -6,8 +6,22 @@ import {
   packPointerFrame,
   submitCommands,
 } from "./commands.js";
+import type { PackedCommand } from "./commands.js";
+import {
+  COLORMAP_BYTE,
+  COMMAND_PAYLOAD_BYTES,
+  INVERT_BYTE,
+  PRESET_BYTE,
+  VOI_FUNCTION_BYTE,
+} from "./generated.js";
 import { drainRing } from "./ring.js";
-import { STACK_COMMANDS } from "./viewport.js";
+import {
+  COLORMAPS,
+  INVERT,
+  STACK_COMMANDS,
+  VOI_FUNCTIONS,
+  WINDOW_PRESETS,
+} from "./viewport.js";
 
 const F64_8 = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x40];
 const F64_3 = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x40];
@@ -17,11 +31,45 @@ const F64_1 = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x3f];
 const F64_40 = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x44, 0x40];
 const F64_400 = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x79, 0x40];
 
+const SAMPLES: readonly PackedCommand[] = [
+  { kind: "Fit", width: 8, height: 8, columns: 2, rows: 4 },
+  { kind: "Pan", x: 3, y: -4 },
+  { kind: "Zoom", factor: 2 },
+  { kind: "Rotate", radians: 1 },
+  { kind: "FlipHorizontal", enabled: true },
+  { kind: "FlipVertical", enabled: false },
+  { kind: "SetWindow", centre: 40, width: 400, function: "linear_exact" },
+  { kind: "ApplyPreset", preset: "lung" },
+  { kind: "SetInvert", invert: "inverse" },
+  { kind: "SetColormap", colormap: "stops" },
+  { kind: "Scroll", step: -1 },
+];
+
 describe("packed commands", () => {
   it("numbers the eleven names from 1", () => {
     expect(STACK_COMMANDS.map((name) => COMMAND_ID[name])).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
     ]);
+  });
+
+  it("declares the generated payload length for every kind", () => {
+    for (const command of SAMPLES) {
+      const packed = packCommands(7, [command]);
+      const view = new DataView(packed.buffer);
+      expect(view.getUint32(4, true)).toBe(COMMAND_PAYLOAD_BYTES[command.kind]);
+      expect(packed.byteLength).toBe(8 + COMMAND_PAYLOAD_BYTES[command.kind]);
+    }
+  });
+
+  it("agrees with the generated enum bytes and the public names", () => {
+    expect(Object.keys(VOI_FUNCTION_BYTE)).toEqual([...VOI_FUNCTIONS]);
+    expect(Object.keys(PRESET_BYTE)).toEqual([...WINDOW_PRESETS]);
+    expect(Object.keys(COLORMAP_BYTE)).toEqual([...COLORMAPS]);
+    expect(Object.keys(INVERT_BYTE)).toEqual([...INVERT]);
+    expect(Object.values(VOI_FUNCTION_BYTE)).toEqual([0, 1, 2]);
+    expect(Object.values(PRESET_BYTE)).toEqual([0, 1, 2]);
+    expect(Object.values(COLORMAP_BYTE)).toEqual([0, 1]);
+    expect(Object.values(INVERT_BYTE)).toEqual([0, 1]);
   });
 
   it("writes every id in little-endian against hand-built bytes", () => {

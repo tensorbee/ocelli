@@ -1,11 +1,35 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-X003
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-100, F-101, F-104, F-X003
+**Last updated:** 2026-10-27
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
-F-101 built the wire. This file names what that wire carries. The wire lives
-in `ocelli-viewport`, `ocelli-wasm` and `@ocelli/core`, not in this file.
+F-101 built the wire. F-104 moved every boundary number into one Rust table
+and generates the TypeScript declarations from it. This file names what that
+wire carries. The wire lives in `ocelli-viewport`, `ocelli-wasm` and
+`@ocelli/core`, not in this file.
+
+## The generated boundary module
+
+`crates/ocelli-viewport/src/boundary.rs` is the one definition of the
+boundary's numbers. It holds the eleven command ids and payload lengths, the
+VOI function, preset, colormap and invert bytes, the flag bits, the
+`ViewportState` and `RingHeader` layouts, the event stride and field offsets,
+and the six ring kinds. `crates/ocelli-viewport/tests/typegen.rs` writes
+`packages/core/src/generated.ts` from those items and compares the committed
+file byte for byte. A change to a Rust payload length or a struct field fails
+the `test` gate until the file is regenerated:
+
+```bash
+UPDATE_TYPES=1 cargo test -p ocelli-viewport --test typegen
+```
+
+`viewport.ts`, `commands.ts` and `ring.ts` import the generated constants
+rather than restating them. `VIEWPORT_STATE_BYTES` is
+`size_of::<ViewportState>()`, and every `STATE_*_OFFSET` is `offset_of!` on
+that struct, so the 96-byte readback and its offsets are the layout rather
+than a second description of it. The ring's 48-byte stride and field offsets
+come from `RingEvent` the same way.
 
 ## The boundary wire this file documents
 

@@ -1,7 +1,7 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-X003
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-X003
+**Last updated:** 2026-10-27
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
@@ -32,6 +32,7 @@ F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
 | `dicomweb.ts` | Bounded WADO-RS, WADO-URI, and QIDO-RS request construction, validation, authentication, cancellation, and response transfer |
 | `ring.ts` | The event ring's consumer side, including `drainRing` over a copied buffer |
 | `commands.ts` | Little-endian packing of the eleven stack commands and one submit per frame |
+| `generated.ts` | F-104's boundary constants and `StackCommand`, generated from `crates/ocelli-viewport/src/boundary.rs` |
 | `errors.ts` | The error-code mirror, the message table, `decodeRecord` |
 | `panic.ts` | `readPanicRecord`, and the panic record's layout |
 | `fatal.ts` | `CoreStatus` and the never-returns-to-ok latch |
@@ -43,6 +44,14 @@ F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
 this file is that they ship, that they add no runtime dependency, and that
 `errors.ts` is where the human text for an error code lives, which is HLD
 section 23's "the message is for humans and may change" taken literally.
+
+`generated.ts` is committed rather than produced at build time, so a clean
+clone type-checks without a codegen step. The drift check is
+`crates/ocelli-viewport/tests/typegen.rs`, which the existing `test` gate runs:
+it emits the file from the Rust table and the real `#[repr(C)]` layouts and
+compares it with the committed bytes, naming the first differing line. The
+`wasm` gate does not run it and no new gate is added, because `test` is
+already in the floor.
 
 ## `panic.ts` is the second file permitted a view over linear memory
 

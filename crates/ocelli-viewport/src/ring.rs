@@ -1,16 +1,15 @@
 //! Section 17.3's ring. Cache kinds 1 to 5 stay in `ocelli-cache`.
 //! Kind 6 is a presented frame. A full ring drops the new event and counts it.
 
+use bytemuck::bytes_of;
 use ocelli_cache::RingEvent;
 
-/// Presented frame. Not a cache kind.
-pub const KIND_PRESENTED: u32 = 6;
+use crate::boundary::{EVENT_HEADER_BYTES, EVENT_STRIDE, RingHeader};
+
+pub use crate::boundary::KIND_PRESENTED;
 
 /// Power-of-two capacity named by the F-101 plan.
 pub const RING_CAPACITY: u32 = 256;
-
-const HEADER_BYTES: usize = 16;
-const EVENT_BYTES: usize = 48;
 
 /// One producer, one consumer, no shared memory.
 #[derive(Clone, Debug)]
@@ -108,14 +107,20 @@ impl EventRing {
         let Ok(count) = usize::try_from(pending) else {
             return 0;
         };
-        let bytes = HEADER_BYTES.saturating_add(count.saturating_mul(EVENT_BYTES));
+        let bytes = EVENT_HEADER_BYTES.saturating_add(count.saturating_mul(EVENT_STRIDE));
         if out.len() < bytes {
             return 0;
         }
-        write_u32(out, 0, pending);
-        write_u32(out, 4, 0);
-        write_u32(out, 8, RING_CAPACITY);
-        write_u32(out, 12, self.dropped);
+        let header = RingHeader {
+            head: pending,
+            tail: 0,
+            capacity: RING_CAPACITY,
+            dropped: self.dropped,
+        };
+        let Some(slot) = out.get_mut(0..EVENT_HEADER_BYTES) else {
+            return 0;
+        };
+        slot.copy_from_slice(bytes_of(&header));
         let mut produced = 0_u32;
         while produced < pending {
             let index = usize::try_from((self.tail.wrapping_add(produced)) & (RING_CAPACITY - 1))
@@ -123,12 +128,18 @@ impl EventRing {
             let Some(event) = self.slots.get(index) else {
                 break;
             };
-            let at = HEADER_BYTES.saturating_add(
+            let at = EVENT_HEADER_BYTES.saturating_add(
                 usize::try_from(produced)
                     .unwrap_or(0)
-                    .saturating_mul(EVENT_BYTES),
+                    .saturating_mul(EVENT_STRIDE),
             );
-            write_event(out, at, event);
+            let Some(end) = at.checked_add(EVENT_STRIDE) else {
+                break;
+            };
+            let Some(slot) = out.get_mut(at..end) else {
+                break;
+            };
+            slot.copy_from_slice(bytes_of(event));
             produced = produced.saturating_add(1);
         }
         self.tail = self.head;
@@ -143,38 +154,4 @@ const fn empty_event() -> RingEvent {
         seq: 0,
         payload: [0_u8; 32],
     }
-}
-
-fn write_u32(out: &mut [u8], at: usize, value: u32) {
-    let Some(end) = at.checked_add(4) else {
-        return;
-    };
-    let Some(slot) = out.get_mut(at..end) else {
-        return;
-    };
-    slot.copy_from_slice(&value.to_le_bytes());
-}
-
-fn write_u64(out: &mut [u8], at: usize, value: u64) {
-    let Some(end) = at.checked_add(8) else {
-        return;
-    };
-    let Some(slot) = out.get_mut(at..end) else {
-        return;
-    };
-    slot.copy_from_slice(&value.to_le_bytes());
-}
-
-fn write_event(out: &mut [u8], at: usize, event: &RingEvent) {
-    write_u32(out, at, event.kind);
-    write_u32(out, at.saturating_add(4), event.viewport);
-    write_u64(out, at.saturating_add(8), event.seq);
-    let payload_at = at.saturating_add(16);
-    let Some(end) = payload_at.checked_add(32) else {
-        return;
-    };
-    let Some(slot) = out.get_mut(payload_at..end) else {
-        return;
-    };
-    slot.copy_from_slice(&event.payload);
 }
