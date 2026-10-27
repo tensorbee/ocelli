@@ -542,8 +542,9 @@ impl Volume {
     /// Fill one candidate.
     ///
     /// Geometry, orientation and spacing come from [`Self::assemble`].
-    /// Each slice's stored samples are written by [`Self::place`] at the
-    /// sorted index `order` names. The returned volume is complete.
+    /// Each slice's stored samples are written by [`Self::place`] at
+    /// sorted position `n`. `order[n]` is that slice's arrival index.
+    /// The returned volume is complete.
     ///
     /// # Errors
     ///

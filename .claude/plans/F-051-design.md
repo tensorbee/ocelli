@@ -104,8 +104,9 @@ impl Volume {
     /// Fill one candidate.
     ///
     /// Geometry, orientation and spacing come from [`Self::assemble`].
-    /// Each slice's stored samples are written by [`Self::place`] at the
-    /// sorted index `order` names. The returned volume is complete.
+    /// Each slice's stored samples are written by [`Self::place`] at
+    /// sorted position `n`. `order[n]` is that slice's arrival index.
+    /// The returned volume is complete.
     ///
     /// # Errors
     ///
@@ -180,7 +181,7 @@ Validity of a constructed volume is the candidate's planes, stored sample bytes,
 
 No external host, adapter, browser or oracle view is required. The story does not draw. A missing renderer is F-052 and later, not an open measurement on this inventory.
 
-Semantic RED before the fix: `construct` may exist only as `assemble`'s cleared volume. AC1 then sees zeros where the fixture requires `[2,2,2,2]`. A compile error for a missing function is not that RED. After the fix the same inputs are GREEN. Mutation: place arrival index `n` at slice `n` instead of `order[n]`, and AC1's slice 0 becomes `[1,1,1,1]`. Restore the source.
+Semantic RED before the fix: `construct` may exist only as `assemble`'s cleared volume. AC1 then sees zeros where the fixture requires `[2,2,2,2]`. A compile error for a missing function is not that RED. After the fix the same inputs are GREEN. Mutation: place at the arrival index instead of the sorted index, and AC1's slice 0 becomes `[1,1,1,1]`. Restore the source.
 
 ## Approach
 
@@ -279,7 +280,7 @@ None new. D-25 stays as F-033 wrote it. D-07 is cited for the tier C row and is 
 
 ## LLD impact
 
-`docs/lld/volumes.md` gains a section for `Volume::construct`: it is the caller of `place`, it copies stored samples in `order`, and it leaves `assemble` cleared. The tier paragraph stays n/a, n/a, full. `docs/lld/cache.md` does not change, because the cache is not called.
+`docs/lld/volumes.md` gains a section for `Volume::construct`: it is the caller of `place`, it copies stored samples to sorted position `n` where `order[n]` is the arrival index, and it leaves `assemble` cleared. The tier paragraph stays n/a, n/a, full. `docs/lld/cache.md` does not change, because the cache is not called.
 
 ## Open questions
 

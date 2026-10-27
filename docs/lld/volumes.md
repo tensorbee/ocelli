@@ -78,8 +78,9 @@ positions a second time outside this crate.
 ## Construction
 
 `Volume::construct` is the caller of `place`. It borrows the candidate for
-the checks above, then writes each slice's stored samples at the sorted
-index `order` names. The returned volume has every slice present.
+the checks above, then writes each slice's stored samples at sorted
+position `n`. `order[n]` is that slice's arrival index. The returned volume
+has every slice present.
 `Volume::assemble` still returns the cleared store with `present_count` 0.
 `construct` applies no modality or VOI LUT and does not insert into
 `VolumeCache`. A failure drops the local volume.

@@ -105,6 +105,7 @@ fn construct_places_samples_in_projected_order() -> Result<(), ocelli_pixel::Pix
     assert_eq!((normal.x, normal.y, normal.z), (0.0, 0.0, 1.0));
     assert_eq!(volume.present_count(), 3);
     assert!(volume.is_complete());
+    assert_eq!(volume.order, [1, 2, 0]);
     Ok(())
 }
 
@@ -154,6 +155,7 @@ fn construct_sorts_oblique_stack_by_projection() -> Result<(), ocelli_pixel::Pix
     assert!((normal.x - 0.0).abs() < 1e-12);
     assert!((normal.y - 0.8).abs() < 1e-12);
     assert!((normal.z + 0.6).abs() < 1e-12);
+    assert_eq!(volume.order, [2, 1, 0]);
     Ok(())
 }
 
@@ -236,6 +238,7 @@ fn construct_spacing_follows_a_four_millimetre_gap() -> Result<(), ocelli_pixel:
             .zip(volume.spacing)
             .all(|(level_spacing, volume_spacing)| (level_spacing - volume_spacing).abs() < 1e-12)
     }));
+    assert_eq!(volume.order, [1, 2, 0]);
     Ok(())
 }
 
