@@ -1,19 +1,13 @@
-# Current sprint, S17
+# Current sprint, S18
 
-**Milestone**: M4, the public API, the boundary, and the stack viewport.
-**Branch**: `sprint/s17`
-**Opened**: 2026-10-26
-**Goal**: Serialise the camera, the display area and the presentation state,
-bind the viewport to React, reshape and document the cornerstone event
-catalogue, and generate the boundary's TypeScript types from the Rust
-definitions.
+**Milestone**: M5, volume, MPR and 3D rendering.
+**Branch**: `sprint/s18`
+**Opened**: 2026-10-27
+**Goal**: Volume construction from a stack: geometry, orientation, spacing.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-050 | E7.6 | Camera, display-area and presentation-state serialisation | Rust+TS | 3w | done |
-| F-102 | E16.3 | Framework bindings (React first) | TS | 3w | done |
-| F-103 | E16.4 | Event model: the ~103 cornerstone events, re-shaped and documented | TS | 4w | done |
-| F-104 | E16.5 | TypeScript type generation from Rust definitions | TS | 4w | done |
+| F-051 | E8.1 | Volume construction from a stack: geometry, orientation, spacing | Rust | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -23,26 +17,24 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S17 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S18 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S16 closed the typed command channel, the polled event ring, the state
-readback, the canvas and world and index adapters, and the CPU stack raster.
-It also preserved a selected VOI sequence across a manual window change.
-S17 continues M4. F-050 makes the camera, the display area and the
-presentation state survive a round trip rather than living only in a live
-viewport. F-102 binds that surface to React. F-103 reshapes cornerstone's
-event catalogue into Ocelli's own and documents the mapping. F-104 generates
-the boundary's TypeScript types from the Rust definitions, so the wire has
-one source of truth.
+S17 closed M4 at tag `s17`. The merge is `7117d14`. M5 starts here. This
+sprint constructs a volume from a stack, and the work is the geometry, the
+orientation and the spacing. The S18 table in `docs/sprints/SPRINT_PLAN.md`
+and the S18 row in `docs/sprints/allocation.json` both name F-051, epic E8.1.
+Orthographic MPR, progressive rendering, the pyramid, ray casting and the
+candidate-render gate stay on later sprints.
 
-M4 runs from S15 through S17. The plan calls this the Phase 1 credibility
-gate, because the three-channel boundary is real and a stack viewport diffs
-clean against cornerstone3D. S17 is the last sprint of M4, so closing it
-completes the milestone. The oracle still has no Ocelli renderer to compare
-a full viewer against. Decision D7 holds. This open publishes nothing.
+F-033 already owns the volume cache and `Volume::assemble`. The as-built note
+on that story says F-051 is the first caller of `place`. This sprint is that
+caller. It does not reopen the LUT chain.
+
+The oracle still has no Ocelli renderer to compare a full viewer against.
+Decision D7 holds. This open publishes nothing.
 
 ## What is carried in
 
@@ -63,26 +55,28 @@ a full viewer against. Decision D7 holds. This open publishes nothing.
 - **Tier B greyscale has been drawn.** F-042 ran the section 18.3 rows on
   this host through headless Chromium WebGL2 and matched `LutChain::map_into`
   within 0.001, format `R32Float`. A tier B colour LUT readback was not run.
-- **The wasm size budget records 2,151,196 bytes.** F-050 measured the release
-  module on 2026-10-27 and re-baselined `ci/wasm-size-budget.json`. The
-  previous baseline was 1,999,061 bytes. S16 measured 2,052,951 bytes against
-  that older baseline and did not move the file. `bearing_on_gate_A4` says
+- **The wasm size budget records 2,151,196 bytes** with tolerance 0.05.
+  F-050 measured the release module on 2026-10-27 and re-baselined
+  `ci/wasm-size-budget.json` from 1,999,061 bytes. `bearing_on_gate_A4` says
   this number does not close A4, and cold start was not remeasured.
+  `--accept-size` is a design-plan declaration, not a way to make a gate
+  green.
 - **`max_review_passes` is stored but not automatically enforced by the
   backing script.** The shared instructions make the run-sprint host
   responsible for counting whole-sprint passes and invoking `set-phase
   blocked` at the configured limit. The per-feature microscope loop remains
   uncapped. No automatic script transition is claimed.
-- **M1, M2 and M3 were not published, and M4 is not complete until this
-  sprint closes.** The cadence names 0.1.0 for M1, 0.2.0 for M2 and 0.3.0 for
-  M3. The workspace version is still 0.1.0. `/release` step 5 runs
+- **M4 is complete. A release is the cadence's next step, and this open does
+  not take it.** `docs/RELEASE.md` maps one minor to each milestone from M2
+  to M12, so M4 names 0.4.0. M1, M2 and M3 were not published. The workspace
+  version is still 0.1.0. `/release` runs
   `python3 scripts/pin_and_size_check.py --require-redistribution`, and that
   command refuses while `openjph-core` 0.1.0 carries no BSD notice material,
-  which is D-22. None of that blocks a story here. All of it blocks
-  publication. No release is due at this open.
-- **No new measured duration.** Every S16 row in `SPRINT_TRACKER.md` reads
-  `not measured`. The capacity points remain the S03 and S06 closes. This
-  open does not invent a ratio and does not recalculate capacity.
+  which is D-22. That blocks publication. It does not block F-051.
+- **No new measured duration.** Every M4 row in `SPRINT_TRACKER.md` reads
+  `not measured`. There is no measured total and no ratio. The capacity
+  points remain the S03 and S06 closes. This open does not invent a ratio
+  and does not recalculate capacity.
 - **F-X011** remains pending because its evidence needs a second physical
   machine. **ICC** is still unimplemented, the other half of HLD section 18's
   stage-4 row. Multi-component JPEG-LS decoding is still owed.
@@ -92,67 +86,46 @@ a full viewer against. Decision D7 holds. This open publishes nothing.
 
 ## The defect class this sprint is exposed to
 
-**A serialised state that round-trips only in the implementation's own
-representation.** HLD section 7 and F-050. A camera written as sixteen bare
-numbers, a display area that loses its origin, or a presentation state that
-restores a selected VOI sequence as a linear window is the defect. Canvas
-points, world points and indices stay distinct across the wire. A serialised
-state is versioned, and a reader refuses a version it does not know rather
-than guessing. Restoring a state must not upload pixels and must not add a
-second camera matrix.
+**Spacing or slice order taken from a tag.** HLD section 19, in
+`docs/hld/16-volume-representation.md`, and DICOM PS3.3 C.7.6.2.1.1.
+`PixelSpacing` is row then column. `ImagePositionPatient` is the centre of
+voxel zero. The inter-slice step is that position projected on the slice
+normal, the row cosine crossed with the column cosine. Shear is the part of
+the step that is not parallel to the normal, measured from the positions.
+HLD section 19 stores `spacing` as three millimetre values and `origin` as
+the `ImagePositionPatient` of the first slice.
 
-**A second event catalogue, or a boundary crossing per event.** Decisions
-D2, D3 and D4. F-103 reshapes cornerstone's event catalogue into Ocelli's
-own and documents the mapping. It does not run a second ring. F-102 binds
-React to the drained ring, not to a callback per event. A React component
-that invokes the wasm boundary once per pointer move is the defect, and so
-is a catalogue that disagrees with the events the ring delivers.
-
-**Two sources of truth for the boundary types.** F-104 generates the
-TypeScript types from the Rust definitions. A hand-written interface that
-drifts from the Rust type is the defect. The generated file is checked, and
-a change to a Rust boundary type that does not regenerate it must fail a
-gate rather than pass silently.
+The failure is a volume whose spacing is Spacing Between Slices, Slice
+Thickness or Slice Location, whose order is Instance Number, or whose shear
+is Gantry/Detector Tilt. Those tags are evidence. They are not the geometry.
+Swapping the two `PixelSpacing` values is the same class of defect.
 
 ## What done means
 
-- **F-050** serialises the camera, the display area and the presentation
-  state through one versioned shape. A round trip preserves the selected VOI
-  sequence and does not replace it with linear numbers. Canvas points, world
-  points and indices stay non-interchangeable. A reader refuses an unknown
-  version. The state does not upload pixels and does not add a second camera
-  matrix.
-- **F-102** binds the viewport to React first. The binding uses the typed
-  command channel and the drained event ring. It does not cross the boundary
-  per event and does not expose a pixel buffer. It does not reshape the event
-  catalogue, which is F-103.
-- **F-103** reshapes cornerstone's event catalogue into Ocelli's catalogue,
-  maps every event to its boundary delivery, and documents the mapping. One
-  catalogue, not two. A delivered event is the one the ring carries. No
-  per-event callback.
-- **F-104** generates the boundary's TypeScript types from the Rust
-  definitions. One source of truth. The generated types are checked against
-  the Rust types, and drift fails a gate. Hand-editing a generated type is
-  not the answer.
-- **Every story declares all three tier rows**, and "n/a" is a real answer
-  that an omitted row is not.
+- **F-051** constructs a volume from a stack. Geometry, orientation and
+  spacing come from the image plane under PS3.3 C.7.6.2.1.1 and HLD section
+  19. The origin is the `ImagePositionPatient` of the lowest projected slice,
+  copied exactly, and that point is the centre of voxel zero. Spacing index 0
+  steps along the row and index 1 along the column. A sheared stack is not
+  stored as an axis-aligned box. The story is the first caller of
+  `Volume::place`. It does not treat Spacing Between Slices, Slice Thickness,
+  Slice Location, Instance Number or the gantry tilt tag as the answer.
+- **F-051 declares all three tier rows**, and "n/a" is a real answer that an
+  omitted row is not.
+- Orthographic reslice, progressive upload, the pyramid, ray casting and the
+  full-corpus candidate gate stay out. Those are F-052, F-057, F-058, F-059
+  and F-X021.
 - `wasm-bindgen` remains confined to `ocelli-wasm`, pixels do not cross the
   boundary, and `ocelli-render` remains the only crate that may create a
-  device.
+  device. The LUT arithmetic stays in `ocelli-pixel`.
 
-## Dependency order and the shared resources
+## Dependency order
 
-F-050 depends on F-048. F-102, F-103 and F-104 depend on F-101. All of those
-backlog dependencies are `done`. No backlog cell in this sprint names
-another story in this sprint, so no story begins blocked by that column.
+F-051 depends on F-033. That backlog row is `done`. No backlog cell in this
+sprint names another story in this sprint.
 
-**One boundary, one catalogue, one generated type set.** F-102, F-103 and
-F-104 share the command protocol, the event ring and the boundary types that
-F-101 built. F-104 is the source of truth those three consume. The designs
-land before implementation.
-
-F-X003 is carried and not scheduled. F-X004 depends on F-X003 and is not this
-sprint. F-X005 also depends on F-X003.
+F-052, F-057, F-058 and F-059 depend on F-051 and are S19. F-X021 depends on
+F-012 and F-052 and is S20. F-X004 depends on F-052 and F-X003 and is S21.
 
 ## Standing expectations
 
@@ -171,13 +144,13 @@ A feature that cannot run on the resolved tier **reports unavailable**. It
 never quietly produces a different result, which is HLD section 31's rule
 generalised by D-07.
 
-## Audit intake and preparation, 2026-10-26
+## Audit intake, 2026-10-27
 
-S16 closed at tag `s16` with 31 of 31 gates green, the corpus passing, and
-whole-sprint review pass 3 clean at zero defects and zero smells.
-`scripts/backlog_check.py`, `scripts/gen_sprint_plan.py --check` and
-`scripts/deviation_check.py` are green at this open. Allocation and
-`SPRINT_PLAN.md` agree on the four S17 stories and on their 14 estimated
-engineer-weeks. No new audit was run at this open.
+S17 closed at tag `s17` with 31 of 31 gates green, the corpus passing, and
+whole-sprint review pass 2 clean at zero defects and zero smells. The gate
+tree is `6fc40a9abcad`. `scripts/backlog_check.py`,
+`scripts/gen_sprint_plan.py --check` and `scripts/deviation_check.py` are
+green at this open. The S18 allocation row and the S18 plan table name the
+same F-ID. No new audit was run at this open.
 
-The four S17 stories are done. Their design plans are in `.claude/plans/`.
+F-051 is pending. Its design plan is not written yet.
