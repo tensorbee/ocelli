@@ -153,4 +153,4 @@ tree is `6fc40a9abcad`. `scripts/backlog_check.py`,
 green at this open. The S18 allocation row and the S18 plan table name the
 same F-ID. No new audit was run at this open.
 
-F-051 is pending. Its design plan is not written yet.
+F-051 is pending. Its design plan is approved in `.claude/plans/F-051-design.md`.
