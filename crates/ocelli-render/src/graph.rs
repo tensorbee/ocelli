@@ -25,13 +25,14 @@ use std::collections::BTreeMap;
 
 use ocelli_cache::{Brick, BrickKey, VolumeId};
 use ocelli_pixel::LutChain;
-use ocelli_volume::Volume;
+use ocelli_volume::{OrthoImage, Volume};
 use wgpu::util::DeviceExt;
 
 use crate::brick_upload::{BrickResidency, BrickUploadError, brick_format};
 use crate::caps::Tier;
 use crate::colour::{ColourLut, ColourParams};
 use crate::gpu::{GpuContext, Recovered, SurfaceError, first_render_attachment};
+use crate::ortho::{self, OrthoError};
 use crate::probe::ResolvedAdapter;
 use crate::progressive::{self, ProgressError, ProgressReport};
 use crate::voi::{VOI_WGSL, VoiParams, VoiParamsError};
@@ -1864,6 +1865,29 @@ impl RenderGraph {
         );
         self.brick_stamps = stamps;
         outcome
+    }
+
+    /// Upload one complete orthographic plane through the stack texture.
+    ///
+    /// `image` is the host reslice. This method does not sample the volume.
+    /// Tier C is refused by [`ortho::present_plane`] before a sample is read.
+    /// An absent sample is [`OrthoError::PlaneIncomplete`] and `upload_stored`
+    /// is not called, so `uploads` and the previous texture stay.
+    ///
+    /// # Errors
+    ///
+    /// [`OrthoError`].
+    pub fn show_ortho(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        id: ViewportId,
+        image: &OrthoImage,
+    ) -> Result<(), OrthoError> {
+        let tier = self.tier;
+        ortho::present_plane(tier, image, |samples| {
+            self.upload_stored(ctx, adapter, id, image.width, image.height, samples)
+        })
     }
 
     /// Reinstall the resources a recovery rebuilt, marking every viewport

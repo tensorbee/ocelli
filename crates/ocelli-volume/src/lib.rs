@@ -23,6 +23,9 @@ use ocelli_core::{Pt, World};
 use ocelli_pixel::{ImageOrientationPatient, PixelRepresentation};
 
 mod levels;
+mod ortho;
+
+pub use ortho::{OrthoImage, OrthoPlane, PlaneSample};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.
@@ -245,6 +248,14 @@ pub enum VolumeError {
         axis: u8,
         /// The coordinate the cut refused.
         value: u32,
+    },
+    /// A plane index outside `[0, dim - 1]`, including a non-finite index.
+    #[error("plane index {index} is outside axis {axis}")]
+    PlaneOutOfRange {
+        /// `0` column, `1` row, `2` slice.
+        axis: u8,
+        /// The index that was refused.
+        index: f64,
     },
 }
 

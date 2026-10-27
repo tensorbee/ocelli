@@ -309,6 +309,14 @@ None.
 
 `docs/lld/volumes.md` gains `reslice`, the three planes, the trilinear and absence rules, and `voxel_world`. `docs/lld/viewport.md` gains `show_ortho`, the incomplete-plane refusal, and the tier C refusal.
 
+## Fact correction
+
+`f64::floor` is not in this crate's `no_std` profile. `floor_nonneg` clears the fractional bits of a non-negative finite value. Truncation of a non-negative value is that floor.
+
+`as f32` is denied. `narrow_f32` copies `f32_from_f64` from `ocelli-viewport/src/view.rs`, because `ocelli-volume` does not depend on `ocelli-viewport`. On an integer index the neighbour weight is zero and that corner is not read. Integer container values through 24 bits round-trip.
+
+`RenderGraph::new` refuses tier C, and `self.tier` is private, so a floor test cannot call `show_ortho` on a device. `present_plane` takes the tier, the image and the upload closure. `show_ortho` copies `self.tier` and calls it, then `upload_stored`. The refusal is `OrthoError::TierCUnavailable`. `GraphError::TierCUnavailable` remains the error `new` returns when a graph cannot be built. There is no `Pass::Ortho`.
+
 ## Open questions
 
 None. The axis names are the sprint text. The kernel is the one that keeps an on-grid axial pixel equal to the stored voxel and refuses to blend in an absent neighbour. F-X004 remains the tier C viewport.

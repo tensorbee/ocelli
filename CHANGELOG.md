@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- An orthographic plane can be taken from a constructed volume. Axial, sagittal and coronal follow that volume's axes. `reslice` returns the stored samples. An absent slice stays absent. `show_ortho` uploads a complete plane through the existing stack window and leaves the last complete plane in place when a sample is missing. Tier C reports the viewport unavailable.
 - A volume can be shown while slices are still arriving. `cut_ready_brick`
   copies only a brick whose slices have all landed. `sync_volume` uploads
   that brick once, and again when the bytes change. An absent slice is not

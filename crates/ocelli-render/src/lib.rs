@@ -61,6 +61,7 @@ pub mod cpu;
 pub mod extent;
 pub mod gpu;
 pub mod graph;
+pub mod ortho;
 pub mod probe;
 pub mod progressive;
 pub mod tier_b;
@@ -84,6 +85,7 @@ pub use graph::{
     RenderGraph, STORED_FORMAT, SegPass, StackPass, Upload, UploadError, ViewportId, VolumePass,
     device_camera_words, tier_b_fragment_module,
 };
+pub use ortho::{OrthoError, present_plane};
 #[cfg(not(target_arch = "wasm32"))]
 pub use probe::resolve_native_gl;
 pub use probe::{
