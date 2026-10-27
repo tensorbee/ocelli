@@ -1079,10 +1079,13 @@ version = "0.1.0"
 name = "ocelli-viewport"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "glam",
  "ocelli-cache",
  "ocelli-core",
  "ocelli-pixel",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

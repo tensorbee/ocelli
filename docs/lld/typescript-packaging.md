@@ -1,7 +1,7 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-X003
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003
+**Last updated:** 2026-10-27
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
@@ -12,7 +12,10 @@ What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 | `@ocelli/core` | The TypeScript shell of HLD section 10 | none |
 | `@ocelli/react` | The React binding | `@ocelli/core` at an exact version |
 
-`@ocelli/react` remains a scaffold. `@ocelli/core` now also publishes F-021's
+`@ocelli/react` publishes the viewport pump, the hook and the host component.
+`jsdom` and `@testing-library/react` are workspace devDependencies used by the
+component test. Neither is a dependency of the published package. `@ocelli/core`
+now also publishes F-021's
 bounded DICOMweb transport and one-write response-sink contract, and F-035's
 decode-to-render handoff. F-100 publishes `viewport.ts`, which is the
 viewport, scene and tool types. F-101 adds `commands.ts` and the copied
@@ -32,6 +35,9 @@ F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
 | `dicomweb.ts` | Bounded WADO-RS, WADO-URI, and QIDO-RS request construction, validation, authentication, cancellation, and response transfer |
 | `ring.ts` | The event ring's consumer side, including `drainRing` over a copied buffer |
 | `commands.ts` | Little-endian packing of the eleven stack commands and one submit per frame |
+| `generated.ts` | F-104's boundary constants and `StackCommand`, plus the F-050 snapshot magic, version and error codes |
+| `snapshot.ts` | F-050's JSON parser and the session snapshot adapter |
+| `events.ts` | F-103's catalogue, delivery classes and payload decoders |
 | `errors.ts` | The error-code mirror, the message table, `decodeRecord` |
 | `panic.ts` | `readPanicRecord`, and the panic record's layout |
 | `fatal.ts` | `CoreStatus` and the never-returns-to-ok latch |
@@ -43,6 +49,14 @@ F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
 this file is that they ship, that they add no runtime dependency, and that
 `errors.ts` is where the human text for an error code lives, which is HLD
 section 23's "the message is for humans and may change" taken literally.
+
+`generated.ts` is committed rather than produced at build time, so a clean
+clone type-checks without a codegen step. The drift check is
+`crates/ocelli-viewport/tests/typegen.rs`, which the existing `test` gate runs:
+it emits the file from the Rust table and the real `#[repr(C)]` layouts and
+compares it with the committed bytes, naming the first differing line. The
+`wasm` gate does not run it and no new gate is added, because `test` is
+already in the floor.
 
 ## `panic.ts` is the second file permitted a view over linear memory
 
@@ -101,9 +115,10 @@ property of the tarball's `exports` map and its emitted module syntax, not of a
 build step in this repository, so the pipeline proves the property directly
 instead of adding a tool that would hide it.
 
-Revisit this when the wasm consumption path lands in F-101. `wasm-pack --target
-web` emits an ESM module plus a `.wasm` asset, and bundlers treat that asset
-specially. If a bundler is needed then, it is added then, with a named reason.
+F-101 landed the boundary by copying bytes out of wasm rather than by
+importing the wasm asset into this package. The bundler decision stands.
+`wasm-pack --target web` still emits an ESM module plus a `.wasm` asset, and
+a bundler is added only with a named reason.
 
 ## The `packages` gate
 
@@ -111,8 +126,11 @@ specially. If a bundler is needed then, it is added then, with a named reason.
 bin/ocelli.sh gate packages
 ```
 
-Two things, in order. `vitest run` over `packages/*/src/**/*.test.ts`, then
-`scripts/package_check.py`.
+Two things, in order. `vitest run` over `packages/*/src/**/*.test.ts` and
+`packages/*/src/**/*.test.tsx`, then `scripts/package_check.py`. The component
+test opts into jsdom with a vitest environment comment, so the rest of the
+suite keeps the default environment. `npm run dev` starts with no session and
+shows the absent state.
 
 `vitest.config.ts` sets `passWithNoTests: false`. Vitest's default is to pass
 an empty run, and this project's rule is that a check which could not run must

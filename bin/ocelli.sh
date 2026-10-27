@@ -346,7 +346,9 @@ run_gate() {
     gpu)         cargo test -p ocelli-render -- --ignored --test-threads=1 &&
                  cargo test -p ocelli-oracle --lib gpu_candidate -- \
                    --ignored --test-threads=1 ;;
-    oracle)      "$0" oracle && "$0" compare ;;
+    oracle)      "$0" oracle &&
+                 python3 scripts/event_catalogue_check.py --require-cornerstone &&
+                 "$0" compare ;;
     *)           echo "unknown gate: $name" >&2; return 2 ;;
   esac
 }

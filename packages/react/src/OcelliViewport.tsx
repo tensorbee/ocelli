@@ -1,38 +1,44 @@
-import { useEffect, useRef } from "react";
-import { coreAvailable } from "@ocelli/core";
+import type { OcelliNamedEvent, PackedCommand, ViewportId } from "@ocelli/core";
+
+import type { OcelliSession } from "./pump.js";
+import { useOcelliViewport } from "./useOcelliViewport.js";
 
 export interface OcelliViewportProps {
   /** Viewport id, unique within a session. */
   readonly id: string;
+  /** The viewport the pump addresses. A slice index is a different number. */
+  readonly viewport: ViewportId;
   /** Applied to the host element. The element is the integration seam. */
   readonly className?: string;
+  /** The caller's session. Null is the absent state. There is no singleton. */
+  readonly session?: OcelliSession | null;
+  readonly onEvents?: (events: readonly OcelliNamedEvent[], dropped: number) => void;
+  readonly onRefused?: (commands: readonly PackedCommand[]) => void;
 }
 
 /**
  * A viewport hosted on a plain DOM element.
  *
- * The element is the seam. Everything Ocelli does to it, another framework
- * binding could do identically, and cornerstone can do to the same element
- * during a strangler migration (HLD section 12).
- *
- * Scaffold. It mounts the element and reports whether a core is present.
- * F-097 attaches a real session.
+ * The element is the seam. The pump submits one command buffer per frame
+ * and drains the ring once. This story does not render a canvas.
  */
-export function OcelliViewport({ id, className }: OcelliViewportProps) {
-  const host = useRef<HTMLDivElement>(null);
+export function OcelliViewport({
+  id,
+  viewport,
+  className,
+  session = null,
+  onEvents,
+  onRefused,
+}: OcelliViewportProps) {
+  useOcelliViewport({ viewport, session, onEvents, onRefused });
+  const core = session === null ? "absent" : "ready";
 
-  useEffect(() => {
-    const element = host.current;
-    if (element === null) {
-      return;
-    }
-    element.dataset["ocelliViewport"] = id;
-    element.dataset["ocelliCore"] = coreAvailable() ? "ready" : "absent";
-    return () => {
-      delete element.dataset["ocelliViewport"];
-      delete element.dataset["ocelliCore"];
-    };
-  }, [id]);
-
-  return <div ref={host} className={className} data-testid={`viewport-${id}`} />;
+  return (
+    <div
+      className={className}
+      data-ocelli-viewport={id}
+      data-ocelli-core={core}
+      data-testid={`viewport-${id}`}
+    />
+  );
 }

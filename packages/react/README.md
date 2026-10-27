@@ -6,8 +6,9 @@ Ocelli is a Rust and WebAssembly medical imaging core for the browser. This
 package is the React framework binding, which HLD section 10 keeps in
 TypeScript deliberately rather than as a compromise.
 
-**This package is a scaffold.** Its viewport component is built alongside the
-boundary in F-100 and F-101.
+F-102 binds one viewport to a session prop. A frame with queued commands
+submits one buffer, and every frame drains the ring once. The component
+renders a host `div` and does not render a canvas.
 
 ## Licence
 

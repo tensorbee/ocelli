@@ -10,11 +10,22 @@
  * The second constraint comes from HLD section 23: the shell must always hold
  * enough state to rebuild a viewport from nothing, because a Rust panic
  * poisons the wasm instance and the recovery path is to tear the worker down
- * and reconstruct from the shell's own copy. That is a design constraint on
- * this package, not an afterthought.
+ * and reconstruct from the shell's own copy. `checkpoint` is that copy.
  *
- * Scaffold. F-097 (E16.3) implements it.
+ * F-102 owns the pump, the hook and the component.
  */
 
 export { OcelliViewport } from "./OcelliViewport.js";
 export type { OcelliViewportProps } from "./OcelliViewport.js";
+export { createViewportPump } from "./pump.js";
+export type {
+  OcelliSession,
+  ViewportCheckpoint,
+  ViewportPump,
+  ViewportPumpOptions,
+} from "./pump.js";
+export { useOcelliViewport } from "./useOcelliViewport.js";
+export type {
+  OcelliViewportHandle,
+  UseOcelliViewportOptions,
+} from "./useOcelliViewport.js";

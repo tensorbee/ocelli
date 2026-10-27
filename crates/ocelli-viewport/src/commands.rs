@@ -5,12 +5,21 @@
 //! before any of it is written. `View`, presentation and scroll stay as they
 //! were when any command in the batch is refused.
 
+use alloc::vec::Vec;
+
 use ocelli_core::{Canvas, Pt};
 use ocelli_pixel::{
     LutChain, ModalityTransform, PhotometricInterpretation, PresentationLutEvidence, VoiFunction,
     VoiTransform,
 };
 
+use crate::boundary::{
+    COLORMAP_GREY, COLORMAP_STOPS, FLAG_ERROR, FLAG_INVERT, FLAG_LOADING, FLAG_REFINING,
+    INVERT_IDENTITY, INVERT_INVERSE, KIND_APPLY_PRESET, KIND_FIT, KIND_FLIP_HORIZONTAL,
+    KIND_FLIP_VERTICAL, KIND_PAN, KIND_ROTATE, KIND_SCROLL, KIND_SET_COLORMAP, KIND_SET_INVERT,
+    KIND_SET_WINDOW, KIND_ZOOM, PRESET_BONE, PRESET_LUNG, PRESET_SOFT_TISSUE, VOI_FUNCTION_LINEAR,
+    VOI_FUNCTION_LINEAR_EXACT, VOI_FUNCTION_SIGMOID, ViewportState, payload_len_of,
+};
 use crate::presentation::{Colormap, Presentation, PresentationError, WindowPreset};
 use crate::scroll::StackSequence;
 use crate::view::{self, Radians, View, ViewError, Zoom};
@@ -22,19 +31,7 @@ pub const MAX_COMMANDS: usize = 64;
 pub const MAX_COMMAND_BYTES: usize = 4096;
 
 /// Readback bytes. HLD section 17.4.
-pub const STATE_BYTES: usize = 96;
-
-const KIND_FIT: u16 = 1;
-const KIND_PAN: u16 = 2;
-const KIND_ZOOM: u16 = 3;
-const KIND_ROTATE: u16 = 4;
-const KIND_FLIP_HORIZONTAL: u16 = 5;
-const KIND_FLIP_VERTICAL: u16 = 6;
-const KIND_SET_WINDOW: u16 = 7;
-const KIND_APPLY_PRESET: u16 = 8;
-const KIND_SET_INVERT: u16 = 9;
-const KIND_SET_COLORMAP: u16 = 10;
-const KIND_SCROLL: u16 = 11;
+pub const STATE_BYTES: usize = core::mem::size_of::<ViewportState>();
 
 /// Why [`StackViewport::apply_commands`] wrote nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,13 +251,13 @@ impl StackViewport {
     #[must_use]
     pub const fn flags(&self) -> u32 {
         let invert = if self.presentation.explicit_inverse() {
-            1
+            FLAG_INVERT
         } else {
             0
         };
-        let loading = if self.loading { 2 } else { 0 };
-        let error = if self.error { 4 } else { 0 };
-        let refining = if self.refining { 8 } else { 0 };
+        let loading = if self.loading { FLAG_LOADING } else { 0 };
+        let error = if self.error { FLAG_ERROR } else { 0 };
+        let refining = if self.refining { FLAG_REFINING } else { 0 };
         invert | loading | error | refining
     }
 
@@ -319,11 +316,6 @@ impl StackViewport {
         if out.len() != STATE_BYTES {
             return Err(CommandError::StateLength);
         }
-        let camera = self.view.camera_matrix(self.columns, self.rows);
-        for (index, value) in camera.iter().enumerate() {
-            let at = index.saturating_mul(4);
-            write_f32(out, at, *value);
-        }
         let (centre, width) = self
             .presentation
             .chain()
@@ -331,15 +323,50 @@ impl StackViewport {
             .window()
             .map(|(centre, width, _function)| (centre, width))
             .unwrap_or((0.0, 0.0));
-        write_f32(out, 64, centre);
-        write_f32(out, 68, width);
-        let slice = self.scroll.index().unwrap_or(0);
-        write_u32(out, 72, slice);
-        write_u32(out, 76, self.scroll.len());
-        write_u32(out, 80, self.flags());
-        write_u32(out, 84, 0);
-        write_u32(out, 88, 0);
-        write_u32(out, 92, 0);
+        let state = ViewportState {
+            camera: self.view.camera_matrix(self.columns, self.rows),
+            voi_center: centre,
+            voi_width: width,
+            slice_index: self.scroll.index().unwrap_or(0),
+            num_slices: self.scroll.len(),
+            flags: self.flags(),
+            padding: [0; 3],
+        };
+        out.copy_from_slice(bytemuck::bytes_of(&state));
+        Ok(())
+    }
+
+    /// UTF-8 JSON for the camera, the display area and the presentation.
+    ///
+    /// Scroll, flags and generation are runtime state and are not included.
+    /// The record has no camera matrix.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::snapshot::SnapshotError::NonFinite`] when a stored value is
+    /// NaN or infinite. [`crate::snapshot::SnapshotError::Encode`] when the
+    /// serialiser refuses the record.
+    pub fn snapshot(&self) -> Result<Vec<u8>, crate::snapshot::SnapshotError> {
+        crate::snapshot::encode(self)
+    }
+
+    /// Replace the camera, the display area and the presentation.
+    ///
+    /// Scroll, flags, generation and the viewport id stay. A refusal assigns
+    /// nothing. The chain is rebuilt through [`ocelli_pixel::LutChain::new`].
+    ///
+    /// # Errors
+    ///
+    /// A [`crate::snapshot::SnapshotError`]. The stored view and presentation
+    /// are unchanged.
+    pub fn restore(&mut self, bytes: &[u8]) -> Result<(), crate::snapshot::SnapshotError> {
+        let decoded = crate::snapshot::decode(bytes)?;
+        self.view = decoded.view;
+        self.presentation = decoded.presentation;
+        self.columns = decoded.columns;
+        self.rows = decoded.rows;
+        self.css_width = decoded.css_width;
+        self.css_height = decoded.css_height;
         Ok(())
     }
 }
@@ -453,19 +480,6 @@ fn parse_one(bytes: &[u8], offset: usize, viewport: u16) -> Result<(Parsed, usiz
     Ok((command, end))
 }
 
-fn payload_len_of(kind: u16) -> Option<u32> {
-    match kind {
-        KIND_FIT => Some(24),
-        KIND_PAN => Some(16),
-        KIND_ZOOM | KIND_ROTATE => Some(8),
-        KIND_FLIP_HORIZONTAL | KIND_FLIP_VERTICAL | KIND_APPLY_PRESET | KIND_SET_INVERT
-        | KIND_SET_COLORMAP => Some(1),
-        KIND_SET_WINDOW => Some(17),
-        KIND_SCROLL => Some(4),
-        _ => None,
-    }
-}
-
 fn decode(kind: u16, payload: &[u8]) -> Result<Parsed, CommandError> {
     match kind {
         KIND_FIT => Ok(Parsed::Fit {
@@ -535,34 +549,34 @@ fn finite_f32(value: f64) -> Result<f32, CommandError> {
 
 fn flag(value: u8) -> Result<bool, CommandError> {
     match value {
-        0 => Ok(false),
-        1 => Ok(true),
+        INVERT_IDENTITY => Ok(false),
+        INVERT_INVERSE => Ok(true),
         _ => Err(CommandError::BadEnum),
     }
 }
 
 fn voi_function(value: u8) -> Result<VoiFunction, CommandError> {
     match value {
-        0 => Ok(VoiFunction::Linear),
-        1 => Ok(VoiFunction::LinearExact),
-        2 => Ok(VoiFunction::Sigmoid),
+        VOI_FUNCTION_LINEAR => Ok(VoiFunction::Linear),
+        VOI_FUNCTION_LINEAR_EXACT => Ok(VoiFunction::LinearExact),
+        VOI_FUNCTION_SIGMOID => Ok(VoiFunction::Sigmoid),
         _ => Err(CommandError::BadEnum),
     }
 }
 
 fn preset(value: u8) -> Result<WindowPreset, CommandError> {
     match value {
-        0 => Ok(WindowPreset::SoftTissue),
-        1 => Ok(WindowPreset::Lung),
-        2 => Ok(WindowPreset::Bone),
+        PRESET_SOFT_TISSUE => Ok(WindowPreset::SoftTissue),
+        PRESET_LUNG => Ok(WindowPreset::Lung),
+        PRESET_BONE => Ok(WindowPreset::Bone),
         _ => Err(CommandError::BadEnum),
     }
 }
 
 fn colormap(value: u8) -> Result<Colormap, CommandError> {
     match value {
-        0 => Ok(Colormap::Grey),
-        1 => Ok(Colormap::Stops),
+        COLORMAP_GREY => Ok(Colormap::Grey),
+        COLORMAP_STOPS => Ok(Colormap::Stops),
         _ => Err(CommandError::BadEnum),
     }
 }
@@ -607,22 +621,22 @@ fn read_f64(bytes: &[u8], at: usize) -> Result<f64, CommandError> {
     Ok(f64::from_le_bytes(buf))
 }
 
-fn write_f32(out: &mut [u8], at: usize, value: f32) {
-    let Some(end) = at.checked_add(4) else {
-        return;
-    };
-    let Some(slot) = out.get_mut(at..end) else {
-        return;
-    };
-    slot.copy_from_slice(&value.to_le_bytes());
-}
+#[cfg(test)]
+mod snapshot_access {
+    use super::StackViewport;
+    use crate::snapshot::SnapshotError;
+    use crate::view::Zoom;
 
-fn write_u32(out: &mut [u8], at: usize, value: u32) {
-    let Some(end) = at.checked_add(4) else {
-        return;
-    };
-    let Some(slot) = out.get_mut(at..end) else {
-        return;
-    };
-    slot.copy_from_slice(&value.to_le_bytes());
+    #[test]
+    fn a_non_finite_zoom_is_refused_before_any_bytes() {
+        let built = StackViewport::try_identity(1);
+        assert!(built.is_ok());
+        let Ok(mut viewport) = built else {
+            return;
+        };
+        viewport.view.set_zoom(Zoom::new(f64::NAN));
+        assert!(matches!(viewport.snapshot(), Err(SnapshotError::NonFinite)));
+        assert_eq!(viewport.generation(), 0);
+        assert_eq!(viewport.flags(), 0);
+    }
 }

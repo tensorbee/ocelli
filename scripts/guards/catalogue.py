@@ -962,6 +962,21 @@ def _renumber_an_error_code(box: Sandbox) -> None:
     box.write("ci/error-codes.json", json.dumps(registry, indent=2) + "\n")
 
 
+def _drop_one_catalogue_row(box: Sandbox) -> None:
+    """Delete the ERROR_EVENT row so the committed map is one name short.
+
+    The count refusal fires before the script opens the oracle install, so
+    this probe needs no node_modules. The expected text names 102 against 103.
+    """
+    box.substitute(
+        "packages/core/src/events.ts",
+        '  { cornerstone: "ERROR_EVENT", source: "core", ocelli: null, '
+        'delivery: "unavailable", producer: null, reason: "errors use the '
+        'section 23 record, not this ring" },\n',
+        "",
+    )
+
+
 def _backlog_done_without_record(box: Sandbox) -> None:
     text = box.read("docs/sprints/BACKLOG.md")
     match = re.search(r"^\|\s*(F-X?\d{3}[a-z]?)\s*\|.*\|\s*pending\s*\|.*$",
@@ -10719,6 +10734,23 @@ GUARDS: tuple[Guard, ...] = (
                 "from a citation that has gone away.",
         claims=("*",),
         covered_by=("scripts/tests/test_guard_catalogue.py",),
+    ),
+    Guard(
+        id="event-catalogue",
+        file="scripts/event_catalogue_check.py",
+        gate="oracle",
+        spec="F-103, the committed catalogue matches the pinned 5.8.2 contract",
+        refuses="A committed catalogue whose row count, pinned version or "
+                "recorded file digests disagree with the 5.8.2 contract.",
+        claims=("FAIL:",),
+        probes=(
+            Probe("event-catalogue.short-map", _drop_one_catalogue_row,
+                  script("python3", "scripts/event_catalogue_check.py"),
+                  "catalogue has 102 rows"),
+        ),
+        limit="The floor probe checks the committed row count only. Comparing "
+              "names and digests to the installed enums needs the oracle tree "
+              "and runs in the oracle gate, not in this probe.",
     ),
 
     # -- the oracle, adopted rather than copied ----------------------------

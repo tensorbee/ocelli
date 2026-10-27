@@ -456,6 +456,100 @@ impl View {
             to_index: back,
         })
     }
+
+    /// The camera inputs and the display-area fields this view owns.
+    ///
+    /// The matrix is not one of them. [`Self::camera_matrix`] stays the only
+    /// derivation.
+    pub(crate) fn encode(self) -> Result<EncodedView, crate::snapshot::SnapshotError> {
+        let encoded = EncodedView {
+            pan_x: self.pan_x,
+            pan_y: self.pan_y,
+            zoom: self.zoom,
+            radians: self.radians,
+            flip_horizontal: self.flip_horizontal,
+            flip_vertical: self.flip_vertical,
+            column_mm: self.column_mm,
+            row_mm: self.row_mm,
+            shift_col: self.shift_col,
+            shift_row: self.shift_row,
+            fitted: self.fitted,
+            anchor_x: self.anchor_x,
+            anchor_y: self.anchor_y,
+            fit_scale: self.fit_scale,
+        };
+        encoded.finite()?;
+        Ok(encoded)
+    }
+
+    /// Rebuild a view from camera inputs.
+    ///
+    /// An unfitted record uses the image centre and a fit scale of one. The
+    /// stored anchor is the letterbox centre only after `fit`.
+    pub(crate) fn decode(encoded: EncodedView) -> Result<Self, crate::snapshot::SnapshotError> {
+        encoded.finite()?;
+        let fitted = encoded.fitted;
+        Ok(Self {
+            pan_x: encoded.pan_x,
+            pan_y: encoded.pan_y,
+            zoom: encoded.zoom,
+            radians: encoded.radians,
+            flip_horizontal: encoded.flip_horizontal,
+            flip_vertical: encoded.flip_vertical,
+            column_mm: encoded.column_mm,
+            row_mm: encoded.row_mm,
+            shift_col: encoded.shift_col,
+            shift_row: encoded.shift_row,
+            fitted,
+            anchor_x: if fitted { encoded.anchor_x } else { 0.0 },
+            anchor_y: if fitted { encoded.anchor_y } else { 0.0 },
+            fit_scale: if fitted { encoded.fit_scale } else { 1.0 },
+        })
+    }
+}
+
+/// Camera inputs plus the display fields [`View`] stores.
+///
+/// CSS size and the grid live on the viewport. This struct does not.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct EncodedView {
+    pub pan_x: f64,
+    pub pan_y: f64,
+    pub zoom: f64,
+    pub radians: f64,
+    pub flip_horizontal: bool,
+    pub flip_vertical: bool,
+    pub column_mm: f64,
+    pub row_mm: f64,
+    pub shift_col: f64,
+    pub shift_row: f64,
+    pub fitted: bool,
+    pub anchor_x: f64,
+    pub anchor_y: f64,
+    pub fit_scale: f64,
+}
+
+impl EncodedView {
+    fn finite(self) -> Result<(), crate::snapshot::SnapshotError> {
+        let values = [
+            self.pan_x,
+            self.pan_y,
+            self.zoom,
+            self.radians,
+            self.column_mm,
+            self.row_mm,
+            self.shift_col,
+            self.shift_row,
+            self.anchor_x,
+            self.anchor_y,
+            self.fit_scale,
+        ];
+        if values.iter().all(|value| value.is_finite()) {
+            Ok(())
+        } else {
+            Err(crate::snapshot::SnapshotError::NonFinite)
+        }
+    }
 }
 
 /// Image coordinate of index `(0, 0)`. PS3.3 C.7.6.2.1.1 places that index

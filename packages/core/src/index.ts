@@ -52,11 +52,10 @@ export type {
   QidoSearchOptions,
 } from "./dicomweb.js";
 
-export { drainRing, readEvent, EVENT_STRIDE, HEADER_BYTES } from "./ring.js";
+export { drainRing, readEvent, HEADER_BYTES } from "./ring.js";
 export type { DrainResult, OcelliEvent } from "./ring.js";
 
 export {
-  COMMAND_ID,
   packCommands,
   packPointerFrame,
   sessionCommandSink,
@@ -68,6 +67,43 @@ export type {
   PackedCommand,
   SessionCommandExports,
 } from "./commands.js";
+
+export {
+  COLORMAP_BYTE,
+  COMMAND_ID,
+  COMMAND_PAYLOAD_BYTES,
+  EVENT_HEADER_BYTES,
+  EVENT_KIND_OFFSET,
+  EVENT_PAYLOAD_BYTES,
+  EVENT_PAYLOAD_OFFSET,
+  EVENT_RING_CAPACITY_OFFSET,
+  EVENT_RING_DROPPED_OFFSET,
+  EVENT_RING_PENDING_OFFSET,
+  EVENT_RING_TAIL_OFFSET,
+  EVENT_SEQ_OFFSET,
+  EVENT_STRIDE,
+  EVENT_VIEWPORT_OFFSET,
+  FLAG_ERROR,
+  FLAG_INVERT,
+  FLAG_LOADING,
+  FLAG_REFINING,
+  INVERT_BYTE,
+  PRESET_BYTE,
+  RING_EVENT_KIND,
+  STACK_COMMANDS,
+  STATE_CAMERA_COMPONENT_BYTES,
+  STATE_CAMERA_COMPONENTS,
+  STATE_CAMERA_OFFSET,
+  STATE_FLAGS_OFFSET,
+  STATE_NUM_SLICES_OFFSET,
+  STATE_PADDING_OFFSET,
+  STATE_SLICE_INDEX_OFFSET,
+  STATE_VOI_CENTER_OFFSET,
+  STATE_VOI_WIDTH_OFFSET,
+  VIEWPORT_STATE_BYTES,
+  VOI_FUNCTION_BYTE,
+} from "./generated.js";
+export type { StackCommand } from "./generated.js";
 
 export {
   decodeRecord,
@@ -104,14 +140,8 @@ export {
   CAMERA_COMPONENTS,
   COLORMAPS,
   INVERT,
-  STACK_COMMANDS,
   TIER_AVAILABILITY,
   TIER_C_DRAWING,
-  FLAG_ERROR,
-  FLAG_INVERT,
-  FLAG_LOADING,
-  FLAG_REFINING,
-  VIEWPORT_STATE_BYTES,
   VIEWPORT_STATE_FIELDS,
   VOI_FUNCTIONS,
   WINDOW_PRESETS,
@@ -123,7 +153,6 @@ export type {
   Colormap,
   Invert,
   Scene,
-  StackCommand,
   StackViewport,
   TierAvailability,
   ToolBinding,
@@ -132,6 +161,47 @@ export type {
   VoiFunction,
   WindowPreset,
 } from "./viewport.js";
+
+export {
+  SNAPSHOT_ERROR,
+  SNAPSHOT_MAGIC,
+  SNAPSHOT_VERSION,
+  parseSnapshot,
+  restoreSessionSnapshot,
+  sessionSnapshot,
+  sessionSnapshotError,
+} from "./snapshot.js";
+export {
+  CORNERSTONE_EVENT_COUNT,
+  CORNERSTONE_EVENT_MAP,
+  EVENT_DELIVERY,
+  OCELLI_EVENTS,
+  UNMAPPED_EVENTS,
+  decodeNamedEvent,
+} from "./events.js";
+export type {
+  CameraSnapshot,
+  DisplayAreaSnapshot,
+  EvidenceSnapshot,
+  ModalitySnapshot,
+  ParsedSnapshot,
+  PhotometricSnapshot,
+  PresentationSnapshot,
+  SessionSnapshotExports,
+  ViewportSnapshot,
+  VoiSnapshot,
+} from "./snapshot.js";
+export type {
+  CacheBudgetChangedPayload,
+  CacheKeyPayload,
+  CachePressurePayload,
+  CornerstoneEventRow,
+  EventDelivery,
+  FramePresentedPayload,
+  OcelliEventName,
+  OcelliNamedEvent,
+  UnmappedEvent,
+} from "./events.js";
 
 /** Package version, kept in step with the crate versions by `/release`. */
 export const VERSION = "0.1.0";

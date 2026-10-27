@@ -1,11 +1,36 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-X003
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003
+**Last updated:** 2026-10-27
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
-F-101 built the wire. This file names what that wire carries. The wire lives
-in `ocelli-viewport`, `ocelli-wasm` and `@ocelli/core`, not in this file.
+F-101 built the wire. F-104 moved every boundary number into one Rust table
+and generates the TypeScript declarations from it. This file names what that
+wire carries. The wire lives in `ocelli-viewport`, `ocelli-wasm` and
+`@ocelli/core`, not in this file.
+
+## The generated boundary module
+
+`crates/ocelli-viewport/src/boundary.rs` is the one definition of the
+command, state and ring numbers. It holds the eleven command ids and payload
+lengths, the VOI function, preset, colormap and invert bytes, the flag bits,
+the `ViewportState` and `RingHeader` layouts, the event stride and field
+offsets, and the six ring kinds. `snapshot.rs` is the one definition of the
+snapshot magic, version and error codes. `crates/ocelli-viewport/tests/typegen.rs`
+writes `packages/core/src/generated.ts` from both and compares the committed
+file byte for byte. A change to a Rust payload length or a struct field fails
+the `test` gate until the file is regenerated:
+
+```bash
+UPDATE_TYPES=1 cargo test -p ocelli-viewport --test typegen
+```
+
+`viewport.ts`, `commands.ts` and `ring.ts` import the generated constants
+rather than restating them. `VIEWPORT_STATE_BYTES` is
+`size_of::<ViewportState>()`, and every `STATE_*_OFFSET` is `offset_of!` on
+that struct, so the 96-byte readback and its offsets are the layout rather
+than a second description of it. The ring's 48-byte stride and field offsets
+come from `RingEvent` the same way.
 
 ## The boundary wire this file documents
 
@@ -86,7 +111,45 @@ sixty-three cornerstone tool classes are not these names. F-103 is the event
 model. Annotation tools are not in the set.
 
 `packages/core/src/viewport.ts` exports the types. It does not call wasm.
-`packages/react` stays a scaffold. F-102 owns framework bindings.
+
+## React binding
+
+`@ocelli/react` exports `OcelliViewport`, `useOcelliViewport` and
+`createViewportPump`. The component takes a session prop. There is no context
+and no module singleton. The pump enqueues commands. A frame with a non-empty queue submits one packed
+buffer through `writeCommands`. An empty queue does not. Every frame drains
+the ring once and dispatches F-103's named events. `checkpoint` reads
+`session.snapshot()` when the caller asks, and `restore` applies that record
+and then one `Scroll`. The host element is a `div` with `data-ocelli-viewport`
+and `data-ocelli-core`. This story does not render a canvas. The binding
+reports `TIER_C_DRAWING` because it does not resolve a GPU tier and must not
+claim a drawn image.
+
+## Snapshot
+
+F-050 adds `snapshot`, `snapshot_error` and `restore_snapshot` on the wasm
+session, and `parseSnapshot`, `sessionSnapshot`, `sessionSnapshotError` and
+`restoreSessionSnapshot` in `@ocelli/core`.
+
+`snapshot` returns the UTF-8 JSON record as a copied array. An empty array
+is a refusal, and `snapshot_error` names it. Zero means the last snapshot
+succeeded. `restore_snapshot` returns zero on success and the same codes
+otherwise. A refused restore leaves the camera, the display area and the
+presentation unchanged. Scroll, flags and generation are not in the record.
+
+`parseSnapshot` refuses an unknown version, a bad magic, malformed JSON and
+an unknown field. `SNAPSHOT_MAGIC`, `SNAPSHOT_VERSION` and `SNAPSHOT_ERROR`
+come from `generated.ts`. The record stores camera inputs. It does not store
+the sixteen-number matrix that `readViewportState` copies.
+
+## Events
+
+F-103 publishes `decodeNamedEvent`, `OCELLI_EVENTS`, `CORNERSTONE_EVENT_MAP`,
+`CORNERSTONE_EVENT_COUNT`, `EVENT_DELIVERY` and `UNMAPPED_EVENTS`.
+
+`decodeNamedEvent` reads a copied ring event. It does not take a view over
+wasm memory. The layout and the 5.8.2 mapping are `docs/lld/events.md`. The
+ring stride, capacity and kinds are unchanged.
 
 ## Minimal resident stack initialization
 

@@ -13,11 +13,22 @@
  * view over wasm linear memory.
  */
 
-/** `RingHeader` in `ocelli-viewport/src/ring.rs`, four u32 fields. */
-export const HEADER_BYTES = 16;
+import {
+  EVENT_HEADER_BYTES,
+  EVENT_KIND_OFFSET,
+  EVENT_PAYLOAD_BYTES,
+  EVENT_PAYLOAD_OFFSET,
+  EVENT_RING_DROPPED_OFFSET,
+  EVENT_RING_PENDING_OFFSET,
+  EVENT_SEQ_OFFSET,
+  EVENT_STRIDE,
+  EVENT_VIEWPORT_OFFSET,
+} from "./generated.js";
 
-/** `Event` in `ocelli-viewport/src/ring.rs`: u32 + u32 + u64 + [u8; 32]. */
-export const EVENT_STRIDE = 48;
+export { EVENT_STRIDE };
+
+/** `RingHeader` in `ocelli-viewport/src/boundary.rs`, four u32 fields. */
+export const HEADER_BYTES = EVENT_HEADER_BYTES;
 
 export interface OcelliEvent {
   readonly kind: number;
@@ -44,13 +55,13 @@ export interface DrainResult {
  */
 export function readEvent(view: DataView, offset: number): OcelliEvent {
   return {
-    kind: view.getUint32(offset, true),
-    viewport: view.getUint32(offset + 4, true),
-    seq: view.getBigUint64(offset + 8, true),
+    kind: view.getUint32(offset + EVENT_KIND_OFFSET, true),
+    viewport: view.getUint32(offset + EVENT_VIEWPORT_OFFSET, true),
+    seq: view.getBigUint64(offset + EVENT_SEQ_OFFSET, true),
     payload: new Uint8Array(
       view.buffer.slice(
-        view.byteOffset + offset + 16,
-        view.byteOffset + offset + 48,
+        view.byteOffset + offset + EVENT_PAYLOAD_OFFSET,
+        view.byteOffset + offset + EVENT_PAYLOAD_OFFSET + EVENT_PAYLOAD_BYTES,
       ),
     ),
   };
@@ -65,7 +76,7 @@ export function readEvent(view: DataView, offset: number): OcelliEvent {
  * linear prefix. A buffer shorter than the declared events yields none.
  */
 export function drainRing(copied: Uint8Array): DrainResult {
-  if (copied.byteLength < HEADER_BYTES) {
+  if (copied.byteLength < EVENT_HEADER_BYTES) {
     return { events: [], dropped: 0 };
   }
   const view = new DataView(
@@ -73,15 +84,15 @@ export function drainRing(copied: Uint8Array): DrainResult {
     copied.byteOffset,
     copied.byteLength,
   );
-  const pending = view.getUint32(0, true);
-  const dropped = view.getUint32(12, true);
-  const bytes = HEADER_BYTES + pending * EVENT_STRIDE;
+  const pending = view.getUint32(EVENT_RING_PENDING_OFFSET, true);
+  const dropped = view.getUint32(EVENT_RING_DROPPED_OFFSET, true);
+  const bytes = EVENT_HEADER_BYTES + pending * EVENT_STRIDE;
   if (copied.byteLength < bytes) {
     return { events: [], dropped };
   }
   const events: OcelliEvent[] = [];
   for (let index = 0; index < pending; index += 1) {
-    events.push(readEvent(view, HEADER_BYTES + index * EVENT_STRIDE));
+    events.push(readEvent(view, EVENT_HEADER_BYTES + index * EVENT_STRIDE));
   }
   return { events, dropped };
 }

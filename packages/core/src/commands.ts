@@ -6,22 +6,17 @@
  * camera and it does not view wasm memory.
  */
 
+import {
+  COLORMAP_BYTE,
+  COMMAND_ID,
+  COMMAND_PAYLOAD_BYTES,
+  INVERT_BYTE,
+  PRESET_BYTE,
+  VOI_FUNCTION_BYTE,
+} from "./generated.js";
 import type { Colormap, Invert, VoiFunction, WindowPreset } from "./viewport.js";
 
-/** Command ids. The numeric value is the wire kind. */
-export const COMMAND_ID = {
-  Fit: 1,
-  Pan: 2,
-  Zoom: 3,
-  Rotate: 4,
-  FlipHorizontal: 5,
-  FlipVertical: 6,
-  SetWindow: 7,
-  ApplyPreset: 8,
-  SetInvert: 9,
-  SetColormap: 10,
-  Scroll: 11,
-} as const;
+export { COMMAND_ID };
 
 /** One packed command. Names match `STACK_COMMANDS`. */
 export type PackedCommand =
@@ -72,28 +67,6 @@ export interface SessionCommandExports {
 export interface CommandWrite {
   write(ptr: number, bytes: Uint8Array): void;
 }
-
-const VOI_BYTE: Record<VoiFunction, number> = {
-  linear: 0,
-  linear_exact: 1,
-  sigmoid: 2,
-};
-
-const PRESET_BYTE: Record<WindowPreset, number> = {
-  soft_tissue: 0,
-  lung: 1,
-  bone: 2,
-};
-
-const INVERT_BYTE: Record<Invert, number> = {
-  identity: 0,
-  inverse: 1,
-};
-
-const COLORMAP_BYTE: Record<Colormap, number> = {
-  grey: 0,
-  stops: 1,
-};
 
 /**
  * Pack `commands` for `viewportId`.
@@ -205,9 +178,15 @@ export function sessionCommandSink(wasm: SessionCommandExports): CommandSink {
 
 function append(out: number[], viewportId: number, command: PackedCommand): void {
   const payload = payloadOf(command);
+  const expected = COMMAND_PAYLOAD_BYTES[command.kind];
+  if (payload.length !== expected) {
+    throw new RangeError(
+      `${command.kind} payload is ${payload.length} bytes and the Rust table declares ${expected}`,
+    );
+  }
   pushU16(out, COMMAND_ID[command.kind]);
   pushU16(out, u16(viewportId, "viewport"));
-  pushU32(out, payload.length);
+  pushU32(out, expected);
   out.push(...payload);
 }
 
@@ -233,7 +212,7 @@ function payloadOf(command: PackedCommand): number[] {
       return [
         ...f64(command.centre),
         ...f64(command.width),
-        VOI_BYTE[command.function],
+        VOI_FUNCTION_BYTE[command.function],
       ];
     case "ApplyPreset":
       return [PRESET_BYTE[command.preset]];

@@ -5,9 +5,11 @@
 //! soft-tissue window is centre 40 and width 400. Lung and bone are the
 //! centre and width pairs named by the F-046 plan.
 
+use alloc::vec::Vec;
+
 use ocelli_pixel::{
-    LutChain, PhotometricInterpretation, PixelError, PresentationLutEvidence, PresentationLutShape,
-    VoiFunction, VoiTransform,
+    LutChain, LutDescriptor, ModalityTransform, PhotometricInterpretation, PixelError,
+    PresentationLutEvidence, PresentationLutShape, VoiFunction, VoiTransform,
 };
 
 /// The three named windows. Each one is `LINEAR`.
@@ -171,6 +173,51 @@ impl Presentation {
         self.colormap
     }
 
+    /// Photometric interpretation stored for the next rebuild.
+    #[must_use]
+    pub const fn photometric(&self) -> PhotometricInterpretation {
+        self.photometric
+    }
+
+    /// Presentation LUT evidence stored for the next rebuild.
+    ///
+    /// `Absent` on `MONOCHROME1` is not [`PresentationLutEvidence::Shape`] of
+    /// inverse, even when both invert.
+    #[must_use]
+    pub const fn evidence(&self) -> PresentationLutEvidence {
+        self.evidence
+    }
+
+    /// Read the chain's selections. This does not rebuild them.
+    pub(crate) fn encode(&self) -> Result<EncodedPresentation, crate::snapshot::SnapshotError> {
+        Ok(EncodedPresentation {
+            modality: encode_modality(self.chain.modality())?,
+            voi: encode_voi(self.chain.voi())?,
+            photometric: self.photometric,
+            evidence: self.evidence,
+            colormap: self.colormap,
+        })
+    }
+
+    /// Rebuild through [`ModalityTransform::new`], [`VoiTransform::new`] and
+    /// [`LutChain::new`]. The arithmetic stays in `ocelli-pixel`.
+    pub(crate) fn decode(
+        encoded: EncodedPresentation,
+    ) -> Result<Self, crate::snapshot::SnapshotError> {
+        let modality = decode_modality(encoded.modality)?;
+        let voi = decode_voi(encoded.voi)?;
+        let chain = match LutChain::new(modality, voi, encoded.photometric, encoded.evidence) {
+            Ok(chain) => chain,
+            Err(_) => return Err(crate::snapshot::SnapshotError::ChainUnavailable),
+        };
+        Ok(Self::new(
+            chain,
+            encoded.photometric,
+            encoded.evidence,
+            encoded.colormap,
+        ))
+    }
+
     /// Whether the stored evidence is an explicit inverse shape.
     ///
     /// `MONOCHROME1` is not this flag. Flag bit 0 of the readback state is.
@@ -219,5 +266,160 @@ impl Presentation {
         self.chain = chain;
         self.evidence = evidence;
         Ok(())
+    }
+}
+
+/// A LUT descriptor carried by a snapshot, before [`LutDescriptor::new`].
+#[derive(Clone, Debug)]
+pub(crate) struct EncodedLut {
+    pub declared_entry_count: u16,
+    pub first_mapped_input: i32,
+    pub bits_per_entry: u8,
+    pub values: Vec<f32>,
+}
+
+/// Stage 1 as selected. A sequence does not also carry rescale.
+#[derive(Clone, Debug)]
+pub(crate) enum EncodedModality {
+    Rescale { slope: f32, intercept: f32 },
+    Lut(EncodedLut),
+}
+
+/// Stage 2 as selected. A sequence does not also carry a window.
+#[derive(Clone, Debug)]
+pub(crate) enum EncodedVoi {
+    Window {
+        center: f32,
+        width: f32,
+        function: VoiFunction,
+        ymin: f32,
+        ymax: f32,
+    },
+    Lut(EncodedLut),
+}
+
+/// The presentation fields a snapshot round-trips.
+#[derive(Clone, Debug)]
+pub(crate) struct EncodedPresentation {
+    pub modality: EncodedModality,
+    pub voi: EncodedVoi,
+    pub photometric: PhotometricInterpretation,
+    pub evidence: PresentationLutEvidence,
+    pub colormap: Colormap,
+}
+
+fn encode_modality(
+    modality: &ModalityTransform,
+) -> Result<EncodedModality, crate::snapshot::SnapshotError> {
+    if let Some(lut) = modality.lut() {
+        return Ok(EncodedModality::Lut(encode_lut(lut)?));
+    }
+    let Some((slope, intercept)) = modality.rescale() else {
+        return Err(crate::snapshot::SnapshotError::ChainUnavailable);
+    };
+    if !slope.is_finite() || !intercept.is_finite() {
+        return Err(crate::snapshot::SnapshotError::NonFinite);
+    }
+    Ok(EncodedModality::Rescale { slope, intercept })
+}
+
+fn encode_voi(voi: &VoiTransform) -> Result<EncodedVoi, crate::snapshot::SnapshotError> {
+    if let Some(lut) = voi.lut() {
+        return Ok(EncodedVoi::Lut(encode_lut(lut)?));
+    }
+    let Some((center, width, function)) = voi.window() else {
+        return Err(crate::snapshot::SnapshotError::ChainUnavailable);
+    };
+    let (ymin, ymax) = voi.output_range();
+    if !center.is_finite() || !width.is_finite() || !ymin.is_finite() || !ymax.is_finite() {
+        return Err(crate::snapshot::SnapshotError::NonFinite);
+    }
+    Ok(EncodedVoi::Window {
+        center,
+        width,
+        function,
+        ymin,
+        ymax,
+    })
+}
+
+fn encode_lut(lut: &LutDescriptor) -> Result<EncodedLut, crate::snapshot::SnapshotError> {
+    if lut.values().iter().any(|value| !value.is_finite()) {
+        return Err(crate::snapshot::SnapshotError::NonFinite);
+    }
+    Ok(EncodedLut {
+        declared_entry_count: lut.declared_entry_count(),
+        first_mapped_input: lut.first_mapped_input(),
+        bits_per_entry: lut.bits_per_entry(),
+        values: lut.values().to_vec(),
+    })
+}
+
+fn decode_modality(
+    encoded: EncodedModality,
+) -> Result<ModalityTransform, crate::snapshot::SnapshotError> {
+    match encoded {
+        EncodedModality::Rescale { slope, intercept } => {
+            if !slope.is_finite() || !intercept.is_finite() {
+                return Err(crate::snapshot::SnapshotError::NonFinite);
+            }
+            match ModalityTransform::new(None, Some(slope), Some(intercept)) {
+                Ok(modality) => Ok(modality),
+                Err(_) => Err(crate::snapshot::SnapshotError::ChainUnavailable),
+            }
+        }
+        EncodedModality::Lut(lut) => {
+            let descriptor = decode_lut(lut)?;
+            match ModalityTransform::new(Some(descriptor), None, None) {
+                Ok(modality) => Ok(modality),
+                Err(_) => Err(crate::snapshot::SnapshotError::ChainUnavailable),
+            }
+        }
+    }
+}
+
+fn decode_voi(encoded: EncodedVoi) -> Result<VoiTransform, crate::snapshot::SnapshotError> {
+    match encoded {
+        EncodedVoi::Window {
+            center,
+            width,
+            function,
+            ymin,
+            ymax,
+        } => {
+            if !center.is_finite() || !width.is_finite() || !ymin.is_finite() || !ymax.is_finite() {
+                return Err(crate::snapshot::SnapshotError::NonFinite);
+            }
+            match VoiTransform::new(None, &[center], &[width], 0, function, ymin, ymax) {
+                Ok(voi) => Ok(voi),
+                Err(PixelError::NonFiniteLutValue) => {
+                    Err(crate::snapshot::SnapshotError::NonFinite)
+                }
+                Err(_) => Err(crate::snapshot::SnapshotError::ChainUnavailable),
+            }
+        }
+        EncodedVoi::Lut(lut) => {
+            let descriptor = decode_lut(lut)?;
+            match VoiTransform::new(Some(descriptor), &[], &[], 0, VoiFunction::Linear, 0.0, 1.0) {
+                Ok(voi) => Ok(voi),
+                Err(_) => Err(crate::snapshot::SnapshotError::ChainUnavailable),
+            }
+        }
+    }
+}
+
+fn decode_lut(lut: EncodedLut) -> Result<LutDescriptor, crate::snapshot::SnapshotError> {
+    if lut.values.iter().any(|value| !value.is_finite()) {
+        return Err(crate::snapshot::SnapshotError::NonFinite);
+    }
+    match LutDescriptor::new(
+        lut.declared_entry_count,
+        lut.first_mapped_input,
+        lut.bits_per_entry,
+        lut.values,
+    ) {
+        Ok(descriptor) => Ok(descriptor),
+        Err(PixelError::NonFiniteLutValue) => Err(crate::snapshot::SnapshotError::NonFinite),
+        Err(_) => Err(crate::snapshot::SnapshotError::BadLut),
     }
 }

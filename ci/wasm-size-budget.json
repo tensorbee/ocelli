@@ -1,16 +1,26 @@
 {
-  "bytes": 1999061,
+  "bytes": 2151196,
   "tolerance": 0.05,
   "note": "Recorded measurement, not a guess. HLD Appendix A gate A4 estimates 3-8 MB uncompressed before tuning, with Naga dominating, and says it is unmeasured. Re-baseline deliberately with --accept-size and say why in the design plan.",
   "rebaselined": {
-    "story": "F-039",
-    "from": 16388,
-    "to": 1999061,
-    "delta": 1982673,
-    "delta_fraction": 120.9832,
-    "cause": "The first edge from ocelli-wasm to ocelli-render, which pulls in wgpu and Naga. This is the number bearing_on_gate_A4 already assigned to F-039. Measured by bin/ocelli.sh wasm on 2026-10-18. The from figure is the recorded F-005 baseline of 16388 bytes. The parent commit was not rebuilt.",
-    "not_the_cause": "Cold start was not remeasured. The F-006 figure of 2.3 ms still stands and is not part of this delta. The from figure is the recorded budget, not a fresh build of 9426845.",
-    "bearing_on_gate_A4": "This measurement is the first time the wasm module reaches wgpu and Naga. 1999061 bytes is 1.91 MiB as printed by --accept-size. Gate A4 estimates 3 to 8 MB uncompressed before tuning, with Naga dominating, and it also names cold start. This number does not close A4. Cold start was not remeasured.",
-    "only_rebaseline_in_S03": "F-004 was answered 'do not wire into ocelli-wasm' in the S03 design round, so there is no second delta and no attribution to split."
+    "story": "F-050",
+    "from": 1999061,
+    "to": 2151196,
+    "delta": 152135,
+    "delta_fraction": 0.0761,
+    "cause": "serde_json enters the shipped wasm module. The operator chose a JSON snapshot of the camera inputs, the display area and the presentation on 2026-10-27. Measured by bin/ocelli.sh wasm on 2026-10-27 as crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm. The from figure is the recorded F-039 baseline.",
+    "not_the_cause": "Cold start was not remeasured. The F-006 figure of 2.3 ms still stands and is not part of this delta.",
+    "bearing_on_gate_A4": "2151196 bytes is 2.05 MiB. Gate A4 estimates 3 to 8 MB uncompressed before tuning, with Naga dominating, and it also names cold start. This number does not close A4. Cold start was not remeasured.",
+    "previous": {
+      "story": "F-039",
+      "from": 16388,
+      "to": 1999061,
+      "delta": 1982673,
+      "delta_fraction": 120.9832,
+      "cause": "The first edge from ocelli-wasm to ocelli-render, which pulls in wgpu and Naga. This is the number bearing_on_gate_A4 already assigned to F-039. Measured by bin/ocelli.sh wasm on 2026-10-18. The from figure is the recorded F-005 baseline of 16388 bytes. The parent commit was not rebuilt.",
+      "not_the_cause": "Cold start was not remeasured. The F-006 figure of 2.3 ms still stands and is not part of this delta. The from figure is the recorded budget, not a fresh build of 9426845.",
+      "bearing_on_gate_A4": "This measurement is the first time the wasm module reaches wgpu and Naga. 1999061 bytes is 1.91 MiB as printed by --accept-size. Gate A4 estimates 3 to 8 MB uncompressed before tuning, with Naga dominating, and it also names cold start. This number does not close A4. Cold start was not remeasured.",
+      "only_rebaseline_in_S03": "F-004 was answered 'do not wire into ocelli-wasm' in the S03 design round, so there is no second delta and no attribution to split."
+    }
   }
 }

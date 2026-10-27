@@ -10,6 +10,23 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- A React viewport binding. `createViewportPump` submits one packed command
+  buffer on a frame that has queued commands, drains the ring once, copies
+  state once and reports that copy only when a field changed. `OcelliViewport` takes a session prop and renders
+  a host element. A missing session is the absent state. The binding does not
+  draw.
+- A named event catalogue for the six ring kinds and the shell events, with
+  one row per cornerstone3D 5.8.2 event. `decodeNamedEvent` reads the copied
+  payload. Scroll, camera and window stay state. Unavailable rows name the
+  reason.
+- A versioned JSON snapshot of one viewport's camera inputs, display area and
+  presentation. `snapshot` and `restore_snapshot` round-trip that record.
+  Scroll, flags and generation stay put, and the 96-byte readback is unchanged.
+- The boundary's TypeScript declarations are generated from the Rust layout.
+  `packages/core/src/generated.ts` is written by
+  `crates/ocelli-viewport/tests/typegen.rs` and checked byte for byte, so a
+  Rust command id, payload length, enum byte or state offset cannot drift
+  from the shell.
 - The Cargo workspace and the crates of HLD section 4's crate table, which
   `ls crates | wc -l` counts. Section 15.1's layout block is not that table and
   omits `ocelli-compute`. `wasm-bindgen` is confined to `ocelli-wasm` and

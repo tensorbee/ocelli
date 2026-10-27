@@ -1,7 +1,7 @@
 # The comparator, the oracle's judging half
 
-**F-IDs that contributed:** F-011, F-012, F-013, F-015, F-X012, F-X003
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-011, F-012, F-013, F-015, F-X012, F-X003, F-103
+**Last updated:** 2026-10-27
 
 HLD section 11 says the harness "pushes the same study through both stacks and
 compares frames within a written per-modality tolerance, with metadata diffed
@@ -66,15 +66,17 @@ additional cost and with no code change when F-X001 to F-X004 land.
 bin/ocelli.sh compare                       # identity, then the catalogue
 bin/ocelli.sh compare gate --reference REF --candidate CANDIDATE --out OUT
 bin/ocelli.sh compare identity --candidate DIR
-bin/ocelli.sh gate oracle                   # renders, then compares
+bin/ocelli.sh gate oracle                   # renders, checks the event catalogue, then compares
 ./target/release/ocelli-compare census      # a measurement, not a gate
 ```
 
-`bin/ocelli.sh gate oracle` is `"$0" oracle && "$0" compare`, chained with `&&`
-for the reason that file already comments on: a case arm returns the status of
-its LAST command, so an unchained render could fail and be reported green by a
-passing comparison. **No new gate name was added.** The comparator is part of
-what `oracle` means.
+`bin/ocelli.sh gate oracle` is `"$0" oracle`, then
+`scripts/event_catalogue_check.py --require-cornerstone`, then `"$0" compare`,
+chained with `&&` for the reason that file already comments on. A case arm
+returns the status of its LAST command, so an unchained render could fail and
+be reported green by a passing comparison. The catalogue check sits between
+them and refuses a mapping that drifted from the pinned 5.8.2 enums. **No new
+gate name was added.** The comparator is part of what `oracle` means.
 
 The binary is built in release. A debug comparison over ninety-nine frames
 plus twenty-nine mutation replays is minutes rather than seconds, and a check

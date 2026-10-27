@@ -181,12 +181,12 @@ The three-channel boundary is real and a stack viewport diffs clean against corn
 | F-047 | E7.3 | S15 | Stack scroll, prefetch strategy, image sequencing | Rust+TS | 3w | F-032 | done |
 | F-048 | E7.4 | S16 | Coordinate transforms: canvas / world / index | Rust+TS | 3w | F-045 | done |
 | F-049 | E7.5 | S15 | Calibration, spacing and gantry-tilt correction | Rust+TS | 2w | F-020 | done |
-| F-050 | E7.6 | S17 | Camera, display-area and presentation-state serialisation | Rust+TS | 3w | F-048 | pending |
+| F-050 | E7.6 | S17 | Camera, display-area and presentation-state serialisation | Rust+TS | 3w | F-048 | done |
 | F-100 | E16.1 | S15 | API design: viewport, scene and tool surface, documented | TS | 4w | - | done |
 | F-101 | E16.2 | S16 | wasm boundary: command channel, event ring buffer, state readback | TS | 5w | F-100 | done |
-| F-102 | E16.3 | S17 | Framework bindings (React first) | TS | 3w | F-101 | pending |
-| F-103 | E16.4 | S17 | Event model: the ~103 cornerstone events, re-shaped and documented | TS | 4w | F-101 | pending |
-| F-104 | E16.5 | S17 | TypeScript type generation from Rust definitions | TS | 4w | F-101 | pending |
+| F-102 | E16.3 | S17 | Framework bindings (React first) | TS | 3w | F-101 | done |
+| F-103 | E16.4 | S17 | Event model: the ~103 cornerstone events, re-shaped and documented | TS | 4w | F-101 | done |
+| F-104 | E16.5 | S17 | TypeScript type generation from Rust definitions | TS | 4w | F-101 | done |
 | F-X003 | X1.3 | S16 | CPU raster for the stack viewport, progressive refinement, and the tier A against C bound | Rust+TS | 6w | F-029, F-045, F-X001 | in-progress |
 | F-X022 | Y1.17 | S16 | Preserve selected VOI sequences across manual window changes | Rust | 1w | F-046 | done |
 | F-X023 | Y1.18 | S16 | Reconcile closure inventory and harden shared sprint preparation | Build | 2w | F-X018 | done |

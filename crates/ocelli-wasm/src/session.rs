@@ -81,6 +81,8 @@ pub struct Session {
     /// Device-sized expansion of `cpu_rgba`. The canvas blits this buffer.
     cpu_present: Vec<u8>,
     stack_epoch: u32,
+    /// Last `snapshot` refusal. Zero after a successful snapshot.
+    snapshot_code: u32,
 }
 
 impl Session {
@@ -102,6 +104,7 @@ impl Session {
             cpu_rgba: Vec::new(),
             cpu_present: Vec::new(),
             stack_epoch: 0,
+            snapshot_code: 0,
         }
     }
 
@@ -408,7 +411,47 @@ impl Session {
         self.viewport.set_generation(generation);
     }
 
-    /// Copy the 96-byte readback. Returns 96, or 0 when `out` is the wrong length.
+    /// UTF-8 JSON for the camera, the display area and the presentation.
+    ///
+    /// An empty vector is a refusal. [`Self::snapshot_error`] names it.
+    /// Scroll, flags and generation are not in the record.
+    #[must_use]
+    pub fn snapshot(&mut self) -> Vec<u8> {
+        match self.viewport.snapshot() {
+            Ok(bytes) => {
+                self.snapshot_code = 0;
+                bytes
+            }
+            Err(error) => {
+                self.snapshot_code = error.number();
+                Vec::new()
+            }
+        }
+    }
+
+    /// The code from the last [`Self::snapshot`] call. Zero after a success.
+    ///
+    /// A restore does not change this. Its own return value is the restore code.
+    #[must_use]
+    pub const fn snapshot_error(&self) -> u32 {
+        self.snapshot_code
+    }
+
+    /// Restore a snapshot. Zero is success. Any other value is
+    /// [`ocelli_viewport::snapshot::SnapshotError::number`].
+    ///
+    /// A refusal leaves the viewport unchanged.
+    #[must_use]
+    pub fn restore_snapshot(&mut self, bytes: &[u8]) -> u32 {
+        match self.viewport.restore(bytes) {
+            Ok(()) => 0,
+            Err(error) => error.number(),
+        }
+    }
+
+    /// Copy the section 17.4 readback.
+    ///
+    /// Returns [`STATE_BYTES`] when `out` has that length, and 0 otherwise.
     #[must_use]
     pub fn copy_state(&self, out: &mut [u8]) -> u32 {
         if self.viewport.write_state(out).is_err() {
@@ -969,7 +1012,9 @@ fn empty_bulk() -> &'static u8 {
 pub(crate) mod bind {
     use std::cell::RefCell;
 
-    use ocelli_viewport::commands::StackViewport;
+    use ocelli_viewport::boundary::{EVENT_HEADER_BYTES, EVENT_STRIDE};
+    use ocelli_viewport::commands::{STATE_BYTES, StackViewport};
+    use ocelli_viewport::ring::RING_CAPACITY;
     use wasm_bindgen::prelude::wasm_bindgen;
 
     use super::{FrameMeta, Session};
@@ -1038,9 +1083,13 @@ pub(crate) mod bind {
 
     #[wasm_bindgen(js_name = copy_state)]
     pub fn copy_state() -> Vec<u8> {
-        let mut out = vec![0_u8; 96];
+        let mut out = vec![0_u8; STATE_BYTES];
         let copied = with_session(|session| session.copy_state(&mut out)).unwrap_or(0);
-        if copied == 96 { out } else { Vec::new() }
+        if usize::try_from(copied).unwrap_or(0) == STATE_BYTES {
+            out
+        } else {
+            Vec::new()
+        }
     }
 
     #[wasm_bindgen(js_name = configure_stack)]
@@ -1078,7 +1127,9 @@ pub(crate) mod bind {
     /// There is no `ring_ptr`. A pointer would be a view over linear memory.
     #[wasm_bindgen(js_name = drain_events)]
     pub fn drain_events() -> Vec<u8> {
-        let mut out = vec![0_u8; 16 + 256 * 48];
+        let capacity = usize::try_from(RING_CAPACITY).unwrap_or(0);
+        let mut out =
+            vec![0_u8; EVENT_HEADER_BYTES.saturating_add(capacity.saturating_mul(EVENT_STRIDE))];
         let copied = with_session(|session| session.copy_ring(&mut out)).unwrap_or(0);
         out.truncate(copied);
         out
@@ -1086,7 +1137,29 @@ pub(crate) mod bind {
 
     #[wasm_bindgen(js_name = ring_capacity)]
     pub fn ring_capacity() -> u32 {
-        ocelli_viewport::ring::RING_CAPACITY
+        RING_CAPACITY
+    }
+
+    /// Copied JSON. Empty when the session is missing or the record is refused.
+    #[wasm_bindgen(js_name = snapshot)]
+    pub fn snapshot() -> Vec<u8> {
+        with_session(super::Session::snapshot).unwrap_or_default()
+    }
+
+    /// Code from the last [`snapshot`]. Zero after a success and when no
+    /// session could be opened.
+    #[wasm_bindgen(js_name = snapshot_error)]
+    pub fn snapshot_error() -> u32 {
+        with_session(|session| session.snapshot_error()).unwrap_or(0)
+    }
+
+    /// Zero on success. A missing session is
+    /// [`ocelli_viewport::snapshot::SNAPSHOT_ERROR_CHAIN_UNAVAILABLE`],
+    /// which is not success.
+    #[wasm_bindgen(js_name = restore_snapshot)]
+    pub fn restore_snapshot(bytes: &[u8]) -> u32 {
+        with_session(|session| session.restore_snapshot(bytes))
+            .unwrap_or(ocelli_viewport::snapshot::SNAPSHOT_ERROR_CHAIN_UNAVAILABLE)
     }
 }
 
