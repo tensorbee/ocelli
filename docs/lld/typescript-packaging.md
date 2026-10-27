@@ -115,9 +115,10 @@ property of the tarball's `exports` map and its emitted module syntax, not of a
 build step in this repository, so the pipeline proves the property directly
 instead of adding a tool that would hide it.
 
-Revisit this when the wasm consumption path lands in F-101. `wasm-pack --target
-web` emits an ESM module plus a `.wasm` asset, and bundlers treat that asset
-specially. If a bundler is needed then, it is added then, with a named reason.
+F-101 landed the boundary by copying bytes out of wasm rather than by
+importing the wasm asset into this package. The bundler decision stands.
+`wasm-pack --target web` still emits an ESM module plus a `.wasm` asset, and
+a bundler is added only with a named reason.
 
 ## The `packages` gate
 

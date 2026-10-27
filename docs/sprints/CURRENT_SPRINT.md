@@ -180,6 +180,4 @@ whole-sprint review pass 3 clean at zero defects and zero smells.
 `SPRINT_PLAN.md` agree on the four S17 stories and on their 14 estimated
 engineer-weeks. No new audit was run at this open.
 
-`/prepare-sprint` is the next command. It writes the draft designs and stops
-before implementation, verification receipts, commits or publication. No
-story is in progress, so no design plan exists yet.
+The four S17 stories are done. Their design plans are in `.claude/plans/`.
