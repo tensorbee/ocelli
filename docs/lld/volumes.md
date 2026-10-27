@@ -1,6 +1,6 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-058
 **Last updated:** 2026-10-27
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
@@ -18,7 +18,7 @@ C.7.6.2.1.1. `SpacingBetweenSlices`, `SliceThickness`, `SliceLocation`,
 | `VolumeCandidate` | Slices that share a frame of reference and an orientation |
 | `Volume` | Section 19's struct over one `VoxelStore` |
 | `VoxelStore` | One contiguous `Vec<u8>`, x fastest, then y, then z |
-| `Level` | One multiscale entry. This story holds exactly one, at offset 0 |
+| `Level` | Level 0 is full resolution at offset 0. Later entries are caller-supplied coarser levels on the same store |
 | `SlicePresence` | One bit per slice over `Vec<u64>`. Deviation D-25 |
 | `VolumeKey` | The series id a cached volume is stored under |
 | `VolumeCache` | Its own `Lru` on `CacheTier::Decoded`, with its own budget |
@@ -97,6 +97,31 @@ the presence set are not counted again.
 `VolumeCache` does not share `ImageCache`'s budget. One volume admitted
 against the frame budget would evict every frame a viewer is holding.
 Admission, eviction and pressure are `Lru`'s, on the decoded tier.
+
+## The level axis
+
+Level 0 is full resolution at offset 0. `Volume::append_level` copies
+caller-supplied bytes onto the end of the same store and pushes the next
+`Level`. It does not downsample. Pyramid generation is F-119. Opacity
+correction is F-121.
+
+Spacing on the new entry is level 0 spacing times level 0's dimension
+divided by the child dimension, on each axis. The ratio is baked at append
+time from level 0.
+
+`Volume::level` and `Volume::brick_grid_at` return
+`VolumeError::LevelAbsent` when the index is missing. They do not substitute
+level 0. A zero axis, an axis larger than level 0, a grid that is not
+smaller on at least one axis, or a buffer whose length is not the child
+voxel count times the voxel width, is `VolumeError::LevelShape`. The store
+does not grow on that refusal.
+
+`Volume::brick_grid` stays level 0. `brick_grid_at` builds `BrickGrid::new`
+for that level's dimensions and then sets `level`. There is no second edge
+table. `Volume::level_bytes` returns the entry's span in the store.
+
+Assembly and `construct` still write one level. `SlicePresence` stays the
+level 0 slice set. Renderers in S19 upload level 0 only.
 
 ## Tiers A, B and C
 

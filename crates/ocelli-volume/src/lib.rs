@@ -21,6 +21,8 @@ use ocelli_cache::{
 use ocelli_core::{Pt, World};
 use ocelli_pixel::{ImageOrientationPatient, PixelRepresentation};
 
+mod levels;
+
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.
 pub const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
@@ -214,6 +216,15 @@ pub enum VolumeError {
         /// The byte length offered.
         actual: usize,
     },
+    /// `index` is not an entry on the level axis.
+    #[error("level {index} is not on the volume")]
+    LevelAbsent {
+        /// The level that was requested.
+        index: u32,
+    },
+    /// A coarser level whose dimensions or byte length cannot be stored.
+    #[error("the coarser level does not fit behind level 0")]
+    LevelShape,
 }
 
 /// One multiscale level. Level 0 is full resolution, and E8.8 adds entries.
@@ -310,6 +321,16 @@ impl VoxelStore {
         self.data.len()
     }
 
+    /// The store as one byte slice, level 0 at offset 0.
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+
+    /// Append bytes after the existing levels. Callers check the length first.
+    pub(crate) fn extend_bytes(&mut self, extra: &[u8]) {
+        self.data.extend_from_slice(extra);
+    }
+
     /// Whether the allocation is empty.
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
@@ -371,7 +392,7 @@ pub struct Volume {
     pub voxel: VoxelKind,
     /// The one contiguous allocation.
     pub data: VoxelStore,
-    /// The multiscale level axis, exactly one entry in this story.
+    /// Level 0 at full resolution, with later caller-supplied levels appended.
     pub levels: Vec<Level>,
     /// Per-slice presence, for progressive assembly.
     pub present: SlicePresence,

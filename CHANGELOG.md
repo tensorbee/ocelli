@@ -10,6 +10,10 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The volume keeps a multiscale level axis. Level 0 stays full resolution.
+  `append_level` stores a caller-supplied coarser level on the same
+  allocation, and a missing level is an error. This story does not build
+  the pyramid.
 - A React viewport binding. `createViewportPump` submits one packed command
   buffer on a frame that has queued commands, drains the ring once, copies
   state once and reports that copy only when a field changed. `OcelliViewport` takes a session prop and renders

@@ -41,4 +41,4 @@ row here in the same hand.
 | [benchmarks.md](benchmarks.md) | The benchmark harness of HLD section 26, its subject registry, the host class and the `bench` gate | F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014 |
 | [guards.md](guards.md) | The guard harness: discovery, the catalogue, the sandbox, the probe runner, the census and executable skill examples | F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023 |
 | [cache.md](cache.md) | `crates/ocelli-cache`: the budgeted LRU, brick addressing, what `Budgeted::bytes` promises, and section 8's three tiers | F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101 |
-| [volumes.md](volumes.md) | `crates/ocelli-volume`: grouping, projected spacing, construction from stored samples, the contiguous store, the volume cache, the brick grid and which bricks are ready | F-033, F-036, F-043, F-051 |
+| [volumes.md](volumes.md) | `crates/ocelli-volume`: grouping, projected spacing, construction from stored samples, the contiguous store, the volume cache, the brick grid, ready bricks and the level axis | F-033, F-036, F-043, F-051, F-058 |
