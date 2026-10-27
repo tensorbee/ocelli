@@ -411,6 +411,10 @@ impl Volume {
     /// parallel to the normal, detected from geometry and never from a tilt
     /// tag.
     pub fn assemble(candidate: VolumeCandidate) -> Result<Self, VolumeError> {
+        Self::assemble_from(&candidate)
+    }
+
+    fn assemble_from(candidate: &VolumeCandidate) -> Result<Self, VolumeError> {
         if candidate.slices.len() < 2 {
             return Err(VolumeError::TooFewSlices);
         }
@@ -533,6 +537,40 @@ impl Volume {
             present: SlicePresence::new(count),
             order,
         })
+    }
+
+    /// Fill one candidate.
+    ///
+    /// Geometry, orientation and spacing come from [`Self::assemble`].
+    /// Each slice's stored samples are written by [`Self::place`] at
+    /// sorted position `n`. `order[n]` is that slice's arrival index.
+    /// The returned volume is complete.
+    ///
+    /// # Errors
+    ///
+    /// Every [`VolumeError`] assembly already returns, plus
+    /// [`VolumeError::SliceSizeMismatch`] when a frame buffer is not one
+    /// slice. A failure returns no volume.
+    pub fn construct(candidate: VolumeCandidate) -> Result<Self, VolumeError> {
+        let mut volume = Self::assemble_from(&candidate)?;
+        let order = volume.order.clone();
+        let count = u32::try_from(candidate.slices.len()).unwrap_or(u32::MAX);
+        for (sorted, arrival) in order.iter().copied().enumerate() {
+            let Some(evidence) = candidate.slices.get(arrival) else {
+                return Err(VolumeError::SliceOutOfRange {
+                    index: u32::try_from(arrival).unwrap_or(u32::MAX),
+                    count,
+                });
+            };
+            let Ok(index) = u32::try_from(sorted) else {
+                return Err(VolumeError::SliceOutOfRange {
+                    index: u32::MAX,
+                    count,
+                });
+            };
+            volume.place(index, evidence.frame().samples())?;
+        }
+        Ok(volume)
     }
 
     /// Write one slice and mark it present. Idempotent: writing a slice

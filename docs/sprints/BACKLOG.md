@@ -197,7 +197,7 @@ Volumes assemble progressively, reslice obliquely and ray-cast on both tiers.
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-051 | E8.1 | S18 | Volume construction from a stack: geometry, orientation, spacing | Rust | 4w | F-033 | pending |
+| F-051 | E8.1 | S18 | Volume construction from a stack: geometry, orientation, spacing | Rust | 4w | F-033 | done |
 | F-052 | E8.2 | S19 | Orthographic viewport: axial, sagittal, coronal | Rust | 4w | F-051 | pending |
 | F-053 | E8.3 | S20 | Oblique / arbitrary-plane reslicing | Rust | 4w | F-052 | pending |
 | F-054 | E8.4 | S20 | Thick slab with composite, MIP, MinIP and average blend modes | Rust | 4w | F-052 | pending |

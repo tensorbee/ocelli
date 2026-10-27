@@ -1,7 +1,7 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-033, F-036, F-043, F-051
+**Last updated:** 2026-10-27
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
 `ImagePositionPatient` projected on the slice normal, DICOM PS3.3
@@ -71,8 +71,19 @@ consulted. A sheared series is a parallelepiped and this story refuses it
 rather than storing it as a box.
 
 `order[n]` is the arrival index of the slice that landed at sorted position
-`n`. A caller places each arriving frame at that position and does not
-project the positions a second time outside this crate.
+`n`. `Volume::construct` copies each slice's stored samples to that position.
+A later progressive caller uses the same index and does not project the
+positions a second time outside this crate.
+
+## Construction
+
+`Volume::construct` is the caller of `place`. It borrows the candidate for
+the checks above, then writes each slice's stored samples at sorted
+position `n`. `order[n]` is that slice's arrival index. The returned volume
+has every slice present.
+`Volume::assemble` still returns the cleared store with `present_count` 0.
+`construct` applies no modality or VOI LUT and does not insert into
+`VolumeCache`. A failure drops the local volume.
 
 ## The store and progressive fill
 
