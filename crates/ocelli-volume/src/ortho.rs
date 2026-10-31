@@ -173,7 +173,7 @@ impl Volume {
         })
     }
 
-    fn in_range(&self, index: f64, dim: u32, axis: u8) -> Result<(), VolumeError> {
+    pub(crate) fn in_range(&self, index: f64, dim: u32, axis: u8) -> Result<(), VolumeError> {
         let inside = dim > 0 && index.is_finite() && index >= 0.0 && index <= f64_from_u32(dim - 1);
         if inside {
             Ok(())
@@ -182,7 +182,9 @@ impl Volume {
         }
     }
 
-    fn sample_at(&self, x: f64, y: f64, z: f64) -> PlaneSample {
+    /// Level-0 trilinear sample. The slab walker calls this. It does not
+    /// grow a second kernel.
+    pub(crate) fn sample_at(&self, x: f64, y: f64, z: f64) -> PlaneSample {
         let Some(x0) = u32_from_nonneg_floor(x) else {
             return PlaneSample::Absent;
         };
@@ -338,7 +340,7 @@ fn f64_from_u32(value: u32) -> f64 {
     f64::from(high) * 65_536.0 + f64::from(low)
 }
 
-fn u32_from_nonneg_floor(index: f64) -> Option<u32> {
+pub(crate) fn u32_from_nonneg_floor(index: f64) -> Option<u32> {
     if !index.is_finite() || index < 0.0 {
         return None;
     }

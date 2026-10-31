@@ -1,0 +1,17 @@
+PS3.3 C.11.2.1.3.2
+function LINEAR_EXACT
+centre 127.5
+width 255
+ymin 0
+ymax 255
+stored 0 200 0
+order reduce-stored-then-one-voi
+composite 200
+mip 200
+minip 0
+average 100
+outside 0 30 300
+outside-average 110
+outside-voi-then-average 95
+rejected-colour (200/255)*0.5*0.5
+rejected-alpha 0.875

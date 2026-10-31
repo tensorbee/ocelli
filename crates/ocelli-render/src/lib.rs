@@ -64,6 +64,7 @@ pub mod graph;
 pub mod ortho;
 pub mod probe;
 pub mod progressive;
+pub mod slab;
 pub mod tier_b;
 pub mod voi;
 
@@ -82,9 +83,9 @@ pub use gpu::{
 };
 pub use graph::{
     BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineFamily, PipelineKey,
-    RayAxis, RenderGraph, STORED_FORMAT, SegPass, StackPass, Upload, UploadError, ViewportId,
-    VolumeBrick, VolumePass, VolumeRaySource, device_camera_words, sampled_texture_limit,
-    tier_b_fragment_module, volume_ray_admission, volume_ray_module,
+    RayAxis, RenderGraph, STORED_FORMAT, SegPass, SlabPass, StackPass, Upload, UploadError,
+    ViewportId, VolumeBrick, VolumePass, VolumeRaySource, device_camera_words,
+    sampled_texture_limit, tier_b_fragment_module, volume_ray_admission, volume_ray_module,
 };
 pub use ortho::{OrthoError, present_plane};
 #[cfg(not(target_arch = "wasm32"))]
@@ -93,6 +94,9 @@ pub use probe::{
     Edge, Passes, ResolvedAdapter, WebGlOpened, WebGlProbe, resolve, resolve_adapter, resolve_webgl,
 };
 pub use progressive::{ProgressError, ProgressReport, sync_ready_bricks};
+pub use slab::{
+    SlabError, fragment_keys_for, present_slab, slab_blend_code, slab_compile_list, slab_module,
+};
 pub use tier_b::{Section183Error, Section183Pixels, read_section_18_3, stored_format_name};
 pub use voi::{VOI_WGSL, VoiParams, VoiParamsError};
 

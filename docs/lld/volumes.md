@@ -1,6 +1,6 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054
 **Last updated:** 2026-10-31
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
@@ -184,6 +184,31 @@ Axial, sagittal and coronal stay `OrthoPlane`. `reslice` is unchanged.
 Display reuses `show_ortho`. This story adds no shader and no second upload.
 Tier C still returns `TierCUnavailable` before a sample is read.
 
+## Thick slab
+
+`Volume::slab_plane` builds the same axis frame as `reslice`.
+`Volume::slab_samples` then walks along the patient normal. `M` is the
+matrix whose column `i` is `spacing[i] * direction.col(i)`. `d` is the
+inverse of `M` times the unit normal. The step in millimetres is
+`1 / length(d)`. The index step is `d / length(d)`. It is not
+`SpacingBetweenSlices` and it is not `SliceThickness`.
+
+Integer `t` is included when `abs(t * step_mm)` is within half the
+thickness. `t = 0` is the centre. Thickness 0 is that one sample. A
+non-finite or negative thickness, or a sample count that does not fit in
+`u32`, is `VolumeError::SlabThickness` and allocates nothing. A zero
+normal, a non-finite normal, a non-positive spacing, or a singular `M` is
+`VolumeError::SlabNormal`.
+
+Each included index is one `sample_at` call. A pixel with any absent
+sample is `PlaneSample::Absent` in every slot of its column. It is not
+stored zero and it is not a reduction of the samples that did land.
+
+Composite display is the centre sample. MIP, MinIP and average reduce the
+stored samples and then apply the existing VOI once. That window is
+`LutChain` in `ocelli-pixel`. This crate does not keep a second copy.
+Display of the column is `RenderGraph::show_slab`.
+
 ## Tiers A, B and C
 
 Not applicable for A and B as a device path. The volume is host memory and
@@ -206,5 +231,6 @@ slice is left out, because uploading it would invent zeros.
 false. The check does not build the ready list and does not read a coarser
 level. This crate still creates no texture. `RenderGraph::sync_volume` in
 `ocelli-render` uploads a ready brick. `RenderGraph::show_ortho` uploads one complete
-orthographic plane. Pixels stay in the store and do not cross the worker
+orthographic plane. `RenderGraph::show_slab` uploads one thick slab from
+`slab_samples`. Pixels stay in the store and do not cross the worker
 boundary.

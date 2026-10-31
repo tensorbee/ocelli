@@ -200,7 +200,7 @@ Volumes assemble progressively, reslice obliquely and ray-cast on both tiers.
 | F-051 | E8.1 | S18 | Volume construction from a stack: geometry, orientation, spacing | Rust | 4w | F-033 | done |
 | F-052 | E8.2 | S19 | Orthographic viewport: axial, sagittal, coronal | Rust | 4w | F-051 | done |
 | F-053 | E8.3 | S20 | Oblique / arbitrary-plane reslicing | Rust | 4w | F-052 | done |
-| F-054 | E8.4 | S20 | Thick slab with composite, MIP, MinIP and average blend modes | Rust | 4w | F-052 | pending |
+| F-054 | E8.4 | S20 | Thick slab with composite, MIP, MinIP and average blend modes | Rust | 4w | F-052 | done |
 | F-055 | E8.5 | S20 | Slice-position sync and frame-of-reference handling | Rust | 3w | F-052 | pending |
 | F-056 | E8.6 | S20 | Multi-volume fusion with per-volume opacity and colormap (PET-CT) | Rust | 4w | F-052 | pending |
 | F-057 | E8.7 | S19 | Progressive volume rendering while the series still loads | Rust | 3w | F-051 | done |

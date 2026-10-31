@@ -1,6 +1,6 @@
 # Viewport
 
-**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022
+**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022, F-054
 **Last updated:** 2026-10-31
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
@@ -229,13 +229,28 @@ returns `OrthoError::TierCUnavailable` before that walk and before a buffer
 is allocated. An `Absent` sample returns `PlaneIncomplete`, and
 `upload_stored` is not called, so `uploads` and the previous texture stay.
 A complete plane uploads the `Present` `f32` values through the existing
-stack pass. Windowing stays `VoiParams` and the existing VOI shader. There
-is no new pass variant and no sampler in WGSL.
+stack pass. Windowing stays `VoiParams` and the existing VOI shader.
+`show_ortho` adds no pass variant and no sampler in WGSL.
 
 Tier A and tier B share that upload. The stored format stays the existing
 choice. Tier C does not draw a plane. `reslice` and `reslice_oblique` are
 host arithmetic and remain available for F-X004. This file does not add a
 second upload.
+
+## Thick slab
+
+`RenderGraph::show_slab` takes a host `SlabImage` from
+`Volume::slab_samples`. It does not sample the volume. `present_slab`
+refuses tier C before it reads the image. An uncompiled blend, including
+labelmap edge, returns `BlendUnavailable` before the image is read and
+does not draw composite. A dimension above the device 3D limit returns
+`ExtentUnavailable` and does not upload a clipped image.
+
+A present pixel is drawn by one of the four slab pipelines. An absent
+pixel discards. The pass loads the colour target, so the previous pixel
+stays. `uploads` does not change. Tier A and tier B share that shader.
+Tier C does not draw a slab. The sample grid remains available on the host
+for F-X004.
 
 ## What this file does not own
 

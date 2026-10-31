@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 
 use ocelli_cache::{Brick, BrickKey, VolumeId};
 use ocelli_pixel::LutChain;
-use ocelli_volume::{OrthoImage, Volume};
+use ocelli_volume::{OrthoImage, PlaneSample, SlabImage, Volume};
 use wgpu::util::DeviceExt;
 
 use crate::brick_upload::{BrickResidency, BrickUploadError, brick_format};
@@ -35,24 +35,29 @@ use crate::gpu::{GpuContext, Recovered, SurfaceError, first_render_attachment};
 use crate::ortho::{self, OrthoError};
 use crate::probe::ResolvedAdapter;
 use crate::progressive::{self, ProgressError, ProgressReport};
+use crate::slab::{self, SlabError};
 use crate::voi::{VOI_WGSL, VoiParams, VoiParamsError};
 
-/// HLD section 22's pass enum, exactly as transcribed.
+/// HLD section 22 listed stack, volume raycast and segmentation overlay.
+/// F-054 adds the thick slab.
 pub enum Pass {
     /// A stack viewport, windowed through section 18.4's uniform.
     Stack(StackPass),
     /// A volume raycast viewport.
     VolumeRaycast(VolumePass),
+    /// A thick slab. The blend selects one of the four compiled pipelines.
+    Slab(SlabPass),
     /// A segmentation overlay, scheduled after its stack pass.
     SegOverlay(SegPass),
 }
 
 impl Pass {
-    /// Which of section 22's three pass kinds this is.
+    /// Which pass kind this is. Section 22 named three. The slab is the fourth.
     pub fn kind(&self) -> PassKind {
         match self {
             Self::Stack(_) => PassKind::Stack,
             Self::VolumeRaycast(_) => PassKind::VolumeRaycast,
+            Self::Slab(_) => PassKind::Slab,
             Self::SegOverlay(_) => PassKind::SegOverlay,
         }
     }
@@ -62,6 +67,7 @@ impl Pass {
         match self {
             Self::Stack(pass) => pass.blend,
             Self::VolumeRaycast(pass) => pass.blend,
+            Self::Slab(pass) => pass.blend,
             Self::SegOverlay(pass) => pass.blend,
         }
     }
@@ -123,6 +129,19 @@ pub struct VolumePass {
     pub from_far: bool,
 }
 
+/// The thick-slab payload.
+///
+/// `blend` selects the compiled slab pipeline. `voi` is the same section
+/// 18.4 uniform the stack pass carries. The shader reduces stored samples
+/// and calls that uniform once.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SlabPass {
+    /// The blend mode the pipeline is keyed by.
+    pub blend: BlendMode,
+    /// Section 18.4's uniform for this viewport.
+    pub voi: VoiParams,
+}
+
 /// The segmentation overlay payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SegPass {
@@ -130,31 +149,40 @@ pub struct SegPass {
     pub blend: BlendMode,
 }
 
-/// The five blend modes the parity surface counts. Only `Composite` has a
-/// shader body in this story. The rest are cache keys, and a lookup for one
-/// reports unavailable rather than substituting composite, which is deviation
-/// D-07's honesty rule applied to a blend mode.
+/// The five blend modes the parity surface counts.
+///
+/// The slab pass compiles composite, MIP, MinIP and average. The volume ray
+/// and the stack pass compile composite only. Labelmap edge projection has
+/// no body. A lookup for an uncompiled key reports unavailable rather than
+/// substituting composite, which is deviation D-07's honesty rule applied
+/// to a blend mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BlendMode {
     /// The ordinary composite.
     Composite,
-    /// Maximum intensity projection. No body until F-052 and F-054.
+    /// Maximum intensity projection. Compiled for the slab pass only.
+    /// The volume ray has no MIP body.
     Mip,
-    /// Minimum intensity projection. No body yet.
+    /// Minimum intensity projection. Compiled for the slab pass only.
     MinIp,
-    /// Average intensity projection. No body yet.
+    /// Average intensity projection. Compiled for the slab pass only.
     Average,
     /// Labelmap edge projection. No body yet.
     LabelmapEdgeProjection,
 }
 
-/// Section 22's three pass kinds, as a cache-key field.
+/// Section 22's pass kinds, as a cache-key field.
+///
+/// `Slab` is the thick-slab key. It is not a volume ray and it is not a
+/// stack. The HLD listed three kinds and did not say those were the last.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PassKind {
     /// The stack pass.
     Stack,
     /// The volume raycast pass.
     VolumeRaycast,
+    /// The thick-slab pass.
+    Slab,
     /// The segmentation overlay pass.
     SegOverlay,
 }
@@ -790,6 +818,46 @@ struct GpuSlot {
     stored: Option<StoredTexture>,
     /// Brick view, residency and ray uniforms. Absent until [`RenderGraph::bind_volume_ray`].
     ray: Option<VolumeRayBinding>,
+    /// Slab value texture, mask and bind groups. Absent until [`RenderGraph::show_slab`].
+    slab: Option<SlabBinding>,
+}
+
+/// Slab bind groups for one viewport. Created at `show_slab`, not inside a tick.
+///
+/// The groups own the texture views, and those views own the textures.
+struct SlabBinding {
+    bind_uniform: wgpu::BindGroup,
+    bind_source: wgpu::BindGroup,
+    stamp: SlabStamp,
+}
+
+/// Identity of the last accepted slab. Equal args do not allocate again.
+#[derive(Clone, PartialEq, Eq)]
+struct SlabStamp {
+    width: u32,
+    height: u32,
+    sample_count: u32,
+    step_bits: u64,
+    index_bits: [u64; 3],
+    samples: Vec<SlabSampleStamp>,
+    blend: BlendMode,
+}
+
+impl SlabStamp {
+    fn same_pixels(&self, other: &Self) -> bool {
+        self.width == other.width
+            && self.height == other.height
+            && self.sample_count == other.sample_count
+            && self.step_bits == other.step_bits
+            && self.index_bits == other.index_bits
+            && self.samples == other.samples
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+enum SlabSampleStamp {
+    Present(u32),
+    Absent,
 }
 
 /// One ready brick already uploaded for a volume ray.
@@ -903,6 +971,8 @@ struct CompiledGraph {
     source_layout: wgpu::BindGroupLayout,
     volume_uniform_layout: wgpu::BindGroupLayout,
     volume_source_layout: wgpu::BindGroupLayout,
+    slab_uniform_layout: wgpu::BindGroupLayout,
+    slab_source_layout: wgpu::BindGroupLayout,
     /// `texture_3d` bindings compiled into the volume shader.
     brick_slots: u32,
     /// 1×1×1 stand-in for a brick slot the ready set does not use.
@@ -917,14 +987,19 @@ fn fragment_pipeline(
     module: &wgpu::ShaderModule,
     format: wgpu::TextureFormat,
     label: &str,
+    constants: &[(&str, f64)],
 ) -> wgpu::RenderPipeline {
+    let stage = wgpu::PipelineCompilationOptions {
+        constants,
+        zero_initialize_workgroup_memory: true,
+    };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module,
             entry_point: Some("vs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            compilation_options: stage.clone(),
             buffers: &[],
         },
         primitive: wgpu::PrimitiveState::default(),
@@ -933,7 +1008,7 @@ fn fragment_pipeline(
         fragment: Some(wgpu::FragmentState {
             module,
             entry_point: Some("fs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            compilation_options: stage,
             targets: &[Some(wgpu::ColorTargetState {
                 format,
                 blend: None,
@@ -993,6 +1068,8 @@ pub struct RenderGraph {
     source_layout: wgpu::BindGroupLayout,
     volume_uniform_layout: wgpu::BindGroupLayout,
     volume_source_layout: wgpu::BindGroupLayout,
+    slab_uniform_layout: wgpu::BindGroupLayout,
+    slab_source_layout: wgpu::BindGroupLayout,
     /// Brick bindings the volume shader was compiled with.
     brick_slots: u32,
     /// Kept alive so unused brick slots in a bind group stay valid.
@@ -1011,28 +1088,31 @@ pub struct RenderGraph {
     brick_stamps: BTreeMap<BrickKey, Vec<u8>>,
 }
 
-/// Blends that have a fragment body. Composite is the only one.
+/// Blend compiled for the stack and the volume ray.
+/// The slab pass also compiles MIP, MinIP and average.
 const COMPILED_BLEND: BlendMode = BlendMode::Composite;
 
 impl RenderGraph {
     /// Whether this story compiles a fragment pipeline for a key.
     ///
-    /// Composite stack and composite volume each have a body, at any GPU
-    /// tier. Every other key is declared, and the frame path reports it
-    /// unavailable. A compute or storage request is
+    /// Composite stack and composite volume each have a body. The slab pass
+    /// compiles composite, MIP, MinIP and average. Volume MIP, stack MIP and
+    /// labelmap edge stay uncompiled. A compute or storage request is
     /// [`RenderGraph::pipeline_family_compiled`], which is false on tier B
     /// and is not this predicate.
     pub fn pipeline_compiled(key: &PipelineKey) -> bool {
-        if key.blend != COMPILED_BLEND {
-            return false;
+        match key.pass {
+            PassKind::Stack | PassKind::VolumeRaycast => key.blend == COMPILED_BLEND,
+            PassKind::Slab => slab::slab_blend_code(key.blend).is_some(),
+            PassKind::SegOverlay => false,
         }
-        matches!(key.pass, PassKind::Stack | PassKind::VolumeRaycast)
     }
 
     /// Whether `family` has a compiled body for `key`.
     ///
-    /// Fragment is the composite stack body or the composite volume ray.
-    /// Compute and storage have no body in this story, on either GPU tier.
+    /// Fragment is a compiled stack body, a compiled volume ray, or one of
+    /// the four slab bodies. Compute and storage have no body in this story,
+    /// on either GPU tier.
     /// On tier B that refusal is the section 7 rule: the fragment pipeline
     /// is not returned in their place.
     pub fn pipeline_family_compiled(key: &PipelineKey, family: PipelineFamily) -> bool {
@@ -1124,7 +1204,10 @@ impl RenderGraph {
     /// [`GraphError::PassHasNoUniform`] for a pass with no VOI uniform.
     pub fn voi_params(&self, id: ViewportId) -> Result<VoiParams, GraphError> {
         let state = self.slot_state(id)?;
-        if !matches!(state.pass, Pass::Stack(_) | Pass::VolumeRaycast(_)) {
+        if !matches!(
+            state.pass,
+            Pass::Stack(_) | Pass::VolumeRaycast(_) | Pass::Slab(_)
+        ) {
             return Err(GraphError::PassHasNoUniform);
         }
         Ok(voi_of(&state.pass))
@@ -1193,6 +1276,8 @@ impl RenderGraph {
             source_layout: compiled.source_layout,
             volume_uniform_layout: compiled.volume_uniform_layout,
             volume_source_layout: compiled.volume_source_layout,
+            slab_uniform_layout: compiled.slab_uniform_layout,
+            slab_source_layout: compiled.slab_source_layout,
             brick_slots: compiled.brick_slots,
             ray_dummy: compiled.ray_dummy,
             format,
@@ -1323,6 +1408,7 @@ impl RenderGraph {
             &module,
             format,
             "ocelli render graph composite",
+            &[],
         );
         let ray_pipeline = fragment_pipeline(
             device,
@@ -1330,16 +1416,73 @@ impl RenderGraph {
             &ray_module,
             format,
             "ocelli volume ray composite",
+            &[],
         );
+        let slab_source = slab::slab_module();
+        let slab_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("ocelli slab"),
+            source: wgpu::ShaderSource::Wgsl(slab_source.into()),
+        });
+        let slab_uniform_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("ocelli slab uniform"),
+                entries: &[uniform_binding(0)],
+            });
+        let slab_value = wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D3,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let slab_source_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("ocelli slab source"),
+                entries: &[slab_value, texture_binding(1)],
+            });
+        let slab_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("ocelli slab"),
+            bind_group_layouts: &[Some(&slab_uniform_layout), Some(&slab_source_layout)],
+            immediate_size: 0,
+        });
+        let mut keys = vec![stack_key, volume_key];
+        let mut pipelines = vec![pipeline, ray_pipeline];
+        for (key, code) in slab::slab_compile_list(tier) {
+            let label = match key.blend {
+                BlendMode::Composite => "ocelli slab composite",
+                BlendMode::Mip => "ocelli slab mip",
+                BlendMode::MinIp => "ocelli slab minip",
+                BlendMode::Average => "ocelli slab average",
+                BlendMode::LabelmapEdgeProjection => "ocelli slab labelmap",
+            };
+            let constants = [("slab_blend", f64::from(code))];
+            keys.push(CompiledKey {
+                key,
+                family: PipelineFamily::Fragment,
+            });
+            pipelines.push(fragment_pipeline(
+                device,
+                &slab_layout,
+                &slab_module,
+                format,
+                label,
+                &constants,
+            ));
+        }
         CompiledGraph {
             uniform_layout,
             source_layout,
             volume_uniform_layout,
             volume_source_layout,
+            slab_uniform_layout,
+            slab_source_layout,
             brick_slots,
             ray_dummy,
-            keys: vec![stack_key, volume_key],
-            pipelines: vec![pipeline, ray_pipeline],
+            keys,
+            pipelines,
         }
     }
 
@@ -1502,6 +1645,7 @@ impl RenderGraph {
             bind_source,
             stored,
             ray: None,
+            slab: None,
         }
     }
 
@@ -1818,7 +1962,10 @@ impl RenderGraph {
                 .get(usize::try_from(id.0).unwrap_or(usize::MAX))
                 .and_then(Option::as_ref)
                 .ok_or(GraphError::UnknownViewport)?;
-            matches!(state.pass, Pass::Stack(_) | Pass::VolumeRaycast(_))
+            matches!(
+                state.pass,
+                Pass::Stack(_) | Pass::VolumeRaycast(_) | Pass::Slab(_)
+            )
         };
         if !has_uniform {
             return Err(GraphError::PassHasNoUniform);
@@ -1845,6 +1992,7 @@ impl RenderGraph {
             match &mut state.pass {
                 Pass::Stack(stack) => stack.voi = params,
                 Pass::VolumeRaycast(volume) => volume.voi = params,
+                Pass::Slab(slab) => slab.voi = params,
                 Pass::SegOverlay(_) => {}
             }
             state.dirty.voi = true;
@@ -2495,6 +2643,119 @@ impl RenderGraph {
         })
     }
 
+    /// Upload one host slab and select its compiled blend.
+    ///
+    /// Tier C is refused by [`slab::present_slab`] before a sample is read.
+    /// An uncompiled blend, including labelmap edge, returns
+    /// [`SlabError::BlendUnavailable`] and does not bind composite. A
+    /// dimension above [`crate::caps::Caps::max_tex_3d`] returns
+    /// [`SlabError::ExtentUnavailable`]. The tick encodes this viewport only
+    /// after a successful upload. `uploads` does not change.
+    ///
+    /// Equal samples, step, index step, count, size and blend do not allocate
+    /// a new texture and do not mark dirt. A blend change keeps the textures
+    /// and marks data dirty. A failed upload drops the staged textures and
+    /// keeps the last binding.
+    ///
+    /// # Errors
+    ///
+    /// [`SlabError`].
+    pub fn show_slab(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        id: ViewportId,
+        image: &SlabImage,
+        blend: BlendMode,
+    ) -> Result<(), SlabError> {
+        let max_tex_3d = ctx.caps().max_tex_3d;
+        let viewport_is_slab = match self.slot_state(id) {
+            Ok(state) => matches!(state.pass, Pass::Slab(_)),
+            Err(_) => {
+                return slab::present_slab(self.tier, true, blend, image, max_tex_3d, |_| {
+                    Err(UploadError::UnknownViewport)
+                });
+            }
+        };
+        slab::present_slab(
+            self.tier,
+            viewport_is_slab,
+            blend,
+            image,
+            max_tex_3d,
+            |image| self.commit_slab(ctx, adapter, id, image, blend),
+        )
+    }
+
+    fn commit_slab(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        id: ViewportId,
+        image: &SlabImage,
+        blend: BlendMode,
+    ) -> Result<(), UploadError> {
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        if self.gpu.get(index).and_then(Option::as_ref).is_none() {
+            return Err(UploadError::NotRebound);
+        }
+        let incoming = slab_stamp(image, blend)?;
+        let held = self
+            .gpu
+            .get(index)
+            .and_then(Option::as_ref)
+            .and_then(|slot| slot.slab.as_ref())
+            .map(|binding| binding.stamp.clone());
+        if let Some(held) = held {
+            if held == incoming {
+                return Ok(());
+            }
+            if held.same_pixels(&incoming) {
+                if let Some(binding) = self
+                    .gpu
+                    .get_mut(index)
+                    .and_then(Option::as_mut)
+                    .and_then(|slot| slot.slab.as_mut())
+                {
+                    binding.stamp.blend = blend;
+                }
+                self.mark_slab_blend(id, blend);
+                return Ok(());
+            }
+        }
+        let format = selected_stored_format(adapter.wgpu_adapter(), self.tier)?;
+        let staged = {
+            let slot = self
+                .gpu
+                .get(index)
+                .and_then(Option::as_ref)
+                .ok_or(UploadError::NotRebound)?;
+            stage_slab(
+                ctx,
+                &self.slab_uniform_layout,
+                &self.slab_source_layout,
+                &slot.uniform,
+                image,
+                format,
+                incoming,
+            )?
+        };
+        if let Some(slot) = self.gpu.get_mut(index).and_then(Option::as_mut) {
+            slot.slab = Some(staged);
+        }
+        self.mark_slab_blend(id, blend);
+        Ok(())
+    }
+
+    fn mark_slab_blend(&mut self, id: ViewportId, blend: BlendMode) {
+        if let Some(state) = self.registry.state_mut(id) {
+            if let Pass::Slab(pass) = &mut state.pass {
+                pass.blend = blend;
+            }
+            state.dirty.data = true;
+        }
+    }
+
     /// Reinstall the resources a recovery rebuilt, marking every viewport
     /// fully dirty because every GPU object the old device owned is gone.
     pub fn install_recovered(&mut self, ctx: &GpuContext, recovered: &Recovered) {
@@ -2510,6 +2771,8 @@ impl RenderGraph {
         self.source_layout = compiled.source_layout;
         self.volume_uniform_layout = compiled.volume_uniform_layout;
         self.volume_source_layout = compiled.volume_source_layout;
+        self.slab_uniform_layout = compiled.slab_uniform_layout;
+        self.slab_source_layout = compiled.slab_source_layout;
         self.brick_slots = compiled.brick_slots;
         self.ray_dummy = compiled.ray_dummy;
         self.keys = compiled.keys;
@@ -2578,15 +2841,10 @@ impl RenderGraph {
                 blend: state.pass.blend(),
                 tier: self.tier,
             };
-            let rebound = self.gpu.get(index).and_then(Option::as_ref).is_some();
-            let ray_ready = state.pass.kind() != PassKind::VolumeRaycast
-                || self
-                    .gpu
-                    .get(index)
-                    .and_then(Option::as_ref)
-                    .and_then(|slot| slot.ray.as_ref())
-                    .is_some();
-            if self.pipeline(&key, PipelineFamily::Fragment).is_some() && rebound && ray_ready {
+            let slot = self.gpu.get(index).and_then(Option::as_ref);
+            let rebound = slot.is_some();
+            let ready = gpu_binding_ready(state.pass.kind(), slot);
+            if self.pipeline(&key, PipelineFamily::Fragment).is_some() && rebound && ready {
                 any_encodable = true;
             } else if first_unavailable.is_none() {
                 first_unavailable = Some(ViewportId(u32::try_from(index).unwrap_or(u32::MAX)));
@@ -2689,7 +2947,7 @@ impl RenderGraph {
             let Some(slot) = gpu.get(index).and_then(Option::as_ref) else {
                 continue;
             };
-            if key.pass == PassKind::VolumeRaycast && slot.ray.is_none() {
+            if !gpu_binding_ready(key.pass, Some(slot)) {
                 continue;
             }
             let has_surface = surfaces.get(index).and_then(Option::as_ref).is_some();
@@ -2713,7 +2971,11 @@ impl RenderGraph {
                         depth_slice: None,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            load: if key.pass == PassKind::Slab {
+                                wgpu::LoadOp::Load
+                            } else {
+                                wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+                            },
                             store: wgpu::StoreOp::Store,
                         },
                     })],
@@ -2727,6 +2989,10 @@ impl RenderGraph {
                 {
                     pass.set_bind_group(0, &ray.bind_uniform, &[]);
                     pass.set_bind_group(1, &ray.bind_source, &[]);
+                } else if let Some(slab) = slot.slab.as_ref().filter(|_| key.pass == PassKind::Slab)
+                {
+                    pass.set_bind_group(0, &slab.bind_uniform, &[]);
+                    pass.set_bind_group(1, &slab.bind_source, &[]);
                 } else {
                     pass.set_bind_group(0, &slot.bind_uniform, &[]);
                     pass.set_bind_group(1, &slot.bind_source, &[]);
@@ -2783,20 +3049,25 @@ fn viewport_encodable(
     let compiled = pipeline_index(keys, &key, PipelineFamily::Fragment)
         .and_then(|found| pipelines.get(found))
         .is_some();
-    let rebound = gpu.get(index).and_then(Option::as_ref).is_some();
-    let ray_ready = key.pass != PassKind::VolumeRaycast
-        || gpu
-            .get(index)
-            .and_then(Option::as_ref)
-            .and_then(|slot| slot.ray.as_ref())
-            .is_some();
-    compiled && rebound && ray_ready
+    let slot = gpu.get(index).and_then(Option::as_ref);
+    let rebound = slot.is_some();
+    let ready = gpu_binding_ready(key.pass, slot);
+    compiled && rebound && ready
+}
+
+fn gpu_binding_ready(kind: PassKind, slot: Option<&GpuSlot>) -> bool {
+    match kind {
+        PassKind::VolumeRaycast => slot.and_then(|slot| slot.ray.as_ref()).is_some(),
+        PassKind::Slab => slot.and_then(|slot| slot.slab.as_ref()).is_some(),
+        PassKind::Stack | PassKind::SegOverlay => true,
+    }
 }
 
 fn voi_of(pass: &Pass) -> VoiParams {
     match pass {
         Pass::Stack(stack) => stack.voi,
         Pass::VolumeRaycast(volume) => volume.voi,
+        Pass::Slab(slab) => slab.voi,
         Pass::SegOverlay(_) => VoiParams {
             center: 0.0,
             width: 1.0,
@@ -2808,6 +3079,287 @@ fn voi_of(pass: &Pass) -> VoiParams {
             invert: 0,
         },
     }
+}
+
+fn slab_stamp(image: &SlabImage, blend: BlendMode) -> Result<SlabStamp, UploadError> {
+    let width = usize::try_from(image.width).map_err(|_| UploadError::ExtentOverflow)?;
+    let height = usize::try_from(image.height).map_err(|_| UploadError::ExtentOverflow)?;
+    let count = usize::try_from(image.sample_count).map_err(|_| UploadError::ExtentOverflow)?;
+    let pixels = width
+        .checked_mul(height)
+        .ok_or(UploadError::ExtentOverflow)?;
+    let expected = pixels
+        .checked_mul(count)
+        .ok_or(UploadError::ExtentOverflow)?;
+    if image.samples.len() != expected {
+        return Err(UploadError::WrongLength);
+    }
+    let mut samples = Vec::with_capacity(expected);
+    for sample in &image.samples {
+        samples.push(match *sample {
+            PlaneSample::Present(value) => SlabSampleStamp::Present(value.to_bits()),
+            PlaneSample::Absent => SlabSampleStamp::Absent,
+        });
+    }
+    let [step_i, step_j, step_k] = image.index_step;
+    Ok(SlabStamp {
+        width: image.width,
+        height: image.height,
+        sample_count: image.sample_count,
+        step_bits: image.step_mm.to_bits(),
+        index_bits: [step_i.to_bits(), step_j.to_bits(), step_k.to_bits()],
+        samples,
+        blend,
+    })
+}
+
+fn stage_slab(
+    ctx: &GpuContext,
+    uniform_layout: &wgpu::BindGroupLayout,
+    source_layout: &wgpu::BindGroupLayout,
+    uniform: &wgpu::Buffer,
+    image: &SlabImage,
+    format: wgpu::TextureFormat,
+    stamp: SlabStamp,
+) -> Result<SlabBinding, UploadError> {
+    let channels = stored_float_channels(format).ok_or(UploadError::FormatUnavailable)?;
+    let texel = channels.checked_mul(4).ok_or(UploadError::ExtentOverflow)?;
+    let device = ctx.device();
+    let values = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("ocelli slab values"),
+        size: wgpu::Extent3d {
+            width: image.width,
+            height: image.height,
+            depth_or_array_layers: image.sample_count,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D3,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let mask = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("ocelli slab mask"),
+        size: wgpu::Extent3d {
+            width: image.width,
+            height: image.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let mask_row = aligned_row_bytes(
+        image
+            .width
+            .checked_mul(texel)
+            .ok_or(UploadError::ExtentOverflow)?,
+    )?;
+    let mask_bytes = slab_mask_bytes(image, channels, mask_row)?;
+    ctx.queue().write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &mask,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &mask_bytes,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(mask_row),
+            rows_per_image: Some(image.height),
+        },
+        wgpu::Extent3d {
+            width: image.width,
+            height: image.height,
+            depth_or_array_layers: 1,
+        },
+    );
+    let column_row = aligned_row_bytes(texel)?;
+    let mut row = 0_u32;
+    while row < image.height {
+        let mut column = 0_u32;
+        while column < image.width {
+            if let Some(values_column) = present_column(image, column, row)? {
+                let bytes = slab_column_bytes(&values_column, channels, column_row)?;
+                ctx.queue().write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &values,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d {
+                            x: column,
+                            y: row,
+                            z: 0,
+                        },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &bytes,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(column_row),
+                        rows_per_image: Some(1),
+                    },
+                    wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: image.sample_count,
+                    },
+                );
+            }
+            column = column.checked_add(1).ok_or(UploadError::ExtentOverflow)?;
+        }
+        row = row.checked_add(1).ok_or(UploadError::ExtentOverflow)?;
+    }
+    let values_view = values.create_view(&wgpu::TextureViewDescriptor::default());
+    let mask_view = mask.create_view(&wgpu::TextureViewDescriptor::default());
+    let bind_uniform = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("ocelli slab voi"),
+        layout: uniform_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: uniform.as_entire_binding(),
+        }],
+    });
+    let bind_source = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("ocelli slab source"),
+        layout: source_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&values_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&mask_view),
+            },
+        ],
+    });
+    Ok(SlabBinding {
+        bind_uniform,
+        bind_source,
+        stamp,
+    })
+}
+
+fn present_column(image: &SlabImage, x: u32, y: u32) -> Result<Option<Vec<f32>>, UploadError> {
+    let width = usize::try_from(image.width).map_err(|_| UploadError::ExtentOverflow)?;
+    let count = usize::try_from(image.sample_count).map_err(|_| UploadError::ExtentOverflow)?;
+    let column = usize::try_from(x).map_err(|_| UploadError::ExtentOverflow)?;
+    let row = usize::try_from(y).map_err(|_| UploadError::ExtentOverflow)?;
+    let pixel = row
+        .checked_mul(width)
+        .and_then(|start| start.checked_add(column))
+        .ok_or(UploadError::ExtentOverflow)?;
+    let start = pixel
+        .checked_mul(count)
+        .ok_or(UploadError::ExtentOverflow)?;
+    let end = start
+        .checked_add(count)
+        .ok_or(UploadError::ExtentOverflow)?;
+    let Some(samples) = image.samples.get(start..end) else {
+        return Err(UploadError::WrongLength);
+    };
+    if samples
+        .iter()
+        .any(|sample| matches!(sample, PlaneSample::Absent))
+    {
+        return Ok(None);
+    }
+    let mut values = Vec::with_capacity(count);
+    for sample in samples {
+        match *sample {
+            PlaneSample::Present(value) => values.push(value),
+            PlaneSample::Absent => return Ok(None),
+        }
+    }
+    Ok(Some(values))
+}
+
+fn slab_mask_bytes(
+    image: &SlabImage,
+    channels: u32,
+    row_bytes: u32,
+) -> Result<Vec<u8>, UploadError> {
+    let height = usize::try_from(image.height).map_err(|_| UploadError::ExtentOverflow)?;
+    let row = usize::try_from(row_bytes).map_err(|_| UploadError::ExtentOverflow)?;
+    let len = height.checked_mul(row).ok_or(UploadError::ExtentOverflow)?;
+    let mut bytes = vec![0_u8; len];
+    let texel = usize::try_from(channels.checked_mul(4).ok_or(UploadError::ExtentOverflow)?)
+        .map_err(|_| UploadError::ExtentOverflow)?;
+    let mut y = 0_u32;
+    while y < image.height {
+        let mut x = 0_u32;
+        while x < image.width {
+            if present_column(image, x, y)?.is_some() {
+                let x_us = usize::try_from(x).map_err(|_| UploadError::ExtentOverflow)?;
+                let y_us = usize::try_from(y).map_err(|_| UploadError::ExtentOverflow)?;
+                let offset = y_us
+                    .checked_mul(row)
+                    .and_then(|start| start.checked_add(x_us.checked_mul(texel)?))
+                    .ok_or(UploadError::ExtentOverflow)?;
+                write_float_lanes(&mut bytes, offset, channels, 1.0)?;
+            }
+            x = x.checked_add(1).ok_or(UploadError::ExtentOverflow)?;
+        }
+        y = y.checked_add(1).ok_or(UploadError::ExtentOverflow)?;
+    }
+    Ok(bytes)
+}
+
+fn slab_column_bytes(
+    values: &[f32],
+    channels: u32,
+    row_bytes: u32,
+) -> Result<Vec<u8>, UploadError> {
+    let row = usize::try_from(row_bytes).map_err(|_| UploadError::ExtentOverflow)?;
+    let len = values
+        .len()
+        .checked_mul(row)
+        .ok_or(UploadError::ExtentOverflow)?;
+    let mut bytes = vec![0_u8; len];
+    for (index, value) in values.iter().copied().enumerate() {
+        let offset = index.checked_mul(row).ok_or(UploadError::ExtentOverflow)?;
+        write_float_lanes(&mut bytes, offset, channels, value)?;
+    }
+    Ok(bytes)
+}
+
+fn write_float_lanes(
+    bytes: &mut [u8],
+    offset: usize,
+    channels: u32,
+    value: f32,
+) -> Result<(), UploadError> {
+    let count = usize::try_from(channels).map_err(|_| UploadError::ExtentOverflow)?;
+    for lane in 0..count {
+        let lane_offset = lane.checked_mul(4).ok_or(UploadError::ExtentOverflow)?;
+        let start = offset
+            .checked_add(lane_offset)
+            .ok_or(UploadError::ExtentOverflow)?;
+        let end = start.checked_add(4).ok_or(UploadError::ExtentOverflow)?;
+        let Some(slot) = bytes.get_mut(start..end) else {
+            return Err(UploadError::ExtentOverflow);
+        };
+        let encoded = if lane == 0 {
+            value.to_le_bytes()
+        } else {
+            0.0_f32.to_le_bytes()
+        };
+        slot.copy_from_slice(&encoded);
+    }
+    Ok(())
+}
+
+fn aligned_row_bytes(unpadded: u32) -> Result<u32, UploadError> {
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let room = unpadded
+        .checked_add(align - 1)
+        .ok_or(UploadError::ExtentOverflow)?;
+    Ok(room / align * align)
 }
 
 fn colour_texel_count(bytes: &[u8]) -> Option<u32> {

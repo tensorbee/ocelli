@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-053 | E8.3 | Oblique / arbitrary-plane reslicing | Rust | 4w | done |
-| F-054 | E8.4 | Thick slab with composite, MIP, MinIP and average blend modes | Rust | 4w | pending |
+| F-054 | E8.4 | Thick slab with composite, MIP, MinIP and average blend modes | Rust | 4w | done |
 | F-055 | E8.5 | Slice-position sync and frame-of-reference handling | Rust | 3w | pending |
 | F-056 | E8.6 | Multi-volume fusion with per-volume opacity and colormap (PET-CT) | Rust | 4w | pending |
 | F-X021 | Y1.16 | Activate the full-corpus candidate-render gate against Ocelli output | Test | 3w | pending |
@@ -167,4 +167,4 @@ tree is `2a9588eb4eaf`. The merge is `6808930`. `scripts/backlog_check.py`,
 green at this open. The S20 allocation rows and the S20 plan table name the
 same F-IDs. No new audit was run at this open.
 
-F-053 is done. F-054, F-055, F-056 and F-X021 are pending.
+F-053 and F-054 are done. F-055, F-056 and F-X021 are pending.
