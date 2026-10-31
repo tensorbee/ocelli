@@ -1,6 +1,6 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056
 **Last updated:** 2026-10-31
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
@@ -262,6 +262,33 @@ the image is read.
 `uploads` does not increase. Equal slab bytes and the same blend do not
 allocate again. A blend change keeps the textures and marks data dirty.
 One tick of a dirty slab and a dirty stack still submits once.
+
+## Fusion
+
+Fusion is not a `Pass` and it is not a slab blend. `RenderGraph::show_fusion`
+binds two concrete volumes. Volume B is in front of volume A. The fragment
+module is `VOI_WGSL`, the shared `table_index`, and `shaders/fusion.wgsl`.
+It calls the existing `lut_chain`. It does not re-type the window. The
+composite is `pet * opacity_pet + ct * opacity_ct * (1.0 - opacity_pet)`.
+An absent sample writes 0 into the stored plane and 0 into the presence
+plane. The shader does not window a texel whose presence is not greater
+than 0. The composite does not treat that stored 0 as a present sample. A
+present volume whose partner is absent is drawn on its own. A 256-entry
+colormap is read at the display index after the window. An omitted table
+scales the windowed display value by that chain's output range, the same
+ratio the stack shader uses.
+
+The window pass and the composite pass are recorded in the tick's existing
+encoder. The tick still submits once. An opacity change writes the uniform
+and does not upload the sample textures again. A settled request does not
+encode. Tier C returns `FusionError::TierCUnavailable` before a sample is
+read. A UID mismatch, an empty UID, an opacity outside 0 to 1, a chain with
+no section 18.4 uniform, a colormap whose length is not 256, and a plane or
+spacing that cannot be sampled return before the published frame changes.
+A lost device is `Unavailable` and is not a frame mismatch. The sample
+planes use the preserving float format a slab upload would choose. When
+that format or the `Rgba16Float` window target cannot be bound, the bind
+returns `FusionError::Unavailable` and writes no CPU image.
 
 ## Tiers
 

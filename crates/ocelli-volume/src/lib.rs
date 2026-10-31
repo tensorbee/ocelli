@@ -22,11 +22,13 @@ use ocelli_cache::{
 use ocelli_core::{Pt, World};
 use ocelli_pixel::{ImageOrientationPatient, PixelRepresentation};
 
+mod fusion;
 mod levels;
 mod ortho;
 mod slab;
 mod sync;
 
+pub use fusion::{FusionPlane, plane_from_ortho, world_on_plane};
 pub use ortho::{ObliquePlane, OrthoImage, OrthoPlane, PlaneSample};
 pub use slab::{SlabImage, SlabPlane};
 pub use sync::{HeldPlane, PlaneSyncError};

@@ -1,6 +1,6 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055, F-056
 **Last updated:** 2026-10-31
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
@@ -233,6 +233,36 @@ error. There is no tolerance on the length. The same index is the result
 on tier A, tier B and tier C. The function has no tier argument and creates
 no device.
 
+## Two volumes on one patient plane
+
+`Volume::sample_world` takes a `Pt<World>` and calls `sample_at`. The delta
+is the point minus the volume origin. The column index is
+`direction.col(0)` dotted with that delta, divided by `spacing[0]`. The row
+index uses column 1 and `spacing[1]`. The slice index uses column 2 and
+`spacing[2]`. DICOM PS3.3 C.7.6.2.1.1 stores `PixelSpacing` as row then
+column, so `PixelSpacing[0]` is `spacing[1]`. A point outside the grid is
+`PlaneSample::Absent`. It is not stored zero. A zero spacing makes the
+quotient non-finite and the sample is absent for the same reason.
+`sample_at` is the only sample kernel. `Volume::reslice`,
+`Volume::reslice_oblique`, the slab column walk and `Volume::sample_world`
+call it.
+
+`FusionPlane` names the shared output. Pixel `(column, row)` is the origin
+plus `column * column_mm` along `row_dir` plus `row * row_mm` along
+`column_dir`. `plane_from_ortho` builds that plane for an axial, sagittal
+or coronal index. Axial steps are `spacing[0]` and `spacing[1]`. Sagittal
+steps are `spacing[1]` and `spacing[2]`. Coronal steps are `spacing[0]` and
+`spacing[2]`. An index outside the volume, or a zero width or height,
+returns no plane. The directions are stored as given. The presenter
+accepts a direction whose length differs from 1 by at most the
+image-orientation tolerance of 2e-6 and does not renormalise it. A
+direction of length 2 is refused.
+
+Two volumes are drawn together only when the caller passes the same
+`FrameOfReferenceUID` string for both and neither string is empty. A
+trailing space is a different string. The volume still does not store the
+UID. There is no SUV and no patient weight.
+
 ## Tiers A, B and C
 
 Not applicable for A and B as a device path. The volume is host memory and
@@ -256,5 +286,6 @@ false. The check does not build the ready list and does not read a coarser
 level. This crate still creates no texture. `RenderGraph::sync_volume` in
 `ocelli-render` uploads a ready brick. `RenderGraph::show_ortho` uploads one complete
 orthographic plane. `RenderGraph::show_slab` uploads one thick slab from
-`slab_samples`. Pixels stay in the store and do not cross the worker
-boundary.
+`slab_samples`. `RenderGraph::show_fusion` samples both volumes through
+`sample_world` and does not publish a fused CPU image. Pixels stay in the
+store and do not cross the worker boundary.

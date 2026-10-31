@@ -59,6 +59,7 @@ pub mod caps;
 pub mod colour;
 pub mod cpu;
 pub mod extent;
+pub mod fusion;
 pub mod gpu;
 pub mod graph;
 pub mod ortho;
@@ -77,6 +78,10 @@ pub use caps::{
 pub use colour::{ColourLut, ColourLutError, PresetId, colour_lut_for};
 pub use cpu::{CpuRaster, RasterColor, RasterError, RasterGrid, RasterQuality, RasterResult};
 pub use extent::{ExtentError, css_from_device, device_extent};
+pub use fusion::{
+    FusionError, FusionLedger, FusionRequest, colour_after_voi, composite, composite_sample,
+    fusion_module,
+};
 pub use gpu::{
     DeviceError, DeviceLoss, DeviceState, GpuContext, GraphResources, Recovered, SharedEncoder,
     SurfaceError,

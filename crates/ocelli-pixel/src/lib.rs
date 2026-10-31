@@ -22,7 +22,8 @@ pub use color::{
 };
 pub use error::PixelError;
 pub use image_plane::{
-    ImageDimensions, ImageOrientationPatient, ImagePlane, ImagePositionPatient, PixelSpacing,
+    DIRECTION_COSINE_TOLERANCE, ImageDimensions, ImageOrientationPatient, ImagePlane,
+    ImagePositionPatient, PixelSpacing,
 };
 pub use lut::{
     LutChain, LutDescriptor, ModalityTransform, PresentationLutEvidence, PresentationLutShape,

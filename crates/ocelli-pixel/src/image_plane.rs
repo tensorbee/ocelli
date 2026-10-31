@@ -5,11 +5,11 @@ use ocelli_core::{Index, Transform, World};
 
 use crate::PixelError;
 
-// Image Orientation Patient is dimensionless. Rounding each component to six
-// decimal places introduces at most 0.5e-6 component error. Cauchy-Schwarz
-// bounds the resulting dot error below 2 * sqrt(3) * 0.5e-6 + 3 * (0.5e-6)^2,
-// which is below 1.733e-6. Two parts per million is a conservative boundary.
-const DIRECTION_COSINE_TOLERANCE: f64 = 2e-6;
+/// Image Orientation Patient is dimensionless. Rounding each component to six
+/// decimal places introduces at most 0.5e-6 component error. Cauchy-Schwarz
+/// bounds the resulting dot error below 2 * sqrt(3) * 0.5e-6 + 3 * (0.5e-6)^2,
+/// which is below 1.733e-6. Two parts per million is a conservative boundary.
+pub const DIRECTION_COSINE_TOLERANCE: f64 = 2e-6;
 
 /// Image Position Patient, the LPS-mm centre of the first voxel.
 #[derive(Clone, Copy, Debug, PartialEq)]

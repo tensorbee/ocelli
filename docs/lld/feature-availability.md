@@ -1,7 +1,7 @@
 # Feature availability
 
-**F-IDs that contributed:** F-037, F-041, F-X001, F-X003
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056
+**Last updated:** 2026-10-31
 
 The contract every tier-gated feature declares, and the distinction between a
 working primary path, a declared fallback and an unavailable feature. This is
@@ -30,6 +30,7 @@ of any of them.
 | `DeviceState` and `GpuContext::recover` | F-037 in `ocelli-render` | A lost device is an OBSERVED state rather than a later call failing, so a feature can report unavailable for the right reason while a rebuild is pending |
 | `VoiParams::from_chain` | F-041 in `ocelli-render` | The first feature-level refusal of this shape: a chain driven by a Modality LUT Sequence or a VOI LUT Sequence has no HLD section 18.4 uniform to be expressed in, so the GPU path is `Unavailable` and tier C is `Available` through `LutChain::map_into`. The two error variants name WHICH stage, because a caller reporting the feature unavailable has to say |
 | `CpuRaster` | F-X003 in `ocelli-render` | Tier C stack drawing. Monochrome uses `LutChain` and the preset tables. Palette and RGB use `ColorTransform` for a supported space. ICC reports unavailable. `RenderGraph::new` still returns `TierCUnavailable`. Representative-host interactive and idle acceptance remains unmeasured |
+| `RenderGraph::show_fusion` | F-056 in `ocelli-render` | Two volumes that share a frame of reference. Tier A and tier B draw them when a preserving float sample format and the `Rgba16Float` window target can be bound. Otherwise the bind returns `FusionError::Unavailable` and writes no CPU image. Tier C returns `FusionError::TierCUnavailable` before a sample is read and writes no CPU image |
 
 The detailed resolver and evidence rules remain in
 [tier-resolution.md](tier-resolution.md). This file begins after that one

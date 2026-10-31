@@ -93,6 +93,24 @@ impl Volume {
         Pt::<World>::new(point.x, point.y, point.z)
     }
 
+    /// Level-0 sample at a patient point.
+    ///
+    /// The index is the inverse of [`Self::voxel_world`]. `spacing[0]` divides
+    /// the column cosine and `spacing[1]` divides the row cosine. An index
+    /// that is not finite, or a corner that has not landed, is
+    /// [`PlaneSample::Absent`]. It is not stored zero.
+    pub fn sample_world(&self, point: Pt<World>) -> PlaneSample {
+        let delta = DVec3::new(
+            point.x - self.origin.x,
+            point.y - self.origin.y,
+            point.z - self.origin.z,
+        );
+        let i = self.direction.col(0).dot(delta) / self.spacing[0];
+        let j = self.direction.col(1).dot(delta) / self.spacing[1];
+        let k = self.direction.col(2).dot(delta) / self.spacing[2];
+        self.sample_at(i, j, k)
+    }
+
     /// Reslice one orthographic plane from level 0.
     ///
     /// # Errors

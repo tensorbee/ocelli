@@ -31,6 +31,7 @@ use wgpu::util::DeviceExt;
 use crate::brick_upload::{BrickResidency, BrickUploadError, brick_format};
 use crate::caps::Tier;
 use crate::colour::{ColourLut, ColourParams};
+use crate::fusion::{self, FusionError, FusionGpu, FusionRequest};
 use crate::gpu::{GpuContext, Recovered, SurfaceError, first_render_attachment};
 use crate::ortho::{self, OrthoError};
 use crate::probe::ResolvedAdapter;
@@ -485,7 +486,7 @@ fn binding_available(features: wgpu::TextureFormatFeatures) -> bool {
 /// Channels a preserving format stores, with the sample in `.r`.
 ///
 /// `R16Float` is not here. It is not the stored `f32` after `textureLoad`.
-fn stored_float_channels(format: wgpu::TextureFormat) -> Option<u32> {
+pub(crate) fn stored_float_channels(format: wgpu::TextureFormat) -> Option<u32> {
     match format {
         wgpu::TextureFormat::R32Float => Some(1),
         wgpu::TextureFormat::Rg32Float => Some(2),
@@ -576,29 +577,6 @@ struct DeviceCamera {
 @group(1) @binding(0) var stored_tex : texture_2d<f32>;
 @group(1) @binding(1) var colour_lut : texture_2d<f32>;
 
-// Same address as `display_index` in `colour.rs`. The value is not modified.
-// A non-finite value uses texel 0. Values at or below 0 use texel 0.
-// Values at or above `last` use texel `last`. Anything between uses the
-// NEAREST integer, ties up. `i32` truncates toward zero, so the half is added
-// before the conversion. See `display_index` for why the reference rounds.
-fn table_index(value : f32, last : u32) -> i32 {
-    if ((value - value) != 0.0) {
-        return 0;
-    }
-    if (!(value > 0.0)) {
-        return 0;
-    }
-    let last_f = f32(last);
-    if (value >= last_f) {
-        return i32(last);
-    }
-    let rounded = value + 0.5;
-    if (rounded >= last_f) {
-        return i32(last);
-    }
-    return i32(rounded);
-}
-
 @vertex
 fn vs_main(@builtin(vertex_index) index : u32) -> @builtin(position) vec4<f32> {
     let u = f32((index << 1u) & 2u);
@@ -641,13 +619,39 @@ fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
 }
 ";
 
+/// Same address as `display_index` in `colour.rs`. The value is not modified.
+///
+/// A non-finite value uses texel 0. Values at or below 0 use texel 0.
+/// Values at or above `last` use texel `last`. Anything between uses the
+/// nearest integer, ties up. `i32` truncates toward zero, so the half is added
+/// before the conversion.
+pub(crate) const TABLE_INDEX_WGSL: &str = r"
+fn table_index(value : f32, last : u32) -> i32 {
+    if ((value - value) != 0.0) {
+        return 0;
+    }
+    if (!(value > 0.0)) {
+        return 0;
+    }
+    let last_f = f32(last);
+    if (value >= last_f) {
+        return i32(last);
+    }
+    let rounded = value + 0.5;
+    if (rounded >= last_f) {
+        return i32(last);
+    }
+    return i32(rounded);
+}
+";
+
 /// The fragment module tier B compiles, and the module tier A compiles too.
 ///
 /// `VOI_WGSL` is included unchanged. The three window functions are not
 /// re-typed here. The entry point samples a float texture with `textureLoad`
 /// and has no compute entry and no storage buffer.
 pub fn tier_b_fragment_module() -> String {
-    format!("{VOI_WGSL}{GRAPH_WGSL}")
+    format!("{VOI_WGSL}{TABLE_INDEX_WGSL}{GRAPH_WGSL}")
 }
 
 /// The volume ray module. `VOI_WGSL` is included once, then the ray entry.
@@ -1086,6 +1090,11 @@ pub struct RenderGraph {
     /// Bytes last accepted for each brick. Cleared with the textures.
     /// A missing key is not a texture of zeros.
     brick_stamps: BTreeMap<BrickKey, Vec<u8>>,
+    /// Fusion resources, compiled when the fusion view is bound.
+    ///
+    /// This is not a [`Pass`]. A viewport with no fusion binding keeps its
+    /// stack pipeline. The tick encodes this view in the same encoder.
+    fusion: Option<FusionGpu>,
 }
 
 /// Blend compiled for the stack and the volume ray.
@@ -1287,6 +1296,7 @@ impl RenderGraph {
             lut_uploads: 0,
             bricks: BrickResidency::new(),
             brick_stamps: BTreeMap::new(),
+            fusion: None,
         })
     }
 
@@ -2799,6 +2809,7 @@ impl RenderGraph {
         for slot in self.gpu.iter_mut() {
             *slot = None;
         }
+        self.fusion = None;
         self.bricks.clear();
         self.brick_stamps.clear();
         for held in &mut self.frame_textures {
@@ -2850,7 +2861,8 @@ impl RenderGraph {
                 first_unavailable = Some(ViewportId(u32::try_from(index).unwrap_or(u32::MAX)));
             }
         }
-        if !any_encodable {
+        let fusion_due = self.fusion.as_ref().is_some_and(|view| view.needs_encode());
+        if !any_encodable && !fusion_due {
             // No encoder is created for a frame that cannot encode, so
             // nothing unfinished is dropped.
             return match first_unavailable {
@@ -2917,6 +2929,7 @@ impl RenderGraph {
             pipelines,
             keys,
             submissions,
+            fusion,
             ..
         } = self;
         let mut encoder = ctx
@@ -3004,7 +3017,13 @@ impl RenderGraph {
                 state.dirty.clear();
             }
         }
-        if encoded == 0 {
+        let mut fusion_passes = 0_u32;
+        if let Some(view) = fusion.as_mut()
+            && view.needs_encode()
+        {
+            fusion_passes = view.encode(&mut encoder);
+        }
+        if encoded == 0 && fusion_passes == 0 {
             for held in frame_textures.iter_mut() {
                 *held = None;
             }
@@ -3022,8 +3041,68 @@ impl RenderGraph {
         }
         FrameOutcome::Submitted {
             viewports: encoded,
-            passes: encoded,
+            passes: encoded.saturating_add(fusion_passes),
         }
+    }
+
+    /// Bind a fusion view, or refuse before any sample upload.
+    ///
+    /// `adapter` is the session adapter. The sample planes use the same
+    /// preserving float format as a slab upload. A device that cannot bind
+    /// that format, or cannot bind `Rgba16Float` as a render target and a
+    /// sampled texture, returns [`FusionError::Unavailable`] and does not
+    /// build a CPU image.
+    ///
+    /// Tier C, a UID mismatch, an empty UID, an opacity outside 0 to 1, a
+    /// chain with no uniform, a colormap that is not 256 entries, and a plane
+    /// that cannot be sampled all return before the published texture changes.
+    /// The shader is compiled here, when the view is created, not inside
+    /// [`RenderGraph::tick`]. The tick encodes the view in the existing
+    /// encoder and still submits once. This does not add a [`Pass`].
+    ///
+    /// # Errors
+    ///
+    /// [`FusionError`]. A device loss is [`FusionError::Unavailable`], not a
+    /// frame-of-reference mismatch.
+    pub fn show_fusion(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        request: &FusionRequest<'_>,
+    ) -> Result<(), FusionError> {
+        if matches!(ctx.state(), crate::gpu::DeviceState::Lost(_)) {
+            return Err(FusionError::Unavailable);
+        }
+        let decision = {
+            let view = self.fusion.as_ref();
+            let dirty = view.map(|view| view.dirty()).unwrap_or(Dirty::full());
+            let stamp = view.map(|view| view.stamp());
+            let uid = view.and_then(|view| view.uid());
+            fusion::decide(self.tier, request, dirty, stamp.as_ref(), uid)
+        };
+        match decision {
+            fusion::Decision::Refuse(err) => Err(err),
+            fusion::Decision::Idle => Ok(()),
+            fusion::Decision::Encode(stamp) => fusion::stage(
+                ctx,
+                adapter,
+                self.tier,
+                &mut self.fusion,
+                self.format,
+                request,
+                *stamp,
+            ),
+        }
+    }
+
+    /// How many times a fusion bind uploaded volume samples.
+    ///
+    /// An opacity-only change leaves this where it was.
+    pub fn fusion_sample_uploads(&self) -> u64 {
+        self.fusion
+            .as_ref()
+            .map(|view| view.sample_uploads())
+            .unwrap_or(0)
     }
 }
 

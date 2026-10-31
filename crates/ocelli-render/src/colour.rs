@@ -351,7 +351,7 @@ fn bake(transform: &ColorTransform, origin: i32, end: i32) -> Result<Vec<u8>, Co
 /// signed-mean bound of `0.1` rejects. `byte_from_channel` already rounds for
 /// the colour path, so truncating here was also an internal inconsistency.
 /// `table_index` in `graph.rs` applies the same rule in WGSL.
-fn display_index(display: f32, last: u32) -> u32 {
+pub(crate) fn display_index(display: f32, last: u32) -> u32 {
     if !display.is_finite() || display <= 0.0 {
         return 0;
     }
@@ -395,7 +395,7 @@ fn f32_from_i32(value: i32) -> Option<f32> {
     }
 }
 
-fn byte_from_channel(value: f32) -> Option<u8> {
+pub(crate) fn byte_from_channel(value: f32) -> Option<u8> {
     if !(0.0..=255.0).contains(&value) {
         return None;
     }

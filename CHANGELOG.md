@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- Two volumes that share one `FrameOfReferenceUID` can be drawn on one patient plane. Volume B is in front. An omitted colormap uses the existing window range. A second UID draws nothing. Tier C reports fusion unavailable and writes no CPU image.
 - Viewports that share one `FrameOfReferenceUID` keep one patient point. A second UID, including a trailing space, stays put. A missing UID moves nobody. The index is host arithmetic and is the same on every tier.
 - A thick slab can be drawn as composite, MIP, MinIP or average. Composite is the centre sample. The other three reduce stored samples and then apply the existing window once. An absent sample leaves the previous pixel in place. Tier C reports the slab unavailable.
 - An arbitrary patient plane can be taken from a constructed volume. The sample is the existing level-0 trilinear read. An absent slice stays absent. Display reuses the orthographic upload, and tier C reports that viewport unavailable.
