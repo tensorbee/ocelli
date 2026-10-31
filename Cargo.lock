@@ -1086,6 +1086,7 @@ dependencies = [
  "ocelli-cache",
  "ocelli-core",
  "ocelli-pixel",
+ "ocelli-volume",
  "serde",
  "serde_json",
 ]

@@ -1,6 +1,6 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055
 **Last updated:** 2026-10-31
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
@@ -22,6 +22,7 @@ C.7.6.2.1.1. `SpacingBetweenSlices`, `SliceThickness`, `SliceLocation`,
 | `SlicePresence` | One bit per slice over `Vec<u64>`. Deviation D-25 |
 | `VolumeKey` | The series id a cached volume is stored under |
 | `VolumeCache` | Its own `Lru` on `CacheTier::Decoded`, with its own budget |
+| `HeldPlane` | One plane held at an index. The anchor is the world point of index 0. `Volume` does not store this plane or the UID |
 
 ## How a series becomes a volume
 
@@ -208,6 +209,29 @@ Composite display is the centre sample. MIP, MinIP and average reduce the
 stored samples and then apply the existing VOI once. That window is
 `LutChain` in `ocelli-pixel`. This crate does not keep a second copy.
 Display of the column is `RenderGraph::show_slab`.
+
+## One patient point on a held plane
+
+`HeldPlane::index_through_point` names the index of a `Pt<World>` on one
+plane. The plane origin is the anchor plus the stored index times
+`spacing_mm` along the normal. DICOM PS3.3 C.7.6.2.1.1 places that origin.
+The offset is the point minus that origin, dotted with the stored normal.
+The new index is the stored index plus that offset divided by `spacing_mm`.
+For a unit normal this is the point minus the anchor, dotted with the
+normal, divided by `spacing_mm`. The caller passes the stored direction
+column. This function does not normalise it. Identity columns are already
+unit, and assembly already normalises the slice column.
+
+The call does not write the plane and does not read a voxel. It does not
+read a UID. `Volume` still does not store `FrameOfReferenceUid`. It does
+not call `reslice`. An index is not rounded and not clamped.
+
+Spacing that is not finite and greater than zero, a normal whose length is
+not finite and greater than zero, or a non-finite anchor, normal, index or
+point is `PlaneSyncError::Unavailable`. A non-finite result is the same
+error. There is no tolerance on the length. The same index is the result
+on tier A, tier B and tier C. The function has no tier argument and creates
+no device.
 
 ## Tiers A, B and C
 

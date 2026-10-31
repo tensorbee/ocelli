@@ -1,6 +1,6 @@
 # Viewport
 
-**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022, F-054
+**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022, F-054, F-055
 **Last updated:** 2026-10-31
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
@@ -252,9 +252,32 @@ stays. `uploads` does not change. Tier A and tier B share that shader.
 Tier C does not draw a slab. The sample grid remains available on the host
 for F-X004.
 
+## Slice sync
+
+`SyncScene` keeps one patient point across viewports that share a
+`FrameOfReferenceUID`. The UID is the existing `FrameOfReferenceUid` string.
+Comparison is that string. A trailing space is a different UID. The scene
+does not parse it and does not trim it.
+
+`register` stores one slot, or replaces the slot with the same `u16`. It
+does not move a peer. `set_point` looks up the source. A missing source or
+a missing source UID is `SyncError::Unavailable`, and no slot is written.
+Every slot whose UID equals the source UID receives
+`HeldPlane::index_through_point`. A different UID stays. A missing peer UID
+stays, and that case is not an error. Any same-UID plane that refuses the
+point refuses the call before a slot is written.
+
+The change list is registration order. An index that compares equal under
+`==`, including the two zeros, is omitted and is not rewritten. `Ok` of an
+empty list is a successful no-op. The anchor stays the world point of index
+0. The normal and the spacing stay. The geometry is the volume function, so
+tier A, tier B and tier C store the same index. This crate creates no
+device.
+
 ## What this file does not own
 
 The TypeScript names are F-100. This crate does not depend on wgpu.
-Volume assembly and measured shear stay in `docs/lld/volumes.md`. This
-module does not read them. Volume brick prefetch in HLD section 30 is
+Volume assembly and measured shear stay in `docs/lld/volumes.md`. Scroll
+does not read them. `SyncScene` calls `HeldPlane::index_through_point` and
+does not assemble a volume. Volume brick prefetch in HLD section 30 is
 not the scroll module.

@@ -25,9 +25,11 @@ use ocelli_pixel::{ImageOrientationPatient, PixelRepresentation};
 mod levels;
 mod ortho;
 mod slab;
+mod sync;
 
 pub use ortho::{ObliquePlane, OrthoImage, OrthoPlane, PlaneSample};
 pub use slab::{SlabImage, SlabPlane};
+pub use sync::{HeldPlane, PlaneSyncError};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.

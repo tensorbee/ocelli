@@ -16,6 +16,7 @@ pub mod presentation;
 pub mod ring;
 pub mod scroll;
 pub mod snapshot;
+pub mod sync;
 pub mod view;
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
