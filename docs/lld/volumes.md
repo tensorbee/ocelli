@@ -1,7 +1,7 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-057, F-058, F-059
+**Last updated:** 2026-10-30
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
 `ImagePositionPatient` projected on the slice normal, DICOM PS3.3
@@ -18,7 +18,7 @@ C.7.6.2.1.1. `SpacingBetweenSlices`, `SliceThickness`, `SliceLocation`,
 | `VolumeCandidate` | Slices that share a frame of reference and an orientation |
 | `Volume` | Section 19's struct over one `VoxelStore` |
 | `VoxelStore` | One contiguous `Vec<u8>`, x fastest, then y, then z |
-| `Level` | One multiscale entry. This story holds exactly one, at offset 0 |
+| `Level` | Level 0 is full resolution at offset 0. Later entries are caller-supplied coarser levels on the same store |
 | `SlicePresence` | One bit per slice over `Vec<u64>`. Deviation D-25 |
 | `VolumeKey` | The series id a cached volume is stored under |
 | `VolumeCache` | Its own `Lru` on `CacheTier::Decoded`, with its own budget |
@@ -94,15 +94,78 @@ counts it once. A write of the wrong length is `SliceSizeMismatch` before
 any range check. `Budgeted::bytes` is the store length. The level axis and
 the presence set are not counted again.
 
+`Volume::cut_ready_brick` copies one brick `ready_bricks` lists, from the
+level 0 prefix only. A coordinate that list omits is
+`VolumeError::BrickNotReady` and nothing is copied.
+`Volume::present_slice_f32` returns one present slice as little-endian
+container values in `f32`. A clear presence bit, including an index at or
+past the slice count, is `VolumeError::SliceNotPresent`. Bits Stored is not
+applied again. The bytes `FD FF` of an `I16` voxel stay `-3`.
+
 `VolumeCache` does not share `ImageCache`'s budget. One volume admitted
 against the frame budget would evict every frame a viewer is holding.
 Admission, eviction and pressure are `Lru`'s, on the decoded tier.
 
+## The level axis
+
+Level 0 is full resolution at offset 0. `Volume::append_level` copies
+caller-supplied bytes onto the end of the same store and pushes the next
+`Level`. It does not downsample. Pyramid generation is F-119. Opacity
+correction is F-121.
+
+Spacing on the new entry is level 0 spacing times level 0's dimension
+divided by the child dimension, on each axis. The ratio is baked at append
+time from level 0.
+
+`Volume::level` and `Volume::brick_grid_at` return
+`VolumeError::LevelAbsent` when the index is missing. They do not substitute
+level 0. A zero axis, an axis larger than level 0, a grid that is not
+smaller on at least one axis, or a buffer whose length is not the child
+voxel count times the voxel width, is `VolumeError::LevelShape`. The store
+does not grow on that refusal.
+
+`Volume::brick_grid` stays level 0. `brick_grid_at` builds `BrickGrid::new`
+for that level's dimensions and then sets `level`. There is no second edge
+table. `Volume::level_bytes` returns the entry's span in the store.
+
+Assembly and `construct` still write one level. `SlicePresence` stays the
+level 0 slice set. Renderers in S19 upload level 0 only.
+
+## Orthographic planes
+
+`Volume::reslice` samples one plane from level 0. `Axial` holds the slice
+index and steps along both in-plane cosines. `Sagittal` holds the column
+index and steps along the column cosine and the slice normal. `Coronal`
+holds the row index and steps along the row cosine and the normal. The
+names are this volume's axes.
+
+`Volume::voxel_world` is the patient point of a continuous index
+`(i, j, k)`. The origin is the centre of voxel `(0, 0, 0)`. The point is
+the origin plus `i * spacing[0] * direction.col(0)` plus
+`j * spacing[1] * direction.col(1)` plus
+`k * spacing[2] * direction.col(2)`. `spacing[0]` is column millimetres
+along the row cosine. That is DICOM PS3.3 C.7.6.2.1.1 with the volume's
+third axis.
+
+An index on the fixed axis outside `[0, dim - 1]`, including a non-finite
+index, is `VolumeError::PlaneOutOfRange`. Nothing is allocated. On a voxel
+centre the sample is that voxel's container value. Off centre the weights
+are trilinear in `f64` and then narrowed to `f32`. A corner with non-zero
+weight on an absent slice is `PlaneSample::Absent`. A zero weight does not
+read that corner. Decode is little-endian `U8`, `I16`, `U16` or `F32`.
+Bits Stored is not applied again. An appended coarser level is not a
+sample source.
+
+Output size is the two stepped axes. Axial spacing is `spacing[0]` by
+`spacing[1]`. Sagittal spacing is `spacing[1]` by `spacing[2]`. Coronal
+spacing is `spacing[0]` by `spacing[2]`.
+
 ## Tiers A, B and C
 
-Not applicable for A and B. The volume is host memory and this crate creates
-no device. The brick upload in `ocelli-render` refuses an axis longer than
-the device's reported 3D limit. The pinned tier B floor for that limit is
+Not applicable for A and B as a device path. The volume is host memory and
+this crate creates no device. `Volume::resident` runs on the host on tier A,
+tier B and tier C. The brick upload in `ocelli-render` refuses an axis
+longer than the device's reported 3D limit. The pinned tier B floor for that limit is
 256, which is the size a brick edge of 128 is guaranteed to fit. This crate
 does not clamp the reported limit and does not apply the check. Tier C
 assembles the same volume, because there is no device path to diverge from.
@@ -113,8 +176,11 @@ A volume enumerates bricks through `BrickGrid` from `ocelli-cache`, via
 `Volume::brick_grid`. It does not keep a second decomposition.
 `Volume::ready_bricks` lists brick coordinates whose slices have all landed,
 in `index_of` order, x fastest. A brick whose z range includes an absent
-slice is left out, because uploading it would invent zeros. The renderer
-does not read `SlicePresence`. No reslice onto a viewport, which is a later
-geometry story. This crate still creates no texture. Upload of a ready brick
-is `ocelli-render`. Pixels stay in the store and do not cross the worker
+slice is left out, because uploading it would invent zeros.
+`Volume::resident` is true when `brick_of` succeeds for that voxel and
+`brick_is_ready` is true for its brick. A voxel outside the dimensions is
+false. The check does not build the ready list and does not read a coarser
+level. This crate still creates no texture. `RenderGraph::sync_volume` in
+`ocelli-render` uploads a ready brick. `RenderGraph::show_ortho` uploads one complete
+orthographic plane. Pixels stay in the store and do not cross the worker
 boundary.

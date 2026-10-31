@@ -1,13 +1,16 @@
-# Current sprint, S18
+# Current sprint, S19
 
 **Milestone**: M5, volume, MPR and 3D rendering.
-**Branch**: `sprint/s18`
+**Branch**: `sprint/s19`
 **Opened**: 2026-10-27
-**Goal**: Volume construction from a stack: geometry, orientation, spacing.
+**Goal**: Orthographic viewport: axial, sagittal, coronal, Progressive volume rendering while the series still loads, Multiscale pyramid hooks in the volume model, VOLUME_3D viewport with ray-cast direct volume rendering.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-051 | E8.1 | Volume construction from a stack: geometry, orientation, spacing | Rust | 4w | done |
+| F-052 | E8.2 | Orthographic viewport: axial, sagittal, coronal | Rust | 4w | done |
+| F-057 | E8.7 | Progressive volume rendering while the series still loads | Rust | 3w | done |
+| F-058 | E8.8 | Multiscale pyramid hooks in the volume model | Rust | 3w | done |
+| F-059 | E9.1 | VOLUME_3D viewport with ray-cast direct volume rendering | Rust | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -17,21 +20,24 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S18 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S19 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S17 closed M4 at tag `s17`. The merge is `7117d14`. M5 starts here. This
-sprint constructs a volume from a stack, and the work is the geometry, the
-orientation and the spacing. The S18 table in `docs/sprints/SPRINT_PLAN.md`
-and the S18 row in `docs/sprints/allocation.json` both name F-051, epic E8.1.
-Orthographic MPR, progressive rendering, the pyramid, ray casting and the
-candidate-render gate stay on later sprints.
+S18 closed at tag `s18`. The merge is `ad2cdd0`. M5 continues. This sprint
+reslices a constructed volume on the axial, sagittal and coronal planes,
+draws while slices are still arriving, leaves a multiscale level axis on the
+volume, and ray-casts a VOLUME_3D view. The S19 table in
+`docs/sprints/SPRINT_PLAN.md` and the S19 rows in
+`docs/sprints/allocation.json` both name F-052, F-057, F-058 and F-059.
+Oblique reslice, thick slab, fusion and the full-corpus candidate gate stay
+on later sprints.
 
-F-033 already owns the volume cache and `Volume::assemble`. The as-built note
-on that story says F-051 is the first caller of `place`. This sprint is that
-caller. It does not reopen the LUT chain.
+F-051 fills one candidate. `place` writes stored samples at sorted position
+`n`, and `order[n]` is the arrival index. `assemble` stays cleared. This
+sprint consumes that volume. It does not reopen construction geometry and it
+does not reopen the LUT chain.
 
 The oracle still has no Ocelli renderer to compare a full viewer against.
 Decision D7 holds. This open publishes nothing.
@@ -66,66 +72,71 @@ Decision D7 holds. This open publishes nothing.
   responsible for counting whole-sprint passes and invoking `set-phase
   blocked` at the configured limit. The per-feature microscope loop remains
   uncapped. No automatic script transition is claimed.
-- **M4 is complete. A release is the cadence's next step, and this open does
-  not take it.** `docs/RELEASE.md` maps one minor to each milestone from M2
-  to M12, so M4 names 0.4.0. M1, M2 and M3 were not published. The workspace
-  version is still 0.1.0. `/release` runs
+- **M5 is not complete, and this open does not publish.** S18 closed F-051.
+  `docs/RELEASE.md` maps one minor to each milestone from M2 to M12, so a
+  finished M5 would name 0.5.0. S19, S20 and S21 remain. M1, M2, M3 and M4
+  were not published. The workspace version is still 0.1.0. `/release` runs
   `python3 scripts/pin_and_size_check.py --require-redistribution`, and that
   command refuses while `openjph-core` 0.1.0 carries no BSD notice material,
-  which is D-22. That blocks publication. It does not block F-051.
-- **No new measured duration.** Every M4 row in `SPRINT_TRACKER.md` reads
-  `not measured`. There is no measured total and no ratio. The capacity
-  points remain the S03 and S06 closes. This open does not invent a ratio
-  and does not recalculate capacity.
+  which is D-22. That blocks publication. It does not block these four
+  stories.
+- **No new measured duration.** F-051 in `SPRINT_TRACKER.md` reads
+  `not measured`, as does every M4 row. There is no measured total and no
+  ratio. The capacity points remain the S03 and S06 closes. This open does
+  not invent a ratio and does not recalculate capacity.
 - **F-X011** remains pending because its evidence needs a second physical
   machine. **ICC** is still unimplemented, the other half of HLD section 18's
   stage-4 row. Multi-component JPEG-LS decoding is still owed.
 - **The oracle has no Ocelli renderer to compare a full viewer against.**
   F-X021 writes the candidate record and depends on F-012 and F-052. It is
-  not this sprint. Decision D7 holds.
+  S20. Decision D7 holds.
 
 ## The defect class this sprint is exposed to
 
-**Spacing or slice order taken from a tag.** HLD section 19, in
-`docs/hld/16-volume-representation.md`, and DICOM PS3.3 C.7.6.2.1.1.
-`PixelSpacing` is row then column. `ImagePositionPatient` is the centre of
-voxel zero. The inter-slice step is that position projected on the slice
-normal, the row cosine crossed with the column cosine. Shear is the part of
-the step that is not parallel to the normal, measured from the positions.
-HLD section 19 stores `spacing` as three millimetre values and `origin` as
-the `ImagePositionPatient` of the first slice.
+**A plane or a ray that is not the constructed volume.** HLD section 7 and
+section 19. Axial, sagittal and coronal are the volume's own axes, from the
+direction built when the volume was constructed. A sagittal sample that steps
+along the row cosine instead of the column cosine is the swap. A brick whose
+slices have not all landed must stay out of the upload, because the missing
+slices would become zeros. A ray uses the same origin, spacing and direction
+as `Volume::construct`. Spacing Between Slices is not that spacing.
 
-The failure is a volume whose spacing is Spacing Between Slices, Slice
-Thickness or Slice Location, whose order is Instance Number, or whose shear
-is Gantry/Detector Tilt. Those tags are evidence. They are not the geometry.
-Swapping the two `PixelSpacing` values is the same class of defect.
+HLD section 7 makes a 3D-texture ray-cast legal on tier B. Deviation D-07
+says a feature that cannot run on the resolved tier reports unavailable.
+F-X005 owns the CPU ray-cast decision and is S21. This sprint must not draw
+a different image on the CPU and call it the same view.
 
 ## What done means
 
-- **F-051** constructs a volume from a stack. Geometry, orientation and
-  spacing come from the image plane under PS3.3 C.7.6.2.1.1 and HLD section
-  19. The origin is the `ImagePositionPatient` of the lowest projected slice,
-  copied exactly, and that point is the centre of voxel zero. Spacing index 0
-  steps along the row and index 1 along the column. A sheared stack is not
-  stored as an axis-aligned box. The story is the first caller of
-  `Volume::place`. It does not treat Spacing Between Slices, Slice Thickness,
-  Slice Location, Instance Number or the gantry tilt tag as the answer.
-- **F-051 declares all three tier rows**, and "n/a" is a real answer that an
-  omitted row is not.
-- Orthographic reslice, progressive upload, the pyramid, ray casting and the
-  full-corpus candidate gate stay out. Those are F-052, F-057, F-058, F-059
-  and F-X021.
+- **F-052** shows axial, sagittal and coronal from the constructed volume's
+  direction, origin and spacing. The three planes are that volume. They are
+  not a second patient frame and not a stack of stored frames sorted by
+  Instance Number.
+- **F-057** draws while the series is incomplete. A slice that has not landed
+  contributes no samples. The view does not paint those voxels as zeros and
+  call the volume complete.
+- **F-058** leaves the multiscale level axis on the volume. The hook is the
+  deliverable. A later consumer of the pyramid is not this story.
+- **F-059** ray-casts a VOLUME_3D view from the constructed volume. Tier A
+  and tier B each have an answer. Tier C reports unavailable unless F-X005
+  has a measured path, and that story is not in this sprint. A CPU image
+  that differs from the GPU image is not an answer.
+- **Each story declares all three tier rows**, and "n/a" is a real answer
+  that an omitted row is not.
+- Oblique reslice, thick slab, slice sync, fusion and the candidate-render
+  gate stay out. Those are F-053, F-054, F-055, F-056 and F-X021.
 - `wasm-bindgen` remains confined to `ocelli-wasm`, pixels do not cross the
   boundary, and `ocelli-render` remains the only crate that may create a
   device. The LUT arithmetic stays in `ocelli-pixel`.
 
 ## Dependency order
 
-F-051 depends on F-033. That backlog row is `done`. No backlog cell in this
-sprint names another story in this sprint.
+F-052, F-057, F-058 and F-059 depend on F-051. That backlog row is `done`.
+No backlog cell in this sprint names another story in this sprint.
 
-F-052, F-057, F-058 and F-059 depend on F-051 and are S19. F-X021 depends on
-F-012 and F-052 and is S20. F-X004 depends on F-052 and F-X003 and is S21.
+F-053, F-054, F-055 and F-056 depend on F-052 and are S20. F-X021 depends on
+F-012 and F-052 and is S20. F-060 depends on F-059 and is S21. F-X004 depends
+on F-052 and F-X003 and is S21. F-X005 is S21.
 
 ## Standing expectations
 
@@ -146,11 +157,11 @@ generalised by D-07.
 
 ## Audit intake, 2026-10-27
 
-S17 closed at tag `s17` with 31 of 31 gates green, the corpus passing, and
+S18 closed at tag `s18` with 31 of 31 gates green, the corpus passing, and
 whole-sprint review pass 2 clean at zero defects and zero smells. The gate
-tree is `6fc40a9abcad`. `scripts/backlog_check.py`,
+tree is `189248116673`. The merge is `ad2cdd0`. `scripts/backlog_check.py`,
 `scripts/gen_sprint_plan.py --check` and `scripts/deviation_check.py` are
-green at this open. The S18 allocation row and the S18 plan table name the
-same F-ID. No new audit was run at this open.
+green at this open. The S19 allocation rows and the S19 plan table name the
+same F-IDs. No new audit was run at this open.
 
-F-051 is done. Its design plan is approved in `.claude/plans/F-051-design.md`.
+F-052, F-057, F-058 and F-059 are pending.

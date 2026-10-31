@@ -10,6 +10,17 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- A VOLUME_3D view ray-casts resident bricks on tier A and tier B. The window is the existing VOI uniform. Opacity stays 0.5 until a transfer function exists. A ready set that does not fit beside the residency texture is not drawn as a subset. Tier C reports the view unavailable.
+- An orthographic plane can be taken from a constructed volume. Axial, sagittal and coronal follow that volume's axes. `reslice` returns the stored samples. An absent slice stays absent. `show_ortho` uploads a complete plane through the existing stack window and leaves the last complete plane in place when a sample is missing. Tier C reports the viewport unavailable.
+- A volume can be shown while slices are still arriving. `cut_ready_brick`
+  copies only a brick whose slices have all landed. `sync_volume` uploads
+  that brick once, and again when the bytes change. An absent slice is not
+  a texture of zeros. `present_slice_f32` returns a landed slice and refuses
+  one that has not.
+- The volume keeps a multiscale level axis. Level 0 stays full resolution.
+  `append_level` stores a caller-supplied coarser level on the same
+  allocation, and a missing level is an error. This story does not build
+  the pyramid.
 - A React viewport binding. `createViewportPump` submits one packed command
   buffer on a frame that has queued commands, drains the ring once, copies
   state once and reports that copy only when a field changed. `OcelliViewport` takes a session prop and renders

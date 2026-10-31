@@ -11,7 +11,7 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, Dirty, FrameOutcome, GraphError, Pass, RenderGraph, StackPass, ViewportId,
+    BlendMode, Dirty, FrameOutcome, GraphError, Pass, RayAxis, RenderGraph, StackPass, ViewportId,
     VoiParams, VolumePass,
 };
 
@@ -236,6 +236,9 @@ fn set_view_dirties_only_the_camera_and_keeps_the_css_matrix() {
         source,
         Pass::VolumeRaycast(VolumePass {
             blend: BlendMode::Composite,
+            voi: voi(),
+            axis: RayAxis::Slice,
+            from_far: false,
         }),
     ) {
         Ok(id) => id,

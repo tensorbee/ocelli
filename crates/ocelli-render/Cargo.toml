@@ -57,6 +57,9 @@ ocelli-core = { path = "../ocelli-core" }
 # F-043. The brick key and the host bytes live in ocelli-cache. The 3D texture
 # lives in this crate. The cache crate does not gain a wgpu dependency.
 ocelli-cache = { path = "../ocelli-cache" }
+# F-057. Progressive upload walks ready bricks and cuts level 0. The volume
+# crate does not depend on this one. A brick texture stays here.
+ocelli-volume = { path = "../ocelli-volume" }
 # F-041. HLD section 20's third bullet, by name: "Use bytemuck::cast_slice for
 # reinterpreting pixel buffers. Hand-written transmutes are unsafe code with no
 # upside here." `unsafe` is allow-listed to two files and neither is this crate,
@@ -68,6 +71,8 @@ bytemuck = { workspace = true }
 ocelli-viewport = { path = "../ocelli-viewport" }
 
 [dev-dependencies]
+# F-057. The progressive tests build a `Volume`, whose direction is `DMat3`.
+glam = { workspace = true }
 # `resolve` is `async fn`, because `request_adapter` and `request_device` are
 # futures in the pinned wgpu, and a native test needs something to drive it.
 # Dev-only, so it never enters the shipped surface, which is the same argument
