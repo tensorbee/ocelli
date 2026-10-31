@@ -82,8 +82,9 @@ pub use gpu::{
 };
 pub use graph::{
     BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineFamily, PipelineKey,
-    RenderGraph, STORED_FORMAT, SegPass, StackPass, Upload, UploadError, ViewportId, VolumePass,
-    device_camera_words, tier_b_fragment_module,
+    RayAxis, RenderGraph, STORED_FORMAT, SegPass, StackPass, Upload, UploadError, ViewportId,
+    VolumeBrick, VolumePass, VolumeRaySource, device_camera_words, sampled_texture_limit,
+    tier_b_fragment_module, volume_ray_admission, volume_ray_module,
 };
 pub use ortho::{OrthoError, present_plane};
 #[cfg(not(target_arch = "wasm32"))]

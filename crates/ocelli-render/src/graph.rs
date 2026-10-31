@@ -77,11 +77,50 @@ pub struct StackPass {
     pub blend: BlendMode,
 }
 
+/// Which volume axis a ray walks. The pixel axes are the other two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RayAxis {
+    /// Walk x. The image is y then z.
+    Column,
+    /// Walk y. The image is x then z.
+    Row,
+    /// Walk z. The image is x then y.
+    Slice,
+}
+
+impl RayAxis {
+    /// Uniform code. 0 is x, 1 is y, 2 is z. The shader matches these numbers.
+    pub const fn code(self) -> u32 {
+        match self {
+            Self::Column => 0,
+            Self::Row => 1,
+            Self::Slice => 2,
+        }
+    }
+
+    fn length(self, dims: [u32; 3]) -> u32 {
+        match self {
+            Self::Column => dims[0],
+            Self::Row => dims[1],
+            Self::Slice => dims[2],
+        }
+    }
+}
+
 /// The volume raycast payload.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `voi` is the same section 18.4 uniform the stack pass carries. `axis` and
+/// `from_far` choose the ray. The shader body exists only for composite.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VolumePass {
     /// The blend mode the pipeline is keyed by.
     pub blend: BlendMode,
+    /// Section 18.4's uniform for this viewport.
+    pub voi: VoiParams,
+    /// The volume axis the ray walks.
+    pub axis: RayAxis,
+    /// When set, the far voxel is the first sample.
+    pub from_far: bool,
 }
 
 /// The segmentation overlay payload.
@@ -252,6 +291,19 @@ pub enum GraphError {
         "the device pixel ratio must be finite, strictly positive and narrow to a positive f32"
     )]
     DevicePixelRatio,
+    /// The ready brick count does not fit the sampled-texture limit.
+    ///
+    /// One sampled binding is the residency texture. Room for bricks is
+    /// that limit minus one. A limit of zero, a ready count of zero, or a
+    /// ready count above that room is refused. A count above the compiled
+    /// brick slots is the same error and creates no texture. The ray does
+    /// not draw a subset of the bricks the caller passed.
+    #[error("the ready brick count does not fit the sampled-texture limit")]
+    SampledTextureLimit,
+    /// The ray has no brick, the flags do not match the axis, or the brick
+    /// format is not an unsigned integer container.
+    #[error("the volume ray has no unsigned brick and matching residency flags")]
+    RayUnavailable,
 }
 
 /// Preferred stored-sample format. The constant stays `R32Float`.
@@ -570,6 +622,119 @@ pub fn tier_b_fragment_module() -> String {
     format!("{VOI_WGSL}{GRAPH_WGSL}")
 }
 
+/// The volume ray module. `VOI_WGSL` is included once, then the ray entry.
+const RAYCAST_WGSL: &str = include_str!("../shaders/raycast.wgsl");
+
+/// Fragment module for the composite volume ray on tier A and tier B.
+///
+/// `slots` is the number of `texture_3d<u32>` bindings. The residency
+/// texture is one more sampled binding, so a ready set of `slots + 1`
+/// bricks does not fit. The window functions stay the F-041 text. The ray
+/// entry has no compute and no storage buffer.
+pub fn volume_ray_module(slots: u32) -> String {
+    let array_slots = slots.max(1);
+    let mut bindings = String::new();
+    for index in 0..slots {
+        bindings.push_str(&format!(
+            "@group(1) @binding({index}) var brick_{index} : texture_3d<u32>;\n"
+        ));
+    }
+    let residency = slots;
+    bindings.push_str(&format!(
+        "@group(1) @binding({residency}) var resident_tex : texture_2d<u32>;\n"
+    ));
+    let mut cases = String::new();
+    for index in 0..slots {
+        cases.push_str(&format!(
+            "case {index}u: {{ return textureLoad(brick_{index}, coord, 0).r; }}\n        "
+        ));
+    }
+    format!("{VOI_WGSL}{RAYCAST_WGSL}")
+        .replace("__RAY_SLOTS__", &array_slots.to_string())
+        .replace("__BRICK_BINDINGS__", &bindings)
+        .replace("__BRICK_CASES__", &cases)
+}
+
+const _: () = assert!(std::mem::size_of::<RayHeader>() == 48);
+
+/// Bytes of the ray uniform, header then one `vec4<u32>` per compiled slot.
+fn ray_uniform_bytes(header: &RayHeader, coords: &[[u32; 3]], slots: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(bytemuck::bytes_of(header));
+    let array_len = usize::try_from(slots.max(1)).unwrap_or(1);
+    for index in 0..array_len {
+        let coord = coords.get(index).copied().unwrap_or([0, 0, 0]);
+        bytes.extend_from_slice(&coord[0].to_le_bytes());
+        bytes.extend_from_slice(&coord[1].to_le_bytes());
+        bytes.extend_from_slice(&coord[2].to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+    }
+    bytes
+}
+
+/// True extent of one brick clipped to `dims`. `None` when the brick starts
+/// outside the volume.
+fn clipped_axis(dim: u32, brick: u32, edge: u32) -> Option<u32> {
+    let origin = brick.checked_mul(edge)?;
+    if origin >= dim {
+        return None;
+    }
+    Some((dim - origin).min(edge))
+}
+
+fn clipped_brick(dims: [u32; 3], coord: [u32; 3], edge: u32) -> Option<[u32; 3]> {
+    Some([
+        clipped_axis(dims[0], coord[0], edge)?,
+        clipped_axis(dims[1], coord[1], edge)?,
+        clipped_axis(dims[2], coord[2], edge)?,
+    ])
+}
+
+/// Brick textures that fit beside the residency texture.
+///
+/// The sampled-texture limit and the bind-group limit both have to hold
+/// the bricks and that one residency texture. A smaller ready set is not
+/// substituted when the count does not fit.
+fn brick_slot_count(limits: &wgpu::Limits) -> u32 {
+    let sampled = limits.max_sampled_textures_per_shader_stage;
+    let group = limits.max_bindings_per_bind_group;
+    sampled.saturating_sub(1).min(group.saturating_sub(1))
+}
+
+/// Whether a volume ray may be bound on `tier`.
+///
+/// Tier C returns [`GraphError::TierCUnavailable`] and produces no image.
+/// A sampled-texture limit of zero, a ready count of zero, or a ready count
+/// that leaves no binding for the residency texture, returns
+/// [`GraphError::SampledTextureLimit`]. Nothing is drawn in either case.
+/// A ready count that fits is not reduced to a smaller set.
+///
+/// # Errors
+///
+/// [`GraphError::TierCUnavailable`] or [`GraphError::SampledTextureLimit`].
+pub fn volume_ray_admission(
+    tier: Tier,
+    ready_bricks: u32,
+    sampled_limit: u32,
+) -> Result<(), GraphError> {
+    if tier == Tier::Cpu {
+        return Err(GraphError::TierCUnavailable);
+    }
+    let room = sampled_limit.saturating_sub(1);
+    if sampled_limit == 0 || ready_bricks == 0 || ready_bricks > room {
+        return Err(GraphError::SampledTextureLimit);
+    }
+    Ok(())
+}
+
+/// Sampled textures the adapter allows in one shader stage.
+pub fn sampled_texture_limit(adapter: &ResolvedAdapter) -> u32 {
+    adapter
+        .wgpu_adapter()
+        .limits()
+        .max_sampled_textures_per_shader_stage
+}
+
 /// Colour table bytes remembered across a device rebuild.
 ///
 /// Restoring the texture does not increment `lut_uploads`. That counter
@@ -623,6 +788,64 @@ struct GpuSlot {
     bind_uniform: wgpu::BindGroup,
     bind_source: wgpu::BindGroup,
     stored: Option<StoredTexture>,
+    /// Brick view, residency and ray uniforms. Absent until [`RenderGraph::bind_volume_ray`].
+    ray: Option<VolumeRayBinding>,
+}
+
+/// One ready brick already uploaded for a volume ray.
+pub struct VolumeBrick<'a> {
+    /// The key `upload_brick` stored.
+    pub key: &'a BrickKey,
+    /// Brick coordinate, x then y then z.
+    pub coord: [u32; 3],
+}
+
+/// What [`RenderGraph::bind_volume_ray`] uploads for one viewport.
+///
+/// `bricks` is the set this call binds. The function does not compare that
+/// slice with `Volume::ready_bricks`. A shorter slice is bound as given
+/// when it fits the sampled-texture room and the compiled slot count.
+pub struct VolumeRaySource<'a> {
+    /// The bricks to bind, in any order. The length is the ready count.
+    pub bricks: &'a [VolumeBrick<'a>],
+    /// Brick edge in voxels. Eight-bit volumes use 128.
+    pub edge: u32,
+    /// Voxel dimensions, x then y then z.
+    pub dims: [u32; 3],
+    /// One flag per step of the view axis. `1` is resident.
+    pub flags: &'a [u32],
+    /// Sampled textures the shader stage may bind, residency included.
+    pub sampled_limit: u32,
+}
+
+/// Ray resources for one volume viewport. Created at bind, not inside a tick.
+struct VolumeRayBinding {
+    capacity: u32,
+    residency: wgpu::Texture,
+    params: wgpu::Buffer,
+    bind_uniform: wgpu::BindGroup,
+    bind_source: wgpu::BindGroup,
+}
+
+/// Fixed prefix of the ray uniform. Field order matches `raycast.wgsl`.
+///
+/// The brick-coordinate array follows these 48 bytes, one `vec4<u32>` per
+/// compiled slot. `edge` is the brick edge. `brick_count` is the ready set.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct RayHeader {
+    axis: u32,
+    from_far: u32,
+    dim_x: u32,
+    dim_y: u32,
+    dim_z: u32,
+    steps: u32,
+    kind: u32,
+    edge: u32,
+    brick_count: u32,
+    pad0: u32,
+    pad1: u32,
+    pad2: u32,
 }
 
 /// The pure registration and dirty registry, sized at creation.
@@ -674,6 +897,54 @@ impl Registry {
     }
 }
 
+/// Layouts and pipelines `compile` builds together.
+struct CompiledGraph {
+    uniform_layout: wgpu::BindGroupLayout,
+    source_layout: wgpu::BindGroupLayout,
+    volume_uniform_layout: wgpu::BindGroupLayout,
+    volume_source_layout: wgpu::BindGroupLayout,
+    /// `texture_3d` bindings compiled into the volume shader.
+    brick_slots: u32,
+    /// 1×1×1 stand-in for a brick slot the ready set does not use.
+    ray_dummy: wgpu::Texture,
+    keys: Vec<CompiledKey>,
+    pipelines: Vec<wgpu::RenderPipeline>,
+}
+
+fn fragment_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    module: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    label: &str,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 /// One compiled pipeline: section 22's key plus the shader family.
 ///
 /// The family is not a new key field. It is how a compute request is kept
@@ -720,6 +991,12 @@ pub struct RenderGraph {
     pipelines: Vec<wgpu::RenderPipeline>,
     uniform_layout: wgpu::BindGroupLayout,
     source_layout: wgpu::BindGroupLayout,
+    volume_uniform_layout: wgpu::BindGroupLayout,
+    volume_source_layout: wgpu::BindGroupLayout,
+    /// Brick bindings the volume shader was compiled with.
+    brick_slots: u32,
+    /// Kept alive so unused brick slots in a bind group stay valid.
+    ray_dummy: wgpu::Texture,
     format: wgpu::TextureFormat,
     tier: Tier,
     submissions: u64,
@@ -734,28 +1011,30 @@ pub struct RenderGraph {
     brick_stamps: BTreeMap<BrickKey, Vec<u8>>,
 }
 
-/// The one pass and blend this story gives a shader body. `compile` builds
-/// exactly this, and `pipeline_compiled` answers from it, so the two cannot
-/// drift apart when a later story adds a body.
-const COMPILED_PASS: PassKind = PassKind::Stack;
+/// Blends that have a fragment body. Composite is the only one.
 const COMPILED_BLEND: BlendMode = BlendMode::Composite;
 
 impl RenderGraph {
     /// Whether this story compiles a fragment pipeline for a key.
     ///
-    /// Only the composite stack pipeline has a shader body, at any tier.
-    /// Every other key is declared, and the frame path reports it unavailable.
-    /// A compute or storage request is [`RenderGraph::pipeline_family_compiled`],
-    /// which is false on tier B and is not this predicate.
+    /// Composite stack and composite volume each have a body, at any GPU
+    /// tier. Every other key is declared, and the frame path reports it
+    /// unavailable. A compute or storage request is
+    /// [`RenderGraph::pipeline_family_compiled`], which is false on tier B
+    /// and is not this predicate.
     pub fn pipeline_compiled(key: &PipelineKey) -> bool {
-        key.pass == COMPILED_PASS && key.blend == COMPILED_BLEND
+        if key.blend != COMPILED_BLEND {
+            return false;
+        }
+        matches!(key.pass, PassKind::Stack | PassKind::VolumeRaycast)
     }
 
     /// Whether `family` has a compiled body for `key`.
     ///
-    /// Fragment is the composite stack body. Compute and storage have no body
-    /// in this story, on either GPU tier. On tier B that refusal is the
-    /// section 7 rule: the fragment pipeline is not returned in their place.
+    /// Fragment is the composite stack body or the composite volume ray.
+    /// Compute and storage have no body in this story, on either GPU tier.
+    /// On tier B that refusal is the section 7 rule: the fragment pipeline
+    /// is not returned in their place.
     pub fn pipeline_family_compiled(key: &PipelineKey, family: PipelineFamily) -> bool {
         match family {
             PipelineFamily::Fragment => Self::pipeline_compiled(key),
@@ -845,7 +1124,7 @@ impl RenderGraph {
     /// [`GraphError::PassHasNoUniform`] for a pass with no VOI uniform.
     pub fn voi_params(&self, id: ViewportId) -> Result<VoiParams, GraphError> {
         let state = self.slot_state(id)?;
-        if !matches!(state.pass, Pass::Stack(_)) {
+        if !matches!(state.pass, Pass::Stack(_) | Pass::VolumeRaycast(_)) {
             return Err(GraphError::PassHasNoUniform);
         }
         Ok(voi_of(&state.pass))
@@ -894,8 +1173,8 @@ impl RenderGraph {
         if tier == Tier::Cpu {
             return Err(GraphError::TierCUnavailable);
         }
-        let (uniform_layout, source_layout, keys, pipelines) = Self::compile(ctx, tier, format);
-        let restored = u32::try_from(pipelines.len()).unwrap_or(0);
+        let compiled = Self::compile(ctx, tier, format);
+        let restored = u32::try_from(compiled.pipelines.len()).unwrap_or(0);
         ctx.register_graph_resources(restored);
         let mut gpu = Vec::new();
         gpu.resize_with(capacity, || None);
@@ -908,10 +1187,14 @@ impl RenderGraph {
             gpu,
             surfaces,
             frame_textures,
-            keys,
-            pipelines,
-            uniform_layout,
-            source_layout,
+            keys: compiled.keys,
+            pipelines: compiled.pipelines,
+            uniform_layout: compiled.uniform_layout,
+            source_layout: compiled.source_layout,
+            volume_uniform_layout: compiled.volume_uniform_layout,
+            volume_source_layout: compiled.volume_source_layout,
+            brick_slots: compiled.brick_slots,
+            ray_dummy: compiled.ray_dummy,
             format,
             tier,
             submissions: 0,
@@ -922,16 +1205,7 @@ impl RenderGraph {
         })
     }
 
-    fn compile(
-        ctx: &GpuContext,
-        tier: Tier,
-        format: wgpu::TextureFormat,
-    ) -> (
-        wgpu::BindGroupLayout,
-        wgpu::BindGroupLayout,
-        Vec<CompiledKey>,
-        Vec<wgpu::RenderPipeline>,
-    ) {
+    fn compile(ctx: &GpuContext, tier: Tier, format: wgpu::TextureFormat) -> CompiledGraph {
         let device = ctx.device();
         // Tier B's compiled module is this fragment text. Tier A compiles the
         // same text. A compute module is not built for either tier.
@@ -939,6 +1213,26 @@ impl RenderGraph {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ocelli render graph"),
             source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let brick_slots = brick_slot_count(&device.limits());
+        let ray_source = volume_ray_module(brick_slots);
+        let ray_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("ocelli volume ray"),
+            source: wgpu::ShaderSource::Wgsl(ray_source.into()),
+        });
+        let ray_dummy = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ocelli ray empty brick"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            format: wgpu::TextureFormat::R8Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
         });
         let uniform_binding = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -954,6 +1248,13 @@ impl RenderGraph {
             label: Some("ocelli graph uniform"),
             entries: &[uniform_binding(0), uniform_binding(1), uniform_binding(2)],
         });
+        // The ray keeps the VOI uniform at binding 0 and puts ray params at
+        // binding 1. It does not take the colour table or the camera.
+        let volume_uniform_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("ocelli volume ray uniform"),
+                entries: &[uniform_binding(0), uniform_binding(1)],
+            });
         // `textureLoad` has no sampler. A non-filterable float binding accepts
         // the stored float formats and `Rgba8Unorm`.
         let texture_binding = |binding| wgpu::BindGroupLayoutEntry {
@@ -970,45 +1271,76 @@ impl RenderGraph {
             label: Some("ocelli graph source"),
             entries: &[texture_binding(0), texture_binding(1)],
         });
+        let uint_texture = |binding, view_dimension| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Uint,
+                view_dimension,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let mut volume_entries = Vec::new();
+        for binding in 0..brick_slots {
+            volume_entries.push(uint_texture(binding, wgpu::TextureViewDimension::D3));
+        }
+        volume_entries.push(uint_texture(brick_slots, wgpu::TextureViewDimension::D2));
+        let volume_source_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("ocelli volume ray source"),
+                entries: &volume_entries,
+            });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("ocelli render graph"),
             bind_group_layouts: &[Some(&uniform_layout), Some(&source_layout)],
             immediate_size: 0,
         });
-        let key = CompiledKey {
+        let volume_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("ocelli volume ray"),
+            bind_group_layouts: &[Some(&volume_uniform_layout), Some(&volume_source_layout)],
+            immediate_size: 0,
+        });
+        let stack_key = CompiledKey {
             key: PipelineKey {
-                pass: COMPILED_PASS,
+                pass: PassKind::Stack,
                 blend: COMPILED_BLEND,
                 tier,
             },
             family: PipelineFamily::Fragment,
         };
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("ocelli render graph composite"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
+        let volume_key = CompiledKey {
+            key: PipelineKey {
+                pass: PassKind::VolumeRaycast,
+                blend: COMPILED_BLEND,
+                tier,
             },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
-        (uniform_layout, source_layout, vec![key], vec![pipeline])
+            family: PipelineFamily::Fragment,
+        };
+        let pipeline = fragment_pipeline(
+            device,
+            &layout,
+            &module,
+            format,
+            "ocelli render graph composite",
+        );
+        let ray_pipeline = fragment_pipeline(
+            device,
+            &volume_layout,
+            &ray_module,
+            format,
+            "ocelli volume ray composite",
+        );
+        CompiledGraph {
+            uniform_layout,
+            source_layout,
+            volume_uniform_layout,
+            volume_source_layout,
+            brick_slots,
+            ray_dummy,
+            keys: vec![stack_key, volume_key],
+            pipelines: vec![pipeline, ray_pipeline],
+        }
     }
 
     fn pipeline(&self, key: &PipelineKey, family: PipelineFamily) -> Option<&wgpu::RenderPipeline> {
@@ -1169,6 +1501,7 @@ impl RenderGraph {
             bind_uniform,
             bind_source,
             stored,
+            ray: None,
         }
     }
 
@@ -1478,16 +1811,16 @@ impl RenderGraph {
         id: ViewportId,
         chain: &LutChain,
     ) -> Result<(), GraphError> {
-        let is_stack = {
+        let has_uniform = {
             let state = self
                 .registry
                 .states
                 .get(usize::try_from(id.0).unwrap_or(usize::MAX))
                 .and_then(Option::as_ref)
                 .ok_or(GraphError::UnknownViewport)?;
-            matches!(state.pass, Pass::Stack(_))
+            matches!(state.pass, Pass::Stack(_) | Pass::VolumeRaycast(_))
         };
-        if !is_stack {
+        if !has_uniform {
             return Err(GraphError::PassHasNoUniform);
         }
         // Rebound before the chain is read, so an unrebound viewport does
@@ -1509,8 +1842,10 @@ impl RenderGraph {
         ctx.queue()
             .write_buffer(&slot.uniform, 0, bytemuck::bytes_of(&params));
         if let Some(state) = self.registry.state_mut(id) {
-            if let Pass::Stack(stack) = &mut state.pass {
-                stack.voi = params;
+            match &mut state.pass {
+                Pass::Stack(stack) => stack.voi = params,
+                Pass::VolumeRaycast(volume) => volume.voi = params,
+                Pass::SegOverlay(_) => {}
             }
             state.dirty.voi = true;
         }
@@ -1829,6 +2164,276 @@ impl RenderGraph {
         self.bricks.upload(ctx, format, features, key, brick)
     }
 
+    /// Bind the bricks in `source` and a residency row for a volume viewport.
+    ///
+    /// The residency texture is `R32Uint`, one texel per step of the view
+    /// axis, written with `write_texture`. Its width is fixed at the first
+    /// bind from `max(dims)`. A later bind that needs a longer axis returns
+    /// [`GraphError::CapacityExhausted`] and keeps the previous binding.
+    /// [`volume_ray_admission`] runs before any texture is created.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::TierCUnavailable`], [`GraphError::SampledTextureLimit`],
+    /// [`GraphError::UnknownViewport`], [`GraphError::ViewportNotRebound`],
+    /// [`GraphError::RayUnavailable`], [`GraphError::CapacityExhausted`].
+    pub fn bind_volume_ray(
+        &mut self,
+        ctx: &GpuContext,
+        adapter: &ResolvedAdapter,
+        id: ViewportId,
+        source: VolumeRaySource<'_>,
+    ) -> Result<(), GraphError> {
+        let VolumeRaySource {
+            bricks,
+            edge,
+            dims,
+            flags,
+            sampled_limit,
+        } = source;
+        let ready_bricks = u32::try_from(bricks.len()).map_err(|_| GraphError::RayUnavailable)?;
+        volume_ray_admission(self.tier, ready_bricks, sampled_limit)?;
+        if ready_bricks > self.brick_slots {
+            return Err(GraphError::SampledTextureLimit);
+        }
+        let (axis, from_far) = {
+            let state = self.slot_state(id)?;
+            match &state.pass {
+                Pass::VolumeRaycast(volume) => (volume.axis, volume.from_far),
+                _ => return Err(GraphError::RayUnavailable),
+            }
+        };
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        if self.gpu.get(index).and_then(Option::as_ref).is_none() {
+            return Err(GraphError::ViewportNotRebound);
+        }
+        let steps = u32::try_from(flags.len()).map_err(|_| GraphError::RayUnavailable)?;
+        if steps == 0 || steps != axis.length(dims) {
+            return Err(GraphError::RayUnavailable);
+        }
+        let requested = dims[0].max(dims[1]).max(dims[2]);
+        if steps > requested {
+            return Err(GraphError::RayUnavailable);
+        }
+        let capacity = {
+            let slot = self
+                .gpu
+                .get(index)
+                .and_then(Option::as_ref)
+                .ok_or(GraphError::ViewportNotRebound)?;
+            match slot.ray.as_ref() {
+                Some(existing) => {
+                    if requested > existing.capacity || steps > existing.capacity {
+                        return Err(GraphError::CapacityExhausted);
+                    }
+                    existing.capacity
+                }
+                None => requested,
+            }
+        };
+        if edge == 0 {
+            return Err(GraphError::RayUnavailable);
+        }
+        let mut brick_format = None;
+        for (index, ready) in bricks.iter().enumerate() {
+            for earlier in bricks.iter().take(index) {
+                if earlier.coord == ready.coord {
+                    return Err(GraphError::RayUnavailable);
+                }
+            }
+            let Some(texture) = self.bricks.texture(ready.key) else {
+                return Err(GraphError::RayUnavailable);
+            };
+            let format = texture.format();
+            if format != wgpu::TextureFormat::R8Uint && format != wgpu::TextureFormat::R16Uint {
+                return Err(GraphError::RayUnavailable);
+            }
+            if let Some(held) = brick_format
+                && held != format
+            {
+                return Err(GraphError::RayUnavailable);
+            }
+            brick_format = Some(format);
+            let Some(extent) = self.bricks.extent_of(ready.key) else {
+                return Err(GraphError::RayUnavailable);
+            };
+            let Some(need) = clipped_brick(dims, ready.coord, edge) else {
+                return Err(GraphError::RayUnavailable);
+            };
+            if extent[0] < need[0] || extent[1] < need[1] || extent[2] < need[2] {
+                return Err(GraphError::RayUnavailable);
+            }
+        }
+        let needed = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
+        let residency_features = adapter
+            .wgpu_adapter()
+            .get_texture_format_features(wgpu::TextureFormat::R32Uint);
+        if !residency_features.allowed_usages.contains(needed) {
+            return Err(GraphError::RayUnavailable);
+        }
+        let texel_count = usize::try_from(capacity).map_err(|_| GraphError::RayUnavailable)?;
+        let mut texels = vec![0u32; texel_count];
+        for (offset, flag) in flags.iter().copied().enumerate() {
+            let Some(cell) = texels.get_mut(offset) else {
+                return Err(GraphError::RayUnavailable);
+            };
+            *cell = flag;
+        }
+        let row = capacity.checked_mul(4).ok_or(GraphError::RayUnavailable)?;
+        let device = ctx.device();
+        let residency = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ocelli ray residency"),
+            size: wgpu::Extent3d {
+                width: capacity,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Uint,
+            usage: needed,
+            view_formats: &[],
+        });
+        ctx.queue().write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &residency,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&texels),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(row),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: capacity,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let residency_view = residency.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("ocelli ray residency"),
+            format: Some(wgpu::TextureFormat::R32Uint),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            ..Default::default()
+        });
+        let mut brick_views = Vec::new();
+        for ready in bricks {
+            let Some(texture) = self.bricks.texture(ready.key) else {
+                return Err(GraphError::RayUnavailable);
+            };
+            brick_views.push(texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("ocelli ray brick"),
+                dimension: Some(wgpu::TextureViewDimension::D3),
+                ..Default::default()
+            }));
+        }
+        let dummy_view = self.ray_dummy.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("ocelli ray empty brick"),
+            dimension: Some(wgpu::TextureViewDimension::D3),
+            ..Default::default()
+        });
+        let header = RayHeader {
+            axis: axis.code(),
+            from_far: u32::from(from_far),
+            dim_x: dims[0],
+            dim_y: dims[1],
+            dim_z: dims[2],
+            steps,
+            kind: 0,
+            edge,
+            brick_count: ready_bricks,
+            pad0: 0,
+            pad1: 0,
+            pad2: 0,
+        };
+        let coords: Vec<[u32; 3]> = bricks.iter().map(|ready| ready.coord).collect();
+        let uniform = ray_uniform_bytes(&header, &coords, self.brick_slots);
+        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ocelli ray params"),
+            contents: &uniform,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bind_uniform = {
+            let slot = self
+                .gpu
+                .get(index)
+                .and_then(Option::as_ref)
+                .ok_or(GraphError::ViewportNotRebound)?;
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("ocelli volume ray uniform"),
+                layout: &self.volume_uniform_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: slot.uniform.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            })
+        };
+        let mut source_entries = Vec::new();
+        for (binding, view) in brick_views.iter().enumerate() {
+            let Ok(index) = u32::try_from(binding) else {
+                return Err(GraphError::RayUnavailable);
+            };
+            source_entries.push(wgpu::BindGroupEntry {
+                binding: index,
+                resource: wgpu::BindingResource::TextureView(view),
+            });
+        }
+        let slot_count = usize::try_from(self.brick_slots).unwrap_or(usize::MAX);
+        for binding in brick_views.len()..slot_count {
+            let Ok(index) = u32::try_from(binding) else {
+                return Err(GraphError::RayUnavailable);
+            };
+            source_entries.push(wgpu::BindGroupEntry {
+                binding: index,
+                resource: wgpu::BindingResource::TextureView(&dummy_view),
+            });
+        }
+        source_entries.push(wgpu::BindGroupEntry {
+            binding: self.brick_slots,
+            resource: wgpu::BindingResource::TextureView(&residency_view),
+        });
+        let bind_source = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ocelli volume ray source"),
+            layout: &self.volume_source_layout,
+            entries: &source_entries,
+        });
+        let slot = self
+            .gpu
+            .get_mut(index)
+            .and_then(Option::as_mut)
+            .ok_or(GraphError::ViewportNotRebound)?;
+        let binding = VolumeRayBinding {
+            capacity,
+            residency,
+            params: params_buffer,
+            bind_uniform,
+            bind_source,
+        };
+        // The texture and the uniform stay on the slot. Dropping either
+        // would free the resources the bind group samples.
+        let uniform_bytes = 48u64 + u64::from(self.brick_slots.max(1)) * 16;
+        if binding.residency.size().width != binding.capacity
+            || binding.params.size() != uniform_bytes
+        {
+            return Err(GraphError::RayUnavailable);
+        }
+        slot.ray = Some(binding);
+        if let Some(state) = self.registry.state_mut(id) {
+            state.dirty.data = true;
+        }
+        Ok(())
+    }
+
     /// Upload each ready level-0 brick whose bytes changed.
     ///
     /// `adapter` is the one [`RenderGraph::upload_brick`] already requires.
@@ -1900,12 +2505,15 @@ impl RenderGraph {
         // `recovered.caps` is the tier `open` copied from the same adapter.
         // Recovery does not resolve a tier.
         self.tier = recovered.caps.tier;
-        let (uniform_layout, source_layout, keys, pipelines) =
-            Self::compile(ctx, self.tier, self.format);
-        self.uniform_layout = uniform_layout;
-        self.source_layout = source_layout;
-        self.keys = keys;
-        self.pipelines = pipelines;
+        let compiled = Self::compile(ctx, self.tier, self.format);
+        self.uniform_layout = compiled.uniform_layout;
+        self.source_layout = compiled.source_layout;
+        self.volume_uniform_layout = compiled.volume_uniform_layout;
+        self.volume_source_layout = compiled.volume_source_layout;
+        self.brick_slots = compiled.brick_slots;
+        self.ray_dummy = compiled.ray_dummy;
+        self.keys = compiled.keys;
+        self.pipelines = compiled.pipelines;
         // Every per-viewport object was created on the dead device: the
         // uniform buffers, both bind groups, the stored-sample texture, the
         // colour table texture and the caller's views as bound.
@@ -1971,7 +2579,14 @@ impl RenderGraph {
                 tier: self.tier,
             };
             let rebound = self.gpu.get(index).and_then(Option::as_ref).is_some();
-            if self.pipeline(&key, PipelineFamily::Fragment).is_some() && rebound {
+            let ray_ready = state.pass.kind() != PassKind::VolumeRaycast
+                || self
+                    .gpu
+                    .get(index)
+                    .and_then(Option::as_ref)
+                    .and_then(|slot| slot.ray.as_ref())
+                    .is_some();
+            if self.pipeline(&key, PipelineFamily::Fragment).is_some() && rebound && ray_ready {
                 any_encodable = true;
             } else if first_unavailable.is_none() {
                 first_unavailable = Some(ViewportId(u32::try_from(index).unwrap_or(u32::MAX)));
@@ -2074,6 +2689,9 @@ impl RenderGraph {
             let Some(slot) = gpu.get(index).and_then(Option::as_ref) else {
                 continue;
             };
+            if key.pass == PassKind::VolumeRaycast && slot.ray.is_none() {
+                continue;
+            }
             let has_surface = surfaces.get(index).and_then(Option::as_ref).is_some();
             let surface_view = frame_textures
                 .get(index)
@@ -2102,8 +2720,17 @@ impl RenderGraph {
                     ..Default::default()
                 });
                 pass.set_pipeline(pipeline);
-                pass.set_bind_group(0, &slot.bind_uniform, &[]);
-                pass.set_bind_group(1, &slot.bind_source, &[]);
+                if let Some(ray) = slot
+                    .ray
+                    .as_ref()
+                    .filter(|_| key.pass == PassKind::VolumeRaycast)
+                {
+                    pass.set_bind_group(0, &ray.bind_uniform, &[]);
+                    pass.set_bind_group(1, &ray.bind_source, &[]);
+                } else {
+                    pass.set_bind_group(0, &slot.bind_uniform, &[]);
+                    pass.set_bind_group(1, &slot.bind_source, &[]);
+                }
                 pass.draw(0..3, 0..1);
             }
             encoded += 1;
@@ -2157,13 +2784,20 @@ fn viewport_encodable(
         .and_then(|found| pipelines.get(found))
         .is_some();
     let rebound = gpu.get(index).and_then(Option::as_ref).is_some();
-    compiled && rebound
+    let ray_ready = key.pass != PassKind::VolumeRaycast
+        || gpu
+            .get(index)
+            .and_then(Option::as_ref)
+            .and_then(|slot| slot.ray.as_ref())
+            .is_some();
+    compiled && rebound && ray_ready
 }
 
 fn voi_of(pass: &Pass) -> VoiParams {
     match pass {
         Pass::Stack(stack) => stack.voi,
-        _ => VoiParams {
+        Pass::VolumeRaycast(volume) => volume.voi,
+        Pass::SegOverlay(_) => VoiParams {
             center: 0.0,
             width: 1.0,
             slope: 1.0,
@@ -2324,9 +2958,27 @@ mod tests {
     use super::{CompiledKey, Dirty, Registry, SlotState, pipeline_index};
     use crate::caps::Tier;
     use crate::graph::{
-        BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RenderGraph, Upload,
-        UploadError, ViewportId, VolumePass,
+        BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RayAxis, RenderGraph,
+        Upload, UploadError, ViewportId, VolumePass,
     };
+
+    fn any_volume() -> VolumePass {
+        VolumePass {
+            blend: BlendMode::Composite,
+            voi: crate::voi::VoiParams {
+                center: 0.0,
+                width: 1.0,
+                slope: 1.0,
+                intercept: 0.0,
+                ymin: 0.0,
+                ymax: 255.0,
+                fn_kind: 1,
+                invert: 0,
+            },
+            axis: RayAxis::Slice,
+            from_far: false,
+        }
+    }
 
     fn sampleable() -> wgpu::TextureFormatFeatures {
         wgpu::TextureFormatFeatures {
@@ -2467,17 +3119,13 @@ mod tests {
     #[test]
     fn removal_clears_the_slot_and_reregistration_reuses_it_fully_dirty() {
         let mut registry = Registry::new(1);
-        let first = registry.register(Pass::VolumeRaycast(VolumePass {
-            blend: BlendMode::Composite,
-        }));
+        let first = registry.register(Pass::VolumeRaycast(any_volume()));
         assert!(first.is_ok());
         if let Ok(id) = first {
             assert!(registry.remove(id));
             assert!(!registry.remove(id));
         }
-        let again = registry.register(Pass::VolumeRaycast(VolumePass {
-            blend: BlendMode::Composite,
-        }));
+        let again = registry.register(Pass::VolumeRaycast(any_volume()));
         assert!(matches!(again, Ok(id) if id.0 == 0));
         if let Ok(id) = again {
             let state = registry
@@ -2491,13 +3139,9 @@ mod tests {
     #[test]
     fn registry_refuses_beyond_capacity_and_starts_fully_dirty() {
         let mut registry = Registry::new(1);
-        let first = registry.register(Pass::VolumeRaycast(VolumePass {
-            blend: BlendMode::Composite,
-        }));
+        let first = registry.register(Pass::VolumeRaycast(any_volume()));
         assert!(first.is_ok());
-        let second = registry.register(Pass::VolumeRaycast(VolumePass {
-            blend: BlendMode::Composite,
-        }));
+        let second = registry.register(Pass::VolumeRaycast(any_volume()));
         assert!(second.is_err());
         if let Ok(id) = first {
             let state = registry

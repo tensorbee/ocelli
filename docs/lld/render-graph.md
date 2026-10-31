@@ -1,7 +1,7 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059
+**Last updated:** 2026-10-30
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
@@ -20,12 +20,12 @@ HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
 ## The rules that hold
 
-**Pipelines compile at creation.** Only the composite stack pipeline has a
-shader body. A lookup for any other pass, blend and tier combination reports
-unavailable rather than aliasing composite, which is deviation D-07's honesty
-rule applied to a blend mode.
+**Pipelines compile at creation.** The composite stack pipeline and the
+composite volume ray each have a shader body. A lookup for any other pass,
+blend and tier combination reports unavailable rather than aliasing
+composite, which is deviation D-07's honesty rule applied to a blend mode.
 
-**Tier B compiles that same fragment module.** The source is `VOI_WGSL`
+**Tier B compiles the stack fragment module.** The source is `VOI_WGSL`
 followed by the graph fragment shader. The three window functions stay the
 F-041 text. `PipelineKey` is still pass, blend and tier. Compute and storage
 are a lookup family beside the key, and they have no body on either GPU tier.
@@ -210,6 +210,37 @@ before a cut and before a stamp write. A grid product that does not fit in
 `u32` is `ProgressError::Grid`. Coarser levels are not uploaded.
 `ProgressReport` returns `present_count` and `dims[2]`. `sync_volume` takes
 the same `&ResolvedAdapter` `upload_brick` already requires.
+
+## Volume ray
+
+**The composite volume ray compiles beside the stack.** The key is
+`VolumeRaycast`, composite, and the tier. Tier A and tier B use one fragment
+module. `VOI_WGSL` is included once. The ray entry has one `texture_3d<u32>`
+binding per brick slot and a `texture_2d<u32>` residency texture on the next
+binding. There is no compute entry and no storage buffer. MIP and the other
+volume blends stay uncompiled. `request_outcome` for those keys is
+`Unavailable`.
+
+**The integral is front to back on voxel centres.** A step whose residency
+flag is 0 is skipped before the brick is read. Display colour comes from the
+existing VOI uniform. Opacity is the constant 0.5 until F-060. Colour and
+alpha accumulate `(1 - A) * colour * 0.5` and `(1 - A) * 0.5`. The pipeline
+blend is off, so the integral is not blended a second time.
+
+**Every brick in the caller set is bound, or none of this call is.** Room is
+the sampled-texture limit minus one, because residency takes a binding. A
+limit of zero, a ready count of zero, or a count above that room returns
+`SampledTextureLimit`. A count above the compiled slot count returns the same
+error before any texture for that call is created. The ray does not draw a
+subset. The caller slice is not compared with `Volume::ready_bricks`.
+
+**Tier C returns `TierCUnavailable`.** `RenderGraph::new` and
+`volume_ray_admission` both refuse CPU before an image exists. This story
+does not return a CPU vector of ray colours. F-X005 owns that path.
+
+**One submit per frame still holds.** The ray bind group is encoded only
+when the viewport has been bound. `set_voi` writes the same thirty-two bytes
+for a volume viewport. `set_view` stays stack-only.
 
 ## Tiers
 

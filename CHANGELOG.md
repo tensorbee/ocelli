@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- A VOLUME_3D view ray-casts resident bricks on tier A and tier B. The window is the existing VOI uniform. Opacity stays 0.5 until a transfer function exists. A ready set that does not fit beside the residency texture is not drawn as a subset. Tier C reports the view unavailable.
 - An orthographic plane can be taken from a constructed volume. Axial, sagittal and coronal follow that volume's axes. `reslice` returns the stored samples. An absent slice stays absent. `show_ortho` uploads a complete plane through the existing stack window and leaves the last complete plane in place when a sample is missing. Tier C reports the viewport unavailable.
 - A volume can be shown while slices are still arriving. `cut_ready_brick`
   copies only a brick whose slices have all landed. `sync_volume` uploads

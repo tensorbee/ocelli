@@ -684,6 +684,19 @@ impl Volume {
         ready
     }
 
+    /// Whether the level-0 brick that contains `voxel` has every slice.
+    ///
+    /// A voxel outside `dims` is false. The check does not allocate and does
+    /// not read a coarser level. Membership is the same predicate
+    /// [`Volume::ready_bricks`] uses.
+    pub fn resident(&self, voxel: [u32; 3]) -> bool {
+        let grid = self.brick_grid();
+        let Ok(brick) = grid.brick_of(voxel) else {
+            return false;
+        };
+        brick_is_ready(&grid, &self.present, brick)
+    }
+
     /// Copy one ready brick. A brick [`Volume::ready_bricks`] does not list
     /// is refused.
     ///

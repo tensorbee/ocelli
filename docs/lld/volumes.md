@@ -1,7 +1,7 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-057, F-058
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-057, F-058, F-059
+**Last updated:** 2026-10-30
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
 `ImagePositionPatient` projected on the slice normal, DICOM PS3.3
@@ -162,9 +162,10 @@ spacing is `spacing[0]` by `spacing[2]`.
 
 ## Tiers A, B and C
 
-Not applicable for A and B. The volume is host memory and this crate creates
-no device. The brick upload in `ocelli-render` refuses an axis longer than
-the device's reported 3D limit. The pinned tier B floor for that limit is
+Not applicable for A and B as a device path. The volume is host memory and
+this crate creates no device. `Volume::resident` runs on the host on tier A,
+tier B and tier C. The brick upload in `ocelli-render` refuses an axis
+longer than the device's reported 3D limit. The pinned tier B floor for that limit is
 256, which is the size a brick edge of 128 is guaranteed to fit. This crate
 does not clamp the reported limit and does not apply the check. Tier C
 assembles the same volume, because there is no device path to diverge from.
@@ -175,8 +176,11 @@ A volume enumerates bricks through `BrickGrid` from `ocelli-cache`, via
 `Volume::brick_grid`. It does not keep a second decomposition.
 `Volume::ready_bricks` lists brick coordinates whose slices have all landed,
 in `index_of` order, x fastest. A brick whose z range includes an absent
-slice is left out, because uploading it would invent zeros. This crate
-still creates no texture. `RenderGraph::sync_volume` in `ocelli-render`
-uploads a ready brick. `RenderGraph::show_ortho` uploads one complete
+slice is left out, because uploading it would invent zeros.
+`Volume::resident` is true when `brick_of` succeeds for that voxel and
+`brick_is_ready` is true for its brick. A voxel outside the dimensions is
+false. The check does not build the ready list and does not read a coarser
+level. This crate still creates no texture. `RenderGraph::sync_volume` in
+`ocelli-render` uploads a ready brick. `RenderGraph::show_ortho` uploads one complete
 orthographic plane. Pixels stay in the store and do not cross the worker
 boundary.

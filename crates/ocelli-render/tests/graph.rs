@@ -61,7 +61,7 @@ fn pipeline_key_distinguishes_each_field() {
             ..base
         }
     );
-    // Only the composite stack pipeline is compiled in this story.
+    // Composite stack is compiled. Volume composite is F-059 and is not this row.
     assert!(RenderGraph::pipeline_compiled(&base));
     assert!(!RenderGraph::pipeline_compiled(&PipelineKey {
         blend: BlendMode::Mip,
@@ -541,14 +541,14 @@ fn set_voi_is_the_single_uniform_route_and_rejects_in_order() {
         &context,
         target_view,
         source,
-        Pass::VolumeRaycast(ocelli_render::VolumePass {
+        Pass::SegOverlay(ocelli_render::SegPass {
             blend: BlendMode::Composite,
         }),
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("registration must fit"),
     };
-    // A registered pass with no uniform answers PassHasNoUniform.
+    // A segmentation pass has no section 18.4 uniform.
     assert!(matches!(
         graph.set_voi(&context, volume, &chain(VoiFunction::Linear)),
         Err(ocelli_render::GraphError::PassHasNoUniform)
