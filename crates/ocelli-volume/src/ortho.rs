@@ -1,8 +1,9 @@
-//! Orthographic planes on the volume's own axes.
+//! Planes through a constructed volume.
 //!
-//! PS3.3 C.7.6.2.1.1 gives the in-plane patient point. The third term is this
-//! volume's spacing and normal. Axial, sagittal and coronal name those axes.
-//! A sagittal line steps on the column cosine and the normal.
+//! PS3.3 C.7.6.2.1.1 gives the patient point. Axial, sagittal and coronal name
+//! this volume's axes. An oblique plane uses the same equation with the
+//! caller's cosines and the same level-0 sampler. A sagittal line steps on
+//! the column cosine and the normal.
 
 use alloc::vec::Vec;
 
@@ -10,6 +11,30 @@ use glam::DVec3;
 use ocelli_core::{Pt, World};
 
 use crate::{Volume, VolumeError, VoxelKind};
+
+/// One arbitrary patient plane. PS3.3 C.7.6.2.1.1.
+///
+/// Pixel `(c, r)` is `origin + c * column_mm * row + r * row_mm * column`.
+/// `column_mm` multiplies the row cosine. `row_mm` multiplies the column
+/// cosine. The cosines are not renormalised. `origin` is the centre of pixel
+/// `(0, 0)`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ObliquePlane {
+    /// Centre of output pixel `(0, 0)`, in patient millimetres.
+    pub origin: Pt<World>,
+    /// Row direction cosine. Multiplied by `column_mm`.
+    pub row: DVec3,
+    /// Column direction cosine. Multiplied by `row_mm`.
+    pub column: DVec3,
+    /// Output columns.
+    pub columns: u32,
+    /// Output rows.
+    pub rows: u32,
+    /// Millimetres between output columns. Multiplies `row`.
+    pub column_mm: f64,
+    /// Millimetres between output rows. Multiplies `column`.
+    pub row_mm: f64,
+}
 
 /// Which volume axis a plane holds still.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -109,6 +134,45 @@ impl Volume {
         })
     }
 
+    /// Reslice one arbitrary patient plane from level 0.
+    ///
+    /// Every pixel is one level-0 sample. Validation runs before the sample
+    /// buffer exists.
+    ///
+    /// # Errors
+    ///
+    /// [`VolumeError::ObliquePlane`] when a plane field or this volume's
+    /// spacing, direction or dimensions cannot be sampled. Nothing is
+    /// allocated in that case.
+    pub fn reslice_oblique(&self, plane: ObliquePlane) -> Result<OrthoImage, VolumeError> {
+        let Some(count) = oblique_pixel_count(self, &plane) else {
+            return Err(VolumeError::ObliquePlane);
+        };
+        let mut samples = Vec::with_capacity(count);
+        let volume_origin = DVec3::new(self.origin.x, self.origin.y, self.origin.z);
+        let mut row = 0_u32;
+        while row < plane.rows {
+            let mut column = 0_u32;
+            while column < plane.columns {
+                let patient = patient_point(&plane, column, row);
+                let delta = patient - volume_origin;
+                let i = self.direction.col(0).dot(delta) / self.spacing[0];
+                let j = self.direction.col(1).dot(delta) / self.spacing[1];
+                let k = self.direction.col(2).dot(delta) / self.spacing[2];
+                samples.push(self.sample_at(i, j, k));
+                column = column.saturating_add(1);
+            }
+            row = row.saturating_add(1);
+        }
+        Ok(OrthoImage {
+            width: plane.columns,
+            height: plane.rows,
+            column_mm: plane.column_mm,
+            row_mm: plane.row_mm,
+            samples,
+        })
+    }
+
     fn in_range(&self, index: f64, dim: u32, axis: u8) -> Result<(), VolumeError> {
         let inside = dim > 0 && index.is_finite() && index >= 0.0 && index <= f64_from_u32(dim - 1);
         if inside {
@@ -184,6 +248,58 @@ impl Volume {
         let chunk = bytes.get(offset..offset.checked_add(width)?)?;
         decode_one(chunk, self.voxel)
     }
+}
+
+fn oblique_pixel_count(volume: &Volume, plane: &ObliquePlane) -> Option<usize> {
+    if volume.dims[0] == 0 || volume.dims[1] == 0 || volume.dims[2] == 0 {
+        return None;
+    }
+    if !positive_finite(volume.spacing[0])
+        || !positive_finite(volume.spacing[1])
+        || !positive_finite(volume.spacing[2])
+    {
+        return None;
+    }
+    if !usable_direction(volume.direction.col(0))
+        || !usable_direction(volume.direction.col(1))
+        || !usable_direction(volume.direction.col(2))
+    {
+        return None;
+    }
+    if !plane.origin.x.is_finite() || !plane.origin.y.is_finite() || !plane.origin.z.is_finite() {
+        return None;
+    }
+    if !usable_direction(plane.row) || !usable_direction(plane.column) {
+        return None;
+    }
+    if !positive_finite(plane.column_mm) || !positive_finite(plane.row_mm) {
+        return None;
+    }
+    if plane.columns == 0 || plane.rows == 0 {
+        return None;
+    }
+    let columns = usize::try_from(plane.columns).ok()?;
+    let rows = usize::try_from(plane.rows).ok()?;
+    columns.checked_mul(rows)
+}
+
+fn patient_point(plane: &ObliquePlane, column: u32, row: u32) -> DVec3 {
+    let origin = DVec3::new(plane.origin.x, plane.origin.y, plane.origin.z);
+    let along_column = f64_from_u32(column) * plane.column_mm;
+    let along_row = f64_from_u32(row) * plane.row_mm;
+    origin + plane.row * along_column + plane.column * along_row
+}
+
+fn positive_finite(value: f64) -> bool {
+    value.is_finite() && value > 0.0
+}
+
+fn usable_direction(vector: DVec3) -> bool {
+    vector.x.is_finite() && vector.y.is_finite() && vector.z.is_finite() && !vector_is_zero(vector)
+}
+
+fn vector_is_zero(vector: DVec3) -> bool {
+    is_zero(vector.x) && is_zero(vector.y) && is_zero(vector.z)
 }
 
 fn voxel_of(plane: OrthoPlane, a: u32, b: u32) -> (f64, f64, f64) {

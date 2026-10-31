@@ -1,7 +1,7 @@
 # Viewport
 
-**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-101, F-X003, F-X022
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022
+**Last updated:** 2026-10-31
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
 `RenderGraph::set_view` uploads the CSS matrix `View::camera_matrix` returns
@@ -222,8 +222,9 @@ open a device and does not upload a texture.
 
 ## Orthographic planes
 
-`RenderGraph::show_ortho` takes a host `OrthoImage` from `Volume::reslice`.
-It does not sample the volume. `present_plane` walks the samples. Tier C
+`RenderGraph::show_ortho` takes a host `OrthoImage` from `Volume::reslice`
+or `Volume::reslice_oblique`. It does not sample the volume. `present_plane`
+walks the samples. Tier C
 returns `OrthoError::TierCUnavailable` before that walk and before a buffer
 is allocated. An `Absent` sample returns `PlaneIncomplete`, and
 `upload_stored` is not called, so `uploads` and the previous texture stay.
@@ -232,8 +233,9 @@ stack pass. Windowing stays `VoiParams` and the existing VOI shader. There
 is no new pass variant and no sampler in WGSL.
 
 Tier A and tier B share that upload. The stored format stays the existing
-choice. Tier C does not draw a plane. `reslice` itself is host arithmetic
-and remains available for F-X004.
+choice. Tier C does not draw a plane. `reslice` and `reslice_oblique` are
+host arithmetic and remain available for F-X004. This file does not add a
+second upload.
 
 ## What this file does not own
 

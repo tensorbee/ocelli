@@ -25,7 +25,7 @@ use ocelli_pixel::{ImageOrientationPatient, PixelRepresentation};
 mod levels;
 mod ortho;
 
-pub use ortho::{OrthoImage, OrthoPlane, PlaneSample};
+pub use ortho::{ObliquePlane, OrthoImage, OrthoPlane, PlaneSample};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.
@@ -249,6 +249,12 @@ pub enum VolumeError {
         /// The coordinate the cut refused.
         value: u32,
     },
+    /// An oblique plane that cannot be sampled. Nothing is allocated.
+    ///
+    /// [`VolumeError::PlaneOutOfRange`] stays the fixed-index error for an
+    /// [`OrthoPlane`].
+    #[error("the oblique plane cannot be sampled")]
+    ObliquePlane,
     /// A plane index outside `[0, dim - 1]`, including a non-finite index.
     #[error("plane index {index} is outside axis {axis}")]
     PlaneOutOfRange {

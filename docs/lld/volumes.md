@@ -1,7 +1,7 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-057, F-058, F-059
-**Last updated:** 2026-10-30
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059
+**Last updated:** 2026-10-31
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
 `ImagePositionPatient` projected on the slice normal, DICOM PS3.3
@@ -159,6 +159,30 @@ sample source.
 Output size is the two stepped axes. Axial spacing is `spacing[0]` by
 `spacing[1]`. Sagittal spacing is `spacing[1]` by `spacing[2]`. Coronal
 spacing is `spacing[0]` by `spacing[2]`.
+
+## Oblique planes
+
+`Volume::reslice_oblique` samples one arbitrary patient plane from level 0.
+`ObliquePlane` carries the origin, the row cosine, the column cosine, the
+output size and the two millimetre steps. Pixel `(c, r)` is
+`origin + c * column_mm * row + r * row_mm * column`. That is DICOM PS3.3
+C.7.6.2.1.1. `column_mm` multiplies the row cosine. `row_mm` multiplies the
+column cosine. The cosines are not renormalised. `origin` is the centre of
+pixel `(0, 0)`.
+
+The patient point minus the volume origin is `delta`. `i` is the dot of
+`direction.col(0)` with `delta`, divided by `spacing[0]`. `j` and `k` use
+columns 1 and 2 the same way. Each pixel is one `sample_at` call. An absent
+contributing slice, or a corner outside the grid, is `PlaneSample::Absent`.
+It is not a stored zero. A zero-weight corner is not read.
+
+A non-finite field, a zero direction, a zero output dimension, or a spacing
+that is not strictly positive is `VolumeError::ObliquePlane`. Nothing is
+allocated. `PlaneOutOfRange` stays the fixed-index error for `OrthoPlane`.
+Axial, sagittal and coronal stay `OrthoPlane`. `reslice` is unchanged.
+
+Display reuses `show_ortho`. This story adds no shader and no second upload.
+Tier C still returns `TierCUnavailable` before a sample is read.
 
 ## Tiers A, B and C
 
