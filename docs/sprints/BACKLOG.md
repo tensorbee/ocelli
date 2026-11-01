@@ -220,7 +220,7 @@ All three representations render: labelmap, contour, surface.
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
 | F-063 | E10.1 | S22 | Labelmap representation: colour LUT, fill and outline rendering | Rust | 4w | F-041 | done |
-| F-064 | E10.2 | S23 | Contour representation | Rust | 4w | F-063 | pending |
+| F-064 | E10.2 | S23 | Contour representation | Rust | 4w | F-063 | done |
 | F-065 | E10.3 | S23 | Surface representation | Rust | 3w | F-063 | pending |
 | F-066 | E10.4 | S23 | Segmentation state model and per-viewport representation registry | Rust | 3w | F-063 | pending |
 | F-067 | E10.5 | S24 | Segmentation intersection and labelmap edge-projection blend | Rust | 2w | F-064 | pending |

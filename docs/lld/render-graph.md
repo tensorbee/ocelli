@@ -1,6 +1,6 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062, F-063
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062, F-063, F-064
 **Last updated:** 2026-11-01
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
@@ -30,11 +30,15 @@ a blend mode.
 **The composite overlay copies presenter bytes.** `show_labelmap` uploads
 the RGBA8 from `present_labelmap` in `ocelli-seg`. Index 0 is background
 and stays transparent. Fill writes the segment colour. Outline is the
-one-pixel 4-connected boundary and uses alpha 255. The shader copies those
-texels. It does not run the image VOI and it does not recompute the outline.
-Equal bytes do not allocate a new texture. Tier C is that presenter.
-`show_labelmap` returns unavailable before it reads the grid. Labelmap edge
-returns unavailable before the grid is read. The frame still submits once.
+one-pixel 4-connected boundary and uses alpha 255. `show_contour` uploads
+the RGBA8 from `present_contour`. The stroke keeps the LUT alpha and does
+not fill the interior. A point off the plane is refused. The same shader
+copies either image. It does not run the image VOI and it does not
+recompute the outline or the stroke. Equal bytes do not allocate a new
+texture. Tier C is those presenters. `show_labelmap` returns unavailable
+before it reads the grid. `show_contour` returns unavailable before it
+reads the points. Labelmap edge returns unavailable before the grid is
+read. The frame still submits once.
 
 **Tier B compiles the stack fragment module.** The source is `VOI_WGSL`
 followed by the graph fragment shader. The three window functions stay the

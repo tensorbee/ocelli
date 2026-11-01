@@ -1079,6 +1079,9 @@ dependencies = [
 [[package]]
 name = "ocelli-seg"
 version = "0.1.0"
+dependencies = [
+ "ocelli-core",
+]
 
 [[package]]
 name = "ocelli-viewport"

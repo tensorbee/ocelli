@@ -40,6 +40,10 @@ impl LabelColourLut {
         }
     }
 
+    pub(crate) fn colour_bytes(&self, segment: u16) -> Option<[u8; 4]> {
+        self.colour(segment).map(Rgba8::bytes)
+    }
+
     fn colour(&self, segment: u16) -> Option<Rgba8> {
         let number = usize::from(segment);
         let index = number.checked_sub(1)?;

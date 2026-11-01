@@ -3289,17 +3289,79 @@ impl RenderGraph {
         let mut bytes = vec![0_u8; byte_len];
         ocelli_seg::present_labelmap(grid, lut, style, &mut bytes)
             .map_err(LabelmapDrawError::Present)?;
+        self.store_overlay(ctx, id, index, grid.width, grid.height, bytes)
+    }
+
+    /// Upload one presented contour onto a composite segmentation viewport.
+    ///
+    /// Tier C is refused before the points are read. The copy shader is the
+    /// labelmap shader. It does not stroke and it does not fill.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::contour::ContourDrawError`].
+    pub fn show_contour(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        contour: &ocelli_seg::Contour,
+        frame: &ocelli_seg::PlaneFrame,
+        lut: &ocelli_seg::LabelColourLut,
+        view: crate::contour::ContourView,
+    ) -> Result<(), crate::contour::ContourDrawError> {
+        if self.tier == Tier::Cpu {
+            return Err(crate::contour::ContourDrawError::TierCUnavailable);
+        }
+        let blend = match self.slot_state(id) {
+            Ok(state) => match &state.pass {
+                Pass::SegOverlay(pass) => pass.blend,
+                _ => return Err(crate::contour::ContourDrawError::NotOverlay),
+            },
+            Err(_) => return Err(crate::contour::ContourDrawError::UnknownViewport),
+        };
+        if blend != BlendMode::Composite {
+            return Err(crate::contour::ContourDrawError::BlendUnavailable);
+        }
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        if self.gpu.get(index).and_then(Option::as_ref).is_none() {
+            return Err(crate::contour::ContourDrawError::NotRebound);
+        }
+        let width_us =
+            usize::try_from(view.width).map_err(|_| crate::contour::ContourDrawError::Extent)?;
+        let height_us =
+            usize::try_from(view.height).map_err(|_| crate::contour::ContourDrawError::Extent)?;
+        let pixels = width_us
+            .checked_mul(height_us)
+            .ok_or(crate::contour::ContourDrawError::Extent)?;
+        let byte_len = pixels
+            .checked_mul(4)
+            .ok_or(crate::contour::ContourDrawError::Extent)?;
+        let mut bytes = vec![0_u8; byte_len];
+        ocelli_seg::present_contour(contour, frame, lut, view.width, view.height, &mut bytes)
+            .map_err(crate::contour::ContourDrawError::Present)?;
+        self.store_overlay(ctx, id, index, view.width, view.height, bytes)
+            .map_err(crate::contour::ContourDrawError::from_labelmap)
+    }
+
+    fn store_overlay(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        index: usize,
+        width: u32,
+        height: u32,
+        bytes: Vec<u8>,
+    ) -> Result<(), LabelmapDrawError> {
         let same = self
             .gpu
             .get(index)
             .and_then(Option::as_ref)
             .and_then(|slot| slot.labelmap.as_ref())
-            .is_some_and(|held| held.same_bytes(grid.width, grid.height, &bytes));
+            .is_some_and(|held| held.same_bytes(width, height, &bytes));
         if same {
             return Ok(());
         }
-        let staged =
-            crate::labelmap::stage(&self.labelmap_layout, ctx, grid.width, grid.height, bytes)?;
+        let staged = crate::labelmap::stage(&self.labelmap_layout, ctx, width, height, bytes)?;
         let Some(slot) = self.gpu.get_mut(index).and_then(Option::as_mut) else {
             return Err(LabelmapDrawError::NotRebound);
         };

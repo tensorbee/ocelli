@@ -71,6 +71,7 @@ pub mod brick_upload;
 pub mod caps;
 pub mod clip;
 pub mod colour;
+mod contour;
 pub mod cpu;
 pub mod extent;
 pub mod fusion;
@@ -94,6 +95,7 @@ pub use caps::{
 };
 pub use clip::ClipPlane;
 pub use colour::{ColourLut, ColourLutError, PresetId, colour_lut_for};
+pub use contour::{ContourDrawError, ContourView};
 pub use cpu::{CpuRaster, RasterColor, RasterError, RasterGrid, RasterQuality, RasterResult};
 pub use extent::{ExtentError, css_from_device, device_extent};
 pub use fusion::{
