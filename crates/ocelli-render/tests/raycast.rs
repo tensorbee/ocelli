@@ -115,10 +115,10 @@ fn a_volume_mip_is_not_the_composite_ray() {
 
 #[test]
 fn volume_raycast_has_no_cpu_image() {
-    assert!(matches!(
-        volume_ray_admission(Tier::Cpu, 1, 16),
-        Err(ocelli_render::GraphError::TierCUnavailable)
-    ));
+    // One ready brick. The success type is unit, so admission cannot return a
+    // colour buffer. Tier C is refused before the sampled-texture check.
+    let cpu_ray: Result<(), GraphError> = volume_ray_admission(Tier::Cpu, 1, 16);
+    assert!(matches!(cpu_ray, Err(GraphError::TierCUnavailable)));
     assert!(volume_ray_admission(Tier::A, 1, 16).is_ok());
     // Two bricks fit in a limit of 16 and still leave one binding for residency.
     assert!(volume_ray_admission(Tier::A, 2, 16).is_ok());

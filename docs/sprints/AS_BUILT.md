@@ -3916,3 +3916,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/render-graph.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** The clip uniform is binding 4 because the 48-byte ray header already holds spacing. Validation lives on `set_clip_planes`. A call before the ray is bound returns `RayUnavailable` and does not store the planes. A finite patient value that narrows to a zero `f32` is refused so the shader does not test a collapsed point or a zero normal. No HLD departure.
 **Notes for future sessions.** One independent review pass reported 0 defects, 0 smells and 0 nitpicks. Changing the half-space test from `>=` to `>` made `a_sample_on_the_plane_stays_in_the_integral` fail with red 0 against 0.39215687. The operator was restored and that test passed. The fourteen ignored raycast tests passed on this machine. The release wasm module was 2169861 bytes, baseline 2151196, ceiling 2258755. Device-loss rebind of a remembered plane list was read and not run. F-X004 and F-X005 stay blocked while F-X003 is in progress. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-X005, the CPU volume-rendering decision, completed 2026-11-01
+
+**What was built.** `VOLUME_3D` stays the existing fragment ray on tier A and tier B. Tier C returns `TierCUnavailable` from `volume_ray_admission` before a sample is read. The success type is unit, so the call writes no colour buffer. There is no CPU ray. `RenderGraph::new` still returns before a device exists on tier C.
+
+**HLD sections implemented.** `docs/hld/05-rendering.md` section 7. Deviation D-07 is the unavailable rule.
+**Deviations.** none.
+**Crates / packages modified.** `crates/ocelli-render` tests and `docs/lld/feature-availability.md`. The library body is unchanged.
+**Tests added.** The existing host test `volume_raycast_has_no_cpu_image` now pins the CPU result as `Result<(), GraphError>`.
+**Fixture provenance.** One ready brick and a sampled limit of 16. No patient data. No pixel arithmetic was added.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A and B stay the existing fragment ray. This story does not draw a new tier A or tier B frame. C is unavailable. `volume_ray_admission(Tier::Cpu, 1, 16)` returns `TierCUnavailable`.
+**LLD updated.** `docs/lld/feature-availability.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** One independent review pass reported 0 defects, 0 smells and 0 nitpicks. Changing the CPU comparison to tier A made `volume_raycast_has_no_cpu_image` fail at the `TierCUnavailable` assertion. The comparison was restored and that test passed. This story changes no shader and no library body. The feature floor remeasures the release module against baseline 2151196 and ceiling 2258755. F-X004 stays pending while F-X003 is in progress. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

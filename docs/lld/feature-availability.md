@@ -1,7 +1,7 @@
 # Feature availability
 
-**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056
-**Last updated:** 2026-10-31
+**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056, F-X005
+**Last updated:** 2026-11-01
 
 The contract every tier-gated feature declares, and the distinction between a
 working primary path, a declared fallback and an unavailable feature. This is
@@ -31,6 +31,7 @@ of any of them.
 | `VoiParams::from_chain` | F-041 in `ocelli-render` | The first feature-level refusal of this shape: a chain driven by a Modality LUT Sequence or a VOI LUT Sequence has no HLD section 18.4 uniform to be expressed in, so the GPU path is `Unavailable` and tier C is `Available` through `LutChain::map_into`. The two error variants name WHICH stage, because a caller reporting the feature unavailable has to say |
 | `CpuRaster` | F-X003 in `ocelli-render` | Tier C stack drawing. Monochrome uses `LutChain` and the preset tables. Palette and RGB use `ColorTransform` for a supported space. ICC reports unavailable. `RenderGraph::new` still returns `TierCUnavailable`. Representative-host interactive and idle acceptance remains unmeasured |
 | `RenderGraph::show_fusion` | F-056 in `ocelli-render` | Two volumes that share a frame of reference. Tier A and tier B draw them when a preserving float sample format and the `Rgba16Float` window target can be bound. Otherwise the bind returns `FusionError::Unavailable` and writes no CPU image. Tier C returns `FusionError::TierCUnavailable` before a sample is read and writes no CPU image |
+| Volume ray `VOLUME_3D` | F-X005 in `ocelli-render` | Tier A and tier B run the existing fragment ray. Tier C returns `TierCUnavailable` from `volume_ray_admission` before a sample is read and writes no colour buffer. There is no CPU ray |
 
 The detailed resolver and evidence rules remain in
 [tier-resolution.md](tier-resolution.md). This file begins after that one
@@ -165,16 +166,16 @@ producer.
 |------|-------|
 | Stable feature identity, tier encoding and conversion to the boundary record | F-101 |
 | Shell transport and tested actionable presentation | F-101, with the public API designed by F-100 |
-| The tier A, B and C declaration for volume rendering | F-X005 |
 | Each later feature's three-tier declaration and fallback tests | That feature's own story |
 
-F-X005 may decide that a CPU volume path is too slow and report volume
-rendering unavailable on tier C. That is an application of this contract, not
-a change to its states.
+`VOLUME_3D` is full on tier A and tier B. It is unavailable on tier C.
+`volume_ray_admission` returns `TierCUnavailable` before a sample is read and
+writes no colour buffer. There is no CPU ray. That is D-07 applied to this
+feature, not a new availability state.
 
 ## What this contract does not build
 
-- A CPU rasteriser, stack viewport, MPR path or volume renderer. F-X003 later draws the stack in `CpuRaster`. That raster is not this contract. MPR and volume rendering remain unbuilt here.
+- A CPU rasteriser, stack viewport, MPR path or CPU volume renderer. F-X003 draws the stack in `CpuRaster`. That raster is not this contract. MPR remains unbuilt here. Volume rendering on tier C stays unavailable and this file adds no CPU ray.
 - A feature enum or registry for work that has not landed.
 - Stable unavailable operands or numeric tier encodings.
 - A `From<ComputeError>` conversion or a new crate dependency.
