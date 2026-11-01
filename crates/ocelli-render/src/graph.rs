@@ -3343,6 +3343,57 @@ impl RenderGraph {
             .map_err(crate::contour::ContourDrawError::from_labelmap)
     }
 
+    /// Upload one presented surface onto a composite segmentation viewport.
+    ///
+    /// Tier C is refused before the mesh is read. The copy shader is the
+    /// labelmap shader. It does not test triangle coverage.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::surface::SurfaceDrawError`].
+    pub fn show_surface(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        mesh: &ocelli_seg::SurfaceMesh,
+        frame: &ocelli_seg::PlaneFrame,
+        lut: &ocelli_seg::LabelColourLut,
+        view: crate::surface::SurfaceView,
+    ) -> Result<(), crate::surface::SurfaceDrawError> {
+        if self.tier == Tier::Cpu {
+            return Err(crate::surface::SurfaceDrawError::TierCUnavailable);
+        }
+        let blend = match self.slot_state(id) {
+            Ok(state) => match &state.pass {
+                Pass::SegOverlay(pass) => pass.blend,
+                _ => return Err(crate::surface::SurfaceDrawError::NotOverlay),
+            },
+            Err(_) => return Err(crate::surface::SurfaceDrawError::UnknownViewport),
+        };
+        if blend != BlendMode::Composite {
+            return Err(crate::surface::SurfaceDrawError::BlendUnavailable);
+        }
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        if self.gpu.get(index).and_then(Option::as_ref).is_none() {
+            return Err(crate::surface::SurfaceDrawError::NotRebound);
+        }
+        let width_us =
+            usize::try_from(view.width).map_err(|_| crate::surface::SurfaceDrawError::Extent)?;
+        let height_us =
+            usize::try_from(view.height).map_err(|_| crate::surface::SurfaceDrawError::Extent)?;
+        let pixels = width_us
+            .checked_mul(height_us)
+            .ok_or(crate::surface::SurfaceDrawError::Extent)?;
+        let byte_len = pixels
+            .checked_mul(4)
+            .ok_or(crate::surface::SurfaceDrawError::Extent)?;
+        let mut bytes = vec![0_u8; byte_len];
+        ocelli_seg::present_surface(mesh, frame, lut, view.width, view.height, &mut bytes)
+            .map_err(crate::surface::SurfaceDrawError::Present)?;
+        self.store_overlay(ctx, id, index, view.width, view.height, bytes)
+            .map_err(crate::surface::SurfaceDrawError::from_labelmap)
+    }
+
     fn store_overlay(
         &mut self,
         ctx: &GpuContext,

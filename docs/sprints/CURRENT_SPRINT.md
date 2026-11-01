@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-064 | E10.2 | Contour representation | Rust | 4w | done |
-| F-065 | E10.3 | Surface representation | Rust | 3w | pending |
+| F-065 | E10.3 | Surface representation | Rust | 3w | done |
 | F-066 | E10.4 | Segmentation state model and per-viewport representation registry | Rust | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
@@ -147,5 +147,5 @@ whole-sprint review pass 2 clean at zero defects and zero smells. The gate
 tree is `eb4825e5c3c3`. The merge is `33ccb34`. `scripts/backlog_check.py`,
 `scripts/gen_sprint_plan.py --check` and `scripts/deviation_check.py` are
 re-run at this open. The S23 allocation rows and the S23 plan table name
-F-064, F-065 and F-066. F-064 is done. F-065 and F-066 stay pending. F-063 is done. F-X003
+F-064, F-065 and F-066. F-064 is done. F-065 is done. F-066 stays pending. F-063 is done. F-X003
 stays in progress.

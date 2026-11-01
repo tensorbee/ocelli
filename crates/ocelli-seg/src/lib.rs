@@ -3,8 +3,8 @@
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
 //! F-063 fills the labelmap representation. F-064 fills the contour.
-//! Surface and the registry stay later stories. The presenter does not
-//! import wgpu.
+//! F-065 fills the surface. The registry stays a later story. The
+//! presenter does not import wgpu.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -12,9 +12,11 @@ extern crate alloc;
 
 mod contour;
 mod labelmap;
+mod surface;
 
 pub use contour::{Contour, ContourError, ContourGeometricType, PlaneFrame, present_contour};
 pub use labelmap::{LabelColourLut, LabelGrid, LabelStyle, LabelmapError, Rgba8, present_labelmap};
+pub use surface::{SurfaceError, SurfaceMesh, present_surface};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.

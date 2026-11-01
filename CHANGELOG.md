@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- A composite segmentation overlay can copy a surface mesh. A pixel centre is covered when every barycentric weight is at least zero. Vertices are not rounded. A zero-area triangle is skipped. The copy shader is the existing labelmap shader. Tier C presents those bytes and does not upload a GPU image.
 - A composite segmentation overlay can copy a contour stroke. The geometric types follow DICOM PS3.3 C.8.8.6. The stroke keeps the segment LUT alpha and does not fill. A point off the plane writes nothing. Tier C presents those bytes and does not upload a GPU image.
 - A composite segmentation overlay copies presenter bytes. Index 0 stays transparent. Fill writes the segment RGBA8. Outline is the one-pixel 4-connected boundary and uses alpha 255. A missing colour or both flags off writes nothing. Labelmap edge stays uncompiled. Tier C presents those bytes and does not upload a GPU image.
 - `bin/ocelli.sh compare produce` writes an Ocelli candidate image for every current oracle view. `compare gate` scores that directory. Colour, palette and YBR stay unscored. A missing image is absent and is not a pass.
