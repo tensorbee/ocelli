@@ -305,6 +305,9 @@ pub enum GraphError {
     /// A viewport id this graph never issued.
     #[error("viewport id was never registered with this graph")]
     UnknownViewport,
+    /// `set_representation` was called on a stack, a slab or a volume.
+    #[error("this viewport is not a segmentation overlay")]
+    NotOverlay,
     /// A VOI chain with no section 18.4 uniform.
     #[error("{0}")]
     Voi(#[from] VoiParamsError),
@@ -880,6 +883,9 @@ struct HeldColour {
 struct SlotState {
     dirty: Dirty,
     pass: Pass,
+    /// Which representation a segmentation overlay shows. Other passes keep
+    /// the labelmap discriminant and the setter refuses them.
+    representation: ocelli_seg::Representation,
     /// Extent of the owned stored texture, remembered across a device rebuild.
     stored: Option<Upload>,
     /// The preserving format chosen for that texture. Absent when the
@@ -1069,6 +1075,7 @@ impl Registry {
                 *slot = Some(SlotState {
                     dirty: Dirty::full(),
                     pass,
+                    representation: ocelli_seg::Representation::Labelmap,
                     stored: None,
                     stored_format: None,
                     colour: None,
@@ -3235,6 +3242,61 @@ impl RenderGraph {
         }
     }
 
+    /// The representation a composite overlay is showing.
+    ///
+    /// A new overlay is [`ocelli_seg::Representation::Labelmap`].
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::UnknownViewport`] when the id was never registered.
+    /// [`GraphError::NotOverlay`] for a stack, a slab or a volume.
+    pub fn representation(&self, id: ViewportId) -> Result<ocelli_seg::Representation, GraphError> {
+        let state = self.slot_state(id)?;
+        match &state.pass {
+            Pass::SegOverlay(_) => Ok(state.representation),
+            _ => Err(GraphError::NotOverlay),
+        }
+    }
+
+    /// Choose which representation the next matching show uploads.
+    ///
+    /// The same value keeps the overlay texture and does not mark dirt.
+    /// A different value drops that texture and marks segmentation dirt.
+    /// This call does not upload.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::UnknownViewport`] when the id was never registered.
+    /// [`GraphError::NotOverlay`] for a stack, a slab or a volume.
+    /// Those viewports are left unchanged.
+    pub fn set_representation(
+        &mut self,
+        id: ViewportId,
+        representation: ocelli_seg::Representation,
+    ) -> Result<(), GraphError> {
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        let changed = {
+            let state = self
+                .registry
+                .state_mut(id)
+                .ok_or(GraphError::UnknownViewport)?;
+            if !matches!(&state.pass, Pass::SegOverlay(_)) {
+                return Err(GraphError::NotOverlay);
+            }
+            if state.representation == representation {
+                false
+            } else {
+                state.representation = representation;
+                state.dirty.segmentation = true;
+                true
+            }
+        };
+        if changed && let Some(slot) = self.gpu.get_mut(index).and_then(Option::as_mut) {
+            slot.labelmap = None;
+        }
+        Ok(())
+    }
+
     /// Upload one presented labelmap onto a composite segmentation viewport.
     ///
     /// Tier C is refused before the grid is read. A viewport that is not a
@@ -3261,15 +3323,18 @@ impl RenderGraph {
         if self.tier == Tier::Cpu {
             return Err(LabelmapDrawError::TierCUnavailable);
         }
-        let blend = match self.slot_state(id) {
+        let (blend, representation) = match self.slot_state(id) {
             Ok(state) => match &state.pass {
-                Pass::SegOverlay(pass) => pass.blend,
+                Pass::SegOverlay(pass) => (pass.blend, state.representation),
                 _ => return Err(LabelmapDrawError::NotOverlay),
             },
             Err(_) => return Err(LabelmapDrawError::UnknownViewport),
         };
         if blend != BlendMode::Composite {
             return Err(LabelmapDrawError::BlendUnavailable);
+        }
+        if representation != ocelli_seg::Representation::Labelmap {
+            return Err(LabelmapDrawError::RepresentationMismatch);
         }
         let index = usize::try_from(id.0).unwrap_or(usize::MAX);
         if self.gpu.get(index).and_then(Option::as_ref).is_none() {
@@ -3289,17 +3354,136 @@ impl RenderGraph {
         let mut bytes = vec![0_u8; byte_len];
         ocelli_seg::present_labelmap(grid, lut, style, &mut bytes)
             .map_err(LabelmapDrawError::Present)?;
+        self.store_overlay(ctx, id, index, grid.width, grid.height, bytes)
+    }
+
+    /// Upload one presented contour onto a composite segmentation viewport.
+    ///
+    /// Tier C is refused before the points are read. The copy shader is the
+    /// labelmap shader. It does not stroke and it does not fill.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::contour::ContourDrawError`].
+    pub fn show_contour(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        contour: &ocelli_seg::Contour,
+        frame: &ocelli_seg::PlaneFrame,
+        lut: &ocelli_seg::LabelColourLut,
+        view: crate::contour::ContourView,
+    ) -> Result<(), crate::contour::ContourDrawError> {
+        if self.tier == Tier::Cpu {
+            return Err(crate::contour::ContourDrawError::TierCUnavailable);
+        }
+        let (blend, representation) = match self.slot_state(id) {
+            Ok(state) => match &state.pass {
+                Pass::SegOverlay(pass) => (pass.blend, state.representation),
+                _ => return Err(crate::contour::ContourDrawError::NotOverlay),
+            },
+            Err(_) => return Err(crate::contour::ContourDrawError::UnknownViewport),
+        };
+        if blend != BlendMode::Composite {
+            return Err(crate::contour::ContourDrawError::BlendUnavailable);
+        }
+        if representation != ocelli_seg::Representation::Contour {
+            return Err(crate::contour::ContourDrawError::RepresentationMismatch);
+        }
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        if self.gpu.get(index).and_then(Option::as_ref).is_none() {
+            return Err(crate::contour::ContourDrawError::NotRebound);
+        }
+        let width_us =
+            usize::try_from(view.width).map_err(|_| crate::contour::ContourDrawError::Extent)?;
+        let height_us =
+            usize::try_from(view.height).map_err(|_| crate::contour::ContourDrawError::Extent)?;
+        let pixels = width_us
+            .checked_mul(height_us)
+            .ok_or(crate::contour::ContourDrawError::Extent)?;
+        let byte_len = pixels
+            .checked_mul(4)
+            .ok_or(crate::contour::ContourDrawError::Extent)?;
+        let mut bytes = vec![0_u8; byte_len];
+        ocelli_seg::present_contour(contour, frame, lut, view.width, view.height, &mut bytes)
+            .map_err(crate::contour::ContourDrawError::Present)?;
+        self.store_overlay(ctx, id, index, view.width, view.height, bytes)
+            .map_err(crate::contour::ContourDrawError::from_labelmap)
+    }
+
+    /// Upload one presented surface onto a composite segmentation viewport.
+    ///
+    /// Tier C is refused before the mesh is read. The copy shader is the
+    /// labelmap shader. It does not test triangle coverage.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::surface::SurfaceDrawError`].
+    pub fn show_surface(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        mesh: &ocelli_seg::SurfaceMesh,
+        frame: &ocelli_seg::PlaneFrame,
+        lut: &ocelli_seg::LabelColourLut,
+        view: crate::surface::SurfaceView,
+    ) -> Result<(), crate::surface::SurfaceDrawError> {
+        if self.tier == Tier::Cpu {
+            return Err(crate::surface::SurfaceDrawError::TierCUnavailable);
+        }
+        let (blend, representation) = match self.slot_state(id) {
+            Ok(state) => match &state.pass {
+                Pass::SegOverlay(pass) => (pass.blend, state.representation),
+                _ => return Err(crate::surface::SurfaceDrawError::NotOverlay),
+            },
+            Err(_) => return Err(crate::surface::SurfaceDrawError::UnknownViewport),
+        };
+        if blend != BlendMode::Composite {
+            return Err(crate::surface::SurfaceDrawError::BlendUnavailable);
+        }
+        if representation != ocelli_seg::Representation::Surface {
+            return Err(crate::surface::SurfaceDrawError::RepresentationMismatch);
+        }
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        if self.gpu.get(index).and_then(Option::as_ref).is_none() {
+            return Err(crate::surface::SurfaceDrawError::NotRebound);
+        }
+        let width_us =
+            usize::try_from(view.width).map_err(|_| crate::surface::SurfaceDrawError::Extent)?;
+        let height_us =
+            usize::try_from(view.height).map_err(|_| crate::surface::SurfaceDrawError::Extent)?;
+        let pixels = width_us
+            .checked_mul(height_us)
+            .ok_or(crate::surface::SurfaceDrawError::Extent)?;
+        let byte_len = pixels
+            .checked_mul(4)
+            .ok_or(crate::surface::SurfaceDrawError::Extent)?;
+        let mut bytes = vec![0_u8; byte_len];
+        ocelli_seg::present_surface(mesh, frame, lut, view.width, view.height, &mut bytes)
+            .map_err(crate::surface::SurfaceDrawError::Present)?;
+        self.store_overlay(ctx, id, index, view.width, view.height, bytes)
+            .map_err(crate::surface::SurfaceDrawError::from_labelmap)
+    }
+
+    fn store_overlay(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        index: usize,
+        width: u32,
+        height: u32,
+        bytes: Vec<u8>,
+    ) -> Result<(), LabelmapDrawError> {
         let same = self
             .gpu
             .get(index)
             .and_then(Option::as_ref)
             .and_then(|slot| slot.labelmap.as_ref())
-            .is_some_and(|held| held.same_bytes(grid.width, grid.height, &bytes));
+            .is_some_and(|held| held.same_bytes(width, height, &bytes));
         if same {
             return Ok(());
         }
-        let staged =
-            crate::labelmap::stage(&self.labelmap_layout, ctx, grid.width, grid.height, bytes)?;
+        let staged = crate::labelmap::stage(&self.labelmap_layout, ctx, width, height, bytes)?;
         let Some(slot) = self.gpu.get_mut(index).and_then(Option::as_mut) else {
             return Err(LabelmapDrawError::NotRebound);
         };
@@ -3336,8 +3520,8 @@ impl RenderGraph {
         // Every per-viewport object was created on the dead device: the
         // uniform buffers, both bind groups, the stored-sample texture, the
         // colour table texture, the labelmap texture and the caller's views
-        // as bound. The next `show_labelmap` after `rebind` uploads the
-        // overlay again.
+        // as bound. The representation choice stays with the pass. The next
+        // matching show after `rebind` uploads the overlay again.
         // They are dropped here, not carried into a pass on the new device.
         // The registry keeps each pass, its last uniform values, the camera
         // floats, the stored extent, the colour table bytes and the opacity

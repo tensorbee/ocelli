@@ -12,3 +12,6 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# F-064. A contour point is `Pt<World>`. The segmentation crate does not
+# gain a renderer.
+ocelli-core = { path = "../ocelli-core" }

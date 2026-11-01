@@ -1,6 +1,6 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062, F-063
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062, F-063, F-064, F-065, F-066
 **Last updated:** 2026-11-01
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
@@ -30,11 +30,27 @@ a blend mode.
 **The composite overlay copies presenter bytes.** `show_labelmap` uploads
 the RGBA8 from `present_labelmap` in `ocelli-seg`. Index 0 is background
 and stays transparent. Fill writes the segment colour. Outline is the
-one-pixel 4-connected boundary and uses alpha 255. The shader copies those
-texels. It does not run the image VOI and it does not recompute the outline.
-Equal bytes do not allocate a new texture. Tier C is that presenter.
-`show_labelmap` returns unavailable before it reads the grid. Labelmap edge
+one-pixel 4-connected boundary and uses alpha 255. `show_contour` uploads
+the RGBA8 from `present_contour`. The stroke keeps the LUT alpha and does
+not fill the interior. A point off the plane is refused. `show_surface`
+uploads the RGBA8 from `present_surface`. A pixel centre is covered when
+every barycentric weight is at least zero. Vertices are not rounded. A
+zero-area triangle is skipped. The same shader copies each image. It does
+not run the image VOI and it does not recompute the outline, the stroke
+or the coverage. Equal bytes do not allocate a new texture. Tier C is
+those presenters. `show_labelmap` returns unavailable before it reads the
+grid. `show_contour` returns unavailable before it reads the points.
+`show_surface` returns unavailable before it reads the mesh. Labelmap edge
 returns unavailable before the grid is read. The frame still submits once.
+
+**The overlay remembers one representation.** A new composite overlay
+starts as labelmap. `set_representation` on a stack, a slab or a volume
+returns `NotOverlay` and changes nothing. The same value keeps the
+texture and does not mark dirt. A different value drops the texture and
+marks segmentation dirt. It does not upload. The next tick stays
+unavailable until the matching show uploads. A show for a different
+representation returns before the presenter. Device recovery keeps the
+choice and still drops the texture.
 
 **Tier B compiles the stack fragment module.** The source is `VOI_WGSL`
 followed by the graph fragment shader. The three window functions stay the

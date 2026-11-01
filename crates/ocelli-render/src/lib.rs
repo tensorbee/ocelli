@@ -71,6 +71,7 @@ pub mod brick_upload;
 pub mod caps;
 pub mod clip;
 pub mod colour;
+mod contour;
 pub mod cpu;
 pub mod extent;
 pub mod fusion;
@@ -83,6 +84,7 @@ pub mod probe;
 pub mod progressive;
 pub mod shade;
 pub mod slab;
+mod surface;
 pub mod tier_b;
 pub mod voi;
 
@@ -94,6 +96,7 @@ pub use caps::{
 };
 pub use clip::ClipPlane;
 pub use colour::{ColourLut, ColourLutError, PresetId, colour_lut_for};
+pub use contour::{ContourDrawError, ContourView};
 pub use cpu::{CpuRaster, RasterColor, RasterError, RasterGrid, RasterQuality, RasterResult};
 pub use extent::{ExtentError, css_from_device, device_extent};
 pub use fusion::{
@@ -122,6 +125,7 @@ pub use shade::{ShadeError, ShadeWeights};
 pub use slab::{
     SlabError, fragment_keys_for, present_slab, slab_blend_code, slab_compile_list, slab_module,
 };
+pub use surface::{SurfaceDrawError, SurfaceView};
 pub use tier_b::{Section183Error, Section183Pixels, read_section_18_3, stored_format_name};
 pub use voi::{VOI_WGSL, VoiParams, VoiParamsError};
 
