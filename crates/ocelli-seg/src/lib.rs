@@ -4,7 +4,8 @@
 //!
 //! F-063 fills the labelmap representation. F-064 fills the contour.
 //! F-065 fills the surface. F-066 names which of those three a viewport
-//! shows. The presenter does not import wgpu.
+//! shows. F-067 cuts a contour by a patient Z plane and draws the labelmap
+//! edge as outline without fill. The presenter does not import wgpu.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -14,7 +15,9 @@ mod contour;
 mod labelmap;
 mod surface;
 
-pub use contour::{Contour, ContourError, ContourGeometricType, PlaneFrame, present_contour};
+pub use contour::{
+    Contour, ContourError, ContourGeometricType, PlaneFrame, intersect_contour, present_contour,
+};
 pub use labelmap::{LabelColourLut, LabelGrid, LabelStyle, LabelmapError, Rgba8, present_labelmap};
 pub use surface::{SurfaceError, SurfaceMesh, present_surface};
 

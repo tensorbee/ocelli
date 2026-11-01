@@ -1,6 +1,6 @@
 # Feature availability
 
-**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056, F-X004, F-X005, F-063, F-064, F-065, F-066
+**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056, F-X004, F-X005, F-063, F-064, F-065, F-066, F-067
 **Last updated:** 2026-11-01
 
 The contract every tier-gated feature declares, and the distinction between a
@@ -33,7 +33,8 @@ of any of them.
 | `RenderGraph::show_fusion` | F-056 in `ocelli-render` | Two volumes that share a frame of reference. Tier A and tier B draw them when a preserving float sample format and the `Rgba16Float` window target can be bound. Otherwise the bind returns `FusionError::Unavailable` and writes no CPU image. Tier C returns `FusionError::TierCUnavailable` before a sample is read and writes no CPU image |
 | Volume ray `VOLUME_3D` | F-X005 in `ocelli-render` | Tier A and tier B run the existing fragment ray. Tier C returns `TierCUnavailable` from `volume_ray_admission` before a sample is read and writes no colour buffer. There is no CPU ray |
 | CPU MPR `present_cpu_plane` | F-X004 in `ocelli-render` | Tier C copies `Volume::reslice` and `Volume::reslice_oblique` samples into `CpuRaster`. An absent sample or a raster refusal writes nothing. Tier A and tier B stay on `present_plane`. There is no second interpolant and no CPU ray. A missing SIMD measurement is not a passed timing row |
-| Composite `SegOverlay` | F-063, F-064, F-065 and F-066 in `ocelli-seg` and `ocelli-render` | Tier A and tier B upload `present_labelmap`, `present_contour` or `present_surface` bytes and a copy shader draws them. The viewport stores one representation. A new overlay starts as labelmap. A mismatch uploads nothing. Tier C is those presenters and the enum. `show_labelmap`, `show_contour`, `show_surface` and `RenderGraph::new` return unavailable before a GPU image. The contour stroke does not fill and it keeps the LUT alpha. The surface covers pixel centres and keeps the LUT alpha. Labelmap edge stays uncompiled |
+| Composite `SegOverlay` | F-063, F-064, F-065 and F-066 in `ocelli-seg` and `ocelli-render` | Tier A and tier B upload `present_labelmap`, `present_contour` or `present_surface` bytes and a copy shader draws them. The viewport stores one representation. A new overlay starts as labelmap. A mismatch uploads nothing. Tier C is those presenters and the enum. `show_labelmap`, `show_contour`, `show_surface` and `RenderGraph::new` return unavailable before a GPU image. The contour stroke does not fill and it keeps the LUT alpha. The surface covers pixel centres and keeps the LUT alpha |
+| Labelmap edge projection | F-067 in `ocelli-seg` and `ocelli-render` | Tier A and tier B compile `SegOverlay` plus `LabelmapEdgeProjection` on the existing labelmap copy shader. `show_labelmap` uploads outline without fill. `intersect_contour` runs on every tier and cuts one contour by a patient Z plane. Tier C `show_labelmap` returns unavailable before the grid is read. Slab, volume and stack have no edge body and do not draw composite in its place. `show_contour` and `show_surface` return unavailable for this blend |
 
 The detailed resolver and evidence rules remain in
 [tier-resolution.md](tier-resolution.md). This file begins after that one

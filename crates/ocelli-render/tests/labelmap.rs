@@ -17,7 +17,7 @@ use ocelli_render::{
 use ocelli_seg::{LabelColourLut, LabelGrid, LabelStyle, LabelmapError, Rgba8, present_labelmap};
 
 #[test]
-fn seg_overlay_compiles_composite_only() {
+fn seg_overlay_compiles_the_edge_copy() {
     let composite = PipelineKey {
         pass: PassKind::SegOverlay,
         blend: BlendMode::Composite,
@@ -33,9 +33,25 @@ fn seg_overlay_compiles_composite_only() {
         blend: BlendMode::LabelmapEdgeProjection,
         tier: Tier::B,
     };
+    let volume_edge = PipelineKey {
+        pass: PassKind::VolumeRaycast,
+        blend: BlendMode::LabelmapEdgeProjection,
+        tier: Tier::A,
+    };
+    let stack_edge = PipelineKey {
+        pass: PassKind::Stack,
+        blend: BlendMode::LabelmapEdgeProjection,
+        tier: Tier::A,
+    };
     assert!(RenderGraph::pipeline_compiled(&composite));
-    assert!(!RenderGraph::pipeline_compiled(&edge));
+    assert!(RenderGraph::pipeline_compiled(&edge));
+    assert!(RenderGraph::pipeline_compiled(&PipelineKey {
+        tier: Tier::B,
+        ..edge
+    }));
     assert!(!RenderGraph::pipeline_compiled(&slab_edge));
+    assert!(!RenderGraph::pipeline_compiled(&volume_edge));
+    assert!(!RenderGraph::pipeline_compiled(&stack_edge));
     assert!(!RenderGraph::pipeline_compiled(&PipelineKey {
         blend: BlendMode::Mip,
         ..composite
@@ -79,6 +95,21 @@ fn style_on() -> LabelStyle {
 fn presented(lut: &LabelColourLut) -> Vec<u8> {
     let mut out = vec![0_u8; 36];
     let painted = present_labelmap(&grid_all_one(), lut, style_on(), &mut out);
+    assert!(painted.is_ok());
+    out
+}
+
+fn presented_outline(lut: &LabelColourLut) -> Vec<u8> {
+    let mut out = vec![0_u8; 36];
+    let painted = present_labelmap(
+        &grid_all_one(),
+        lut,
+        LabelStyle {
+            fill: false,
+            outline: true,
+        },
+        &mut out,
+    );
     assert!(painted.is_ok());
     out
 }
@@ -296,7 +327,7 @@ fn shown_labelmap_matches_the_presenter() {
 
 #[test]
 #[ignore = "needs a real adapter, run by the gpu gate"]
-fn labelmap_edge_and_a_foreign_pass_upload_nothing() {
+fn labelmap_edge_uploads_the_outline_and_a_foreign_pass_does_not() {
     let Some(mut context) = context() else {
         return;
     };
@@ -304,7 +335,7 @@ fn labelmap_edge_and_a_foreign_pass_upload_nothing() {
         Ok(graph) => graph,
         Err(_) => return,
     };
-    let (source, target_view, _target) = overlay_target(&context);
+    let (source, target_view, target) = overlay_target(&context);
     let edge = match graph.register(
         &context,
         target_view,
@@ -319,8 +350,20 @@ fn labelmap_edge_and_a_foreign_pass_upload_nothing() {
     let lut = LabelColourLut::from_segment_one(vec![segment_one()]);
     assert_eq!(
         graph.show_labelmap(&context, edge, &grid_all_one(), &lut, style_on()),
-        Err(LabelmapDrawError::BlendUnavailable)
+        Ok(())
     );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let outline = presented_outline(&lut);
+    assert_eq!(outline.get(0..4), Some(&[10_u8, 20, 30, 255][..]));
+    assert_eq!(outline.get(16..20), Some(&[0_u8, 0, 0, 0][..]));
+    assert_eq!(readback_plane(&context, &target, 3, 3), outline);
+    assert_eq!(graph.submissions(), 1);
     let (source, target_view, _target) = overlay_target(&context);
     let missing = LabelGrid {
         width: 1,
@@ -386,8 +429,8 @@ fn labelmap_edge_and_a_foreign_pass_upload_nothing() {
         graph.show_labelmap(&context, ViewportId(9), &grid_all_one(), &lut, style_on()),
         Err(LabelmapDrawError::UnknownViewport)
     );
-    assert_eq!(graph.submissions(), 0);
-    // The stack still encodes. The edge blend and the missing colour did not.
+    assert_eq!(graph.submissions(), 1);
+    // The stack still encodes. The missing colour did not.
     assert_eq!(
         graph.tick(&context),
         FrameOutcome::Submitted {

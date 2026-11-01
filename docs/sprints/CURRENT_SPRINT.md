@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-067 | E10.5 | Segmentation intersection and labelmap edge-projection blend | Rust | 2w | pending |
+| F-067 | E10.5 | Segmentation intersection and labelmap edge-projection blend | Rust | 2w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -29,9 +29,11 @@ edge-projection blend. Appendix B names that blend as the fifth mode.
 The HLD does not give its formula. The design plan records the local
 rule before any code.
 
-`BlendMode::LabelmapEdgeProjection` has no compiled body. A lookup for
-that key reports unavailable. It does not substitute composite. Contour,
-surface and the registry are already done. They are not this blend.
+`BlendMode::LabelmapEdgeProjection` compiles for the segmentation overlay
+on the existing labelmap copy shader. Slab, volume and stack have no body
+for that blend. A lookup for those keys reports unavailable and does not
+substitute composite. Contour, surface and the registry are already done.
+They are not this blend.
 
 F-067 depends on F-064. That backlog row is `done`. F-063, F-065 and
 F-066 are done and are not dependencies of this row.

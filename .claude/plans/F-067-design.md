@@ -53,10 +53,10 @@ These choices are local. They are not a reading of a vtk shader and they are not
 - A segment with endpoints on opposite sides of the plane contributes one point. `t = (plane_z - z0) / (z1 - z0)` with `0 < t < 1`. The emitted Z is `plane_z`, not a recomputed Z. X and Y are `p0 + t * (p1 - p0)`.
 - An endpoint on the plane is emitted as that point. A parallel segment off the plane emits nothing.
 - Consecutive points with equal X, Y and Z bits are collapsed.
-- Zero points returns `ContourError::Empty`. One point is `Point`. Two or more points stay the original kind when every input point was on the plane. A cut that is not entirely on the plane is `OpenPlanar`. A closed contour is not closed again by the cut.
+- Zero points returns `ContourError::Empty`. One emitted point is `Point`. Two or more emitted points are `OpenPlanar` when the contour was not entirely on the plane. An entirely on-plane contour keeps its original kind and its points. A closed contour is not closed again by the cut.
 - Non-finite `plane_z` or a non-finite coordinate returns `ContourError::Frame` and produces no contour.
 - Labelmap edge projection is outline without fill. It reuses `present_labelmap` with `LabelStyle { fill: false, outline: true }`. The caller's fill flag is ignored. Outline alpha stays 255. Segment 0 stays transparent. Interior labelled pixels stay transparent.
-- The overlay shader stays the F-063 copy. No new WGSL. `pipeline_compiled` for `SegOverlay` plus `LabelmapEdgeProjection` stays false.
+- The overlay shader stays the F-063 copy. No new WGSL. `pipeline_compiled` is true for `SegOverlay` plus `LabelmapEdgeProjection`, on the same module and the same layout as composite. An uncompiled key cannot encode, so the first approved wording that left this key false cannot draw AC5. Slab, volume and stack stay false for that blend. They do not receive the overlay pipeline.
 - `show_contour` and `show_surface` still return `BlendUnavailable` for this blend. Slab and volume still have no body for it. They report unavailable. They do not draw composite in its place.
 - MIP, MinIP and average on a segmentation overlay stay unavailable.
 
@@ -122,7 +122,7 @@ Intersection does not touch the render graph. The edge show uses the existing `s
 | AC4 | `-0.0` against plane `+0.0` contributes no point | CPU fixture | treating the signs as one plane | implementation |
 | AC5 | A 3 by 3 segment-1 grid under the edge blend matches outline-only `present_labelmap`. Centre is transparent. Boundary is `(10, 20, 30, 255)` even when the caller asked for fill | ignored GPU readback | uploading the composite fill | gpu gate |
 | AC6 | `show_contour` on the edge overlay returns `BlendUnavailable` and does not upload | existing contour device test | stroking the contour through the edge blend | gpu gate |
-| AC7 | Slab and `pipeline_compiled` still refuse a labelmap-edge pipeline | existing slab and compile tests | compiling composite under the edge key | implementation |
+| AC7 | The overlay edge key compiles on the existing copy shader. Slab, volume and stack stay uncompiled for that blend | `seg_overlay_compiles_the_edge_copy` and the slab test | leaving the overlay edge key uncompiled, or returning a pipeline for a slab, volume or stack edge key | implementation |
 | AC8 | CPU `show_labelmap` returns unavailable before the grid is read | existing tier check, read in review | presenting on the CPU device path | implementation |
 
 ## Approach
@@ -131,7 +131,7 @@ Add `intersect_contour` beside `present_contour` in `ocelli-seg`. Export it from
 
 In `show_labelmap`, treat `LabelmapEdgeProjection` as a second accepted blend. Build `LabelStyle { fill: false, outline: true }` and pass that to `present_labelmap`. Leave the composite arm on the caller style. Leave every other blend on `BlendUnavailable`.
 
-Do not add a shader. Do not add a `queue.submit`.
+Do not add a shader file. Compile a second overlay key on the existing labelmap module. Do not add a `queue.submit`.
 
 Update `labelmap_edge_and_a_foreign_pass_upload_nothing` so the edge show's readback is the outline fixture. Keep the foreign-pass and missing-colour assertions.
 
@@ -145,7 +145,7 @@ Writers: `crates/ocelli-seg/src/contour.rs`, `crates/ocelli-seg/src/lib.rs`, `cr
 
 Focused checks are `bin/ocelli.sh test ocelli-seg --test contour` and `bin/ocelli.sh test ocelli-render --test labelmap`. The edge readback is an ignored test and runs under `bin/ocelli.sh gate gpu`, which the sprint profile includes. Feature completion is `bin/ocelli.sh gate --floor` plus the corpus gate. This story does not change CPU candidate bytes. The stored comparison report stays the sprint evidence and is reconfirmed before that record.
 
-A mutation that lets the edge blend call `present_labelmap` with the caller's fill flag must turn the centre pixel into `(10, 20, 30, 128)`.
+A mutation that lets the edge blend call `present_labelmap` with the caller's fill flag must turn the centre pixel into `(10, 20, 30, 128)`. A constant `t` of 0.5 must fail the cut from `(0, 0, 0)` to `(10, 4, 4)` at plane 1. That point is `(2.5, 1, 1)`.
 
 ## Boundary and tier
 
@@ -163,7 +163,7 @@ A mutation that lets the edge blend call `present_labelmap` with the caller's fi
 |----------|----------------|-------|
 | fixture | AC1 to AC4, citing the local plane cut and PS3.3 C.8.20.2 for segment colour | `crates/ocelli-seg/tests/contour.rs` |
 | gpu | AC5 outline readback, fill ignored | `crates/ocelli-render/tests/labelmap.rs`, ignored |
-| unit | AC7 compile refusal stays red for the edge key | existing `seg_overlay_compiles_composite_only` |
+| unit | AC7 overlay edge key is compiled and the slab edge key is not | `seg_overlay_compiles_the_edge_copy` |
 
 ## Parity surface covered
 

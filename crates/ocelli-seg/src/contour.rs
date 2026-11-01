@@ -124,6 +124,130 @@ pub fn present_contour(
     Ok(())
 }
 
+/// Cut `contour` by the patient plane `z = plane_z`.
+///
+/// A point is on the plane when its Z bits match `plane_z`, so `-0.0` and
+/// `+0.0` stay different. A crossing uses `t = (plane_z - z0) / (z1 - z0)`
+/// with `0 < t < 1` and stores `plane_z` itself. The whole contour is
+/// returned unchanged when every point is already on the plane.
+///
+/// # Errors
+///
+/// [`ContourError::Frame`] for a non-finite plane or coordinate.
+/// [`ContourError::Length`] when the geometric type does not match the
+/// point count. [`ContourError::Empty`] when the plane misses the contour.
+pub fn intersect_contour(contour: &Contour, plane_z: f64) -> Result<Contour, ContourError> {
+    if !plane_z.is_finite() {
+        return Err(ContourError::Frame);
+    }
+    if !kind_len(contour.kind, contour.points.len()) {
+        return Err(ContourError::Length);
+    }
+    for point in &contour.points {
+        if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
+            return Err(ContourError::Frame);
+        }
+    }
+    let mut entirely_on_plane = true;
+    for point in &contour.points {
+        if point.z.to_bits() != plane_z.to_bits() {
+            entirely_on_plane = false;
+            break;
+        }
+    }
+    if entirely_on_plane {
+        return Ok(Contour {
+            segment: contour.segment,
+            kind: contour.kind,
+            points: contour.points.clone(),
+        });
+    }
+    if contour.kind == ContourGeometricType::Point {
+        return Err(ContourError::Empty);
+    }
+    let mut emitted = Vec::new();
+    let count = contour.points.len();
+    let segments = if contour.kind == ContourGeometricType::ClosedPlanar {
+        count
+    } else {
+        count - 1
+    };
+    for index in 0..segments {
+        let Some(start) = contour.points.get(index) else {
+            return Err(ContourError::Length);
+        };
+        let next = if index + 1 == count { 0 } else { index + 1 };
+        let Some(end) = contour.points.get(next) else {
+            return Err(ContourError::Length);
+        };
+        emit_segment(&mut emitted, *start, *end, plane_z)?;
+    }
+    if emitted.is_empty() {
+        return Err(ContourError::Empty);
+    }
+    let kind = if emitted.len() == 1 {
+        ContourGeometricType::Point
+    } else {
+        ContourGeometricType::OpenPlanar
+    };
+    Ok(Contour {
+        segment: contour.segment,
+        kind,
+        points: emitted,
+    })
+}
+
+fn emit_segment(
+    out: &mut Vec<Pt<World>>,
+    start: Pt<World>,
+    end: Pt<World>,
+    plane_z: f64,
+) -> Result<(), ContourError> {
+    let start_on = start.z.to_bits() == plane_z.to_bits();
+    let end_on = end.z.to_bits() == plane_z.to_bits();
+    if start_on && end_on {
+        push_unique(out, start);
+        push_unique(out, end);
+        return Ok(());
+    }
+    if start_on {
+        push_unique(out, start);
+        return Ok(());
+    }
+    if end_on {
+        push_unique(out, end);
+        return Ok(());
+    }
+    let start_below = start.z < plane_z;
+    let end_below = end.z < plane_z;
+    if start_below == end_below {
+        return Ok(());
+    }
+    let dz = end.z - start.z;
+    let t = (plane_z - start.z) / dz;
+    if !t.is_finite() || t <= 0.0 || t >= 1.0 {
+        return Ok(());
+    }
+    let x = start.x + t * (end.x - start.x);
+    let y = start.y + t * (end.y - start.y);
+    if !x.is_finite() || !y.is_finite() {
+        return Err(ContourError::Frame);
+    }
+    push_unique(out, Pt::new(x, y, plane_z));
+    Ok(())
+}
+
+fn push_unique(out: &mut Vec<Pt<World>>, point: Pt<World>) {
+    if let Some(last) = out.last()
+        && last.x.to_bits() == point.x.to_bits()
+        && last.y.to_bits() == point.y.to_bits()
+        && last.z.to_bits() == point.z.to_bits()
+    {
+        return;
+    }
+    out.push(point);
+}
+
 fn paint_projected(
     raster: &mut Raster<'_>,
     kind: ContourGeometricType,
