@@ -26,7 +26,9 @@
 //! `set_clip_planes`. That call writes a 256-byte uniform and does not
 //! upload a brick. F-063 uploads a composite labelmap from `ocelli-seg`
 //! presenter bytes. The copy shader does not run the image VOI and does not
-//! recompute the outline. Labelmap edge stays uncompiled. F-045 writes
+//! recompute the outline. F-067 compiles labelmap edge projection for the
+//! segmentation overlay on that same copy shader and uploads outline
+//! without fill. Slab, volume and stack leave that blend uncompiled. F-045 writes
 //! the sixteen camera floats at group 0 binding 2. `set_view` does not
 //! write the VOI uniform. The oracle still has no Ocelli frame to judge.
 //! Decision D7 stays open.
@@ -167,10 +169,11 @@ pub struct SegPass {
 /// The five blend modes the parity surface counts.
 ///
 /// The slab pass compiles composite, MIP, MinIP and average. The volume ray
-/// and the stack pass compile composite only. Labelmap edge projection has
-/// no body. A lookup for an uncompiled key reports unavailable rather than
-/// substituting composite, which is deviation D-07's honesty rule applied
-/// to a blend mode.
+/// and the stack pass compile composite only. Labelmap edge projection
+/// compiles for the segmentation overlay only, on the same copy shader as
+/// composite. Slab, volume and stack have no edge body. A lookup for an
+/// uncompiled key reports unavailable rather than substituting composite,
+/// which is deviation D-07's honesty rule applied to a blend mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BlendMode {
     /// The ordinary composite.
@@ -182,7 +185,10 @@ pub enum BlendMode {
     MinIp,
     /// Average intensity projection. Compiled for the slab pass only.
     Average,
-    /// Labelmap edge projection. No body yet.
+    /// Labelmap edge projection.
+    ///
+    /// The overlay compiles this key on the existing labelmap copy shader.
+    /// Slab, volume and stack do not.
     LabelmapEdgeProjection,
 }
 
@@ -1248,15 +1254,18 @@ const COMPILED_BLEND: BlendMode = BlendMode::Composite;
 impl RenderGraph {
     /// Whether this story compiles a fragment pipeline for a key.
     ///
-    /// Composite stack, composite volume and composite segmentation each have
-    /// a body. The slab pass compiles composite, MIP, MinIP and average.
-    /// Volume MIP, stack MIP and labelmap edge stay uncompiled. A compute or
-    /// storage request is [`RenderGraph::pipeline_family_compiled`], which
-    /// is false on tier B and is not this predicate.
+    /// Composite stack, composite volume and the segmentation overlay each
+    /// have a body. The overlay compiles composite and labelmap edge
+    /// projection on the same copy shader. The slab pass compiles composite,
+    /// MIP, MinIP and average. Volume MIP, stack MIP, and labelmap edge on
+    /// slab, volume or stack stay uncompiled. A compute or storage request
+    /// is [`RenderGraph::pipeline_family_compiled`], which is false on tier B
+    /// and is not this predicate.
     pub fn pipeline_compiled(key: &PipelineKey) -> bool {
         match key.pass {
-            PassKind::Stack | PassKind::VolumeRaycast | PassKind::SegOverlay => {
-                key.blend == COMPILED_BLEND
+            PassKind::Stack | PassKind::VolumeRaycast => key.blend == COMPILED_BLEND,
+            PassKind::SegOverlay => {
+                key.blend == COMPILED_BLEND || key.blend == BlendMode::LabelmapEdgeProjection
             }
             PassKind::Slab => slab::slab_blend_code(key.blend).is_some(),
         }
@@ -1265,8 +1274,8 @@ impl RenderGraph {
     /// Whether `family` has a compiled body for `key`.
     ///
     /// Fragment is a compiled stack body, a compiled volume ray, a compiled
-    /// composite labelmap, or one of the four slab bodies. Compute and
-    /// storage have no body in this story,
+    /// overlay copy (composite or labelmap edge), or one of the four slab
+    /// bodies. Compute and storage have no body in this story,
     /// on either GPU tier.
     /// On tier B that refusal is the section 7 rule: the fragment pipeline
     /// is not returned in their place.
@@ -1665,6 +1674,25 @@ impl RenderGraph {
             &labelmap_module,
             format,
             "ocelli labelmap composite",
+            &[],
+        ));
+        // The edge key is a second pipeline on the same copy shader.
+        // The presented bytes are already outline-only. Slab, volume and
+        // stack do not receive this key, so they cannot alias composite.
+        keys.push(CompiledKey {
+            key: PipelineKey {
+                pass: PassKind::SegOverlay,
+                blend: BlendMode::LabelmapEdgeProjection,
+                tier,
+            },
+            family: PipelineFamily::Fragment,
+        });
+        pipelines.push(fragment_pipeline(
+            device,
+            &labelmap_pipeline_layout,
+            &labelmap_module,
+            format,
+            "ocelli labelmap edge",
             &[],
         ));
         CompiledGraph {
@@ -3300,9 +3328,10 @@ impl RenderGraph {
     /// Upload one presented labelmap onto a composite segmentation viewport.
     ///
     /// Tier C is refused before the grid is read. A viewport that is not a
-    /// composite `SegOverlay` is refused before the presenter runs, so a
-    /// labelmap-edge blend does not alias composite and a stack viewport
-    /// does not gain an overlay. A presenter error uploads nothing.
+    /// `SegOverlay` is refused before the presenter runs. Composite uses the
+    /// caller style. Labelmap edge projection forces outline without fill,
+    /// so a fill request does not alias composite. A stack viewport does not
+    /// gain an overlay. A presenter error uploads nothing.
     ///
     /// Equal bytes do not allocate a texture and do not mark dirt. A new
     /// image replaces the binding only after the texture exists, then sets
@@ -3330,19 +3359,28 @@ impl RenderGraph {
             },
             Err(_) => return Err(LabelmapDrawError::UnknownViewport),
         };
-        if blend != BlendMode::Composite {
+        let edge = blend == BlendMode::LabelmapEdgeProjection;
+        if blend != BlendMode::Composite && !edge {
             return Err(LabelmapDrawError::BlendUnavailable);
         }
         if representation != ocelli_seg::Representation::Labelmap {
             return Err(LabelmapDrawError::RepresentationMismatch);
         }
+        let drawn = if edge {
+            ocelli_seg::LabelStyle {
+                fill: false,
+                outline: true,
+            }
+        } else {
+            style
+        };
         let index = usize::try_from(id.0).unwrap_or(usize::MAX);
         if self.gpu.get(index).and_then(Option::as_ref).is_none() {
             return Err(LabelmapDrawError::NotRebound);
         }
-        if !style.fill && !style.outline {
+        if !drawn.fill && !drawn.outline {
             let mut unused = [];
-            return ocelli_seg::present_labelmap(grid, lut, style, &mut unused)
+            return ocelli_seg::present_labelmap(grid, lut, drawn, &mut unused)
                 .map_err(LabelmapDrawError::Present);
         }
         let width_us = usize::try_from(grid.width).map_err(|_| LabelmapDrawError::Extent)?;
@@ -3352,7 +3390,7 @@ impl RenderGraph {
             .ok_or(LabelmapDrawError::Extent)?;
         let byte_len = pixels.checked_mul(4).ok_or(LabelmapDrawError::Extent)?;
         let mut bytes = vec![0_u8; byte_len];
-        ocelli_seg::present_labelmap(grid, lut, style, &mut bytes)
+        ocelli_seg::present_labelmap(grid, lut, drawn, &mut bytes)
             .map_err(LabelmapDrawError::Present)?;
         self.store_overlay(ctx, id, index, grid.width, grid.height, bytes)
     }

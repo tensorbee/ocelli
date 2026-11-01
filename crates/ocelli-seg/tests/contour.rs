@@ -7,7 +7,7 @@
 use ocelli_core::{Pt, World};
 use ocelli_seg::{
     Contour, ContourError, ContourGeometricType, LabelColourLut, LabelGrid, LabelStyle, PlaneFrame,
-    Rgba8, present_contour, present_labelmap,
+    Rgba8, intersect_contour, present_contour, present_labelmap,
 };
 
 fn colour() -> Rgba8 {
@@ -217,4 +217,191 @@ fn a_contour_refusal_writes_nothing() {
     );
     assert!(sentinels.iter().all(|byte| *byte == 0xA5));
     assert!(short_out.iter().all(|byte| *byte == 0xA5));
+}
+
+fn at_z(x: f64, y: f64, z: f64) -> Pt<World> {
+    Pt::new(x, y, z)
+}
+
+#[test]
+fn a_cut_off_the_midpoint_uses_t() {
+    // t = (1 - 0) / (4 - 0) = 0.25. x = 0.25 * 10. y = 0.25 * 4.
+    // A constant midpoint would be (5, 2, 1).
+    let rising = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![at_z(0.0, 0.0, 0.0), at_z(10.0, 4.0, 4.0)],
+    );
+    assert_eq!(
+        intersect_contour(&rising, 1.0),
+        Ok(contour(
+            ContourGeometricType::Point,
+            vec![at_z(2.5, 1.0, 1.0)]
+        ))
+    );
+    // t = (1 - 4) / (0 - 4) = 0.75. x = 0.75 * 8. y = 0.75 * 2.
+    // A constant 0.25 would be (2, 0.5, 1).
+    let falling = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![at_z(0.0, 0.0, 4.0), at_z(8.0, 2.0, 0.0)],
+    );
+    assert_eq!(
+        intersect_contour(&falling, 1.0),
+        Ok(contour(
+            ContourGeometricType::Point,
+            vec![at_z(6.0, 1.5, 1.0)]
+        ))
+    );
+}
+
+#[test]
+fn a_segment_crosses_the_plane_at_its_midpoint() {
+    let line = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![at_z(0.0, 0.0, 0.0), at_z(0.0, 0.0, 4.0)],
+    );
+    let cut = intersect_contour(&line, 2.0);
+    assert_eq!(
+        cut,
+        Ok(contour(
+            ContourGeometricType::Point,
+            vec![at_z(0.0, 0.0, 2.0)]
+        ))
+    );
+}
+
+#[test]
+fn an_open_polyline_crosses_the_plane_twice() {
+    let line = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![
+            at_z(0.0, 0.0, 0.0),
+            at_z(2.0, 0.0, 2.0),
+            at_z(4.0, 0.0, 0.0),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&line, 1.0),
+        Ok(contour(
+            ContourGeometricType::OpenPlanar,
+            vec![at_z(1.0, 0.0, 1.0), at_z(3.0, 0.0, 1.0)]
+        ))
+    );
+}
+
+#[test]
+fn a_contour_already_on_the_plane_keeps_its_kind() {
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, 0.0, 1.0),
+            at_z(2.0, 0.0, 1.0),
+            at_z(1.0, 2.0, 1.0),
+        ],
+    );
+    assert_eq!(intersect_contour(&closed, 1.0), Ok(closed));
+}
+
+#[test]
+fn negative_zero_is_not_the_positive_plane() {
+    let point = contour(ContourGeometricType::Point, vec![at_z(0.0, 0.0, -0.0)]);
+    assert_eq!(intersect_contour(&point, 0.0), Err(ContourError::Empty));
+    let rising = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![at_z(0.0, 0.0, -0.0), at_z(4.0, 0.0, 4.0)],
+    );
+    assert_eq!(intersect_contour(&rising, 0.0), Err(ContourError::Empty));
+}
+
+#[test]
+fn a_closed_contour_cut_stays_open() {
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, 0.0, 0.0),
+            at_z(2.0, 0.0, 0.0),
+            at_z(1.0, 1.0, 2.0),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&closed, 1.0),
+        Ok(contour(
+            ContourGeometricType::OpenPlanar,
+            vec![at_z(1.5, 0.5, 1.0), at_z(0.5, 0.5, 1.0)]
+        ))
+    );
+}
+
+#[test]
+fn a_non_finite_plane_is_refused() {
+    let line = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![at_z(0.0, 0.0, 0.0), at_z(0.0, 0.0, 4.0)],
+    );
+    assert_eq!(intersect_contour(&line, f64::NAN), Err(ContourError::Frame));
+    let broken = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![at_z(0.0, 0.0, f64::NAN), at_z(0.0, 0.0, 4.0)],
+    );
+    assert_eq!(intersect_contour(&broken, 1.0), Err(ContourError::Frame));
+}
+
+#[test]
+fn a_parallel_segment_off_the_plane_is_empty() {
+    let line = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![at_z(0.0, 0.0, 0.0), at_z(4.0, 0.0, 0.0)],
+    );
+    assert_eq!(intersect_contour(&line, 1.0), Err(ContourError::Empty));
+}
+
+#[test]
+fn a_shared_vertex_on_the_plane_is_emitted_once() {
+    let line = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![
+            at_z(0.0, 0.0, 0.0),
+            at_z(0.0, 0.0, 2.0),
+            at_z(0.0, 0.0, 0.0),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&line, 2.0),
+        Ok(contour(
+            ContourGeometricType::Point,
+            vec![at_z(0.0, 0.0, 2.0)]
+        ))
+    );
+}
+
+#[test]
+fn an_open_nonplanar_cut_is_open_planar() {
+    let line = contour(
+        ContourGeometricType::OpenNonplanar,
+        vec![
+            at_z(0.0, 0.0, 0.0),
+            at_z(2.0, 0.0, 2.0),
+            at_z(4.0, 1.0, 0.0),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&line, 1.0),
+        Ok(contour(
+            ContourGeometricType::OpenPlanar,
+            vec![at_z(1.0, 0.0, 1.0), at_z(3.0, 0.5, 1.0)]
+        ))
+    );
+    let on_plane = contour(
+        ContourGeometricType::OpenNonplanar,
+        vec![at_z(0.0, 0.0, 1.0), at_z(2.0, 0.0, 1.0)],
+    );
+    assert_eq!(intersect_contour(&on_plane, 1.0), Ok(on_plane));
+}
+
+#[test]
+fn a_contour_with_the_wrong_point_count_is_refused() {
+    let digon = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![at_z(0.0, 0.0, 0.0), at_z(1.0, 0.0, 2.0)],
+    );
+    assert_eq!(intersect_contour(&digon, 1.0), Err(ContourError::Length));
 }

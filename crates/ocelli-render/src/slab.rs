@@ -54,10 +54,11 @@ pub fn slab_compile_list(tier: Tier) -> [(PipelineKey, u32); 4] {
     ]
 }
 
-/// Fragment keys compiled for one tier.
+/// Fragment keys compiled for one tier, excluding the segmentation overlay.
 ///
 /// Stack composite, volume composite, then the four slab modes. Volume MIP
-/// and stack MIP are absent. Labelmap edge is absent.
+/// and stack MIP are absent. The overlay copy keys are registered beside
+/// this list.
 pub fn fragment_keys_for(tier: Tier) -> [PipelineKey; 6] {
     let [composite, mip, minip, average] = slab_compile_list(tier);
     [

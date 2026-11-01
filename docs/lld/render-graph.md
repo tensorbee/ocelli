@@ -1,6 +1,6 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062, F-063, F-064, F-065, F-066
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062, F-063, F-064, F-065, F-066, F-067
 **Last updated:** 2026-11-01
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
@@ -21,11 +21,12 @@ HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 ## The rules that hold
 
 **Pipelines compile at creation.** The composite stack pipeline, the
-composite volume ray, the composite segmentation overlay, and the four slab
-pipelines each have a shader body. Volume MIP, stack MIP and labelmap edge
-stay uncompiled. A lookup for an uncompiled key reports unavailable rather
-than aliasing composite, which is deviation D-07's honesty rule applied to
-a blend mode.
+composite volume ray, the segmentation overlay, and the four slab
+pipelines each have a shader body. The overlay compiles composite and
+labelmap edge projection on the same copy shader. Volume MIP, stack MIP,
+and labelmap edge on slab, volume and stack stay uncompiled. A lookup for
+an uncompiled key reports unavailable rather than aliasing composite, which
+is deviation D-07's honesty rule applied to a blend mode.
 
 **The composite overlay copies presenter bytes.** `show_labelmap` uploads
 the RGBA8 from `present_labelmap` in `ocelli-seg`. Index 0 is background
@@ -41,7 +42,15 @@ or the coverage. Equal bytes do not allocate a new texture. Tier C is
 those presenters. `show_labelmap` returns unavailable before it reads the
 grid. `show_contour` returns unavailable before it reads the points.
 `show_surface` returns unavailable before it reads the mesh. Labelmap edge
-returns unavailable before the grid is read. The frame still submits once.
+projection on the overlay uploads outline without fill. The caller fill
+flag does not change those bytes. Slab, volume and stack report that blend
+unavailable and do not draw composite. `show_contour` and `show_surface`
+return unavailable for that blend. Tier C `show_labelmap` returns
+unavailable before it reads the grid. `intersect_contour` cuts one contour
+by a patient Z plane on every tier. A point is on the plane when the Z bits
+match. One emitted point is `Point`. Two or more emitted points are
+open planar when the contour was not entirely on the plane. A contour
+already on the plane keeps its kind. The frame still submits once.
 
 **The overlay remembers one representation.** A new composite overlay
 starts as labelmap. `set_representation` on a stack, a slab or a volume
@@ -364,6 +373,7 @@ The stored format was `R32Float`. LINEAR read back
 `[0.0, 127.5, 255.0, 63.75]` on both sides. The gap at input 40 stayed.
 `LINEAR_EXACT` at input -160 was `0.0`. The script exited 0. Native
 `Backends::GL` found no adapter. That miss is not the tier B run. Slab MIP, MinIP and average have fragment bodies. Volume MIP and stack
-MIP stay uncompiled. LabelmapEdgeProjection
-waits for F-067. The carried LINEAR out-of-range finding is left where F-041
+MIP stay uncompiled. The segmentation overlay compiles labelmap edge
+projection on the existing copy shader. Slab, volume and stack do not.
+The carried LINEAR out-of-range finding is left where F-041
 recorded it.

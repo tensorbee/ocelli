@@ -18,7 +18,7 @@ pub enum LabelmapDrawError {
     TierCUnavailable,
     /// The viewport is not a segmentation overlay.
     NotOverlay,
-    /// The overlay blend is not composite. Labelmap edge stays uncompiled.
+    /// The overlay blend is neither composite nor labelmap edge projection.
     BlendUnavailable,
     /// The viewport is showing a different representation. The presenter did not run.
     RepresentationMismatch,
