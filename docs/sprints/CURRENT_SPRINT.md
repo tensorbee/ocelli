@@ -22,12 +22,12 @@ grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S24 / {print $2, $9}'
 
 ## What this sprint is
 
-S23 closed at tag `s23`. The merge is `8f2d179`. M6 started in S22 and is
-not complete. This sprint is the last M6 story. It intersects a
-segmentation with the displayed plane and compiles the labelmap
-edge-projection blend. Appendix B names that blend as the fifth mode.
-The HLD does not give its formula. The design plan records the local
-rule before any code.
+S23 closed at tag `s23`. The merge is `8f2d179`. M6 started in S22.
+F-067 is done. M6 stays open until this sprint closes. This sprint
+intersects a segmentation with the displayed plane and compiles the
+labelmap edge-projection blend. Appendix B names that blend as the fifth
+mode. The HLD does not give its formula. The design plan records the
+local rule.
 
 `BlendMode::LabelmapEdgeProjection` compiles for the segmentation overlay
 on the existing labelmap copy shader. Slab, volume and stack have no body
@@ -66,7 +66,8 @@ This open publishes nothing.
   a pass reports zero defects and zero smells. The stored number is not a
   stop. The per-feature microscope loop remains uncapped.
 - **M6 is not complete, and this open does not publish.** S23 closed
-  F-064, F-065 and F-066. F-067 is the remaining M6 story. M6 is S22 to
+  F-064, F-065 and F-066. F-067 is done. M6 stays open until this sprint
+  closes. M6 is S22 to
   S24, 5 stories and 16 engineer-weeks. `docs/RELEASE.md` maps one minor
   to each milestone from M2 to M12, so a finished M6 would name 0.6.0.
   M1 through M5 were not published. The workspace version is still 0.1.0.
@@ -137,5 +138,5 @@ whole-sprint review pass 1 clean at zero defects and zero smells. The gate
 tree is `97f98dab6687`. The merge is `8f2d179`. `scripts/backlog_check.py`,
 `scripts/gen_sprint_plan.py --check` and `scripts/deviation_check.py` are
 re-run at this open. The S24 allocation row and the S24 plan table name
-F-067. F-067 is pending. F-064, F-065 and F-066 are done. F-063 is done.
+F-067. F-067 is done. F-064, F-065 and F-066 are done. F-063 is done.
 F-X003 stays in progress.

@@ -26,7 +26,9 @@
 //! `set_clip_planes`. That call writes a 256-byte uniform and does not
 //! upload a brick. F-063 uploads a composite labelmap from `ocelli-seg`
 //! presenter bytes. The copy shader does not run the image VOI and does not
-//! recompute the outline. Labelmap edge stays uncompiled. F-045 writes
+//! recompute the outline. F-067 compiles labelmap edge projection for the
+//! segmentation overlay on that same copy shader and uploads outline
+//! without fill. Slab, volume and stack leave that blend uncompiled. F-045 writes
 //! the sixteen camera floats at group 0 binding 2. `set_view` does not
 //! write the VOI uniform. The oracle still has no Ocelli frame to judge.
 //! Decision D7 stays open.
