@@ -28,11 +28,12 @@ Fill covers the labelled voxels. Outline draws their boundary. The S22
 table in `docs/sprints/SPRINT_PLAN.md` and the S22 row in
 `docs/sprints/allocation.json` both name F-063.
 
-`ocelli-seg` is still the F-001 scaffold. HLD section 4 gives that crate
-the segmentation state and the three representations. HLD section 22 names
-the overlay pass `SegOverlay`. This sprint fills the labelmap
-representation. It does not reopen the image LUT chain, volume
-construction, fusion, or the candidate gate.
+`ocelli-seg` presents the labelmap. Index 0 stays transparent. Fill writes
+the segment colour and the outline is the one-pixel 4-connected boundary.
+HLD section 4 gives that crate the segmentation state and the three
+representations. HLD section 22 names the overlay pass `SegOverlay`.
+Contour and surface stay later stories. This sprint does not reopen the
+image LUT chain, volume construction, fusion, or the candidate gate.
 
 F-063 depends on F-041. That backlog row is `done`. The image VOI shader
 is not the segment colour table. Contour, surface, the representation
@@ -142,4 +143,4 @@ whole-sprint review pass 2 clean at zero defects and zero smells. The gate
 tree is `adb6adafd1f7`. The merge is `971376e`. `scripts/backlog_check.py`,
 `scripts/gen_sprint_plan.py --check` and `scripts/deviation_check.py` are
 re-run at this open. The S22 allocation row and the S22 plan table name
-F-063. F-063 is pending. F-X003 stays in progress.
+F-063. F-063 is done. F-X003 stays in progress.
