@@ -1,17 +1,13 @@
-# Current sprint, S21
+# Current sprint, S22
 
-**Milestone**: M5, volume, MPR and 3D rendering.
-**Branch**: `sprint/s21`
+**Milestone**: M6, segmentation rendering.
+**Branch**: `sprint/s22`
 **Opened**: 2026-11-01
-**Goal**: Transfer-function editing surface and preset library, Lighting, shading and gradient opacity, Cropping planes and volume clipping, CPU MPR and oblique reslicing, with SIMD inner loops, The CPU volume-rendering decision, and honest unavailability.
+**Goal**: Labelmap representation: colour LUT, fill and outline rendering.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-060 | E9.2 | Transfer-function editing surface and preset library | Rust | 3w | done |
-| F-061 | E9.3 | Lighting, shading and gradient opacity | Rust | 3w | done |
-| F-062 | E9.4 | Cropping planes and volume clipping | Rust | 4w | done |
-| F-X004 | X1.4 | CPU MPR and oblique reslicing, with SIMD inner loops | Rust | 5w | done |
-| F-X005 | X1.5 | The CPU volume-rendering decision, and honest unavailability | Rust+TS | 2w | done |
+| F-063 | E10.1 | Labelmap representation: colour LUT, fill and outline rendering | Rust | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -21,30 +17,28 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S21 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S22 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S20 closed at tag `s20`. The merge is `685f55d`. M5 continues. This sprint
-gives the volume ray cast a transfer function and a preset library, shades
-that ray, clips it to caller planes, and decides what the CPU tier may draw
-for MPR and for the volume view. The S21 table in
-`docs/sprints/SPRINT_PLAN.md` and the S21 rows in
-`docs/sprints/allocation.json` both name F-060, F-061, F-062, F-X004 and
-F-X005.
+S21 closed at tag `s21`. The merge is `971376e`. M5 is complete. M6 starts.
+This sprint draws a labelmap. The colour comes from that label's own LUT.
+Fill covers the labelled voxels. Outline draws their boundary. The S22
+table in `docs/sprints/SPRINT_PLAN.md` and the S22 row in
+`docs/sprints/allocation.json` both name F-063.
 
-F-059 ray-casts ready bricks. F-060 replaces its constant 0.5 opacity with
-a 256-entry table. F-061 multiplies that colour by a fragment shade and
-leaves the default unlit. F-052 samples the axial, sagittal and coronal planes of
-the constructed volume. This sprint consumes those views. It does not
-reopen volume construction, the LUT chain, fusion, or the candidate gate.
+`ocelli-seg` presents the labelmap. Index 0 stays transparent. Fill writes
+the segment colour and the outline is the one-pixel 4-connected boundary.
+HLD section 4 gives that crate the segmentation state and the three
+representations. HLD section 22 names the overlay pass `SegOverlay`.
+Contour and surface stay later stories. This sprint does not reopen the
+image LUT chain, volume construction, fusion, or the candidate gate.
 
-F-X004 and F-X005 also depend on F-X003. That backlog row is still
-`in-progress`, carried for lack of a representative GPU-less host. F-X005
-is done as the unavailable decision. F-X004 presents existing reslice
-samples through the existing `CpuRaster`. The story is done. It does not mark F-X003 done.
-F-060, F-061 and F-062 depend only on F-059, which is `done`.
+F-063 depends on F-041. That backlog row is `done`. The image VOI shader
+is not the segment colour table. Contour, surface, the representation
+registry and labelmap edge projection are later stories. Labelmap edge
+stays the uncompiled blend already left in place.
 
 This open publishes nothing.
 
@@ -53,9 +47,8 @@ This open publishes nothing.
 - **F-X003 is carried out of S16 and is not a story in this sprint.** AC6
   needs a representative GPU-less incumbent host, the operator has confirmed
   none is available, and no local diagnostic is accepted as that
-  measurement. Its backlog row stays `in-progress`. F-X005 is done without
-  that host. F-X004 is done and uses the raster already in the tree. The host
-  measurement stays unmet.
+  measurement. Its backlog row stays `in-progress`. F-063 does not depend
+  on it.
 - **The open LINEAR finding against `ocelli-pixel`'s own arithmetic** stays
   unscheduled. It has no F-ID. Clamping it so a readback matches is a
   tolerance change.
@@ -77,18 +70,18 @@ This open publishes nothing.
   responsible for counting whole-sprint passes and invoking `set-phase
   blocked` at the configured limit. The per-feature microscope loop remains
   uncapped. No automatic script transition is claimed.
-- **M5 is not complete, and this open does not publish.** S20 closed F-053,
-  F-054, F-055, F-056 and F-X021. `docs/RELEASE.md` maps one minor to each
-  milestone from M2 to M12, so a finished M5 would name 0.5.0. S21 remains.
-  M1, M2, M3 and M4 were not published. The workspace version is still
-  0.1.0. `/release` runs
+- **M5 is complete, and this open does not publish.** S21 closed F-060,
+  F-061, F-062, F-X004 and F-X005. `docs/RELEASE.md` maps one minor to each
+  milestone from M2 to M12, so a finished M5 names 0.5.0. M1, M2, M3 and M4
+  were not published. The workspace version is still 0.1.0. `/release` runs
   `python3 scripts/pin_and_size_check.py --require-redistribution`, and that
   command refuses while `openjph-core` 0.1.0 carries no BSD notice material,
   which is D-22. That blocks publication. It does not block this sprint.
-- **No new measured duration.** The S20 rows in `SPRINT_TRACKER.md` read
-  `not measured`, as does every earlier M5 and M4 row. There is no measured
-  total and no ratio. The capacity points remain the S03 and S06 closes.
-  This open does not invent a ratio and does not recalculate capacity.
+- **No new measured duration.** The M5 rows in `SPRINT_TRACKER.md` read
+  `not measured`, as does every earlier row this close inspected. There is
+  no measured total and no ratio. The capacity points remain the S03 and
+  S06 closes. This open does not invent a ratio and does not recalculate
+  capacity.
 - **F-X011** remains pending because its evidence needs a second physical
   machine. **ICC** is still unimplemented, the other half of HLD section 18's
   stage-4 row. Lossless JPEG-LS RGB at 8 bits, three components and sample
@@ -97,56 +90,34 @@ This open publishes nothing.
 
 ## The defect class this sprint is exposed to
 
-**An opacity that is not the named preset, a shade that rewrites the
-sample, a clip that is not the requested plane, or a CPU image that
-quietly differs from the GPU one.** HLD section 7 and section 19. The
-volume has one origin, one spacing and one direction. F-059 holds opacity
-at 0.5 until a transfer function exists. A preset that maps to a different
-curve is the wrong function. Changing the VOI window and calling it the
-transfer function is the same defect.
-
-Lighting and gradient opacity are optical. They are not a second window
-and they do not rewrite the stored sample. A crop cuts the ray in the
-patient frame. Dropping a whole brick, or clipping in canvas space, is
-the wrong crop.
-
-Section 7 makes a 3D-texture ray-cast legal on tier B. Deviation D-07 says
-a feature that cannot run on the resolved tier reports unavailable. F-X004
-has to sample the same plane F-052 already takes. F-X005 must not draw a
-slow CPU volume that differs from the tier A ray cast. Unavailable is a
-legitimate answer for that view.
+**A label drawn in a colour that is not its LUT entry, a fill that covers
+voxels the label does not own, or an outline that is not that label's
+boundary.** HLD section 22 and section 31. Section 31 says a segmentation
+mask should never round-trip through JavaScript to be drawn. Using the
+image VOI window as the segment colour is the wrong table. Drawing the
+outline as a second fill, or the fill as only the boundary, is the wrong
+representation. A tier that cannot draw the overlay reports unavailable. It
+does not alias `SegOverlay` to the composite stack pass.
 
 ## What done means
 
-- **F-060** replaces the constant 0.5 opacity with the caller's transfer
-  function and a named preset. The preset is that curve. It is not a VOI
-  window under another name.
-- **F-061** shades the ray and applies gradient opacity. The stored sample
-  stays the sample. A mode that cannot run on the resolved tier reports
-  unavailable.
-- **F-062** clips the ray to caller planes in the patient frame. A brick
-  that merely intersects the plane is not discarded whole.
-- **F-X004** presents the plane F-052 already defines, including an oblique
-  plane, through the existing `CpuRaster`. The scalar samples are that plane.
-  A missing SIMD measurement is not a passed timing row. The story is
-  `done`. F-X003 stays `in-progress`.
-- **F-X005** decides the CPU volume path. A quiet second image is not an
-  acceptable decision. Unavailable, said to the user, is. The story is
-  `done`. There is no CPU volume image.
-- **Each story declares all three tier rows**, and "n/a" is a real answer
+- **F-063** draws the labelmap fill and the labelmap outline from that
+  label's colour LUT. The LUT is not the image VOI chain. The outline is
+  the boundary of the labelled voxels. The mask stays with the drawer and
+  does not cross into JavaScript to be painted.
+- **Labelmap edge projection stays uncompiled.** That blend is F-067.
+  Contour and surface stay unbuilt. Those are F-064 and F-065.
+- **The story declares all three tier rows**, and "n/a" is a real answer
   that an omitted row is not.
 - `wasm-bindgen` remains confined to `ocelli-wasm`, pixels do not cross the
   boundary, and `ocelli-render` remains the only crate that may create a
-  device. The LUT arithmetic stays in `ocelli-pixel`.
+  device. The image LUT arithmetic stays in `ocelli-pixel`.
 
 ## Dependency order
 
-F-060, F-061 and F-062 depend on F-059. That backlog row is `done`.
-F-X004 depends on F-052 and F-X003. F-052 is `done`. F-X003 is
-`in-progress`. F-X005 depends on F-059 and F-X003. F-X005 is `done`.
-F-X004 is `done`. It uses the raster already in the tree. The
-representative GPU-less host stays unmeasured. No backlog cell in this
-sprint names another story in this sprint.
+F-063 depends on F-041. That backlog row is `done`. No backlog cell in this
+sprint names another story in this sprint. F-X003 stays `in-progress` and
+is not a dependency of F-063.
 
 ## Standing expectations
 
@@ -167,11 +138,9 @@ generalised by D-07.
 
 ## Audit intake, 2026-11-01
 
-S20 closed at tag `s20` with 31 of 31 gates green, the corpus passing, and
+S21 closed at tag `s21` with 31 of 31 gates green, the corpus passing, and
 whole-sprint review pass 2 clean at zero defects and zero smells. The gate
-tree is `93bf532df411`. The merge is `685f55d`. `scripts/backlog_check.py`,
+tree is `adb6adafd1f7`. The merge is `971376e`. `scripts/backlog_check.py`,
 `scripts/gen_sprint_plan.py --check` and `scripts/deviation_check.py` are
-green at this open. The S21 allocation rows and the S21 plan table name the
-same F-IDs. No new audit was run at this open.
-
-F-060, F-061, F-062, F-X004 and F-X005 are done. F-X003 stays in progress.
+re-run at this open. The S22 allocation row and the S22 plan table name
+F-063. F-063 is done. F-X003 stays in progress.

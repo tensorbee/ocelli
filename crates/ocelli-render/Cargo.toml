@@ -69,6 +69,9 @@ bytemuck = { workspace = true }
 # F-046. One match from the viewport colormap onto `PresetId`. The viewport
 # crate does not depend on this one, and this match does not create a device.
 ocelli-viewport = { path = "../ocelli-viewport" }
+# F-063. The label colour table, fill and outline live in ocelli-seg. This
+# crate uploads those bytes. The segmentation crate does not gain wgpu.
+ocelli-seg = { path = "../ocelli-seg" }
 
 [dev-dependencies]
 # F-057. The progressive tests build a `Volume`, whose direction is `DMat3`.

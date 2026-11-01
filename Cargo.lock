@@ -1066,6 +1066,7 @@ dependencies = [
  "ocelli-cache",
  "ocelli-core",
  "ocelli-pixel",
+ "ocelli-seg",
  "ocelli-viewport",
  "ocelli-volume",
  "pollster",

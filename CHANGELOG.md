@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- A composite segmentation overlay copies presenter bytes. Index 0 stays transparent. Fill writes the segment RGBA8. Outline is the one-pixel 4-connected boundary and uses alpha 255. A missing colour or both flags off writes nothing. Labelmap edge stays uncompiled. Tier C presents those bytes and does not upload a GPU image.
 - `bin/ocelli.sh compare produce` writes an Ocelli candidate image for every current oracle view. `compare gate` scores that directory. Colour, palette and YBR stay unscored. A missing image is absent and is not a pass.
 - Lossless JPEG-LS RGB with three components and sample interleave decodes to the stored samples. Line interleave, a non-zero NEAR and any other component count stay refused.
 - Two volumes that share one `FrameOfReferenceUID` can be drawn on one patient plane. Volume B is in front. An omitted colormap uses the existing window range. A second UID draws nothing. Tier C reports fusion unavailable and writes no CPU image.
