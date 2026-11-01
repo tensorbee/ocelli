@@ -11,7 +11,7 @@
 | F-054 | E8.4 | Thick slab with composite, MIP, MinIP and average blend modes | Rust | 4w | done |
 | F-055 | E8.5 | Slice-position sync and frame-of-reference handling | Rust | 3w | done |
 | F-056 | E8.6 | Multi-volume fusion with per-volume opacity and colormap (PET-CT) | Rust | 4w | done |
-| F-X021 | Y1.16 | Activate the full-corpus candidate-render gate against Ocelli output | Test | 3w | pending |
+| F-X021 | Y1.16 | Activate the full-corpus candidate-render gate against Ocelli output | Test | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -55,11 +55,10 @@ Ocelli output. Decision D7 holds. This open publishes nothing.
 - **The open LINEAR finding against `ocelli-pixel`'s own arithmetic** stays
   unscheduled. It has no F-ID. Clamping it so a readback matches is a
   tolerance change.
-- **The SIGMOID reference-width diagnosis** stays open in
-  `docs/lld/oracle.md`. The rendered reference codes fit width 0.5 while the
-  installed transfer-function path statically yields width 1.5. An oracle run
-  is needed to settle it. Do not change DICOM arithmetic or the parity policy
-  to settle it.
+- **The SIGMOID file width stays on the product LUT.** File width 0.5 at
+  centre 40 is about 4.586 under PS3.3 C.11.2.1.3.1. The pinned renderer
+  presents recovered width 1.5, and the candidate passes that window into
+  the same function. The product formula is not changed to settle it.
 - **Tier B greyscale has been drawn.** F-042 ran the section 18.3 rows on
   this host through headless Chromium WebGL2 and matched `LutChain::map_into`
   within 0.001, format `R32Float`. A tier B colour LUT readback was not run.
@@ -89,7 +88,9 @@ Ocelli output. Decision D7 holds. This open publishes nothing.
   This open does not invent a ratio and does not recalculate capacity.
 - **F-X011** remains pending because its evidence needs a second physical
   machine. **ICC** is still unimplemented, the other half of HLD section 18's
-  stage-4 row. Multi-component JPEG-LS decoding is still owed.
+  stage-4 row. Lossless JPEG-LS RGB at 8 bits, three components and sample
+  interleave now decodes. Line interleave, a non-zero NEAR and any other
+  component count stay refused.
 
 ## The defect class this sprint is exposed to
 
@@ -167,4 +168,4 @@ tree is `2a9588eb4eaf`. The merge is `6808930`. `scripts/backlog_check.py`,
 green at this open. The S20 allocation rows and the S20 plan table name the
 same F-IDs. No new audit was run at this open.
 
-F-053, F-054, F-055 and F-056 are done. F-X021 is pending.
+F-053, F-054, F-055, F-056 and F-X021 are done.

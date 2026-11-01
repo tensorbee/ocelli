@@ -183,14 +183,17 @@ def _prepare_control(box: sb.Sandbox, probe: Probe) -> None:
     elif key == "git push, hooks enabled":
         # A healthy repository pushes a head that carries its trailer, and the
         # trailer is written by the commit-msg hook from a ledger entry a real
-        # gate run produced. So the control has to produce one the same way,
-        # and it is not forgeable: verify_ledger.py trailer emits nothing
-        # without a record for that exact tree.
+        # gate run produced. Pre-push requires comparison evidence, so this
+        # control records a green comparison report for that same tree. The
+        # trailer is not forgeable: verify_ledger.py emits nothing without a
+        # record for that exact tree.
         box.enable_hooks()
         box.write("probe-note.txt", "a benign change\n")
         box.stage_all()
+        write_green_comparison_report()
         box.run(["python3", "scripts/verify_ledger.py", "record",
-                 "--gates", "fmt", "--corpus", "pass", "--profile", "sprint"])
+                 "--gates", "fmt", "--corpus", "pass", "--profile", "sprint",
+                 "--comparison-report", ".claude/probe-comparison.json"])
         box.git("commit", "-m", "F-000, a probe")
     elif key.startswith("python3 scripts/verify_ledger.py record") \
             and "--comparison-report" in key:

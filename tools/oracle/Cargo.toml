@@ -16,11 +16,13 @@ workspace = true
 [dependencies]
 dicom-core = { workspace = true }
 ocelli-codec = { path = "../../crates/ocelli-codec" }
+ocelli-cache = { path = "../../crates/ocelli-cache" }
 ocelli-core = { path = "../../crates/ocelli-core" }
 ocelli-dicom = { path = "../../crates/ocelli-dicom" }
 ocelli-pixel = { path = "../../crates/ocelli-pixel" }
 ocelli-render = { path = "../../crates/ocelli-render" }
 ocelli-viewport = { path = "../../crates/ocelli-viewport" }
+ocelli-volume = { path = "../../crates/ocelli-volume" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

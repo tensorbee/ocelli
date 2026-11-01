@@ -110,6 +110,23 @@ python3 scripts/verify_ledger.py record \
   --profile <profile>
 ```
 
+The sprint profile also records the candidate gate and then requires it.
+The report is the green `compare gate` output for a `compare produce`
+directory that contains every current view.
+
+```bash
+python3 scripts/verify_ledger.py record \
+  --gates <the gates that actually ran> \
+  --corpus <pass|fail|absent> \
+  --profile sprint \
+  --comparison-report <path to compare.json>
+python3 scripts/verify_ledger.py assert --require-comparison
+```
+
+A feature-profile record does not pass `--require-comparison`. The CI
+evidence job stays `check-commit HEAD` and does not render. Pre-push passes
+`--require-comparison`, so a head without that claim is not pushed.
+
 This keys on `git write-tree`, the hash of the current index.
 `.githooks/commit-msg` appends the `Ocelli-Verify` and `Ocelli-Generated-By`
 trailers from that entry (HLD 27.2 R6). Pre-commit warns if the receipt is

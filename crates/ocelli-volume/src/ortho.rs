@@ -163,6 +163,19 @@ impl Volume {
     /// spacing, direction or dimensions cannot be sampled. Nothing is
     /// allocated in that case.
     pub fn reslice_oblique(&self, plane: ObliquePlane) -> Result<OrthoImage, VolumeError> {
+        self.fill_oblique(plane, false)
+    }
+
+    /// Nearest patient plane. The index is rounded, then [`Self::sample_at`] reads that voxel.
+    ///
+    /// Half away from zero on a positive index. A negative index at or below
+    /// `-0.5` is absent. This is the `NEAREST` sample the volume viewport asks
+    /// for. It is not a second reconstruction.
+    pub fn reslice_nearest(&self, plane: ObliquePlane) -> Result<OrthoImage, VolumeError> {
+        self.fill_oblique(plane, true)
+    }
+
+    fn fill_oblique(&self, plane: ObliquePlane, nearest: bool) -> Result<OrthoImage, VolumeError> {
         let Some(count) = oblique_pixel_count(self, &plane) else {
             return Err(VolumeError::ObliquePlane);
         };
@@ -177,7 +190,12 @@ impl Volume {
                 let i = self.direction.col(0).dot(delta) / self.spacing[0];
                 let j = self.direction.col(1).dot(delta) / self.spacing[1];
                 let k = self.direction.col(2).dot(delta) / self.spacing[2];
-                samples.push(self.sample_at(i, j, k));
+                let sample = if nearest {
+                    self.sample_nearest(i, j, k)
+                } else {
+                    self.sample_at(i, j, k)
+                };
+                samples.push(sample);
                 column = column.saturating_add(1);
             }
             row = row.saturating_add(1);
@@ -189,6 +207,19 @@ impl Volume {
             row_mm: plane.row_mm,
             samples,
         })
+    }
+
+    fn sample_nearest(&self, i: f64, j: f64, k: f64) -> PlaneSample {
+        let Some(i) = nearest_index(i) else {
+            return PlaneSample::Absent;
+        };
+        let Some(j) = nearest_index(j) else {
+            return PlaneSample::Absent;
+        };
+        let Some(k) = nearest_index(k) else {
+            return PlaneSample::Absent;
+        };
+        self.sample_at(i, j, k)
     }
 
     pub(crate) fn in_range(&self, index: f64, dim: u32, axis: u8) -> Result<(), VolumeError> {
@@ -335,6 +366,26 @@ fn voxel_of(plane: OrthoPlane, a: u32, b: u32) -> (f64, f64, f64) {
 fn is_zero(weight: f64) -> bool {
     let bits = weight.to_bits();
     bits == 0 || bits == 1_u64 << 63
+}
+
+/// Nearest integer for a voxel index. Positive halves move away from zero.
+fn nearest_index(index: f64) -> Option<f64> {
+    if !index.is_finite() {
+        return None;
+    }
+    if index < 0.0 {
+        if index > -0.5 {
+            return Some(0.0);
+        }
+        return None;
+    }
+    let base = floor_nonneg(index);
+    let fraction = index - base;
+    if fraction >= 0.5 {
+        Some(base + 1.0)
+    } else {
+        Some(base)
+    }
 }
 
 /// Floor of a non-negative finite value. `f64::floor` is not in `no_std`.

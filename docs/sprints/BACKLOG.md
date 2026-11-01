@@ -211,7 +211,7 @@ Volumes assemble progressively, reslice obliquely and ray-cast on both tiers.
 | F-062 | E9.4 | S21 | Cropping planes and volume clipping | Rust | 4w | F-059 | pending |
 | F-X004 | X1.4 | S21 | CPU MPR and oblique reslicing, with SIMD inner loops | Rust | 5w | F-052, F-X003 | pending |
 | F-X005 | X1.5 | S21 | The CPU volume-rendering decision, and honest unavailability | Rust+TS | 2w | F-059, F-X003 | pending |
-| F-X021 | Y1.16 | S20 | Activate the full-corpus candidate-render gate against Ocelli output | Test | 3w | F-012, F-052 | pending |
+| F-X021 | Y1.16 | S20 | Activate the full-corpus candidate-render gate against Ocelli output | Test | 3w | F-012, F-052 | done |
 
 ### M6, Segmentation rendering
 

@@ -8,15 +8,21 @@
 //!
 //! The dependency's `PixelLayout` applies a modality rescale. Slope is pinned to
 //! `1.0` and intercept to `0.0` at the one call site, so HLD section 18's
-//! arithmetic still exists exactly once, in `ocelli-pixel`.
+//! arithmetic still exists exactly once, in `ocelli-pixel`. The dependency
+//! refuses a multi-component scan. One shape is decoded here instead: 8-bit
+//! RGB, `NEAR` zero, sample interleaved. Every other multi-component codestream
+//! is still refused.
+
+mod sample_interleaved;
 
 use std::sync::Arc;
 
 use ritk_codecs::{PixelLayout, PixelSignedness, decode_jpeg_ls_fragment};
 
 use crate::{
-    Capability, CodecError, Decoder, FrameDesc, PixelDataVr, PixelRepresentation, Registry,
-    RegistryError, sample_convert::convert_samples,
+    Capability, CodecError, DecodePhotometricInterpretation, DecodeSampleLayout, Decoder,
+    FrameDesc, PixelDataVr, PixelRepresentation, Registry, RegistryError,
+    sample_convert::convert_samples,
 };
 
 const JPEGLS_LOSSLESS_UID: &str = "1.2.840.10008.1.2.4.80";
@@ -86,6 +92,25 @@ impl Decoder for JpegLsDecoder {
         }
     }
 
+    fn decode_photometric_interpretation(
+        &self,
+        desc: &FrameDesc,
+    ) -> DecodePhotometricInterpretation {
+        if self.mode == Mode::Lossless && rgb8_frame(desc) {
+            DecodePhotometricInterpretation::Rgb
+        } else {
+            DecodePhotometricInterpretation::Preserved
+        }
+    }
+
+    fn decode_sample_layout(&self, desc: &FrameDesc) -> DecodeSampleLayout {
+        if self.mode == Mode::Lossless && rgb8_frame(desc) {
+            DecodeSampleLayout::Interleaved
+        } else {
+            DecodeSampleLayout::Preserved
+        }
+    }
+
     fn decode(&self, src: &[u8], desc: &FrameDesc, out: &mut [u8]) -> Result<(), CodecError> {
         if out.len() != desc.output_len() {
             return Err(CodecError::OutputLength {
@@ -97,6 +122,21 @@ impl Decoder for JpegLsDecoder {
         let codestream = logical_codestream(src)?;
         let header = inspect_headers(codestream)?;
         validate_header(self.mode, header, desc)?;
+        if rgb8_frame(desc) {
+            // The sample-interleaved decoder is the lossless 8-bit scan only.
+            // A near-lossless UID, including one whose NEAR is above zero,
+            // stays refused rather than being read with the lossless thresholds.
+            if self.mode != Mode::Lossless {
+                return Err(CodecError::UnsupportedPixelFormat);
+            }
+            let decoded =
+                sample_interleaved::decode(colour_scan(codestream)?, desc.rows(), desc.columns())?;
+            if decoded.len() != out.len() {
+                return Err(CodecError::InvalidCodestream);
+            }
+            out.copy_from_slice(&decoded);
+            return Ok(());
+        }
 
         let signedness = match desc.pixel_representation() {
             PixelRepresentation::Unsigned => PixelSignedness::Unsigned,
@@ -120,11 +160,23 @@ impl Decoder for JpegLsDecoder {
     }
 }
 
+/// 8-bit interleaved RGB. This is the one multi-component shape decoded here.
+fn rgb8_frame(desc: &FrameDesc) -> bool {
+    desc.pixel_data_vr() == PixelDataVr::Ob
+        && desc.samples_per_pixel() == 3
+        && desc.bits_allocated() == 8
+        && desc.bits_stored() == 8
+        && desc.pixel_representation() == PixelRepresentation::Unsigned
+        && desc.photometric_interpretation() == "RGB"
+}
+
 fn validate_descriptor(desc: &FrameDesc) -> Result<(), CodecError> {
-    // Multi-component JPEG-LS is refused here, before the dependency is
-    // reached, so the refusal is ours and typed. A DICOM JPEG-LS frame can be
-    // RGB, and neither candidate gate A2 measured decodes one, so this reports
-    // unavailable rather than producing a wrong pixel.
+    if rgb8_frame(desc) {
+        return Ok(());
+    }
+    // Every other multi-component or colour shape is refused before a sample
+    // is written. A monochrome descriptor paired with a colour codestream is
+    // caught later, because this check cannot see the codestream.
     if desc.pixel_data_vr() != PixelDataVr::Ob
         || desc.samples_per_pixel() != 1
         || !matches!(desc.bits_allocated(), 8 | 16)
@@ -288,9 +340,15 @@ fn parse_sos(payload: &[u8]) -> Result<(u8, u8), CodecError> {
 }
 
 fn validate_header(mode: Mode, header: Headers, desc: &FrameDesc) -> Result<(), CodecError> {
-    // Single component and non-interleaved only. Both are refusals rather than
-    // wrong pixels, and both match what the vendored decoder itself accepts.
-    if header.components != 1 || header.interleave != 0 {
+    // Two accepted shapes. Anything else, including line interleave, is a
+    // refusal rather than a wrong pixel. The vendored decoder still accepts
+    // only the single-component arm.
+    let sample_interleaved = header.components == 3 && header.interleave == 2;
+    let single = header.components == 1 && header.interleave == 0;
+    if !sample_interleaved && !single {
+        return Err(CodecError::UnsupportedPixelFormat);
+    }
+    if sample_interleaved && !rgb8_frame(desc) {
         return Err(CodecError::UnsupportedPixelFormat);
     }
     if header.rows != desc.rows()
@@ -310,7 +368,70 @@ fn validate_header(mode: Mode, header: Headers, desc: &FrameDesc) -> Result<(), 
     if !near_is_valid {
         return Err(CodecError::FrameMismatch);
     }
+    if single
+        && (desc.samples_per_pixel() != 1
+            || !matches!(
+                desc.photometric_interpretation(),
+                "MONOCHROME1" | "MONOCHROME2"
+            ))
+    {
+        return Err(CodecError::FrameMismatch);
+    }
     Ok(())
+}
+
+/// Bytes of one scan, from the end of SOS through the byte before EOI.
+///
+/// The colour decoder accepts SOF55 and SOS only. An LSE preset, a restart
+/// interval, or any other marker would change the coding parameters, and
+/// ignoring one would decode a different image.
+fn colour_scan(src: &[u8]) -> Result<&[u8], CodecError> {
+    let mut offset = 2usize;
+    let mut saw_frame = false;
+    while offset.checked_add(4).is_some_and(|end| end <= src.len()) {
+        if src.get(offset) != Some(&0xff) {
+            return Err(CodecError::InvalidCodestream);
+        }
+        let marker = *src.get(offset + 1).ok_or(CodecError::InvalidCodestream)?;
+        if matches!(marker, SOI | EOI) {
+            return Err(CodecError::InvalidCodestream);
+        }
+        let length = usize::from(read_u16(src, offset + 2)?);
+        if length < 2 {
+            return Err(CodecError::InvalidCodestream);
+        }
+        let end = offset
+            .checked_add(2)
+            .and_then(|value| value.checked_add(length))
+            .ok_or(CodecError::InvalidCodestream)?;
+        if end > src.len() {
+            return Err(CodecError::InvalidCodestream);
+        }
+        match marker {
+            SOF55 => {
+                if saw_frame {
+                    return Err(CodecError::InvalidCodestream);
+                }
+                saw_frame = true;
+            }
+            SOS => {
+                if !saw_frame {
+                    return Err(CodecError::InvalidCodestream);
+                }
+                let scan_end = src
+                    .len()
+                    .checked_sub(2)
+                    .ok_or(CodecError::InvalidCodestream)?;
+                if end > scan_end || src.get(scan_end..scan_end + 2) != Some(&[0xff, EOI]) {
+                    return Err(CodecError::InvalidCodestream);
+                }
+                return src.get(end..scan_end).ok_or(CodecError::InvalidCodestream);
+            }
+            _ => return Err(CodecError::UnsupportedPixelFormat),
+        }
+        offset = end;
+    }
+    Err(CodecError::InvalidCodestream)
 }
 
 fn read_u16(src: &[u8], offset: usize) -> Result<u16, CodecError> {

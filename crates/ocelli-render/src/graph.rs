@@ -558,8 +558,10 @@ pub enum UploadError {
 ///
 /// `colour.mode` 2 indexes the table by the stored sample and does not call
 /// `lut_chain`. `colour.mode` 1 calls `lut_chain` and indexes by that display
-/// value. Mode 0 is the greyscale normalisation, and it still emits the
-/// unclamped display value.
+/// value. Grey LINEAR and LINEAR_EXACT with output range 0 to 255 and
+/// `colour.pad` 1 read the same 1024 ramp as `reference_ramp_index`. SIGMOID
+/// stays on `table_index`. Mode 0 is the greyscale normalisation, and it
+/// still emits the unclamped display value.
 const GRAPH_WGSL: &str = r"
 struct ColourParams {
     mode : u32,
@@ -576,6 +578,65 @@ struct DeviceCamera {
 @group(0) @binding(2) var<uniform> camera : DeviceCamera;
 @group(1) @binding(0) var stored_tex : texture_2d<f32>;
 @group(1) @binding(1) var colour_lut : texture_2d<f32>;
+
+fn round_half_even_byte(value : f32) -> f32 {
+    if ((value - value) != 0.0 || !(value > 0.0)) {
+        return 0.0;
+    }
+    if (value >= 255.0) {
+        return 255.0;
+    }
+    let base = floor(value);
+    let fraction = value - base;
+    if (fraction > 0.5) {
+        return base + 1.0;
+    }
+    if (fraction < 0.5) {
+        return base;
+    }
+    let half = base * 0.5;
+    if (floor(half) == half) {
+        return base;
+    }
+    return base + 1.0;
+}
+
+// Same byte as `reference_ramp_index` in colour.rs. `inverted` is voi.invert.
+fn reference_ramp_byte(display : f32, inverted : bool) -> i32 {
+    if ((display - display) != 0.0) {
+        return 0;
+    }
+    var rising = display;
+    if (inverted) {
+        rising = 255.0 - display;
+    }
+    if ((rising - rising) != 0.0 || !(rising > 0.0)) {
+        if (inverted) {
+            return 255;
+        }
+        return 0;
+    }
+    if (rising >= 255.0) {
+        if (inverted) {
+            return 0;
+        }
+        return 255;
+    }
+    let width = 1024.0;
+    let edge = 0.5 / width;
+    var coord = rising / 255.0;
+    if (coord < edge) {
+        coord = edge;
+    } else if (coord > 1.0 - edge) {
+        coord = 1.0 - edge;
+    }
+    let bin = floor(coord * width) / 1023.0;
+    var sample = bin;
+    if (inverted) {
+        sample = 1.0 - bin;
+    }
+    return i32(round_half_even_byte(sample * 255.0));
+}
 
 @vertex
 fn vs_main(@builtin(vertex_index) index : u32) -> @builtin(position) vec4<f32> {
@@ -604,7 +665,14 @@ fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
     }
     let display = lut_chain(stored);
     if (colour.mode == 1u) {
-        let index = table_index(display, colour.last);
+        let linear = voi.fn_kind == 0u || voi.fn_kind == 1u;
+        let unit_range = voi.ymin == 0.0 && voi.ymax == 255.0;
+        let ramp = colour.pad == 1u && linear && unit_range;
+        let index = select(
+            table_index(display, colour.last),
+            reference_ramp_byte(display, voi.invert != 0u),
+            ramp
+        );
         return textureLoad(colour_lut, vec2<i32>(index, 0), 0);
     }
     // Normalise the display value into the colour target range. The full

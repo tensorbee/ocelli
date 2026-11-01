@@ -231,11 +231,10 @@ fn the_two_uids_are_not_interchangeable() -> TestResult {
 }
 
 #[test]
-fn multi_component_and_colour_descriptors_are_refused_before_the_dependency() -> TestResult {
-    // A DICOM JPEG-LS frame can be RGB and neither route gate A2 measured
-    // decodes one. The refusal is ours and typed, and it happens before the
-    // dependency is called, so the capability statement is honest rather than
-    // an opaque dependency string.
+fn an_rgb_descriptor_does_not_decode_the_monochrome_codestream() -> TestResult {
+    // The lossless monochrome fixture is 16-bit and single-component. An 8-bit
+    // RGB descriptor names a different frame, so the answer is a mismatch and
+    // not a decoded image. The check still happens before the vendored decoder.
     let colour = FrameDesc::new(FrameDescInput {
         rows: 64,
         columns: 96,
@@ -254,7 +253,7 @@ fn multi_component_and_colour_descriptors_are_refused_before_the_dependency() ->
             &colour,
             &mut out,
         ),
-        Err(CodecError::UnsupportedPixelFormat)
+        Err(CodecError::FrameMismatch)
     );
     assert!(out.iter().all(|byte| *byte == 0xa5));
 
@@ -314,16 +313,16 @@ fn a_multi_component_codestream_is_refused_by_the_header_check() -> TestResult {
 /// so the refusal now has a real encoder's three-component output behind it.
 ///
 /// **This is not a duplicate of the test above.** That one is a repository
-/// local 16 by 16 fixture encoded LINE-interleaved, `ILV = 1`. This one is a
-/// corpus row encoded SAMPLE-interleaved, `ILV = 2`. The adapter's condition is
-/// `interleave != 0`, so a test at one value cannot speak for the other, and
-/// only one of the two is manifest backed.
+/// local 16 by 16 fixture encoded LINE-interleaved, `ILV = 1`, and every
+/// descriptor refuses it. This one is a corpus row encoded SAMPLE-interleaved,
+/// `ILV = 2`. An RGB descriptor decodes that row. A monochrome descriptor does
+/// not, so a test at one interleave cannot speak for the other, and only one
+/// of the two is manifest backed.
 ///
-/// The descriptor is single-sample monochrome at the frame's real dimensions,
-/// so every earlier check passes and the codestream header check is the one
-/// that fires. Nothing is decoded, which is the point: the adopted crate has no
-/// multi-component support and the required behaviour is a clean refusal rather
-/// than a wrong pixel.
+/// The descriptor is single-sample monochrome at the frame's real dimensions.
+/// The codestream is three-component sample-interleaved RGB. A monochrome
+/// description of that codestream is still refused, and nothing is written.
+/// The RGB descriptor is a different test, and it must reproduce the ramp.
 #[test]
 fn the_manifest_backed_sample_interleaved_colour_row_is_refused() -> TestResult {
     let desc = frame(64, 96, 8, 8, PixelRepresentation::Unsigned, "MONOCHROME2")?;
@@ -340,6 +339,117 @@ fn the_manifest_backed_sample_interleaved_colour_row_is_refused() -> TestResult 
     // would leave a caller holding half a decoded image and an error.
     assert!(out.iter().all(|byte| *byte == 0xa5));
     Ok(())
+}
+
+#[test]
+fn sample_interleaved_rgb_reproduces_the_uncompressed_ramp() -> TestResult {
+    // `syntax/jpegls_lossless_rgb8.dcm` is the RGB reference encoded losslessly,
+    // so the decode must equal `scripts/corpus_synth.py`'s `rgb_ramp` at
+    // `SYNTAX_ROWS` by `SYNTAX_COLS`. That ramp is red along the columns, green
+    // along the rows, and blue the integer mean of the two. It comes from no
+    // codec. `.81` is the wrong UID for a NEAR of zero.
+    let desc = FrameDesc::new(FrameDescInput {
+        rows: 64,
+        columns: 96,
+        samples_per_pixel: 3,
+        bits_allocated: 8,
+        bits_stored: 8,
+        high_bit: 7,
+        pixel_representation: PixelRepresentation::Unsigned,
+        photometric_interpretation: "RGB".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
+    })?;
+    assert_eq!(
+        JpegLsDecoder::lossless().decode_photometric_interpretation(&desc),
+        DecodePhotometricInterpretation::Rgb
+    );
+    assert_eq!(
+        JpegLsDecoder::lossless().decode_sample_layout(&desc),
+        DecodeSampleLayout::Interleaved
+    );
+    assert_eq!(
+        JpegLsDecoder::near_lossless().decode_photometric_interpretation(&desc),
+        DecodePhotometricInterpretation::Preserved
+    );
+
+    let source = include_bytes!("fixtures/jpegls_corpus_rgb8.jls");
+    let mut out = vec![0xa5; desc.output_len()];
+    assert_eq!(
+        JpegLsDecoder::near_lossless().decode(source, &desc, &mut out),
+        Err(CodecError::FrameMismatch)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+
+    JpegLsDecoder::lossless().decode(source, &desc, &mut out)?;
+    let expected = rgb_ramp(64, 96);
+    assert_eq!(out.len(), expected.len());
+    let mut mismatches = 0usize;
+    let mut first = None;
+    for (index, (got, want)) in out.iter().zip(expected.iter()).enumerate() {
+        if got != want {
+            mismatches += 1;
+            if first.is_none() {
+                first = Some(index);
+            }
+        }
+    }
+    assert_eq!(mismatches, 0, "first sample index {first:?}");
+    Ok(())
+}
+
+#[test]
+fn a_near_lossless_rgb_codestream_is_refused() -> TestResult {
+    // The lossless fixture's NEAR byte is zero. Raising it to one makes a
+    // legal `.81` header. That scan is still refused. The lossless thresholds
+    // must not decode it, and the output buffer stays untouched.
+    let desc = FrameDesc::new(FrameDescInput {
+        rows: 64,
+        columns: 96,
+        samples_per_pixel: 3,
+        bits_allocated: 8,
+        bits_stored: 8,
+        high_bit: 7,
+        pixel_representation: PixelRepresentation::Unsigned,
+        photometric_interpretation: "RGB".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
+    })?;
+    let mut source = include_bytes!("fixtures/jpegls_corpus_rgb8.jls").to_vec();
+    assert_eq!(source.get(32).copied(), Some(0));
+    assert_eq!(source.get(33).copied(), Some(2));
+    let Some(near) = source.get_mut(32) else {
+        return Err("NEAR byte missing".into());
+    };
+    *near = 1;
+    let mut out = vec![0xa5; desc.output_len()];
+    assert_eq!(
+        JpegLsDecoder::near_lossless().decode(&source, &desc, &mut out),
+        Err(CodecError::UnsupportedPixelFormat)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+    assert_eq!(
+        JpegLsDecoder::lossless().decode(&source, &desc, &mut out),
+        Err(CodecError::FrameMismatch)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+    Ok(())
+}
+
+/// `scripts/corpus_synth.py` `rgb_ramp` for the syntax-sized colour reference.
+fn rgb_ramp(rows: u32, columns: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    let row_span = rows.saturating_sub(1).max(1);
+    let column_span = columns.saturating_sub(1).max(1);
+    for row in 0..rows {
+        let green = (row * 255) / row_span;
+        for column in 0..columns {
+            let red = (column * 255) / column_span;
+            let blue = (red + green) / 2;
+            out.push(u8::try_from(red).unwrap_or(255));
+            out.push(u8::try_from(green).unwrap_or(255));
+            out.push(u8::try_from(blue).unwrap_or(255));
+        }
+    }
+    out
 }
 
 #[test]

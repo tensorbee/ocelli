@@ -10,6 +10,10 @@
 //! snap is 120. Store index 1 changed from 30 to 38 adds 1, so the pixel is 96.
 //! `P(1, 0)` is `(1.5, 0.5, 0.5)` and is outside the grid.
 //!
+//! `reslice_nearest` rounds `(0.5, 0.5, 0.5)` half away from zero to
+//! `(1, 1, 1)`. That voxel is 170. The trilinear mix of the same point
+//! stays 95.
+//!
 //! Slice 1 absent on that same pixel is `Absent`. Stored zero would be 25.
 //! Renormalising the four present corners would be 50. The literals below are
 //! 95, 96, 10 and 60. This file does not call `sample_at`.
@@ -44,6 +48,18 @@ fn half_voxel_oblique_is_the_trilinear_mix() {
     let mutated = sampled(&volume, plane);
     assert_eq!(present_bits(at(&mutated, 0, 0)), 96.0_f32.to_bits());
     assert!(matches!(at(&mutated, 1, 0), PlaneSample::Absent));
+}
+
+#[test]
+fn nearest_half_index_reads_the_upper_voxel() {
+    let volume = identity_volume(true);
+    let image = volume.reslice_nearest(mix_plane());
+    let Ok(image) = image else {
+        unreachable!("the fixture plane is inside the identity volume")
+    };
+    assert_eq!(present_bits(at(&image, 0, 0)), 170.0_f32.to_bits());
+    assert_ne!(present_bits(at(&image, 0, 0)), 95.0_f32.to_bits());
+    assert!(matches!(at(&image, 1, 0), PlaneSample::Absent));
 }
 
 #[test]

@@ -119,6 +119,23 @@ fn sigmoid_minus_sixty_is_255_over_one_plus_e() {
 }
 
 #[test]
+fn sigmoid_width_below_one_keeps_the_file_width() {
+    let narrow = require_ok!(VoiTransform::new(
+        None,
+        &[40.0],
+        &[0.5],
+        0,
+        VoiFunction::Sigmoid,
+        0.0,
+        255.0
+    ));
+
+    // PS3.3 C.11.2.1.3.1 at c=40, w=0.5, x=39.5. The exponent is 4.
+    // y = 255 / (1 + exp(4)).
+    assert_close(narrow.apply(Modality(39.5)).0, 4.586_483_5);
+}
+
+#[test]
 fn each_function_refuses_its_invalid_width() {
     assert!(VoiTransform::new(None, &[0.0], &[0.5], 0, VoiFunction::Linear, 0.0, 255.0).is_err());
     assert!(

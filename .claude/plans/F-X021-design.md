@@ -131,12 +131,19 @@ Those stack frames and those three orientations are the current views. `volume__
 
 The HLD does not name the producer, the candidate directory, or `--require-comparison`. The decisions below are local. They are not a new deviation.
 
-1. The producer is a new test or tool entry. It writes a candidate directory in the existing F-012 layout. It calls Ocelli decode, the existing LUT, and the F-052 ortho reslice. It does not call cornerstone. It does not copy reference pixels into the candidate frame bytes.
+1. The producer is a new test or tool entry. It writes a candidate directory in the existing F-012 layout. It calls Ocelli decode, the existing LUT, and the volume cut in decision 5. It does not call cornerstone. It does not copy reference pixels into the candidate frame bytes.
 2. `--require-comparison` becomes required on the local sprint profile and on `check-commit` for commits that claim comparison evidence. The producer writes a real Ocelli image for every current view before that flag is bound. A missing image is absent and fails. CI still does not render. It reads the trailer. D-04 stays.
 3. Section 25.1 tolerances stay as written. `tools/oracle/render-params.json` and `tools/oracle/volume-params.json` stay as written.
 4. Colour views that the current Ocelli stack path cannot score stay a named gap. They are not marked `pass`. Palette and YBR stay in that same gap. This story does not choose a perceptual metric and does not move D-16.
+5. The candidate applies the pinned renderer's reconstruction around the product calls. The product LUT, `StoredBits::new`, `Volume::construct` and `decode_extended` stay on their existing rules.
+   - A SIGMOID file width in `(0, 1)` is presented at the recovered window and then evaluated by the unchanged C.11.2.1.3.1 function. Width 0.5 at centre 40 is width 1.5 at centre 40. The product LUT keeps the file width.
+   - An irregular series `Volume::construct` refuses as non-uniform spacing is placed on the endpoint grid and then constructed. A duplicate position or a sheared stack stays refused.
+   - The volume cut is the reference canvas sampled with NEAREST, because `render-params.json` sets interpolation to NEAREST. `Volume::reslice_nearest` rounds a positive half away from zero and then calls `sample_at`. The displayed byte is the thin composite of the 1024 colour table, then the quad blend.
+   - Unsigned 12-bit samples of transfer syntax `1.2.840.10008.1.2.4.51` gain the jpeg.js residual of 15 after product decode. The codec return value does not.
+   - A native frame whose high bit is not `BitsStored - 1` is unpacked with the conforming high bit. `StoredBits::new` still refuses the file high bit.
+   - Grey `LINEAR` and `LINEAR_EXACT` bytes use one 1024-wide ramp on the CPU and the GPU. `SIGMOID` and a stops preset keep the nearest display byte.
 
-The empty reading of this section would be false. The four choices above are the ones the HLD does not make.
+The empty reading of this section would be false. The five choices above are the ones the HLD does not make.
 
 ## Problem and reproducer
 
@@ -146,7 +153,7 @@ Trigger. Produce a candidate directory from Ocelli, then change one Ocelli const
 
 Current behavior. No entry writes that full candidate directory. `assert --require-comparison` and `check-commit --require-comparison` stay dormant. Colour stays unscored. CI runs `python3 scripts/verify_ledger.py check-commit HEAD` and does not render.
 
-Source identity. Decode, `LutChain::map_into`, and `Volume::reslice`. Not cornerstone. Not the reference `.raw` bytes.
+Source identity. Decode, `LutChain::map_into`, and the volume cut in decision 5. Not a call into cornerstone. Not the reference `.raw` bytes.
 
 ## Scope, API and compatibility
 
@@ -154,7 +161,7 @@ In scope.
 
 - One new entry that writes `<id>.raw`, `<id>.json` and `run.json` in the layout `docs/lld/oracle.md` already specifies.
 - Stack views use the reference sidecar's canvas, which is the 512 square from `render-params.json`, with `NEAREST`, camera `reset`, and VOI taken from the file. Colour rules keep VOI source `none` and are not scored.
-- Volume views use `Volume::construct` and `Volume::reslice` for `AXIAL`, `SAGITTAL` and `CORONAL`. Slab thickness stays null, so the cut is one plane. Blend stays `COMPOSITE` only as that single-plane cut. The entry does not implement MIP, MinIP or average.
+- Volume views use `Volume::construct` and the NEAREST canvas cut in decision 5 for `AXIAL`, `SAGITTAL` and `CORONAL`. Slab thickness stays null, so the cut is one plane. Blend stays `COMPOSITE` only as that single-plane cut. The entry does not implement MIP, MinIP or average.
 - The existing `ocelli-compare gate` judges the directory. The entry does not grow a second comparator.
 - The mutation test and the missing-view test below.
 - Local sprint recording of a comparison report, after every current view has a real Ocelli image.
@@ -181,7 +188,7 @@ Refusal. The producer refuses a candidate path that resolves to the reference ru
 
 | Consumer / entry point | Concrete provider | Caller context / policy | Observable output |
 |------------------------|-------------------|-------------------------|-------------------|
-| `compare produce` | Ocelli decode registry, `LutChain::map_into`, `Volume::construct`, `Volume::reslice`, existing `CpuRaster` for the stack canvas | Native tool. No cornerstone. Parameters come from the reference sidecar and the unchanged param files. | Candidate `<id>.raw`, `<id>.json`, `run.json` |
+| `compare produce` | Ocelli decode registry, `LutChain::map_into`, `Volume::construct`, `Volume::reslice_nearest`, existing `CpuRaster` for the stack canvas | Native tool. No cornerstone. Parameters come from the reference sidecar and the unchanged param files. Decision 5 names the reconstructions around those calls. | Candidate `<id>.raw`, `<id>.json`, `run.json` |
 | `ocelli-compare gate` | F-012 directory contract in `tools/oracle/src/bin/ocelli-compare.rs` | Two distinct directories. Tolerances in `tools/oracle/src/tolerance.rs` unchanged. | `compare.json` with judged, unmeasured, absent, unsupported source rows and declared volume refusals as separate counts |
 | Local sprint `/verify` | `scripts/verify_ledger.py record --comparison-report` then `assert --require-comparison` | Sprint profile, after every current view has a candidate image. | Ledger `comparison` object, or a refusal |
 | `.githooks/pre-push` | `scripts/verify_ledger.py check-commit` | Local head. Reads the trailer. | Push allowed only when the trailer matches the tree |
@@ -190,7 +197,7 @@ Refusal. The producer refuses a candidate path that resolves to the reference ru
 | `produce_applicable` | Existing bounded monochrome path | Unchanged. A subset is not the full record. | Unchanged subset directories |
 | `identity` and `mutations` | Existing comparator self-tests | Unchanged. Neither is Ocelli evidence. | Unchanged |
 
-Units and rounding stay in the existing LUT and reslice code. This entry does not add a second formula. Selection of a current view is the reference run's declared frame list. Conversion to RGBA8 for the candidate `.raw` reuses the existing stack presentation path. State transition of the ledger is the comparison object written only after `comparison_evidence` accepts the report.
+The product LUT stays the only VOI formula. Decision 5 names the pinned-renderer reconstructions around it. Grey LINEAR presentation is one ramp on both tiers. Selection of a current view is the reference run's declared frame list. Conversion to RGBA8 for the candidate `.raw` reuses the existing stack presentation path. State transition of the ledger is the comparison object written only after `comparison_evidence` accepts the report.
 
 ## State transitions and invariants
 
@@ -208,7 +215,7 @@ Units and rounding stay in the existing LUT and reslice code. This entry does no
 
 Invariants that span the producer, the gate and the ledger.
 
-- Candidate frame bytes are a function of Ocelli decode, LUT and reslice, not of the reference frame bytes.
+- Candidate frame bytes are a function of Ocelli decode, the LUT and decision 5, not of the reference frame bytes.
 - The candidate `run.json` carries the same `*Sha256` input digests as the reference. A mismatch is a refusal before pixels, which is the existing contract.
 - A ledger-accepted comparison report has a positive judged-view count, zero absent views, and a complete record set.
 - A missing view is not a pass. A colour view is not a pass.
@@ -222,7 +229,7 @@ This section is applicable because the entry writes a directory and the ledger p
 | Resource or visible state | Acquired or staged by | Lifetime identity | Observable commit point | Failure and duplicate-operation behavior |
 |---------------------------|-----------------------|-------------------|-------------------------|------------------------------------------|
 | Candidate directory | `compare produce` | Resolved path, required to differ from the reference path | `run.json` exists only after every declared `.raw` and sidecar for that run is written | A failed write removes the partial files. A second run replaces the directory. Equal arguments do not prove the bytes were not rewritten. |
-| Candidate `.raw` | Ocelli decode, LUT and reslice | View id plus `sha256-rgba8-v1` digest | Bytes on disk whose digest the sidecar `frame.sha256` names | A copy of the reference raw is not a commit of Ocelli output. The mutation test rejects it. |
+| Candidate `.raw` | Ocelli decode, LUT and decision 5 | View id plus `sha256-rgba8-v1` digest | Bytes on disk whose digest the sidecar `frame.sha256` names | A copy of the reference raw is not a commit of Ocelli output. The mutation test rejects it. |
 | `compare.json` | `ocelli-compare gate` | Output directory of that invocation | Report whose `operation` is `gate` and whose verdict is green | A red, empty, or absent-bearing report is not recorded. Identity output stays unacceptable. |
 | Ledger `comparison` object | `verify_ledger.py record --comparison-report` | `git write-tree` of the index | Object with `reportSha256`, `claimedVerdictViews` greater than zero, and `verdict` `pass` | `invalidate` drops that tree's receipt before a rerun. A stale tree does not satisfy a new index. |
 | `Ocelli-Verify` trailer | `.githooks/commit-msg` from the ledger | Commit message on that tree | Trailer fields emitted by `trailer`, never typed by hand | CI re-reads the trailer. A trailer for another tree fails. |
@@ -241,7 +248,7 @@ Validity of a recorded comparison is the report digest plus the tree hash. A cha
 | AC3 | The CI evidence command does not invoke a GPU, the oracle renderer, or the corpus. It reads the trailer. | `.github/workflows/ci.yml` evidence step remains `python3 scripts/verify_ledger.py check-commit HEAD`. | A GPU job, a corpus render, or a step that calls `bin/ocelli.sh oracle` or `compare produce` in CI. | External. CI workflow text. No equipment beyond the workflow file. |
 | AC4 | No `wasm-bindgen` outside `ocelli-wasm`. This story adds none. | Existing wasm-bindgen gate over the diff. | A bindgen import in the producer or the oracle crate. | Implementation. Pins gate. |
 | AC5 | No `unsafe` outside the two permitted files. This story adds none. | Existing `unsafe` gate over the diff. | An `unsafe` block in the producer. | Implementation. `unsafe` gate. |
-| AC6 | The producer runs where `Volume::reslice` and `LutChain::map_into` already run. The gate process adds no raster. Tier C for that process is n/a. If a view needs a GPU ortho upload, tier C reports unavailable and writes no other image. | Producer execution record names the entry. A forced GPU-upload path on tier C has no `.raw`. | A silent CPU image that differs from the GPU image. A new raster inside the ledger or `check-commit`. | Implementation for the producer. The gate process row is the absence of a raster in `verify_ledger.py` and `ci.yml`. |
+| AC6 | The producer runs on `CpuRaster` and `Volume::reslice_nearest`. The gate process adds no raster. Grey LINEAR uses one 1024 ramp on the CPU and the GPU. Tier C for the gate process is n/a. If a view needs a GPU ortho upload, tier C reports unavailable and writes no other image. | Producer execution record names the entry. A forced GPU-upload path on tier C has no `.raw`. | A silent stack image whose CPU byte differs from the GPU byte. A new raster inside the ledger or `check-commit`. | Implementation for the producer. The gate process row is the absence of a raster in `verify_ledger.py` and `ci.yml`. |
 | AC7 | A colour, palette or YBR view the current stack path cannot score stays a named gap and is not `pass`. | Producer disposition list contains the view with a not-scored reason. No record for it has outcome `pass`. | Marking the gap `pass`, or copying the reference colour frame and scoring it. | Implementation. Producer dispositions. |
 | AC8 | `--require-comparison` on the local sprint profile and on `check-commit` for a commit that claims comparison evidence. The candidate directory contains every current view. | `verify_ledger.py assert --require-comparison` on that report, then the commit trailer. | Binding the flag by pointing it at a reference copy, or at a subset that drops views and still says the full record passed. | External local verification. Owner is the sprint profile. |
 
@@ -254,8 +261,8 @@ AC3's procedure is to read the evidence job. The command starts at checkout and 
 The smallest change that matches the transcribed contract.
 
 1. Add `compare produce` next to the existing gate command in `tools/oracle/src/bin/ocelli-compare.rs` and `bin/ocelli.sh`. The function lives beside `produce_applicable` and does not replace it.
-2. For each rendered stack row the current path can score, reuse the existing decode, `LutChain::map_into`, and `CpuRaster` path in `tools/oracle/src/produce.rs`. The canvas, interpolation, camera and VOI come from the reference sidecar, which was produced under `render-params.json`.
-3. For each rendered volume reformat, build the volume with `Volume::construct` and cut it with `Volume::reslice` for the sidecar orientation. Present that plane with the same existing canvas path so the candidate width and height match the reference. A size mismatch is already a frame-size refusal. Do not add a slab blend. Null slab is one plane.
+2. For each rendered stack row the current path can score, reuse the existing decode, `LutChain::map_into`, and `CpuRaster` path in `tools/oracle/src/produce.rs`. The canvas, interpolation, camera and VOI come from the reference sidecar, which was produced under `render-params.json`. Decision 5 names the window and unpack adjustments on that path.
+3. For each rendered volume reformat, build the volume with `Volume::construct` where it accepts the series, or the endpoint grid in decision 5 where construct reports non-uniform spacing. Cut the reference canvas with `Volume::reslice_nearest`. Present that plane with the thin composite in decision 5 so the candidate width and height match the reference. A size mismatch is already a frame-size refusal. Do not add a slab blend. Null slab is one plane.
 4. Write candidate bytes only from that path. Reuse the F-012 `run.json` shape, including equal `*Sha256` keys. Do not copy the reference `.raw` into the candidate `.raw`.
 5. Leave colour, palette and YBR as named not-scored dispositions. Do not emit `pass` for them.
 6. Keep `volume__real__ct_cmb_mml` as the declared refusal the reference already records. Do not invent frames for it. The refusal count must match or the gate reports a coverage problem.
@@ -314,7 +321,7 @@ What this story can show is that the candidate bytes depend on Ocelli and that a
 - unsafe: none
 - Tier A (WebGPU): n/a for the gate process. The planned producer does not open a device. It runs the existing LUT and CPU ortho path. A GPU ortho upload is not part of this plan. If one becomes necessary, that view is unavailable where the upload cannot run, and no other image is written.
 - Tier B (WebGL2): n/a for the gate process. No new WebGL path. The same rule as tier A if a GPU upload is required.
-- Tier C (CPU): n/a for the gate process itself, because no new raster is introduced. The producer runs where the existing ortho and LUT code run, which is `Volume::reslice` and `LutChain::map_into`, plus the existing `CpuRaster` already used for monochrome stack frames. If the producer needs the GPU ortho upload, tier C reports that view unavailable rather than writing a different image.
+- Tier C (CPU): n/a for the gate process itself, because no new raster is introduced. The producer runs on `Volume::reslice_nearest` and `LutChain::map_into`, plus the existing `CpuRaster` already used for monochrome stack frames. Grey LINEAR matches the GPU ramp. If the producer needs the GPU ortho upload, tier C reports that view unavailable rather than writing a different image.
 
 D-07 is the existing third tier. This story does not extend it and does not draw a second image under a tier check.
 
@@ -325,7 +332,7 @@ D-07 is the existing third tier. This story does not extend it and does not draw
 | mutation | A reference-byte copy does not move its digest when one Ocelli constant changes. A real producer digest does move. The reference digest does not. | New test next to the producer. Uses the `sha256-rgba8-v1` contract already in `tools/oracle/src/render_hash.rs`. |
 | unit | A view id on one side only is `absent` and the run is not `pass`. A declared missing `.raw` is a structural refusal and is not `pass`. | `tools/oracle` coverage test over a directory the entry wrote. |
 | unit | Colour, palette and YBR dispositions are not outcome `pass`. | Producer disposition test. |
-| fixture | No new pixel formula. Existing LUT fixtures cite PS3.3 C.11. Existing ortho tests cite the volume axes. A new sampling function would be out of scope. | `crates/ocelli-pixel` and `crates/ocelli-volume/tests/ortho.rs`, unchanged. |
+| fixture | The product LUT fixtures stay on PS3.3 C.11. Decision 5 names the candidate reconstructions. `reslice_nearest` is covered beside the ortho tests. | `crates/ocelli-pixel` and `crates/ocelli-volume/tests/oblique.rs`. |
 | conformance | The CI command text does not render. | Review of `.github/workflows/ci.yml` against AC3. |
 | property | Binding the flag on a report with an absent view cannot record a green comparison. | Existing ledger probe `comparison report has absent views`, reused. Not a new tolerance. |
 
@@ -335,7 +342,7 @@ HLD 27.2 R3 is met by refusing a new arithmetic function. The mutation test reje
 
 None. `docs/hld/B-parity-surface.md` has no `Covered by` column. Its rows are viewport types, tool classes, blend modes, VOI LUT functions, transfer syntaxes, segmentation representations, core events and adapters. None of those rows is keyed to Y1.16.
 
-This story does not add a viewport, a tool, a blend mode, a LUT function, a transfer syntax, a segmentation representation, an event or an adapter. `COMPOSITE` with null slab is the current volume view's declared single-plane cut, consumed through `Volume::reslice`, not a new blend implementation.
+This story does not add a viewport, a tool, a blend mode, a LUT function, a transfer syntax, a segmentation representation, an event or an adapter. `COMPOSITE` with null slab is the current volume view's declared single-plane cut, consumed through `Volume::reslice_nearest`, not a new blend implementation.
 
 Observations this story can establish are only AC1 through AC7. A parity pass on colour, ultrasound, oblique, thick-slab MIP, MinIP, average, or fusion stays unavailable. Those gaps are F-X021's named colour gap and the other S20 and S21 stories. A missing observation is not a passed row.
 
@@ -351,6 +358,7 @@ Existing citations. D-04 is the rule that CI validates the local record and does
 
 - `docs/lld/comparator.md`, the two sections quoted above, to say whether the producer exists and whether `--require-comparison` is still dormant.
 - `docs/lld/oracle.md`, the paragraph that still assigns full viewer activation to F-X021.
+- `docs/lld/codecs.md`, the JPEG-LS section, because the adapter decodes the lossless RGB corpus row.
 
 No HLD edit. No deviation edit.
 

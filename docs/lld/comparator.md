@@ -1,7 +1,7 @@
 # The comparator, the oracle's judging half
 
-**F-IDs that contributed:** F-011, F-012, F-013, F-015, F-X012, F-X003, F-103
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-011, F-012, F-013, F-015, F-X012, F-X003, F-103, F-X021
+**Last updated:** 2026-11-01
 
 HLD section 11 says the harness "pushes the same study through both stacks and
 compares frames within a written per-modality tolerance, with metadata diffed
@@ -19,13 +19,13 @@ sees.
 ## What it compares today, stated plainly
 
 Decision D7 is that the validation oracle exists before the port code, and
-F-011 did not break it. The comparator has no second side of the corpus to
-compare against. A stub renderer was refused in the design
-round: it would be port code written before it was designed, and its frames
-would prove only that the stub and the comparator agree.
+F-011 did not break it. The comparator is still a function of two directories.
+It does not render either side. A stub renderer was refused in the design
+round, because it would be port code written before it was designed, and its
+frames would prove only that the stub and the comparator agree.
 
-So the comparator is a function of two directories, and today those two
-directories are filled by three things, none of which is a renderer.
+Those two directories are filled by four things. None of them is a renderer
+inside this crate.
 
 1. **Hand-constructed fixture frame pairs**, in `tools/oracle/tests/`, whose
    divergence is known by construction because both sides' bytes are written
@@ -44,26 +44,31 @@ directories are filled by three things, none of which is a renderer.
    follows `src/faults.mjs`'s split: the catalogue is production data in
    `src/`, the runner is separate, and every entry is replayed on every oracle
    gate rather than trusted from a note saying somebody once watched it fail.
+4. **`compare produce`**, which writes one Ocelli image for every current
+   stack view and every current volume orientation. The bytes come from the
+   existing decode, `LutChain::map_into`, `CpuRaster` and
+   `Volume::reslice_nearest`. Colour, palette and YBR frames are written and
+   stay unscored. A missing image is absent. Copying the reference `.raw`
+   into that directory is not this source.
 
-F-012 adds a fourth operation without claiming a fourth producer. `gate`
-requires both `--reference` and `--candidate`, resolves both paths, and refuses
-when they name the same directory. It writes the same report as `identity` but
-is the only command whose invocation is suitable for candidate evidence. A
-copied reference directory is useful as controlled contract evidence. It is
-not Ocelli evidence and is not made binding by this story.
+F-012's `gate` requires both `--reference` and `--candidate`, resolves both
+paths, and refuses when they name the same directory. It writes the same
+report as `identity`. It is the command whose invocation is suitable for
+candidate evidence. A copied reference directory remains controlled contract
+evidence. It is not Ocelli evidence.
 
-**The candidate side is a directory contract and not a call into a renderer.**
-When the port lands, the Ocelli half writes `<id>.raw` and `<id>.json` in the
-shape `docs/lld/oracle.md` already specifies, points the comparator at it with
-`--candidate`, and nothing here changes. That is also what makes deviation
-D-07's requirement that "the divergence bound has to cover tier A against tier
-C" this same binary with two candidate directories and no reference, at no
-additional cost and with no code change when F-X001 to F-X004 land.
+**The candidate side is a directory contract.** `compare produce` writes
+`<id>.raw` and `<id>.json` in the shape `docs/lld/oracle.md` already
+specifies, and `gate` points at that directory with `--candidate`. The
+comparator does not call into a renderer. Deviation D-07's requirement that
+the divergence bound cover tier A against tier C is still this same binary
+with two candidate directories and no reference.
 
 ## Where it runs
 
 ```bash
 bin/ocelli.sh compare                       # identity, then the catalogue
+bin/ocelli.sh compare produce --reference REF --candidate CANDIDATE --corpus ROOT
 bin/ocelli.sh compare gate --reference REF --candidate CANDIDATE --out OUT
 bin/ocelli.sh compare identity --candidate DIR
 bin/ocelli.sh gate oracle                   # renders, checks the event catalogue, then compares
@@ -1030,14 +1035,14 @@ failure into a non-failure, so it gets the same handling as the other one.
 Its only entry is the SIGMOID width case F-010 recorded. F-X012 preserves that
 `raisedBy`, adds `resolvedBy: F-X012`, and makes it reachable with
 `synthetic/ct_sigmoid_width_half.dcm`. The pinned helper returns lower 39.75 and
-upper 39.25, but the observed presented pixels remain standard-correct and
-monotonic. The register therefore acts only if a future candidate comparison
-contains the declared pointwise monochrome inversion while geometry agrees. An
-unrelated candidate pixel, rescale parameter or camera geometry change stays
-attributed by its ordinary rung. This preserves D-11's attribution rule
-without manufacturing a pixel divergence. D14's Ocelli bound remains against
-the standard-correct presented output. The helper's separately measured
-inverted range is not widened into that bound.
+upper 39.25. The presented pixels are monotonic and follow the width 1.5 that
+`toWindowLevel` rebuilds from that range, not a pointwise inversion and not
+the file width. The product LUT keeps the file width. The producer passes the
+recovered window into that function, so the view meets section 25.1. The
+register still acts only if a comparison contains the
+declared pointwise monochrome inversion while geometry agrees. An unrelated
+candidate pixel, rescale parameter or camera geometry change stays attributed
+by its ordinary rung.
 
 ### Two mechanisms for "the reference is wrong", and why both
 
@@ -1265,21 +1270,78 @@ tolerance and it is not a claim of cross-machine reproducibility. D14's
 measured divergence remains the claim an attestation may make when hashes are
 unequal.
 
+## The uniform reformat sample
+
+A uniform reformat is one nearest plane. Cornerstone's null slab is
+`MINIMUM_SLAB_THICKNESS` (0.05 mm) on the camera side of the focal point, and
+the parallel ray starts at the near clip `MAXIMUM_RAY_DISTANCE` (1e6 mm).
+Float32 evaluation of that intersection is the sample offset. It depends on
+the camera distance. The producer computes it and cuts the shifted plane with
+`Volume::reslice_nearest`.
+
+The volume box is tested in the same float32 arithmetic. A miss is absent
+even when the analytic index is inside the volume. A hit on a face reads that
+face voxel with a one-pixel `reslice_nearest`. `reslice_oblique` still
+samples the analytic index. `reslice_nearest` rounds a positive half away
+from zero. The displayed byte is the thin composite of the 1024 colour
+table, not the stack LUT. Four samples around the integer pixel are then
+tested against the projected eight-corner bounds of the index box. A
+partial pixel blends that colour with black by `(value * hits + 2) / 4`.
+A pixel outside the quad is black.
+
+This matches the three reference frames of
+`volume__synthetic__ct_series_uniform`. Non-uniform spacing is still refused
+by `Volume::construct`. The producer then places those slices on the endpoint
+grid, `|d_last - d_first| / (n - 1)`, and constructs that uniform series.
+Slice k keeps its samples. `volume__synthetic__ct_series_nonuniform` is the
+series this describes, and the reference renders it as the uniform series.
+
+## The stack window sample
+
+The reference rasteriser snaps the image rectangle to a sixteenth of a canvas
+pixel before it reads a texel. That is the subpixel grid the pinned software
+rasteriser keeps. The producer scales column spacing and row spacing so the
+snapped width and height are the rectangle the CPU raster samples, then pans
+by the centre delta when the two edges do not move by the same amount. An
+edge that is already on the grid does not move. Coverage then tests that same
+rectangle. `real__dx_varepop__00000001` is the frame this changes. Its
+columns already lie on whole pixels and its rows do not.
+
+## The extended JPEG level
+
+`decode_extended` agrees with DCMTK. The pinned cornerstone decoder for a
+12-bit extended scan is jpeg.js. That decoder adds the 8-bit bias 2056 scaled
+by `4095 / 255`, then shifts by 4. A 12-bit level in the same fixed-point
+domain is `(2048 << 4) + 8`. The difference rounds to 15 stored counts. The
+producer adds those 15 counts to unsigned samples of transfer syntax
+`1.2.840.10008.1.2.4.51` before the LUT. The codec fixture stays on DCMTK.
+
+## The left-aligned stored container
+
+PS3.3 C.7.6.3 shifts a stored sample by `HighBit + 1 - BitsStored`.
+`StoredBits::new` still refuses a high bit other than `BitsStored - 1`.
+The pinned renderer does not apply that shift.
+`synthetic__ct_signed_12in16_left` and `synthetic__ct_signed_12in16_right`
+are one rendered frame. The producer unpacks with the conforming high bit,
+so both frames follow that render. The pixel crate does not.
+
 ## What the comparator still does not build
 
 Named, because each is somebody's story.
 
-- Any Ocelli renderer, decoder, LUT chain or port code. Decision D7.
+- A viewport renderer. `compare produce` calls the existing decode, LUT,
+  `CpuRaster` and `Volume::reslice_nearest`. It does not add a renderer.
+  Decision D7.
 - A perceptual colour metric, and any CIEDE2000 implementation. Metric and
   threshold are one decision and belong together.
 - Re-rendering the saturated rows at a wider window, or a magnified render for
   the two decimated rows. Both change `render-params.json` and therefore every
   reference frame.
-- The Ocelli producer for all current views. F-X003 writes settled CPU frames
-  for the monochrome stack rows its raster can draw and hands those directories
-  to `ocelli-compare gate`. F-X021 still activates the full candidate record
-  after F-052. Colour stays unscored. Under D-04, CI validates the local
-  comparator record and does not render the ignored corpus.
+- A second producer. `compare produce` writes one Ocelli image for every
+  current stack view and every current volume orientation. F-X003 still
+  writes the bounded monochrome stack. Colour, palette and YBR stay
+  unscored. Under D-04, CI validates the local comparator record and does
+  not render the ignored corpus.
 
 ## Verification-ledger evidence
 
@@ -1298,7 +1360,7 @@ and guard harness read the same file. A serializer change therefore cannot be
 copied into a hand-built Python control while leaving validation semantics
 behind.
 
-`assert --require-comparison` and `check-commit --require-comparison` are the
-local and CI readers. F-012 deliberately leaves them dormant in the ordinary
-profiles. A bounded monochrome candidate directory does not activate that
-requirement. F-X021 still does, after F-052.
+`assert --require-comparison` is bound on the sprint profile. Pre-push
+passes `check-commit --require-comparison`. A feature-profile record and
+the CI evidence job do not pass that flag. CI still reads the trailer and
+does not render. A bounded monochrome directory is not the full record.

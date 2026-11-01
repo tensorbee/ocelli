@@ -32,12 +32,14 @@
 //!    real reference frames with the verdict each must produce written down
 //!    beside it. That is what proves detection at corpus scale.
 //!
-//! **The corpus candidate side is a directory.** `produce` writes `<id>.raw`
-//! and `<id>.json` for each monochrome stack row the CPU raster can draw, in
-//! the shape `docs/lld/oracle.md` already specifies. `ocelli-compare gate`
-//! reads that directory. The loader does not change. Colour rows are recorded
-//! and are not scored. F-X021 still owns full viewer activation. Tier A is
-//! not opened here.
+//! **The corpus candidate side is a directory.** `produce_applicable` writes
+//! `<id>.raw` and `<id>.json` for each monochrome stack row the CPU raster can
+//! draw. `produce_current` writes one Ocelli image for every current stack
+//! view and every current volume orientation. Colour, palette and YBR
+//! images are written and are not scored. A view that is not built is
+//! absent. `ocelli-compare gate` reads the directory. The loader does not
+//! change. The sprint profile records that gate, and pre-push requires
+//! `--require-comparison`. Tier A is not opened here.
 //!
 //! `candidate` remains the synthetic control. It rasters one hand-built
 //! monochrome window and passes that settled frame to `compare_view`. It does

@@ -81,6 +81,7 @@ struct Arguments {
     command: String,
     reference: PathBuf,
     candidate: PathBuf,
+    corpus: Option<PathBuf>,
     out: PathBuf,
     reference_explicit: bool,
     candidate_explicit: bool,
@@ -100,6 +101,7 @@ where
     let mut reference_explicit = false;
     let mut candidate: Option<PathBuf> = None;
     let mut candidate_explicit = false;
+    let mut corpus = None;
     let mut out = PathBuf::from(DEFAULT_OUT);
     let mut arguments = input.into_iter().map(Into::into);
     while let Some(argument) = arguments.next() {
@@ -120,6 +122,13 @@ where
                 ));
                 candidate_explicit = true;
             }
+            "--corpus" => {
+                corpus = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "--corpus wants a directory".to_owned())?,
+                ));
+            }
             "--out" => {
                 out = PathBuf::from(
                     arguments
@@ -135,14 +144,15 @@ where
         }
     }
     if command.is_empty() {
-        return Err("a command is required: `gate`, `identity`, `mutations` or \
-             `census`. See docs/lld/comparator.md"
+        return Err("a command is required: `gate`, `identity`, `mutations`, \
+             `census` or `produce`. See docs/lld/comparator.md"
             .to_owned());
     }
     Ok(Arguments {
         candidate: candidate.unwrap_or_else(|| reference.clone()),
         command,
         reference,
+        corpus,
         out,
         reference_explicit,
         candidate_explicit,
@@ -245,6 +255,9 @@ fn validate_output_directory(out: &Path, reference: &Path, candidate: &Path) -> 
 
 fn run() -> Result<bool, String> {
     let arguments = parse_arguments()?;
+    if arguments.command == "produce" {
+        return produce_command(&arguments);
+    }
     if arguments.command == "gate" {
         validate_gate_directories(&arguments)?;
     }
@@ -275,8 +288,35 @@ fn run() -> Result<bool, String> {
         "mutations" => mutations(&reference, &candidate, &register, &metadata_truth, &census),
         "census" => detectability(&reference, &candidate, &register, &metadata_truth, &census),
         other => Err(format!(
-            "{other} is not a command. `gate`, `identity`, `mutations` or `census`"
+            "{other} is not a command. `gate`, `identity`, `mutations`, `census` \
+             or `produce`"
         )),
+    }
+}
+
+fn produce_command(arguments: &Arguments) -> Result<bool, String> {
+    if !arguments.reference_explicit {
+        return Err("`produce` requires an explicit --reference directory".to_owned());
+    }
+    if !arguments.candidate_explicit {
+        return Err("`produce` requires an explicit --candidate directory".to_owned());
+    }
+    let Some(corpus) = &arguments.corpus else {
+        return Err("`produce` requires an explicit --corpus directory".to_owned());
+    };
+    let summary = ocelli_oracle::produce::produce_current(&ocelli_oracle::produce::CurrentPaths {
+        reference_run: arguments.reference.clone(),
+        corpus_root: corpus.clone(),
+        candidate_run: arguments.candidate.clone(),
+    });
+    println!(
+        "produce: written {}, omitted {}, unsupported {}",
+        summary.written, summary.omitted, summary.unsupported
+    );
+    if summary.resources == "ran" {
+        Ok(true)
+    } else {
+        Err(format!("produce refused: {}", summary.resources))
     }
 }
 
@@ -1074,6 +1114,65 @@ mod argument_tests {
             return Err("an implicit candidate was accepted".to_owned());
         };
         assert!(error.contains("explicit --candidate"));
+        Ok(())
+    }
+
+    #[test]
+    fn produce_requires_reference_candidate_and_corpus() -> Result<(), String> {
+        let missing_reference =
+            parsed(["produce", "--candidate", "candidate", "--corpus", "corpus"])?;
+        let Err(error) = super::produce_command(&missing_reference) else {
+            return Err("produce accepted an implicit reference".to_owned());
+        };
+        assert!(error.contains("explicit --reference"), "{error}");
+        let missing_candidate =
+            parsed(["produce", "--reference", "reference", "--corpus", "corpus"])?;
+        let Err(error) = super::produce_command(&missing_candidate) else {
+            return Err("produce accepted an implicit candidate".to_owned());
+        };
+        assert!(error.contains("explicit --candidate"), "{error}");
+        let missing_corpus = parsed([
+            "produce",
+            "--reference",
+            "reference",
+            "--candidate",
+            "candidate",
+        ])?;
+        let Err(error) = super::produce_command(&missing_corpus) else {
+            return Err("produce accepted an implicit corpus".to_owned());
+        };
+        assert!(error.contains("explicit --corpus"), "{error}");
+        Ok(())
+    }
+
+    #[test]
+    fn produce_writes_nothing_when_the_reference_is_missing() -> Result<(), String> {
+        let root = std::env::temp_dir().join(format!("ocelli-fx021-cli-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        let reference = root.join("reference");
+        let candidate = root.join("candidate");
+        let corpus = root.join("corpus");
+        std::fs::create_dir_all(&corpus).map_err(|error| error.to_string())?;
+        let arguments = parsed([
+            "produce",
+            "--reference",
+            reference
+                .to_str()
+                .ok_or_else(|| "reference path".to_owned())?,
+            "--candidate",
+            candidate
+                .to_str()
+                .ok_or_else(|| "candidate path".to_owned())?,
+            "--corpus",
+            corpus.to_str().ok_or_else(|| "corpus path".to_owned())?,
+        ])?;
+        let Err(error) = super::produce_command(&arguments) else {
+            return Err("produce published a missing reference".to_owned());
+        };
+        assert!(error.contains("reference-run-absent"), "{error}");
+        assert!(!candidate.join("run.json").is_file());
+        std::fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
         Ok(())
     }
 
