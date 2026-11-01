@@ -24,7 +24,9 @@
 //! upload a brick. F-062 clips that ray to at most six patient planes. The
 //! default list is empty, so the unlit integral stays until
 //! `set_clip_planes`. That call writes a 256-byte uniform and does not
-//! upload a brick. F-045 writes
+//! upload a brick. F-063 uploads a composite labelmap from `ocelli-seg`
+//! presenter bytes. The copy shader does not run the image VOI and does not
+//! recompute the outline. Labelmap edge stays uncompiled. F-045 writes
 //! the sixteen camera floats at group 0 binding 2. `set_view` does not
 //! write the VOI uniform. The oracle still has no Ocelli frame to judge.
 //! Decision D7 stays open.
@@ -42,6 +44,7 @@ use crate::clip::{CLIP_UNIFORM_BYTES, ClipList, PatientFrame};
 use crate::colour::{ColourLut, ColourParams};
 use crate::fusion::{self, FusionError, FusionGpu, FusionRequest};
 use crate::gpu::{GpuContext, Recovered, SurfaceError, first_render_attachment};
+pub use crate::labelmap::LabelmapDrawError;
 use crate::opacity::{OpacityPreset, OpacityTable};
 use crate::ortho::{self, OrthoError};
 use crate::probe::ResolvedAdapter;
@@ -928,6 +931,8 @@ struct GpuSlot {
     ray: Option<VolumeRayBinding>,
     /// Slab value texture, mask and bind groups. Absent until [`RenderGraph::show_slab`].
     slab: Option<SlabBinding>,
+    /// Presented labelmap. Absent until [`RenderGraph::show_labelmap`].
+    labelmap: Option<crate::labelmap::LabelmapBinding>,
 }
 
 /// Slab bind groups for one viewport. Created at `show_slab`, not inside a tick.
@@ -1107,6 +1112,7 @@ struct CompiledGraph {
     volume_source_layout: wgpu::BindGroupLayout,
     slab_uniform_layout: wgpu::BindGroupLayout,
     slab_source_layout: wgpu::BindGroupLayout,
+    labelmap_layout: wgpu::BindGroupLayout,
     /// `texture_3d` bindings compiled into the volume shader.
     brick_slots: u32,
     /// 1×1×1 stand-in for a brick slot the ready set does not use.
@@ -1204,6 +1210,7 @@ pub struct RenderGraph {
     volume_source_layout: wgpu::BindGroupLayout,
     slab_uniform_layout: wgpu::BindGroupLayout,
     slab_source_layout: wgpu::BindGroupLayout,
+    labelmap_layout: wgpu::BindGroupLayout,
     /// Brick bindings the volume shader was compiled with.
     brick_slots: u32,
     /// Kept alive so unused brick slots in a bind group stay valid.
@@ -1234,23 +1241,25 @@ const COMPILED_BLEND: BlendMode = BlendMode::Composite;
 impl RenderGraph {
     /// Whether this story compiles a fragment pipeline for a key.
     ///
-    /// Composite stack and composite volume each have a body. The slab pass
-    /// compiles composite, MIP, MinIP and average. Volume MIP, stack MIP and
-    /// labelmap edge stay uncompiled. A compute or storage request is
-    /// [`RenderGraph::pipeline_family_compiled`], which is false on tier B
-    /// and is not this predicate.
+    /// Composite stack, composite volume and composite segmentation each have
+    /// a body. The slab pass compiles composite, MIP, MinIP and average.
+    /// Volume MIP, stack MIP and labelmap edge stay uncompiled. A compute or
+    /// storage request is [`RenderGraph::pipeline_family_compiled`], which
+    /// is false on tier B and is not this predicate.
     pub fn pipeline_compiled(key: &PipelineKey) -> bool {
         match key.pass {
-            PassKind::Stack | PassKind::VolumeRaycast => key.blend == COMPILED_BLEND,
+            PassKind::Stack | PassKind::VolumeRaycast | PassKind::SegOverlay => {
+                key.blend == COMPILED_BLEND
+            }
             PassKind::Slab => slab::slab_blend_code(key.blend).is_some(),
-            PassKind::SegOverlay => false,
         }
     }
 
     /// Whether `family` has a compiled body for `key`.
     ///
-    /// Fragment is a compiled stack body, a compiled volume ray, or one of
-    /// the four slab bodies. Compute and storage have no body in this story,
+    /// Fragment is a compiled stack body, a compiled volume ray, a compiled
+    /// composite labelmap, or one of the four slab bodies. Compute and
+    /// storage have no body in this story,
     /// on either GPU tier.
     /// On tier B that refusal is the section 7 rule: the fragment pipeline
     /// is not returned in their place.
@@ -1417,6 +1426,7 @@ impl RenderGraph {
             volume_source_layout: compiled.volume_source_layout,
             slab_uniform_layout: compiled.slab_uniform_layout,
             slab_source_layout: compiled.slab_source_layout,
+            labelmap_layout: compiled.labelmap_layout,
             brick_slots: compiled.brick_slots,
             ray_dummy: compiled.ray_dummy,
             format,
@@ -1620,6 +1630,36 @@ impl RenderGraph {
                 &constants,
             ));
         }
+        let labelmap_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ocelli labelmap"),
+            entries: &[texture_binding(0)],
+        });
+        let labelmap_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("ocelli labelmap"),
+                bind_group_layouts: &[Some(&labelmap_layout)],
+                immediate_size: 0,
+            });
+        let labelmap_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("ocelli labelmap"),
+            source: wgpu::ShaderSource::Wgsl(crate::labelmap::LABELMAP_WGSL.into()),
+        });
+        keys.push(CompiledKey {
+            key: PipelineKey {
+                pass: PassKind::SegOverlay,
+                blend: COMPILED_BLEND,
+                tier,
+            },
+            family: PipelineFamily::Fragment,
+        });
+        pipelines.push(fragment_pipeline(
+            device,
+            &labelmap_pipeline_layout,
+            &labelmap_module,
+            format,
+            "ocelli labelmap composite",
+            &[],
+        ));
         CompiledGraph {
             uniform_layout,
             source_layout,
@@ -1627,6 +1667,7 @@ impl RenderGraph {
             volume_source_layout,
             slab_uniform_layout,
             slab_source_layout,
+            labelmap_layout,
             brick_slots,
             ray_dummy,
             keys,
@@ -1794,6 +1835,7 @@ impl RenderGraph {
             stored,
             ray: None,
             slab: None,
+            labelmap: None,
         }
     }
 
@@ -3193,6 +3235,82 @@ impl RenderGraph {
         }
     }
 
+    /// Upload one presented labelmap onto a composite segmentation viewport.
+    ///
+    /// Tier C is refused before the grid is read. A viewport that is not a
+    /// composite `SegOverlay` is refused before the presenter runs, so a
+    /// labelmap-edge blend does not alias composite and a stack viewport
+    /// does not gain an overlay. A presenter error uploads nothing.
+    ///
+    /// Equal bytes do not allocate a texture and do not mark dirt. A new
+    /// image replaces the binding only after the texture exists, then sets
+    /// segmentation and data dirt. The tick copies those bytes. It does not
+    /// recompute the outline. `uploads` does not change.
+    ///
+    /// # Errors
+    ///
+    /// [`LabelmapDrawError`].
+    pub fn show_labelmap(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        grid: &ocelli_seg::LabelGrid,
+        lut: &ocelli_seg::LabelColourLut,
+        style: ocelli_seg::LabelStyle,
+    ) -> Result<(), LabelmapDrawError> {
+        if self.tier == Tier::Cpu {
+            return Err(LabelmapDrawError::TierCUnavailable);
+        }
+        let blend = match self.slot_state(id) {
+            Ok(state) => match &state.pass {
+                Pass::SegOverlay(pass) => pass.blend,
+                _ => return Err(LabelmapDrawError::NotOverlay),
+            },
+            Err(_) => return Err(LabelmapDrawError::UnknownViewport),
+        };
+        if blend != BlendMode::Composite {
+            return Err(LabelmapDrawError::BlendUnavailable);
+        }
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        if self.gpu.get(index).and_then(Option::as_ref).is_none() {
+            return Err(LabelmapDrawError::NotRebound);
+        }
+        if !style.fill && !style.outline {
+            let mut unused = [];
+            return ocelli_seg::present_labelmap(grid, lut, style, &mut unused)
+                .map_err(LabelmapDrawError::Present);
+        }
+        let width_us = usize::try_from(grid.width).map_err(|_| LabelmapDrawError::Extent)?;
+        let height_us = usize::try_from(grid.height).map_err(|_| LabelmapDrawError::Extent)?;
+        let pixels = width_us
+            .checked_mul(height_us)
+            .ok_or(LabelmapDrawError::Extent)?;
+        let byte_len = pixels.checked_mul(4).ok_or(LabelmapDrawError::Extent)?;
+        let mut bytes = vec![0_u8; byte_len];
+        ocelli_seg::present_labelmap(grid, lut, style, &mut bytes)
+            .map_err(LabelmapDrawError::Present)?;
+        let same = self
+            .gpu
+            .get(index)
+            .and_then(Option::as_ref)
+            .and_then(|slot| slot.labelmap.as_ref())
+            .is_some_and(|held| held.same_bytes(grid.width, grid.height, &bytes));
+        if same {
+            return Ok(());
+        }
+        let staged =
+            crate::labelmap::stage(&self.labelmap_layout, ctx, grid.width, grid.height, bytes)?;
+        let Some(slot) = self.gpu.get_mut(index).and_then(Option::as_mut) else {
+            return Err(LabelmapDrawError::NotRebound);
+        };
+        slot.labelmap = Some(staged);
+        if let Some(state) = self.registry.state_mut(id) {
+            state.dirty.segmentation = true;
+            state.dirty.data = true;
+        }
+        Ok(())
+    }
+
     /// Reinstall the resources a recovery rebuilt, marking every viewport
     /// fully dirty because every GPU object the old device owned is gone.
     pub fn install_recovered(&mut self, ctx: &GpuContext, recovered: &Recovered) {
@@ -3210,13 +3328,16 @@ impl RenderGraph {
         self.volume_source_layout = compiled.volume_source_layout;
         self.slab_uniform_layout = compiled.slab_uniform_layout;
         self.slab_source_layout = compiled.slab_source_layout;
+        self.labelmap_layout = compiled.labelmap_layout;
         self.brick_slots = compiled.brick_slots;
         self.ray_dummy = compiled.ray_dummy;
         self.keys = compiled.keys;
         self.pipelines = compiled.pipelines;
         // Every per-viewport object was created on the dead device: the
         // uniform buffers, both bind groups, the stored-sample texture, the
-        // colour table texture and the caller's views as bound.
+        // colour table texture, the labelmap texture and the caller's views
+        // as bound. The next `show_labelmap` after `rebind` uploads the
+        // overlay again.
         // They are dropped here, not carried into a pass on the new device.
         // The registry keeps each pass, its last uniform values, the camera
         // floats, the stored extent, the colour table bytes and the opacity
@@ -3438,7 +3559,13 @@ impl RenderGraph {
                 {
                     pass.set_bind_group(0, &slab.bind_uniform, &[]);
                     pass.set_bind_group(1, &slab.bind_source, &[]);
-                } else {
+                } else if let Some(label) = slot
+                    .labelmap
+                    .as_ref()
+                    .filter(|_| key.pass == PassKind::SegOverlay)
+                {
+                    pass.set_bind_group(0, &label.bind, &[]);
+                } else if key.pass != PassKind::SegOverlay {
                     pass.set_bind_group(0, &slot.bind_uniform, &[]);
                     pass.set_bind_group(1, &slot.bind_source, &[]);
                 }
@@ -3570,7 +3697,8 @@ fn gpu_binding_ready(kind: PassKind, slot: Option<&GpuSlot>) -> bool {
     match kind {
         PassKind::VolumeRaycast => slot.and_then(|slot| slot.ray.as_ref()).is_some(),
         PassKind::Slab => slot.and_then(|slot| slot.slab.as_ref()).is_some(),
-        PassKind::Stack | PassKind::SegOverlay => true,
+        PassKind::SegOverlay => slot.and_then(|slot| slot.labelmap.as_ref()).is_some(),
+        PassKind::Stack => true,
     }
 }
 

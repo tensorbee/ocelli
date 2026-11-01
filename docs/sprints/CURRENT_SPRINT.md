@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-063 | E10.1 | Labelmap representation: colour LUT, fill and outline rendering | Rust | 4w | pending |
+| F-063 | E10.1 | Labelmap representation: colour LUT, fill and outline rendering | Rust | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.

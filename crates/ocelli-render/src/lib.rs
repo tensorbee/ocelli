@@ -27,6 +27,9 @@
 //! default list is empty, so the unlit integral stays until
 //! `set_clip_planes`. That call writes a 256-byte uniform and does not
 //! upload a brick.
+//! **F-063 (E10.1, S22) uploads a labelmap** as an `Rgba8Unorm` overlay.
+//! The bytes come from `ocelli-seg`. The copy shader does not run the image
+//! VOI. `set_voi` still returns `PassHasNoUniform` for that pass.
 //! **F-039 (E6.3, S13) attaches a surface** from the same `wgpu::Instance`
 //! the adapter was opened on, and sizes the backing store with
 //! [`extent::device_extent`].
@@ -73,6 +76,7 @@ pub mod extent;
 pub mod fusion;
 pub mod gpu;
 pub mod graph;
+mod labelmap;
 pub mod opacity;
 pub mod ortho;
 pub mod probe;
@@ -101,9 +105,9 @@ pub use gpu::{
     SurfaceError,
 };
 pub use graph::{
-    BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineFamily, PipelineKey,
-    RayAxis, RenderGraph, STORED_FORMAT, SegPass, SlabPass, StackPass, Upload, UploadError,
-    ViewportId, VolumeBrick, VolumePass, VolumeRaySource, device_camera_words,
+    BlendMode, Dirty, FrameOutcome, GraphError, LabelmapDrawError, Pass, PassKind, PipelineFamily,
+    PipelineKey, RayAxis, RenderGraph, STORED_FORMAT, SegPass, SlabPass, StackPass, Upload,
+    UploadError, ViewportId, VolumeBrick, VolumePass, VolumeRaySource, device_camera_words,
     sampled_texture_limit, tier_b_fragment_module, volume_ray_admission, volume_ray_module,
 };
 pub use opacity::{OpacityError, OpacityPreset, OpacityTable};

@@ -2,9 +2,16 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
-//! Scaffold only. F-001 creates the crate, later stories fill it.
+//! F-063 fills the labelmap representation. Contour and surface stay later
+//! stories. The presenter does not import wgpu.
 
 #![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
+
+mod labelmap;
+
+pub use labelmap::{LabelColourLut, LabelGrid, LabelStyle, LabelmapError, Rgba8, present_labelmap};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.
