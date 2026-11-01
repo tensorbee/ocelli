@@ -1,7 +1,7 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055, F-056
-**Last updated:** 2026-10-31
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055, F-056, F-X004
+**Last updated:** 2026-11-01
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
 `ImagePositionPatient` projected on the slice normal, DICOM PS3.3
@@ -182,8 +182,16 @@ that is not strictly positive is `VolumeError::ObliquePlane`. Nothing is
 allocated. `PlaneOutOfRange` stays the fixed-index error for `OrthoPlane`.
 Axial, sagittal and coronal stay `OrthoPlane`. `reslice` is unchanged.
 
-Display reuses `show_ortho`. This story adds no shader and no second upload.
-Tier C still returns `TierCUnavailable` before a sample is read.
+Display on tier A and tier B reuses `show_ortho`. That path adds no shader
+and no second upload. `present_plane` still returns `TierCUnavailable`
+before a sample is read.
+
+Tier C MPR is `present_cpu_plane`. It copies each `PlaneSample::Present`
+value from `Volume::reslice` or `Volume::reslice_oblique` into `Stored`
+and draws that slice with `CpuRaster`. It does not resample. An absent
+sample or a raster refusal writes nothing. There is no CPU volume ray.
+SIMD timing is not measured on a host whose `SimdSupport` is
+`NotApplicable`. The scalar copy is the sample lock.
 
 ## Thick slab
 

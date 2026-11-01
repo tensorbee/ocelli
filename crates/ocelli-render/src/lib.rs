@@ -107,7 +107,7 @@ pub use graph::{
     sampled_texture_limit, tier_b_fragment_module, volume_ray_admission, volume_ray_module,
 };
 pub use opacity::{OpacityError, OpacityPreset, OpacityTable};
-pub use ortho::{OrthoError, present_plane};
+pub use ortho::{OrthoError, copy_plane_stored, present_cpu_plane, present_plane};
 #[cfg(not(target_arch = "wasm32"))]
 pub use probe::resolve_native_gl;
 pub use probe::{

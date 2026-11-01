@@ -10,7 +10,7 @@
 | F-060 | E9.2 | Transfer-function editing surface and preset library | Rust | 3w | done |
 | F-061 | E9.3 | Lighting, shading and gradient opacity | Rust | 3w | done |
 | F-062 | E9.4 | Cropping planes and volume clipping | Rust | 4w | done |
-| F-X004 | X1.4 | CPU MPR and oblique reslicing, with SIMD inner loops | Rust | 5w | pending |
+| F-X004 | X1.4 | CPU MPR and oblique reslicing, with SIMD inner loops | Rust | 5w | done |
 | F-X005 | X1.5 | The CPU volume-rendering decision, and honest unavailability | Rust+TS | 2w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
@@ -41,9 +41,10 @@ the constructed volume. This sprint consumes those views. It does not
 reopen volume construction, the LUT chain, fusion, or the candidate gate.
 
 F-X004 and F-X005 also depend on F-X003. That backlog row is still
-`in-progress`, carried for lack of a representative GPU-less host. Those
-two stories do not start while that dependency is open. F-060, F-061 and
-F-062 depend only on F-059, which is `done`.
+`in-progress`, carried for lack of a representative GPU-less host. F-X005
+is done as the unavailable decision. F-X004 presents existing reslice
+samples through the existing `CpuRaster`. The story is done. It does not mark F-X003 done.
+F-060, F-061 and F-062 depend only on F-059, which is `done`.
 
 This open publishes nothing.
 
@@ -52,8 +53,9 @@ This open publishes nothing.
 - **F-X003 is carried out of S16 and is not a story in this sprint.** AC6
   needs a representative GPU-less incumbent host, the operator has confirmed
   none is available, and no local diagnostic is accepted as that
-  measurement. Its backlog row stays `in-progress`. F-X004 and F-X005 name
-  it as a dependency and wait.
+  measurement. Its backlog row stays `in-progress`. F-X005 is done without
+  that host. F-X004 is done and uses the raster already in the tree. The host
+  measurement stays unmet.
 - **The open LINEAR finding against `ocelli-pixel`'s own arithmetic** stays
   unscheduled. It has no F-ID. Clamping it so a readback matches is a
   tolerance change.
@@ -124,12 +126,13 @@ legitimate answer for that view.
   unavailable.
 - **F-062** clips the ray to caller planes in the patient frame. A brick
   that merely intersects the plane is not discarded whole.
-- **F-X004** reslices on the CPU, including an oblique plane, with the SIMD
-  inner loop and a measured no-SIMD path. The sample is the plane F-052
-  already defines. It does not start while F-X003 is open.
+- **F-X004** presents the plane F-052 already defines, including an oblique
+  plane, through the existing `CpuRaster`. The scalar samples are that plane.
+  A missing SIMD measurement is not a passed timing row. The story is
+  `done`. F-X003 stays `in-progress`.
 - **F-X005** decides the CPU volume path. A quiet second image is not an
-  acceptable decision. Unavailable, said to the user, is. It does not start
-  while F-X003 is open.
+  acceptable decision. Unavailable, said to the user, is. The story is
+  `done`. There is no CPU volume image.
 - **Each story declares all three tier rows**, and "n/a" is a real answer
   that an omitted row is not.
 - `wasm-bindgen` remains confined to `ocelli-wasm`, pixels do not cross the
@@ -140,8 +143,10 @@ legitimate answer for that view.
 
 F-060, F-061 and F-062 depend on F-059. That backlog row is `done`.
 F-X004 depends on F-052 and F-X003. F-052 is `done`. F-X003 is
-`in-progress`. F-X005 depends on F-059 and F-X003. No backlog cell in this
-sprint names another story in this sprint. F-X004 and F-X005 begin blocked.
+`in-progress`. F-X005 depends on F-059 and F-X003. F-X005 is `done`.
+F-X004 is `done`. It uses the raster already in the tree. The
+representative GPU-less host stays unmeasured. No backlog cell in this
+sprint names another story in this sprint.
 
 ## Standing expectations
 
@@ -169,4 +174,4 @@ tree is `93bf532df411`. The merge is `685f55d`. `scripts/backlog_check.py`,
 green at this open. The S21 allocation rows and the S21 plan table name the
 same F-IDs. No new audit was run at this open.
 
-F-060, F-061, F-062 and F-X005 are done. F-X004 stays pending while F-X003 is in progress.
+F-060, F-061, F-062, F-X004 and F-X005 are done. F-X003 stays in progress.

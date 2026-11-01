@@ -1,6 +1,6 @@
 # Feature availability
 
-**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056, F-X005
+**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056, F-X004, F-X005
 **Last updated:** 2026-11-01
 
 The contract every tier-gated feature declares, and the distinction between a
@@ -32,6 +32,7 @@ of any of them.
 | `CpuRaster` | F-X003 in `ocelli-render` | Tier C stack drawing. Monochrome uses `LutChain` and the preset tables. Palette and RGB use `ColorTransform` for a supported space. ICC reports unavailable. `RenderGraph::new` still returns `TierCUnavailable`. Representative-host interactive and idle acceptance remains unmeasured |
 | `RenderGraph::show_fusion` | F-056 in `ocelli-render` | Two volumes that share a frame of reference. Tier A and tier B draw them when a preserving float sample format and the `Rgba16Float` window target can be bound. Otherwise the bind returns `FusionError::Unavailable` and writes no CPU image. Tier C returns `FusionError::TierCUnavailable` before a sample is read and writes no CPU image |
 | Volume ray `VOLUME_3D` | F-X005 in `ocelli-render` | Tier A and tier B run the existing fragment ray. Tier C returns `TierCUnavailable` from `volume_ray_admission` before a sample is read and writes no colour buffer. There is no CPU ray |
+| CPU MPR `present_cpu_plane` | F-X004 in `ocelli-render` | Tier C copies `Volume::reslice` and `Volume::reslice_oblique` samples into `CpuRaster`. An absent sample or a raster refusal writes nothing. Tier A and tier B stay on `present_plane`. There is no second interpolant and no CPU ray. A missing SIMD measurement is not a passed timing row |
 
 The detailed resolver and evidence rules remain in
 [tier-resolution.md](tier-resolution.md). This file begins after that one
@@ -175,7 +176,7 @@ feature, not a new availability state.
 
 ## What this contract does not build
 
-- A CPU rasteriser, stack viewport, MPR path or CPU volume renderer. F-X003 draws the stack in `CpuRaster`. That raster is not this contract. MPR remains unbuilt here. Volume rendering on tier C stays unavailable and this file adds no CPU ray.
+- A CPU volume renderer. F-X003 draws the stack in `CpuRaster`. F-X004 presents an MPR plane through that raster from the existing reslice samples. Volume rendering on tier C stays unavailable and this file adds no CPU ray.
 - A feature enum or registry for work that has not landed.
 - Stable unavailable operands or numeric tier encodings.
 - A `From<ComputeError>` conversion or a new crate dependency.
