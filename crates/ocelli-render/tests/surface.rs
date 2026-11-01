@@ -14,7 +14,7 @@ use ocelli_render::{
     BlendMode, Dirty, FrameOutcome, GraphError, GraphResources, Pass, Recovered, RenderGraph,
     SegPass, StackPass, SurfaceDrawError, SurfaceView, ViewportId, VoiParams,
 };
-use ocelli_seg::{LabelColourLut, PlaneFrame, Rgba8, SurfaceMesh, present_surface};
+use ocelli_seg::{LabelColourLut, PlaneFrame, Representation, Rgba8, SurfaceMesh, present_surface};
 
 fn native_clock() -> impl FnMut() -> u64 {
     let start = std::time::Instant::now();
@@ -487,6 +487,10 @@ fn shown_surface_matches_the_presenter() {
         Ok(id) => id,
         Err(_) => return,
     };
+    assert_eq!(
+        graph.set_representation(id, Representation::Surface),
+        Ok(())
+    );
     assert!(
         graph
             .show_surface(

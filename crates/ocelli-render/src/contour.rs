@@ -26,6 +26,8 @@ pub enum ContourDrawError {
     NotOverlay,
     /// The overlay blend is not composite.
     BlendUnavailable,
+    /// The viewport is showing a different representation. The presenter did not run.
+    RepresentationMismatch,
     /// The presenter refused. The previous texture stays.
     Present(ContourError),
     /// The viewport id was never registered.
@@ -44,6 +46,7 @@ impl ContourDrawError {
             LabelmapDrawError::TierCUnavailable => Self::TierCUnavailable,
             LabelmapDrawError::NotOverlay => Self::NotOverlay,
             LabelmapDrawError::BlendUnavailable => Self::BlendUnavailable,
+            LabelmapDrawError::RepresentationMismatch => Self::RepresentationMismatch,
             LabelmapDrawError::UnknownViewport => Self::UnknownViewport,
             LabelmapDrawError::Present(_) => Self::Extent,
         }

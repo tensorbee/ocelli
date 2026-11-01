@@ -20,6 +20,8 @@ pub enum LabelmapDrawError {
     NotOverlay,
     /// The overlay blend is not composite. Labelmap edge stays uncompiled.
     BlendUnavailable,
+    /// The viewport is showing a different representation. The presenter did not run.
+    RepresentationMismatch,
     /// The presenter refused. The previous texture stays.
     Present(LabelmapError),
     /// The viewport id was never registered.

@@ -9,7 +9,8 @@ use ocelli_render::{
     RenderGraph, SegPass, ViewportId,
 };
 use ocelli_seg::{
-    Contour, ContourGeometricType, LabelColourLut, PlaneFrame, Rgba8, present_contour,
+    Contour, ContourGeometricType, LabelColourLut, PlaneFrame, Representation, Rgba8,
+    present_contour,
 };
 
 fn colour() -> Rgba8 {
@@ -220,6 +221,10 @@ fn shown_contour_matches_the_presenter() {
         Ok(id) => id,
         Err(_) => return,
     };
+    assert_eq!(
+        graph.set_representation(id, Representation::Contour),
+        Ok(())
+    );
     assert!(
         graph
             .show_contour(&context, id, &line(), &frame(), &lut, view())
