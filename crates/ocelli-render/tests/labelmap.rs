@@ -11,8 +11,8 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, Dirty, FrameOutcome, GraphError, LabelmapDrawError, Pass, PassKind, PipelineKey,
-    RenderGraph, SegPass, StackPass, Tier, ViewportId, VoiParams,
+    BlendMode, Dirty, FrameOutcome, GraphError, GraphResources, LabelmapDrawError, Pass, PassKind,
+    PipelineKey, Recovered, RenderGraph, SegPass, StackPass, Tier, ViewportId, VoiParams,
 };
 use ocelli_seg::{LabelColourLut, LabelGrid, LabelStyle, LabelmapError, Rgba8, present_labelmap};
 
@@ -56,6 +56,16 @@ fn grid_all_one() -> LabelGrid {
         width: 3,
         height: 3,
         indices: vec![1, 1, 1, 1, 1, 1, 1, 1, 1],
+    }
+}
+
+/// A plus of segment 1. Corners are background. The centre's four orthogonal
+/// neighbours match, so it stays fill. PS3.3 C.8.20.2 keeps index 0 clear.
+fn grid_plus() -> LabelGrid {
+    LabelGrid {
+        width: 3,
+        height: 3,
+        indices: vec![0, 1, 0, 1, 1, 1, 0, 1, 0],
     }
 }
 
@@ -385,4 +395,107 @@ fn labelmap_edge_and_a_foreign_pass_upload_nothing() {
             passes: 1
         }
     );
+}
+
+fn presented_grid(grid: &LabelGrid, lut: &LabelColourLut) -> Vec<u8> {
+    let mut out = vec![0_u8; 36];
+    let painted = present_labelmap(grid, lut, style_on(), &mut out);
+    assert!(painted.is_ok());
+    out
+}
+
+#[test]
+#[ignore = "needs a real adapter, run by the gpu gate"]
+fn recovery_reuploads_a_labelmap_that_includes_background() {
+    // Hand bytes for grid_plus, fill and outline on.
+    // Corner 0 is background (0, 0, 0, 0). Top arm is outline alpha 255.
+    // Centre offset 16 is fill alpha 128. An 8-neighbour outline would
+    // paint that centre at alpha 255 because the corners differ.
+    let Some(mut context) = context() else {
+        return;
+    };
+    let mut graph = match RenderGraph::new(&mut context, 1, wgpu::TextureFormat::Rgba8Unorm) {
+        Ok(graph) => graph,
+        Err(_) => return,
+    };
+    let (source, target_view, target) = overlay_target(&context);
+    let id = match graph.register(
+        &context,
+        target_view,
+        source,
+        Pass::SegOverlay(SegPass {
+            blend: BlendMode::Composite,
+        }),
+    ) {
+        Ok(id) => id,
+        Err(_) => return,
+    };
+    let lut = LabelColourLut::from_segment_one(vec![segment_one()]);
+    let grid = grid_plus();
+    let expected = presented_grid(&grid, &lut);
+    assert_eq!(expected.get(0..4), Some(&[0_u8, 0, 0, 0][..]));
+    assert_eq!(expected.get(4..8), Some(&[10_u8, 20, 30, 255][..]));
+    assert_eq!(expected.get(16..20), Some(&[10_u8, 20, 30, 128][..]));
+    assert_eq!(expected.get(8..12), Some(&[0_u8, 0, 0, 0][..]));
+    assert!(
+        graph
+            .show_labelmap(&context, id, &grid, &lut, style_on())
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    assert_eq!(readback_plane(&context, &target, 3, 3), expected);
+    let recovered = Recovered {
+        caps: *context.caps(),
+        graph: Some(GraphResources {
+            pipelines_restored: 1,
+            cache_generation: 2,
+        }),
+    };
+    graph.install_recovered(&context, &recovered);
+    assert_eq!(
+        graph.show_labelmap(&context, id, &grid, &lut, style_on()),
+        Err(LabelmapDrawError::NotRebound)
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Unavailable { viewport: id }
+    );
+    let (source, target_view, target) = overlay_target(&context);
+    assert!(graph.rebind(&context, id, target_view, source).is_ok());
+    assert_eq!(graph.dirty(id), Ok(Dirty::full()));
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Unavailable { viewport: id }
+    );
+    assert_eq!(graph.submissions(), 1);
+    assert!(
+        graph
+            .show_labelmap(&context, id, &grid, &lut, style_on())
+            .is_ok()
+    );
+    assert_eq!(graph.dirty(id), Ok(Dirty::full()));
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    assert_eq!(readback_plane(&context, &target, 3, 3), expected);
+    assert_eq!(graph.submissions(), 2);
+    let before = graph.submissions();
+    assert!(
+        graph
+            .show_labelmap(&context, id, &grid, &lut, style_on())
+            .is_ok()
+    );
+    assert_eq!(graph.dirty(id), Ok(Dirty::default()));
+    assert_eq!(graph.tick(&context), FrameOutcome::Noop);
+    assert_eq!(graph.submissions(), before);
 }
