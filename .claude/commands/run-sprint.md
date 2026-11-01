@@ -175,10 +175,16 @@ Record a passing run in both evidence stores:
 
 ```bash
 python3 scripts/verify_ledger.py record --profile sprint \
-  --gates <what-ran> --corpus <result>
+  --gates <what-ran> --corpus <result> \
+  --comparison-report <path to compare.json>
+python3 scripts/verify_ledger.py assert --require-comparison
 python3 scripts/sprint_workflow.py record-verification --profile sprint \
   --result pass --gates <what-ran> --corpus <result>
 ```
+
+The comparison report is the green `compare gate` for a `compare produce`
+directory that contains every current view. A report with an absent view
+is not acceptable evidence.
 
 The ledger supplies commit provenance. The sprint run state supplies closure
 ordering. Both records use the current staged tree.

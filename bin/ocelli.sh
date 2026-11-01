@@ -669,9 +669,11 @@ case "$command" in
     # An argument is passed straight through. F-012's candidate-evidence form
     # is `bin/ocelli.sh compare gate --reference REF --candidate CANDIDATE`.
     # It requires two distinct resolved directories and never defaults the
-    # candidate to the reference. F-X003 writes those directories for the
-    # monochrome stack rows. F-X021 still owns full viewer activation.
-    if [ ! -d tools/oracle/out ]; then
+    # candidate to the reference. F-X003 writes the monochrome subset.
+    # `compare produce --reference REF --candidate CANDIDATE --corpus ROOT`
+    # writes one Ocelli image per current view. The sprint profile records
+    # that gate, and pre-push requires --require-comparison.
+    if [ "$#" -eq 0 ] && [ ! -d tools/oracle/out ]; then
       echo "There is no oracle output to compare." >&2
       echo "Run: bin/ocelli.sh oracle" >&2
       echo "See docs/lld/comparator.md for what this compares and what it does not." >&2

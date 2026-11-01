@@ -14,6 +14,7 @@ use ocelli_core::{Display, Stored};
 use ocelli_pixel::{
     ColorTransform, DecodedLayout, DecodedPhotometric, LutChain, PaletteColorLut,
     PhotometricInterpretation, PixelDataEncoding, PlanarConfiguration, Rgb, SampleLayout,
+    VoiFunction,
 };
 use ocelli_viewport::presentation::Colormap;
 
@@ -69,11 +70,15 @@ impl ColourParams {
     };
 
     pub(crate) fn from_lut(lut: &ColourLut) -> Self {
+        // `pad` 1 marks the grey identity table. The fragment shader then
+        // uses the 1024 ramp for LINEAR and LINEAR_EXACT. Stops and palette
+        // stay on `table_index`.
+        let grey = u32::from(lut.preset_id() == Some(PresetId::Grey));
         Self {
             mode: lut.mode(),
             origin: lut.origin(),
             last: lut.last_index(),
-            pad: 0,
+            pad: grey,
         }
     }
 }
@@ -213,7 +218,7 @@ impl ColourLut {
                 .map_into(&[sample], &mut display)
                 .map_err(|_| ColourLutError::Length)?;
             let shown = display.first().copied().unwrap_or(Display(0.0));
-            let index = display_index(shown.0, last);
+            let index = preset_index(self, chain, shown.0, last);
             *output = rgb_at(bytes, index);
         }
         Ok(())
@@ -338,6 +343,80 @@ fn bake(transform: &ColorTransform, origin: i32, end: i32) -> Result<Vec<u8>, Co
     Ok(bytes)
 }
 
+/// Grey `LINEAR` and `LINEAR_EXACT` use the pinned renderer's colour texture.
+///
+/// cornerstone3D 5.8.2 stores the ramp in a 1024-wide texture. The table
+/// samples `i / 1023`, `Uint8ClampedArray` rounds half to even, and the
+/// fragment shader reads that texture with NEAREST after `CLAMP_TO_EDGE`.
+/// Nearest-byte of the continuous display misses that table by one code on
+/// the values the signed-mean bound can see. `SIGMOID` is not this ramp.
+/// A VOI LUT sequence is not this ramp. `stops` keeps the 256-entry address.
+fn preset_index(lut: &ColourLut, chain: &LutChain, display: f32, last: u32) -> u32 {
+    if lut.preset_id() == Some(PresetId::Grey) && linear_byte_ramp(chain) {
+        reference_ramp_index(display, chain.inverts())
+    } else {
+        display_index(display, last)
+    }
+}
+
+fn linear_byte_ramp(chain: &LutChain) -> bool {
+    let function = chain.voi().window().map(|(_, _, function)| function);
+    let linear = matches!(
+        function,
+        Some(VoiFunction::Linear | VoiFunction::LinearExact)
+    );
+    let (ymin, ymax) = chain.voi().output_range();
+    linear && ymin.to_bits() == 0.0_f32.to_bits() && (ymax - 255.0).to_bits() == 0.0_f32.to_bits()
+}
+
+/// Byte stored by the 1024-wide ramp. `inverted` complements the table entry,
+/// which is how the reference inverts `MONOCHROME1` without a second formula.
+fn reference_ramp_index(display: f32, inverted: bool) -> u32 {
+    if !display.is_finite() {
+        return 0;
+    }
+    let rising = if inverted { 255.0 - display } else { display };
+    if !rising.is_finite() || rising <= 0.0 {
+        return if inverted { 255 } else { 0 };
+    }
+    if rising >= 255.0 {
+        return if inverted { 0 } else { 255 };
+    }
+    let width = 1024.0_f32;
+    let half = 0.5 / width;
+    let mut coord = rising / 255.0;
+    if coord < half {
+        coord = half;
+    } else if coord > 1.0 - half {
+        coord = 1.0 - half;
+    }
+    let bin = (coord * width).floor() / 1023.0;
+    let sample = if inverted { 1.0 - bin } else { bin };
+    u32::from(byte_from_channel(round_half_even(sample * 255.0)).unwrap_or(0))
+}
+
+/// Round half to even. `Uint8ClampedArray` uses that rule when the image
+/// mapper stores `255 * table`.
+fn round_half_even(value: f32) -> f32 {
+    if !value.is_finite() || value <= 0.0 {
+        return 0.0;
+    }
+    if value >= 255.0 {
+        return 255.0;
+    }
+    let floor = value.floor();
+    let fraction = value - floor;
+    if fraction > 0.5 {
+        return floor + 1.0;
+    }
+    if fraction < 0.5 {
+        return floor;
+    }
+    let half = floor * 0.5;
+    let even = (half.floor() - half).to_bits() == 0.0_f32.to_bits();
+    if even { floor } else { floor + 1.0 }
+}
+
 /// Table address. `display` itself is not modified.
 ///
 /// Values at or below 0 use texel 0. Values at or above `last` use texel
@@ -351,7 +430,7 @@ fn bake(transform: &ColorTransform, origin: i32, end: i32) -> Result<Vec<u8>, Co
 /// signed-mean bound of `0.1` rejects. `byte_from_channel` already rounds for
 /// the colour path, so truncating here was also an internal inconsistency.
 /// `table_index` in `graph.rs` applies the same rule in WGSL.
-fn display_index(display: f32, last: u32) -> u32 {
+pub(crate) fn display_index(display: f32, last: u32) -> u32 {
     if !display.is_finite() || display <= 0.0 {
         return 0;
     }
@@ -395,7 +474,7 @@ fn f32_from_i32(value: i32) -> Option<f32> {
     }
 }
 
-fn byte_from_channel(value: f32) -> Option<u8> {
+pub(crate) fn byte_from_channel(value: f32) -> Option<u8> {
     if !(0.0..=255.0).contains(&value) {
         return None;
     }
@@ -438,6 +517,8 @@ mod tests {
         assert_eq!(module.matches("fn voi_sigmoid(").count(), 1);
         assert!(module.contains("colour.mode == 2u"));
         assert!(module.contains("colour.mode == 1u"));
+        assert_eq!(module.matches("fn reference_ramp_byte(").count(), 1);
+        assert!(module.contains("colour.pad == 1u"));
         assert!(!module.contains("@compute"));
         assert!(!module.contains("var<storage"));
     }
@@ -447,6 +528,23 @@ mod tests {
         assert_eq!(std::mem::size_of::<super::ColourParams>(), 16);
         assert_eq!(super::ColourParams::NONE.pad, 0);
         assert_eq!(super::ColourParams::NONE.mode, 0);
+        use ocelli_pixel::PhotometricInterpretation;
+        let grey = super::ColourLut::preset(
+            super::PresetId::Grey,
+            PhotometricInterpretation::Monochrome2,
+        );
+        let Ok(grey) = grey else {
+            unreachable!("grey preset is available");
+        };
+        assert_eq!(super::ColourParams::from_lut(&grey).pad, 1);
+        let stops = super::ColourLut::preset(
+            super::PresetId::Stops,
+            PhotometricInterpretation::Monochrome2,
+        );
+        let Ok(stops) = stops else {
+            unreachable!("stops preset is available");
+        };
+        assert_eq!(super::ColourParams::from_lut(&stops).pad, 0);
     }
 
     #[test]
@@ -471,5 +569,101 @@ mod tests {
         let palette =
             super::colour_lut_for(Colormap::Grey, PhotometricInterpretation::PaletteColor);
         assert!(matches!(palette, Err(super::ColourLutError::Unavailable)));
+    }
+
+    /// Stored 149, 202, 213 and 224 at LINEAR 40/400.
+    ///
+    /// The continuous display rounds to 197, 231, 238 and 245. The reference
+    /// frame `syntax__explicit_vr_le` stores 198, 232, 239 and 246. Those four
+    /// codes are the whole signed-mean failure of that view.
+    #[test]
+    fn grey_linear_matches_the_reference_1024_ramp() {
+        use ocelli_core::Stored;
+        use ocelli_pixel::{PhotometricInterpretation, VoiFunction};
+
+        let lut = grey_lut(PhotometricInterpretation::Monochrome2);
+        let chain = window_chain(VoiFunction::Linear, PhotometricInterpretation::Monochrome2);
+        let stored = [Stored(149.0), Stored(202.0), Stored(213.0), Stored(224.0)];
+        let mut destination = [ocelli_pixel::Rgb::BLACK; 4];
+        assert!(
+            lut.map_preset_into(&chain, &stored, &mut destination)
+                .is_ok()
+        );
+        let bytes = [
+            channel_byte(&destination, 0),
+            channel_byte(&destination, 1),
+            channel_byte(&destination, 2),
+            channel_byte(&destination, 3),
+        ];
+        assert_eq!(bytes, [198, 232, 239, 246]);
+
+        let first = stored.first().copied().unwrap_or(Stored(0.0));
+        let nearest = super::display_index(chain.apply(first).0, 255);
+        assert_eq!(nearest, 197);
+    }
+
+    #[test]
+    fn grey_monochrome1_complements_the_reference_ramp() {
+        use ocelli_core::Stored;
+        use ocelli_pixel::{PhotometricInterpretation, VoiFunction};
+
+        let lut = grey_lut(PhotometricInterpretation::Monochrome1);
+        let chain = window_chain(VoiFunction::Linear, PhotometricInterpretation::Monochrome1);
+        assert!(chain.inverts());
+        let mut destination = [ocelli_pixel::Rgb::BLACK; 1];
+        assert!(
+            lut.map_preset_into(&chain, &[Stored(149.0)], &mut destination)
+                .is_ok()
+        );
+        assert_eq!(channel_byte(&destination, 0), 57);
+    }
+
+    #[test]
+    fn sigmoid_keeps_the_nearest_byte() {
+        use ocelli_core::Stored;
+        use ocelli_pixel::{PhotometricInterpretation, VoiFunction};
+
+        let lut = grey_lut(PhotometricInterpretation::Monochrome2);
+        let chain = window_chain(VoiFunction::Sigmoid, PhotometricInterpretation::Monochrome2);
+        let sample = Stored(40.0);
+        let mut destination = [ocelli_pixel::Rgb::BLACK; 1];
+        assert!(
+            lut.map_preset_into(&chain, &[sample], &mut destination)
+                .is_ok()
+        );
+        let nearest = super::display_index(chain.apply(sample).0, 255);
+        let byte = u8::try_from(nearest).unwrap_or(0);
+        assert_eq!(channel_byte(&destination, 0), byte);
+    }
+
+    fn grey_lut(photometric: ocelli_pixel::PhotometricInterpretation) -> super::ColourLut {
+        let lut = super::ColourLut::preset(super::PresetId::Grey, photometric);
+        let Ok(lut) = lut else {
+            unreachable!("grey preset is available");
+        };
+        lut
+    }
+
+    fn channel_byte(rgb: &[ocelli_pixel::Rgb], index: usize) -> u8 {
+        let value = rgb.get(index).map(|pixel| pixel.r).unwrap_or(0.0);
+        super::byte_from_channel(value).unwrap_or(u8::MAX)
+    }
+
+    fn window_chain(
+        function: ocelli_pixel::VoiFunction,
+        photometric: ocelli_pixel::PhotometricInterpretation,
+    ) -> ocelli_pixel::LutChain {
+        use ocelli_pixel::{LutChain, ModalityTransform, PresentationLutEvidence, VoiTransform};
+
+        let modality = ModalityTransform::new(None, Some(1.0), Some(0.0));
+        let voi = VoiTransform::new(None, &[40.0], &[400.0], 0, function, 0.0, 255.0);
+        let (Ok(modality), Ok(voi)) = (modality, voi) else {
+            unreachable!("40/400 is a legal window");
+        };
+        let chain = LutChain::new(modality, voi, photometric, PresentationLutEvidence::Absent);
+        let Ok(chain) = chain else {
+            unreachable!("the chain accepts this window");
+        };
+        chain
     }
 }

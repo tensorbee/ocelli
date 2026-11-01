@@ -10,6 +10,12 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- `bin/ocelli.sh compare produce` writes an Ocelli candidate image for every current oracle view. `compare gate` scores that directory. Colour, palette and YBR stay unscored. A missing image is absent and is not a pass.
+- Lossless JPEG-LS RGB with three components and sample interleave decodes to the stored samples. Line interleave, a non-zero NEAR and any other component count stay refused.
+- Two volumes that share one `FrameOfReferenceUID` can be drawn on one patient plane. Volume B is in front. An omitted colormap uses the existing window range. A second UID draws nothing. Tier C reports fusion unavailable and writes no CPU image.
+- Viewports that share one `FrameOfReferenceUID` keep one patient point. A second UID, including a trailing space, stays put. A missing UID moves nobody. The index is host arithmetic and is the same on every tier.
+- A thick slab can be drawn as composite, MIP, MinIP or average. Composite is the centre sample. The other three reduce stored samples and then apply the existing window once. An absent sample leaves the previous pixel in place. Tier C reports the slab unavailable.
+- An arbitrary patient plane can be taken from a constructed volume. The sample is the existing level-0 trilinear read. An absent slice stays absent. Display reuses the orthographic upload, and tier C reports that viewport unavailable.
 - A VOLUME_3D view ray-casts resident bricks on tier A and tier B. The window is the existing VOI uniform. Opacity stays 0.5 until a transfer function exists. A ready set that does not fit beside the residency texture is not drawn as a subset. Tier C reports the view unavailable.
 - An orthographic plane can be taken from a constructed volume. Axial, sagittal and coronal follow that volume's axes. `reslice` returns the stored samples. An absent slice stays absent. `show_ortho` uploads a complete plane through the existing stack window and leaves the last complete plane in place when a sample is missing. Tier C reports the viewport unavailable.
 - A volume can be shown while slices are still arriving. `cut_ready_brick`

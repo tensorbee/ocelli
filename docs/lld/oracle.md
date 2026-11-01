@@ -1,8 +1,8 @@
 # The oracle, reference half
 
 **F-IDs that contributed:** F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008,
-F-X009, F-X012, F-X013, F-X003, F-026
-**Last updated:** 2026-10-26
+F-X009, F-X012, F-X013, F-X003, F-026, F-X021
+**Last updated:** 2026-11-01
 
 HLD section 11 names cornerstone3D as the reference the differential harness
 measures against, and decision D7 makes the oracle the thing that exists before
@@ -10,12 +10,13 @@ port code. This file is the design behind `tools/oracle`. Read it beside
 `docs/lld/corpus.md`, because the corpus is what this renders and the two are
 one instrument.
 
-**This half compares nothing against Ocelli.** It produces, for every
+**This half compares nothing.** It produces, for every
 applicable corpus row, a reference frame plus the metadata that explains it,
 and for every declared series directory a reference volume and three orthogonal
 reformats of it. The half that judges is F-011 and it is
-`docs/lld/comparator.md`. Comparing Ocelli's own output against these frames
-still waits on there being an Ocelli output, which is decision D7 holding.
+`docs/lld/comparator.md`. `compare produce` writes the Ocelli candidate those
+frames are judged against. Decision D7 still holds, because this reference
+half existed before that producer.
 
 F-026 has no production render bridge. Its JPEG 2000 conformance evidence is
 therefore a sample-domain native and actual Node-hosted wasm comparison against
@@ -76,8 +77,10 @@ F-012 makes that directory contract explicit through `ocelli-compare gate`.
 It requires two distinct resolved directories and reports judged views,
 unmeasured views, absent views, unsupported source rows and declared volume
 refusals as separate counts. F-X003 writes a bounded monochrome stack
-candidate directory and points that existing command at it. F-X021 still owns
-full viewer activation after F-052. Colour pixels are not scored here.
+candidate directory and points that existing command at it. F-X021 writes
+one Ocelli image for every current view with `compare produce` and binds
+`--require-comparison` on the sprint profile and on pre-push. Colour
+pixels are not scored here.
 
 ## The pins, and deviation D-11
 
@@ -356,16 +359,15 @@ an inverted range. The new synthetic row reaches it: width 0.5 at centre 40
 returns lower 39.75 and upper 39.25, so lower exceeds upper by 0.5.
 
 The approved F-X012 plan expected that helper result to invert the presented
-pixels. The normal oracle contradicted that expectation. The 5.8.2 viewport's
-SIGMOID presentation remains monotonic increasing and its observed display
-codes at modality values 39.5, 39.75, 40, 40.25 and 40.5 are 5, 30, 127, 225
-and 250. Those are the observed quantised RGBA8 codes. They track the
-independent PS3.3 curve, with 127 observed for the exact centre value 127.5,
-so this record does not claim nearest-integer rounding.
-The frame digest is
+pixels. The viewport stays monotonic. It does not follow the file width.
+`toWindowLevel` rebuilds the inverted helper range as width 1.5 at centre 40,
+and the rendered codes follow that recovered window. At modality 39.5 the
+code is 53, not the PS3.3 value 5. The centre code is 127 where nearest of
+127.5 is 128, and one shoulder is 239 where the continuous value is 238.433.
+Both are one code. The frame digest is
 `03da6fdededcadf69d33416c37ec80bd5a32c3ded31cf685bc122eda16155aea`.
-The helper defect is therefore recorded as reachable, with its direction and
-magnitude, but not invented as a presented-pixel divergence.
+The presented window for a file width in `(0, 1)` is that recovery, and the
+DICOM formula then runs unchanged. A width of at least one is not on this path.
 
 F-014 makes this row the worked permanent quirk capture. The record in
 `corpus/quirks.json` names the focused comparator test as its executable
@@ -1233,17 +1235,13 @@ subset green.
 `node tools/oracle/diagnose-sigmoid.mjs` builds a deterministic synthetic
 shoulder ramp, renders the installed pinned reference and the real CPU
 candidate, and records both alongside the PS3.3 C.11.2.1.3.1 equation. It
-observed 17 mismatching samples out of 20. Ocelli follows width 0.5 within
-one output code. The pinned reference's rendered codes at the five points the
-F-X012 record names are 5, 30, 127, 225 and 250, which also fit width 0.5
-within one output code. The installed transfer-function path is not settled
-by those codes. The traced `toLowHighRange` result is lower 39.75 and upper
-39.25, and the installed `createSigmoidRGBTransferFunction` on that range
-statically yields codes that fit width 1.5. The rendered codes and the
-transfer-function path therefore disagree, and the reference's applied width
-stays unresolved pending an oracle run. The earlier claim that the rendered
-reference followed width 1.5 is withdrawn. The remaining
-reference-versus-candidate difference is therefore not explained by a settled
-SIGMOID width mismatch. Do not change DICOM arithmetic or the parity policy to
-settle it. The remaining interior quantization, letterbox and nonsquare edge
-residuals remain unattributed. All rendered corpus outputs stay ignored.
+observed 17 mismatching samples out of 20 while the candidate still used the
+file width. The same reference raw, digest
+`03da6fdededcadf69d33416c37ec80bd5a32c3ded31cf685bc122eda16155aea`, follows
+the recovered width 1.5. The five codes 5, 30, 127, 225 and 250 do occur in
+that frame, at stored columns other than the five the file-width curve names.
+The traced `toLowHighRange` result is lower 39.75 and upper 39.25, and
+`toWindowLevel` rebuilds that range as width 1.5 at centre 40. The product
+LUT keeps the file width. The producer passes the recovered window into the
+unchanged C.11.2.1.3.1 function. A width of at least one stays the file
+window. The parity bounds in section 25.1 are unchanged.

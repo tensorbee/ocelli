@@ -1,7 +1,7 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059
-**Last updated:** 2026-10-30
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056
+**Last updated:** 2026-10-31
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
@@ -9,7 +9,7 @@ HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
 | Type | What it is |
 |------|-----------|
-| `Pass` | Section 22's enum: `Stack`, `VolumeRaycast`, `SegOverlay` |
+| `Pass` | Section 22's enum: `Stack`, `VolumeRaycast`, `SegOverlay`. F-054 adds `Slab` |
 | `PipelineKey` | Pass kind, blend mode and tier. The whole key, tier included |
 | `Dirty` | Five flags from section 22 word for word: camera, VOI, slice, segmentation, data |
 | `ViewportId` | A newtype, so an index cannot transpose at a call site |
@@ -20,10 +20,11 @@ HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
 ## The rules that hold
 
-**Pipelines compile at creation.** The composite stack pipeline and the
-composite volume ray each have a shader body. A lookup for any other pass,
-blend and tier combination reports unavailable rather than aliasing
-composite, which is deviation D-07's honesty rule applied to a blend mode.
+**Pipelines compile at creation.** The composite stack pipeline, the
+composite volume ray, and the four slab pipelines each have a shader body.
+Volume MIP, stack MIP and labelmap edge stay uncompiled. A lookup for an
+uncompiled key reports unavailable rather than aliasing composite, which is
+deviation D-07's honesty rule applied to a blend mode.
 
 **Tier B compiles the stack fragment module.** The source is `VOI_WGSL`
 followed by the graph fragment shader. The three window functions stay the
@@ -242,6 +243,53 @@ does not return a CPU vector of ray colours. F-X005 owns that path.
 when the viewport has been bound. `set_voi` writes the same thirty-two bytes
 for a volume viewport. `set_view` stays stack-only.
 
+## Thick slab
+
+`PassKind::Slab` compiles four fragment pipelines from one module. The
+override `slab_blend` is 0 for composite, 1 for MIP, 2 for MinIP and 3 for
+average. `VOI_WGSL` is included once. Composite loads the centre sample.
+MIP, MinIP and average reduce stored samples and then call `lut_chain`
+once. There is no storage buffer and no compute entry. Labelmap edge on
+this pass is uncompiled. `show_slab` returns `BlendUnavailable` and does
+not bind composite.
+
+The colour attachment uses `LoadOp::Load`. An absent pixel discards before
+a value load, so the previous colour stays. A dimension of zero, or a
+dimension above the device `max_tex_3d`, returns `ExtentUnavailable` and
+does not upload a smaller image. Tier C returns `TierCUnavailable` before
+the image is read.
+
+`uploads` does not increase. Equal slab bytes and the same blend do not
+allocate again. A blend change keeps the textures and marks data dirty.
+One tick of a dirty slab and a dirty stack still submits once.
+
+## Fusion
+
+Fusion is not a `Pass` and it is not a slab blend. `RenderGraph::show_fusion`
+binds two concrete volumes. Volume B is in front of volume A. The fragment
+module is `VOI_WGSL`, the shared `table_index`, and `shaders/fusion.wgsl`.
+It calls the existing `lut_chain`. It does not re-type the window. The
+composite is `pet * opacity_pet + ct * opacity_ct * (1.0 - opacity_pet)`.
+An absent sample writes 0 into the stored plane and 0 into the presence
+plane. The shader does not window a texel whose presence is not greater
+than 0. The composite does not treat that stored 0 as a present sample. A
+present volume whose partner is absent is drawn on its own. A 256-entry
+colormap is read at the display index after the window. An omitted table
+scales the windowed display value by that chain's output range, the same
+ratio the stack shader uses.
+
+The window pass and the composite pass are recorded in the tick's existing
+encoder. The tick still submits once. An opacity change writes the uniform
+and does not upload the sample textures again. A settled request does not
+encode. Tier C returns `FusionError::TierCUnavailable` before a sample is
+read. A UID mismatch, an empty UID, an opacity outside 0 to 1, a chain with
+no section 18.4 uniform, a colormap whose length is not 256, and a plane or
+spacing that cannot be sampled return before the published frame changes.
+A lost device is `Unavailable` and is not a frame mismatch. The sample
+planes use the preserving float format a slab upload would choose. When
+that format or the `Rgba16Float` window target cannot be bound, the bind
+returns `FusionError::Unavailable` and writes no CPU image.
+
 ## Tiers
 
 | Tier | Stored upload |
@@ -263,7 +311,7 @@ The stored format was `R32Float`. LINEAR read back
 `[0.0, 127.81955, 255.0, 63.909775]`. LINEAR_EXACT read back
 `[0.0, 127.5, 255.0, 63.75]` on both sides. The gap at input 40 stayed.
 `LINEAR_EXACT` at input -160 was `0.0`. The script exited 0. Native
-`Backends::GL` found no adapter. That miss is not the tier B run. Mip, MinIp
-and Average wait for F-054, which depends on F-052. LabelmapEdgeProjection
+`Backends::GL` found no adapter. That miss is not the tier B run. Slab MIP, MinIP and average have fragment bodies. Volume MIP and stack
+MIP stay uncompiled. LabelmapEdgeProjection
 waits for F-067. The carried LINEAR out-of-range finding is left where F-041
 recorded it.

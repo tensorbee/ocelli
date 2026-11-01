@@ -1,7 +1,7 @@
 # Viewport
 
-**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-101, F-X003, F-X022
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022, F-054, F-055
+**Last updated:** 2026-10-31
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
 `RenderGraph::set_view` uploads the CSS matrix `View::camera_matrix` returns
@@ -222,22 +222,62 @@ open a device and does not upload a texture.
 
 ## Orthographic planes
 
-`RenderGraph::show_ortho` takes a host `OrthoImage` from `Volume::reslice`.
-It does not sample the volume. `present_plane` walks the samples. Tier C
+`RenderGraph::show_ortho` takes a host `OrthoImage` from `Volume::reslice`
+or `Volume::reslice_oblique`. It does not sample the volume. `present_plane`
+walks the samples. Tier C
 returns `OrthoError::TierCUnavailable` before that walk and before a buffer
 is allocated. An `Absent` sample returns `PlaneIncomplete`, and
 `upload_stored` is not called, so `uploads` and the previous texture stay.
 A complete plane uploads the `Present` `f32` values through the existing
-stack pass. Windowing stays `VoiParams` and the existing VOI shader. There
-is no new pass variant and no sampler in WGSL.
+stack pass. Windowing stays `VoiParams` and the existing VOI shader.
+`show_ortho` adds no pass variant and no sampler in WGSL.
 
 Tier A and tier B share that upload. The stored format stays the existing
-choice. Tier C does not draw a plane. `reslice` itself is host arithmetic
-and remains available for F-X004.
+choice. Tier C does not draw a plane. `reslice` and `reslice_oblique` are
+host arithmetic and remain available for F-X004. This file does not add a
+second upload.
+
+## Thick slab
+
+`RenderGraph::show_slab` takes a host `SlabImage` from
+`Volume::slab_samples`. It does not sample the volume. `present_slab`
+refuses tier C before it reads the image. An uncompiled blend, including
+labelmap edge, returns `BlendUnavailable` before the image is read and
+does not draw composite. A dimension above the device 3D limit returns
+`ExtentUnavailable` and does not upload a clipped image.
+
+A present pixel is drawn by one of the four slab pipelines. An absent
+pixel discards. The pass loads the colour target, so the previous pixel
+stays. `uploads` does not change. Tier A and tier B share that shader.
+Tier C does not draw a slab. The sample grid remains available on the host
+for F-X004.
+
+## Slice sync
+
+`SyncScene` keeps one patient point across viewports that share a
+`FrameOfReferenceUID`. The UID is the existing `FrameOfReferenceUid` string.
+Comparison is that string. A trailing space is a different UID. The scene
+does not parse it and does not trim it.
+
+`register` stores one slot, or replaces the slot with the same `u16`. It
+does not move a peer. `set_point` looks up the source. A missing source or
+a missing source UID is `SyncError::Unavailable`, and no slot is written.
+Every slot whose UID equals the source UID receives
+`HeldPlane::index_through_point`. A different UID stays. A missing peer UID
+stays, and that case is not an error. Any same-UID plane that refuses the
+point refuses the call before a slot is written.
+
+The change list is registration order. An index that compares equal under
+`==`, including the two zeros, is omitted and is not rewritten. `Ok` of an
+empty list is a successful no-op. The anchor stays the world point of index
+0. The normal and the spacing stay. The geometry is the volume function, so
+tier A, tier B and tier C store the same index. This crate creates no
+device.
 
 ## What this file does not own
 
 The TypeScript names are F-100. This crate does not depend on wgpu.
-Volume assembly and measured shear stay in `docs/lld/volumes.md`. This
-module does not read them. Volume brick prefetch in HLD section 30 is
+Volume assembly and measured shear stay in `docs/lld/volumes.md`. Scroll
+does not read them. `SyncScene` calls `HeldPlane::index_through_point` and
+does not assemble a volume. Volume brick prefetch in HLD section 30 is
 not the scroll module.

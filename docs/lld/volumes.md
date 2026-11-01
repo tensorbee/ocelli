@@ -1,7 +1,7 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-057, F-058, F-059
-**Last updated:** 2026-10-30
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055, F-056
+**Last updated:** 2026-10-31
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
 `ImagePositionPatient` projected on the slice normal, DICOM PS3.3
@@ -22,6 +22,7 @@ C.7.6.2.1.1. `SpacingBetweenSlices`, `SliceThickness`, `SliceLocation`,
 | `SlicePresence` | One bit per slice over `Vec<u64>`. Deviation D-25 |
 | `VolumeKey` | The series id a cached volume is stored under |
 | `VolumeCache` | Its own `Lru` on `CacheTier::Decoded`, with its own budget |
+| `HeldPlane` | One plane held at an index. The anchor is the world point of index 0. `Volume` does not store this plane or the UID |
 
 ## How a series becomes a volume
 
@@ -160,6 +161,108 @@ Output size is the two stepped axes. Axial spacing is `spacing[0]` by
 `spacing[1]`. Sagittal spacing is `spacing[1]` by `spacing[2]`. Coronal
 spacing is `spacing[0]` by `spacing[2]`.
 
+## Oblique planes
+
+`Volume::reslice_oblique` samples one arbitrary patient plane from level 0.
+`ObliquePlane` carries the origin, the row cosine, the column cosine, the
+output size and the two millimetre steps. Pixel `(c, r)` is
+`origin + c * column_mm * row + r * row_mm * column`. That is DICOM PS3.3
+C.7.6.2.1.1. `column_mm` multiplies the row cosine. `row_mm` multiplies the
+column cosine. The cosines are not renormalised. `origin` is the centre of
+pixel `(0, 0)`.
+
+The patient point minus the volume origin is `delta`. `i` is the dot of
+`direction.col(0)` with `delta`, divided by `spacing[0]`. `j` and `k` use
+columns 1 and 2 the same way. Each pixel is one `sample_at` call. An absent
+contributing slice, or a corner outside the grid, is `PlaneSample::Absent`.
+It is not a stored zero. A zero-weight corner is not read.
+
+A non-finite field, a zero direction, a zero output dimension, or a spacing
+that is not strictly positive is `VolumeError::ObliquePlane`. Nothing is
+allocated. `PlaneOutOfRange` stays the fixed-index error for `OrthoPlane`.
+Axial, sagittal and coronal stay `OrthoPlane`. `reslice` is unchanged.
+
+Display reuses `show_ortho`. This story adds no shader and no second upload.
+Tier C still returns `TierCUnavailable` before a sample is read.
+
+## Thick slab
+
+`Volume::slab_plane` builds the same axis frame as `reslice`.
+`Volume::slab_samples` then walks along the patient normal. `M` is the
+matrix whose column `i` is `spacing[i] * direction.col(i)`. `d` is the
+inverse of `M` times the unit normal. The step in millimetres is
+`1 / length(d)`. The index step is `d / length(d)`. It is not
+`SpacingBetweenSlices` and it is not `SliceThickness`.
+
+Integer `t` is included when `abs(t * step_mm)` is within half the
+thickness. `t = 0` is the centre. Thickness 0 is that one sample. A
+non-finite or negative thickness, or a sample count that does not fit in
+`u32`, is `VolumeError::SlabThickness` and allocates nothing. A zero
+normal, a non-finite normal, a non-positive spacing, or a singular `M` is
+`VolumeError::SlabNormal`.
+
+Each included index is one `sample_at` call. A pixel with any absent
+sample is `PlaneSample::Absent` in every slot of its column. It is not
+stored zero and it is not a reduction of the samples that did land.
+
+Composite display is the centre sample. MIP, MinIP and average reduce the
+stored samples and then apply the existing VOI once. That window is
+`LutChain` in `ocelli-pixel`. This crate does not keep a second copy.
+Display of the column is `RenderGraph::show_slab`.
+
+## One patient point on a held plane
+
+`HeldPlane::index_through_point` names the index of a `Pt<World>` on one
+plane. The plane origin is the anchor plus the stored index times
+`spacing_mm` along the normal. DICOM PS3.3 C.7.6.2.1.1 places that origin.
+The offset is the point minus that origin, dotted with the stored normal.
+The new index is the stored index plus that offset divided by `spacing_mm`.
+For a unit normal this is the point minus the anchor, dotted with the
+normal, divided by `spacing_mm`. The caller passes the stored direction
+column. This function does not normalise it. Identity columns are already
+unit, and assembly already normalises the slice column.
+
+The call does not write the plane and does not read a voxel. It does not
+read a UID. `Volume` still does not store `FrameOfReferenceUid`. It does
+not call `reslice`. An index is not rounded and not clamped.
+
+Spacing that is not finite and greater than zero, a normal whose length is
+not finite and greater than zero, or a non-finite anchor, normal, index or
+point is `PlaneSyncError::Unavailable`. A non-finite result is the same
+error. There is no tolerance on the length. The same index is the result
+on tier A, tier B and tier C. The function has no tier argument and creates
+no device.
+
+## Two volumes on one patient plane
+
+`Volume::sample_world` takes a `Pt<World>` and calls `sample_at`. The delta
+is the point minus the volume origin. The column index is
+`direction.col(0)` dotted with that delta, divided by `spacing[0]`. The row
+index uses column 1 and `spacing[1]`. The slice index uses column 2 and
+`spacing[2]`. DICOM PS3.3 C.7.6.2.1.1 stores `PixelSpacing` as row then
+column, so `PixelSpacing[0]` is `spacing[1]`. A point outside the grid is
+`PlaneSample::Absent`. It is not stored zero. A zero spacing makes the
+quotient non-finite and the sample is absent for the same reason.
+`sample_at` is the only sample kernel. `Volume::reslice`,
+`Volume::reslice_oblique`, the slab column walk and `Volume::sample_world`
+call it.
+
+`FusionPlane` names the shared output. Pixel `(column, row)` is the origin
+plus `column * column_mm` along `row_dir` plus `row * row_mm` along
+`column_dir`. `plane_from_ortho` builds that plane for an axial, sagittal
+or coronal index. Axial steps are `spacing[0]` and `spacing[1]`. Sagittal
+steps are `spacing[1]` and `spacing[2]`. Coronal steps are `spacing[0]` and
+`spacing[2]`. An index outside the volume, or a zero width or height,
+returns no plane. The directions are stored as given. The presenter
+accepts a direction whose length differs from 1 by at most the
+image-orientation tolerance of 2e-6 and does not renormalise it. A
+direction of length 2 is refused.
+
+Two volumes are drawn together only when the caller passes the same
+`FrameOfReferenceUID` string for both and neither string is empty. A
+trailing space is a different string. The volume still does not store the
+UID. There is no SUV and no patient weight.
+
 ## Tiers A, B and C
 
 Not applicable for A and B as a device path. The volume is host memory and
@@ -182,5 +285,7 @@ slice is left out, because uploading it would invent zeros.
 false. The check does not build the ready list and does not read a coarser
 level. This crate still creates no texture. `RenderGraph::sync_volume` in
 `ocelli-render` uploads a ready brick. `RenderGraph::show_ortho` uploads one complete
-orthographic plane. Pixels stay in the store and do not cross the worker
-boundary.
+orthographic plane. `RenderGraph::show_slab` uploads one thick slab from
+`slab_samples`. `RenderGraph::show_fusion` samples both volumes through
+`sample_world` and does not publish a fused CPU image. Pixels stay in the
+store and do not cross the worker boundary.

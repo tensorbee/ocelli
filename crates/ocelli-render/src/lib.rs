@@ -59,11 +59,13 @@ pub mod caps;
 pub mod colour;
 pub mod cpu;
 pub mod extent;
+pub mod fusion;
 pub mod gpu;
 pub mod graph;
 pub mod ortho;
 pub mod probe;
 pub mod progressive;
+pub mod slab;
 pub mod tier_b;
 pub mod voi;
 
@@ -76,15 +78,19 @@ pub use caps::{
 pub use colour::{ColourLut, ColourLutError, PresetId, colour_lut_for};
 pub use cpu::{CpuRaster, RasterColor, RasterError, RasterGrid, RasterQuality, RasterResult};
 pub use extent::{ExtentError, css_from_device, device_extent};
+pub use fusion::{
+    FusionError, FusionLedger, FusionRequest, colour_after_voi, composite, composite_sample,
+    fusion_module,
+};
 pub use gpu::{
     DeviceError, DeviceLoss, DeviceState, GpuContext, GraphResources, Recovered, SharedEncoder,
     SurfaceError,
 };
 pub use graph::{
     BlendMode, Dirty, FrameOutcome, GraphError, Pass, PassKind, PipelineFamily, PipelineKey,
-    RayAxis, RenderGraph, STORED_FORMAT, SegPass, StackPass, Upload, UploadError, ViewportId,
-    VolumeBrick, VolumePass, VolumeRaySource, device_camera_words, sampled_texture_limit,
-    tier_b_fragment_module, volume_ray_admission, volume_ray_module,
+    RayAxis, RenderGraph, STORED_FORMAT, SegPass, SlabPass, StackPass, Upload, UploadError,
+    ViewportId, VolumeBrick, VolumePass, VolumeRaySource, device_camera_words,
+    sampled_texture_limit, tier_b_fragment_module, volume_ray_admission, volume_ray_module,
 };
 pub use ortho::{OrthoError, present_plane};
 #[cfg(not(target_arch = "wasm32"))]
@@ -93,6 +99,9 @@ pub use probe::{
     Edge, Passes, ResolvedAdapter, WebGlOpened, WebGlProbe, resolve, resolve_adapter, resolve_webgl,
 };
 pub use progressive::{ProgressError, ProgressReport, sync_ready_bricks};
+pub use slab::{
+    SlabError, fragment_keys_for, present_slab, slab_blend_code, slab_compile_list, slab_module,
+};
 pub use tier_b::{Section183Error, Section183Pixels, read_section_18_3, stored_format_name};
 pub use voi::{VOI_WGSL, VoiParams, VoiParamsError};
 

@@ -1,8 +1,9 @@
-//! Orthographic planes on the volume's own axes.
+//! Planes through a constructed volume.
 //!
-//! PS3.3 C.7.6.2.1.1 gives the in-plane patient point. The third term is this
-//! volume's spacing and normal. Axial, sagittal and coronal name those axes.
-//! A sagittal line steps on the column cosine and the normal.
+//! PS3.3 C.7.6.2.1.1 gives the patient point. Axial, sagittal and coronal name
+//! this volume's axes. An oblique plane uses the same equation with the
+//! caller's cosines and the same level-0 sampler. A sagittal line steps on
+//! the column cosine and the normal.
 
 use alloc::vec::Vec;
 
@@ -10,6 +11,30 @@ use glam::DVec3;
 use ocelli_core::{Pt, World};
 
 use crate::{Volume, VolumeError, VoxelKind};
+
+/// One arbitrary patient plane. PS3.3 C.7.6.2.1.1.
+///
+/// Pixel `(c, r)` is `origin + c * column_mm * row + r * row_mm * column`.
+/// `column_mm` multiplies the row cosine. `row_mm` multiplies the column
+/// cosine. The cosines are not renormalised. `origin` is the centre of pixel
+/// `(0, 0)`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ObliquePlane {
+    /// Centre of output pixel `(0, 0)`, in patient millimetres.
+    pub origin: Pt<World>,
+    /// Row direction cosine. Multiplied by `column_mm`.
+    pub row: DVec3,
+    /// Column direction cosine. Multiplied by `row_mm`.
+    pub column: DVec3,
+    /// Output columns.
+    pub columns: u32,
+    /// Output rows.
+    pub rows: u32,
+    /// Millimetres between output columns. Multiplies `row`.
+    pub column_mm: f64,
+    /// Millimetres between output rows. Multiplies `column`.
+    pub row_mm: f64,
+}
 
 /// Which volume axis a plane holds still.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -68,6 +93,24 @@ impl Volume {
         Pt::<World>::new(point.x, point.y, point.z)
     }
 
+    /// Level-0 sample at a patient point.
+    ///
+    /// The index is the inverse of [`Self::voxel_world`]. `spacing[0]` divides
+    /// the column cosine and `spacing[1]` divides the row cosine. An index
+    /// that is not finite, or a corner that has not landed, is
+    /// [`PlaneSample::Absent`]. It is not stored zero.
+    pub fn sample_world(&self, point: Pt<World>) -> PlaneSample {
+        let delta = DVec3::new(
+            point.x - self.origin.x,
+            point.y - self.origin.y,
+            point.z - self.origin.z,
+        );
+        let i = self.direction.col(0).dot(delta) / self.spacing[0];
+        let j = self.direction.col(1).dot(delta) / self.spacing[1];
+        let k = self.direction.col(2).dot(delta) / self.spacing[2];
+        self.sample_at(i, j, k)
+    }
+
     /// Reslice one orthographic plane from level 0.
     ///
     /// # Errors
@@ -109,7 +152,77 @@ impl Volume {
         })
     }
 
-    fn in_range(&self, index: f64, dim: u32, axis: u8) -> Result<(), VolumeError> {
+    /// Reslice one arbitrary patient plane from level 0.
+    ///
+    /// Every pixel is one level-0 sample. Validation runs before the sample
+    /// buffer exists.
+    ///
+    /// # Errors
+    ///
+    /// [`VolumeError::ObliquePlane`] when a plane field or this volume's
+    /// spacing, direction or dimensions cannot be sampled. Nothing is
+    /// allocated in that case.
+    pub fn reslice_oblique(&self, plane: ObliquePlane) -> Result<OrthoImage, VolumeError> {
+        self.fill_oblique(plane, false)
+    }
+
+    /// Nearest patient plane. The index is rounded, then [`Self::sample_at`] reads that voxel.
+    ///
+    /// Half away from zero on a positive index. A negative index at or below
+    /// `-0.5` is absent. This is the `NEAREST` sample the volume viewport asks
+    /// for. It is not a second reconstruction.
+    pub fn reslice_nearest(&self, plane: ObliquePlane) -> Result<OrthoImage, VolumeError> {
+        self.fill_oblique(plane, true)
+    }
+
+    fn fill_oblique(&self, plane: ObliquePlane, nearest: bool) -> Result<OrthoImage, VolumeError> {
+        let Some(count) = oblique_pixel_count(self, &plane) else {
+            return Err(VolumeError::ObliquePlane);
+        };
+        let mut samples = Vec::with_capacity(count);
+        let volume_origin = DVec3::new(self.origin.x, self.origin.y, self.origin.z);
+        let mut row = 0_u32;
+        while row < plane.rows {
+            let mut column = 0_u32;
+            while column < plane.columns {
+                let patient = patient_point(&plane, column, row);
+                let delta = patient - volume_origin;
+                let i = self.direction.col(0).dot(delta) / self.spacing[0];
+                let j = self.direction.col(1).dot(delta) / self.spacing[1];
+                let k = self.direction.col(2).dot(delta) / self.spacing[2];
+                let sample = if nearest {
+                    self.sample_nearest(i, j, k)
+                } else {
+                    self.sample_at(i, j, k)
+                };
+                samples.push(sample);
+                column = column.saturating_add(1);
+            }
+            row = row.saturating_add(1);
+        }
+        Ok(OrthoImage {
+            width: plane.columns,
+            height: plane.rows,
+            column_mm: plane.column_mm,
+            row_mm: plane.row_mm,
+            samples,
+        })
+    }
+
+    fn sample_nearest(&self, i: f64, j: f64, k: f64) -> PlaneSample {
+        let Some(i) = nearest_index(i) else {
+            return PlaneSample::Absent;
+        };
+        let Some(j) = nearest_index(j) else {
+            return PlaneSample::Absent;
+        };
+        let Some(k) = nearest_index(k) else {
+            return PlaneSample::Absent;
+        };
+        self.sample_at(i, j, k)
+    }
+
+    pub(crate) fn in_range(&self, index: f64, dim: u32, axis: u8) -> Result<(), VolumeError> {
         let inside = dim > 0 && index.is_finite() && index >= 0.0 && index <= f64_from_u32(dim - 1);
         if inside {
             Ok(())
@@ -118,7 +231,9 @@ impl Volume {
         }
     }
 
-    fn sample_at(&self, x: f64, y: f64, z: f64) -> PlaneSample {
+    /// Level-0 trilinear sample. The slab walker calls this. It does not
+    /// grow a second kernel.
+    pub(crate) fn sample_at(&self, x: f64, y: f64, z: f64) -> PlaneSample {
         let Some(x0) = u32_from_nonneg_floor(x) else {
             return PlaneSample::Absent;
         };
@@ -186,6 +301,58 @@ impl Volume {
     }
 }
 
+fn oblique_pixel_count(volume: &Volume, plane: &ObliquePlane) -> Option<usize> {
+    if volume.dims[0] == 0 || volume.dims[1] == 0 || volume.dims[2] == 0 {
+        return None;
+    }
+    if !positive_finite(volume.spacing[0])
+        || !positive_finite(volume.spacing[1])
+        || !positive_finite(volume.spacing[2])
+    {
+        return None;
+    }
+    if !usable_direction(volume.direction.col(0))
+        || !usable_direction(volume.direction.col(1))
+        || !usable_direction(volume.direction.col(2))
+    {
+        return None;
+    }
+    if !plane.origin.x.is_finite() || !plane.origin.y.is_finite() || !plane.origin.z.is_finite() {
+        return None;
+    }
+    if !usable_direction(plane.row) || !usable_direction(plane.column) {
+        return None;
+    }
+    if !positive_finite(plane.column_mm) || !positive_finite(plane.row_mm) {
+        return None;
+    }
+    if plane.columns == 0 || plane.rows == 0 {
+        return None;
+    }
+    let columns = usize::try_from(plane.columns).ok()?;
+    let rows = usize::try_from(plane.rows).ok()?;
+    columns.checked_mul(rows)
+}
+
+fn patient_point(plane: &ObliquePlane, column: u32, row: u32) -> DVec3 {
+    let origin = DVec3::new(plane.origin.x, plane.origin.y, plane.origin.z);
+    let along_column = f64_from_u32(column) * plane.column_mm;
+    let along_row = f64_from_u32(row) * plane.row_mm;
+    origin + plane.row * along_column + plane.column * along_row
+}
+
+fn positive_finite(value: f64) -> bool {
+    value.is_finite() && value > 0.0
+}
+
+fn usable_direction(vector: DVec3) -> bool {
+    vector.x.is_finite() && vector.y.is_finite() && vector.z.is_finite() && !vector_is_zero(vector)
+}
+
+fn vector_is_zero(vector: DVec3) -> bool {
+    is_zero(vector.x) && is_zero(vector.y) && is_zero(vector.z)
+}
+
 fn voxel_of(plane: OrthoPlane, a: u32, b: u32) -> (f64, f64, f64) {
     let along_a = f64_from_u32(a);
     let along_b = f64_from_u32(b);
@@ -199,6 +366,26 @@ fn voxel_of(plane: OrthoPlane, a: u32, b: u32) -> (f64, f64, f64) {
 fn is_zero(weight: f64) -> bool {
     let bits = weight.to_bits();
     bits == 0 || bits == 1_u64 << 63
+}
+
+/// Nearest integer for a voxel index. Positive halves move away from zero.
+fn nearest_index(index: f64) -> Option<f64> {
+    if !index.is_finite() {
+        return None;
+    }
+    if index < 0.0 {
+        if index > -0.5 {
+            return Some(0.0);
+        }
+        return None;
+    }
+    let base = floor_nonneg(index);
+    let fraction = index - base;
+    if fraction >= 0.5 {
+        Some(base + 1.0)
+    } else {
+        Some(base)
+    }
 }
 
 /// Floor of a non-negative finite value. `f64::floor` is not in `no_std`.
@@ -222,7 +409,7 @@ fn f64_from_u32(value: u32) -> f64 {
     f64::from(high) * 65_536.0 + f64::from(low)
 }
 
-fn u32_from_nonneg_floor(index: f64) -> Option<u32> {
+pub(crate) fn u32_from_nonneg_floor(index: f64) -> Option<u32> {
     if !index.is_finite() || index < 0.0 {
         return None;
     }

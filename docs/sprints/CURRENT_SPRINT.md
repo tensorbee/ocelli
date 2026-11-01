@@ -1,16 +1,17 @@
-# Current sprint, S19
+# Current sprint, S20
 
 **Milestone**: M5, volume, MPR and 3D rendering.
-**Branch**: `sprint/s19`
-**Opened**: 2026-10-27
-**Goal**: Orthographic viewport: axial, sagittal, coronal, Progressive volume rendering while the series still loads, Multiscale pyramid hooks in the volume model, VOLUME_3D viewport with ray-cast direct volume rendering.
+**Branch**: `sprint/s20`
+**Opened**: 2026-10-31
+**Goal**: Oblique / arbitrary-plane reslicing, Thick slab with composite, MIP, MinIP and average blend modes, Slice-position sync and frame-of-reference handling, Multi-volume fusion with per-volume opacity and colormap (PET-CT), Activate the full-corpus candidate-render gate against Ocelli output.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-052 | E8.2 | Orthographic viewport: axial, sagittal, coronal | Rust | 4w | done |
-| F-057 | E8.7 | Progressive volume rendering while the series still loads | Rust | 3w | done |
-| F-058 | E8.8 | Multiscale pyramid hooks in the volume model | Rust | 3w | done |
-| F-059 | E9.1 | VOLUME_3D viewport with ray-cast direct volume rendering | Rust | 4w | done |
+| F-053 | E8.3 | Oblique / arbitrary-plane reslicing | Rust | 4w | done |
+| F-054 | E8.4 | Thick slab with composite, MIP, MinIP and average blend modes | Rust | 4w | done |
+| F-055 | E8.5 | Slice-position sync and frame-of-reference handling | Rust | 3w | done |
+| F-056 | E8.6 | Multi-volume fusion with per-volume opacity and colormap (PET-CT) | Rust | 4w | done |
+| F-X021 | Y1.16 | Activate the full-corpus candidate-render gate against Ocelli output | Test | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -20,27 +21,28 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S19 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S20 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S18 closed at tag `s18`. The merge is `ad2cdd0`. M5 continues. This sprint
-reslices a constructed volume on the axial, sagittal and coronal planes,
-draws while slices are still arriving, leaves a multiscale level axis on the
-volume, and ray-casts a VOLUME_3D view. The S19 table in
-`docs/sprints/SPRINT_PLAN.md` and the S19 rows in
-`docs/sprints/allocation.json` both name F-052, F-057, F-058 and F-059.
-Oblique reslice, thick slab, fusion and the full-corpus candidate gate stay
-on later sprints.
+S19 closed at tag `s19`. The merge is `6808930`. M5 continues. This sprint
+reslices a constructed volume on an arbitrary plane, draws a thick slab as
+composite, MIP, MinIP or average, keeps a slice position inside one frame of
+reference, fuses volumes that share that frame, and compares Ocelli output
+with the oracle. The S20 table in `docs/sprints/SPRINT_PLAN.md` and the S20
+rows in `docs/sprints/allocation.json` both name F-053, F-054, F-055, F-056
+and F-X021. Transfer-function editing, lighting, cropping and the CPU volume
+paths stay on S21.
 
-F-051 fills one candidate. `place` writes stored samples at sorted position
-`n`, and `order[n]` is the arrival index. `assemble` stays cleared. This
-sprint consumes that volume. It does not reopen construction geometry and it
-does not reopen the LUT chain.
+F-052 samples the axial, sagittal and coronal planes of the constructed
+volume. F-059 ray-casts ready bricks and skips a step whose residency flag
+is 0. This sprint consumes those views. It does not reopen volume
+construction and it does not reopen the LUT chain.
 
-The oracle still has no Ocelli renderer to compare a full viewer against.
-Decision D7 holds. This open publishes nothing.
+F-012 owns the candidate-directory contract. F-X021 connects Ocelli output
+to that contract. A candidate directory filled with the reference is not
+Ocelli output. Decision D7 holds. This open publishes nothing.
 
 ## What is carried in
 
@@ -53,11 +55,10 @@ Decision D7 holds. This open publishes nothing.
 - **The open LINEAR finding against `ocelli-pixel`'s own arithmetic** stays
   unscheduled. It has no F-ID. Clamping it so a readback matches is a
   tolerance change.
-- **The SIGMOID reference-width diagnosis** stays open in
-  `docs/lld/oracle.md`. The rendered reference codes fit width 0.5 while the
-  installed transfer-function path statically yields width 1.5. An oracle run
-  is needed to settle it. Do not change DICOM arithmetic or the parity policy
-  to settle it.
+- **The SIGMOID file width stays on the product LUT.** File width 0.5 at
+  centre 40 is about 4.586 under PS3.3 C.11.2.1.3.1. The pinned renderer
+  presents recovered width 1.5, and the candidate passes that window into
+  the same function. The product formula is not changed to settle it.
 - **Tier B greyscale has been drawn.** F-042 ran the section 18.3 rows on
   this host through headless Chromium WebGL2 and matched `LutChain::map_into`
   within 0.001, format `R32Float`. A tier B colour LUT readback was not run.
@@ -72,71 +73,74 @@ Decision D7 holds. This open publishes nothing.
   responsible for counting whole-sprint passes and invoking `set-phase
   blocked` at the configured limit. The per-feature microscope loop remains
   uncapped. No automatic script transition is claimed.
-- **M5 is not complete, and this open does not publish.** S18 closed F-051.
-  `docs/RELEASE.md` maps one minor to each milestone from M2 to M12, so a
-  finished M5 would name 0.5.0. S19, S20 and S21 remain. M1, M2, M3 and M4
-  were not published. The workspace version is still 0.1.0. `/release` runs
+- **M5 is not complete, and this open does not publish.** S19 closed F-052,
+  F-057, F-058 and F-059. `docs/RELEASE.md` maps one minor to each milestone
+  from M2 to M12, so a finished M5 would name 0.5.0. S20 and S21 remain.
+  M1, M2, M3 and M4 were not published. The workspace version is still
+  0.1.0. `/release` runs
   `python3 scripts/pin_and_size_check.py --require-redistribution`, and that
   command refuses while `openjph-core` 0.1.0 carries no BSD notice material,
-  which is D-22. That blocks publication. It does not block these four
+  which is D-22. That blocks publication. It does not block these five
   stories.
-- **No new measured duration.** F-051 in `SPRINT_TRACKER.md` reads
-  `not measured`, as does every M4 row. There is no measured total and no
-  ratio. The capacity points remain the S03 and S06 closes. This open does
-  not invent a ratio and does not recalculate capacity.
+- **No new measured duration.** The S19 rows in `SPRINT_TRACKER.md` read
+  `not measured`, as does every earlier M5 and M4 row. There is no measured
+  total and no ratio. The capacity points remain the S03 and S06 closes.
+  This open does not invent a ratio and does not recalculate capacity.
 - **F-X011** remains pending because its evidence needs a second physical
   machine. **ICC** is still unimplemented, the other half of HLD section 18's
-  stage-4 row. Multi-component JPEG-LS decoding is still owed.
-- **The oracle has no Ocelli renderer to compare a full viewer against.**
-  F-X021 writes the candidate record and depends on F-012 and F-052. It is
-  S20. Decision D7 holds.
+  stage-4 row. Lossless JPEG-LS RGB at 8 bits, three components and sample
+  interleave now decodes. Line interleave, a non-zero NEAR and any other
+  component count stay refused.
 
 ## The defect class this sprint is exposed to
 
-**A plane or a ray that is not the constructed volume.** HLD section 7 and
-section 19. Axial, sagittal and coronal are the volume's own axes, from the
-direction built when the volume was constructed. A sagittal sample that steps
-along the row cosine instead of the column cosine is the swap. A brick whose
-slices have not all landed must stay out of the upload, because the missing
-slices would become zeros. A ray uses the same origin, spacing and direction
-as `Volume::construct`. Spacing Between Slices is not that spacing.
+**A sample that is not on the requested plane, or a blend that is a
+different mode.** HLD section 7 and section 19. The volume has one origin,
+one spacing and one direction. An oblique sample that steps along the slice
+index instead of the requested plane is the wrong plane. Composite, MIP,
+MinIP and average are distinct shader variants. Returning the first sample
+and calling it a MIP is the wrong mode. Two volumes with different
+`FrameOfReferenceUID` values are two candidates. Overlaying them as one view
+is the wrong fusion. F-X021 judges Ocelli pixels. Copying the reference into
+the candidate directory makes the comparison agree with itself.
 
 HLD section 7 makes a 3D-texture ray-cast legal on tier B. Deviation D-07
 says a feature that cannot run on the resolved tier reports unavailable.
-F-X005 owns the CPU ray-cast decision and is S21. This sprint must not draw
-a different image on the CPU and call it the same view.
+F-X004 and F-X005 own the CPU MPR and CPU volume decision and are S21. This
+sprint must not draw a different image on the CPU and call it the same view.
 
 ## What done means
 
-- **F-052** shows axial, sagittal and coronal from the constructed volume's
-  direction, origin and spacing. The three planes are that volume. They are
-  not a second patient frame and not a stack of stored frames sorted by
-  Instance Number.
-- **F-057** draws while the series is incomplete. A slice that has not landed
-  contributes no samples. The view does not paint those voxels as zeros and
-  call the volume complete.
-- **F-058** leaves the multiscale level axis on the volume. The hook is the
-  deliverable. A later consumer of the pyramid is not this story.
-- **F-059** ray-casts a VOLUME_3D view from the constructed volume. Tier A
-  and tier B each have an answer. Tier C reports unavailable unless F-X005
-  has a measured path, and that story is not in this sprint. A CPU image
-  that differs from the GPU image is not an answer.
+- **F-053** samples an arbitrary plane through the constructed volume. The
+  plane is that volume's origin, spacing and direction. It is not a rotation
+  of the stored slice index and not a second patient frame.
+- **F-054** draws a thick slab as composite, MIP, MinIP or average. The four
+  modes are distinct. A mode that cannot run on the resolved tier reports
+  unavailable. It does not return composite and name it MIP.
+- **F-055** keeps a slice position inside one frame of reference. A second
+  `FrameOfReferenceUID` is not the same position.
+- **F-056** fuses volumes that share a frame of reference, with per-volume
+  opacity and colormap. A PET-CT pair with two frames is not overlaid as if
+  the frames matched.
+- **F-X021** points the candidate-render gate at Ocelli output for the oracle
+  views. The reference copied into the candidate directory is not that
+  output.
 - **Each story declares all three tier rows**, and "n/a" is a real answer
   that an omitted row is not.
-- Oblique reslice, thick slab, slice sync, fusion and the candidate-render
-  gate stay out. Those are F-053, F-054, F-055, F-056 and F-X021.
+- Transfer-function editing, lighting, cropping, CPU MPR and the CPU volume
+  decision stay out. Those are F-060, F-061, F-062, F-X004 and F-X005.
 - `wasm-bindgen` remains confined to `ocelli-wasm`, pixels do not cross the
   boundary, and `ocelli-render` remains the only crate that may create a
   device. The LUT arithmetic stays in `ocelli-pixel`.
 
 ## Dependency order
 
-F-052, F-057, F-058 and F-059 depend on F-051. That backlog row is `done`.
-No backlog cell in this sprint names another story in this sprint.
+F-053, F-054, F-055 and F-056 depend on F-052. That backlog row is `done`.
+F-X021 depends on F-012 and F-052. Both backlog rows are `done`. No backlog
+cell in this sprint names another story in this sprint.
 
-F-053, F-054, F-055 and F-056 depend on F-052 and are S20. F-X021 depends on
-F-012 and F-052 and is S20. F-060 depends on F-059 and is S21. F-X004 depends
-on F-052 and F-X003 and is S21. F-X005 is S21.
+F-060, F-061 and F-062 depend on F-059 and are S21. F-X004 depends on F-052
+and F-X003 and is S21. F-X005 depends on F-059 and F-X003 and is S21.
 
 ## Standing expectations
 
@@ -155,13 +159,13 @@ A feature that cannot run on the resolved tier **reports unavailable**. It
 never quietly produces a different result, which is HLD section 31's rule
 generalised by D-07.
 
-## Audit intake, 2026-10-27
+## Audit intake, 2026-10-31
 
-S18 closed at tag `s18` with 31 of 31 gates green, the corpus passing, and
-whole-sprint review pass 2 clean at zero defects and zero smells. The gate
-tree is `189248116673`. The merge is `ad2cdd0`. `scripts/backlog_check.py`,
+S19 closed at tag `s19` with 31 of 31 gates green, the corpus passing, and
+whole-sprint review pass 1 clean at zero defects and zero smells. The gate
+tree is `2a9588eb4eaf`. The merge is `6808930`. `scripts/backlog_check.py`,
 `scripts/gen_sprint_plan.py --check` and `scripts/deviation_check.py` are
-green at this open. The S19 allocation rows and the S19 plan table name the
+green at this open. The S20 allocation rows and the S20 plan table name the
 same F-IDs. No new audit was run at this open.
 
-F-052, F-057, F-058 and F-059 are pending.
+F-053, F-054, F-055, F-056 and F-X021 are done.

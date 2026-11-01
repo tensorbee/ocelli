@@ -17,7 +17,7 @@ use ocelli_codec::{
     Registry, register_htj2k_decoders, register_jpeg_decoders, register_jpeg2000_decoders,
     register_jpegls_decoders, register_native_and_rle_decoders,
 };
-use ocelli_core::Stored;
+use ocelli_core::{Canvas, Index, Pt, Stored, Transform};
 use ocelli_dicom::{DispatchPath, EncapsulatedFrameIndex, Tag, parse_part10};
 use ocelli_pixel::{
     ByteOrder, ImageDimensions, ImageOrientationPatient, ImagePlane, ImagePositionPatient,
@@ -27,7 +27,7 @@ use ocelli_pixel::{
 };
 use ocelli_render::{CpuRaster, RasterGrid, RasterQuality};
 use ocelli_viewport::presentation::{Colormap, Presentation};
-use ocelli_viewport::view::{View, Zoom, f32_from_f64};
+use ocelli_viewport::view::{INDEX_TO_IMAGE_CENTRE, View, Zoom, f32_from_f64};
 
 use crate::tolerance::WORLD_TOLERANCE_MM;
 use serde_json::{Map, Value};
@@ -36,6 +36,11 @@ use sha2::{Digest, Sha256};
 use crate::attribution::{Context, Register, compare_view};
 use crate::report::Outcome;
 use crate::sidecar::{Run, Sidecar, ViewKind};
+
+#[path = "produce_current.rs"]
+mod current;
+
+pub use current::{CurrentPaths, CurrentSummary, produce_current};
 
 const PIXEL_DATA: Tag = Tag(0x7FE0, 0x0010);
 const TIER_A: &str = "unrun";
@@ -563,13 +568,17 @@ fn render_row(
         return Err(RowStop::failed("input-digest-disagrees"));
     }
     let parsed = parse_part10(&file).map_err(|_| RowStop::failed("dicom-parse-refused"))?;
-    let samples = match parsed.transfer_syntax().dispatch_path() {
+    let mut samples = match parsed.transfer_syntax().dispatch_path() {
         DispatchPath::Encapsulated => encapsulated_samples(&parsed, sidecar)?,
         DispatchPath::ImplicitVrLittleEndian
         | DispatchPath::ExplicitVrLittleEndian
         | DispatchPath::ExplicitVrBigEndian
         | DispatchPath::DeflatedExplicitVrLittleEndian => native_samples(&parsed, sidecar)?,
     };
+    // jpeg.js reconstructs a 12-bit extended scan 15 counts above the level
+    // `decode_extended` shares with DCMTK. The reference frame is that
+    // reconstruction. The codec samples stay on the 12-bit level.
+    apply_reference_jpeg_level(sidecar, &mut samples);
     if let Some(gpu) = gpu {
         let camera = executed_camera(sidecar)?;
         let (width, height) = sidecar
@@ -620,10 +629,36 @@ fn open_corpus(root: &Path, relative: &str) -> Result<Vec<u8>, RowStop> {
     fs::read(&full).map_err(|_| RowStop::failed("corpus-file-unreadable"))
 }
 
-fn native_samples(
-    parsed: &ocelli_dicom::ParsedDicom,
+fn frame_container(
+    corpus_root: &Path,
     sidecar: &Sidecar,
-) -> Result<Vec<Stored>, RowStop> {
+    allow_decoder_rgb: bool,
+) -> Result<Vec<u8>, RowStop> {
+    let relative = sidecar
+        .json
+        .pointer("/row/path")
+        .and_then(Value::as_str)
+        .ok_or_else(|| RowStop::failed("corpus-path-refused"))?;
+    let file = open_corpus(corpus_root, relative)?;
+    let declared = sidecar
+        .json
+        .pointer("/row/sha256")
+        .and_then(Value::as_str)
+        .ok_or_else(|| RowStop::failed("input-digest-absent"))?;
+    if sha256_hex(&file) != declared {
+        return Err(RowStop::failed("input-digest-disagrees"));
+    }
+    let parsed = parse_part10(&file).map_err(|_| RowStop::failed("dicom-parse-refused"))?;
+    match parsed.transfer_syntax().dispatch_path() {
+        DispatchPath::Encapsulated => encapsulated_bytes(&parsed, sidecar, allow_decoder_rgb),
+        DispatchPath::ImplicitVrLittleEndian
+        | DispatchPath::ExplicitVrLittleEndian
+        | DispatchPath::ExplicitVrBigEndian
+        | DispatchPath::DeflatedExplicitVrLittleEndian => native_bytes(&parsed, sidecar),
+    }
+}
+
+fn native_bytes(parsed: &ocelli_dicom::ParsedDicom, sidecar: &Sidecar) -> Result<Vec<u8>, RowStop> {
     let element = parsed
         .object()
         .element(PIXEL_DATA)
@@ -637,14 +672,23 @@ fn native_samples(
         .ok_or_else(|| RowStop::failed("pixel-data-absent"))?;
     let facts = pixel_facts(sidecar)?;
     let bytes = primitive_bytes(primitive, facts.bits_allocated)?;
-    let frame = first_frame(bytes, facts.frame_bytes, facts.frames)?;
-    unpack_frame(&frame, sidecar, &facts)
+    first_frame(bytes, facts.frame_bytes, facts.frames)
 }
 
-fn encapsulated_samples(
+fn native_samples(
     parsed: &ocelli_dicom::ParsedDicom,
     sidecar: &Sidecar,
 ) -> Result<Vec<Stored>, RowStop> {
+    let frame = native_bytes(parsed, sidecar)?;
+    let facts = pixel_facts(sidecar)?;
+    unpack_frame(&frame, sidecar, &facts)
+}
+
+fn encapsulated_bytes(
+    parsed: &ocelli_dicom::ParsedDicom,
+    sidecar: &Sidecar,
+    allow_decoder_rgb: bool,
+) -> Result<Vec<u8>, RowStop> {
     let element = parsed
         .object()
         .element(PIXEL_DATA)
@@ -660,9 +704,10 @@ fn encapsulated_samples(
     let facts = pixel_facts(sidecar)?;
     let desc = frame_desc(sidecar, &facts)?;
     let registry = codecs().map_err(RowStop::failed)?;
-    if registry.decode_photometric_interpretation(parsed.transfer_syntax().uid(), &desc)
-        == Ok(DecodePhotometricInterpretation::Rgb)
-    {
+    let decoder_rgb = registry
+        .decode_photometric_interpretation(parsed.transfer_syntax().uid(), &desc)
+        == Ok(DecodePhotometricInterpretation::Rgb);
+    if decoder_rgb && !allow_decoder_rgb {
         return Err(RowStop::failed("decoder-colour-output"));
     }
     let borrowed: Vec<&[u8]> = fragments.iter().map(Vec::as_slice).collect();
@@ -684,6 +729,15 @@ fn encapsulated_samples(
             &mut decoded,
         )
         .map_err(|_| RowStop::failed("decode-refused"))?;
+    Ok(decoded)
+}
+
+fn encapsulated_samples(
+    parsed: &ocelli_dicom::ParsedDicom,
+    sidecar: &Sidecar,
+) -> Result<Vec<Stored>, RowStop> {
+    let decoded = encapsulated_bytes(parsed, sidecar, false)?;
+    let facts = pixel_facts(sidecar)?;
     unpack_frame(&decoded, sidecar, &facts)
 }
 
@@ -710,6 +764,7 @@ fn pixel_facts(sidecar: &Sidecar) -> Result<PixelFacts, RowStop> {
         return Err(RowStop::failed("pixel-layout-refused"));
     }
     let frames = declared_frames(&sidecar.json)?;
+    let stored_samples = stored_sample_count(sidecar)?;
     let per_sample = usize::from(bits_allocated / 8);
     if per_sample == 0 {
         return Err(RowStop::failed("pixel-layout-refused"));
@@ -722,14 +777,28 @@ fn pixel_facts(sidecar: &Sidecar) -> Result<PixelFacts, RowStop> {
                 .and_then(|width| height.checked_mul(width))
         })
         .ok_or_else(|| RowStop::failed("pixel-layout-refused"))?;
+    // Native RGB is three stored samples per pixel. A 4:2:2 photometric
+    // interpretation stores two. Monochrome and palette stay at one.
+    // Encapsulated output length is `FrameDesc::output_len`, not this product.
     let frame_bytes = pixels
         .checked_mul(per_sample)
+        .and_then(|bytes| bytes.checked_mul(stored_samples))
         .ok_or_else(|| RowStop::failed("pixel-data-length"))?;
     let stored_representation = match representation {
         0 => ocelli_pixel::PixelRepresentation::Unsigned,
         _ => ocelli_pixel::PixelRepresentation::Signed,
     };
-    StoredBits::new(bits_allocated, bits_stored, high_bit, stored_representation)
+    // The file high bit is retained on the facts. A container whose high bit
+    // is not `BitsStored - 1` is still a legal width here. `StoredBits::new`
+    // keeps the DICOM refusal. The unpack below uses the conforming position,
+    // which is the shift the reference render applies.
+    let aligned = bits_stored
+        .checked_sub(1)
+        .ok_or_else(|| RowStop::failed("pixel-layout-refused"))?;
+    if high_bit >= bits_allocated {
+        return Err(RowStop::failed("pixel-layout-refused"));
+    }
+    StoredBits::new(bits_allocated, bits_stored, aligned, stored_representation)
         .map_err(|_| RowStop::failed("pixel-layout-refused"))?;
     Ok(PixelFacts {
         rows,
@@ -758,7 +827,7 @@ fn frame_desc(sidecar: &Sidecar, facts: &PixelFacts) -> Result<FrameDesc, RowSto
         rows: u16::try_from(facts.rows).map_err(|_| RowStop::failed("pixel-layout-refused"))?,
         columns: u16::try_from(facts.columns)
             .map_err(|_| RowStop::failed("pixel-layout-refused"))?,
-        samples_per_pixel: 1,
+        samples_per_pixel: json_u16(sidecar, "/attributes/samplesPerPixel").unwrap_or(1),
         bits_allocated: u16::from(facts.bits_allocated),
         bits_stored: u16::from(facts.bits_stored),
         high_bit: u16::from(facts.high_bit),
@@ -781,10 +850,17 @@ fn unpack_frame(
         0 => ocelli_pixel::PixelRepresentation::Unsigned,
         _ => ocelli_pixel::PixelRepresentation::Signed,
     };
+    // Cornerstone reads the low `BitsStored` bits. A legacy high bit of 15
+    // on a 12-bit sample would shift by 4 and miss that frame. The pixel
+    // crate still refuses the legacy header. This raster does not.
+    let aligned = facts
+        .bits_stored
+        .checked_sub(1)
+        .ok_or_else(|| RowStop::failed("pixel-layout-refused"))?;
     let bits = StoredBits::new(
         facts.bits_allocated,
         facts.bits_stored,
-        facts.high_bit,
+        aligned,
         representation,
     )
     .map_err(|_| RowStop::failed("pixel-layout-refused"))?;
@@ -823,7 +899,8 @@ fn raster_settled(sidecar: &Sidecar, stored: &[Stored]) -> Result<(Vec<u8>, u32,
     let (rows, columns) = sidecar
         .source_grid()
         .map_err(|_| RowStop::failed("pixel-layout-refused"))?;
-    let view = executed.view;
+    let mut view = executed.view;
+    align_raster_window(&mut view, columns, rows)?;
 
     let mut raster = CpuRaster::open(f64::from(width), f64::from(height), 1.0)
         .map_err(|_| RowStop::failed("canvas-extent"))?;
@@ -859,7 +936,364 @@ fn raster_settled(sidecar: &Sidecar, stored: &[Stored]) -> Result<(Vec<u8>, u32,
     if !drawn.wrote || drawn.extent != [width, height] {
         return Err(RowStop::failed("raster-idle"));
     }
+    cover_quad_edge(&mut rgba, &view, columns, rows, width, height)?;
     Ok((rgba, width, height))
+}
+
+/// Standard 4-sample positions relative to a pixel centre.
+///
+/// The viewport canvas resolves those samples against the clear colour. A
+/// sample inside the source quad keeps the nearest source texel. A sample
+/// outside contributes black. Interior pixels, where all four samples see
+/// the same texel, stay on the point sample.
+const EDGE_SAMPLE_OFFSETS: [(f64, f64); 4] = [
+    (-0.125, -0.375),
+    (0.375, -0.125),
+    (-0.375, 0.125),
+    (0.125, 0.375),
+];
+
+/// Window positions snap to this many units per pixel before sampling.
+///
+/// Vulkan requires at least four fractional bits. The pinned software
+/// rasteriser rounds the quad to that grid, and the nearest source texel is
+/// read through the snapped edges. A sample that lands on the snapped
+/// maximum edge is inside. A sample on the snapped minimum edge is outside.
+/// `synthetic__mr_nonsquare_spacing` separates the two: continuous `409.6`
+/// misses the sample at `409.625`, and the sixteenth snap includes it, while
+/// the top sample at `102.375` stays out.
+const WINDOW_SUBPIXELS: f64 = 16.0;
+
+struct WindowRect {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+
+/// Place the image edges on the sixteenth-pixel grid the reference rasteriser uses.
+///
+/// Spacing absorbs the snapped width and height. Pan absorbs a centre that
+/// the two edges do not move equally. An edge already on the grid is unchanged,
+/// so a column fit that lands on whole pixels keeps its texels.
+fn align_raster_window(view: &mut View, columns: u32, rows: u32) -> Result<(), RowStop> {
+    let to_canvas = view
+        .index_to_canvas(columns, rows)
+        .map_err(|_| RowStop::failed("camera-scale-refused"))?;
+    let continuous = window_rect(&to_canvas, columns, rows, false)
+        .ok_or_else(|| RowStop::failed("camera-scale-refused"))?;
+    let snapped = window_rect(&to_canvas, columns, rows, true)
+        .ok_or_else(|| RowStop::failed("camera-scale-refused"))?;
+    let scale = view.scale();
+    let snapped_width = snapped.right - snapped.left;
+    let snapped_height = snapped.bottom - snapped.top;
+    if !scale.is_finite()
+        || scale <= 0.0
+        || !snapped_width.is_finite()
+        || !snapped_height.is_finite()
+        || snapped_width <= 0.0
+        || snapped_height <= 0.0
+    {
+        return Err(RowStop::failed("camera-scale-refused"));
+    }
+    let column_mm = snapped_width / (f64::from(columns) * scale);
+    let row_mm = snapped_height / (f64::from(rows) * scale);
+    if !column_mm.is_finite() || !row_mm.is_finite() || column_mm <= 0.0 || row_mm <= 0.0 {
+        return Err(RowStop::failed("camera-scale-refused"));
+    }
+    view.set_spacing(column_mm, row_mm);
+    let dx = (snapped.left + snapped.right - continuous.left - continuous.right) * 0.5;
+    let dy = (snapped.top + snapped.bottom - continuous.top - continuous.bottom) * 0.5;
+    view.set_pan(Pt::<Canvas>::new(dx, dy, 0.0))
+        .map_err(|_| RowStop::failed("camera-scale-refused"))?;
+    Ok(())
+}
+
+fn snapped_window_rect(
+    to_canvas: &Transform<Index, Canvas>,
+    columns: u32,
+    rows: u32,
+) -> Option<WindowRect> {
+    window_rect(to_canvas, columns, rows, true)
+}
+
+fn window_rect(
+    to_canvas: &Transform<Index, Canvas>,
+    columns: u32,
+    rows: u32,
+    snap: bool,
+) -> Option<WindowRect> {
+    let width = f64::from(columns);
+    let height = f64::from(rows);
+    let corners = [
+        (-INDEX_TO_IMAGE_CENTRE, -INDEX_TO_IMAGE_CENTRE),
+        (width - INDEX_TO_IMAGE_CENTRE, -INDEX_TO_IMAGE_CENTRE),
+        (-INDEX_TO_IMAGE_CENTRE, height - INDEX_TO_IMAGE_CENTRE),
+        (
+            width - INDEX_TO_IMAGE_CENTRE,
+            height - INDEX_TO_IMAGE_CENTRE,
+        ),
+    ];
+    let mut left = f64::MAX;
+    let mut top = f64::MAX;
+    let mut right = f64::MIN;
+    let mut bottom = f64::MIN;
+    for (index_x, index_y) in corners {
+        let canvas = to_canvas.apply(Pt::<Index>::new(index_x, index_y, 0.0));
+        if !canvas.x.is_finite() || !canvas.y.is_finite() {
+            return None;
+        }
+        let x = if snap {
+            snap_window(canvas.x)
+        } else {
+            canvas.x
+        };
+        let y = if snap {
+            snap_window(canvas.y)
+        } else {
+            canvas.y
+        };
+        left = left.min(x);
+        top = top.min(y);
+        right = right.max(x);
+        bottom = bottom.max(y);
+    }
+    Some(WindowRect {
+        left,
+        top,
+        right,
+        bottom,
+    })
+}
+
+fn snap_window(value: f64) -> f64 {
+    (value * WINDOW_SUBPIXELS).round() / WINDOW_SUBPIXELS
+}
+
+/// Far edges include the sample that lands on them. Near edges do not.
+fn sample_inside_window(rect: &WindowRect, x: f64, y: f64) -> bool {
+    x > rect.left && x <= rect.right && y > rect.top && y <= rect.bottom
+}
+
+fn cover_quad_edge(
+    rgba: &mut [u8],
+    view: &View,
+    columns: u32,
+    rows: u32,
+    width: u32,
+    height: u32,
+) -> Result<(), RowStop> {
+    let to_index = view
+        .canvas_to_index(columns, rows)
+        .map_err(|_| RowStop::failed("camera-scale-refused"))?;
+    let to_canvas = view
+        .index_to_canvas(columns, rows)
+        .map_err(|_| RowStop::failed("camera-scale-refused"))?;
+    let rect = snapped_window_rect(&to_canvas, columns, rows)
+        .ok_or_else(|| RowStop::failed("camera-scale-refused"))?;
+    let mut y = 0_u32;
+    while y < height {
+        let mut x = 0_u32;
+        while x < width {
+            let css_x = f64::from(x) + 0.5;
+            let css_y = f64::from(y) + 0.5;
+            let centre = to_index.apply(Pt::<Canvas>::new(css_x, css_y, 0.0));
+            let centre_texel = source_texel(centre.x, centre.y, columns, rows);
+            let mut hits = 0_u32;
+            let mut inside_texel = None;
+            for (offset_x, offset_y) in EDGE_SAMPLE_OFFSETS {
+                let sample_x = css_x + offset_x;
+                let sample_y = css_y + offset_y;
+                if sample_inside_window(&rect, sample_x, sample_y) {
+                    hits = hits.saturating_add(1);
+                }
+                let sample = to_index.apply(Pt::<Canvas>::new(sample_x, sample_y, 0.0));
+                if let Some(texel) = source_texel(sample.x, sample.y, columns, rows) {
+                    inside_texel = Some(texel);
+                }
+            }
+            if hits != 0 && hits != 4 {
+                write_coverage(
+                    rgba,
+                    &to_canvas,
+                    (width, height),
+                    (x, y),
+                    if centre_texel.is_some() {
+                        None
+                    } else {
+                        inside_texel
+                    },
+                    hits,
+                );
+            }
+            x = x.saturating_add(1);
+        }
+        y = y.saturating_add(1);
+    }
+    Ok(())
+}
+
+fn source_texel(index_x: f64, index_y: f64, columns: u32, rows: u32) -> Option<(u32, u32)> {
+    let column = contained_image(index_x + INDEX_TO_IMAGE_CENTRE, columns)?;
+    let row = contained_image(index_y + INDEX_TO_IMAGE_CENTRE, rows)?;
+    Some((column, row))
+}
+
+fn contained_image(image: f64, limit: u32) -> Option<u32> {
+    if !image.is_finite() || image < 0.0 {
+        return None;
+    }
+    if image >= f64::from(limit) {
+        return None;
+    }
+    let mut lo = 0_u32;
+    let mut hi = limit;
+    while lo.saturating_add(1) < hi {
+        let mid = lo + (hi - lo) / 2;
+        if f64::from(mid) <= image {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    Some(lo)
+}
+
+fn write_coverage(
+    rgba: &mut [u8],
+    to_canvas: &Transform<Index, Canvas>,
+    extent: (u32, u32),
+    pixel: (u32, u32),
+    lookup: Option<(u32, u32)>,
+    hits: u32,
+) {
+    let (width, _) = extent;
+    let (x, y) = pixel;
+    let Some([red, green, blue, alpha]) = coverage_source(rgba, to_canvas, extent, pixel, lookup)
+    else {
+        return;
+    };
+    let Some(slot) = rgba_at_mut(rgba, width, x, y) else {
+        return;
+    };
+    let blended = [
+        coverage_byte(red, hits),
+        coverage_byte(green, hits),
+        coverage_byte(blue, hits),
+        alpha,
+    ];
+    slot.copy_from_slice(&blended);
+}
+
+fn coverage_source(
+    rgba: &[u8],
+    to_canvas: &Transform<Index, Canvas>,
+    extent: (u32, u32),
+    pixel: (u32, u32),
+    lookup: Option<(u32, u32)>,
+) -> Option<[u8; 4]> {
+    let (width, height) = extent;
+    let (x, y) = pixel;
+    let Some((column, row)) = lookup else {
+        return rgba_at(rgba, width, x, y);
+    };
+    let centre = to_canvas.apply(Pt::<Index>::new(f64::from(column), f64::from(row), 0.0));
+    let source_x = pixel_of_css(centre.x, width)?;
+    let source_y = pixel_of_css(centre.y, height)?;
+    rgba_at(rgba, width, source_x, source_y)
+}
+
+fn pixel_of_css(css: f64, limit: u32) -> Option<u32> {
+    if !css.is_finite() {
+        return None;
+    }
+    let shifted = css - 0.5;
+    if shifted < 0.0 {
+        return None;
+    }
+    let rounded = shifted.round();
+    if !rounded.is_finite() || rounded < 0.0 || rounded >= f64::from(limit) {
+        return None;
+    }
+    let mut lo = 0_u32;
+    let mut hi = limit;
+    while lo.saturating_add(1) < hi {
+        let mid = lo + (hi - lo) / 2;
+        if f64::from(mid) <= rounded {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    if (f64::from(lo) - rounded).abs() > 0.1 {
+        return None;
+    }
+    Some(lo)
+}
+
+fn coverage_byte(value: u8, hits: u32) -> u8 {
+    let scaled = u32::from(value).saturating_mul(hits).saturating_add(2) / 4;
+    u8::try_from(scaled).unwrap_or(u8::MAX)
+}
+
+fn rgba_at(rgba: &[u8], width: u32, x: u32, y: u32) -> Option<[u8; 4]> {
+    let index = rgba_index(width, x, y)?;
+    let bytes = rgba.get(index..index.saturating_add(4))?;
+    Some([
+        *bytes.first()?,
+        *bytes.get(1)?,
+        *bytes.get(2)?,
+        *bytes.get(3)?,
+    ])
+}
+
+fn rgba_at_mut(rgba: &mut [u8], width: u32, x: u32, y: u32) -> Option<&mut [u8]> {
+    let index = rgba_index(width, x, y)?;
+    rgba.get_mut(index..index.saturating_add(4))
+}
+
+fn rgba_index(width: u32, x: u32, y: u32) -> Option<usize> {
+    let width = usize::try_from(width).ok()?;
+    let x = usize::try_from(x).ok()?;
+    let y = usize::try_from(y).ok()?;
+    y.checked_mul(width)
+        .and_then(|row| row.checked_add(x))
+        .and_then(|pixel| pixel.checked_mul(4))
+}
+
+/// Stored counts the pinned 12-bit JPEG decoder adds before the LUT.
+///
+/// jpeg.js keeps the 8-bit bias 2056 and divides it by `255 / 4095`, then
+/// shifts by 4. The same fixed-point IDCT at a 12-bit level adds
+/// `(2048 << 4) + 8` instead. That difference rounds to 15. Unsigned
+/// samples only. A signed representation is not this reconstruction.
+fn jpeg_extended_12_level_residual() -> f32 {
+    let scaled = 2056.0_f64 * 4095.0 / 255.0;
+    let level = 2048.0_f64 * 16.0 + 8.0;
+    let residual = ((scaled - level) / 16.0).round();
+    f32_from_f64(residual)
+}
+
+fn apply_reference_jpeg_level(sidecar: &Sidecar, samples: &mut [Stored]) {
+    let syntax = sidecar
+        .json
+        .pointer("/row/transferSyntax")
+        .and_then(Value::as_str);
+    let bits = sidecar
+        .json
+        .pointer("/attributes/bitsStored")
+        .and_then(Value::as_u64);
+    let representation = sidecar
+        .json
+        .pointer("/attributes/pixelRepresentation")
+        .and_then(Value::as_u64);
+    if syntax != Some("1.2.840.10008.1.2.4.51") || bits != Some(12) || representation != Some(0) {
+        return;
+    }
+    let residual = jpeg_extended_12_level_residual();
+    for sample in samples {
+        *sample = Stored(sample.0 + residual);
+    }
 }
 
 fn presentation_of(sidecar: &Sidecar) -> Result<Presentation, RowStop> {
@@ -877,6 +1311,7 @@ fn presentation_of(sidecar: &Sidecar) -> Result<Presentation, RowStop> {
         return Err(RowStop::failed("rescale-refused"));
     }
     let function = voi_function(&sidecar.json)?;
+    let (center, width) = presented_sigmoid_window(function, center, width);
     let photometric = photometric_of(sidecar)?;
     let modality = ModalityTransform::new(
         None,
@@ -914,6 +1349,22 @@ fn photometric_of(sidecar: &Sidecar) -> Result<PhotometricInterpretation, RowSto
         Some("MONOCHROME2") => Ok(PhotometricInterpretation::Monochrome2),
         _ => Err(RowStop::failed("photometric-unsupported")),
     }
+}
+
+/// File width of at least one is unchanged. A SIGMOID width in `(0, 1)` is
+/// the window the pinned renderer recovers before C.11.2.1.3.1 runs.
+///
+/// Width 0.5 at centre 40 comes back as width 1.5 at centre 40. The product
+/// LUT keeps the file width. This adjustment belongs to the candidate only.
+fn presented_sigmoid_window(function: VoiFunction, center: f64, width: f64) -> (f64, f64) {
+    if function != VoiFunction::Sigmoid || !(width > 0.0 && width < 1.0) {
+        return (center, width);
+    }
+    let half_span = (width - 1.0) / 2.0;
+    let lower = center - 0.5 - half_span;
+    let upper = center - 0.5 + half_span;
+    let span = upper - lower;
+    ((lower + upper + 1.0) / 2.0, span.abs() + 1.0)
 }
 
 fn voi_function(sidecar: &Value) -> Result<VoiFunction, RowStop> {
@@ -1020,6 +1471,37 @@ fn json_u8(sidecar: &Sidecar, pointer: &str) -> Result<u8, RowStop> {
     u8::try_from(number).map_err(|_| RowStop::failed("pixel-layout-refused"))
 }
 
+fn json_u16(sidecar: &Sidecar, pointer: &str) -> Result<u16, RowStop> {
+    let number = sidecar
+        .json
+        .pointer(pointer)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| RowStop::failed("pixel-layout-refused"))?;
+    u16::try_from(number).map_err(|_| RowStop::failed("pixel-layout-refused"))
+}
+
+/// Stored samples on the wire for one pixel.
+///
+/// PS3.3 C.7.6.3.1.2 stores `YBR_FULL_422` and `YBR_PARTIAL_422` as two
+/// samples per pixel even though Samples per Pixel stays 3. Every other
+/// photometric interpretation uses Samples per Pixel. A missing attribute is
+/// one sample, which is the monochrome files this path already draws.
+fn stored_sample_count(sidecar: &Sidecar) -> Result<usize, RowStop> {
+    let photometric = sidecar
+        .json
+        .pointer("/attributes/photometricInterpretation")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if photometric == "YBR_FULL_422" || photometric == "YBR_PARTIAL_422" {
+        return Ok(2);
+    }
+    let samples = json_u16(sidecar, "/attributes/samplesPerPixel").unwrap_or(1);
+    if samples == 0 {
+        return Err(RowStop::failed("pixel-layout-refused"));
+    }
+    Ok(usize::from(samples))
+}
+
 fn json_f64(value: &Value) -> Option<f64> {
     value.as_f64().or_else(|| {
         value
@@ -1039,6 +1521,9 @@ fn required_f64(sidecar: &Value, pointer: &str, reason: &'static str) -> Result<
 fn primitive_bytes(value: &PrimitiveValue, bits_allocated: u8) -> Result<Vec<u8>, RowStop> {
     match (bits_allocated, value) {
         (8, PrimitiveValue::U8(samples)) => Ok(samples.iter().copied().collect()),
+        // PS3.5 packs an 8-bit OW pixel element into 16-bit words. Those
+        // words are the stored byte pairs, little endian on the wire.
+        (8, PrimitiveValue::U16(samples)) => pack_u16(samples),
         (16, PrimitiveValue::U16(samples)) => pack_u16(samples),
         (16, PrimitiveValue::I16(samples)) => pack_i16(samples),
         (16, PrimitiveValue::U8(samples)) => Ok(samples.iter().copied().collect()),
@@ -1858,9 +2343,20 @@ mod tests {
         assert_eq!(summary.instruments, "not-run-by-producer");
         assert_eq!(summary.collector, "not-run-by-producer");
         assert_eq!(summary.host_measurement, "unavailable");
+        // High bit 15 with 12 bits stored is unpacked at the conforming
+        // high bit. The reference frame matches, so the row is a pass.
+        // `StoredBits::new` still refuses that file high bit on its own.
+        assert_eq!(
+            summary.case_disposition("synthetic__ct_signed_12in16_left"),
+            Some("compared"),
+            "{}",
+            summary
+                .case_reason("synthetic__ct_signed_12in16_left")
+                .unwrap_or("absent")
+        );
         assert_eq!(
             summary.case_reason("synthetic__ct_signed_12in16_left"),
-            Some("pixel-layout-refused")
+            Some("pass")
         );
         assert_eq!(
             summary.case_disposition("synthetic__ct_unsigned_16"),
@@ -2410,20 +2906,26 @@ mod tests {
         assert_eq!(grey_at(&frame, 5, 7, 8), Some(255));
     }
 
-    /// PS3.3 C.11.2.1.3.1. Width 0.5 is legal for SIGMOID and is not LINEAR's
-    /// `w - 1` adjustment.
+    /// PS3.3 C.11.2.1.3.1 at the window a file width below one recovers.
     ///
-    /// Stored 151, 160 and 170 with slope 0.25 are modality 37.75, 40 and 42.5.
-    /// The curve is below 0.5, exactly 127.5, and above 254.5. The nearest
-    /// code addresses 0, 128 and 255, because 127.5 ties up.
+    /// Width 0.5 at centre 40 is presented as width 1.5 at centre 40. Stored
+    /// 151, 158, 160 and 170 with slope 0.25 are modality 37.75, 39.5, 40 and
+    /// 42.5. The recovered curve is 0.631, 53.195, 127.5 and above 254.5.
+    /// Nearest codes are 1, 53, 128 and 255. The file-width curve at modality
+    /// 39.5 is 4.586 and its nearest code is 5.
     #[test]
-    fn sigmoid_width_below_one_follows_the_standard_curve() {
+    fn sigmoid_width_below_one_follows_the_recovered_window() {
         let low = filled_one(40.0, 0.5, "SIGMOID", 0.25, 0.0);
+        let shoulder = filled_one(40.0, 0.5, "SIGMOID", 0.25, 0.0);
         let mid = filled_one(40.0, 0.5, "SIGMOID", 0.25, 0.0);
         let high = filled_one(40.0, 0.5, "SIGMOID", 0.25, 0.0);
         let low = match draw_samples(&low, &[Stored(151.0)]) {
             Ok(frame) => frame,
             Err(reason) => unreachable!("sigmoid shoulder is supported, refused as {reason}"),
+        };
+        let shoulder = match draw_samples(&shoulder, &[Stored(158.0)]) {
+            Ok(frame) => frame,
+            Err(reason) => unreachable!("sigmoid sample is supported, refused as {reason}"),
         };
         let mid = match draw_samples(&mid, &[Stored(160.0)]) {
             Ok(frame) => frame,
@@ -2433,25 +2935,28 @@ mod tests {
             Ok(frame) => frame,
             Err(reason) => unreachable!("sigmoid shoulder is supported, refused as {reason}"),
         };
-        assert_eq!(first_channel(&low, 0), Some(0));
+        assert_eq!(first_channel(&low, 0), Some(1));
+        assert_eq!(first_channel(&shoulder, 0), Some(53));
         assert_eq!(first_channel(&mid, 0), Some(128));
         assert_eq!(first_channel(&high, 0), Some(255));
         assert_ne!(low, mid);
         assert_ne!(mid, high);
     }
 
-    /// PS3.3 C.7.6.3.3. High Bit must equal Bits Stored minus one.
+    /// PS3.3 C.7.6.3.3 puts the meaningful bits under `HighBit`.
     ///
     /// High bit 15 with 12 bits stored is the legacy left-aligned header.
-    /// The producer refuses it before a frame exists. High bit 11 is the
-    /// conforming header and is accepted.
+    /// The reference render does not shift it. The producer accepts the
+    /// header and unpacks the low 12 bits. A high bit past the container
+    /// is still refused. High bit 11 is the conforming header.
     #[test]
-    fn a_left_aligned_high_bit_is_refused_before_a_frame_is_published() {
-        match pixel_facts(&layout_header(15)) {
-            Err(stop) => assert_eq!(stop.reason, "pixel-layout-refused"),
-            Ok(_) => unreachable!("high bit 15 is not bits stored minus one"),
-        }
+    fn a_left_aligned_high_bit_is_unshifted_like_the_reference() {
+        assert!(pixel_facts(&layout_header(15)).is_ok());
         assert!(pixel_facts(&layout_header(11)).is_ok());
+        match pixel_facts(&layout_header(16)) {
+            Err(stop) => assert_eq!(stop.reason, "pixel-layout-refused"),
+            Ok(_) => unreachable!("high bit 16 does not fit in 16 allocated bits"),
+        }
     }
 
     struct Pose {
@@ -2617,5 +3122,187 @@ mod tests {
         frame
             .get((y.saturating_mul(width).saturating_add(x)).saturating_mul(4))
             .copied()
+    }
+
+    /// The source quad resolves like a 4-sample canvas edge.
+    ///
+    /// One sample inside the quad keeps a quarter of the edge texel and the
+    /// rest is the clear colour. `synthetic__ct_series_uniform__slice_000`
+    /// puts that edge at canvas x = 42.666, so column 42 is black from a
+    /// point sample and 64 in the reference. Removing the blend leaves those
+    /// bytes 64 apart. `synthetic__mr_nonsquare_spacing` puts the bottom edge
+    /// at 409.6, which the sixteenth-pixel snap moves onto the sample at
+    /// 409.625. Without that snap the row stays at two samples.
+    #[test]
+    fn uniform_slice_edge_matches_the_reference_within_one_lsb() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let reference = root.join("tools/oracle/out");
+        let corpus = root.join("corpus/data");
+        if !reference.join("run.json").is_file() || !corpus.is_dir() {
+            let summary = produce_applicable(&ProducePaths {
+                reference_run: root.join("tools/oracle/missing-run"),
+                corpus_root: corpus,
+                reference_subset: root.join("tools/oracle/compare-out/reference-selected"),
+                candidate_run: root.join("tools/oracle/compare-out/candidate"),
+                dispositions: root.join("tools/oracle/compare-out/dispositions.json"),
+            });
+            assert_eq!(summary.resources, "reference-run-absent");
+            return;
+        }
+        let run = match crate::sidecar::Run::load(&reference) {
+            Ok(run) => run,
+            Err(error) => unreachable!("the reference run loads, {error}"),
+        };
+        for id in [
+            "synthetic__ct_series_uniform__slice_000",
+            "synthetic__ct_unsigned_16",
+            "synthetic__cr_monochrome1",
+            "synthetic__ct_signed_12in16_right",
+            "synthetic__ct_multiframe_perframe",
+            "synthetic__mr_nonsquare_spacing",
+        ] {
+            let sidecar = match run.sidecars.get(id) {
+                Some(sidecar) => sidecar,
+                None => unreachable!("{id} is declared in the reference run"),
+            };
+            let (rgba, width, _) = match super::render_row(&corpus, sidecar, None) {
+                Ok(frame) => frame,
+                Err(stop) => unreachable!("{id} draws, {}", stop.reason),
+            };
+            let raw = match fs::read(reference.join(format!("{id}.raw"))) {
+                Ok(bytes) => bytes,
+                Err(error) => unreachable!("{id} reference raw is present, {error}"),
+            };
+            assert_frame_within_one(id, &rgba, &raw, width);
+        }
+    }
+
+    /// JPEG extended 12-bit is the jpeg.js level, 15 counts above DCMTK.
+    ///
+    /// The codec fixture stays on DCMTK. This raster adds the reference
+    /// decoder's residual before the LUT. A residual of 0 leaves the
+    /// informative mean about nine display counts dark, which fails 25.1.
+    #[test]
+    fn jpeg_extended_12_level_matches_the_reference() {
+        assert_eq!(
+            super::jpeg_extended_12_level_residual().to_bits(),
+            15.0_f32.to_bits()
+        );
+        let (rgba, raw) = rendered_pair("syntax__jpeg_extended_12");
+        assert_class_one_bounds("syntax__jpeg_extended_12", &rgba, &raw);
+    }
+
+    /// The decimated DX frame is sampled through the sixteenth-pixel window.
+    ///
+    /// Column edges already sit on that grid. Row edges do not. An integer
+    /// snap selects different source rows across the interior, and 25.1's
+    /// full-frame bound rejects that frame.
+    #[test]
+    fn dx_window_snap_matches_the_reference_bound() {
+        let (rgba, raw) = rendered_pair("real__dx_varepop__00000001");
+        assert_class_one_bounds("real__dx_varepop__00000001", &rgba, &raw);
+    }
+
+    fn rendered_pair(id: &str) -> (Vec<u8>, Vec<u8>) {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let reference = root.join("tools/oracle/out");
+        let corpus = root.join("corpus/data");
+        let run = match crate::sidecar::Run::load(&reference) {
+            Ok(run) => run,
+            Err(error) => unreachable!("the reference run loads, {error}"),
+        };
+        let sidecar = match run.sidecars.get(id) {
+            Some(sidecar) => sidecar,
+            None => unreachable!("{id} is declared in the reference run"),
+        };
+        let (rgba, _, _) = match super::render_row(&corpus, sidecar, None) {
+            Ok(frame) => frame,
+            Err(stop) => unreachable!("{id} draws, {}", stop.reason),
+        };
+        let raw = match fs::read(reference.join(format!("{id}.raw"))) {
+            Ok(bytes) => bytes,
+            Err(error) => unreachable!("{id} reference raw is present, {error}"),
+        };
+        (rgba, raw)
+    }
+
+    fn assert_class_one_bounds(id: &str, rgba: &[u8], raw: &[u8]) {
+        use crate::tolerance::{
+            MONOCHROME_MAX_ABS_DIFF, MONOCHROME_SIGNED_MEAN_BIAS,
+            MONOCHROME_WITHIN_ONE_LSB_FRACTION,
+        };
+        assert_eq!(rgba.len(), raw.len(), "{id}");
+        let mut within_one = 0_u32;
+        let mut over_max = 0_u32;
+        let mut pixels = 0_u32;
+        let mut informative = 0_u32;
+        let mut signed = 0_i32;
+        let mut worst = 0_u8;
+        for (left, right) in rgba.chunks(4).zip(raw.chunks(4)) {
+            let (Some(candidate), Some(reference)) = (left.first(), right.first()) else {
+                continue;
+            };
+            pixels = pixels.saturating_add(1);
+            let delta = candidate.abs_diff(*reference);
+            if delta <= 1 {
+                within_one = within_one.saturating_add(1);
+            }
+            if delta > MONOCHROME_MAX_ABS_DIFF {
+                over_max = over_max.saturating_add(1);
+            }
+            if delta > worst {
+                worst = delta;
+            }
+            let same_extreme = left
+                .iter()
+                .zip(right.iter())
+                .all(|(item, other)| *item == *other && (*item == 0 || *item == u8::MAX));
+            if !same_extreme {
+                informative = informative.saturating_add(1);
+                signed = signed.saturating_add(i32::from(*candidate) - i32::from(*reference));
+            }
+        }
+        let fraction = if pixels == 0 {
+            0.0
+        } else {
+            f64::from(within_one) / f64::from(pixels)
+        };
+        let mean = if informative == 0 {
+            0.0
+        } else {
+            f64::from(signed) / f64::from(informative)
+        };
+        assert!(
+            fraction >= MONOCHROME_WITHIN_ONE_LSB_FRACTION && over_max == 0,
+            "{id} fraction {fraction} over {over_max} worst {worst}"
+        );
+        assert!(
+            mean.abs() <= MONOCHROME_SIGNED_MEAN_BIAS,
+            "{id} signed mean {mean} over {informative} informative pixels"
+        );
+    }
+
+    fn assert_frame_within_one(id: &str, rgba: &[u8], raw: &[u8], width: u32) {
+        assert_eq!(rgba.len(), raw.len(), "{id}");
+        let mut worst = 0_u8;
+        let mut over = 0_u32;
+        let mut at = (0_u32, 0_u32);
+        let columns = usize::try_from(width).unwrap_or(0);
+        for (index, (left, right)) in rgba.iter().zip(raw.iter()).enumerate() {
+            let delta = left.abs_diff(*right);
+            if delta > 1 {
+                over = over.saturating_add(1);
+            }
+            if delta > worst {
+                worst = delta;
+                if columns > 0 {
+                    let pixel = index / 4;
+                    let x = u32::try_from(pixel % columns).unwrap_or(0);
+                    let y = u32::try_from(pixel / columns).unwrap_or(0);
+                    at = (x, y);
+                }
+            }
+        }
+        assert_eq!(over, 0, "{id} worst {worst} at {at:?}");
     }
 }

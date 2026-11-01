@@ -622,10 +622,10 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 408 | `scripts/lint_policy_check.py` | `lint-policy.cargo-config-is-permitted`, level 3 | must ACCEPT, output carries `cargo config(s) lower no denied lint through rustflags` | deep | `bin/ocelli.sh gate guards-deep` |
 | 409 | `scripts/lint_policy_check.py` | `lint-policy.path-dependency-member`, level 3 | must refuse, output carries `does not inherit the workspace lint table` | deep | `bin/ocelli.sh gate guards-deep` |
 | 410 | `scripts/lint_policy_check.py` | `lint-policy.module-outside-the-member`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 411 | `scripts/lint_policy_check.py` | `lint-policy.clean-module-outside-the-member`, level 3 | must ACCEPT, output carries `1 `#[path]` module(s) followed` | deep | `bin/ocelli.sh gate guards-deep` |
+| 411 | `scripts/lint_policy_check.py` | `lint-policy.clean-module-outside-the-member`, level 3 | must ACCEPT, output carries `2 `#[path]` module(s) followed` | deep | `bin/ocelli.sh gate guards-deep` |
 | 412 | `scripts/lint_policy_check.py` | `lint-policy.cfg-attr-module-path`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
 | 413 | `scripts/lint_policy_check.py` | `lint-policy.raw-string-module-path`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
-| 414 | `scripts/lint_policy_check.py` | `lint-policy.clean-cfg-attr-module-path`, level 3 | must ACCEPT, output carries `1 `#[path]` module(s) followed` | deep | `bin/ocelli.sh gate guards-deep` |
+| 414 | `scripts/lint_policy_check.py` | `lint-policy.clean-cfg-attr-module-path`, level 3 | must ACCEPT, output carries `2 `#[path]` module(s) followed` | deep | `bin/ocelli.sh gate guards-deep` |
 | 415 | `scripts/lint_policy_check.py` | `lint-policy.required-row-with-a-tail`, level 3 | must refuse, output carries `cannot be parsed as TOML` | deep | `bin/ocelli.sh gate guards-deep` |
 | 416 | `scripts/lint_policy_check.py` | `lint-policy.crate-root-outside-the-member`, level 3 | must refuse, output carries `allows the lint group` | deep | `bin/ocelli.sh gate guards-deep` |
 | 417 | `scripts/lint_policy_check.py` | `lint-policy.clean-crate-root-outside-the-member`, level 3 | must ACCEPT, output carries `cargo target root(s) seeded` | deep | `bin/ocelli.sh gate guards-deep` |

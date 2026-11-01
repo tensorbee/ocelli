@@ -22,10 +22,16 @@ use ocelli_cache::{
 use ocelli_core::{Pt, World};
 use ocelli_pixel::{ImageOrientationPatient, PixelRepresentation};
 
+mod fusion;
 mod levels;
 mod ortho;
+mod slab;
+mod sync;
 
-pub use ortho::{OrthoImage, OrthoPlane, PlaneSample};
+pub use fusion::{FusionPlane, plane_from_ortho, world_on_plane};
+pub use ortho::{ObliquePlane, OrthoImage, OrthoPlane, PlaneSample};
+pub use slab::{SlabImage, SlabPlane};
+pub use sync::{HeldPlane, PlaneSyncError};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.
@@ -249,6 +255,18 @@ pub enum VolumeError {
         /// The coordinate the cut refused.
         value: u32,
     },
+    /// A slab thickness that cannot be sampled. Nothing is allocated.
+    #[error("the slab thickness cannot be sampled")]
+    SlabThickness,
+    /// A slab normal that cannot be sampled. Nothing is allocated.
+    #[error("the slab normal cannot be sampled")]
+    SlabNormal,
+    /// An oblique plane that cannot be sampled. Nothing is allocated.
+    ///
+    /// [`VolumeError::PlaneOutOfRange`] stays the fixed-index error for an
+    /// [`OrthoPlane`].
+    #[error("the oblique plane cannot be sampled")]
+    ObliquePlane,
     /// A plane index outside `[0, dim - 1]`, including a non-finite index.
     #[error("plane index {index} is outside axis {axis}")]
     PlaneOutOfRange {

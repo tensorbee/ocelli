@@ -1,7 +1,7 @@
 # Codec registry
 
-**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028, F-030
-**Last updated:** 2026-09-14
+**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028, F-030, F-X021
+**Last updated:** 2026-11-01
 
 `ocelli-codec` owns decoder capability, registration, and exact Transfer
 Syntax UID dispatch. Concrete adapters cover native Implicit and Explicit VR
@@ -81,8 +81,10 @@ package instead, because gate A2's one advantage for `pure_jpegls` was
 multi-component support and
 `vendor/ritk-codecs-0.6.0/src/jpeg_ls/decoder.rs` refuses `Nf != 1` explicitly
 too, leaving a second vendored package as the only remaining difference.
-**Both routes are single-component only, and both refuse rather than producing a
-wrong pixel.**
+The vendored dependency is single-component only and refuses rather than
+producing a wrong pixel. The adapter decodes one further shape itself: 8-bit
+RGB, `NEAR` zero, three components, sample interleaved. Every other
+multi-component codestream is still refused.
 
 ### The two UIDs are not interchangeable
 
@@ -103,11 +105,13 @@ A unit test pins the exact payload `pyjpegls` 1.5.1 emits, including a row where
 
 | Condition | Where | Error |
 |-----------|-------|-------|
-| Samples per Pixel other than one | descriptor | `UnsupportedPixelFormat` |
-| Bits Allocated other than 8 or 16 | descriptor | `UnsupportedPixelFormat` |
-| A colour or palette interpretation | descriptor | `UnsupportedPixelFormat` |
+| Samples per Pixel other than one, except three for 8-bit RGB | descriptor | `UnsupportedPixelFormat` |
+| Bits Allocated other than 8 or 16 on a monochrome frame | descriptor | `UnsupportedPixelFormat` |
+| Bits Allocated other than 8 on an RGB frame | descriptor | `UnsupportedPixelFormat` |
+| A palette interpretation, or a colour interpretation other than RGB | descriptor | `UnsupportedPixelFormat` |
 | Other Word Pixel Data | descriptor | `UnsupportedPixelFormat` |
-| SOF55 `Nf != 1` or SOS `ILV != 0` | codestream | `UnsupportedPixelFormat` |
+| SOF55 and SOS other than one component at `ILV = 0`, or three at `ILV = 2` | codestream | `UnsupportedPixelFormat` |
+| An RGB codestream with a monochrome descriptor | codestream | `UnsupportedPixelFormat` |
 | Dimensions or precision disagreeing with the descriptor | codestream | `FrameMismatch` |
 | `NEAR` disagreeing with the UID | codestream | `FrameMismatch` |
 | A stray SOI or EOI where a marker segment belongs | codestream | `InvalidCodestream` |
@@ -119,22 +123,28 @@ catches a frame declared as colour. The codestream check catches a
 the file that claims to be monochrome and is not, and no descriptor check can
 see it.
 
-**The multi-component corpus row gate A2 recorded as owed exists as of F-030.**
+**The multi-component corpus row gate A2 recorded as owed is decoded.**
 `syntax/jpegls_lossless_rgb8.dcm` is the RGB reference encoded to
 `1.2.840.10008.1.2.4.80` by `pyjpegls` 1.5.1, declaring `Nf = 3` and `ILV = 2`.
-The adapter still refuses it, which is the required behaviour rather than a gap:
-the adopted crate has no multi-component support and a clean refusal is HLD
-section 31's rule.
+The syntax is lossless, so the decode must equal the uncompressed reference.
+The adapter does that for precision 8, `NEAR` zero, three components and sample
+interleave, and it does not call the vendored decoder for that scan. A
+monochrome descriptor against the same codestream stays
+`UnsupportedPixelFormat`. An LSE preset or any other marker between SOI and SOS
+is refused rather than ignored, because those markers change the coding
+parameters.
 
 The row is not a duplicate of `tests/fixtures/jpegls_rgb8_ilv1.jls`. That
 fixture is repository-local, 16 by 16, and **line**-interleaved, `ILV = 1`. The
 corpus row is manifest-backed, 64 by 96, and **sample**-interleaved, `ILV = 2`.
-The adapter's condition is `interleave != 0`, so a test at one value does not
-speak for the other, and only one of the two is manifest-backed. Both are
-asserted, and both go red when the header check is removed.
+`ILV = 1` stays refused. A test at one value does not speak for the other, and
+only one of the two is manifest-backed. Removing the header check makes the
+line-interleaved fixture decode as if it were a supported shape, and that test
+goes red.
 
-What remains owed is multi-component **decoding**, which is a codec story with
-its own candidate evidence and not a corpus gap.
+What remains refused is every multi-component shape other than this one:
+line interleave, a precision other than 8, a non-zero `NEAR`, and a component
+count other than three.
 
 ### The modality rescale is pinned to the identity
 

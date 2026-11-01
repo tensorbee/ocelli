@@ -9873,7 +9873,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-module-outside-the-member",
                   _a_clean_module_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "1 `#[path]` module(s) followed",
+                  "2 `#[path]` module(s) followed",
                   polarity="accept",
                   note="The other direction. A module source outside the "
                        "member directory is legal Rust and says nothing about "
@@ -9883,7 +9883,9 @@ GUARDS: tuple[Guard, ...] = (
                        "The OK line named the four keys in a fixed string, so "
                        "this probe passed on a sentence that would have "
                        "printed identically had the file been skipped, and "
-                       "the count is derived from the sources actually read.",
+                       "the count is derived from the sources actually read. "
+                       "`produce` already follows one path module, so the "
+                       "planted module is the second.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.cfg-attr-module-path",
                   _a_cfg_attr_module_outside_the_member,
@@ -9917,7 +9919,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-cfg-attr-module-path",
                   _a_clean_cfg_attr_module_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "1 `#[path]` module(s) followed",
+                  "2 `#[path]` module(s) followed",
                   polarity="accept",
                   note="The direction widening `MODULE_PATH` could get wrong. "
                        "`cfg_attr` is legal Rust and says nothing about lint "
@@ -9925,7 +9927,8 @@ GUARDS: tuple[Guard, ...] = (
                        "resolve, so an over-tight read of the wrapper would "
                        "refuse a crate that moves a module behind a feature. "
                        "The count in the expect is what proves the file was "
-                       "read: 46 .rs files becomes 47, measured.",
+                       "read. `produce` already follows one path module, so "
+                       "the planted module is the second.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.required-row-with-a-tail",
                   _a_required_row_with_a_tail,
