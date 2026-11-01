@@ -1304,10 +1304,11 @@ def member_sources(member: Path,
 
     **The third return value is how many files each FOLLOWED key put on the
     queue**, and it exists because the OK line said "`#[path]` modules
-    followed and `include!` followed" as a fixed string. This repository holds
-    neither, so two of that line's four clauses described a capability and not
-    the run, and a reader had no way to tell a followed key from an unexercised
-    one. The count is taken at the queue rather than from the attributes seen,
+    followed and `include!` followed" as a fixed string. This repository
+    follows one `#[path]` module and no `include!`. Before that module
+    existed the two clauses described a capability and not the run, and a
+    reader had no way to tell a followed key from an unexercised one. The
+    count is taken at the queue rather than from the attributes seen,
     so removing the follow reports zero rather than reporting an attribute this
     pass did nothing with.
     """
