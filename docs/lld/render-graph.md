@@ -1,6 +1,6 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062
 **Last updated:** 2026-11-01
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
@@ -245,6 +245,14 @@ Otherwise it is `ambient + diffuse * max(0, dot(n, light))`. The shaded value
 is `colour * shade`. Transfer opacity is not multiplied by the shade. Colour
 and alpha accumulate `(1 - A) * colour * shade * alpha` and `(1 - A) * alpha`.
 The pipeline blend is off, so the integral is not blended a second time.
+Clip planes are a 256-byte uniform at group 0 binding 4. The prefix holds the
+patient origin and the three direction columns. Six slots follow. A slot with
+normal w of 0 is disabled. The kept side is `dot(point - plane_origin, normal) >= 0`,
+so a sample on the plane stays. A discarded sample adds no colour and no alpha.
+The brick stays bound. `set_clip_planes` accepts at most six planes. A
+non-finite component or a zero-length normal is refused and the previous list
+stays. Zero planes leaves the measured ray unchanged. The uniform is created
+at bind. `set_clip_planes` writes it and does not upload a brick.
 
 **Every brick in the caller set is bound, or none of this call is.** Room is
 the sampled-texture limit minus one, because residency takes a binding. A
@@ -254,7 +262,7 @@ error before any texture for that call is created. The ray does not draw a
 subset. The caller slice is not compared with `Volume::ready_bricks`.
 
 **Tier C returns `TierCUnavailable`.** `RenderGraph::new`,
-`volume_ray_admission`, `set_opacity` and `set_shade` refuse CPU before an image exists.
+`volume_ray_admission`, `set_opacity`, `set_shade` and `set_clip_planes` refuse CPU before an image exists.
 This story does not return a CPU vector of ray colours. F-X005 owns that path.
 
 **One submit per frame still holds.** The ray bind group is encoded only

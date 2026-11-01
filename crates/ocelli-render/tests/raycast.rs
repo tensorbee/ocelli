@@ -18,12 +18,15 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, FrameOutcome, GraphError, OpacityError, OpacityPreset, OpacityTable, Pass, PassKind,
-    PipelineFamily, PipelineKey, RayAxis, RenderGraph, ShadeError, ShadeWeights, Tier, VOI_WGSL,
-    ViewportId, VoiParams, VolumeBrick, VolumePass, VolumeRaySource, sampled_texture_limit,
-    volume_ray_admission, volume_ray_module,
+    BlendMode, ClipPlane, FrameOutcome, GraphError, OpacityError, OpacityPreset, OpacityTable,
+    Pass, PassKind, PipelineFamily, PipelineKey, RayAxis, RenderGraph, ShadeError, ShadeWeights,
+    Tier, VOI_WGSL, ViewportId, VoiParams, VolumeBrick, VolumePass, VolumeRaySource,
+    sampled_texture_limit, volume_ray_admission, volume_ray_module,
 };
 use ocelli_volume::{Level, SlicePresence, Volume, VoxelKind, VoxelStore};
+
+const ORIGIN_MM: [f64; 3] = [0.0, 0.0, 0.0];
+const IDENTITY_DIRECTION: [[f64; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 /// `(200 / 255) * 0.5 * 0.5`. Both steps resident, near sample is 0.
 fn both_resident() -> f32 {
@@ -94,6 +97,11 @@ fn a_volume_mip_is_not_the_composite_ray() {
     assert!(module.contains("var<uniform> opacity"));
     assert!(module.contains("var<uniform> shade"));
     assert!(module.contains("@binding(3)"));
+    assert!(module.contains("@binding(4)"));
+    assert!(module.contains("dot(delta, normal.xyz) >= 0.0"));
+    assert!(module.contains("crop.axis_x.xyz * (ray.spacing_x * index.x)"));
+    assert!(module.contains("crop.axis_y.xyz * (ray.spacing_y * index.y)"));
+    assert!(module.contains("crop.axis_z.xyz * (ray.spacing_z * index.z)"));
     assert!(module.contains("ambient + diffuse * max(0.0, facing)"));
     assert!(module.contains("let lit = colour * shade_of"));
     assert!(!module.contains("let alpha = 0.5"));
@@ -520,6 +528,8 @@ fn draw_ray_table(
                     flags: &flags,
                     sampled_limit: fixture.limit,
                     spacing_mm: [1.0, 1.0, 1.0],
+                    origin_mm: ORIGIN_MM,
+                    direction: IDENTITY_DIRECTION,
                 },
             )
             .is_ok()
@@ -661,6 +671,8 @@ fn two_ready_bricks_both_contribute() {
                     flags: &flags,
                     sampled_limit: fixture.limit,
                     spacing_mm: [1.0, 1.0, 1.0],
+                    origin_mm: ORIGIN_MM,
+                    direction: IDENTITY_DIRECTION,
                 },
             )
             .is_ok()
@@ -741,6 +753,8 @@ fn set_opacity_does_not_upload_bricks() {
                     flags: &[0, 1],
                     sampled_limit: fixture.limit,
                     spacing_mm: [1.0, 1.0, 1.0],
+                    origin_mm: ORIGIN_MM,
+                    direction: IDENTITY_DIRECTION,
                 },
             )
             .is_ok()
@@ -937,6 +951,8 @@ fn draw_centre(samples: [u16; 3], weights: Option<&ShadeWeights>) -> Option<[f32
                     flags: &[0, 1, 0],
                     sampled_limit: fixture.limit,
                     spacing_mm: [1.0, 1.0, 1.0],
+                    origin_mm: ORIGIN_MM,
+                    direction: IDENTITY_DIRECTION,
                 },
             )
             .is_ok()
@@ -1051,6 +1067,8 @@ fn light_against_the_gradient_zeroes_the_colour() {
                     flags: &[0, 1, 0],
                     sampled_limit: fixture.limit,
                     spacing_mm: [1.0, 1.0, 1.0],
+                    origin_mm: ORIGIN_MM,
+                    direction: IDENTITY_DIRECTION,
                 },
             )
             .is_ok()
@@ -1093,4 +1111,303 @@ fn a_zero_gradient_uses_the_ambient_weight() {
         return;
     };
     assert_ray(pixel, (200.0_f32 / 255.0) * 0.25, 0.5);
+}
+
+fn spacing_of(volume: &Volume) -> [f32; 3] {
+    [
+        ocelli_viewport::view::f32_from_f64(volume.spacing[0]),
+        ocelli_viewport::view::f32_from_f64(volume.spacing[1]),
+        ocelli_viewport::view::f32_from_f64(volume.spacing[2]),
+    ]
+}
+
+fn direction_of(volume: &Volume) -> [[f64; 3]; 3] {
+    let column = |axis: glam::DVec3| [axis.x, axis.y, axis.z];
+    [
+        column(volume.direction.col(0)),
+        column(volume.direction.col(1)),
+        column(volume.direction.col(2)),
+    ]
+}
+
+fn clip_samples(samples: &[u8], spacing_z: f64) -> Volume {
+    let count = u32::try_from(samples.len()).unwrap_or(0);
+    let mut volume = empty_volume([1, 1, count]);
+    volume.spacing = [1.0, 1.0, spacing_z];
+    if let Some(level) = volume.levels.first_mut() {
+        level.spacing = volume.spacing;
+    }
+    for (index, sample) in samples.iter().copied().enumerate() {
+        let Ok(z) = u32::try_from(index) else {
+            unreachable!("slice index");
+        };
+        assert!(volume.place(z, &[sample]).is_ok());
+    }
+    volume
+}
+
+fn draw_clip(samples: &[u8], spacing_z: f64, planes: Option<&[ClipPlane]>) -> Option<[f32; 4]> {
+    let mut fixture = open_ray()?;
+    let volume = clip_samples(samples, spacing_z);
+    let synced =
+        fixture
+            .graph
+            .sync_volume(&fixture.context, &fixture.adapter, VolumeId(1), &volume);
+    assert!(synced.is_ok());
+    let chain = exact_chain(127.5, 255.0);
+    let (view, texture) = target(fixture.context.device());
+    let source = dummy_source(fixture.context.device());
+    let viewport = match fixture.graph.register(
+        &fixture.context,
+        view,
+        source,
+        Pass::VolumeRaycast(VolumePass {
+            blend: BlendMode::Composite,
+            voi: params(&chain),
+            axis: RayAxis::Slice,
+            from_far: false,
+        }),
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("one viewport fits"),
+    };
+    let ready = volume.ready_bricks();
+    assert_eq!(ready.len(), 1);
+    let Some(coord) = ready.first().copied() else {
+        unreachable!("one ready brick");
+    };
+    let key = key_at(1, coord);
+    let bricks = [VolumeBrick { key: &key, coord }];
+    let flags = vec![1_u32; samples.len()];
+    assert!(
+        fixture
+            .graph
+            .bind_volume_ray(
+                &fixture.context,
+                &fixture.adapter,
+                viewport,
+                VolumeRaySource {
+                    bricks: &bricks,
+                    edge: volume.brick_grid().edge,
+                    dims: volume.dims,
+                    flags: &flags,
+                    sampled_limit: fixture.limit,
+                    spacing_mm: spacing_of(&volume),
+                    origin_mm: [volume.origin.x, volume.origin.y, volume.origin.z],
+                    direction: direction_of(&volume),
+                },
+            )
+            .is_ok()
+    );
+    if let Some(planes) = planes {
+        let before = fixture.graph.brick_uploads();
+        assert!(
+            fixture
+                .graph
+                .set_clip_planes(&fixture.context, viewport, planes)
+                .is_ok()
+        );
+        assert_eq!(fixture.graph.brick_uploads(), before);
+        assert_eq!(volume.ready_bricks().len(), 1);
+    }
+    assert_eq!(
+        fixture.graph.tick(&fixture.context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    Some(read_pixel(&fixture.context, &texture))
+}
+
+#[test]
+fn no_planes_keep_the_two_step_colour() {
+    // Stored 200, LINEAR_EXACT centre 127.5 width 255, displays as 200.
+    // Flat alpha is 0.5. The first step adds `0.5 * colour`. The second adds
+    // half of that again. `0.75 * 200/255` is `150/255`.
+    let colour = 200.0_f32 / 255.0;
+    let two = colour * 0.5 + (1.0 - 0.5) * (colour * 0.5);
+    assert_eq!(two.to_bits(), (150.0_f32 / 255.0).to_bits());
+    assert_eq!(
+        one_step_colour(0.5).to_bits(),
+        (100.0_f32 / 255.0).to_bits()
+    );
+}
+
+#[test]
+fn cpu_clip_is_unavailable_before_a_sample() {
+    assert!(matches!(
+        volume_ray_admission(Tier::Cpu, 1, 16),
+        Err(GraphError::TierCUnavailable)
+    ));
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn no_planes_keep_both_resident_samples() {
+    let Some(pixel) = draw_clip(&[200, 200], 10.0, None) else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    assert_ray(pixel, (200.0_f32 / 255.0) * 0.75, 0.75);
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_plane_keeps_only_the_sample_past_five_millimetres() {
+    let plane = ClipPlane {
+        origin_mm: [0.0, 0.0, 5.0],
+        normal: [0.0, 0.0, 1.0],
+    };
+    let Some(pixel) = draw_clip(&[200, 200], 10.0, Some(&[plane])) else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    assert_ray(pixel, one_step_colour(0.5), 0.5);
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_sample_on_the_plane_stays_in_the_integral() {
+    let plane = ClipPlane {
+        origin_mm: [0.0, 0.0, 0.0],
+        normal: [0.0, 0.0, 1.0],
+    };
+    let Some(pixel) = draw_clip(&[200], 1.0, Some(&[plane])) else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    assert_ray(pixel, one_step_colour(0.5), 0.5);
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_refused_plane_list_keeps_the_clipped_colour() {
+    let Some(mut fixture) = open_ray() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let volume = clip_samples(&[200, 200], 10.0);
+    let synced =
+        fixture
+            .graph
+            .sync_volume(&fixture.context, &fixture.adapter, VolumeId(1), &volume);
+    assert!(synced.is_ok());
+    let chain = exact_chain(127.5, 255.0);
+    let (view, texture) = target(fixture.context.device());
+    let source = dummy_source(fixture.context.device());
+    let viewport = match fixture.graph.register(
+        &fixture.context,
+        view,
+        source,
+        Pass::VolumeRaycast(VolumePass {
+            blend: BlendMode::Composite,
+            voi: params(&chain),
+            axis: RayAxis::Slice,
+            from_far: false,
+        }),
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("one viewport fits"),
+    };
+    let plane = ClipPlane {
+        origin_mm: [0.0, 0.0, 5.0],
+        normal: [0.0, 0.0, 1.0],
+    };
+    assert!(matches!(
+        fixture
+            .graph
+            .set_clip_planes(&fixture.context, viewport, &[plane]),
+        Err(GraphError::RayUnavailable)
+    ));
+    let ready = volume.ready_bricks();
+    assert_eq!(ready.len(), 1);
+    let Some(coord) = ready.first().copied() else {
+        unreachable!("one ready brick");
+    };
+    let key = key_at(1, coord);
+    let bricks = [VolumeBrick { key: &key, coord }];
+    let before = fixture.graph.brick_uploads();
+    assert!(
+        fixture
+            .graph
+            .bind_volume_ray(
+                &fixture.context,
+                &fixture.adapter,
+                viewport,
+                VolumeRaySource {
+                    bricks: &bricks,
+                    edge: volume.brick_grid().edge,
+                    dims: volume.dims,
+                    flags: &[1, 1],
+                    sampled_limit: fixture.limit,
+                    spacing_mm: spacing_of(&volume),
+                    origin_mm: [volume.origin.x, volume.origin.y, volume.origin.z],
+                    direction: direction_of(&volume),
+                },
+            )
+            .is_ok()
+    );
+    assert_eq!(fixture.graph.brick_uploads(), before);
+    assert!(
+        fixture
+            .graph
+            .set_clip_planes(&fixture.context, viewport, &[plane])
+            .is_ok()
+    );
+    assert_eq!(fixture.graph.brick_uploads(), before);
+    assert_eq!(volume.ready_bricks().len(), 1);
+    assert_eq!(
+        fixture.graph.tick(&fixture.context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    assert_ray(
+        read_pixel(&fixture.context, &texture),
+        one_step_colour(0.5),
+        0.5,
+    );
+    let mut seven = Vec::new();
+    for _ in 0..7 {
+        seven.push(plane);
+    }
+    assert!(matches!(
+        fixture
+            .graph
+            .set_clip_planes(&fixture.context, viewport, &seven),
+        Err(GraphError::ClipCount)
+    ));
+    assert!(matches!(
+        fixture.graph.set_clip_planes(
+            &fixture.context,
+            viewport,
+            &[ClipPlane {
+                origin_mm: [f64::NAN, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+            }],
+        ),
+        Err(GraphError::ClipNotFinite)
+    ));
+    assert!(matches!(
+        fixture.graph.set_clip_planes(
+            &fixture.context,
+            viewport,
+            &[ClipPlane {
+                origin_mm: [0.0, 0.0, 0.0],
+                normal: [0.0, 0.0, 0.0],
+            }],
+        ),
+        Err(GraphError::ClipZeroNormal)
+    ));
+    assert_eq!(fixture.graph.brick_uploads(), before);
+    assert!(
+        fixture
+            .graph
+            .set_clip_planes(&fixture.context, viewport, &[plane])
+            .is_ok()
+    );
+    assert_eq!(fixture.graph.tick(&fixture.context), FrameOutcome::Noop);
+    assert_eq!(fixture.graph.brick_uploads(), before);
 }

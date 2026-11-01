@@ -9,7 +9,7 @@
 |------|----------|-------|-------|-----|--------|
 | F-060 | E9.2 | Transfer-function editing surface and preset library | Rust | 3w | done |
 | F-061 | E9.3 | Lighting, shading and gradient opacity | Rust | 3w | done |
-| F-062 | E9.4 | Cropping planes and volume clipping | Rust | 4w | pending |
+| F-062 | E9.4 | Cropping planes and volume clipping | Rust | 4w | done |
 | F-X004 | X1.4 | CPU MPR and oblique reslicing, with SIMD inner loops | Rust | 5w | pending |
 | F-X005 | X1.5 | The CPU volume-rendering decision, and honest unavailability | Rust+TS | 2w | pending |
 
@@ -169,4 +169,4 @@ tree is `93bf532df411`. The merge is `685f55d`. `scripts/backlog_check.py`,
 green at this open. The S21 allocation rows and the S21 plan table name the
 same F-IDs. No new audit was run at this open.
 
-F-060 and F-061 are done. F-062, F-X004 and F-X005 are pending.
+F-060, F-061 and F-062 are done. F-X004 and F-X005 stay pending while F-X003 is in progress.

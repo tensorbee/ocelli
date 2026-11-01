@@ -21,6 +21,9 @@
 //! that uniform and does not upload a brick. F-061 multiplies the ray colour
 //! by a fragment shade. The default weights are unlit, so the F-060 colour
 //! stays until `set_shade`. That call writes a 16-byte uniform and does not
+//! upload a brick. F-062 clips that ray to at most six patient planes. The
+//! default list is empty, so the unlit integral stays until
+//! `set_clip_planes`. That call writes a 256-byte uniform and does not
 //! upload a brick. F-045 writes
 //! the sixteen camera floats at group 0 binding 2. `set_view` does not
 //! write the VOI uniform. The oracle still has no Ocelli frame to judge.
@@ -35,6 +38,7 @@ use wgpu::util::DeviceExt;
 
 use crate::brick_upload::{BrickResidency, BrickUploadError, brick_format};
 use crate::caps::Tier;
+use crate::clip::{CLIP_UNIFORM_BYTES, ClipList, PatientFrame};
 use crate::colour::{ColourLut, ColourParams};
 use crate::fusion::{self, FusionError, FusionGpu, FusionRequest};
 use crate::gpu::{GpuContext, Recovered, SurfaceError, first_render_attachment};
@@ -340,6 +344,15 @@ pub enum GraphError {
     /// format is not an unsigned integer container.
     #[error("the volume ray has no unsigned brick and matching residency flags")]
     RayUnavailable,
+    /// More than six clip planes.
+    #[error("a volume ray accepts at most six clip planes")]
+    ClipCount,
+    /// A clip component is NaN or infinite, or it does not narrow to a finite f32.
+    #[error("a clip plane component is not finite")]
+    ClipNotFinite,
+    /// The normal length is zero in f64, or its f32 image has length zero.
+    #[error("a clip plane normal has length zero")]
+    ClipZeroNormal,
 }
 
 /// Preferred stored-sample format. The constant stays `R32Float`.
@@ -808,6 +821,14 @@ fn brick_slot_count(limits: &wgpu::Limits) -> u32 {
     sampled.saturating_sub(1).min(group.saturating_sub(1))
 }
 
+fn clip_error(error: crate::clip::ClipError) -> GraphError {
+    match error {
+        crate::clip::ClipError::Count => GraphError::ClipCount,
+        crate::clip::ClipError::NotFinite => GraphError::ClipNotFinite,
+        crate::clip::ClipError::ZeroNormal => GraphError::ClipZeroNormal,
+    }
+}
+
 /// Whether a volume ray may be bound on `tier`.
 ///
 /// Tier C returns [`GraphError::TierCUnavailable`] and produces no image.
@@ -869,6 +890,10 @@ struct SlotState {
     opacity: OpacityTable,
     /// Shade weights for a volume ray. Unlit until `set_shade`.
     shade: ShadeWeights,
+    /// Clip planes for a volume ray. Empty until `set_clip_planes`.
+    clip: ClipList,
+    /// Patient frame copied by a successful `bind_volume_ray`.
+    frame: PatientFrame,
     /// Device pixels per CSS pixel uploaded beside the CSS camera.
     dpr: f64,
 }
@@ -970,6 +995,12 @@ pub struct VolumeRaySource<'a> {
     /// Millimetres per voxel, x then y then z. Each axis must be finite and
     /// greater than zero. The central difference divides by this spacing.
     pub spacing_mm: [f32; 3],
+    /// Patient millimetres of the centre of voxel `(0, 0, 0)`. Each component
+    /// must be finite and narrow to a finite `f32`.
+    pub origin_mm: [f64; 3],
+    /// Direction columns, the same order as `Volume::direction.col`. Column 0
+    /// scales with `spacing_mm[0]` and the x index.
+    pub direction: [[f64; 3]; 3],
 }
 
 /// Ray resources for one volume viewport. Created at bind, not inside a tick.
@@ -983,6 +1014,9 @@ struct VolumeRayBinding {
     /// 16 bytes. Created at bind. `set_shade` writes it and does not
     /// replace it.
     shade: wgpu::Buffer,
+    /// 256 bytes. Created at bind. `set_clip_planes` writes it and does not
+    /// replace it.
+    clip: wgpu::Buffer,
     bind_uniform: wgpu::BindGroup,
     bind_source: wgpu::BindGroup,
 }
@@ -1037,6 +1071,8 @@ impl Registry {
                     dpr: 1.0,
                     opacity: OpacityTable::preset(OpacityPreset::Flat),
                     shade: ShadeWeights::unlit(),
+                    clip: ClipList::empty(),
+                    frame: PatientFrame::identity(),
                 });
                 return Ok(ViewportId(
                     u32::try_from(index).map_err(|_| GraphError::CapacityExhausted)?,
@@ -1438,8 +1474,9 @@ impl RenderGraph {
             entries: &[uniform_binding(0), uniform_binding(1), uniform_binding(2)],
         });
         // The ray keeps the VOI uniform at binding 0, ray params at binding 1,
-        // the 256-entry opacity table at binding 2 and the shade weights at
-        // binding 3. It does not take the colour table or the camera.
+        // the 256-entry opacity table at binding 2, the shade weights at
+        // binding 3 and the clip planes at binding 4. It does not take the
+        // colour table or the camera. The stack layout stays three bindings.
         let volume_uniform_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("ocelli volume ray uniform"),
@@ -1448,6 +1485,7 @@ impl RenderGraph {
                     uniform_binding(1),
                     uniform_binding(2),
                     uniform_binding(3),
+                    uniform_binding(4),
                 ],
             });
         // `textureLoad` has no sampler. A non-filterable float binding accepts
@@ -2449,21 +2487,30 @@ impl RenderGraph {
             flags,
             sampled_limit,
             spacing_mm,
+            origin_mm,
+            direction,
         } = source;
         let ready_bricks = u32::try_from(bricks.len()).map_err(|_| GraphError::RayUnavailable)?;
         volume_ray_admission(self.tier, ready_bricks, sampled_limit)?;
         if !spacing_mm_ok(spacing_mm) {
             return Err(GraphError::RayUnavailable);
         }
+        let Some(frame) = PatientFrame::try_new(origin_mm, direction) else {
+            return Err(GraphError::RayUnavailable);
+        };
         if ready_bricks > self.brick_slots {
             return Err(GraphError::SampledTextureLimit);
         }
-        let (axis, from_far, opacity, shade) = {
+        let (axis, from_far, opacity, shade, clip) = {
             let state = self.slot_state(id)?;
             match &state.pass {
-                Pass::VolumeRaycast(volume) => {
-                    (volume.axis, volume.from_far, state.opacity, state.shade)
-                }
+                Pass::VolumeRaycast(volume) => (
+                    volume.axis,
+                    volume.from_far,
+                    state.opacity,
+                    state.shade,
+                    state.clip,
+                ),
                 _ => return Err(GraphError::RayUnavailable),
             }
         };
@@ -2633,6 +2680,12 @@ impl RenderGraph {
             contents: &shade_bytes,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        let clip_bytes = clip.uniform_bytes(&frame);
+        let clip_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ocelli ray clip"),
+            contents: &clip_bytes,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let bind_uniform = {
             let slot = self
                 .gpu
@@ -2658,6 +2711,10 @@ impl RenderGraph {
                     wgpu::BindGroupEntry {
                         binding: 3,
                         resource: shade_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: clip_buffer.as_entire_binding(),
                     },
                 ],
             })
@@ -2702,6 +2759,7 @@ impl RenderGraph {
             params: params_buffer,
             opacity: opacity_buffer,
             shade: shade_buffer,
+            clip: clip_buffer,
             bind_uniform,
             bind_source,
         };
@@ -2712,11 +2770,13 @@ impl RenderGraph {
             || binding.params.size() != uniform_bytes
             || binding.opacity.size() != 1024
             || binding.shade.size() != 16
+            || binding.clip.size() != u64::try_from(CLIP_UNIFORM_BYTES).unwrap_or(u64::MAX)
         {
             return Err(GraphError::RayUnavailable);
         }
         slot.ray = Some(binding);
         if let Some(state) = self.registry.state_mut(id) {
+            state.frame = frame;
             state.dirty.data = true;
         }
         Ok(())
@@ -2871,6 +2931,89 @@ impl RenderGraph {
         }
         if let Some(state) = self.registry.state_mut(id) {
             state.shade = *weights;
+            state.dirty.data = true;
+        }
+        Ok(())
+    }
+
+    /// Write the clip uniform for a bound volume ray.
+    ///
+    /// The buffer was created by [`RenderGraph::bind_volume_ray`]. This call
+    /// replaces its bytes and does not create a second buffer. It does not
+    /// increment [`RenderGraph::brick_uploads`], [`RenderGraph::uploads`] or
+    /// [`RenderGraph::lut_uploads`], and it does not write a brick texture.
+    /// The same bytes are a no-op, so a repeated call does not mark the
+    /// viewport dirty again. A call before the ray is bound returns
+    /// [`GraphError::RayUnavailable`] and does not store the planes, so the
+    /// later bind stays empty.
+    ///
+    /// Tier C returns [`GraphError::TierCUnavailable`] before a sample is
+    /// read and before the uniform is written. More than six planes, a
+    /// non-finite component, or a zero-length normal leaves the previous list
+    /// unchanged and does not write the uniform.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::TierCUnavailable`] on tier C.
+    /// [`GraphError::UnknownViewport`] for an id this graph never issued.
+    /// [`GraphError::PassHasNoUniform`] for a pass that is not a volume ray.
+    /// [`GraphError::ViewportNotRebound`] when a rebuild has not yet
+    /// recreated the slot. [`GraphError::RayUnavailable`] when the ray has
+    /// not been bound. [`GraphError::ClipCount`], [`GraphError::ClipNotFinite`]
+    /// and [`GraphError::ClipZeroNormal`] when the list itself is refused.
+    pub fn set_clip_planes(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        planes: &[crate::clip::ClipPlane],
+    ) -> Result<(), GraphError> {
+        if self.tier == Tier::Cpu {
+            return Err(GraphError::TierCUnavailable);
+        }
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        let is_volume = {
+            let state = self
+                .registry
+                .states
+                .get(index)
+                .and_then(Option::as_ref)
+                .ok_or(GraphError::UnknownViewport)?;
+            matches!(state.pass, Pass::VolumeRaycast(_))
+        };
+        if !is_volume {
+            return Err(GraphError::PassHasNoUniform);
+        }
+        if self.gpu.get(index).and_then(Option::as_ref).is_none() {
+            return Err(GraphError::ViewportNotRebound);
+        }
+        if self
+            .gpu
+            .get(index)
+            .and_then(Option::as_ref)
+            .and_then(|slot| slot.ray.as_ref())
+            .is_none()
+        {
+            return Err(GraphError::RayUnavailable);
+        }
+        let accepted = ClipList::from_planes(planes).map_err(clip_error)?;
+        if self.slot_state(id)?.clip.same(&accepted) {
+            return Ok(());
+        }
+        let bytes = {
+            let frame = self.slot_state(id)?.frame;
+            accepted.uniform_bytes(&frame)
+        };
+        {
+            let ray = self
+                .gpu
+                .get(index)
+                .and_then(Option::as_ref)
+                .and_then(|slot| slot.ray.as_ref())
+                .ok_or(GraphError::RayUnavailable)?;
+            ctx.queue().write_buffer(&ray.clip, 0, &bytes);
+        }
+        if let Some(state) = self.registry.state_mut(id) {
+            state.clip = accepted;
             state.dirty.data = true;
         }
         Ok(())
@@ -3081,9 +3224,10 @@ impl RenderGraph {
         // caller-owned source through `rebind`, or recreates an owned texture
         // through `rebind_stored`. Either restore writes the colour bytes
         // again and does not increment `lut_uploads`. The next
-        // `bind_volume_ray` writes the remembered opacity table and the
-        // remembered shade weights into new uniforms and does not increment
-        // `brick_uploads`.
+        // `bind_volume_ray` writes the remembered opacity table, the
+        // remembered shade weights and the remembered clip planes into new
+        // uniforms and does not increment `brick_uploads`. The next bind
+        // also replaces the patient frame from the source it is given.
         // Surfaces were configured on the dead device. The frame texture is
         // dropped before the surface it came from. The shell still holds the
         // canvases and supplies them again through `bind_surface`.

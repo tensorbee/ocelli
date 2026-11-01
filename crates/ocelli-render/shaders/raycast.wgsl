@@ -11,6 +11,10 @@
 // index. Shade is ambient when the gradient length is 0, otherwise
 // ambient + diffuse * max(0, dot(n, light)). The shaded value is
 // colour * shade. Transfer opacity is not multiplied by the shade.
+// Clip planes are a 256-byte uniform at group 0 binding 4. The patient
+// point uses the volume origin, spacing and direction. A sample is kept
+// when dot(point - plane_origin, normal) >= 0, which includes the plane.
+// A disabled slot has normal.w of 0. A discarded sample adds nothing.
 // No storage buffer and no compute.
 //
 // volume_ray_module fills the slot count, the brick bindings and the load
@@ -49,6 +53,21 @@ struct ShadeParams {
 }
 
 @group(0) @binding(3) var<uniform> shade : ShadeParams;
+
+struct CropSlot {
+    origin : vec4<f32>,
+    normal : vec4<f32>,
+}
+
+struct CropParams {
+    origin : vec4<f32>,
+    axis_x : vec4<f32>,
+    axis_y : vec4<f32>,
+    axis_z : vec4<f32>,
+    planes : array<CropSlot, 6>,
+}
+
+@group(0) @binding(4) var<uniform> crop : CropParams;
 
 fn opacity_of(index : i32) -> f32 {
     var lane = 0u;
@@ -178,6 +197,28 @@ fn shade_of(gradient : vec3<f32>) -> f32 {
     return ambient + diffuse * max(0.0, facing);
 }
 
+fn patient_point(voxel : vec3<i32>) -> vec3<f32> {
+    let index = vec3<f32>(voxel);
+    return crop.origin.xyz
+        + crop.axis_x.xyz * (ray.spacing_x * index.x)
+        + crop.axis_y.xyz * (ray.spacing_y * index.y)
+        + crop.axis_z.xyz * (ray.spacing_z * index.z);
+}
+
+fn sample_kept(point : vec3<f32>) -> bool {
+    for (var i = 0u; i < 6u; i = i + 1u) {
+        let normal = crop.planes[i].normal;
+        if (normal.w == 0.0) {
+            continue;
+        }
+        let delta = point - crop.planes[i].origin.xyz;
+        if (!(dot(delta, normal.xyz) >= 0.0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 @fragment
 fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
     let px = u32(at.x);
@@ -199,6 +240,9 @@ fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
             continue;
         }
         let voxel = voxel_of(px, py, step);
+        if (!sample_kept(patient_point(voxel))) {
+            continue;
+        }
         let bx = u32(voxel.x) / ray.edge;
         let by = u32(voxel.y) / ray.edge;
         let bz = u32(voxel.z) / ray.edge;

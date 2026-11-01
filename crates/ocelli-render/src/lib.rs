@@ -23,6 +23,10 @@
 //! **F-061 (E9.3, S21) shades that colour in the fragment shader.** The
 //! default weights are ambient 1 and diffuse 0, so the F-060 colour stays.
 //! `set_shade` writes a 16-byte uniform and does not upload a brick.
+//! **F-062 (E9.4, S21) clips that ray to at most six patient planes.** The
+//! default list is empty, so the unlit integral stays until
+//! `set_clip_planes`. That call writes a 256-byte uniform and does not
+//! upload a brick.
 //! **F-039 (E6.3, S13) attaches a surface** from the same `wgpu::Instance`
 //! the adapter was opened on, and sizes the backing store with
 //! [`extent::device_extent`].
@@ -62,6 +66,7 @@
 
 pub mod brick_upload;
 pub mod caps;
+pub mod clip;
 pub mod colour;
 pub mod cpu;
 pub mod extent;
@@ -83,6 +88,7 @@ pub use caps::{
     ProbeOutcome, Resolution, SimdSupport, SoftwareVerdict, Tier, TierEvidence, TierRequest,
     TierSignals, candidate_order, classify, compute_available, opens_a_device, recovers_from,
 };
+pub use clip::ClipPlane;
 pub use colour::{ColourLut, ColourLutError, PresetId, colour_lut_for};
 pub use cpu::{CpuRaster, RasterColor, RasterError, RasterGrid, RasterQuality, RasterResult};
 pub use extent::{ExtentError, css_from_device, device_extent};
