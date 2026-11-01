@@ -17,6 +17,16 @@
 //! those textures. `brick_uploads` counts them.
 //! **F-057 (E8.7, S19) calls that upload** for each ready brick whose bytes
 //! changed. An incomplete brick has no texture.
+//! **F-060 (E9.2, S21) indexes a 256-entry opacity uniform** from the display
+//! value. The default table is the constant `0.5` F-059 locked. `set_opacity`
+//! writes that uniform and does not upload a brick.
+//! **F-061 (E9.3, S21) shades that colour in the fragment shader.** The
+//! default weights are ambient 1 and diffuse 0, so the F-060 colour stays.
+//! `set_shade` writes a 16-byte uniform and does not upload a brick.
+//! **F-062 (E9.4, S21) clips that ray to at most six patient planes.** The
+//! default list is empty, so the unlit integral stays until
+//! `set_clip_planes`. That call writes a 256-byte uniform and does not
+//! upload a brick.
 //! **F-039 (E6.3, S13) attaches a surface** from the same `wgpu::Instance`
 //! the adapter was opened on, and sizes the backing store with
 //! [`extent::device_extent`].
@@ -56,15 +66,18 @@
 
 pub mod brick_upload;
 pub mod caps;
+pub mod clip;
 pub mod colour;
 pub mod cpu;
 pub mod extent;
 pub mod fusion;
 pub mod gpu;
 pub mod graph;
+pub mod opacity;
 pub mod ortho;
 pub mod probe;
 pub mod progressive;
+pub mod shade;
 pub mod slab;
 pub mod tier_b;
 pub mod voi;
@@ -75,6 +88,7 @@ pub use caps::{
     ProbeOutcome, Resolution, SimdSupport, SoftwareVerdict, Tier, TierEvidence, TierRequest,
     TierSignals, candidate_order, classify, compute_available, opens_a_device, recovers_from,
 };
+pub use clip::ClipPlane;
 pub use colour::{ColourLut, ColourLutError, PresetId, colour_lut_for};
 pub use cpu::{CpuRaster, RasterColor, RasterError, RasterGrid, RasterQuality, RasterResult};
 pub use extent::{ExtentError, css_from_device, device_extent};
@@ -92,13 +106,15 @@ pub use graph::{
     ViewportId, VolumeBrick, VolumePass, VolumeRaySource, device_camera_words,
     sampled_texture_limit, tier_b_fragment_module, volume_ray_admission, volume_ray_module,
 };
-pub use ortho::{OrthoError, present_plane};
+pub use opacity::{OpacityError, OpacityPreset, OpacityTable};
+pub use ortho::{OrthoError, copy_plane_stored, present_cpu_plane, present_plane};
 #[cfg(not(target_arch = "wasm32"))]
 pub use probe::resolve_native_gl;
 pub use probe::{
     Edge, Passes, ResolvedAdapter, WebGlOpened, WebGlProbe, resolve, resolve_adapter, resolve_webgl,
 };
 pub use progressive::{ProgressError, ProgressReport, sync_ready_bricks};
+pub use shade::{ShadeError, ShadeWeights};
 pub use slab::{
     SlabError, fragment_keys_for, present_slab, slab_blend_code, slab_compile_list, slab_module,
 };

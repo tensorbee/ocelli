@@ -1,7 +1,7 @@
 # Viewport
 
-**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022, F-054, F-055
-**Last updated:** 2026-10-31
+**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022, F-054, F-055, F-X004
+**Last updated:** 2026-11-01
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
 `RenderGraph::set_view` uploads the CSS matrix `View::camera_matrix` returns
@@ -233,9 +233,10 @@ stack pass. Windowing stays `VoiParams` and the existing VOI shader.
 `show_ortho` adds no pass variant and no sampler in WGSL.
 
 Tier A and tier B share that upload. The stored format stays the existing
-choice. Tier C does not draw a plane. `reslice` and `reslice_oblique` are
-host arithmetic and remain available for F-X004. This file does not add a
-second upload.
+choice. `show_ortho` does not draw a plane on tier C. `present_cpu_plane`
+copies the same `reslice` and `reslice_oblique` samples into `CpuRaster`.
+It does not upload and it does not resample. This file does not add a
+second GPU upload.
 
 ## Thick slab
 
@@ -249,8 +250,8 @@ does not draw composite. A dimension above the device 3D limit returns
 A present pixel is drawn by one of the four slab pipelines. An absent
 pixel discards. The pass loads the colour target, so the previous pixel
 stays. `uploads` does not change. Tier A and tier B share that shader.
-Tier C does not draw a slab. The sample grid remains available on the host
-for F-X004.
+Tier C does not draw a slab. The sample grid remains available on the host.
+F-X004 does not present a slab.
 
 ## Slice sync
 

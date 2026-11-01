@@ -1,7 +1,7 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056
-**Last updated:** 2026-10-31
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062
+**Last updated:** 2026-11-01
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
@@ -224,9 +224,35 @@ volume blends stay uncompiled. `request_outcome` for those keys is
 
 **The integral is front to back on voxel centres.** A step whose residency
 flag is 0 is skipped before the brick is read. Display colour comes from the
-existing VOI uniform. Opacity is the constant 0.5 until F-060. Colour and
-alpha accumulate `(1 - A) * colour * 0.5` and `(1 - A) * 0.5`. The pipeline
-blend is off, so the integral is not blended a second time.
+existing VOI uniform. Opacity is a 256-entry uniform at group 0 binding 2. The bytes are
+1024. A uniform array stride is 16, so the shader packs them as 64 `vec4`
+values and reads one component. The address is `table_index(display, 255)`,
+the same rule as `display_index`.
+`Flat` is `0.5` at every index. `Ramp` entry `i` is `i / 255`. A caller
+table of any other length, a non-finite entry, or an entry outside 0 to 1
+is refused and the previous table stays. The uniform is created at bind.
+`set_opacity` writes those bytes and does not upload a brick. The same bytes
+do not allocate a second uniform. Shade weights are a 16-byte uniform at
+group 0 binding 3. Ambient defaults to 1 and diffuse defaults to 0, so the
+unlit colour matches the opacity integral. `set_shade` writes that uniform
+and does not upload a brick. A non-finite weight, or a weight outside 0 to 1,
+is refused and the previous weights stay. The normal is the central difference
+of stored samples in millimetres. A neighbour outside the volume or outside
+the same brick contributes 0. Spacing is the last three words of the 48-byte
+ray header. The light is the unit walk axis toward the near end, and that end
+is the decreasing index. Shade is ambient when the gradient length is 0.
+Otherwise it is `ambient + diffuse * max(0, dot(n, light))`. The shaded value
+is `colour * shade`. Transfer opacity is not multiplied by the shade. Colour
+and alpha accumulate `(1 - A) * colour * shade * alpha` and `(1 - A) * alpha`.
+The pipeline blend is off, so the integral is not blended a second time.
+Clip planes are a 256-byte uniform at group 0 binding 4. The prefix holds the
+patient origin and the three direction columns. Six slots follow. A slot with
+normal w of 0 is disabled. The kept side is `dot(point - plane_origin, normal) >= 0`,
+so a sample on the plane stays. A discarded sample adds no colour and no alpha.
+The brick stays bound. `set_clip_planes` accepts at most six planes. A
+non-finite component or a zero-length normal is refused and the previous list
+stays. Zero planes leaves the measured ray unchanged. The uniform is created
+at bind. `set_clip_planes` writes it and does not upload a brick.
 
 **Every brick in the caller set is bound, or none of this call is.** Room is
 the sampled-texture limit minus one, because residency takes a binding. A
@@ -235,9 +261,9 @@ limit of zero, a ready count of zero, or a count above that room returns
 error before any texture for that call is created. The ray does not draw a
 subset. The caller slice is not compared with `Volume::ready_bricks`.
 
-**Tier C returns `TierCUnavailable`.** `RenderGraph::new` and
-`volume_ray_admission` both refuse CPU before an image exists. This story
-does not return a CPU vector of ray colours. F-X005 owns that path.
+**Tier C returns `TierCUnavailable`.** `RenderGraph::new`,
+`volume_ray_admission`, `set_opacity`, `set_shade` and `set_clip_planes` refuse CPU before an image exists.
+This story does not return a CPU vector of ray colours. F-X005 owns that path.
 
 **One submit per frame still holds.** The ray bind group is encoded only
 when the viewport has been bound. `set_voi` writes the same thirty-two bytes
