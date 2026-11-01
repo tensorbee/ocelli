@@ -206,7 +206,7 @@ Volumes assemble progressively, reslice obliquely and ray-cast on both tiers.
 | F-057 | E8.7 | S19 | Progressive volume rendering while the series still loads | Rust | 3w | F-051 | done |
 | F-058 | E8.8 | S19 | Multiscale pyramid hooks in the volume model | Rust | 3w | F-051 | done |
 | F-059 | E9.1 | S19 | VOLUME_3D viewport with ray-cast direct volume rendering | Rust | 4w | F-051 | done |
-| F-060 | E9.2 | S21 | Transfer-function editing surface and preset library | Rust | 3w | F-059 | pending |
+| F-060 | E9.2 | S21 | Transfer-function editing surface and preset library | Rust | 3w | F-059 | done |
 | F-061 | E9.3 | S21 | Lighting, shading and gradient opacity | Rust | 3w | F-059 | pending |
 | F-062 | E9.4 | S21 | Cropping planes and volume clipping | Rust | 4w | F-059 | pending |
 | F-X004 | X1.4 | S21 | CPU MPR and oblique reslicing, with SIMD inner loops | Rust | 5w | F-052, F-X003 | pending |

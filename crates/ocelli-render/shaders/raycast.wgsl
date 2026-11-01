@@ -1,8 +1,10 @@
-// Volume composite ray. Appended to voi.wgsl.
+// Volume composite ray. Appended to voi.wgsl and table_index.
 // One step is one voxel. A residency flag of 0 skips the step before any
 // brick is read. Each ready brick is its own texture_3d. The residency
-// texture is the last binding in group 1. Opacity is the constant 0.5 until
-// F-060. No storage buffer and no compute.
+// texture is the last binding in group 1. Opacity is a 256-entry uniform
+// at group 0 binding 2. The address is table_index of the display value
+// with last 255. Entries are packed as vec4 so the uniform stride is 16.
+// No storage buffer and no compute.
 //
 // volume_ray_module fills the slot count, the brick bindings and the load
 // cases. The slot count is the device's sampled-texture room after the
@@ -25,6 +27,34 @@ struct RayParams {
 }
 
 @group(0) @binding(1) var<uniform> ray : RayParams;
+
+struct OpacitySamples {
+    values : array<vec4<f32>, 64>,
+}
+
+@group(0) @binding(2) var<uniform> opacity : OpacitySamples;
+
+fn opacity_of(index : i32) -> f32 {
+    var lane = 0u;
+    if (index > 0) {
+        lane = u32(index);
+    }
+    if (lane > 255u) {
+        lane = 255u;
+    }
+    let packed = opacity.values[lane / 4u];
+    let component = lane % 4u;
+    if (component == 0u) {
+        return packed.x;
+    }
+    if (component == 1u) {
+        return packed.y;
+    }
+    if (component == 2u) {
+        return packed.z;
+    }
+    return packed.w;
+}
 
 __BRICK_BINDINGS__
 
@@ -110,7 +140,7 @@ fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
         let display = lut_chain(stored);
         let span = voi.ymax - voi.ymin;
         let colour = select(0.0, (display - voi.ymin) / span, span > 0.0);
-        let alpha = 0.5;
+        let alpha = opacity_of(table_index(display, 255u));
         accum_c = accum_c + (1.0 - accum_a) * colour * alpha;
         accum_a = accum_a + (1.0 - accum_a) * alpha;
     }

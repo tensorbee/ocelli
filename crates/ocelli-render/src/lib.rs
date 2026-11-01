@@ -17,6 +17,9 @@
 //! those textures. `brick_uploads` counts them.
 //! **F-057 (E8.7, S19) calls that upload** for each ready brick whose bytes
 //! changed. An incomplete brick has no texture.
+//! **F-060 (E9.2, S21) indexes a 256-entry opacity uniform** from the display
+//! value. The default table is the constant `0.5` F-059 locked. `set_opacity`
+//! writes that uniform and does not upload a brick.
 //! **F-039 (E6.3, S13) attaches a surface** from the same `wgpu::Instance`
 //! the adapter was opened on, and sizes the backing store with
 //! [`extent::device_extent`].
@@ -62,6 +65,7 @@ pub mod extent;
 pub mod fusion;
 pub mod gpu;
 pub mod graph;
+pub mod opacity;
 pub mod ortho;
 pub mod probe;
 pub mod progressive;
@@ -92,6 +96,7 @@ pub use graph::{
     ViewportId, VolumeBrick, VolumePass, VolumeRaySource, device_camera_words,
     sampled_texture_limit, tier_b_fragment_module, volume_ray_admission, volume_ray_module,
 };
+pub use opacity::{OpacityError, OpacityPreset, OpacityTable};
 pub use ortho::{OrthoError, present_plane};
 #[cfg(not(target_arch = "wasm32"))]
 pub use probe::resolve_native_gl;

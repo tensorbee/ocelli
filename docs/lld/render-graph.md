@@ -1,7 +1,7 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056
-**Last updated:** 2026-10-31
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060
+**Last updated:** 2026-11-01
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
@@ -224,9 +224,17 @@ volume blends stay uncompiled. `request_outcome` for those keys is
 
 **The integral is front to back on voxel centres.** A step whose residency
 flag is 0 is skipped before the brick is read. Display colour comes from the
-existing VOI uniform. Opacity is the constant 0.5 until F-060. Colour and
-alpha accumulate `(1 - A) * colour * 0.5` and `(1 - A) * 0.5`. The pipeline
-blend is off, so the integral is not blended a second time.
+existing VOI uniform. Opacity is a 256-entry uniform at group 0 binding 2. The bytes are
+1024. A uniform array stride is 16, so the shader packs them as 64 `vec4`
+values and reads one component. The address is `table_index(display, 255)`,
+the same rule as `display_index`.
+`Flat` is `0.5` at every index. `Ramp` entry `i` is `i / 255`. A caller
+table of any other length, a non-finite entry, or an entry outside 0 to 1
+is refused and the previous table stays. The uniform is created at bind.
+`set_opacity` writes those bytes and does not upload a brick. The same bytes
+do not allocate a second uniform. Colour and alpha accumulate
+`(1 - A) * colour * alpha` and `(1 - A) * alpha`. The pipeline blend is off,
+so the integral is not blended a second time.
 
 **Every brick in the caller set is bound, or none of this call is.** Room is
 the sampled-texture limit minus one, because residency takes a binding. A
@@ -235,9 +243,9 @@ limit of zero, a ready count of zero, or a count above that room returns
 error before any texture for that call is created. The ray does not draw a
 subset. The caller slice is not compared with `Volume::ready_bricks`.
 
-**Tier C returns `TierCUnavailable`.** `RenderGraph::new` and
-`volume_ray_admission` both refuse CPU before an image exists. This story
-does not return a CPU vector of ray colours. F-X005 owns that path.
+**Tier C returns `TierCUnavailable`.** `RenderGraph::new`,
+`volume_ray_admission` and `set_opacity` refuse CPU before an image exists.
+This story does not return a CPU vector of ray colours. F-X005 owns that path.
 
 **One submit per frame still holds.** The ray bind group is encoded only
 when the viewport has been bound. `set_voi` writes the same thirty-two bytes

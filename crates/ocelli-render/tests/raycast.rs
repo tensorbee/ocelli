@@ -18,9 +18,10 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RayAxis, RenderGraph,
-    Tier, VOI_WGSL, ViewportId, VoiParams, VolumeBrick, VolumePass, VolumeRaySource,
-    sampled_texture_limit, volume_ray_admission, volume_ray_module,
+    BlendMode, FrameOutcome, OpacityError, OpacityPreset, OpacityTable, Pass, PassKind,
+    PipelineFamily, PipelineKey, RayAxis, RenderGraph, Tier, VOI_WGSL, ViewportId, VoiParams,
+    VolumeBrick, VolumePass, VolumeRaySource, sampled_texture_limit, volume_ray_admission,
+    volume_ray_module,
 };
 use ocelli_volume::{Level, SlicePresence, Volume, VoxelKind, VoxelStore};
 
@@ -89,7 +90,9 @@ fn a_volume_mip_is_not_the_composite_ray() {
     assert!(module.contains("var brick_0 : texture_3d<u32>"));
     assert!(module.contains("var brick_1 : texture_3d<u32>"));
     assert!(module.starts_with(VOI_WGSL));
-    assert!(module.contains("let alpha = 0.5"));
+    assert!(module.contains("table_index(display, 255u)"));
+    assert!(module.contains("var<uniform> opacity"));
+    assert!(!module.contains("let alpha = 0.5"));
     assert!(module.contains("if (flag == 0u)"));
     assert!(!module.contains("var<storage"));
     assert!(!module.contains("@compute"));
@@ -122,6 +125,123 @@ fn volume_raycast_has_no_cpu_image() {
     assert!(matches!(
         volume_ray_admission(Tier::A, 16, 16),
         Err(ocelli_render::GraphError::SampledTextureLimit)
+    ));
+}
+
+/// PS3.3 C.11.2.1.3.2 LINEAR_EXACT, centre 127.5, width 255, output 0 to 255.
+/// Stored 200 is inside `(0, 255]` and maps to display 200. One front-to-back
+/// step from a clear pixel is `colour * alpha` with `colour = 200/255`.
+fn one_step_colour(alpha: f32) -> f32 {
+    (200.0_f32 / 255.0) * alpha
+}
+
+#[test]
+fn flat_opacity_keeps_the_one_step_integral() {
+    let table = OpacityTable::preset(OpacityPreset::Flat);
+    let Some(alpha) = table.entries().get(200).copied() else {
+        unreachable!("256 entries")
+    };
+    assert_eq!(alpha.to_bits(), 0.5_f32.to_bits());
+    assert_eq!(
+        one_step_colour(alpha).to_bits(),
+        ((200.0_f32 / 255.0) * 0.5).to_bits()
+    );
+    assert!(
+        table
+            .entries()
+            .iter()
+            .all(|entry| entry.to_bits() == 0.5_f32.to_bits())
+    );
+}
+
+#[test]
+fn ramp_opacity_uses_display_200() {
+    let table = OpacityTable::preset(OpacityPreset::Ramp);
+    let Some(alpha) = table.entries().get(200).copied() else {
+        unreachable!("256 entries")
+    };
+    // Display 200 addresses entry 200. The normalised colour 200/255 is not
+    // an index, and the 1024-wide grey ramp is not this table.
+    assert_eq!(alpha.to_bits(), (200.0_f32 / 255.0).to_bits());
+    assert_eq!(
+        one_step_colour(alpha).to_bits(),
+        ((200.0_f32 / 255.0) * (200.0_f32 / 255.0)).to_bits()
+    );
+    assert_eq!(
+        table.entries().first().copied().unwrap_or(1.0).to_bits(),
+        0.0_f32.to_bits()
+    );
+    assert_eq!(
+        table.entries().last().copied().unwrap_or(0.0).to_bits(),
+        1.0_f32.to_bits()
+    );
+}
+
+#[test]
+fn a_bad_opacity_table_leaves_the_previous_one() {
+    let previous = OpacityTable::preset(OpacityPreset::Flat);
+    let short = [0.5_f32; 255];
+    assert!(matches!(
+        OpacityTable::from_entries(&short),
+        Err(OpacityError::Length)
+    ));
+    let mut wide = [0.5_f32; 256];
+    {
+        let Some(first) = wide.first_mut() else {
+            unreachable!("256 entries")
+        };
+        *first = 1.1;
+    }
+    assert!(matches!(
+        OpacityTable::from_entries(&wide),
+        Err(OpacityError::OutOfRange)
+    ));
+    {
+        let Some(first) = wide.first_mut() else {
+            unreachable!("256 entries")
+        };
+        *first = -0.1;
+    }
+    assert!(matches!(
+        OpacityTable::from_entries(&wide),
+        Err(OpacityError::OutOfRange)
+    ));
+    {
+        let Some(first) = wide.first_mut() else {
+            unreachable!("256 entries")
+        };
+        *first = f32::NAN;
+    }
+    assert!(matches!(
+        OpacityTable::from_entries(&wide),
+        Err(OpacityError::NotFinite)
+    ));
+    {
+        let Some(first) = wide.first_mut() else {
+            unreachable!("256 entries")
+        };
+        *first = f32::INFINITY;
+    }
+    assert!(matches!(
+        OpacityTable::from_entries(&wide),
+        Err(OpacityError::NotFinite)
+    ));
+    assert_eq!(
+        previous
+            .entries()
+            .get(200)
+            .copied()
+            .unwrap_or(0.0)
+            .to_bits(),
+        0.5_f32.to_bits()
+    );
+}
+
+#[test]
+fn cpu_opacity_is_unavailable_before_a_sample() {
+    assert!(matches!(
+        volume_ray_admission(Tier::Cpu, 1, 16),
+        Err(ocelli_render::GraphError::TierCUnavailable)
     ));
 }
 
@@ -342,6 +462,15 @@ fn place_pair(first: u8, second: u8) -> Volume {
 }
 
 fn draw_ray(from_far: bool, samples: (u8, u8), flags: [u32; 2]) -> Option<[f32; 4]> {
+    draw_ray_table(from_far, samples, flags, None)
+}
+
+fn draw_ray_table(
+    from_far: bool,
+    samples: (u8, u8),
+    flags: [u32; 2],
+    table: Option<&OpacityTable>,
+) -> Option<[f32; 4]> {
     let mut fixture = open_ray()?;
     let volume = place_pair(samples.0, samples.1);
     let synced =
@@ -390,6 +519,16 @@ fn draw_ray(from_far: bool, samples: (u8, u8), flags: [u32; 2]) -> Option<[f32; 
             )
             .is_ok()
     );
+    if let Some(table) = table {
+        let before = fixture.graph.brick_uploads();
+        assert!(
+            fixture
+                .graph
+                .set_opacity(&fixture.context, viewport, table)
+                .is_ok()
+        );
+        assert_eq!(fixture.graph.brick_uploads(), before);
+    }
     assert_eq!(
         fixture.graph.tick(&fixture.context),
         FrameOutcome::Submitted {
@@ -532,4 +671,109 @@ fn two_ready_bricks_both_contribute() {
         two_brick_colour(),
         0.75,
     );
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn ramp_opacity_matches_the_display_fraction() {
+    let table = OpacityTable::preset(OpacityPreset::Ramp);
+    let Some(pixel) = draw_ray_table(false, (0, 200), [0, 1], Some(&table)) else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let alpha = 200.0_f32 / 255.0;
+    assert_ray(pixel, one_step_colour(alpha), alpha);
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn set_opacity_does_not_upload_bricks() {
+    let Some(mut fixture) = open_ray() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let volume = place_pair(0, 200);
+    let synced =
+        fixture
+            .graph
+            .sync_volume(&fixture.context, &fixture.adapter, VolumeId(1), &volume);
+    assert!(synced.is_ok());
+    let ready = volume.ready_bricks();
+    let Some(coord) = ready.first().copied() else {
+        unreachable!("one ready brick");
+    };
+    let key = key_at(1, coord);
+    let bricks = [VolumeBrick { key: &key, coord }];
+    let chain = exact_chain(127.5, 255.0);
+    let (view, texture) = target(fixture.context.device());
+    let source = dummy_source(fixture.context.device());
+    let viewport = match fixture.graph.register(
+        &fixture.context,
+        view,
+        source,
+        Pass::VolumeRaycast(VolumePass {
+            blend: BlendMode::Composite,
+            voi: params(&chain),
+            axis: RayAxis::Slice,
+            from_far: false,
+        }),
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("one viewport fits"),
+    };
+    assert!(
+        fixture
+            .graph
+            .bind_volume_ray(
+                &fixture.context,
+                &fixture.adapter,
+                viewport,
+                VolumeRaySource {
+                    bricks: &bricks,
+                    edge: volume.brick_grid().edge,
+                    dims: volume.dims,
+                    flags: &[0, 1],
+                    sampled_limit: fixture.limit,
+                },
+            )
+            .is_ok()
+    );
+    let before = fixture.graph.brick_uploads();
+    let flat = OpacityTable::preset(OpacityPreset::Flat);
+    assert!(
+        fixture
+            .graph
+            .set_opacity(&fixture.context, viewport, &flat)
+            .is_ok()
+    );
+    assert_eq!(fixture.graph.brick_uploads(), before);
+    let ramp = OpacityTable::preset(OpacityPreset::Ramp);
+    assert!(
+        fixture
+            .graph
+            .set_opacity(&fixture.context, viewport, &ramp)
+            .is_ok()
+    );
+    assert_eq!(fixture.graph.brick_uploads(), before);
+    assert!(
+        fixture
+            .graph
+            .set_opacity(&fixture.context, viewport, &ramp)
+            .is_ok()
+    );
+    assert_eq!(fixture.graph.brick_uploads(), before);
+    assert_eq!(
+        fixture.graph.tick(&fixture.context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let alpha = 200.0_f32 / 255.0;
+    assert_ray(
+        read_pixel(&fixture.context, &texture),
+        one_step_colour(alpha),
+        alpha,
+    );
+    assert_eq!(fixture.graph.brick_uploads(), before);
 }
