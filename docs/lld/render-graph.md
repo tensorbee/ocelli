@@ -1,6 +1,6 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061
 **Last updated:** 2026-11-01
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
@@ -232,9 +232,19 @@ the same rule as `display_index`.
 table of any other length, a non-finite entry, or an entry outside 0 to 1
 is refused and the previous table stays. The uniform is created at bind.
 `set_opacity` writes those bytes and does not upload a brick. The same bytes
-do not allocate a second uniform. Colour and alpha accumulate
-`(1 - A) * colour * alpha` and `(1 - A) * alpha`. The pipeline blend is off,
-so the integral is not blended a second time.
+do not allocate a second uniform. Shade weights are a 16-byte uniform at
+group 0 binding 3. Ambient defaults to 1 and diffuse defaults to 0, so the
+unlit colour matches the opacity integral. `set_shade` writes that uniform
+and does not upload a brick. A non-finite weight, or a weight outside 0 to 1,
+is refused and the previous weights stay. The normal is the central difference
+of stored samples in millimetres. A neighbour outside the volume or outside
+the same brick contributes 0. Spacing is the last three words of the 48-byte
+ray header. The light is the unit walk axis toward the near end, and that end
+is the decreasing index. Shade is ambient when the gradient length is 0.
+Otherwise it is `ambient + diffuse * max(0, dot(n, light))`. The shaded value
+is `colour * shade`. Transfer opacity is not multiplied by the shade. Colour
+and alpha accumulate `(1 - A) * colour * shade * alpha` and `(1 - A) * alpha`.
+The pipeline blend is off, so the integral is not blended a second time.
 
 **Every brick in the caller set is bound, or none of this call is.** Room is
 the sampled-texture limit minus one, because residency takes a binding. A
@@ -244,7 +254,7 @@ error before any texture for that call is created. The ray does not draw a
 subset. The caller slice is not compared with `Volume::ready_bricks`.
 
 **Tier C returns `TierCUnavailable`.** `RenderGraph::new`,
-`volume_ray_admission` and `set_opacity` refuse CPU before an image exists.
+`volume_ray_admission`, `set_opacity` and `set_shade` refuse CPU before an image exists.
 This story does not return a CPU vector of ray colours. F-X005 owns that path.
 
 **One submit per frame still holds.** The ray bind group is encoded only

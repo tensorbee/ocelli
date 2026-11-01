@@ -18,10 +18,10 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, FrameOutcome, OpacityError, OpacityPreset, OpacityTable, Pass, PassKind,
-    PipelineFamily, PipelineKey, RayAxis, RenderGraph, Tier, VOI_WGSL, ViewportId, VoiParams,
-    VolumeBrick, VolumePass, VolumeRaySource, sampled_texture_limit, volume_ray_admission,
-    volume_ray_module,
+    BlendMode, FrameOutcome, GraphError, OpacityError, OpacityPreset, OpacityTable, Pass, PassKind,
+    PipelineFamily, PipelineKey, RayAxis, RenderGraph, ShadeError, ShadeWeights, Tier, VOI_WGSL,
+    ViewportId, VoiParams, VolumeBrick, VolumePass, VolumeRaySource, sampled_texture_limit,
+    volume_ray_admission, volume_ray_module,
 };
 use ocelli_volume::{Level, SlicePresence, Volume, VoxelKind, VoxelStore};
 
@@ -92,6 +92,10 @@ fn a_volume_mip_is_not_the_composite_ray() {
     assert!(module.starts_with(VOI_WGSL));
     assert!(module.contains("table_index(display, 255u)"));
     assert!(module.contains("var<uniform> opacity"));
+    assert!(module.contains("var<uniform> shade"));
+    assert!(module.contains("@binding(3)"));
+    assert!(module.contains("ambient + diffuse * max(0.0, facing)"));
+    assert!(module.contains("let lit = colour * shade_of"));
     assert!(!module.contains("let alpha = 0.5"));
     assert!(module.contains("if (flag == 0u)"));
     assert!(!module.contains("var<storage"));
@@ -515,6 +519,7 @@ fn draw_ray_table(
                     dims: volume.dims,
                     flags: &flags,
                     sampled_limit: fixture.limit,
+                    spacing_mm: [1.0, 1.0, 1.0],
                 },
             )
             .is_ok()
@@ -655,6 +660,7 @@ fn two_ready_bricks_both_contribute() {
                     dims: volume.dims,
                     flags: &flags,
                     sampled_limit: fixture.limit,
+                    spacing_mm: [1.0, 1.0, 1.0],
                 },
             )
             .is_ok()
@@ -734,6 +740,7 @@ fn set_opacity_does_not_upload_bricks() {
                     dims: volume.dims,
                     flags: &[0, 1],
                     sampled_limit: fixture.limit,
+                    spacing_mm: [1.0, 1.0, 1.0],
                 },
             )
             .is_ok()
@@ -776,4 +783,314 @@ fn set_opacity_does_not_upload_bricks() {
         alpha,
     );
     assert_eq!(fixture.graph.brick_uploads(), before);
+}
+
+/// PS3.3 C.11.2.1.3.2 LINEAR_EXACT, centre 127.5, width 255, output 0 to 255.
+/// Stored 200 displays as 200. Flat opacity is 0.5. One front-to-back step
+/// from clear is `(200/255) * 0.5`. Unlit shade is 1, so that product stays.
+/// Ambient 0 and diffuse 1 with the light along the gradient is also shade 1.
+/// The same weights with the light against the gradient are shade 0, so the
+/// colour is 0 and the alpha stays 0.5. A zero gradient uses the ambient
+/// weight alone: ambient 0.5 gives `(200/255) * 0.5 * 0.5`.
+#[test]
+fn unlit_weights_keep_the_flat_product() {
+    let weights = ShadeWeights::unlit();
+    assert_eq!(weights.ambient().to_bits(), 1.0_f32.to_bits());
+    assert_eq!(weights.diffuse().to_bits(), 0.0_f32.to_bits());
+    assert_eq!(
+        one_step_colour(0.5).to_bits(),
+        ((200.0_f32 / 255.0) * 0.5).to_bits()
+    );
+}
+
+#[test]
+fn centre_gradient_of_100_200_300_is_one_hundred_per_millimetre() {
+    // Index increases toward the far end. Spacing is 1 mm.
+    // (sample at +1) minus (sample at -1), divided by 2.
+    let against = (300.0_f32 - 100.0_f32) / 2.0;
+    assert_eq!(against.to_bits(), 100.0_f32.to_bits());
+    let along = (100.0_f32 - 300.0_f32) / 2.0;
+    assert_eq!(along.to_bits(), (-100.0_f32).to_bits());
+    let weights = match ShadeWeights::from_weights(0.0, 1.0) {
+        Ok(weights) => weights,
+        Err(_) => unreachable!("0 and 1 are in range"),
+    };
+    assert_eq!(weights.ambient().to_bits(), 0.0_f32.to_bits());
+    assert_eq!(weights.diffuse().to_bits(), 1.0_f32.to_bits());
+    // Dot 1 leaves the VOI colour. The pixel is still the one-step product.
+    assert_eq!(
+        (one_step_colour(0.5) * 1.0).to_bits(),
+        one_step_colour(0.5).to_bits()
+    );
+    // Dot -1 contributes 0. The colour is 0. Alpha is the flat 0.5.
+    assert_eq!((one_step_colour(0.5) * 0.0).to_bits(), 0.0_f32.to_bits());
+    let ambient = match ShadeWeights::from_weights(0.5, 1.0) {
+        Ok(weights) => weights.ambient(),
+        Err(_) => unreachable!("0.5 and 1 are in range"),
+    };
+    assert_eq!(
+        ((200.0_f32 / 255.0) * ambient * 0.5).to_bits(),
+        ((200.0_f32 / 255.0) * 0.25).to_bits()
+    );
+}
+
+#[test]
+fn a_bad_shade_weight_leaves_the_previous_one() {
+    let previous = ShadeWeights::unlit();
+    assert!(matches!(
+        ShadeWeights::from_weights(f32::NAN, 0.0),
+        Err(ShadeError::NotFinite)
+    ));
+    assert!(matches!(
+        ShadeWeights::from_weights(0.0, f32::INFINITY),
+        Err(ShadeError::NotFinite)
+    ));
+    assert!(matches!(
+        ShadeWeights::from_weights(1.1, 0.0),
+        Err(ShadeError::OutOfRange)
+    ));
+    assert!(matches!(
+        ShadeWeights::from_weights(-0.1, 1.0),
+        Err(ShadeError::OutOfRange)
+    ));
+    assert_eq!(previous.ambient().to_bits(), 1.0_f32.to_bits());
+    assert_eq!(previous.diffuse().to_bits(), 0.0_f32.to_bits());
+}
+
+#[test]
+fn cpu_shade_is_unavailable_before_a_sample() {
+    assert!(matches!(
+        volume_ray_admission(Tier::Cpu, 1, 16),
+        Err(GraphError::TierCUnavailable)
+    ));
+}
+
+fn u16_line(samples: [u16; 3]) -> Volume {
+    let dims = [1, 1, 3];
+    let mut volume = Volume {
+        dims,
+        spacing: [1.0, 1.0, 1.0],
+        origin: Pt::<World>::new(0.0, 0.0, 0.0),
+        direction: DMat3::IDENTITY,
+        voxel: VoxelKind::U16,
+        data: VoxelStore::new(dims, VoxelKind::U16),
+        levels: vec![Level {
+            dims,
+            spacing: [1.0, 1.0, 1.0],
+            offset: 0,
+        }],
+        present: SlicePresence::new(dims[2]),
+        order: Vec::new(),
+    };
+    for (index, sample) in samples.iter().copied().enumerate() {
+        let Ok(z) = u32::try_from(index) else {
+            unreachable!("three slices");
+        };
+        assert!(volume.place(z, &sample.to_le_bytes()).is_ok());
+    }
+    volume
+}
+
+fn draw_centre(samples: [u16; 3], weights: Option<&ShadeWeights>) -> Option<[f32; 4]> {
+    let mut fixture = open_ray()?;
+    let volume = u16_line(samples);
+    let synced =
+        fixture
+            .graph
+            .sync_volume(&fixture.context, &fixture.adapter, VolumeId(1), &volume);
+    assert!(synced.is_ok());
+    let chain = exact_chain(127.5, 255.0);
+    let (view, texture) = target(fixture.context.device());
+    let source = dummy_source(fixture.context.device());
+    let viewport = match fixture.graph.register(
+        &fixture.context,
+        view,
+        source,
+        Pass::VolumeRaycast(VolumePass {
+            blend: BlendMode::Composite,
+            voi: params(&chain),
+            axis: RayAxis::Slice,
+            from_far: false,
+        }),
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("one viewport fits"),
+    };
+    let ready = volume.ready_bricks();
+    assert_eq!(ready.len(), 1);
+    let Some(coord) = ready.first().copied() else {
+        unreachable!("one ready brick");
+    };
+    let key = key_at(1, coord);
+    let bricks = [VolumeBrick { key: &key, coord }];
+    assert!(
+        fixture
+            .graph
+            .bind_volume_ray(
+                &fixture.context,
+                &fixture.adapter,
+                viewport,
+                VolumeRaySource {
+                    bricks: &bricks,
+                    edge: volume.brick_grid().edge,
+                    dims: volume.dims,
+                    flags: &[0, 1, 0],
+                    sampled_limit: fixture.limit,
+                    spacing_mm: [1.0, 1.0, 1.0],
+                },
+            )
+            .is_ok()
+    );
+    if let Some(weights) = weights {
+        let before = fixture.graph.brick_uploads();
+        assert!(
+            fixture
+                .graph
+                .set_shade(&fixture.context, viewport, weights)
+                .is_ok()
+        );
+        assert_eq!(fixture.graph.brick_uploads(), before);
+    }
+    assert_eq!(
+        fixture.graph.tick(&fixture.context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    Some(read_pixel(&fixture.context, &texture))
+}
+
+fn diffuse_only() -> ShadeWeights {
+    match ShadeWeights::from_weights(0.0, 1.0) {
+        Ok(weights) => weights,
+        Err(_) => unreachable!("0 and 1 are in range"),
+    }
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn unlit_shade_keeps_the_flat_integral() {
+    // 100, 200, 300 points the gradient at the far end, against the light.
+    // A default diffuse weight would zero this pixel.
+    let Some(pixel) = draw_centre([100, 200, 300], None) else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    assert_ray(pixel, one_step_colour(0.5), 0.5);
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn light_along_the_gradient_keeps_the_voi_product() {
+    // 300, 200, 100 points the gradient at the near end, along the light.
+    // Shade is 1, so the pixel matches the unlit one-step product.
+    let weights = diffuse_only();
+    let Some(pixel) = draw_centre([300, 200, 100], Some(&weights)) else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    assert_ray(pixel, one_step_colour(0.5), 0.5);
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn light_against_the_gradient_zeroes_the_colour() {
+    let Some(mut fixture) = open_ray() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let volume = u16_line([100, 200, 300]);
+    let synced =
+        fixture
+            .graph
+            .sync_volume(&fixture.context, &fixture.adapter, VolumeId(1), &volume);
+    assert!(synced.is_ok());
+    let chain = exact_chain(127.5, 255.0);
+    let (view, texture) = target(fixture.context.device());
+    let source = dummy_source(fixture.context.device());
+    let viewport = match fixture.graph.register(
+        &fixture.context,
+        view,
+        source,
+        Pass::VolumeRaycast(VolumePass {
+            blend: BlendMode::Composite,
+            voi: params(&chain),
+            axis: RayAxis::Slice,
+            from_far: false,
+        }),
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("one viewport fits"),
+    };
+    let weights = diffuse_only();
+    assert!(matches!(
+        fixture
+            .graph
+            .set_shade(&fixture.context, viewport, &weights),
+        Err(GraphError::RayUnavailable)
+    ));
+    let ready = volume.ready_bricks();
+    let Some(coord) = ready.first().copied() else {
+        unreachable!("one ready brick");
+    };
+    let key = key_at(1, coord);
+    let bricks = [VolumeBrick { key: &key, coord }];
+    let before = fixture.graph.brick_uploads();
+    assert!(
+        fixture
+            .graph
+            .bind_volume_ray(
+                &fixture.context,
+                &fixture.adapter,
+                viewport,
+                VolumeRaySource {
+                    bricks: &bricks,
+                    edge: volume.brick_grid().edge,
+                    dims: volume.dims,
+                    flags: &[0, 1, 0],
+                    sampled_limit: fixture.limit,
+                    spacing_mm: [1.0, 1.0, 1.0],
+                },
+            )
+            .is_ok()
+    );
+    assert_eq!(fixture.graph.brick_uploads(), before);
+    assert!(
+        fixture
+            .graph
+            .set_shade(&fixture.context, viewport, &weights)
+            .is_ok()
+    );
+    assert_eq!(fixture.graph.brick_uploads(), before);
+    assert_eq!(
+        fixture.graph.tick(&fixture.context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    assert_ray(read_pixel(&fixture.context, &texture), 0.0, 0.5);
+    assert!(
+        fixture
+            .graph
+            .set_shade(&fixture.context, viewport, &weights)
+            .is_ok()
+    );
+    assert_eq!(fixture.graph.tick(&fixture.context), FrameOutcome::Noop);
+    assert_eq!(fixture.graph.brick_uploads(), before);
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_zero_gradient_uses_the_ambient_weight() {
+    let weights = match ShadeWeights::from_weights(0.5, 1.0) {
+        Ok(weights) => weights,
+        Err(_) => unreachable!("0.5 and 1 are in range"),
+    };
+    let Some(pixel) = draw_centre([200, 200, 200], Some(&weights)) else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    assert_ray(pixel, (200.0_f32 / 255.0) * 0.25, 0.5);
 }

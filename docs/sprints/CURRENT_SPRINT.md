@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-060 | E9.2 | Transfer-function editing surface and preset library | Rust | 3w | done |
-| F-061 | E9.3 | Lighting, shading and gradient opacity | Rust | 3w | pending |
+| F-061 | E9.3 | Lighting, shading and gradient opacity | Rust | 3w | done |
 | F-062 | E9.4 | Cropping planes and volume clipping | Rust | 4w | pending |
 | F-X004 | X1.4 | CPU MPR and oblique reslicing, with SIMD inner loops | Rust | 5w | pending |
 | F-X005 | X1.5 | The CPU volume-rendering decision, and honest unavailability | Rust+TS | 2w | pending |
@@ -35,7 +35,8 @@ for MPR and for the volume view. The S21 table in
 F-X005.
 
 F-059 ray-casts ready bricks. F-060 replaces its constant 0.5 opacity with
-a 256-entry table. F-052 samples the axial, sagittal and coronal planes of
+a 256-entry table. F-061 multiplies that colour by a fragment shade and
+leaves the default unlit. F-052 samples the axial, sagittal and coronal planes of
 the constructed volume. This sprint consumes those views. It does not
 reopen volume construction, the LUT chain, fusion, or the candidate gate.
 
@@ -168,4 +169,4 @@ tree is `93bf532df411`. The merge is `685f55d`. `scripts/backlog_check.py`,
 green at this open. The S21 allocation rows and the S21 plan table name the
 same F-IDs. No new audit was run at this open.
 
-F-060 is done. F-061, F-062, F-X004 and F-X005 are pending.
+F-060 and F-061 are done. F-062, F-X004 and F-X005 are pending.

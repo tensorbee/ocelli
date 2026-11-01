@@ -18,7 +18,10 @@
 //! counts the brick upload. F-057 calls that upload for each ready brick
 //! whose bytes changed. An incomplete brick has no texture. F-060 replaces
 //! the ray's constant opacity with a 256-entry uniform. `set_opacity` writes
-//! that uniform and does not upload a brick. F-045 writes
+//! that uniform and does not upload a brick. F-061 multiplies the ray colour
+//! by a fragment shade. The default weights are unlit, so the F-060 colour
+//! stays until `set_shade`. That call writes a 16-byte uniform and does not
+//! upload a brick. F-045 writes
 //! the sixteen camera floats at group 0 binding 2. `set_view` does not
 //! write the VOI uniform. The oracle still has no Ocelli frame to judge.
 //! Decision D7 stays open.
@@ -39,6 +42,7 @@ use crate::opacity::{OpacityPreset, OpacityTable};
 use crate::ortho::{self, OrthoError};
 use crate::probe::ResolvedAdapter;
 use crate::progressive::{self, ProgressError, ProgressReport};
+use crate::shade::{ShadeWeights, spacing_mm_ok};
 use crate::slab::{self, SlabError};
 use crate::voi::{VOI_WGSL, VoiParams, VoiParamsError};
 
@@ -863,6 +867,8 @@ struct SlotState {
     camera: [f32; 16],
     /// Opacity table for a volume ray. Flat until `set_opacity`.
     opacity: OpacityTable,
+    /// Shade weights for a volume ray. Unlit until `set_shade`.
+    shade: ShadeWeights,
     /// Device pixels per CSS pixel uploaded beside the CSS camera.
     dpr: f64,
 }
@@ -961,6 +967,9 @@ pub struct VolumeRaySource<'a> {
     pub flags: &'a [u32],
     /// Sampled textures the shader stage may bind, residency included.
     pub sampled_limit: u32,
+    /// Millimetres per voxel, x then y then z. Each axis must be finite and
+    /// greater than zero. The central difference divides by this spacing.
+    pub spacing_mm: [f32; 3],
 }
 
 /// Ray resources for one volume viewport. Created at bind, not inside a tick.
@@ -971,6 +980,9 @@ struct VolumeRayBinding {
     /// 1024 bytes. Created at bind. `set_opacity` writes it and does not
     /// replace it.
     opacity: wgpu::Buffer,
+    /// 16 bytes. Created at bind. `set_shade` writes it and does not
+    /// replace it.
+    shade: wgpu::Buffer,
     bind_uniform: wgpu::BindGroup,
     bind_source: wgpu::BindGroup,
 }
@@ -991,9 +1003,13 @@ struct RayHeader {
     kind: u32,
     edge: u32,
     brick_count: u32,
-    pad0: u32,
-    pad1: u32,
-    pad2: u32,
+    /// Millimetres between columns. The last three words stay inside the
+    /// 48-byte prefix. They are not shade weights.
+    spacing_x: f32,
+    /// Millimetres between rows.
+    spacing_y: f32,
+    /// Millimetres between slices.
+    spacing_z: f32,
 }
 
 /// The pure registration and dirty registry, sized at creation.
@@ -1020,6 +1036,7 @@ impl Registry {
                     camera: IDENTITY_CAMERA,
                     dpr: 1.0,
                     opacity: OpacityTable::preset(OpacityPreset::Flat),
+                    shade: ShadeWeights::unlit(),
                 });
                 return Ok(ViewportId(
                     u32::try_from(index).map_err(|_| GraphError::CapacityExhausted)?,
@@ -1420,13 +1437,18 @@ impl RenderGraph {
             label: Some("ocelli graph uniform"),
             entries: &[uniform_binding(0), uniform_binding(1), uniform_binding(2)],
         });
-        // The ray keeps the VOI uniform at binding 0, ray params at binding 1
-        // and the 256-entry opacity table at binding 2. It does not take the
-        // colour table or the camera.
+        // The ray keeps the VOI uniform at binding 0, ray params at binding 1,
+        // the 256-entry opacity table at binding 2 and the shade weights at
+        // binding 3. It does not take the colour table or the camera.
         let volume_uniform_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("ocelli volume ray uniform"),
-                entries: &[uniform_binding(0), uniform_binding(1), uniform_binding(2)],
+                entries: &[
+                    uniform_binding(0),
+                    uniform_binding(1),
+                    uniform_binding(2),
+                    uniform_binding(3),
+                ],
             });
         // `textureLoad` has no sampler. A non-filterable float binding accepts
         // the stored float formats and `Rgba8Unorm`.
@@ -2426,16 +2448,22 @@ impl RenderGraph {
             dims,
             flags,
             sampled_limit,
+            spacing_mm,
         } = source;
         let ready_bricks = u32::try_from(bricks.len()).map_err(|_| GraphError::RayUnavailable)?;
         volume_ray_admission(self.tier, ready_bricks, sampled_limit)?;
+        if !spacing_mm_ok(spacing_mm) {
+            return Err(GraphError::RayUnavailable);
+        }
         if ready_bricks > self.brick_slots {
             return Err(GraphError::SampledTextureLimit);
         }
-        let (axis, from_far, opacity) = {
+        let (axis, from_far, opacity, shade) = {
             let state = self.slot_state(id)?;
             match &state.pass {
-                Pass::VolumeRaycast(volume) => (volume.axis, volume.from_far, state.opacity),
+                Pass::VolumeRaycast(volume) => {
+                    (volume.axis, volume.from_far, state.opacity, state.shade)
+                }
                 _ => return Err(GraphError::RayUnavailable),
             }
         };
@@ -2582,9 +2610,9 @@ impl RenderGraph {
             kind: 0,
             edge,
             brick_count: ready_bricks,
-            pad0: 0,
-            pad1: 0,
-            pad2: 0,
+            spacing_x: spacing_mm[0],
+            spacing_y: spacing_mm[1],
+            spacing_z: spacing_mm[2],
         };
         let coords: Vec<[u32; 3]> = bricks.iter().map(|ready| ready.coord).collect();
         let uniform = ray_uniform_bytes(&header, &coords, self.brick_slots);
@@ -2597,6 +2625,12 @@ impl RenderGraph {
         let opacity_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ocelli ray opacity"),
             contents: &opacity_bytes,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let shade_bytes = shade.uniform_bytes();
+        let shade_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("ocelli ray shade"),
+            contents: &shade_bytes,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let bind_uniform = {
@@ -2620,6 +2654,10 @@ impl RenderGraph {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: opacity_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: shade_buffer.as_entire_binding(),
                     },
                 ],
             })
@@ -2663,6 +2701,7 @@ impl RenderGraph {
             residency,
             params: params_buffer,
             opacity: opacity_buffer,
+            shade: shade_buffer,
             bind_uniform,
             bind_source,
         };
@@ -2672,6 +2711,7 @@ impl RenderGraph {
         if binding.residency.size().width != binding.capacity
             || binding.params.size() != uniform_bytes
             || binding.opacity.size() != 1024
+            || binding.shade.size() != 16
         {
             return Err(GraphError::RayUnavailable);
         }
@@ -2753,6 +2793,84 @@ impl RenderGraph {
         }
         if let Some(state) = self.registry.state_mut(id) {
             state.opacity = *table;
+            state.dirty.data = true;
+        }
+        Ok(())
+    }
+
+    /// Write the shade uniform for a bound volume ray.
+    ///
+    /// The buffer was created by [`RenderGraph::bind_volume_ray`]. This call
+    /// replaces its bytes and does not create a second buffer. It does not
+    /// increment [`RenderGraph::brick_uploads`], [`RenderGraph::uploads`] or
+    /// [`RenderGraph::lut_uploads`], and it does not write a brick texture.
+    /// The same bytes are a no-op, so a repeated call does not mark the
+    /// viewport dirty again.
+    ///
+    /// Tier C returns [`GraphError::TierCUnavailable`] before a sample is
+    /// read and before the uniform is written. A pair this method would
+    /// refuse is refused by [`crate::shade::ShadeWeights::from_weights`]
+    /// before the call, so the previous uniform stays. A call before the
+    /// ray is bound returns [`GraphError::RayUnavailable`] and does not
+    /// store the weights, so the later bind stays unlit.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::TierCUnavailable`] on tier C.
+    /// [`GraphError::UnknownViewport`] for an id this graph never issued.
+    /// [`GraphError::PassHasNoUniform`] for a pass that is not a volume ray.
+    /// [`GraphError::ViewportNotRebound`] when a rebuild has not yet
+    /// recreated the slot. [`GraphError::RayUnavailable`] when the ray has
+    /// not been bound, in which case nothing is written.
+    pub fn set_shade(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        weights: &ShadeWeights,
+    ) -> Result<(), GraphError> {
+        if self.tier == Tier::Cpu {
+            return Err(GraphError::TierCUnavailable);
+        }
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        let is_volume = {
+            let state = self
+                .registry
+                .states
+                .get(index)
+                .and_then(Option::as_ref)
+                .ok_or(GraphError::UnknownViewport)?;
+            matches!(state.pass, Pass::VolumeRaycast(_))
+        };
+        if !is_volume {
+            return Err(GraphError::PassHasNoUniform);
+        }
+        if self.gpu.get(index).and_then(Option::as_ref).is_none() {
+            return Err(GraphError::ViewportNotRebound);
+        }
+        if self
+            .gpu
+            .get(index)
+            .and_then(Option::as_ref)
+            .and_then(|slot| slot.ray.as_ref())
+            .is_none()
+        {
+            return Err(GraphError::RayUnavailable);
+        }
+        if self.slot_state(id)?.shade.same(weights) {
+            return Ok(());
+        }
+        let bytes = weights.uniform_bytes();
+        {
+            let ray = self
+                .gpu
+                .get(index)
+                .and_then(Option::as_ref)
+                .and_then(|slot| slot.ray.as_ref())
+                .ok_or(GraphError::RayUnavailable)?;
+            ctx.queue().write_buffer(&ray.shade, 0, &bytes);
+        }
+        if let Some(state) = self.registry.state_mut(id) {
+            state.shade = *weights;
             state.dirty.data = true;
         }
         Ok(())
@@ -2963,8 +3081,9 @@ impl RenderGraph {
         // caller-owned source through `rebind`, or recreates an owned texture
         // through `rebind_stored`. Either restore writes the colour bytes
         // again and does not increment `lut_uploads`. The next
-        // `bind_volume_ray` writes the remembered opacity table into a new
-        // uniform and does not increment `brick_uploads`.
+        // `bind_volume_ray` writes the remembered opacity table and the
+        // remembered shade weights into new uniforms and does not increment
+        // `brick_uploads`.
         // Surfaces were configured on the dead device. The frame texture is
         // dropped before the surface it came from. The shell still holds the
         // canvases and supplies them again through `bind_surface`.
