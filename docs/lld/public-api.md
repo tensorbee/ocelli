@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -219,6 +219,8 @@ F-087 adds `windowDrag`, `windowRegion`, `stackDrag` and `MANIPULATION_TOOLS` in
 F-088 adds `crosshairLines`, `referenceLines` and `referenceCursor` in `packages/core`. The horizontal segment spans the viewport width at the projected y. The vertical segment spans the viewport height at the projected x. The edges are inside. A point outside, a non-finite coordinate, or a non-positive side returns nothing. `referenceLines` is `crosshairLines`. The functions do not project and do not read a frame of reference.
 
 F-090 adds `rotationDrag`, `orientationQuadrant` and `ROTATION_TOOLS` in `packages/core`. The drag is the F-069 delta. It adds the horizontal pixel delta divided by 256 to the caller radians. TrackballRotate, VolumeRotate and PlanarRotate bind to Rotate. The quadrant truncates the angle divided by a quarter turn toward zero, then wraps into 0, 1, 2 or 3. A negative quarter turn is 3. OrientationController is that function and is not a registry tool. The module does not write a camera.
+
+F-091 adds `magnifyCircle`, `scaleLength` and `orientationMarker` in `packages/core`. A null scale is stored as 1. An advanced scale is finite and greater than 1. A radius that is not greater than 0 is refused. A non-finite centre is refused. The scale overlay is the product of the caller millimetres and the caller pixels per millimetre. A pixels-per-millimetre that is not greater than 0 is refused. Quadrant 0 keeps the four letters. Each later quadrant moves the first letter to the end. Quadrant 4 is refused and does not wrap. The annotation layer is unchanged. These functions do not read pixels.
 
 ## React binding
 

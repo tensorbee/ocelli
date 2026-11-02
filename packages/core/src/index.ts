@@ -204,6 +204,8 @@ export {
 
 export { ROTATION_TOOLS, orientationQuadrant, rotationDrag } from "./orientation.js";
 
+export { magnifyCircle, orientationMarker, scaleLength } from "./magnify.js";
+
 export {
   COMMAND_CURSORS,
   CURSOR_PHASES,

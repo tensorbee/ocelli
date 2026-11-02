@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The shell stores a magnify circle. A missing scale is 1 and a stored scale must be greater than 1. A scale overlay is the product of the caller factors. An orientation marker rotates four letters by quadrant and refuses quadrant 4.
 - The shell names TrackballRotate, VolumeRotate and PlanarRotate. Each binds to the existing Rotate command. The drag is the existing rotation delta. The orientation quadrant wraps a quarter turn into 0, 1, 2 or 3.
 - The shell draws a crosshair from a projected canvas point. The horizontal segment spans the width at that y and the vertical segment spans the height at that x. The edges are inside. Reference lines are the same function. The module does not project.
 - The shell names Pan, Zoom, WindowLevel, WindowLevelRegion and StackScroll. A window drag moves the centre with the horizontal drag and the width with the upward drag, both divided by 256. A region window is the mid-span of the caller samples. A stack drag truncates the upward drag. Pan and zoom stay the existing pointer expressions.

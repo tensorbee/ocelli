@@ -147,6 +147,10 @@ const PUBLISHED: readonly string[] = [
   "ROTATION_TOOLS",
   "orientationQuadrant",
   "rotationDrag",
+  // ./magnify.js, F-091
+  "magnifyCircle",
+  "orientationMarker",
+  "scaleLength",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",

@@ -4379,3 +4379,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19dfc-c6f1-77a1-a62a-d96c6310920e`. `orientation.ts` sha256 at the clean pass is `6880f125595e0d3e72182af24ecfe6de397d1fb67e1ef10b1d0933a6e74b5049`. A flipped drag sign returned -1 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-091, magnify, scale overlay and orientation marker, completed 2026-11-02
+
+**What was built.** `magnifyCircle`, `scaleLength` and `orientationMarker` in `packages/core`. A null scale is stored as 1. A stored advanced scale is finite and greater than 1. A radius that is not greater than 0 is refused. A non-finite centre is refused. The scale overlay is the product of the caller millimetres and the caller pixels per millimetre. Quadrant 0 keeps the four letters. Each later quadrant moves the first letter to the end. Quadrant 4 is refused. The annotation layer is unchanged. These functions do not read pixels.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts the tool classes and does not define these overlays. The circle, the product and the letter rotation are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Six tests in `packages/core/src/magnify.test.ts`. The published-name list includes the magnify values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-091-design.md`. No DICOM section. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none. A non-finite centre is refused. The plan requires that refusal for the radius and the advanced scale, and the same guard covers the centre.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19dfc-c6f1-77a1-a62a-d97f0cbb9a84`. `magnify.ts` sha256 at the clean pass is `7bf17030c581109fc6e2bda6816d703477a22789b5626445bba1d5d1111e15bc`. A quadrant step that did not move went red and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

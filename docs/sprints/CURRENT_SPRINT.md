@@ -10,7 +10,7 @@
 | F-087 | E14.1 | Pan, Zoom, WindowLevel, WindowLevelRegion, StackScroll | Rust+TS | 4w | done |
 | F-088 | E14.2 | Crosshairs, WorldCrosshair, ReferenceLines, ReferenceCursors | Rust+TS | 5w | done |
 | F-090 | E14.4 | TrackballRotate, VolumeRotate, PlanarRotate, OrientationController | Rust+TS | 4w | done |
-| F-091 | E14.5 | Magnify, AdvancedMagnify, ScaleOverlay, OrientationMarker | Rust+TS | 3w | pending |
+| F-091 | E14.5 | Magnify, AdvancedMagnify, ScaleOverlay, OrientationMarker | Rust+TS | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
