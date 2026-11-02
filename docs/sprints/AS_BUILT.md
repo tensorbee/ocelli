@@ -4028,3 +4028,35 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/render-graph.md`, `docs/lld/feature-availability.md` and their rows in `docs/lld/README.md`.
 **Deviations from the design plan.** The first approved wording left `pipeline_compiled` false for the overlay edge key. An uncompiled key cannot encode, so the readback cannot pass. The plan now compiles a second overlay key on the existing copy shader. Slab, volume and stack stay uncompiled.
 **Notes for future sessions.** Pass 1 reported 2 defects, 0 smells and 0 nitpicks. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Setting `t` to `0.5` made `a_cut_off_the_midpoint_uses_t` fail with left `(5, 2, 1)` and right `(2.5, 1, 1)`. Forcing the caller fill made the edge readback fail with centre `[10, 20, 30, 128]` against `[0, 0, 0, 0]`. Both were restored. The feature floor remeasures the release module against baseline 2151196 and ceiling 2258755. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-068, tool lifecycle, tool groups, bindings and modes, completed 2026-11-01
+
+**What was built.** `createToolRegistry` returns a caller-owned registry. A group holds tools, modes and pointer bindings, and the viewports attached to that group. Modes are `active`, `passive` and `off`. A new tool starts `off`. `active` requires a binding. Taking a binding moves every other active owner of that binding to `passive` and clears that owner's bindings. The names come back in registration order. A refused call writes nothing. A viewport id belongs to at most one group. Reads return copies. The registry does not listen, pack a command, or measure.
+
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section 3. `docs/hld/07-concurrency-and-typescript.md` section 10.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and `docs/lld/README.md`.
+**Tests added.** 27 unit tests in `packages/core/src/tools.test.ts`. The published-name list in `packages/core/src/index.test.ts` includes the registry values.
+**Fixture provenance.** no pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The registry does not draw and does not read a device. The same state is stored on every tier.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 3 smells and 0 nitpicks. Pass 2 reported 0 defects, 3 smells and 0 nitpicks. Pass 3 reported 0 defects, 1 smell and 0 nitpicks. Pass 4 reported 0 defects, 1 smell and 0 nitpicks. Pass 5 reported 0 defects, 0 smells and 0 nitpicks. The smells were tests that stayed green when a required behaviour was replaced. The implementation hash stayed `ca6a90079cb00c974f602f978f4bcb8eb866024dd4678c4ceadfa0e217b6c2c9`. F-069 dispatches. F-072 owns cursors. F-071 draws. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-070, hit-testing, projection and measurement mathematics, completed 2026-11-01
+
+**What was built.** `ocelli-geom` now measures `distance`, `polyline_length`, `angle_at`, `project_onto_segment`, `hit_segment` and `project_onto_plane` on `Pt<S>`. The functions do not convert spaces. Distance is the Euclidean length. The angle is unsigned, in `0` to `pi`, from `atan2` of the cross-product length and the dot product. Segment projection divides by the squared length and clamps `t` into `0` to `1`. A hit is that distance at or inside the caller tolerance. Plane projection divides the normal by its length. An exact zero segment or normal is `Degenerate`. A non-finite value or a negative tolerance is `Frame`. `GeomError` numbers 400 and 401 are not `ErrorCode` values, because nothing writes the ring.
+
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section 4. `docs/hld/07-concurrency-and-typescript.md` section 10. `docs/hld/13-core-types.md` section 16 is consumed and not reimplemented.
+**Deviations.** none. D-02 already names the crate `ocelli-geom`.
+**Crates / packages modified.** `crates/ocelli-geom`, `Cargo.lock`, `docs/lld/geometry.md` and `docs/lld/README.md`.
+**Tests added.** 13 fixture tests in `crates/ocelli-geom/tests/measure.rs`, plus the existing scaffold test. One distance is instantiated on `Canvas` and the rest on `World`.
+**Fixture provenance.** No pixel arithmetic. The HLD names the crate and does not give these formulas. The coordinates are the local rules in the approved plan. The segment from `(0, 0, 0)` to `(4, 0, 0)` and the point `(1, 3, 0)` project to `(1, 0, 0)` with `t = 0.25` and distance `3`. The plane through the origin with normal `(0, 0, 2)` sends `(1, 2, 3)` to `(1, 2, 0)`.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device. The same call returns the same number on every tier.
+**LLD updated.** `docs/lld/geometry.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** The first approved sentence said no glam call is added. `f64::sqrt` and `f64::atan2` are not in `core` for this `no_std` crate, so length and the angle go through workspace glam and its libm backend. That is the same policy as the sigmoid in `ocelli-pixel`. A direct libm crate was not added. This is not a `D-NN`.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. `measure.rs` sha256 stayed `2b00b1406e5b07cebeda9fc863bee927f9615df65b68299fde1d6f179b3902e8`. Dropping the plane division made the axial foot `z` equal `-9`. An epsilon on the segment length made the `1e-12` segment degenerate. Swapping the `atan2` arguments made the right angle `0`. All three were restored. The division remains the written `t`. The hit comparison remains `<=`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

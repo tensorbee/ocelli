@@ -163,6 +163,26 @@ export type {
 } from "./viewport.js";
 
 export {
+  POINTER_BUTTONS,
+  POINTER_MODIFIERS,
+  TOOL_MODES,
+  TOOL_REFUSALS,
+  createToolRegistry,
+} from "./tools.js";
+export type {
+  ModeChange,
+  PointerBinding,
+  PointerButton,
+  PointerModifier,
+  RegisteredTool,
+  ToolGroupView,
+  ToolMode,
+  ToolOutcome,
+  ToolRefusal,
+  ToolRegistry,
+} from "./tools.js";
+
+export {
   SNAPSHOT_ERROR,
   SNAPSHOT_MAGIC,
   SNAPSHOT_VERSION,

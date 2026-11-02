@@ -1,13 +1,14 @@
-# Current sprint, S24
+# Current sprint, S25
 
-**Milestone**: M6, segmentation rendering.
-**Branch**: `sprint/s24`
+**Milestone**: M7, tool framework and geometry.
+**Branch**: `sprint/s25`
 **Opened**: 2026-11-01
-**Goal**: Segmentation intersection and labelmap edge-projection blend.
+**Goal**: Tool lifecycle, tool groups, bindings and modes, ocelli-geom: hit-testing, projection and measurement mathematics.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-067 | E10.5 | Segmentation intersection and labelmap edge-projection blend | Rust | 2w | done |
+| F-068 | E11.1 | Tool lifecycle, tool groups, bindings and modes | Rust+TS | 3w | done |
+| F-070 | E11.3 | ocelli-geom: hit-testing, projection and measurement mathematics | Rust+TS | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -17,36 +18,41 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S24 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S25 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S23 closed at tag `s23`. The merge is `8f2d179`. M6 started in S22.
-F-067 is done. M6 stays open until this sprint closes. This sprint
-intersects a segmentation with the displayed plane and compiles the
-labelmap edge-projection blend. Appendix B names that blend as the fifth
-mode. The HLD does not give its formula. The design plan records the
-local rule.
+S24 closed at tag `s24`. The merge is `71ac28d`. M6 is complete. M6 is
+S22 to S24, 5 stories and 16 engineer-weeks. This open does not publish.
+The workspace version stays 0.1.0.
 
-`BlendMode::LabelmapEdgeProjection` compiles for the segmentation overlay
-on the existing labelmap copy shader. Slab, volume and stack have no body
-for that blend. A lookup for those keys reports unavailable and does not
-substitute composite. Contour, surface and the registry are already done.
-They are not this blend.
+This sprint is the first M7 sprint. It owns tool lifecycle state in the
+shell and the hit-testing, projection and measurement functions in
+`ocelli-geom`. F-069, F-071 and F-072 are later sprints. They are not
+implemented here.
 
-F-067 depends on F-064. That backlog row is `done`. F-063, F-065 and
-F-066 are done and are not dependencies of this row.
+F-068 depends on F-100. F-070 depends on F-048. Both of those backlog
+rows are `done`. The two S25 stories do not depend on each other.
 
-This open publishes nothing.
+Closing this sprint does not complete M7. M7 is S25 to S27, 5 stories
+and 16 engineer-weeks.
 
 ## What is carried in
 
+- **M6 is complete, and this open does not publish.** Tag `s24` points at
+  merge `71ac28d`. No row in that close has a measured duration. No ratio
+  is invented. A finished M6 would name 0.6.0. M1 through M5 were not
+  published. The workspace version is still 0.1.0. `/release` runs
+  `python3 scripts/pin_and_size_check.py --require-redistribution`, and
+  that command refuses while `openjph-core` 0.1.0 carries no BSD notice
+  material, which is D-22. That blocks publication. It does not block
+  this sprint.
 - **F-X003 is carried out of S16 and is not a story in this sprint.** AC6
   needs a representative GPU-less incumbent host, the operator has confirmed
   none is available, and no local diagnostic is accepted as that
-  measurement. Its backlog row stays `in-progress`. F-067 does not depend
-  on it.
+  measurement. Its backlog row stays `in-progress`. Neither S25 story
+  depends on it.
 - **The open LINEAR finding against `ocelli-pixel`'s own arithmetic** stays
   unscheduled. It has no F-ID. Clamping it so a readback matches is a
   tolerance change.
@@ -58,23 +64,13 @@ This open publishes nothing.
   this host through headless Chromium WebGL2 and matched `LutChain::map_into`
   within 0.001, format `R32Float`. A tier B colour LUT readback was not run.
 - **The wasm size budget records 2,151,196 bytes** with tolerance 0.05.
-  The ceiling is 2,258,755. The S23 sprint gate measured the release module
-  at 2,171,060 bytes. The budget file was not edited. `--accept-size` is a
-  design-plan declaration, not a way to make a gate green.
+  The ceiling is 2,258,755. The S24 sprint gate passed that budget. The
+  budget file was not edited. `--accept-size` is a design-plan
+  declaration, not a way to make a gate green.
 - **`max_review_passes` is stored but not automatically enforced by the
   backing script.** The operator required the review loop to continue until
   a pass reports zero defects and zero smells. The stored number is not a
   stop. The per-feature microscope loop remains uncapped.
-- **M6 is not complete, and this open does not publish.** S23 closed
-  F-064, F-065 and F-066. F-067 is done. M6 stays open until this sprint
-  closes. M6 is S22 to
-  S24, 5 stories and 16 engineer-weeks. `docs/RELEASE.md` maps one minor
-  to each milestone from M2 to M12, so a finished M6 would name 0.6.0.
-  M1 through M5 were not published. The workspace version is still 0.1.0.
-  `/release` runs
-  `python3 scripts/pin_and_size_check.py --require-redistribution`, and that
-  command refuses while `openjph-core` 0.1.0 carries no BSD notice material,
-  which is D-22. That blocks publication. It does not block this sprint.
 - **No new measured duration.** Every `SPRINT_TRACKER.md` row this close
   inspected reads `not measured`. There is no measured total and no ratio.
   The capacity points remain the S03 and S06 closes. This open does not
@@ -87,32 +83,38 @@ This open publishes nothing.
 
 ## The defect class this sprint is exposed to
 
-**An edge projection that quietly draws the composite blend, or an
-intersection that paints a pixel the contour does not cross.** HLD
-section 31 says a feature that cannot run reports unavailable. It does
-not alias onto another blend. The intersection is a patient-space contour
-against the displayed plane. Mixing a canvas pixel with a patient
-millimetre is the silent wrong pixel.
+**Two tools quietly owning one gesture, and a length that mixes a canvas
+pixel with a patient millimetre.** Tool state lives in the shell. The
+numbers live in `ocelli-geom` on `Pt<S>`, so a canvas point and a world
+point do not type-check as the same argument. A mode change that leaves
+the previous owner active is the interaction form of the quietly wrong
+result. A constant segment parameter is the measurement form.
 
 ## What done means
 
-- **F-067** states the intersection rule and the edge-projection rule in
-  the approved design plan, then implements both. The composite labelmap,
-  the contour stroke and the surface cover stay as S23 left them.
-- **The edge-projection blend does not substitute composite.** A tier that
-  cannot run it reports unavailable.
-- **One `queue.submit` per frame** stays one. This story does not add a
-  second submit.
-- **Tier C** reports unavailable or shares the one presenter. It does not
-  grow a second raster.
-- **Each story declares all three tier rows**, and "n/a" is a real answer
-  that an omitted row is not.
+- **F-068** is a caller-owned registry. A group holds tools, modes and
+  pointer bindings, and the viewports attached to that group. It does not
+  listen for events and it does not draw.
+- **One active owner per pointer binding inside a group.** Taking a binding
+  moves the previous owner to passive and clears that owner's bindings.
+  The move is in the return value.
+- **A refused change leaves the group untouched.**
+- **F-070** is the distance, the polyline length, the angle, the segment
+  projection, the segment hit and the plane projection. The formulas are
+  the local rules in the design plan. The HLD names the crate and does
+  not give the formulas.
+- **No second copy of that arithmetic in TypeScript.** Camera mapping
+  stays the F-048 transforms. This sprint does not add a wasm export.
+- **Each story declares all three tier rows.** Both stories are pure
+  state or pure arithmetic, so the rows are n/a. An omitted row is not
+  an answer.
 
 ## Dependency order
 
-F-067 depends on F-064. That backlog row is `done`. No other story is
-allocated to S24. F-X003 stays `in-progress` and is not a dependency of
-this sprint.
+F-068 depends on F-100. F-070 depends on F-048. Both are `done`. F-068
+lands before F-070 because the sprint runs serial in the canonical
+worktree. F-069 and F-072 wait for F-068 and are S26. F-071 waits for
+F-069 and is S27. F-X003 stays `in-progress` and is not a dependency.
 
 ## Standing expectations
 
@@ -133,10 +135,8 @@ generalised by D-07.
 
 ## Audit intake, 2026-11-01
 
-S23 closed at tag `s23` with 31 of 31 gates green, the corpus passing, and
-whole-sprint review pass 1 clean at zero defects and zero smells. The gate
-tree is `97f98dab6687`. The merge is `8f2d179`. `scripts/backlog_check.py`,
-`scripts/gen_sprint_plan.py --check` and `scripts/deviation_check.py` are
-re-run at this open. The S24 allocation row and the S24 plan table name
-F-067. F-067 is done. F-064, F-065 and F-066 are done. F-063 is done.
-F-X003 stays in progress.
+S24 closed at tag `s24`. The merge is `71ac28d`. M6 is complete and
+unpublished. The S25 allocation rows and the S25 plan table name F-068
+and F-070. F-068 is done. F-070 is done. F-100 and F-048 are done.
+F-069, F-071 and F-072 are not this sprint. F-X003 stays in progress.
+F-X011 remains pending.

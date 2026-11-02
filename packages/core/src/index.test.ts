@@ -22,7 +22,9 @@ import { coreAvailable, VERSION } from "./index.js";
  * `OcelliRecord`, `RecordOperands`, `PanicMemory`, `PanicRecord`,
  * `CoreStatus`, `Camera`, `Colormap`, `Invert`, `Scene`, `StackCommand`,
  * `StackViewport`, `TierAvailability`, `ToolBinding`, `ViewportId`,
- * `VoiFunction`, `WindowPreset`) are erased
+ * `VoiFunction`, `WindowPreset`, `ModeChange`, `PointerBinding`,
+ * `PointerButton`, `PointerModifier`, `RegisteredTool`, `ToolGroupView`,
+ * `ToolMode`, `ToolOutcome`, `ToolRefusal`, `ToolRegistry`) are erased
  * before this runs, and `npx tsc` is what watches those.
  *
  * Adding an export is a deliberate act, so adding a line here is the cost of
@@ -120,6 +122,12 @@ const PUBLISHED: readonly string[] = [
   "WINDOW_PRESETS",
   "readViewportState",
   "viewportId",
+  // ./tools.js, F-068
+  "POINTER_BUTTONS",
+  "POINTER_MODIFIERS",
+  "TOOL_MODES",
+  "TOOL_REFUSALS",
+  "createToolRegistry",
   // ./snapshot.js, F-050
   "SNAPSHOT_ERROR",
   "SNAPSHOT_MAGIC",
