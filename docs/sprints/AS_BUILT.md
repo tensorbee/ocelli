@@ -4316,3 +4316,18 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19d82-c55f-73e0-9eaa-5f4a8e4f9d1f`. `contour_edit.rs` sha256 at the clean pass is `39702b31160146da28cf5e4721d5b1b38eadc50f8416ce00fd1be68b841d9e72`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-086, between-slice labelmap interpolation, completed 2026-11-02
+
+**What was built.** `interpolate_labelmap` in `ocelli-seg`. A slice is a key when any sample equals the caller segment. Only slices strictly between consecutive keys are written. A nearer slice takes that end's mask. The exact halfway slice takes the union. Endpoint keys stay. Fewer than two keys writes nothing and reports covered 0 and changed 0. An empty stack, a zero side, a bad length or mismatched slices are `Degenerate` and write nothing. `present_labelmap` is unchanged. There is no TypeScript copy.
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts tool classes and does not define an interpolation. `docs/hld/03-architecture-and-crates.md` names `ocelli-seg` and does not give one. The halfway rule is the approved local plan. It is not an HLD formula. PS3.3 C.8.20.2 keeps segment 0 as background.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-seg`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Nine tests in `crates/ocelli-seg/tests/interpolate.rs`. They lock the acceptance rows, a second call, segment 0 through the existing presenter, a slice past the upper key, consecutive pairs, and the empty, mismatched, zero-side and short-buffer refusals.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-086-design.md`. PS3.3 C.8.20.2 is the background rule only. The halfway rule is that plan. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The function does not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19dc1-b14f-7ea0-b9a3-678dba7b8102`. `interpolate.rs` sha256 at the clean pass is `e0853470e923b75f30fd8b2fbd6c1e0e8439219e1f242cb562f87c6223915982`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

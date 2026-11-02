@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- `ocelli-seg` writes a caller segment on slices strictly between slices that already hold it. A nearer slice takes that end's mask. The exact halfway slice takes the union. An endpoint stays. Fewer than two keys writes nothing. An empty stack, a zero side, a bad length or mismatched slices write nothing. The presenter is unchanged.
 - `ocelli-seg` paints a caller segment on the samples inside a closed index polygon, including the boundary. The ring closes from the last point to the first. A non-finite vertex or a non-finite intersection writes nothing. The contour representation is unchanged.
 - `ocelli-seg` paints a caller segment where a caller value is inside a start and an end, and only inside a rectangle or a circle. The end is included. A value outside the shape is ignored, including a non-finite one. A non-finite value inside the shape writes nothing. The presenter is unchanged.
 - `ocelli-seg` flood-fills the 4-connected region of a seed value and paint-fills every sample with that value. A diagonal is not connected. Segment 0 is a legal fill. An outside seed writes nothing. The presenter is unchanged.
