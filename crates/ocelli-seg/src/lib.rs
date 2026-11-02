@@ -9,7 +9,8 @@
 //! the label grid. F-084 reads a segment, stores a label and reports the
 //! longest runs. F-081 erases a rectangle, a circle or a sphere to
 //! background. F-082 flood-fills a connected region and paint-fills every
-//! copy of one value. The presenter does not import wgpu.
+//! copy of one value. F-083 paints a start-end span inside a rectangle or
+//! a circle. The presenter does not import wgpu.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -22,6 +23,7 @@ mod labelmap;
 mod scissors;
 mod segment_tools;
 mod surface;
+mod threshold;
 
 pub use brush::{Brush, BrushCoverage, BrushError, BrushShape, stamp_brush};
 pub use contour::{
@@ -35,6 +37,9 @@ pub use segment_tools::{
     segment_bidirectional,
 };
 pub use surface::{SurfaceError, SurfaceMesh, present_surface};
+pub use threshold::{
+    ThresholdCoverage, ThresholdError, ThresholdRoi, ThresholdShape, threshold_roi,
+};
 
 /// Which segmentation representation a viewport shows.
 ///

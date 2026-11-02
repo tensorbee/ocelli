@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -207,6 +207,8 @@ F-084 adds `segment_at`, `label_segment` and `segment_bidirectional` in `ocelli-
 F-081 adds `cut_scissor` in `ocelli-seg`. It writes segment 0. A circle and a sphere call `stamp_brush`. A rectangle includes every index from its minimum through its maximum on the slice named by `z`, and both zero bit patterns select slice 0. An inverted span or a non-finite value writes nothing. `present_labelmap` is unchanged. There is no TypeScript copy.
 
 F-082 adds `flood_fill` and `paint_fill` in `ocelli-seg`. A flood replaces the 4-connected region of the seed value. A paint replaces each sample whose stored value equals the seed. The written number is the caller segment. A different value stays. A diagonal is not connected. Segment 0 is a legal written value. An outside seed writes nothing. `present_labelmap` is unchanged. There is no TypeScript copy.
+
+F-083 adds `threshold_roi` in `ocelli-seg`. A sample inside a rectangle or a circle is painted when its caller value is at or above `start` and at or below `end`. Both ends are included. Both zero bit patterns match. A value outside the shape stays, including a non-finite value. A non-finite value inside the shape writes nothing. An inverted span or a negative radius writes nothing. `present_labelmap` is unchanged. There is no TypeScript copy.
 
 ## React binding
 

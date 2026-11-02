@@ -4284,3 +4284,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Reviewer `01a19d46-f6d6-7080-a3cd-fbdb19b10e6d`. The defect was the public-api paint sentence. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19d56-7774-7e02-8ca3-4ddea41ce3fa`. `fill.rs` sha256 at the clean pass is `ba88ad6353797a694e735327d6c03f11819858089459328482eab1e85f4d98f4`. `tests/fill.rs` sha256 is `7ce9038ca1f38884fecb45ae034c31edfb7712bd4baf69dc3d55b89d13de8982`. `brush.rs` was not edited. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-083, rectangle and circle threshold, completed 2026-11-02
+
+**What was built.** `threshold_roi` in `ocelli-seg`. It paints a caller segment where a caller value is at or above `start` and at or below `end`, and only inside a rectangle or a circle. Both ends are included. Both zero bit patterns match. A value outside the shape stays, including a non-finite value. A non-finite value inside the shape writes nothing. An inverted span or a negative radius writes nothing. The circle uses the F-080 disk. The span is `number_in_span`, and `index_in_span` calls it. `present_labelmap` is unchanged. There is no TypeScript copy.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts tool classes and does not define a threshold. `docs/hld/03-architecture-and-crates.md` names `ocelli-seg` and does not give one. The inclusive span is the approved local plan. The circle keeps the F-080 squared-distance test. PS3.3 C.8.20.2 keeps segment 0 as background.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-seg`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Nine tests in `crates/ocelli-seg/tests/threshold.rs`. They are the acceptance rows. They lock the middle values, the circle plus, a non-finite value outside the shape, a non-finite value inside the shape, an inverted span and a negative radius, a short buffer and a zero side, a second paint, an exact value, and the presenter.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-083-design.md`. PS3.3 C.8.20.2 is the background rule only. The value span is that plan. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The function does not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19d6c-ad1a-76d3-8e5f-e307d479764c`. `threshold.rs` sha256 at the clean pass is `1dba6d6dd930ec14701cb66e16ca0eea3c9acab6ec1101ee745785904e988bf9`. `brush.rs` sha256 is `d6f4026fab1968339d901a646f479a279b948a6a31b584102ab8711759db447c`. The disk and the ball stay `is_le`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

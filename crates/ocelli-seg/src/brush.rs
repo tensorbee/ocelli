@@ -197,12 +197,16 @@ pub(crate) fn span_inverted(min: f64, max: f64) -> bool {
     min.total_cmp(&max).is_gt()
 }
 
-/// `index` is inside the inclusive span. Both zero bit patterns match.
-pub(crate) fn index_in_span(index: u32, min: f64, max: f64) -> bool {
-    let value = f64::from(index);
+/// `value` is inside the inclusive span. Both zero bit patterns match.
+pub(crate) fn number_in_span(value: f64, min: f64, max: f64) -> bool {
     let above = same_number(value, min) || value.total_cmp(&min).is_gt();
     let below = same_number(value, max) || value.total_cmp(&max).is_lt();
     above && below
+}
+
+/// `index` is inside the inclusive span. Both zero bit patterns match.
+pub(crate) fn index_in_span(index: u32, min: f64, max: f64) -> bool {
+    number_in_span(f64::from(index), min, max)
 }
 
 pub(crate) fn strictly_negative(value: f64) -> bool {
