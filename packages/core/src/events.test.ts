@@ -227,7 +227,8 @@ describe("F-103 event catalogue", () => {
         }
       }
     }
-    expect(listeners).toEqual([]);
+    // F-069 is the shell listener. events.ts stays the only catalogue.
+    expect(listeners).toEqual(["pointer.ts"]);
     expect(declarations).toEqual(["events.ts"]);
   });
 });

@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-069 | E11.2 | Pointer, touch and wheel event normalisation and dispatch | Rust+TS | 3w | pending |
+| F-069 | E11.2 | Pointer, touch and wheel event normalisation and dispatch | Rust+TS | 3w | done |
 | F-072 | E11.5 | Cursor management and tool state machine | Rust+TS | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
@@ -137,5 +137,5 @@ generalised by D-07.
 
 S25 closed at tag `s25`. The merge is `f1cd800`. M7 stays open and
 unpublished. The S26 allocation rows and the S26 plan table name F-069
-and F-072. Both are pending. F-068 is done. F-071 is not this sprint.
+and F-072. F-069 is done. F-072 is pending. F-068 is done. F-071 is not this sprint.
 F-X003 stays in progress. F-X011 remains pending.

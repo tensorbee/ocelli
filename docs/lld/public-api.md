@@ -1,7 +1,7 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068
-**Last updated:** 2026-11-01
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069
+**Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
 F-101 built the wire. F-104 moved every boundary number into one Rust table
@@ -141,7 +141,29 @@ The tool name is caller-chosen and is not required to equal the command.
 The command is still one of the eleven. Registering a tool does not pack
 that command and does not listen for events. Reads return copies.
 Hit-testing and measurement stay in `ocelli-geom` and are not computed
-here. F-069 will dispatch. F-072 will own cursors. F-071 will draw.
+here.
+
+## Pointer dispatch
+
+F-069 normalises pointer, touch and wheel input in
+`packages/core/src/pointer.ts`. `createPointerDispatch` returns a
+caller-owned dispatcher for one viewport in one tool group. `takeFrame`
+returns at most one packed buffer. It does not call wasm.
+
+`Pan`, `Zoom` and `Rotate` come from a caller basis captured at pointer
+down. Those camera writes replace, so the packed value is the basis plus
+the delta from the gesture origin. It is not the client position. `Scroll`
+is one step per frame. A wheel sums its samples and then clamps once to
+the i32 range. A drag whose command is `Scroll` contributes the sign of
+that frame's y change. The other seven commands pack nothing.
+
+A click is a net movement strictly under 3 CSS pixels. Once a sample is
+at least 3 CSS pixels from the origin, later samples of that gesture
+still pack. A second down after an up is a new gesture even before
+`takeFrame`. A second pointer id does not pack. Touch uses the touch
+names. Mouse and pen use the pointer names.
+
+F-072 will own cursors. F-071 will draw.
 
 ## React binding
 

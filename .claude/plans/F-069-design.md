@@ -41,12 +41,13 @@ The HLD does not give a gesture-to-payload formula. The decisions below are loca
 - The active tool and its command are captured at `pointerdown`. A later mode change does not retarget that gesture.
 - `Pan` is `basis.panX + (x - originX)` and `basis.panY + (y - originY)`. It is not the client position. The last sample in the frame is the one sample. Without a finite basis the frame packs nothing for this command.
 - `Zoom` is `basis.zoom * exp(-(y - originY) / 256)`. `Rotate` is `basis.radians + (x - originX) / 256`. The divisor 256 is a local scale. A non-finite result is not packed.
-- `Scroll` from a wheel is one command. Pixel mode (`deltaMode` 0 or omitted) contributes the sign of the summed `deltaY`, and a zero sum contributes 0. Line mode (`deltaMode` 1) contributes `trunc(deltaY)` per event, summed. Page mode (`deltaMode` 2) contributes the sign of each non-zero `deltaY`, summed. A drag whose captured command is `Scroll` contributes the sign of that frame's `y` change. The frame sums those contributions and clamps to the i32 range. Zero packs no `Scroll`.
-- A wheel packs only when exactly one active tool in the group has command `Scroll`. None is `no-owner`. Two or more is `ambiguous-scroll`.
+- `Scroll` from a wheel is one command. Pixel mode (`deltaMode` 0 or omitted) contributes the sign of the summed `deltaY`, and a zero sum contributes 0. Line mode (`deltaMode` 1) contributes `trunc(deltaY)` per event, summed. Page mode (`deltaMode` 2) contributes the sign of each non-zero `deltaY`, summed. A drag whose captured command is `Scroll` contributes the sign of that frame's `y` change. The frame sums those contributions in full and then clamps once to the i32 range. Sample order does not change the step. Zero packs no `Scroll`.
+- A wheel packs only when exactly one active tool in the group has command `Scroll`. None is `no-owner`. Two or more is `ambiguous-scroll`. An ambiguous wheel does not remove a `Scroll` the captured drag already produced.
 - `Fit`, `FlipHorizontal`, `FlipVertical`, `SetWindow`, `ApplyPreset`, `SetInvert` and `SetColormap` pack nothing. The reason is `payload-not-in-gesture`. This story does not invent a window formula.
-- A second pointer id during an open gesture does not pack. Its events are still reported.
+- A second pointer id during an open gesture does not pack. Its events are still reported. A second down after an up opens a new gesture even when `takeFrame` has not run. The closed gesture still contributes to that frame.
 - `pointerType` `touch` uses the touch names. `mouse` and `pen` use the pointer names. The adapter listens to pointer and wheel events only, not to mouse or touch events, because a second listener would dispatch one contact twice.
-- A click is a gesture whose net movement is strictly under 3 CSS pixels. A double click is a second click whose down is at most 400 ms after the first up and strictly under 3 pixels from that up. A touch swipe ends a touch gesture whose distance is at least 24 and whose duration is at most 300 ms, and that ending is not also a tap.
+- A click is a gesture whose net movement at pointer up is strictly under 3 CSS pixels. A double click is a second click whose down is at most 400 ms after the first up and strictly under 3 pixels from that up. A touch swipe ends a touch gesture whose distance is at least 24 and whose duration is at most 300 ms, and that ending is not also a tap.
+- Once any sample of a gesture is at least 3 CSS pixels from the origin, later samples of that gesture still pack, including a return inside 3. The click test still uses the net distance at pointer up. `setPointerCapture` and `releasePointerCapture` are called as methods on the target.
 - Coordinates are whatever `clientX` and `clientY` the caller supplies. This story does not read a bounding box.
 - The viewport must already be attached to the group. An unknown group or a missing viewport packs nothing.
 
@@ -88,7 +89,7 @@ Out of scope:
 
 `ingest` does not throw. A non-finite coordinate is dropped. Button 0, 1 and 2 are `primary`, `auxiliary` and `secondary`. Any other button does not start a gesture.
 
-`takeFrame` reasons are `packed`, `empty`, `no-owner`, `payload-not-in-gesture`, `missing-basis`, `non-finite`, `ambiguous-scroll`, `ignored-contact`, `unknown-group` and `missing-viewport`. `empty` means the queue had nothing to report. `ignored-contact` is reported on the frame when a second pointer id arrived and the primary gesture also produced events. The primary gesture's own reason stays on the frame. A second contact alone, with no primary gesture samples in that frame, uses `ignored-contact`.
+`takeFrame` reasons are `packed`, `empty`, `no-delta`, `no-gesture`, `no-owner`, `payload-not-in-gesture`, `missing-basis`, `non-finite`, `ambiguous-scroll`, `ignored-contact`, `unknown-group` and `missing-viewport`. `empty` means the queue had nothing to report. `no-delta` means the frame has events, the gesture is eligible, and it packs nothing because the pointer has not moved by 3 CSS pixels or a scroll step is zero. A click that never left that distance is that case. `no-gesture` means the frame has events and no eligible gesture. A hover, a dropped button and a cancelled gesture use `no-gesture`. `ignored-contact` is used when a second pointer id is the only input in the frame. A pointer up or a touch end with no open gesture is `no-gesture`. When the primary gesture also produced events, the primary reason stays.
 
 Packed bytes for a non-empty command list are `packCommands(viewport, commands)`. An empty list is a zero-length buffer and does not call the packer.
 
@@ -110,10 +111,12 @@ The DOM target is a small surface with `addEventListener` and `removeEventListen
 | idle | primary down on an owner | gesture open, tool captured | registry |
 | gesture open | moves | one command on `takeFrame` from the last point | captured tool |
 | gesture open | second pointer id | events only for that id | first gesture's command |
-| gesture open | up under 3 px | click or tap, no camera command | registry |
+| gesture open and still inside 3 px | up | click or tap, no camera command | registry |
+| gesture that has reached 3 px | a later sample inside 3 px | one replacement command from the origin | a click when the up point is inside 3 px |
 | gesture open | up at 3 px or more | drag end, no click | registry |
+| after up, before `takeFrame` | down | a new gesture | the closed gesture packs in the same frame |
 | after a click | second click within 400 ms and 3 px | `pointer.doubleClick` or `touch` has no double name, so a second touch tap stays `touch.tap` | first tap already emitted |
-| gesture open | `pointercancel` | gesture closed, no click, no final command | registry |
+| gesture open | `pointercancel` | gesture closed, no click, no final command, reason `no-gesture` when that frame has events | registry |
 | idle | wheel | one `Scroll` or a no-pack reason | registry |
 
 A touch gesture does not emit `pointer.doubleClick`. Two quick taps emit two `touch.tap` events when each qualifies as a tap.
@@ -128,10 +131,10 @@ The dispatcher owns the queue and the open gesture. The registry owns tools. `ta
 |----|-------------------------------|------|-------------------------------|-------|
 | AC1 | Two moves, one `Pan` of basis plus delta, one buffer | `one frame packs the last pan` | one `Pan` per move, or client position as pan | implementation |
 | AC2 | No basis, events kept, no `Pan` | `a missing basis does not pack a pan` | packing zero | implementation |
-| AC3 | Zoom and rotate use the 256 scale and the last sample | `zoom and rotate use the gesture origin` | per-event multiply stored by replacement | implementation |
+| AC3 | Zoom and rotate use the 256 scale and the origin across two frames | `zoom and rotate use the gesture origin` | a segment delta instead of the origin | implementation |
 | AC4 | Non-finite zoom result packs nothing | `a non finite zoom is not packed` | packing `Infinity` | implementation |
 | AC5 | Pixel wheel is the sign of the sum, one `Scroll` | `a wheel frame scrolls once` | raw `deltaY` or one command per event | implementation |
-| AC6 | Two active `Scroll` tools pack nothing | `two scroll tools are ambiguous` | packing both | implementation |
+| AC6 | Two active `Scroll` tools, wheel only, pack nothing | `two scroll tools are ambiguous` | packing the wheel, or deleting a drag `Scroll` | implementation |
 | AC7 | Line mode sums truncations. Page mode sums signs | `wheel mode changes the step` | treating every mode as pixels | implementation |
 | AC8 | Scroll drag uses the sign of the frame dy and sums with a wheel | `a scroll drag and a wheel share one step` | two `Scroll` commands | implementation |
 | AC9 | `SetWindow` and `Fit` pack nothing | `a window tool does not invent a payload` | a local window formula | implementation |
@@ -143,11 +146,21 @@ The dispatcher owns the queue and the open gesture. The registry owns tools. `ta
 | AC15 | Cancel packs nothing and is not a click | `cancel closes the gesture` | a click on cancel | implementation |
 | AC16 | Modifier order matches the stored binding | `modifier order still finds the owner` | raw key order | implementation |
 | AC17 | Passive tool and unknown group and missing viewport pack nothing | `a refused group packs nothing` | throwing, or packing anyway | implementation |
-| AC18 | Button 3 does not start a gesture | `an extra button is not a binding` | treating it as primary | implementation |
+| AC18 | Button 3 does not start a gesture | `an extra button is not a binding` | treating it as primary, or calling the frame `no-delta` | implementation |
 | AC19 | Non-finite coordinates are dropped | `a non finite point is dropped` | packing `NaN` | implementation |
 | AC20 | Source does not name `submitCommands` or `writeCommands` | `the dispatcher does not cross the boundary` | a wasm call per frame | implementation |
 | AC21 | `detach` stops delivery | `detach removes the listener` | a listener left in place | implementation |
 | AC22 | Empty `takeFrame` does not repeat commands | `an empty frame stays empty` | replaying the previous buffer | implementation |
+| AC23 | A second down before `takeFrame` packs from its own origin | `a second press in the same frame starts a gesture` | treating that down as an extra contact | implementation |
+| AC24 | Two clicks in one frame emit `pointer.doubleClick` | `two clicks in one frame can double click` | one click and a dropped second down | implementation |
+| AC25 | Capture methods run with the target as `this` | `capture keeps the target as this` | calling the copied function | implementation |
+| AC26 | A return inside 3 px still replaces pan, and the up is still a click | `a return inside the click distance still replaces pan` | packing nothing on the return | implementation |
+| AC27 | A scroll return contributes the sign of that frame | `a scroll drag keeps the return step` | dropping the step because the point is inside 3 px | implementation |
+| AC28 | An ambiguous wheel keeps the drag `Scroll` | `an ambiguous wheel does not drop a scroll drag` | filtering the drag command out | implementation |
+| AC29 | A hover packs nothing and is `no-gesture` | `a hover is not a delta` | reason `no-delta` | implementation |
+| AC30 | Cancel in the same frame packs nothing and is `no-gesture` | `cancel in the same frame is not a delta` | a click, or reason `no-delta` | implementation |
+| AC31 | A pointer up with no open gesture is `no-gesture` | `a stray up is not an extra contact` | reason `ignored-contact` | implementation |
+| AC32 | Wheel samples sum in full and clamp once | `wheel contributions sum before the clamp` | clamping each addition, so order changes the step | implementation |
 
 ## Approach
 
@@ -157,7 +170,7 @@ Rejected: calling `packPointerFrame`, submitting inside `ingest`, and reading th
 
 ## Dependencies, write ownership and resources
 
-Depends on F-068, which is done. Serial in the canonical worktree. This story writes `pointer.ts`, `pointer.test.ts`, `index.ts` and `index.test.ts`. It does not write `tools.ts`, `cursor.ts`, shaders, or the GPU. F-072 later edits `index.ts` and the ledgers, so it waits until this story is committed.
+Depends on F-068, which is done. Serial in the canonical worktree. This story writes `pointer.ts`, `pointer.test.ts`, `index.ts` and `index.test.ts`. It also updates the F-103 listener census in `events.test.ts`, so `pointer.ts` is the one `addEventListener` source and `events.ts` stays the only catalogue. It does not write `tools.ts`, `events.ts`, `cursor.ts`, shaders, or the GPU. F-072 later edits `index.ts` and the ledgers, so it waits until this story is committed.
 
 ## Verification and evidence reuse
 

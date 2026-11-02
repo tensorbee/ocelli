@@ -182,6 +182,18 @@ export type {
   ToolRegistry,
 } from "./tools.js";
 
+export { DISPATCH_REASONS, createPointerDispatch } from "./pointer.js";
+export type {
+  DispatchFrame,
+  DispatchReason,
+  GestureBasis,
+  PointerDispatch,
+  PointerDispatchOptions,
+  PointerDomEvent,
+  PointerTarget,
+  ShellGestureEvent,
+} from "./pointer.js";
+
 export {
   SNAPSHOT_ERROR,
   SNAPSHOT_MAGIC,
