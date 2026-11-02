@@ -138,6 +138,11 @@ const PUBLISHED: readonly string[] = [
   // ./pointer.js, F-069
   "DISPATCH_REASONS",
   "createPointerDispatch",
+  // ./manipulation.js, F-087
+  "MANIPULATION_TOOLS",
+  "stackDrag",
+  "windowDrag",
+  "windowRegion",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",

@@ -196,6 +196,13 @@ export type {
 } from "./pointer.js";
 
 export {
+  MANIPULATION_TOOLS,
+  stackDrag,
+  windowDrag,
+  windowRegion,
+} from "./manipulation.js";
+
+export {
   COMMAND_CURSORS,
   CURSOR_PHASES,
   createCursorController,
