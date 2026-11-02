@@ -128,6 +128,6 @@ generalised by D-07.
 ## Audit intake, 2026-11-02
 
 S26 closed at tag `s26`. The merge is `84402db`. M7 stays open until this
-sprint's story is done, and this open does not publish. The S27 allocation
+sprint closes, and this open does not publish. The S27 allocation
 row and the S27 plan table name F-071. F-069 is done. F-072 is done. F-068
 is done. F-070 is done. F-X003 stays in progress. F-X011 remains pending.
