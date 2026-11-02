@@ -1,14 +1,16 @@
-# Current sprint, S30
+# Current sprint, S31
 
 **Milestone**: M9, segmentation tools.
-**Branch**: `sprint/s30`
+**Branch**: `sprint/s31`
 **Opened**: 2026-11-02
-**Goal**: Brush with sphere and circle brush geometry, SegmentSelect, SegmentLabel, SegmentBidirectional.
+**Goal**: Rectangle, Circle and Sphere scissors, PaintFill and flood fill, RectangleROI and CircleROI start-end threshold tools, LabelmapEditWithContour.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-080 | E13.1 | Brush with sphere and circle brush geometry | Rust+TS | 4w | done |
-| F-084 | E13.5 | SegmentSelect, SegmentLabel, SegmentBidirectional | Rust+TS | 3w | done |
+| F-081 | E13.2 | Rectangle, Circle and Sphere scissors | Rust+TS | 4w | pending |
+| F-082 | E13.3 | PaintFill and flood fill | Rust+TS | 3w | pending |
+| F-083 | E13.4 | RectangleROI and CircleROI start-end threshold tools | Rust+TS | 4w | pending |
+| F-085 | E13.6 | LabelmapEditWithContour | Rust+TS | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -18,23 +20,24 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S30 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S31 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S29 closed at tag `s29`. The merge is `26f003c`. F-075, F-077, F-078 and
-F-079 are done. M8 is complete. This open does not publish. The workspace
-version stays 0.1.0.
+S30 closed at tag `s30`. The merge is `1cff82a`. F-080 and F-084 are done.
+M9 is not complete. This open does not publish. The workspace version stays
+0.1.0.
 
-This sprint owns a circle brush and a sphere brush on a caller label grid,
-and the select, label and bidirectional readings of one segment. The stamp
-writes a segment number. It does not draw. The existing labelmap presenter
-still draws. The tools do not own the DICOM SR content tree. That type is
-F-094.
+This sprint owns scissors, flood fill, paint fill, a start-end threshold
+inside a rectangle or a circle, and a labelmap edit from a closed polygon.
+Each tool writes a segment number into a caller label grid. None of them
+draws. The existing labelmap presenter still draws. The tools do not own
+the DICOM SR content tree. That type is F-094.
 
-F-080 depends on F-063. F-084 depends on F-066. Those rows are `done`. The
+F-081, F-082, F-083 and F-085 depend on F-080. That row is `done`. The
 canonical worktree runs one story at a time. There is no worker branch.
+F-086 stays in S32.
 
 Closing this sprint does not complete M9. M9 is S30 to S32, 7 stories and
 24 engineer-weeks. A release is not taken from this open.
@@ -49,6 +52,9 @@ Closing this sprint does not complete M9. M9 is S30 to S32, 7 stories and
   that command refuses while `openjph-core` 0.1.0 carries no BSD notice
   material, which is D-22. That blocks publication. It does not block
   this sprint.
+- **S30 is closed at tag `s30` and did not complete M9.** The merge is
+  `1cff82a`. F-080 and F-084 are done. The brush and the segment readings
+  stay as committed.
 - **F-X003 is carried out of S16 and is not a story in this sprint.** AC6
   needs a representative GPU-less incumbent host, the operator has confirmed
   none is available, and no local diagnostic is accepted as that
@@ -65,14 +71,14 @@ Closing this sprint does not complete M9. M9 is S30 to S32, 7 stories and
   this host through headless Chromium WebGL2 and matched `LutChain::map_into`
   within 0.001, format `R32Float`. A tier B colour LUT readback was not run.
 - **The wasm size budget records 2,151,196 bytes** with tolerance 0.05.
-  The ceiling is 2,258,755. The S29 sprint gate passed that budget. The
+  The ceiling is 2,258,755. The S30 sprint gate passed that budget. The
   budget file was not edited. `--accept-size` is a design-plan
   declaration, not a way to make a gate green.
 - **`max_review_passes` is stored but not automatically enforced by the
   backing script.** The operator required the review loop to continue until
   a pass reports zero defects and zero smells. The stored number is not a
   stop. The per-feature microscope loop remains uncapped.
-- **No new measured duration.** Every `SPRINT_TRACKER.md` row the S29 close
+- **No new measured duration.** Every `SPRINT_TRACKER.md` row the S30 close
   inspected reads `not measured`. There is no measured total and no ratio.
   The capacity points remain the S03 and S06 closes. This open does not
   invent a ratio and does not recalculate capacity.
@@ -84,30 +90,36 @@ Closing this sprint does not complete M9. M9 is S30 to S32, 7 stories and
 
 ## The defect class this sprint is exposed to
 
-**A stamp or a run that is quietly one sample off.** A sample on the radius
-belongs inside the brush. A sample past the radius stays as it was. A
-refusal writes nothing. Segment 0 is background and is not a named segment.
-The longest run is the one the tie rule names. A shorter run that looks
-central is still the wrong answer.
+**A write that is quietly one sample off, or a refusal that still writes.**
+A sample on a scissor edge or on a polygon edge belongs inside. A sample
+past that edge stays as it was. A flood does not cross a different segment
+and does not use a diagonal. A threshold paints only where the value is
+inside the caller's start and end. A non-finite value inside the shape
+writes nothing. Segment 0 remains a legal erase and is still background
+for the presenter.
 
 ## What done means
 
-- **F-080** stamps a circle or a sphere of segment numbers into the caller's
-  label grids. The comparison is squared distance. A negative radius or a
-  non-finite centre writes nothing.
-- **F-084** reads one segment number, stores one label for a segment above
-  0, and reports the longest horizontal and vertical runs. Background is
-  not a label and not a bidirectional subject.
+- **F-081** erases to segment 0 inside a rectangle, a circle or a sphere.
+  The circle and the sphere use the existing stamp. The rectangle uses
+  inclusive index bounds on one slice.
+- **F-082** flood-fills the 4-connected region of the seed value, and
+  paint-fills every sample on that grid with the same value. The caller
+  chooses the written segment.
+- **F-083** paints a caller segment where a caller value buffer is between
+  a start and an end, and only inside a rectangle or a circle.
+- **F-085** paints a caller segment on the samples inside a closed polygon,
+  including the boundary. It does not edit the contour representation.
 - **Each story declares all three tier rows.** An omitted row is not an
   answer. A measurement that cannot run on the resolved tier reports
   unavailable.
 
 ## Dependency order
 
-F-080 depends on F-063. F-084 depends on F-066. Those two rows are `done`.
-F-081, F-082, F-083 and F-085 depend on F-080 and stay in S31. F-094 owns
-the SR type and is not a dependency of this sprint. F-X003 stays
-`in-progress` and is not a dependency.
+F-081, F-082, F-083 and F-085 depend on F-080. That row is `done`. F-086
+depends on F-080 and stays in S32. F-094 owns the SR type and is not a
+dependency of this sprint. F-X003 stays `in-progress` and is not a
+dependency.
 
 ## Standing expectations
 
@@ -128,7 +140,7 @@ generalised by D-07.
 
 ## Audit intake, 2026-11-02
 
-S29 closed at tag `s29`. The merge is `26f003c`. M8 is complete and this
-open does not publish. The S30 allocation rows and the S30 plan table name
-F-080 and F-084. F-063 and F-066 are done. F-X003 stays in progress.
-F-X011 remains pending.
+S30 closed at tag `s30`. The merge is `1cff82a`. M9 is not complete and
+this open does not publish. The S31 allocation rows and the S31 plan table
+name F-081, F-082, F-083 and F-085. F-080 is done. F-086 stays in S32.
+F-X003 stays in progress. F-X011 remains pending.
