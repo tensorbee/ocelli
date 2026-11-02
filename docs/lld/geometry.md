@@ -97,8 +97,9 @@ area is the caller's number. This function does not call `rectangle`,
 
 `histogram` writes a caller-supplied bin buffer. An empty sample list or an
 empty bin buffer is `Degenerate`, and the buffer stays unchanged. A value on
-an interior edge belongs to the higher bin. Equal samples land in bin 0 and
-the width is 0.
+an interior edge belongs to the higher bin. The maximum belongs to the last
+bin, including when adding the width steps past it. Equal samples land in
+bin 0 and the width is 0.
 
 `suv_bw` is the separate PET path. It does not call the modality LUT. Units
 other than BQML, or a weight, dose or half-life that is not strictly

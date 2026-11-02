@@ -87,6 +87,24 @@ fn an_interior_edge_belongs_to_the_higher_bin() {
 }
 
 #[test]
+fn the_maximum_of_a_narrow_range_is_the_last_bin() {
+    let mut counts = [0, 0, 0, 0, 0, 0, 0, 0];
+    let low = 10_000_000.0;
+    let high = low + 1.0e-8;
+    let histogram = bins(&[low, high], &mut counts);
+    let Some(first) = counts.first().copied() else {
+        unreachable!("eight bins")
+    };
+    let Some(last) = counts.last().copied() else {
+        unreachable!("eight bins")
+    };
+    assert_eq!(first, 1);
+    assert_eq!(last, 1);
+    assert_eq!(counts.iter().sum::<u32>(), 2);
+    assert!(histogram.width.total_cmp(&0.0).is_ne());
+}
+
+#[test]
 fn equal_samples_fill_the_first_bin() {
     let mut counts = [9, 9, 9];
     let histogram = bins(&[5.0, 5.0], &mut counts);

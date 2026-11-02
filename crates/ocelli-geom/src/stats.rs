@@ -158,7 +158,8 @@ pub fn roi_statistics(samples: &[f64], area: f64) -> Result<RoiStats, GeomError>
 /// Fill `counts` from `samples`.
 ///
 /// A value on an interior edge belongs to the higher bin. The maximum belongs
-/// to the last bin. Equal samples all land in bin 0.
+/// to the last bin, including when adding the width steps past it. Equal
+/// samples all land in bin 0.
 ///
 /// # Errors
 ///
@@ -213,12 +214,17 @@ pub fn histogram(samples: &[f64], counts: &mut [u32]) -> Result<Histogram, GeomE
     }
     let last = counts.len() - 1;
     for &sample in samples {
-        let mut index = 0;
-        let mut edge = min + width;
-        while index < last && sample.total_cmp(&edge).is_ge() {
-            index += 1;
-            edge += width;
-        }
+        let index = if sample.total_cmp(&max).is_eq() {
+            last
+        } else {
+            let mut index = 0;
+            let mut edge = min + width;
+            while index < last && sample.total_cmp(&edge).is_ge() {
+                index += 1;
+                edge += width;
+            }
+            index
+        };
         if let Some(slot) = counts.get_mut(index) {
             *slot = slot.saturating_add(1);
         }

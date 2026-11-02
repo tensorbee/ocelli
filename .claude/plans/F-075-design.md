@@ -57,7 +57,7 @@ decayed_dose = RadionuclideTotalDose * 2 ^ ( -elapsed_seconds / RadionuclideHalf
 - `min` and `max` are the ordinary extrema of the same finite samples.
 - `area` is the caller-supplied number. This function does not call `rectangle`, `ellipse`, `circle` or `polygon_area`.
 - `histogram` writes a caller-supplied `u32` buffer. It allocates nothing. An empty sample list or an empty bin buffer is `Degenerate`, and the buffer is left unchanged. A non-finite sample is `Frame`, and the buffer is left unchanged.
-- Bin edges are equal. `width` is `(max - min) / bin_count` when `max` differs from `min`. A value on an interior edge belongs to the higher bin. The maximum belongs to the last bin. When every sample is equal, `width` is 0 and every sample is counted in bin 0.
+- Bin edges are equal. `width` is `(max - min) / bin_count` when `max` differs from `min`. A value on an interior edge belongs to the higher bin. The maximum belongs to the last bin, including when adding the width steps past it. When every sample is equal, `width` is 0 and every sample is counted in bin 0.
 - `suv_bw` does not call `modality` and does not accept a `Modality` value. The activity line is the skill's first line, computed here so the SUV path cannot be inserted into the LUT chain.
 - Every SUV input is an argument. There is no default weight, dose, half-life or elapsed time.
 - A non-finite SUV input is `SuvError::Frame`, checked before the other refusals.
