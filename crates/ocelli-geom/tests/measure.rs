@@ -1,13 +1,17 @@
-//! Hand-computed fixtures for the local rules in `.claude/plans/F-070-design.md`.
+//! Hand-computed fixtures for the local rules in `.claude/plans/F-070-design.md`
+//! and `.claude/plans/F-073-design.md`.
 //!
-//! The expected numbers are the Euclidean results of those rules. They are
-//! not a second call into the function under test. A constant segment
-//! parameter of 0.5 fails the `(1, 3, 0)` projection.
+//! The F-070 numbers are the Euclidean results of that plan. The F-073
+//! numbers are that plan's own rules. One finite point is degenerate for
+//! `length` and is 0 for `polyline_length`. Height of `(0,0,1)` and `(5,5,4)` is 3,
+//! not `sqrt(59)`. Cobb of the x axis and `(1,1,0)` is `PI/4` because the
+//! absolute dot is used. They are not a second call into the function under
+//! test. A constant segment parameter of 0.5 fails the `(1, 3, 0)` projection.
 
 use ocelli_core::{Canvas, Pt, World};
 use ocelli_geom::{
-    GeomError, angle_at, distance, hit_segment, polyline_length, project_onto_plane,
-    project_onto_segment,
+    GeomError, angle_at, bidirectional, cobb, distance, height, hit_segment, length,
+    polyline_length, project_onto_plane, project_onto_segment,
 };
 
 fn world(x: f64, y: f64, z: f64) -> Pt<World> {
@@ -220,4 +224,125 @@ fn a_zero_normal_is_not_a_plane() {
 fn the_geom_numbers_stay_in_range() {
     assert_eq!(GeomError::Frame.number(), 400);
     assert_eq!(GeomError::Degenerate.number(), 401);
+}
+
+// F-073 fixtures from `.claude/plans/F-073-design.md`.
+// Length of (0, 0, 0) to (3, 4, 0) is 5 because 3*3 + 4*4 = 25 and its
+// square root is 5. Height of z = 1 and z = 4 is abs(4 - 1) = 3. Cobb of
+// (1, 0, 0) and (1, 1, 0) has dot 1 and cross length 1, so atan2(1, 1) is
+// PI/4. Reversing the second segment makes the signed dot -1. The absolute
+// dot keeps the same acute angle. Lengths 3 and 4 keep 4 as the longer one.
+
+#[test]
+fn length_of_a_three_four_five_segment_is_five() {
+    let points = [world(0.0, 0.0, 0.0), world(3.0, 4.0, 0.0)];
+    assert_eq!(length(&points).map(bits), Ok(bits(5.0)));
+}
+
+#[test]
+fn a_single_point_is_not_a_length() {
+    assert_eq!(length(&[world(0.0, 0.0, 0.0)]), Err(GeomError::Degenerate));
+    assert_eq!(length::<World>(&[]), Err(GeomError::Degenerate));
+}
+
+#[test]
+fn height_is_the_absolute_z_difference() {
+    // The Euclidean length of this pair is not 3. Height ignores x and y.
+    assert_eq!(
+        height(world(0.0, 0.0, 1.0), world(5.0, 5.0, 4.0)).map(bits),
+        Ok(bits(3.0))
+    );
+    assert_eq!(
+        height(world(0.0, 0.0, 4.0), world(0.0, 0.0, 1.0)).map(bits),
+        Ok(bits(3.0))
+    );
+    assert_eq!(
+        height(world(f64::NAN, 0.0, 1.0), world(0.0, 0.0, 4.0)),
+        Err(GeomError::Frame)
+    );
+}
+
+#[test]
+fn a_right_angle_is_half_pi() {
+    assert_eq!(
+        angle_at(
+            world(1.0, 0.0, 0.0),
+            world(0.0, 0.0, 0.0),
+            world(0.0, 1.0, 0.0)
+        )
+        .map(bits),
+        Ok(bits(std::f64::consts::FRAC_PI_2))
+    );
+}
+
+#[test]
+fn a_zero_arm_is_degenerate() {
+    let origin = world(0.0, 0.0, 0.0);
+    assert_eq!(
+        angle_at(origin, origin, world(1.0, 0.0, 0.0)),
+        Err(GeomError::Degenerate)
+    );
+}
+
+#[test]
+fn cobb_is_acute_and_ignores_direction() {
+    let forward = cobb(
+        world(0.0, 0.0, 0.0),
+        world(1.0, 0.0, 0.0),
+        world(0.0, 0.0, 0.0),
+        world(1.0, 1.0, 0.0),
+    )
+    .map(bits);
+    assert_eq!(forward, Ok(bits(std::f64::consts::FRAC_PI_4)));
+    let reversed = cobb(
+        world(0.0, 0.0, 0.0),
+        world(1.0, 0.0, 0.0),
+        world(1.0, 1.0, 0.0),
+        world(0.0, 0.0, 0.0),
+    )
+    .map(bits);
+    assert_eq!(reversed, Ok(bits(std::f64::consts::FRAC_PI_4)));
+    assert_eq!(
+        cobb(
+            world(0.0, 0.0, 0.0),
+            world(0.0, 0.0, 0.0),
+            world(0.0, 0.0, 0.0),
+            world(1.0, 0.0, 0.0),
+        ),
+        Err(GeomError::Degenerate)
+    );
+}
+
+#[test]
+fn bidirectional_keeps_the_longer_length() {
+    let pair = bidirectional(
+        world(0.0, 0.0, 0.0),
+        world(3.0, 0.0, 0.0),
+        world(0.0, 0.0, 0.0),
+        world(0.0, 4.0, 0.0),
+    );
+    assert_eq!(
+        pair.map(|item| (bits(item.length), bits(item.width))),
+        Ok((bits(4.0), bits(3.0)))
+    );
+    let swapped = bidirectional(
+        world(0.0, 0.0, 0.0),
+        world(0.0, 4.0, 0.0),
+        world(0.0, 0.0, 0.0),
+        world(3.0, 0.0, 0.0),
+    );
+    assert_eq!(
+        swapped.map(|item| (bits(item.length), bits(item.width))),
+        Ok((bits(4.0), bits(3.0)))
+    );
+    let same = bidirectional(
+        world(0.0, 0.0, 0.0),
+        world(0.0, 0.0, 0.0),
+        world(1.0, 0.0, 0.0),
+        world(1.0, 0.0, 0.0),
+    );
+    assert_eq!(
+        same.map(|item| (bits(item.length), bits(item.width))),
+        Ok((bits(0.0), bits(0.0)))
+    );
 }

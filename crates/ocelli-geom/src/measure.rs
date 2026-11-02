@@ -1,9 +1,13 @@
 //! Hit-testing, projection and measurement mathematics.
 //!
-//! The HLD names this crate and does not give these formulas. The rules are
-//! the local decisions in `.claude/plans/F-070-design.md`. Points stay in
-//! the space the caller already chose. This module does not convert a
-//! canvas point into a world point.
+//! The HLD names this crate and does not give these formulas. F-070 rules
+//! are the local decisions in `.claude/plans/F-070-design.md`. F-073 rules
+//! are the local decisions in `.claude/plans/F-073-design.md`. `length` of
+//! fewer than two points is degenerate. `polyline_length` of one finite
+//! point stays 0. Height is the absolute caller-space `z` difference, not
+//! the Euclidean length. Cobb uses the absolute dot and stays in `0..=PI/2`.
+//! Points stay in the space the caller already chose. This module does not
+//! convert a canvas point into a world point.
 
 use glam::{DVec2, DVec3};
 use ocelli_core::Pt;
@@ -73,7 +77,7 @@ fn dot(left: (f64, f64, f64), right: (f64, f64, f64)) -> f64 {
     left.0 * right.0 + left.1 * right.1 + left.2 * right.2
 }
 
-fn length(value: (f64, f64, f64)) -> f64 {
+fn span_length(value: (f64, f64, f64)) -> f64 {
     // `f64::sqrt` is not in `core` for this `no_std` crate. glam's libm
     // backend is the same policy the sigmoid uses in `ocelli-pixel`.
     DVec3::new(value.0, value.1, value.2).length()
@@ -88,7 +92,7 @@ fn length(value: (f64, f64, f64)) -> f64 {
 pub fn distance<S>(start: Pt<S>, end: Pt<S>) -> Result<f64, GeomError> {
     finite_point(start)?;
     finite_point(end)?;
-    let span = length(sub(end, start));
+    let span = span_length(sub(end, start));
     if span.is_finite() {
         Ok(span)
     } else {
@@ -117,7 +121,7 @@ pub fn polyline_length<S>(points: &[Pt<S>]) -> Result<f64, GeomError> {
         let Some(end) = pair.get(1).copied() else {
             continue;
         };
-        let span = length(sub(end, start));
+        let span = span_length(sub(end, start));
         if !span.is_finite() {
             return Err(GeomError::Frame);
         }
@@ -144,8 +148,8 @@ pub fn angle_at<S>(arm_start: Pt<S>, vertex: Pt<S>, arm_end: Pt<S>) -> Result<f6
     finite_point(arm_end)?;
     let u = sub(arm_start, vertex);
     let v = sub(arm_end, vertex);
-    let u_len = length(u);
-    let v_len = length(v);
+    let u_len = span_length(u);
+    let v_len = span_length(v);
     if !u_len.is_finite() || !v_len.is_finite() {
         return Err(GeomError::Frame);
     }
@@ -157,7 +161,7 @@ pub fn angle_at<S>(arm_start: Pt<S>, vertex: Pt<S>, arm_end: Pt<S>) -> Result<f6
         u.2 * v.0 - u.0 * v.2,
         u.0 * v.1 - u.1 * v.0,
     );
-    let cross_len = length(cross);
+    let cross_len = span_length(cross);
     let dotted = dot(u, v);
     if !cross_len.is_finite() || !dotted.is_finite() {
         return Err(GeomError::Frame);
@@ -213,7 +217,7 @@ pub fn project_onto_segment<S>(
         start.z + t * direction.2,
     );
     finite_point(foot)?;
-    let span = length(sub(point, foot));
+    let span = span_length(sub(point, foot));
     if !span.is_finite() {
         return Err(GeomError::Frame);
     }
@@ -288,4 +292,122 @@ pub fn project_onto_plane<S>(
     );
     finite_point(foot)?;
     Ok(foot)
+}
+
+/// The longer and shorter of two segment lengths.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bidirectional {
+    /// The larger Euclidean length. Equal lengths use that shared value.
+    pub length: f64,
+    /// The smaller Euclidean length.
+    pub width: f64,
+}
+
+/// Polyline length. Fewer than two points is degenerate.
+///
+/// This is the F-073 length tool. It calls [`polyline_length`] after the
+/// count check, so a one-point list is not reported as 0.
+///
+/// # Errors
+///
+/// [`GeomError::Degenerate`] when `points` has fewer than two elements.
+/// [`GeomError::Frame`] when [`polyline_length`] refuses.
+pub fn length<S>(points: &[Pt<S>]) -> Result<f64, GeomError> {
+    if points.len() < 2 {
+        return Err(GeomError::Degenerate);
+    }
+    polyline_length(points)
+}
+
+/// Absolute difference of the caller-space `z` coordinates.
+///
+/// This is the F-073 height tool. It does not convert spaces and it does
+/// not pick an image axis.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when either point or the difference is non-finite.
+pub fn height<S>(start: Pt<S>, end: Pt<S>) -> Result<f64, GeomError> {
+    finite_point(start)?;
+    finite_point(end)?;
+    let delta = (end.z - start.z).abs();
+    if delta.is_finite() {
+        Ok(delta)
+    } else {
+        Err(GeomError::Frame)
+    }
+}
+
+/// Acute angle between two undirected segments, in radians, in `0..=PI/2`.
+///
+/// Reversing either segment does not change the value. A zero-length
+/// segment is degenerate.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when a point or the angle is non-finite.
+/// [`GeomError::Degenerate`] when either segment has length zero.
+pub fn cobb<S>(
+    first_start: Pt<S>,
+    first_end: Pt<S>,
+    second_start: Pt<S>,
+    second_end: Pt<S>,
+) -> Result<f64, GeomError> {
+    finite_point(first_start)?;
+    finite_point(first_end)?;
+    finite_point(second_start)?;
+    finite_point(second_end)?;
+    let first = sub(first_end, first_start);
+    let second = sub(second_end, second_start);
+    let first_len = span_length(first);
+    let second_len = span_length(second);
+    if !first_len.is_finite() || !second_len.is_finite() {
+        return Err(GeomError::Frame);
+    }
+    if exact_zero(first_len) || exact_zero(second_len) {
+        return Err(GeomError::Degenerate);
+    }
+    let cross = (
+        first.1 * second.2 - first.2 * second.1,
+        first.2 * second.0 - first.0 * second.2,
+        first.0 * second.1 - first.1 * second.0,
+    );
+    let cross_len = span_length(cross);
+    let dotted = dot(first, second).abs();
+    if !cross_len.is_finite() || !dotted.is_finite() {
+        return Err(GeomError::Frame);
+    }
+    let angle = DVec2::new(dotted, cross_len).to_angle();
+    if angle.is_finite() {
+        Ok(angle)
+    } else {
+        Err(GeomError::Frame)
+    }
+}
+
+/// Longer and shorter Euclidean lengths of two segments.
+///
+/// Identical endpoints stay length 0, because that distance is exact.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when [`distance`] refuses either segment.
+pub fn bidirectional<S>(
+    first_start: Pt<S>,
+    first_end: Pt<S>,
+    second_start: Pt<S>,
+    second_end: Pt<S>,
+) -> Result<Bidirectional, GeomError> {
+    let first = distance(first_start, first_end)?;
+    let second = distance(second_start, second_end)?;
+    // `float_cmp` is denied. Both lengths are finite, so `total_cmp` orders
+    // them without treating an equal pair as unordered.
+    let (longer, shorter) = match first.total_cmp(&second) {
+        core::cmp::Ordering::Less => (second, first),
+        core::cmp::Ordering::Equal | core::cmp::Ordering::Greater => (first, second),
+    };
+    Ok(Bidirectional {
+        length: longer,
+        width: shorter,
+    })
 }

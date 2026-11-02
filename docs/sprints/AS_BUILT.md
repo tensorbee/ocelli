@@ -4108,3 +4108,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** The feature commit adds the sentence that a list that is not an array and an SVG element with no owner document are `bad-mark`. The design commit was not amended.
 **Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. The defect was a blank id hiding a structural mistake, and an earlier non-finite point hiding a later point that is not a number. `annotation.ts` sha256 at the clean pass is `89f98b74452b63785e68a095b4cca3584cb804c1816a10a267b2ec86ab202be2`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-073, length, height, Cobb angle and bidirectional, completed 2026-11-02
+
+**What was built.** `length`, `height`, `cobb` and `bidirectional` in `ocelli-geom`. `length` refuses fewer than two points and then calls `polyline_length`. `height` is the absolute caller-space `z` difference. `cobb` is the acute undirected angle from `atan2` of the cross-product length and the absolute dot. `bidirectional` keeps the longer Euclidean distance as `length` and the shorter as `width`. The angle tool stays `angle_at`. A second function that only forwarded would violate the structural rule. The design commit was not amended.
+
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` names `ocelli-geom` and does not give these formulas. `docs/hld/B-parity-surface.md` counts the tool classes and does not define them. The formulas are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-geom`, `docs/lld/geometry.md` and `docs/lld/public-api.md`.
+**Tests added.** Seven acceptance tests in `crates/ocelli-geom/tests/measure.rs`. The existing F-070 tests still pass.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-073-design.md`. No DICOM section. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/geometry.md`, `docs/lld/public-api.md` and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The committed plan named `angle` as a call to `angle_at`. The feature commit records that the angle tool is `angle_at` and does not add the forwarding wrapper. The design commit was not amended.
+**Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Pass 2 reported 1 defect, 0 smells and 0 nitpicks. Pass 3 reported 0 defects, 0 smells and 0 nitpicks. Pass 1 was the module headers citing only F-070. Pass 2 was the test header saying every one-point polyline has length 0. `measure.rs` sha256 at the clean pass is `a32fbe33ac7e3408e769e9d0c1bcc85f23bab837e6b1bc75f20b5510d491f20c`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

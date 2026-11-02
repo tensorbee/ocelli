@@ -1,11 +1,12 @@
 # Geometry
 
-**F-IDs that contributed:** F-070
-**Last updated:** 2026-11-01
+**F-IDs that contributed:** F-070, F-073
+**Last updated:** 2026-11-02
 
 Hit-testing, projection and measurement in `ocelli-geom`. The HLD names the
 crate and does not give the formulas. The rules below are the local
-decisions in `.claude/plans/F-070-design.md`.
+decisions in `.claude/plans/F-070-design.md` and
+`.claude/plans/F-073-design.md`.
 
 The functions take `Pt<S>`. They do not convert spaces. A canvas point is
 measured in canvas units and a world point in millimetres. The caller
@@ -40,7 +41,28 @@ point has length 0. One non-finite coordinate refuses the whole sum.
 
 `angle_at` is the unsigned angle at the vertex, in radians, in `0..=PI`.
 It is `atan2` of the cross-product length and the dot product. A
-zero-length arm is `Degenerate`.
+zero-length arm is `Degenerate`. The angle tool remains this function.
+There is no second name.
+
+## Length, height, Cobb and bidirectional
+
+`length` is `polyline_length` after a count check. Fewer than two points
+is `Degenerate`. That includes one non-finite point, because the count is
+checked first. One finite point still has `polyline_length` 0. One
+non-finite point is `Frame` from `polyline_length`.
+
+`height` is the absolute difference of the caller-space `z` coordinates.
+It ignores `x` and `y`. A non-finite point or a non-finite difference is
+`Frame`.
+
+`cobb` is the acute angle between two undirected segments, in radians, in
+`0..=PI/2`. It is `atan2` of the cross-product length and the absolute
+dot. Reversing a segment does not change it. A zero-length segment is
+`Degenerate`.
+
+`bidirectional` reports the larger Euclidean distance as `length` and the
+smaller as `width`. Equal distances share that value. Identical endpoints
+stay 0.
 
 ## Segment
 

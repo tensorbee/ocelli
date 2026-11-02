@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -183,6 +183,10 @@ F-071 draws a caller-supplied display list into one SVG element from `packages/c
 On success the layer replaces the element's children, stores a copy of the list, and then emits. Removals come first, in the previous order. Each next mark follows. A new id emits `annotation.added`, and `annotation.completed` after that when the new mark is completed. The initial visible, locked and selected flags do not emit change events. An id that remains emits `annotation.modified` when points or text differ, then `annotation.completed` only when completed goes from false to true, then `annotation.visibilityChanged`, `annotation.locked` and `annotation.selectionChanged`, and only for the flags that differ. `annotation.rendered` is last. Its ids are the accepted list in order. An identical list still rewrites the SVG and emits only `annotation.rendered`. A throw from the listener is not caught and does not roll the write back.
 
 Each mark is one `g`. `data-ocelli-id` is the id. `data-selected` and `data-locked` are `true` or `false`. A hidden mark stays in the SVG with `display` `none`. A visible mark does not set `display`. A non-empty point list is one `polyline`. The `points` attribute is `x,y` pairs separated by one space, using `String` on each finite number. Comparison is `===`. A non-null text is one `text` element at the last point. Null text adds no text element. This module does not listen.
+
+## Measurement tools
+
+F-073 adds `length`, `height`, `cobb` and `bidirectional` in `ocelli-geom`. The angle tool is the existing `angle_at`. `length` of fewer than two points is `Degenerate`. One finite point still has `polyline_length` 0. One non-finite point is `Frame` from `polyline_length` and `Degenerate` from `length`. Height is the absolute caller-space `z` difference, not the Euclidean length. Cobb is `atan2` of the cross-product length and the absolute dot, in radians, in `0..=PI/2`. Bidirectional keeps the longer distance as `length` and the shorter as `width`. Identical endpoints stay 0. The functions take `Pt` and do not convert spaces. `packages/core/src/tools.ts` does not compute them.
 
 ## React binding
 

@@ -29,7 +29,7 @@ The HLD does not define these five tools. The decisions below are local. They ar
 
 - `length` of two or more points is `polyline_length`. Fewer than two points is `Degenerate`, checked before that call, because `polyline_length` of one point is 0 and a one-point length is not a measurement.
 - `height` is the absolute difference of the caller-space `z` coordinates. The function does not choose an image axis and does not convert spaces. A non-finite point is `Frame`.
-- `angle` is `angle_at` on exactly three points, vertex in the middle, in radians. Any other count is `Degenerate`.
+- The angle tool is the existing `angle_at` on exactly three points, vertex in the middle, in radians. A second function named `angle` would only call `angle_at`, and a wrapper that only forwards is refused. A zero-length arm is `Degenerate`.
 - `cobb` is the acute angle between two undirected segments, four points, in radians, in `0..=PI/2`. A zero-length segment is `Degenerate`. The value uses `atan2` of the absolute cross length and the absolute dot, so reversing either segment does not change it.
 - `bidirectional` is two segments. `length` is the larger Euclidean distance and `width` is the smaller. Equal distances use that shared value for both. A zero distance stays 0, because that is the true length of identical points.
 - Points stay in the space the caller already chose. There is no canvas conversion and no spacing scale inside these functions.
@@ -39,9 +39,9 @@ The HLD does not define these five tools. The decisions below are local. They ar
 
 ## Problem and reproducer
 
-Nothing in `ocelli-geom` names these five tools. `distance((0,0,0), (3,4,0))` is 5 and `angle_at((1,0,0), (0,0,0), (0,1,0))` is `PI/2`, and those calls are the pieces. A caller cannot ask for a height, a Cobb angle or a bidirectional pair without inventing a second formula.
+`distance((0,0,0), (3,4,0))` is 5 and `angle_at((1,0,0), (0,0,0), (0,1,0))` is `PI/2`. A caller cannot ask for a named length of two or more points, a height, a Cobb angle or a bidirectional pair without inventing a second formula.
 
-The observation is a Rust call. `length` of `(0,0,0)` and `(3,4,0)` is 5. `height` of `(0,0,1)` and `(5,5,4)` is 3. `angle` of `(1,0,0)`, `(0,0,0)`, `(0,1,0)` is `PI/2`. `cobb` of `(0,0,0)`, `(1,0,0)`, `(0,0,0)`, `(1,1,0)` is `PI/4`. `bidirectional` of `(0,0,0)`, `(3,0,0)`, `(0,0,0)`, `(0,4,0)` reports length 4 and width 3.
+The observation is a Rust call. `length` of `(0,0,0)` and `(3,4,0)` is 5. `height` of `(0,0,1)` and `(5,5,4)` is 3. `angle_at` of `(1,0,0)`, `(0,0,0)`, `(0,1,0)` is `PI/2`. `cobb` of `(0,0,0)`, `(1,0,0)`, `(0,0,0)`, `(1,1,0)` is `PI/4`. `bidirectional` of `(0,0,0)`, `(3,0,0)`, `(0,0,0)`, `(0,4,0)` reports length 4 and width 3.
 
 ## Scope, API and compatibility
 
@@ -49,7 +49,7 @@ In scope:
 
 - New functions in `crates/ocelli-geom/src/measure.rs`, re-exported from the crate root
 - Unit tests with the hand-computed values above
-- `docs/lld/public-api.md` gains the five names when the story is completed
+- `docs/lld/geometry.md` and `docs/lld/public-api.md` gain `length`, `height`, `cobb` and `bidirectional` when the story is completed. `polyline_length` of one finite point stays 0. The angle tool remains `angle_at`.
 
 Out of scope:
 
@@ -61,10 +61,11 @@ Out of scope:
 ```text
 length(points) -> Result<f64, GeomError>
 height(start, end) -> Result<f64, GeomError>
-angle(arm_start, vertex, arm_end) -> Result<f64, GeomError>
 cobb(first_start, first_end, second_start, second_end) -> Result<f64, GeomError>
 bidirectional(first_start, first_end, second_start, second_end) -> Result<Bidirectional, GeomError>
 ```
+
+The angle tool is `angle_at`, already exported by F-070. This story does not add a second name.
 
 `Bidirectional` holds `length` and `width`, both `f64`. Units are the units of the point space. Angles are radians.
 
@@ -74,7 +75,7 @@ bidirectional(first_start, first_end, second_start, second_end) -> Result<Bidire
 |----------|----------|--------|--------|
 | A later annotation tool | `length` | two or more finite points | one distance |
 | A later annotation tool | `height` | two finite points | absolute `z` difference |
-| A later annotation tool | `angle` | three finite points, vertex in the middle | radians in `0..=PI` |
+| A later annotation tool | `angle_at` | three finite points, vertex in the middle | radians in `0..=PI` |
 | A later annotation tool | `cobb` | two finite segments | radians in `0..=PI/2` |
 | A later annotation tool | `bidirectional` | two finite segments | longer and shorter lengths |
 
@@ -110,7 +111,7 @@ Not applicable. The functions allocate nothing and store nothing.
 
 ## Approach
 
-Add the five functions beside the F-070 functions. `length` checks the count and calls `polyline_length`. `angle` calls `angle_at`. `height` subtracts `z`. `cobb` and `bidirectional` use the same finite-point check and the same vector helpers. `f64::sqrt` and `f64::atan2` stay behind glam, as F-070 already does.
+Add the four new functions beside the F-070 functions. `length` checks the count and calls `polyline_length`. The angle tool stays `angle_at`. `height` subtracts `z`. `cobb` and `bidirectional` use the same finite-point check and the same vector helpers. `f64::sqrt` and `f64::atan2` stay behind glam, as F-070 already does.
 
 Rejected: a TypeScript copy, a cornerstone port, and a height that is undefined for a diagonal.
 
@@ -153,7 +154,7 @@ none
 
 ## LLD impact
 
-`docs/lld/public-api.md` gains the five measurement names. No new LLD file.
+`docs/lld/geometry.md` and `docs/lld/public-api.md` gain `length`, `height`, `cobb` and `bidirectional`. `geometry.md` keeps `polyline_length` of one finite point at 0, which is not `length`. The angle tool remains `angle_at`. No new LLD file.
 
 ## Open questions
 
