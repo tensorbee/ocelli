@@ -1,7 +1,7 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068
+**Last updated:** 2026-11-01
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
 F-101 built the wire. F-104 moved every boundary number into one Rust table
@@ -111,6 +111,37 @@ sixty-three cornerstone tool classes are not these names. F-103 is the event
 model. Annotation tools are not in the set.
 
 `packages/core/src/viewport.ts` exports the types. It does not call wasm.
+
+## Tool lifecycle
+
+F-068 stores interaction state in `packages/core/src/tools.ts`.
+`createToolRegistry` returns a caller-owned registry. There is no module
+singleton. A group holds tools, modes and pointer bindings, and the
+viewports attached to that group.
+
+Modes are `active`, `passive` and `off`. A new tool starts `off` with no
+bindings. `active` requires at least one pointer binding. `passive` and
+`off` require an empty binding list. A pointer binding is one of
+`primary`, `auxiliary` or `secondary`, plus a set of `alt`, `ctrl`,
+`meta` and `shift`. Modifier order does not make a second binding. A
+repeated modifier on one binding is one modifier.
+
+Setting a tool `active` on a binding moves every other active owner of
+that binding, in the same group, to `passive` and clears that owner's
+bindings. The moved names come back in registration order. The same mode
+and the same binding set return an empty demotion list. A refused call
+writes nothing.
+
+A viewport id belongs to at most one group. `viewportId(0)` is a valid
+id. A negative, non-integer or unsafe number is refused. Destroying a
+group releases its viewports. Removing the active tool does not promote
+another tool.
+
+The tool name is caller-chosen and is not required to equal the command.
+The command is still one of the eleven. Registering a tool does not pack
+that command and does not listen for events. Reads return copies.
+Hit-testing and measurement stay in `ocelli-geom` and are not computed
+here. F-069 will dispatch. F-072 will own cursors. F-071 will draw.
 
 ## React binding
 

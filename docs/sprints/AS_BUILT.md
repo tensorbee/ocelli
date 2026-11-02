@@ -4028,3 +4028,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/render-graph.md`, `docs/lld/feature-availability.md` and their rows in `docs/lld/README.md`.
 **Deviations from the design plan.** The first approved wording left `pipeline_compiled` false for the overlay edge key. An uncompiled key cannot encode, so the readback cannot pass. The plan now compiles a second overlay key on the existing copy shader. Slab, volume and stack stay uncompiled.
 **Notes for future sessions.** Pass 1 reported 2 defects, 0 smells and 0 nitpicks. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Setting `t` to `0.5` made `a_cut_off_the_midpoint_uses_t` fail with left `(5, 2, 1)` and right `(2.5, 1, 1)`. Forcing the caller fill made the edge readback fail with centre `[10, 20, 30, 128]` against `[0, 0, 0, 0]`. Both were restored. The feature floor remeasures the release module against baseline 2151196 and ceiling 2258755. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-068, tool lifecycle, tool groups, bindings and modes, completed 2026-11-01
+
+**What was built.** `createToolRegistry` returns a caller-owned registry. A group holds tools, modes and pointer bindings, and the viewports attached to that group. Modes are `active`, `passive` and `off`. A new tool starts `off`. `active` requires a binding. Taking a binding moves every other active owner of that binding to `passive` and clears that owner's bindings. The names come back in registration order. A refused call writes nothing. A viewport id belongs to at most one group. Reads return copies. The registry does not listen, pack a command, or measure.
+
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section 3. `docs/hld/07-concurrency-and-typescript.md` section 10.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and `docs/lld/README.md`.
+**Tests added.** 27 unit tests in `packages/core/src/tools.test.ts`. The published-name list in `packages/core/src/index.test.ts` includes the registry values.
+**Fixture provenance.** no pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The registry does not draw and does not read a device. The same state is stored on every tier.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 3 smells and 0 nitpicks. Pass 2 reported 0 defects, 3 smells and 0 nitpicks. Pass 3 reported 0 defects, 1 smell and 0 nitpicks. Pass 4 reported 0 defects, 1 smell and 0 nitpicks. Pass 5 reported 0 defects, 0 smells and 0 nitpicks. The smells were tests that stayed green when a required behaviour was replaced. The implementation hash stayed `ca6a90079cb00c974f602f978f4bcb8eb866024dd4678c4ceadfa0e217b6c2c9`. F-069 dispatches. F-072 owns cursors. F-071 draws. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
