@@ -6,7 +6,8 @@
 //! F-065 fills the surface. F-066 names which of those three a viewport
 //! shows. F-067 cuts a contour by a patient Z plane and draws the labelmap
 //! edge as outline without fill. F-080 stamps a circle or a sphere into
-//! the label grid. The presenter does not import wgpu.
+//! the label grid. F-084 reads a segment, stores a label and reports the
+//! longest runs. The presenter does not import wgpu.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -15,6 +16,7 @@ extern crate alloc;
 mod brush;
 mod contour;
 mod labelmap;
+mod segment_tools;
 mod surface;
 
 pub use brush::{Brush, BrushCoverage, BrushError, BrushShape, stamp_brush};
@@ -22,6 +24,10 @@ pub use contour::{
     Contour, ContourError, ContourGeometricType, PlaneFrame, intersect_contour, present_contour,
 };
 pub use labelmap::{LabelColourLut, LabelGrid, LabelStyle, LabelmapError, Rgba8, present_labelmap};
+pub use segment_tools::{
+    SegmentBidirectional, SegmentLabel, SegmentRun, SegmentToolError, label_segment, segment_at,
+    segment_bidirectional,
+};
 pub use surface::{SurfaceError, SurfaceMesh, present_surface};
 
 /// Which segmentation representation a viewport shows.

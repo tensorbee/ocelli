@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-080 | E13.1 | Brush with sphere and circle brush geometry | Rust+TS | 4w | done |
-| F-084 | E13.5 | SegmentSelect, SegmentLabel, SegmentBidirectional | Rust+TS | 3w | pending |
+| F-084 | E13.5 | SegmentSelect, SegmentLabel, SegmentBidirectional | Rust+TS | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.

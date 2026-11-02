@@ -261,7 +261,7 @@ The 12 segmentation classes.
 | F-081 | E13.2 | S31 | Rectangle, Circle and Sphere scissors | Rust+TS | 4w | F-080 | pending |
 | F-082 | E13.3 | S31 | PaintFill and flood fill | Rust+TS | 3w | F-080 | pending |
 | F-083 | E13.4 | S31 | RectangleROI and CircleROI start-end threshold tools | Rust+TS | 4w | F-080 | pending |
-| F-084 | E13.5 | S30 | SegmentSelect, SegmentLabel, SegmentBidirectional | Rust+TS | 3w | F-066 | pending |
+| F-084 | E13.5 | S30 | SegmentSelect, SegmentLabel, SegmentBidirectional | Rust+TS | 3w | F-066 | done |
 | F-085 | E13.6 | S31 | LabelmapEditWithContour | Rust+TS | 3w | F-080 | pending |
 | F-086 | E13.7 | S32 | Between-slice labelmap interpolation | Rust+TS | 3w | F-080 | pending |
 

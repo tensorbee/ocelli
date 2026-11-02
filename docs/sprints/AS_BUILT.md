@@ -4236,3 +4236,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19cb6-214d-7b10-89ff-19537da639e5`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19cc7-d0c1-78d1-8392-feb38c898891`. `brush.rs` sha256 at the clean pass is `a8756735471dd7787d2538daf1e61e12529576ab0425571984be0a76d27f96dc`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-084, segment select label and bidirectional, completed 2026-11-02
+
+**What was built.** `segment_at`, `label_segment` and `segment_bidirectional` in `ocelli-seg`. An in-range read returns the stored number, including 0. An outside index, a zero side, or a length other than `width * height` is `Degenerate`. A label stores trimmed text. Segment 0 is `Background`. Blank text is `Blank`. Either refusal leaves the list as it was. The longest run wins. An equal length keeps the run found first. One sample is length 1 on both axes. `bidirectional` in `ocelli-geom` is unchanged. There is no TypeScript copy.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts tool classes and does not define these readings. `docs/hld/03-architecture-and-crates.md` names `ocelli-seg` and does not give them. The run rule is the approved local plan. PS3.3 C.8.20.2 keeps segment 0 as background.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-seg`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Thirteen tests in `crates/ocelli-seg/tests/segment_tools.rs`. Nine are the acceptance rows. Four more lock a refusal on an existing label, a gap, a long buffer, and a zero side together with an outside row.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-084-design.md`. PS3.3 C.8.20.2 is the background rule only. The run rule is that plan. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ce1-769c-7be2-8cb7-54f1da121f02`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ced-603a-70b0-b242-e3b8343f19b6`. `segment_tools.rs` sha256 at the clean pass is `f087933c6e2e0216d8f26d4e33909682d812fbaf8374c776994cc844b145898d`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
