@@ -245,11 +245,11 @@ The 26 annotation classes and the ROI statistics engine.
 |------|----------|--------|-------|-------|-----|------------|--------|
 | F-073 | E12.1 | S28 | Length, Height, Angle, CobbAngle, Bidirectional | Rust+TS | 5w | F-070 | done |
 | F-074 | E12.2 | S28 | Probe, DragProbe, RectangleROI, EllipticalROI, CircleROI | Rust+TS | 5w | F-070 | done |
-| F-075 | E12.3 | S29 | ROI statistics engine: mean, SD, min, max, area, SUV, histogram | Rust+TS | 4w | F-074 | pending |
+| F-075 | E12.3 | S29 | ROI statistics engine: mean, SD, min, max, area, SUV, histogram | Rust+TS | 4w | F-074 | done |
 | F-076 | E12.4 | S28 | PlanarFreehandROI, SplineROI and spline mathematics | Rust+TS | 5w | F-070 | done |
-| F-077 | E12.5 | S29 | LivewireContour and LivewireContourSegmentation | Rust+TS | 5w | F-076 | pending |
-| F-078 | E12.6 | S29 | ArrowAnnotate, Label, KeyImage, ETDRSGrid | Rust+TS | 3w | F-071 | pending |
-| F-079 | E12.7 | S29 | UltrasoundDirectional, VideoRedaction | Rust+TS | 3w | F-070 | pending |
+| F-077 | E12.5 | S29 | LivewireContour and LivewireContourSegmentation | Rust+TS | 5w | F-076 | done |
+| F-078 | E12.6 | S29 | ArrowAnnotate, Label, KeyImage, ETDRSGrid | Rust+TS | 3w | F-071 | done |
+| F-079 | E12.7 | S29 | UltrasoundDirectional, VideoRedaction | Rust+TS | 3w | F-070 | done |
 
 ### M9, Segmentation tools
 

@@ -20,6 +20,7 @@
  * F-100 publishes the viewport, scene and tool types from `viewport.ts`.
  * F-101 publishes command packing and the copied ring drain. `coreAvailable()`
  * stays false until a built module is loaded.
+ * F-078 publishes arrow, label, key image and ETDRS display-list marks.
  */
 
 export {
@@ -219,6 +220,16 @@ export type {
   AnnotationRefusal,
   AnnotationSyncResult,
 } from "./annotation.js";
+
+export {
+  MARK_REFUSALS,
+  arrowMark,
+  etdrsMarks,
+  etdrsRegion,
+  keyImageMark,
+  labelMark,
+} from "./marks.js";
+export type { EtdrsRegion, MarkRefusal, MarkResult, MarksResult } from "./marks.js";
 
 export {
   SNAPSHOT_ERROR,
