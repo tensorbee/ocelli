@@ -151,8 +151,11 @@ caller-owned dispatcher for one viewport in one tool group. `takeFrame`
 returns at most one packed buffer. It does not call wasm.
 
 `Pan`, `Zoom` and `Rotate` come from a caller basis captured at pointer
-down. Those camera writes replace, so the packed value is the basis plus
-the delta from the gesture origin. It is not the client position. `Scroll`
+down. Those camera writes replace the stored value. The last sample in
+the frame is the one sample. `Pan` is `basis.panX + (x - originX)` and
+`basis.panY + (y - originY)`. It is not the client position. `Zoom` is
+`basis.zoom * exp(-(y - originY) / 256)`. `Rotate` is
+`basis.radians + (x - originX) / 256`. `Scroll`
 is one step per frame. A wheel sums its samples and then clamps once to
 the i32 range. A drag whose command is `Scroll` contributes the sign of
 that frame's y change. The other seven commands pack nothing.
