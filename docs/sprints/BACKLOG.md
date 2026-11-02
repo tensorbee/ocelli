@@ -285,7 +285,7 @@ SR is the native annotation type, and SEG, RTSTRUCT and TID 1500 round trip.
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-094 | E15.1 | S35 | DICOM SR as the native in-memory annotation model | Rust+TS | 4w | F-070 | pending |
+| F-094 | E15.1 | S35 | DICOM SR as the native in-memory annotation model | Rust+TS | 4w | F-070 | done |
 | F-095 | E15.2 | S35 | Annotation state manager, frame-of-reference indexing, undo/redo | Rust+TS | 4w | F-070 | pending |
 | F-096 | E15.3 | S36 | Measurement persistence and serialisation format | Rust+TS | 3w | F-094 | pending |
 | F-097 | E15.4 | S36 | DICOM SR TID 1500 round-trip | Rust+TS | 3w | F-095 | pending |

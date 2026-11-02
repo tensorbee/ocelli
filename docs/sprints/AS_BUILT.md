@@ -4443,3 +4443,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19e3d-e6e5-7aa1-825b-ee2ba8de87c7`. `sculpt.ts` sha256 at the clean pass is `12bcf3bcabb54f3322f91be62d0eb4b757f237e3c47f6e0ab455dea575bf0cc8`. A later maximum tie returned index 2 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-094, DICOM SR content tree, completed 2026-11-02
+
+**What was built.** `contentTree` and `provenanceItems` in `packages/core`. The annotation type is a DICOM SR content tree. The root relationship is absent. A child uses one of five relationships. One bad node returns nothing and the caller object is not written. Provenance children are the tool, the engine version, the algorithm and the operator. A null algorithm omits that child. An empty required string returns nothing. The drawing layer is unchanged. There is no Rust twin.
+
+**HLD sections implemented.** Decision D13 and HLD section 34. The section does not give the node fields. The eight value types, the five relationships and the provenance order are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Six tests in `packages/core/src/sr.test.ts`. The published-name list includes the two content-tree values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-094-design.md`. No DICOM section. No pixel arithmetic. The concept codes on the numeric fixture are test labels.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 1 defect and 1 smell. Reviewer `01a19e85-9c0a-7c41-b1a0-cfde5c7ec570`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19e95-a66a-76b2-9be6-2c785bc3d7ad`. `sr.ts` sha256 at the clean pass is `0557fb71fc8795422fcfb2002c7eb93ffcc97d3a14e38493a7cac9283e2f1da8`. A point width of 3 made the `(1, 2)` point return null and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

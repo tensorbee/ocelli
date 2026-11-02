@@ -216,6 +216,8 @@ export { cropDrag, cropPlanes } from "./crop.js";
 
 export { eraseNearest, mipIndex, sculptVertex } from "./sculpt.js";
 
+export { contentTree, provenanceItems } from "./sr.js";
+
 export {
   COMMAND_CURSORS,
   CURSOR_PHASES,
