@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -195,6 +195,8 @@ F-076 adds `polygon_area` and `spline_point` in `ocelli-geom`. The area is half 
 F-075 adds `roi_statistics`, `histogram` and `suv_bw` in `ocelli-geom`. The mean divides by the count. The standard deviation divides by the count. The area is the caller's number. An empty sample list is `Degenerate`. A histogram value on an interior edge belongs to the higher bin. SUV is not the modality LUT. Units other than BQML are unavailable. There is no default weight. Rectangle, ellipse, circle and polygon area stay the earlier functions.
 
 F-077 adds `livewire_path` and `livewire_mask` in `ocelli-geom`. The path is 4-connected. The cost is the sum of the pixels entered, and the start pixel adds nothing. The mask marks visited pixels and does not fill an interior. An empty path is `Degenerate`. `polygon_area` and `spline_point` stay the F-076 functions. There is no TypeScript copy.
+
+F-078 adds `arrowMark`, `labelMark`, `keyImageMark`, `etdrsRegion` and `etdrsMarks` in `packages/core`. They return display-list marks for the F-071 layer. The arrow head is at most 12 pixels and at most a quarter of the shaft. A key image stores the text `KEY`. ETDRS radii are 0.5, 1.5 and 3 mm, and a boundary belongs to the outer side. The spokes are exact axis offsets. The SR content tree remains F-094.
 
 ## React binding
 

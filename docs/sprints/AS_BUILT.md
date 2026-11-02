@@ -4188,3 +4188,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/geometry.md`, `docs/lld/public-api.md` and their rows in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19c36-6418-7503-899e-c13137c7c488`. `livewire.rs` sha256 at the clean pass is `55db7c7b0a68dbe82baf6aa3deb5b964520375ae80efb8e12b710f7a85b04fb8`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-078, arrow label key image and ETDRS marks, completed 2026-11-02
+
+**What was built.** `arrowMark`, `labelMark`, `keyImageMark`, `etdrsRegion` and `etdrsMarks` in `packages/core`. Each constructor returns an F-071 display-list mark. The arrow head is at most 12 pixels and at most a quarter of the shaft. A label needs non-blank text. A key image stores the text `KEY` and does not toggle. ETDRS radii are 0.5, 1.5 and 3 mm. A boundary belongs to the outer side. The spokes are exact axis offsets. The drawing layer is unchanged. The marks are not an SR content tree.
+
+**HLD sections implemented.** Decision D13 keeps the SR content tree as the annotation type and F-094 owns it. `docs/hld/B-parity-surface.md` counts annotation classes and does not define these marks. The geometry is the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Nine tests in `packages/core/src/marks.test.ts`. Eight are the acceptance rows. The ninth locks the refusal order. One test syncs an arrow through the existing layer and reads the polyline.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-078-design.md`. No DICOM section. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The marks do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19c4c-e6d5-7c90-93d0-f9017aa61977`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks on the export inventory. Reviewer `01a19c5b-4dc1-7a11-82a9-e933d3221180`. `marks.ts` sha256 at the clean pass is `56f6b0b764cec0b49d5cc046921e60a20d02b8a9219fca3d1ce445d2d8407514`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

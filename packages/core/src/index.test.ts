@@ -146,6 +146,13 @@ const PUBLISHED: readonly string[] = [
   // ./annotation.js, F-071
   "ANNOTATION_REFUSALS",
   "createAnnotationLayer",
+  // ./marks.js, F-078
+  "MARK_REFUSALS",
+  "arrowMark",
+  "etdrsMarks",
+  "etdrsRegion",
+  "keyImageMark",
+  "labelMark",
   // ./snapshot.js, F-050
   "SNAPSHOT_ERROR",
   "SNAPSHOT_MAGIC",
