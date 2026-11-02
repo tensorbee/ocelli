@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -173,6 +173,16 @@ F-072 emits the shell tool events from a wrapper around the F-068 registry and w
 `createCursorController` reads the group it was given. The active tool that owns primary supplies both the idle cursor and the dragging cursor. Primary counts in any binding slot, and a modifier does not remove it. That remains true when the cursor string is `default`. If nobody owns primary, the first active tool in registration order supplies both phases, including when that cursor is `default`. No active tool, and an unknown group, use `default`. `sync` writes `style.cursor` on every call.
 
 The local cursors are Pan `grab` and `grabbing`, Zoom `zoom-in`, Rotate and SetWindow `crosshair`, Scroll `ns-resize`, and Fit, FlipHorizontal, FlipVertical, ApplyPreset, SetInvert and SetColormap `default`. An override replaces one command for that controller. It does not change the shared table. This module does not listen and does not import the pointer dispatcher.
+
+## Annotation drawing
+
+F-071 draws a caller-supplied display list into one SVG element from `packages/core/src/annotation.ts`. `createAnnotationLayer` binds that element and one listener. The list is canvas-pixel marks. It is not the SR content tree. F-094 owns that type. Points are not projected here.
+
+`sync` validates the whole list before it writes. A refusal leaves the previous children in place and emits nothing. The refusals are `bad-mark`, `blank-id`, `non-finite` and `duplicate-id`. The first failing mark in list order wins. One mark is checked as structure, then a blank id, then a non-finite coordinate, then a duplicate of an earlier id. A list that is not an array is `bad-mark`. An element with no owner document is `bad-mark`. A blank id is `trim().length === 0`. A stored id is not trimmed.
+
+On success the layer replaces the element's children, stores a copy of the list, and then emits. Removals come first, in the previous order. Each next mark follows. A new id emits `annotation.added`, and `annotation.completed` after that when the new mark is completed. The initial visible, locked and selected flags do not emit change events. An id that remains emits `annotation.modified` when points or text differ, then `annotation.completed` only when completed goes from false to true, then `annotation.visibilityChanged`, `annotation.locked` and `annotation.selectionChanged`, and only for the flags that differ. `annotation.rendered` is last. Its ids are the accepted list in order. An identical list still rewrites the SVG and emits only `annotation.rendered`. A throw from the listener is not caught and does not roll the write back.
+
+Each mark is one `g`. `data-ocelli-id` is the id. `data-selected` and `data-locked` are `true` or `false`. A hidden mark stays in the SVG with `display` `none`. A visible mark does not set `display`. A non-empty point list is one `polyline`. The `points` attribute is `x,y` pairs separated by one space, using `String` on each finite number. Comparison is `===`. A non-null text is one `text` element at the last point. Null text adds no text element. This module does not listen.
 
 ## React binding
 
