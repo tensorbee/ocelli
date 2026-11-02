@@ -9,7 +9,7 @@
 
 HLD `docs/hld/B-parity-surface.md` Appendix B counts about 63 tool classes, of which 26 are annotation. It does not define a probe, a rectangle, an ellipse or a circle.
 
-`Volume::sample_world` already returns the level-0 sample at a patient point. An index that is not finite, or a corner that has not landed, is `PlaneSample::Absent`. It is not stored zero. `spacing[0]` divides the column cosine and `spacing[1]` divides the row cosine.
+`Volume::sample_world` already returns the level-0 sample at a patient point. An index that is not finite, or a corner that has not landed, is `PlaneSample::Absent`. It is not stored zero. `spacing[0]` divides the row cosine and `spacing[1]` divides the column cosine.
 
 The ROI statistics engine is F-075. Mean, standard deviation, area statistics, SUV and the histogram are not this story.
 

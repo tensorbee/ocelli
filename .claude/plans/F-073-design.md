@@ -19,7 +19,7 @@ HLD `docs/hld/03-architecture-and-crates.md` names `ocelli-geom` and does not gi
 
 `distance` is the Euclidean length of two finite points. Identical points are 0. A non-finite point or a non-finite result is `GeomError::Frame`.
 
-`polyline_length` sums segment lengths in order. Fewer than two points returns 0 from that function. This story does not change that function.
+`polyline_length` sums segment lengths in order. One finite point is 0. A non-finite coordinate is `Frame`. This story does not change that function.
 
 `angle_at(arm_start, vertex, arm_end)` is the unsigned angle at `vertex`, in radians, in `0..=PI`. A zero-length arm is `GeomError::Degenerate`. The value is `atan2` of the cross-product length and the dot product.
 
@@ -27,7 +27,7 @@ HLD `docs/hld/03-architecture-and-crates.md` names `ocelli-geom` and does not gi
 
 The HLD does not define these five tools. The decisions below are local. They are not a formula the HLD forgot to write, and they are not a transcription of another viewer's source.
 
-- `length` of two or more points is `polyline_length`. Fewer than two points is `Degenerate`, checked before that call, because `polyline_length` of one point is 0 and a one-point length is not a measurement.
+- `length` of two or more points is `polyline_length`. Fewer than two points is `Degenerate`, checked before that call. One finite point is 0 from `polyline_length`. One non-finite point is `Frame` from `polyline_length` and `Degenerate` from `length`.
 - `height` is the absolute difference of the caller-space `z` coordinates. The function does not choose an image axis and does not convert spaces. A non-finite point is `Frame`.
 - The angle tool is the existing `angle_at` on exactly three points, vertex in the middle, in radians. A second function named `angle` would only call `angle_at`, and a wrapper that only forwards is refused. A zero-length arm is `Degenerate`.
 - `cobb` is the acute angle between two undirected segments, four points, in radians, in `0..=PI/2`. A zero-length segment is `Degenerate`. The value uses `atan2` of the absolute cross length and the absolute dot, so reversing either segment does not change it.
