@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -213,6 +213,14 @@ F-083 adds `threshold_roi` in `ocelli-seg`. A sample inside a rectangle or a cir
 F-085 adds `edit_labelmap_with_contour` in `ocelli-seg`. A sample at an integer column and row is inside when it lies on a closed edge or when a ray toward increasing `x` crosses an odd number of edges. The ring closes from the last point to the first. A horizontal edge does not count. A non-finite vertex or a non-finite intersection writes nothing. Fewer than three points writes nothing. `present_contour` and the representation enum are unchanged. There is no TypeScript copy.
 
 F-086 adds `interpolate_labelmap` in `ocelli-seg`. A slice is a key when any sample equals the caller segment. Only slices strictly between consecutive keys are written. A nearer slice takes that end's mask. The exact halfway slice takes the union. Endpoint keys stay. Fewer than two keys writes nothing. An empty stack, a zero side, a bad length or mismatched slices write nothing. `present_labelmap` is unchanged. There is no TypeScript copy.
+
+F-087 adds `windowDrag`, `windowRegion`, `stackDrag` and `MANIPULATION_TOOLS` in `packages/core`. A window drag adds the horizontal pixel delta divided by 256 to the centre, and the upward pixel delta divided by 256 to the width. A width that is not greater than 0 is refused. The caller basis is not written. A region window uses the mid-span of the caller samples, and a span of 0 is refused. A stack step truncates the upward delta divided by 256 toward zero, and a step of 0 is refused. Pan and zoom stay the F-069 expressions. The five names bind to Pan, Zoom, SetWindow, SetWindow and Scroll. These functions do not pack a command and do not apply a VOI LUT.
+
+F-088 adds `crosshairLines`, `referenceLines` and `referenceCursor` in `packages/core`. The horizontal segment spans the viewport width at the projected y. The vertical segment spans the viewport height at the projected x. The edges are inside. A point outside, a non-finite coordinate, or a non-positive side returns nothing. `referenceLines` is `crosshairLines`. The functions do not project and do not read a frame of reference.
+
+F-090 adds `rotationDrag`, `orientationQuadrant` and `ROTATION_TOOLS` in `packages/core`. The drag is the F-069 delta. It adds the horizontal pixel delta divided by 256 to the caller radians. TrackballRotate, VolumeRotate and PlanarRotate bind to Rotate. The quadrant truncates the angle divided by a quarter turn toward zero, then wraps into 0, 1, 2 or 3. A negative quarter turn is 3. OrientationController is that function and is not a registry tool. The module does not write a camera.
+
+F-091 adds `magnifyCircle`, `scaleLength` and `orientationMarker` in `packages/core`. A null scale is stored as 1. An advanced scale is finite and greater than 1. A radius that is not greater than 0 is refused. A non-finite centre is refused. The scale overlay is the product of the caller millimetres and the caller pixels per millimetre. A pixels-per-millimetre that is not greater than 0 is refused. Quadrant 0 keeps the four letters. Each later quadrant moves the first letter to the end. Quadrant 4 is refused and does not wrap. The annotation layer is unchanged. These functions do not read pixels.
 
 ## React binding
 

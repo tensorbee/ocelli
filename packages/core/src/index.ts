@@ -196,6 +196,17 @@ export type {
 } from "./pointer.js";
 
 export {
+  MANIPULATION_TOOLS,
+  stackDrag,
+  windowDrag,
+  windowRegion,
+} from "./manipulation.js";
+
+export { ROTATION_TOOLS, orientationQuadrant, rotationDrag } from "./orientation.js";
+
+export { magnifyCircle, orientationMarker, scaleLength } from "./magnify.js";
+
+export {
   COMMAND_CURSORS,
   CURSOR_PHASES,
   createCursorController,
@@ -220,6 +231,9 @@ export type {
   AnnotationRefusal,
   AnnotationSyncResult,
 } from "./annotation.js";
+
+export { crosshairLines, referenceCursor, referenceLines } from "./crosshair.js";
+export type { Segment } from "./crosshair.js";
 
 export {
   MARK_REFUSALS,

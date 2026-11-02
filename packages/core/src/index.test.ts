@@ -138,6 +138,19 @@ const PUBLISHED: readonly string[] = [
   // ./pointer.js, F-069
   "DISPATCH_REASONS",
   "createPointerDispatch",
+  // ./manipulation.js, F-087
+  "MANIPULATION_TOOLS",
+  "stackDrag",
+  "windowDrag",
+  "windowRegion",
+  // ./orientation.js, F-090
+  "ROTATION_TOOLS",
+  "orientationQuadrant",
+  "rotationDrag",
+  // ./magnify.js, F-091
+  "magnifyCircle",
+  "orientationMarker",
+  "scaleLength",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",
@@ -146,6 +159,10 @@ const PUBLISHED: readonly string[] = [
   // ./annotation.js, F-071
   "ANNOTATION_REFUSALS",
   "createAnnotationLayer",
+  // ./crosshair.js, F-088
+  "crosshairLines",
+  "referenceCursor",
+  "referenceLines",
   // ./marks.js, F-078
   "MARK_REFUSALS",
   "arrowMark",
