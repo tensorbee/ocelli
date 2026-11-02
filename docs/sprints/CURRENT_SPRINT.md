@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-075 | E12.3 | ROI statistics engine: mean, SD, min, max, area, SUV, histogram | Rust+TS | 4w | pending |
+| F-075 | E12.3 | ROI statistics engine: mean, SD, min, max, area, SUV, histogram | Rust+TS | 4w | done |
 | F-077 | E12.5 | LivewireContour and LivewireContourSegmentation | Rust+TS | 5w | pending |
 | F-078 | E12.6 | ArrowAnnotate, Label, KeyImage, ETDRSGrid | Rust+TS | 3w | pending |
 | F-079 | E12.7 | UltrasoundDirectional, VideoRedaction | Rust+TS | 3w | pending |

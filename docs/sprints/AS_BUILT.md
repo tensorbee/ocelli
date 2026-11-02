@@ -4156,3 +4156,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/geometry.md`, `docs/lld/public-api.md` and their rows in `docs/lld/README.md`.
 **Deviations from the design plan.** The feature commit also names `docs/lld/geometry.md` in the plan's LLD impact. The design commit was not amended.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. `measure.rs` sha256 at the clean pass is `d111418fc11027fea712520cd542625cc45415c41827599856d5279e573c240a`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-075, ROI statistics, completed 2026-11-02
+
+**What was built.** `roi_statistics`, `histogram` and `suv_bw` in `ocelli-geom`. An empty sample list is `Degenerate`. The mean and the population standard deviation both divide by the count. One sample has standard deviation 0. The area is the caller's number. A histogram value on an interior edge belongs to the higher bin. Equal samples land in bin 0. SUV is not the modality LUT. Units other than BQML, or a missing positive weight, dose or half-life, is unavailable. There is no default weight.
+
+**HLD sections implemented.** `docs/hld/15-lut-chain.md` says SUV is a separate path and must not be folded into the modality LUT. `docs/hld/05-rendering.md` and `docs/hld/26-differentiating-capabilities.md` name a later histogram compute kernel and do not give these formulas. The formulas are the approved local plan. The SUV arithmetic follows the project skill and is not a PS3.3 equation.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-geom`, `docs/lld/geometry.md`, `docs/lld/public-api.md` and the contributor rows in `docs/lld/README.md`.
+**Tests added.** Ten acceptance tests in `crates/ocelli-geom/tests/stats.rs`.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-075-design.md`. No DICOM section. No pixel arithmetic. The SUV numbers follow that plan.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/geometry.md`, `docs/lld/public-api.md` and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. `stats.rs` sha256 at the clean pass is `9dc27599585ad24486907e13860af263e031c42be847896651d96adceb156761`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

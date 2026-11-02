@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- `ocelli-geom` summarises caller samples as a mean, a population standard deviation, a minimum, a maximum and the caller's area. An empty list is not a mean of 0. A histogram uses the caller's bins. SUV is a separate path and is unavailable when the units are not BQML or a required magnitude is missing. There is no default weight.
 - `ocelli-geom` measures a polygon area and one point on a uniform Catmull-Rom spline. The area closes the ring. The spline passes through the knots. Freehand length remains the existing length. The functions do not convert spaces and do not compute region statistics.
 - `ocelli-geom` measures a rectangle, an ellipse and a circle from caller points. A rectangle ignores `z`. A zero ellipse radius is not an area. A circle uses the Euclidean radius. The probe remains the existing volume sample. The functions do not convert spaces and do not compute region statistics.
 - `ocelli-geom` measures a named length, a caller-space height, an acute Cobb angle and a bidirectional pair. Fewer than two points is not a length. The angle tool remains the existing unsigned angle. The functions do not convert spaces.
