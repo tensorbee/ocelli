@@ -10,6 +10,10 @@
 //! A rectangle uses absolute `x` and `y` only. An ellipse area is `PI`
 //! times the absolute radii, and a zero radius is degenerate. A circle
 //! radius is the Euclidean distance, and identical points are degenerate.
+//! F-076 rules are the local decisions in `.claude/plans/F-076-design.md`.
+//! A polygon area is half the absolute shoelace sum, and the function
+//! closes the ring. Fewer than three points is degenerate. A spline point
+//! uses the uniform Catmull-Rom basis. `t` outside `0..=1` is degenerate.
 //! Points stay in the space the caller already chose. This module does not
 //! convert a canvas point into a world point.
 
@@ -503,4 +507,113 @@ pub fn circle<S>(centre: Pt<S>, rim: Pt<S>) -> Result<Circle, GeomError> {
     } else {
         Err(GeomError::Frame)
     }
+}
+
+/// Absolute shoelace area in the caller plane. The ring is closed here.
+///
+/// Fewer than three points is degenerate. `z` is not a factor.
+///
+/// # Errors
+///
+/// [`GeomError::Degenerate`] when `points` has fewer than three elements.
+/// [`GeomError::Frame`] when a point or the running sum is non-finite.
+pub fn polygon_area<S>(points: &[Pt<S>]) -> Result<f64, GeomError> {
+    if points.len() < 3 {
+        return Err(GeomError::Degenerate);
+    }
+    for point in points {
+        finite_point(*point)?;
+    }
+    let mut sum = 0.0;
+    for index in 0..points.len() {
+        let Some(current) = points.get(index).copied() else {
+            continue;
+        };
+        let next_index = if index + 1 == points.len() {
+            0
+        } else {
+            let Some(index) = index.checked_add(1) else {
+                return Err(GeomError::Frame);
+            };
+            index
+        };
+        let Some(next) = points.get(next_index).copied() else {
+            continue;
+        };
+        let cross = current.x * next.y - next.x * current.y;
+        if !cross.is_finite() {
+            return Err(GeomError::Frame);
+        }
+        sum += cross;
+        if !sum.is_finite() {
+            return Err(GeomError::Frame);
+        }
+    }
+    let area = sum.abs() * 0.5;
+    if area.is_finite() {
+        Ok(area)
+    } else {
+        Err(GeomError::Frame)
+    }
+}
+
+/// One point on a uniform Catmull-Rom segment.
+///
+/// The curve passes through the input points. Segment 0 repeats the first
+/// point as the previous ghost. The last segment repeats the last point as
+/// the next ghost. `t` is in `0..=1`.
+///
+/// # Errors
+///
+/// [`GeomError::Degenerate`] when `t` is outside `0..=1`, or when `segment`
+/// has no following point.
+/// [`GeomError::Frame`] when a used point or the result is non-finite.
+pub fn spline_point<S>(points: &[Pt<S>], segment: usize, t: f64) -> Result<Pt<S>, GeomError> {
+    if !(0.0..=1.0).contains(&t) {
+        return Err(GeomError::Degenerate);
+    }
+    let Some(next_index) = segment.checked_add(1) else {
+        return Err(GeomError::Degenerate);
+    };
+    let Some(start) = points.get(segment).copied() else {
+        return Err(GeomError::Degenerate);
+    };
+    let Some(end) = points.get(next_index).copied() else {
+        return Err(GeomError::Degenerate);
+    };
+    let previous = if segment == 0 {
+        start
+    } else {
+        let Some(point) = segment
+            .checked_sub(1)
+            .and_then(|index| points.get(index))
+            .copied()
+        else {
+            return Err(GeomError::Degenerate);
+        };
+        point
+    };
+    let following = match next_index.checked_add(1) {
+        Some(index) => points.get(index).copied().unwrap_or(end),
+        None => end,
+    };
+    finite_point(previous)?;
+    finite_point(start)?;
+    finite_point(end)?;
+    finite_point(following)?;
+    let pm = DVec3::new(previous.x, previous.y, previous.z);
+    let p0 = DVec3::new(start.x, start.y, start.z);
+    let p1 = DVec3::new(end.x, end.y, end.z);
+    let pn = DVec3::new(following.x, following.y, following.z);
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let combined = p0 * 2.0
+        + (p1 - pm) * t
+        + (pm * 2.0 - p0 * 5.0 + p1 * 4.0 - pn) * t2
+        + (p0 * 3.0 - pm - p1 * 3.0 + pn) * t3;
+    let q = combined * 0.5;
+    if !q.x.is_finite() || !q.y.is_finite() || !q.z.is_finite() {
+        return Err(GeomError::Frame);
+    }
+    Ok(Pt::new(q.x, q.y, q.z))
 }

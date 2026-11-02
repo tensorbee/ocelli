@@ -1,12 +1,13 @@
 # Geometry
 
-**F-IDs that contributed:** F-070, F-073, F-074
+**F-IDs that contributed:** F-070, F-073, F-074, F-076
 **Last updated:** 2026-11-02
 
 Hit-testing, projection and measurement in `ocelli-geom`. The HLD names the
 crate and does not give the formulas. The rules below are the local
-decisions in `.claude/plans/F-070-design.md` and
-`.claude/plans/F-073-design.md`.
+decisions in `.claude/plans/F-070-design.md`,
+`.claude/plans/F-073-design.md`, `.claude/plans/F-074-design.md` and
+`.claude/plans/F-076-design.md`.
 
 The functions take `Pt<S>`. They do not convert spaces. A canvas point is
 measured in canvas units and a world point in millimetres. The caller
@@ -82,6 +83,20 @@ distance. `area` is `PI * radius * radius`. Identical points are
 A probe is `Volume::sample_world` in `ocelli-volume`. This crate does not
 add a second sampler. Mean, standard deviation, SUV and the histogram are
 not these functions.
+
+## Polygon and spline
+
+`polygon_area` is half the absolute shoelace sum on `x` and `y`. The
+function closes the ring. Fewer than three points is `Degenerate`. A
+non-finite point or a non-finite sum is `Frame`. `z` is not a factor.
+
+`spline_point` evaluates one uniform Catmull-Rom segment. The curve passes
+through the knots. End ghosts repeat the first and last points. `t` outside
+`0..=1`, including a non-finite `t`, is `Degenerate`. A segment with no
+following point is `Degenerate`. A non-finite used point or a non-finite
+result is `Frame`.
+
+Freehand length remains `length`. There is no second length function.
 
 ## Segment
 

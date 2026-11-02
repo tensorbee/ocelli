@@ -132,7 +132,7 @@ none
 
 ## LLD impact
 
-`docs/lld/public-api.md` gains `polygon_area` and `spline_point` when the story is completed.
+`docs/lld/geometry.md` and `docs/lld/public-api.md` gain `polygon_area` and `spline_point` when the story is completed. Freehand length remains `length`.
 
 ## Open questions
 

@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-076
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -189,6 +189,8 @@ Each mark is one `g`. `data-ocelli-id` is the id. `data-selected` and `data-lock
 F-073 adds `length`, `height`, `cobb` and `bidirectional` in `ocelli-geom`. The angle tool is the existing `angle_at`. `length` of fewer than two points is `Degenerate`. One finite point still has `polyline_length` 0. One non-finite point is `Frame` from `polyline_length` and `Degenerate` from `length`. Height is the absolute caller-space `z` difference, not the Euclidean length. Cobb is `atan2` of the cross-product length and the absolute dot, in radians, in `0..=PI/2`. Bidirectional keeps the longer distance as `length` and the shorter as `width`. Identical endpoints stay 0. The functions take `Pt` and do not convert spaces. `packages/core/src/tools.ts` does not compute them.
 
 F-074 adds `rectangle`, `ellipse` and `circle` in `ocelli-geom`. A rectangle is the absolute `x` and `y` differences and their product. `z` is not a factor. An ellipse area is `PI` times the absolute radii. A zero radius is `Degenerate`. A circle radius is the Euclidean distance and the area is `PI * radius * radius`. Identical points are `Degenerate`. The probe remains `Volume::sample_world`. Drag is the caller repeating that point. These functions do not compute a mean, a standard deviation, an SUV or a histogram.
+
+F-076 adds `polygon_area` and `spline_point` in `ocelli-geom`. The area is half the absolute shoelace sum on `x` and `y`, and the function closes the ring. Fewer than three points is `Degenerate`. The spline is uniform Catmull-Rom and passes through the knots. `t` outside `0..=1` is `Degenerate`. Freehand length remains `length`. These functions do not compute region statistics.
 
 ## React binding
 

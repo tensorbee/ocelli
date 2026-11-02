@@ -4140,3 +4140,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/geometry.md`, `docs/lld/public-api.md` and their rows in `docs/lld/README.md`.
 **Deviations from the design plan.** The feature commit also names `docs/lld/geometry.md` in the plan's LLD impact. The design commit was not amended.
 **Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. The defect was an ellipse test of two negative radii that stayed green without `abs`. `measure.rs` sha256 at the clean pass is `9c0be8d45fee8291914590f7ebb2296a499d3213f572613bde01df7f7a1eac52`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-076, polygon area and spline point, completed 2026-11-02
+
+**What was built.** `polygon_area` and `spline_point` in `ocelli-geom`. The area is half the absolute shoelace sum on `x` and `y`, and the function closes the ring. Fewer than three points is `Degenerate`. The spline is one uniform Catmull-Rom segment and it passes through the knots. End ghosts repeat the first and last points. `t` outside `0..=1` is `Degenerate`. Freehand length remains `length`. This story does not compute region statistics.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts the tool classes and does not define the polygon or the spline. `docs/hld/03-architecture-and-crates.md` names `ocelli-geom` and does not give the formulas. The formulas are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-geom`, `docs/lld/geometry.md` and `docs/lld/public-api.md`.
+**Tests added.** Five acceptance tests in `crates/ocelli-geom/tests/measure.rs`.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-076-design.md`. No DICOM section. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/geometry.md`, `docs/lld/public-api.md` and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The feature commit also names `docs/lld/geometry.md` in the plan's LLD impact. The design commit was not amended.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. `measure.rs` sha256 at the clean pass is `d111418fc11027fea712520cd542625cc45415c41827599856d5279e573c240a`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

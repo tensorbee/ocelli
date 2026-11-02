@@ -1,5 +1,6 @@
 //! Hand-computed fixtures for the local rules in `.claude/plans/F-070-design.md`,
-//! `.claude/plans/F-073-design.md` and `.claude/plans/F-074-design.md`.
+//! `.claude/plans/F-073-design.md`, `.claude/plans/F-074-design.md` and
+//! `.claude/plans/F-076-design.md`.
 //!
 //! The F-070 numbers are the Euclidean results of that plan. The F-073
 //! numbers are that plan's own rules. One finite point is degenerate for
@@ -11,7 +12,8 @@
 use ocelli_core::{Canvas, Pt, World};
 use ocelli_geom::{
     GeomError, angle_at, bidirectional, circle, cobb, distance, ellipse, height, hit_segment,
-    length, polyline_length, project_onto_plane, project_onto_segment, rectangle,
+    length, polygon_area, polyline_length, project_onto_plane, project_onto_segment, rectangle,
+    spline_point,
 };
 
 fn world(x: f64, y: f64, z: f64) -> Pt<World> {
@@ -402,5 +404,103 @@ fn circle_radius_is_the_euclidean_length() {
     assert_eq!(
         circle(world(f64::NAN, 0.0, 0.0), world(1.0, 0.0, 0.0)),
         Err(GeomError::Frame)
+    );
+}
+
+// F-076 fixtures from `.claude/plans/F-076-design.md`.
+// Unit square cross terms are 0 + 1 + 1 + 0 = 2, and half of that is 1.
+// The same square shifted to (1, 1) still has area 1, and dropping the
+// closing edge leaves 1.5. Spline points (0, 0, 0), (1, 0, 0), (2, 1, 0),
+// segment 0, t = 0.5. Previous ghost is the first point and the next point
+// is the third. The basis sum is (0.875, -0.125, 0), and half of that is
+// (0.4375, -0.0625, 0). A polyline midpoint would be (0.5, 0, 0).
+
+#[test]
+fn the_unit_square_has_area_one() {
+    let square = [
+        world(0.0, 0.0, 0.0),
+        world(1.0, 0.0, 0.0),
+        world(1.0, 1.0, 0.0),
+        world(0.0, 1.0, 0.0),
+    ];
+    assert_eq!(polygon_area(&square).map(bits), Ok(bits(1.0)));
+    let reversed = [
+        world(0.0, 0.0, 0.0),
+        world(0.0, 1.0, 0.0),
+        world(1.0, 1.0, 0.0),
+        world(1.0, 0.0, 0.0),
+    ];
+    assert_eq!(polygon_area(&reversed).map(bits), Ok(bits(1.0)));
+    let shifted = [
+        world(1.0, 1.0, 9.0),
+        world(2.0, 1.0, 9.0),
+        world(2.0, 2.0, 9.0),
+        world(1.0, 2.0, 9.0),
+    ];
+    assert_eq!(polygon_area(&shifted).map(bits), Ok(bits(1.0)));
+    assert_eq!(
+        polygon_area(&[
+            world(0.0, 0.0, 0.0),
+            world(1.0, 0.0, 0.0),
+            world(f64::NAN, 1.0, 0.0)
+        ]),
+        Err(GeomError::Frame)
+    );
+}
+
+#[test]
+fn two_points_have_no_area() {
+    assert_eq!(
+        polygon_area(&[world(0.0, 0.0, 0.0), world(1.0, 0.0, 0.0)]),
+        Err(GeomError::Degenerate)
+    );
+    assert_eq!(polygon_area::<World>(&[]), Err(GeomError::Degenerate));
+}
+
+#[test]
+fn the_first_spline_midpoint_is_hand_computed() {
+    let points = [
+        world(0.0, 0.0, 0.0),
+        world(1.0, 0.0, 0.0),
+        world(2.0, 1.0, 0.0),
+    ];
+    let got = spline_point(&points, 0, 0.5);
+    assert_eq!(
+        got.map(|point| (bits(point.x), bits(point.y), bits(point.z))),
+        Ok((bits(0.4375), bits(-0.0625), bits(0.0)))
+    );
+}
+
+#[test]
+fn the_spline_passes_through_the_knots() {
+    let points = [
+        world(0.0, 0.0, 0.0),
+        world(1.0, 0.0, 0.0),
+        world(2.0, 1.0, 0.0),
+    ];
+    let start = spline_point(&points, 0, 0.0);
+    assert_eq!(
+        start.map(|point| (bits(point.x), bits(point.y), bits(point.z))),
+        Ok((bits(0.0), bits(0.0), bits(0.0)))
+    );
+    let end = spline_point(&points, 0, 1.0);
+    assert_eq!(
+        end.map(|point| (bits(point.x), bits(point.y), bits(point.z))),
+        Ok((bits(1.0), bits(0.0), bits(0.0)))
+    );
+}
+
+#[test]
+fn a_parameter_outside_the_segment_is_degenerate() {
+    let points = [
+        world(0.0, 0.0, 0.0),
+        world(1.0, 0.0, 0.0),
+        world(2.0, 1.0, 0.0),
+    ];
+    assert_eq!(spline_point(&points, 0, 1.5), Err(GeomError::Degenerate));
+    assert_eq!(spline_point(&points, 2, 0.5), Err(GeomError::Degenerate));
+    assert_eq!(
+        spline_point(&points, 0, f64::NAN),
+        Err(GeomError::Degenerate)
     );
 }
