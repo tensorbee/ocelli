@@ -10,7 +10,7 @@
 | F-081 | E13.2 | Rectangle, Circle and Sphere scissors | Rust+TS | 4w | done |
 | F-082 | E13.3 | PaintFill and flood fill | Rust+TS | 3w | done |
 | F-083 | E13.4 | RectangleROI and CircleROI start-end threshold tools | Rust+TS | 4w | done |
-| F-085 | E13.6 | LabelmapEditWithContour | Rust+TS | 3w | pending |
+| F-085 | E13.6 | LabelmapEditWithContour | Rust+TS | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.

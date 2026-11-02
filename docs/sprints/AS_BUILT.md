@@ -4300,3 +4300,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19d6c-ad1a-76d3-8e5f-e307d479764c`. `threshold.rs` sha256 at the clean pass is `1dba6d6dd930ec14701cb66e16ca0eea3c9acab6ec1101ee745785904e988bf9`. `brush.rs` sha256 is `d6f4026fab1968339d901a646f479a279b948a6a31b584102ab8711759db447c`. The disk and the ball stay `is_le`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-085, labelmap edit with contour, completed 2026-11-02
+
+**What was built.** `edit_labelmap_with_contour` in `ocelli-seg`. It paints a caller segment on samples inside a closed index polygon, including the boundary. The ring closes from the last point to the first. A sample on an edge is inside. A sample off the edge is inside when a ray toward increasing `x` crosses an odd number of edges. A horizontal edge does not count. A zero-length edge contains only that point. A non-finite vertex or a non-finite intersection writes nothing. Fewer than three points writes nothing. `present_contour` and the representation enum are unchanged. There is no TypeScript copy.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts tool classes and does not define this edit. `docs/hld/03-architecture-and-crates.md` names `ocelli-seg` and does not give one. The even-odd rule plus the boundary is the approved local plan. It is not the F-064 contour. PS3.3 C.8.20.2 keeps segment 0 as background.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-seg`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Eight tests in `crates/ocelli-seg/tests/contour_edit.rs`. They are the acceptance rows. They lock the rectangle, the triangle, a short polygon and a short buffer, a non-finite vertex, an overflowing edge, a repeated closing point, a second edit, and the presenter.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-085-design.md`. PS3.3 C.8.20.2 is the background rule only. The even-odd rule is that plan. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The function does not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19d82-c55f-73e0-9eaa-5f4a8e4f9d1f`. `contour_edit.rs` sha256 at the clean pass is `39702b31160146da28cf5e4721d5b1b38eadc50f8416ce00fd1be68b841d9e72`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
