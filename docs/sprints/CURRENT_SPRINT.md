@@ -104,7 +104,7 @@ for the presenter.
   The circle and the sphere use the existing stamp. The rectangle uses
   inclusive index bounds on one slice.
 - **F-082** flood-fills the 4-connected region of the seed value, and
-  paint-fills every sample on that grid with the same value. The caller
+  paint-fills each sample that still holds that value. The caller
   chooses the written segment.
 - **F-083** paints a caller segment where a caller value buffer is between
   a start and an end, and only inside a rectangle or a circle.
