@@ -257,7 +257,7 @@ The 12 segmentation classes.
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-080 | E13.1 | S30 | Brush with sphere and circle brush geometry | Rust+TS | 4w | F-063 | pending |
+| F-080 | E13.1 | S30 | Brush with sphere and circle brush geometry | Rust+TS | 4w | F-063 | done |
 | F-081 | E13.2 | S31 | Rectangle, Circle and Sphere scissors | Rust+TS | 4w | F-080 | pending |
 | F-082 | E13.3 | S31 | PaintFill and flood fill | Rust+TS | 3w | F-080 | pending |
 | F-083 | E13.4 | S31 | RectangleROI and CircleROI start-end threshold tools | Rust+TS | 4w | F-080 | pending |
