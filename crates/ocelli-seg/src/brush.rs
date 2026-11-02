@@ -72,28 +72,7 @@ pub fn stamp_brush(grids: &mut [LabelGrid], brush: Brush) -> Result<BrushCoverag
     if strictly_negative(brush.radius) {
         return Err(BrushError::Degenerate);
     }
-    let Some(first) = grids.first() else {
-        return Err(BrushError::Degenerate);
-    };
-    let width = first.width;
-    let height = first.height;
-    if width == 0 || height == 0 {
-        return Err(BrushError::Degenerate);
-    }
-    let Some(width_usize) = usize::try_from(width).ok() else {
-        return Err(BrushError::Degenerate);
-    };
-    let Some(height_usize) = usize::try_from(height).ok() else {
-        return Err(BrushError::Degenerate);
-    };
-    let Some(pixels) = width_usize.checked_mul(height_usize) else {
-        return Err(BrushError::Degenerate);
-    };
-    for grid in grids.iter() {
-        if grid.width != width || grid.height != height || grid.indices.len() != pixels {
-            return Err(BrushError::Degenerate);
-        }
-    }
+    let (width, height) = require_stack(grids)?;
 
     let radius_sq = brush.radius * brush.radius;
     let mut staged = Vec::new();
@@ -144,21 +123,93 @@ pub fn stamp_brush(grids: &mut [LabelGrid], brush: Brush) -> Result<BrushCoverag
 }
 
 fn inside(brush: &Brush, x: u32, y: u32, z_f: f64, radius_sq: f64) -> bool {
-    let dx = f64::from(x) - brush.center_x;
-    let dy = f64::from(y) - brush.center_y;
-    let dz = match brush.shape {
-        BrushShape::Circle => 0.0,
-        BrushShape::Sphere => z_f - brush.center_z,
-    };
+    match brush.shape {
+        BrushShape::Circle => disk_contains(brush.center_x, brush.center_y, radius_sq, x, y),
+        BrushShape::Sphere => ball_contains(
+            brush.center_x,
+            brush.center_y,
+            brush.center_z,
+            radius_sq,
+            x,
+            y,
+            z_f,
+        ),
+    }
+}
+
+/// Squared index distance on `x` and `y` is within `radius_sq`.
+pub(crate) fn disk_contains(center_x: f64, center_y: f64, radius_sq: f64, x: u32, y: u32) -> bool {
+    let dx = f64::from(x) - center_x;
+    let dy = f64::from(y) - center_y;
+    let dist_sq = dx * dx + dy * dy;
+    dist_sq.total_cmp(&radius_sq).is_le()
+}
+
+/// Squared index distance on `x`, `y` and `z` is within `radius_sq`.
+pub(crate) fn ball_contains(
+    center_x: f64,
+    center_y: f64,
+    center_z: f64,
+    radius_sq: f64,
+    x: u32,
+    y: u32,
+    z_f: f64,
+) -> bool {
+    let dx = f64::from(x) - center_x;
+    let dy = f64::from(y) - center_y;
+    let dz = z_f - center_z;
     let dist_sq = dx * dx + dy * dy + dz * dz;
     dist_sq.total_cmp(&radius_sq).is_le()
 }
 
-fn strictly_negative(value: f64) -> bool {
+/// Empty stacks, a zero side, a bad length, or mismatched slices.
+pub(crate) fn require_stack(grids: &[LabelGrid]) -> Result<(u32, u32), BrushError> {
+    let Some(first) = grids.first() else {
+        return Err(BrushError::Degenerate);
+    };
+    let width = first.width;
+    let height = first.height;
+    if width == 0 || height == 0 {
+        return Err(BrushError::Degenerate);
+    }
+    let Some(width_usize) = usize::try_from(width).ok() else {
+        return Err(BrushError::Degenerate);
+    };
+    let Some(height_usize) = usize::try_from(height).ok() else {
+        return Err(BrushError::Degenerate);
+    };
+    let Some(pixels) = width_usize.checked_mul(height_usize) else {
+        return Err(BrushError::Degenerate);
+    };
+    for grid in grids {
+        if grid.width != width || grid.height != height || grid.indices.len() != pixels {
+            return Err(BrushError::Degenerate);
+        }
+    }
+    Ok((width, height))
+}
+
+/// `min` is above `max`, and the two are not the same number.
+pub(crate) fn span_inverted(min: f64, max: f64) -> bool {
+    if same_number(min, max) {
+        return false;
+    }
+    min.total_cmp(&max).is_gt()
+}
+
+/// `index` is inside the inclusive span. Both zero bit patterns match.
+pub(crate) fn index_in_span(index: u32, min: f64, max: f64) -> bool {
+    let value = f64::from(index);
+    let above = same_number(value, min) || value.total_cmp(&min).is_gt();
+    let below = same_number(value, max) || value.total_cmp(&max).is_lt();
+    above && below
+}
+
+pub(crate) fn strictly_negative(value: f64) -> bool {
     value.total_cmp(&0.0).is_lt() && value.to_bits() != NEGATIVE_ZERO_BITS
 }
 
-fn same_number(left: f64, right: f64) -> bool {
+pub(crate) fn same_number(left: f64, right: f64) -> bool {
     let left_bits = left.to_bits();
     let right_bits = right.to_bits();
     let left_zero = left_bits == 0 || left_bits == NEGATIVE_ZERO_BITS;

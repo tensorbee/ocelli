@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -203,6 +203,8 @@ F-079 adds `ultrasound_direction` and `redact_rect` in `ocelli-geom`. The angle 
 F-080 adds `stamp_brush` in `ocelli-seg`. A sample is inside when its squared index distance is less than or equal to the squared radius. A circle paints only the slice whose index equals `center_z`, and both zero bit patterns select slice 0. A sphere uses every slice. Radius 0 paints only an integer centre. A negative radius or a non-finite centre writes nothing. Segment 0 erases. `present_labelmap` is unchanged. There is no TypeScript copy.
 
 F-084 adds `segment_at`, `label_segment` and `segment_bidirectional` in `ocelli-seg`. An in-range read returns the stored number, including 0. An outside column, a zero side, or a short buffer is `Degenerate`. A label stores trimmed text and keeps an existing segment in place. Segment 0 is `Background`. Blank text is `Blank`. The longest run wins, and an equal length keeps the run found first. One sample is a run of length 1 on both axes. `bidirectional` in `ocelli-geom` is unchanged. There is no TypeScript copy.
+
+F-081 adds `cut_scissor` in `ocelli-seg`. It writes segment 0. A circle and a sphere call `stamp_brush`. A rectangle includes every index from its minimum through its maximum on the slice named by `z`, and both zero bit patterns select slice 0. An inverted span or a non-finite value writes nothing. `present_labelmap` is unchanged. There is no TypeScript copy.
 
 ## React binding
 
