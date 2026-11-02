@@ -249,7 +249,7 @@ The 26 annotation classes and the ROI statistics engine.
 | F-076 | E12.4 | S28 | PlanarFreehandROI, SplineROI and spline mathematics | Rust+TS | 5w | F-070 | done |
 | F-077 | E12.5 | S29 | LivewireContour and LivewireContourSegmentation | Rust+TS | 5w | F-076 | done |
 | F-078 | E12.6 | S29 | ArrowAnnotate, Label, KeyImage, ETDRSGrid | Rust+TS | 3w | F-071 | done |
-| F-079 | E12.7 | S29 | UltrasoundDirectional, VideoRedaction | Rust+TS | 3w | F-070 | pending |
+| F-079 | E12.7 | S29 | UltrasoundDirectional, VideoRedaction | Rust+TS | 3w | F-070 | done |
 
 ### M9, Segmentation tools
 

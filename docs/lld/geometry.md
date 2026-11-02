@@ -1,6 +1,6 @@
 # Geometry
 
-**F-IDs that contributed:** F-070, F-073, F-074, F-075, F-076, F-077
+**F-IDs that contributed:** F-070, F-073, F-074, F-075, F-076, F-077, F-079
 **Last updated:** 2026-11-02
 
 Hit-testing, projection and measurement in `ocelli-geom`. The HLD names the
@@ -8,8 +8,9 @@ crate and does not give the formulas. The rules below are the local
 decisions in `.claude/plans/F-070-design.md`,
 `.claude/plans/F-073-design.md`, `.claude/plans/F-074-design.md`,
 `.claude/plans/F-075-design.md`,
-`.claude/plans/F-076-design.md` and
-`.claude/plans/F-077-design.md`.
+`.claude/plans/F-076-design.md`,
+`.claude/plans/F-077-design.md` and
+`.claude/plans/F-079-design.md`.
 
 The functions take `Pt<S>`. They do not convert spaces. A canvas point is
 measured in canvas units and a world point in millimetres. The caller
@@ -132,6 +133,25 @@ interior. An empty path is `Degenerate` and no mask is returned.
 
 `polygon_area` and `spline_point` stay the F-076 functions. This path
 does not call them.
+
+## Ultrasound direction and redaction
+
+`ultrasound_direction` is the image-plane angle of two caller points.
+The angle is `atan2(dy, dx)`. Zero is positive `x`. `z` is not a factor.
+The length is the Euclidean length of the same span, so `z` is a factor.
+A zero-length span, including both signs of zero, is `Degenerate`. A
+non-finite point or result is `Frame`.
+
+`redact_rect` writes a caller fill into the intersection of a rectangle
+and a row-major buffer. The buffer length must equal `width * height`.
+A mismatch or a zero frame is `Degenerate` and the buffer is unchanged.
+A non-finite fill, or a non-finite sample in the intersection, is
+`Frame` and nothing is written. A zero side or a missed rectangle sets
+`applied` false. A sample that already equals the fill counts as
+`samples_already_fill`. Equality matches a negative zero with a positive
+zero. `applied` is true when the intersection is non-empty.
+
+`distance` stays the F-070 function.
 
 ## Segment
 

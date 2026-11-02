@@ -10,7 +10,7 @@
 | F-075 | E12.3 | ROI statistics engine: mean, SD, min, max, area, SUV, histogram | Rust+TS | 4w | done |
 | F-077 | E12.5 | LivewireContour and LivewireContourSegmentation | Rust+TS | 5w | done |
 | F-078 | E12.6 | ArrowAnnotate, Label, KeyImage, ETDRSGrid | Rust+TS | 3w | done |
-| F-079 | E12.7 | UltrasoundDirectional, VideoRedaction | Rust+TS | 3w | pending |
+| F-079 | E12.7 | UltrasoundDirectional, VideoRedaction | Rust+TS | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.

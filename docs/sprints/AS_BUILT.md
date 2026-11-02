@@ -4204,3 +4204,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19c4c-e6d5-7c90-93d0-f9017aa61977`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks on the export inventory. Reviewer `01a19c5b-4dc1-7a11-82a9-e933d3221180`. `marks.ts` sha256 at the clean pass is `56f6b0b764cec0b49d5cc046921e60a20d02b8a9219fca3d1ce445d2d8407514`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-079, ultrasound direction and video redaction, completed 2026-11-02
+
+**What was built.** `ultrasound_direction` and `redact_rect` in `ocelli-geom`. The angle is the image plane. The length is the Euclidean length of the same span, so `z` counts in the length and not in the angle. Identical points are `Degenerate`. A rectangular redaction writes a caller fill into the intersection of a row-major buffer. A missed rectangle sets `applied` false and leaves the buffer unchanged. A non-finite sample in the intersection writes nothing. `distance` is unchanged.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts utility classes and does not define these tools. The angle, the length and the miss report are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-geom`, `docs/lld/geometry.md`, `docs/lld/public-api.md` and the contributor rows in `docs/lld/README.md`.
+**Tests added.** Eleven tests in `crates/ocelli-geom/tests/redact.rs`. Six are the acceptance rows. Five lock a non-finite point, a non-finite fill, a zero side, a short buffer and a negative zero.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-079-design.md`. The squared length of `(0, 2, 9)` is `4 + 81`. No DICOM section. No pixel arithmetic on an image.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/geometry.md`, `docs/lld/public-api.md` and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The plan's example length of 2 was the `y` component. The length that includes `z` is the square root of `4 + 81`. The plan's second sample was not the row-major left column. The blocking `NaN` is the third sample. Both corrections are in the plan. The decisions are unchanged.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 1 nitpick. Reviewer `01a19c6b-b9a1-7b53-9816-da19229200c3`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks after rustfmt. Reviewer `01a19c79-0028-7351-9e17-92dfe39d93ea`. `redact.rs` sha256 at the clean pass is `75a8d4ab4a4fc656772cbe3030c627edad5304154c007474230ce44089fbf58f`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

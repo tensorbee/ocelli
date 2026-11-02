@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- `ocelli-geom` reports an image-plane ultrasound direction and the Euclidean length of the same span. `z` is in the length and not in the angle. A rectangular redaction writes a caller fill into the intersection of a row-major buffer. A missed rectangle sets applied false and leaves the buffer unchanged. A non-finite sample in the intersection writes nothing.
 - The shell can build an arrow, a label, a key image and an ETDRS grid as display-list marks. The arrow head is a quarter of the shaft, capped at 12 pixels. The grid uses radii of 0.5, 1.5 and 3 mm. The drawing layer is unchanged. The marks are not an SR content tree.
 - `ocelli-geom` finds a 4-connected livewire path on a caller-supplied cost grid and marks the pixels that path visits. The start pixel adds no cost. The mask does not fill an interior. An empty path is not a blank mask. Polygon area and the spline point stay the earlier functions.
 - `ocelli-geom` summarises caller samples as a mean, a population standard deviation, a minimum, a maximum and the caller's area. An empty list is not a mean of 0. A histogram uses the caller's bins. SUV is a separate path and is unavailable when the units are not BQML or a required magnitude is missing. There is no default weight.

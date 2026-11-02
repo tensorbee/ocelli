@@ -13,8 +13,11 @@
 //! and SUVbw in [`stats`]. Those numbers are not a second area and not the
 //! modality LUT. F-077 adds [`livewire_path`] and [`livewire_mask`]. The
 //! mask marks visited pixels and does not fill an interior.
-//! [`polygon_area`] stays the F-076 function. The HLD names the crate and
-//! does not give them. Camera transforms stay in `ocelli-viewport`.
+//! [`polygon_area`] stays the F-076 function. F-079 adds
+//! [`ultrasound_direction`] and [`redact_rect`]. The angle is the image
+//! plane and the length includes `z`. A missed rectangle sets `applied`
+//! false. [`distance`] stays the F-070 function. The HLD names the crate
+//! and does not give them. Camera transforms stay in `ocelli-viewport`.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -22,6 +25,7 @@ extern crate alloc;
 
 mod livewire;
 mod measure;
+mod redact;
 mod stats;
 
 pub use livewire::{livewire_mask, livewire_path};
@@ -30,6 +34,7 @@ pub use measure::{
     circle, cobb, distance, ellipse, height, hit_segment, length, polygon_area, polyline_length,
     project_onto_plane, project_onto_segment, rectangle, spline_point,
 };
+pub use redact::{Direction, Redaction, redact_rect, ultrasound_direction};
 pub use stats::{Histogram, RoiStats, SuvError, SuvInputs, histogram, roi_statistics, suv_bw};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which

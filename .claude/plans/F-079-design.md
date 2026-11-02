@@ -20,7 +20,7 @@ The HLD does not define these tools. The decisions below are local. They are not
 - `ultrasound_direction` is the image-plane direction of two caller points. It does not read an ultrasound DICOM tag and it does not convert spaces.
 - `radians` is `atan2(dy, dx)` through the same glam vector path F-070 uses. Zero is positive `x`. The range is the range of that `atan2`.
 - `length` is the Euclidean length of the same span. A zero-length span, including both signs of zero, is `Degenerate`. A non-finite point or a non-finite result is `Frame`.
-- A direction along positive `y`, from `(0, 0, 0)` to `(0, 2, 9)`, is `PI / 2` and length 2. `z` is included in the length and is not included in the angle. The angle is the image plane.
+- A direction along positive `y`, from `(0, 0, 0)` to `(0, 2, 9)`, is `PI / 2`. The span is `(0, 2, 9)`. `z` is included in the length and is not included in the angle, so the length is the square root of `4 + 81`. The angle is the image plane.
 - `redact_rect` writes a caller-supplied fill into the intersection of a rectangle and a row-major sample buffer. It does not read a video file.
 - The buffer length must equal `width * height`. A mismatch or a zero frame is `Degenerate`, and the buffer is unchanged.
 - A non-finite fill, or a non-finite sample inside the intersection, is `Frame`. The function scans the intersection before it writes, so a refusal leaves every sample unchanged.
@@ -33,7 +33,7 @@ The HLD does not define these tools. The decisions below are local. They are not
 
 A caller can measure a length and cannot ask which way an ultrasound mark points, or redact a rectangle while being told whether any sample changed.
 
-`ultrasound_direction` of `(0, 0, 0)` to `(0, 2, 9)` is `PI / 2` and length 2. Identical points are `Degenerate`.
+`ultrasound_direction` of `(0, 0, 0)` to `(0, 2, 9)` is `PI / 2` and the square root of `4 + 81`. Identical points are `Degenerate`.
 
 A 2 by 2 buffer `1, 2, 3, 4`, rectangle `x = 0`, `y = 0`, width 1, height 2, fill 0, becomes `0, 2, 0, 4` with `samples_written` 2 and `applied` true. The same call again reports `samples_written` 0, `samples_already_fill` 2 and `applied` true. A rectangle at `(5, 5)` reports `applied` false and leaves the buffer unchanged.
 
@@ -72,12 +72,12 @@ redact_rect(samples, width, height, x, y, rect_w, rect_h, fill) -> Result<Redact
 
 | Start | Input | Result | Preserved on refusal |
 |-------|-------|--------|----------------------|
-| none | `(0,0,0)` to `(0,2,9)` | `PI / 2` and length 2 | no stored state |
+| none | `(0,0,0)` to `(0,2,9)` | `PI / 2` and the square root of `4 + 81` | no stored state |
 | none | identical points | `Degenerate` | no stored state |
 | `1, 2, 3, 4` | the left column, fill 0 | `0, 2, 0, 4`, written 2 | the old buffer on `Frame` |
 | `0, 2, 0, 4` | the same rectangle | written 0, already 2, applied true | samples that were already 0 |
 | `0, 2, 0, 4` | rectangle `(5, 5)` | applied false | the whole buffer |
-| `1, NaN, 3, 4` | the left column | `Frame` | `NaN` still in place |
+| `1, 2, NaN, 4` | the left column | `Frame` | `NaN` still in place |
 
 ## Ownership, commit and recovery
 
@@ -87,7 +87,7 @@ The sample buffer is borrowed. The commit point is the return of `Ok` after the 
 
 | ID | Trigger and expected behavior | Test | Wrong implementation rejected | Stage |
 |----|-------------------------------|------|-------------------------------|-------|
-| AC1 | Positive `y` is `PI / 2` and length 2 | `positive_y_is_half_pi` | using `z` in the angle, or dropping it from the length | implementation |
+| AC1 | Positive `y` is `PI / 2` and the square root of `4 + 81` | `positive_y_is_half_pi` | using `z` in the angle, or dropping it from the length | implementation |
 | AC2 | Identical points are `Degenerate` | `a_zero_direction_is_degenerate` | returning angle 0 | implementation |
 | AC3 | The left column becomes 0 and the right column stays | `the_left_column_is_redacted` | filling the whole frame | implementation |
 | AC4 | A second pass reports already filled | `a_second_pass_says_the_pixels_were_unchanged` | reporting a write that did not happen | implementation |
@@ -96,7 +96,7 @@ The sample buffer is borrowed. The commit point is the return of `Ok` after the 
 
 ## Approach
 
-Add `redact.rs` and re-export it. The angle uses `DVec2::new(dx, dy).to_angle()`. The length uses the existing `span_length` shape, a `DVec3` length, so `z` counts in the length only. The redaction walks `y` then `x` in `u32` and checks the product with `u32` checked arithmetic before it indexes.
+Add `redact.rs` and re-export it. The angle uses `DVec2::new(dx, dy).to_angle()`. The length uses the existing `span_length` shape, a `DVec3` length, so `z` counts in the length only. The squared length of `(0, 2, 9)` is `4 + 81`. The redaction walks `y` then `x` in `u32` and checks the product with `u32` checked arithmetic before it indexes. A row-major left column holds the first and third samples, so the blocking `NaN` is `1, 2, NaN, 4`.
 
 Rejected: a TypeScript redaction, a default black fill that reports success on a miss, and a change to `distance`.
 
@@ -127,7 +127,7 @@ The functions do not open a device. A missed rectangle is reported. It is not a 
 | Category | What it proves | Where |
 |----------|----------------|-------|
 | unit | the acceptance rows above | `crates/ocelli-geom/tests/redact.rs` |
-| fixture | `PI / 2`, length 2, and the buffer `0, 2, 0, 4` | the same tests |
+| fixture | `PI / 2`, the square root of `4 + 81`, and the buffer `0, 2, 0, 4` | the same tests |
 
 ## Parity surface covered
 
