@@ -10,8 +10,9 @@
 //! longest runs. F-081 erases a rectangle, a circle or a sphere to
 //! background. F-082 flood-fills a connected region and paint-fills every
 //! copy of one value. F-083 paints a start-end span inside a rectangle or
-//! a circle. F-085 paints samples inside a closed index polygon. The
-//! presenter does not import wgpu.
+//! a circle. F-085 paints samples inside a closed index polygon. F-086
+//! writes each between-slice from the nearer key and the union at one
+//! half. The presenter does not import wgpu.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -21,6 +22,7 @@ mod brush;
 mod contour;
 mod contour_edit;
 mod fill;
+mod interpolate;
 mod labelmap;
 mod scissors;
 mod segment_tools;
@@ -35,6 +37,7 @@ pub use contour_edit::{
     ContourEditCoverage, ContourEditError, IndexPoint, edit_labelmap_with_contour,
 };
 pub use fill::{FillCoverage, FillError, flood_fill, paint_fill};
+pub use interpolate::{InterpolateCoverage, InterpolateError, interpolate_labelmap};
 pub use labelmap::{LabelColourLut, LabelGrid, LabelStyle, LabelmapError, Rgba8, present_labelmap};
 pub use scissors::{ScissorCoverage, ScissorError, ScissorShape, cut_scissor};
 pub use segment_tools::{
