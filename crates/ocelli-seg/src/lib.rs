@@ -7,7 +7,11 @@
 //! shows. F-067 cuts a contour by a patient Z plane and draws the labelmap
 //! edge as outline without fill. F-080 stamps a circle or a sphere into
 //! the label grid. F-084 reads a segment, stores a label and reports the
-//! longest runs. The presenter does not import wgpu.
+//! longest runs. F-081 erases a rectangle, a circle or a sphere to
+//! background. F-082 flood-fills a connected region and paint-fills every
+//! copy of one value. F-083 paints a start-end span inside a rectangle or
+//! a circle. F-085 paints samples inside a closed index polygon. The
+//! presenter does not import wgpu.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -15,20 +19,32 @@ extern crate alloc;
 
 mod brush;
 mod contour;
+mod contour_edit;
+mod fill;
 mod labelmap;
+mod scissors;
 mod segment_tools;
 mod surface;
+mod threshold;
 
 pub use brush::{Brush, BrushCoverage, BrushError, BrushShape, stamp_brush};
 pub use contour::{
     Contour, ContourError, ContourGeometricType, PlaneFrame, intersect_contour, present_contour,
 };
+pub use contour_edit::{
+    ContourEditCoverage, ContourEditError, IndexPoint, edit_labelmap_with_contour,
+};
+pub use fill::{FillCoverage, FillError, flood_fill, paint_fill};
 pub use labelmap::{LabelColourLut, LabelGrid, LabelStyle, LabelmapError, Rgba8, present_labelmap};
+pub use scissors::{ScissorCoverage, ScissorError, ScissorShape, cut_scissor};
 pub use segment_tools::{
     SegmentBidirectional, SegmentLabel, SegmentRun, SegmentToolError, label_segment, segment_at,
     segment_bidirectional,
 };
 pub use surface::{SurfaceError, SurfaceMesh, present_surface};
+pub use threshold::{
+    ThresholdCoverage, ThresholdError, ThresholdRoi, ThresholdShape, threshold_roi,
+};
 
 /// Which segmentation representation a viewport shows.
 ///

@@ -10,6 +10,10 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- `ocelli-seg` paints a caller segment on the samples inside a closed index polygon, including the boundary. The ring closes from the last point to the first. A non-finite vertex or a non-finite intersection writes nothing. The contour representation is unchanged.
+- `ocelli-seg` paints a caller segment where a caller value is inside a start and an end, and only inside a rectangle or a circle. The end is included. A value outside the shape is ignored, including a non-finite one. A non-finite value inside the shape writes nothing. The presenter is unchanged.
+- `ocelli-seg` flood-fills the 4-connected region of a seed value and paint-fills every sample with that value. A diagonal is not connected. Segment 0 is a legal fill. An outside seed writes nothing. The presenter is unchanged.
+- `ocelli-seg` erases to segment 0 inside a rectangle, a circle or a sphere. The circle and the sphere use the existing stamp. A rectangle includes its bounds on one slice. An inverted span or a non-finite value writes nothing. The presenter is unchanged.
 - `ocelli-seg` reads one segment number, stores a trimmed label for a segment above 0, and reports the longest horizontal and vertical runs. An equal length keeps the earlier run. Segment 0 is not a label and not a run. A short buffer is not background. The brush and the presenter are unchanged.
 - `ocelli-seg` stamps a circle or a sphere of segment numbers into a caller label grid. A sample on the radius is inside. A circle paints one slice. A sphere uses every slice. A negative radius or a non-finite centre writes nothing. Segment 0 erases. The labelmap presenter is unchanged.
 - `ocelli-geom` reports an image-plane ultrasound direction and the Euclidean length of the same span. `z` is in the length and not in the angle. A rectangular redaction writes a caller fill into the intersection of a row-major buffer. A missed rectangle sets applied false and leaves the buffer unchanged. A non-finite sample in the intersection writes nothing.
