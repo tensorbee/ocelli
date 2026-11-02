@@ -4427,3 +4427,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 1 nitpick. Reviewer `01a19e53-86b4-74e0-8ee7-8dad23ed16c7`. `crop.ts` sha256 at the clean pass is `4f145f47e977fb2ee0effbe785e94811fb899c802d50fb75e3b56fe13d133340`. A flipped drag sign went red and was restored. Pass 1 refused a finite overflow normal on the drag and that refusal was removed. Pass 2 found the plane square was not locked and one expect closed it. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-093, sculptor, annotation eraser and MIP jump, completed 2026-11-02
+
+**What was built.** `sculptVertex`, `eraseNearest` and `mipIndex` in `packages/core`. A polygon needs at least three points. The selected vertex moves by the raw pixel delta and the other points are copied. The caller list is not written. The nearest mark inside a positive radius is named. An equal distance keeps the earlier mark. The function does not delete the mark. The MIP index is the earlier maximum of the finite samples. One non-finite sample refuses the call. The module does not edit an annotation and it does not read a pixel.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts the tool classes and does not define these tools. The vertex move, the earlier mark and the earlier maximum are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Six tests in `packages/core/src/sculpt.test.ts`. The published-name list includes the sculpt values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-093-design.md`. No DICOM section. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19e3d-e6e5-7aa1-825b-ee2ba8de87c7`. `sculpt.ts` sha256 at the clean pass is `12bcf3bcabb54f3322f91be62d0eb4b757f237e3c47f6e0ab455dea575bf0cc8`. A later maximum tie returned index 2 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

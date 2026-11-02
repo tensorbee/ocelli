@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The shell moves one polygon vertex by the raw pixel delta. The nearest mark inside the radius keeps the earlier id on a tie. A MIP jump names the earlier maximum sample. The mark is not deleted.
 - The shell copies at most six volume crop planes and refuses a zero normal. A drag moves the origin by the caller normal times the horizontal pixel delta divided by 256. The kept side stays in the existing clip.
 - The shell clips a slice segment to the viewport and drops a segmentation segment that misses. One non-finite coordinate refuses the list. An overlay grid draws the interior lines of an integer cell count. One cell draws nothing.
 - The shell stores a magnify circle. A missing scale is 1 and a stored scale must be greater than 1. A scale overlay is the product of the caller factors. An orientation marker rotates four letters by quadrant and refuses quadrant 4.

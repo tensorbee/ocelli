@@ -158,6 +158,10 @@ const PUBLISHED: readonly string[] = [
   // ./crop.js, F-092
   "cropDrag",
   "cropPlanes",
+  // ./sculpt.js, F-093
+  "eraseNearest",
+  "mipIndex",
+  "sculptVertex",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",
