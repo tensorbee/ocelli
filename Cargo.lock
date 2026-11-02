@@ -1018,6 +1018,10 @@ dependencies = [
 [[package]]
 name = "ocelli-geom"
 version = "0.1.0"
+dependencies = [
+ "glam",
+ "ocelli-core",
+]
 
 [[package]]
 name = "ocelli-native"

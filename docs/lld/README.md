@@ -20,6 +20,7 @@ row here in the same hand.
 | File | Area | F-IDs |
 |------|------|-------|
 | [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001, F-005, F-018 |
+| [geometry.md](geometry.md) | `crates/ocelli-geom`, hit-testing, projection and measurement mathematics | F-070 |
 | [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-020, F-021, F-025 |
 | [pixel-pipeline.md](pixel-pipeline.md) | Image-plane evidence, stored-value extraction, and all four stages of DICOM PS3.3 C.11: modality, VOI, presentation and colour | F-018, F-029, F-030, F-041, F-044, F-046 |
 | [dicomweb.md](dicomweb.md) | TypeScript DICOMweb transport and the pure Rust response contract | F-021, F-101 |

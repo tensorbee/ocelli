@@ -12,3 +12,8 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# F-070. A measurement takes `Pt<S>` and does not convert spaces.
+ocelli-core = { path = "../ocelli-core" }
+# `f64::sqrt` and `f64::atan2` are not in `core` here. The workspace glam
+# entry already selects the libm backend. This is not a second math policy.
+glam = { workspace = true }

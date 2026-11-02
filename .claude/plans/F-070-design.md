@@ -89,7 +89,7 @@ pub fn hit_segment<S>(point: Pt<S>, start: Pt<S>, end: Pt<S>, tolerance: f64) ->
 pub fn project_onto_plane<S>(point: Pt<S>, origin: Pt<S>, normal: Pt<S>) -> Result<Pt<S>, GeomError>
 ```
 
-`GeomError::number` is a `match`, not a cast. The crate stays `no_std` outside tests. It depends on `ocelli-core` and does not depend on `wgpu` or `wasm-bindgen`.
+`GeomError::number` is a `match`, not a cast. The crate stays `no_std` outside tests. It depends on `ocelli-core` and on workspace `glam` for `sqrt` and `atan2`, because those `f64` methods are not in `core` on this toolchain. It does not depend on `wgpu` or `wasm-bindgen`.
 
 `SegmentProjection` is `Copy` by a hand impl, for the same reason `Pt` is. The marker must not become a bound.
 
@@ -135,7 +135,7 @@ Not applicable. The functions borrow their points and return a value. They alloc
 
 ## Approach
 
-`crates/ocelli-geom/src/measure.rs` holds the six functions. `lib.rs` re-exports them and keeps `CRATE_NAME`. Arithmetic uses `f64` in core. No `glam` call is added in this crate. `ocelli-core` already depends on `glam` for `Transform`, and this story does not need a second matrix type.
+`crates/ocelli-geom/src/measure.rs` holds the six functions. `lib.rs` re-exports them and keeps `CRATE_NAME`. The segment parameter stays the written division. `f64::sqrt` and `f64::atan2` are not in `core` for this `no_std` crate, the same limit that kept `f64::round` out of `ocelli-seg`. Length and the angle go through workspace `glam`, whose libm backend is already the sigmoid policy in `ocelli-pixel`. No second math crate is added.
 
 `len2` is an exact zero when its bits are the bits of `+0.0` or `-0.0`. Inequalities against `0` and `1` are the clamp. `float_cmp` denies `==` on `f64`, so the zero test does not use that operator.
 
@@ -146,6 +146,7 @@ Rejected alternatives:
 - Requiring a unit normal and refusing DICOM direction cosines that are not bit-exact. The plane formula normalises.
 - An epsilon for "short" segments. The story would then own a tolerance the HLD did not write. Exact zero is the degeneracy. A short segment has a defined `t`.
 - Calling `canvas_to_world` inside `distance`. That would hide the space change the type parameter exists to show.
+- Adding a direct `libm` crate beside workspace `glam`. The sigmoid path already chose glam's libm backend, and a second math crate would be a second policy.
 
 ## Dependencies, write ownership and resources
 

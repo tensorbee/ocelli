@@ -2,9 +2,18 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
-//! Scaffold only. F-001 creates the crate, later stories fill it.
+//! F-001 creates the crate. F-070 fills [`measure`]. The formulas are the
+//! local rules in `.claude/plans/F-070-design.md`. The HLD names the crate
+//! and does not give them. Camera transforms stay in `ocelli-viewport`.
 
 #![cfg_attr(not(test), no_std)]
+
+mod measure;
+
+pub use measure::{
+    GeomError, SegmentProjection, angle_at, distance, hit_segment, polyline_length,
+    project_onto_plane, project_onto_segment,
+};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.

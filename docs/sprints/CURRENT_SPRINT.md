@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-068 | E11.1 | Tool lifecycle, tool groups, bindings and modes | Rust+TS | 3w | done |
-| F-070 | E11.3 | ocelli-geom: hit-testing, projection and measurement mathematics | Rust+TS | 4w | pending |
+| F-070 | E11.3 | ocelli-geom: hit-testing, projection and measurement mathematics | Rust+TS | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -137,6 +137,6 @@ generalised by D-07.
 
 S24 closed at tag `s24`. The merge is `71ac28d`. M6 is complete and
 unpublished. The S25 allocation rows and the S25 plan table name F-068
-and F-070. F-068 is done. F-070 is pending. F-100 and F-048 are done.
+and F-070. F-068 is done. F-070 is done. F-100 and F-048 are done.
 F-069, F-071 and F-072 are not this sprint. F-X003 stays in progress.
 F-X011 remains pending.
