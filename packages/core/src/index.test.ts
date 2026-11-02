@@ -151,6 +151,17 @@ const PUBLISHED: readonly string[] = [
   "magnifyCircle",
   "orientationMarker",
   "scaleLength",
+  // ./intersection.js, F-089
+  "overlayGrid",
+  "segmentationIntersection",
+  "sliceIntersection",
+  // ./crop.js, F-092
+  "cropDrag",
+  "cropPlanes",
+  // ./sculpt.js, F-093
+  "eraseNearest",
+  "mipIndex",
+  "sculptVertex",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",

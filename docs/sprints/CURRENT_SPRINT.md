@@ -1,16 +1,15 @@
-# Current sprint, S33
+# Current sprint, S34
 
 **Milestone**: M10, manipulation and utility tools.
-**Branch**: `sprint/s33`
+**Branch**: `sprint/s34`
 **Opened**: 2026-11-02
-**Goal**: Pan, zoom, window, stack scroll, crosshairs, reference lines, rotation and the magnify overlay.
+**Goal**: Slice intersection, segmentation intersection, an overlay grid, volume cropping, a sculptor, an annotation eraser and a MIP jump.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-087 | E14.1 | Pan, Zoom, WindowLevel, WindowLevelRegion, StackScroll | Rust+TS | 4w | done |
-| F-088 | E14.2 | Crosshairs, WorldCrosshair, ReferenceLines, ReferenceCursors | Rust+TS | 5w | done |
-| F-090 | E14.4 | TrackballRotate, VolumeRotate, PlanarRotate, OrientationController | Rust+TS | 4w | done |
-| F-091 | E14.5 | Magnify, AdvancedMagnify, ScaleOverlay, OrientationMarker | Rust+TS | 3w | done |
+| F-089 | E14.3 | SliceIntersection, SegmentationIntersection, OverlayGrid | Rust+TS | 4w | done |
+| F-092 | E14.6 | VolumeCropping and VolumeCroppingControl | Rust+TS | 3w | done |
+| F-093 | E14.7 | Sculptor, AnnotationEraser, MIPJumpToClick | Rust+TS | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -20,30 +19,36 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S33 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S34 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S32 closed at tag `s32`. The merge is `7ae7559`. F-086 is done. M9 is
-complete. This open does not publish. The workspace version stays 0.1.0.
+S33 closed at tag `s33`. The merge is `5c07ef9`. F-087, F-088, F-090 and
+F-091 are done. Closing S33 did not complete M10 and did not publish. The
+workspace version stays 0.1.0.
 
-This sprint owns four manipulation stories. Appendix B counts 25
-manipulation and utility classes and does not define their formulas. F-069
-already owns pan, zoom and rotate from a caller basis. These stories do
-not replace that arithmetic. They name the tools that call it, and the
-overlays those tools draw. The DICOM SR content tree stays F-094.
+This sprint owns the last three manipulation stories. Appendix B counts
+25 manipulation and utility classes and does not define their formulas.
+F-088 already draws a crosshair from a projected point. F-062 already
+stores at most six patient clip planes. F-076 already measures a polygon
+and a spline. These stories do not replace that arithmetic. They name
+the shell helpers that sit beside it. The DICOM SR content tree stays
+F-094.
 
-Closing this sprint does not complete M10. M10 is S33 to S34. A release
-is not taken from this open.
+Closing this sprint completes M10 and does not publish.
 
 ## What is carried in
 
-- **M9 is complete at tag `s32`, and this open does not publish.** The
+- **M10 is not complete at this open.** M10 is S33 to S34. S33 is closed
+  at tag `s33`. The merge is `5c07ef9`. The tag object is `b1c32477` and
+  peels to that merge. The sprint tip is `8fe1642`, tree `f9d348a6c699`.
+  F-087 is `0fd34ab`. F-088 is `c12948d`. F-090 is `18d17e6`. F-091 is
+  `9e10257`. No row in that close has a measured duration. No ratio is
+  invented. The comparison report is unchanged.
+- **M9 is complete at tag `s32`, and that close did not publish.** The
   merge is `7ae7559`. The tag object is `1a255447` and peels to that
-  merge. The sprint tip is `329a872`, tree `296969729f10`. F-080 through
-  F-086 stay as committed. No row in that close has a measured duration.
-  No ratio is invented. The comparison report is unchanged.
+  merge.
 - **M8 is complete at tag `s29` and was not published.** A finished M8
   would name 0.8.0. M1 through M9 were not published. The workspace
   version is still 0.1.0. `/release` runs
@@ -67,14 +72,14 @@ is not taken from this open.
   this host through headless Chromium WebGL2 and matched `LutChain::map_into`
   within 0.001, format `R32Float`. A tier B colour LUT readback was not run.
 - **The wasm size budget records 2,151,196 bytes** with tolerance 0.05.
-  The ceiling is 2,258,755. The S32 sprint gate passed that budget. The
+  The ceiling is 2,258,755. The S33 sprint gate passed that budget. The
   budget file was not edited. `--accept-size` is a design-plan
   declaration, not a way to make a gate green.
 - **`max_review_passes` is stored but not automatically enforced by the
   backing script.** The operator required the review loop to continue until
   a pass reports zero defects and zero smells. The stored number is not a
   stop. The per-feature microscope loop remains uncapped.
-- **No new measured duration.** The S32 tracker row reads `not measured`.
+- **No new measured duration.** The S33 tracker rows read `not measured`.
   There is no measured total and no ratio. The capacity points remain the
   S03 and S06 closes. This open does not invent a ratio and does not
   recalculate capacity.
@@ -86,32 +91,35 @@ is not taken from this open.
 
 ## The defect class this sprint is exposed to
 
-**A second pan, zoom or rotate formula beside F-069, or a crosshair that
-mixes a canvas point with a patient point.** F-069 already adds pan from
-the basis and scales zoom and rotate by 256. A tool that writes the camera
-again with different arithmetic is the defect. A reference line that treats
-a canvas pixel as a patient coordinate is the other.
+**A second clip test beside F-062, a second polygon area beside F-076, or
+a canvas segment stored as a patient plane.** F-062 already keeps the
+half-space `dot(point - origin, normal) >= 0` and refuses a seventh
+plane. A shell that repeats that test can drift from the shader. F-089
+clips caller canvas segments to the viewport and does not project. F-093
+moves a vertex and names a mark. It does not erase the SR tree and it
+does not scan a frame.
 
 ## What done means
 
-- **F-087** names pan, zoom, window, region window and stack scroll on the
-  existing registry. Pan, zoom and the wheel stay the F-069 formulas.
-- **F-088** draws crosshairs and reference marks from one patient point.
-  Canvas points and patient points stay distinct types.
-- **F-090** names trackball, volume and planar rotation. The rotate delta
-  stays the F-069 formula.
-- **F-091** names magnify, scale and the orientation marker. The drawing
-  layer from F-071 is not rewritten.
+- **F-089** clips one slice segment and a list of segmentation segments
+  to the viewport, and returns the interior lines of an overlay grid. It
+  does not project and it does not call the crosshair module.
+- **F-092** accepts at most six caller planes and drags one origin along
+  the caller normal. It does not call `set_clip_planes` and it does not
+  retest the kept side.
+- **F-093** moves one polygon vertex by the pixel delta, names the nearest
+  mark inside a radius, and returns the earlier index of the maximum
+  caller sample. It does not read pixels and it does not edit the
+  annotation layer.
 - **Each story declares all three tier rows.** An omitted row is not an
   answer. A measurement that cannot run on the resolved tier reports
   unavailable.
 
 ## Dependency order
 
-F-087 depends on F-068. F-088 depends on F-055. F-090 depends on F-059.
-F-091 depends on F-071. Those rows are `done`. F-089 waits for F-088 and
-is S34. F-094 owns the SR type and is not a dependency of this sprint.
-F-X003 stays `in-progress` and is not a dependency.
+F-089 depends on F-088. F-092 depends on F-062. F-093 depends on F-076.
+Those rows are `done`. F-094 owns the SR type and is not a dependency of
+this sprint. F-X003 stays `in-progress` and is not a dependency.
 
 ## Standing expectations
 
@@ -132,6 +140,7 @@ generalised by D-07.
 
 ## Audit intake, 2026-11-02
 
-S32 closed at tag `s32`. The merge is `7ae7559`. M9 is complete and this
-open does not publish. The S33 allocation rows and the S33 plan table name
-F-087, F-088, F-090 and F-091. F-X003 stays in progress. F-X011 remains pending.
+S33 closed at tag `s33`. The merge is `5c07ef9`. Closing S33 did not
+complete M10 and did not publish. The S34 allocation rows and the S34
+plan table name F-089, F-092 and F-093. F-X003 stays in progress.
+F-X011 remains pending.
