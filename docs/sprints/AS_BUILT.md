@@ -4363,3 +4363,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19dfc-c6f1-77a1-a62a-d95a7b4a4438`. `crosshair.ts` sha256 at the clean pass is `91bd816188d42ac7893015d5a73a811d95b19f20edf3304e7dc7f828d1287df9`. A horizontal end at width minus one went red and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-090, trackball, volume and planar rotation, completed 2026-11-02
+
+**What was built.** `rotationDrag`, `orientationQuadrant` and `ROTATION_TOOLS` in `packages/core`. The drag is the F-069 delta. It adds the horizontal pixel delta divided by 256 to the caller radians. TrackballRotate, VolumeRotate and PlanarRotate bind to Rotate. The quadrant truncates the angle divided by a quarter turn toward zero, then wraps into 0, 1, 2 or 3. A negative quarter turn is 3. OrientationController is that function and is not a registry tool. The module does not write a camera.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts the tool classes and does not define a second rotation. The drag is the F-069 expression. The quadrant is the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Five tests in `packages/core/src/orientation.test.ts`. The published-name list includes the rotation values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-090-design.md`. No DICOM section. No pixel arithmetic. The scale 256 is the F-069 scale.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19dfc-c6f1-77a1-a62a-d96c6310920e`. `orientation.ts` sha256 at the clean pass is `6880f125595e0d3e72182af24ecfe6de397d1fb67e1ef10b1d0933a6e74b5049`. A flipped drag sign returned -1 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

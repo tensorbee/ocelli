@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The shell names TrackballRotate, VolumeRotate and PlanarRotate. Each binds to the existing Rotate command. The drag is the existing rotation delta. The orientation quadrant wraps a quarter turn into 0, 1, 2 or 3.
 - The shell draws a crosshair from a projected canvas point. The horizontal segment spans the width at that y and the vertical segment spans the height at that x. The edges are inside. Reference lines are the same function. The module does not project.
 - The shell names Pan, Zoom, WindowLevel, WindowLevelRegion and StackScroll. A window drag moves the centre with the horizontal drag and the width with the upward drag, both divided by 256. A region window is the mid-span of the caller samples. A stack drag truncates the upward drag. Pan and zoom stay the existing pointer expressions.
 - `ocelli-seg` writes a caller segment on slices strictly between slices that already hold it. A nearer slice takes that end's mask. The exact halfway slice takes the union. An endpoint stays. Fewer than two keys writes nothing. An empty stack, a zero side, a bad length or mismatched slices write nothing. The presenter is unchanged.

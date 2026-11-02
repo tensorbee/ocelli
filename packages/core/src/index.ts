@@ -202,6 +202,8 @@ export {
   windowRegion,
 } from "./manipulation.js";
 
+export { ROTATION_TOOLS, orientationQuadrant, rotationDrag } from "./orientation.js";
+
 export {
   COMMAND_CURSORS,
   CURSOR_PHASES,

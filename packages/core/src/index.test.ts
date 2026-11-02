@@ -143,6 +143,10 @@ const PUBLISHED: readonly string[] = [
   "stackDrag",
   "windowDrag",
   "windowRegion",
+  // ./orientation.js, F-090
+  "ROTATION_TOOLS",
+  "orientationQuadrant",
+  "rotationDrag",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",
