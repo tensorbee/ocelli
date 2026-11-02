@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-073 | E12.1 | Length, Height, Angle, CobbAngle, Bidirectional | Rust+TS | 5w | done |
-| F-074 | E12.2 | Probe, DragProbe, RectangleROI, EllipticalROI, CircleROI | Rust+TS | 5w | pending |
+| F-074 | E12.2 | Probe, DragProbe, RectangleROI, EllipticalROI, CircleROI | Rust+TS | 5w | done |
 | F-076 | E12.4 | PlanarFreehandROI, SplineROI and spline mathematics | Rust+TS | 5w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes

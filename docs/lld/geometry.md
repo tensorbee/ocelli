@@ -1,6 +1,6 @@
 # Geometry
 
-**F-IDs that contributed:** F-070, F-073
+**F-IDs that contributed:** F-070, F-073, F-074
 **Last updated:** 2026-11-02
 
 Hit-testing, projection and measurement in `ocelli-geom`. The HLD names the
@@ -63,6 +63,25 @@ dot. Reversing a segment does not change it. A zero-length segment is
 `bidirectional` reports the larger Euclidean distance as `length` and the
 smaller as `width`. Equal distances share that value. Identical endpoints
 stay 0.
+
+## Rectangle, ellipse and circle
+
+`rectangle` takes two opposite corners. `width` is the absolute `x`
+difference and `height` is the absolute `y` difference. `area` is their
+product. `z` is not a factor. A non-finite point or a non-finite area is
+`Frame`. A zero side stays area 0.
+
+`ellipse` returns `PI` times the product of the absolute radii. Radii of
+opposite sign still give that positive area. A zero radius, including
+either sign of zero, is `Degenerate`. A non-finite radius is `Frame`.
+
+`circle` takes a centre and a rim point. The radius is the Euclidean
+distance. `area` is `PI * radius * radius`. Identical points are
+`Degenerate`. A non-finite point is `Frame`.
+
+A probe is `Volume::sample_world` in `ocelli-volume`. This crate does not
+add a second sampler. Mean, standard deviation, SUV and the histogram are
+not these functions.
 
 ## Segment
 

@@ -2,10 +2,14 @@
 //!
 //! The HLD names this crate and does not give these formulas. F-070 rules
 //! are the local decisions in `.claude/plans/F-070-design.md`. F-073 rules
-//! are the local decisions in `.claude/plans/F-073-design.md`. `length` of
+//! are the local decisions in `.claude/plans/F-073-design.md`. F-074 rules
+//! are the local decisions in `.claude/plans/F-074-design.md`. `length` of
 //! fewer than two points is degenerate. `polyline_length` of one finite
 //! point stays 0. Height is the absolute caller-space `z` difference, not
 //! the Euclidean length. Cobb uses the absolute dot and stays in `0..=PI/2`.
+//! A rectangle uses absolute `x` and `y` only. An ellipse area is `PI`
+//! times the absolute radii, and a zero radius is degenerate. A circle
+//! radius is the Euclidean distance, and identical points are degenerate.
 //! Points stay in the space the caller already chose. This module does not
 //! convert a canvas point into a world point.
 
@@ -410,4 +414,93 @@ pub fn bidirectional<S>(
         length: longer,
         width: shorter,
     })
+}
+
+/// Width, height and area of a rectangle in the caller plane.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rectangle {
+    /// Absolute difference of the `x` coordinates.
+    pub width: f64,
+    /// Absolute difference of the `y` coordinates.
+    pub height: f64,
+    /// `width * height`. `z` is not a factor.
+    pub area: f64,
+}
+
+/// Radius and area of a circle in the caller's space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Circle {
+    /// Euclidean distance from the centre to the rim.
+    pub radius: f64,
+    /// `PI * radius * radius`.
+    pub area: f64,
+}
+
+/// Rectangle from two opposite corners. `z` is ignored.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when a point or the area is non-finite.
+pub fn rectangle<S>(corner: Pt<S>, opposite: Pt<S>) -> Result<Rectangle, GeomError> {
+    finite_point(corner)?;
+    finite_point(opposite)?;
+    let width = (opposite.x - corner.x).abs();
+    let height = (opposite.y - corner.y).abs();
+    let area = width * height;
+    if width.is_finite() && height.is_finite() && area.is_finite() {
+        Ok(Rectangle {
+            width,
+            height,
+            area,
+        })
+    } else {
+        Err(GeomError::Frame)
+    }
+}
+
+/// Ellipse area, `PI * abs(rx) * abs(ry)`.
+///
+/// The product of the absolute radii is taken first, so radii 2 and 3 are
+/// `PI * 6`. A zero radius is degenerate rather than area 0.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when a radius or the area is non-finite.
+/// [`GeomError::Degenerate`] when either radius is exact zero.
+pub fn ellipse(rx: f64, ry: f64) -> Result<f64, GeomError> {
+    if !rx.is_finite() || !ry.is_finite() {
+        return Err(GeomError::Frame);
+    }
+    if exact_zero(rx) || exact_zero(ry) {
+        return Err(GeomError::Degenerate);
+    }
+    let area = core::f64::consts::PI * (rx.abs() * ry.abs());
+    if area.is_finite() {
+        Ok(area)
+    } else {
+        Err(GeomError::Frame)
+    }
+}
+
+/// Circle from a centre and a rim point.
+///
+/// Identical points are degenerate. The radius of those points is 0, and
+/// area 0 is not a circle.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when [`distance`] refuses, or when the area is
+/// non-finite.
+/// [`GeomError::Degenerate`] when the two points are identical.
+pub fn circle<S>(centre: Pt<S>, rim: Pt<S>) -> Result<Circle, GeomError> {
+    let radius = distance(centre, rim)?;
+    if exact_zero(radius) {
+        return Err(GeomError::Degenerate);
+    }
+    let area = core::f64::consts::PI * (radius * radius);
+    if area.is_finite() {
+        Ok(Circle { radius, area })
+    } else {
+        Err(GeomError::Frame)
+    }
 }

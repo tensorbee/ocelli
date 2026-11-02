@@ -127,7 +127,7 @@ none
 
 ## LLD impact
 
-`docs/lld/public-api.md` gains the three shape names when the story is completed. The probe stays the existing `sample_world` sentence.
+`docs/lld/geometry.md` and `docs/lld/public-api.md` gain `rectangle`, `ellipse` and `circle` when the story is completed. The probe stays the existing `sample_world`. A zero rectangle side stays area 0.
 
 ## Open questions
 

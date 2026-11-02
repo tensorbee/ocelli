@@ -4124,3 +4124,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/geometry.md`, `docs/lld/public-api.md` and their rows in `docs/lld/README.md`.
 **Deviations from the design plan.** The committed plan named `angle` as a call to `angle_at`. The feature commit records that the angle tool is `angle_at` and does not add the forwarding wrapper. The design commit was not amended.
 **Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Pass 2 reported 1 defect, 0 smells and 0 nitpicks. Pass 3 reported 0 defects, 0 smells and 0 nitpicks. Pass 1 was the module headers citing only F-070. Pass 2 was the test header saying every one-point polyline has length 0. `measure.rs` sha256 at the clean pass is `a32fbe33ac7e3408e769e9d0c1bcc85f23bab837e6b1bc75f20b5510d491f20c`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-074, rectangle, ellipse and circle, completed 2026-11-02
+
+**What was built.** `rectangle`, `ellipse` and `circle` in `ocelli-geom`. A rectangle is the absolute `x` and `y` differences and their product. `z` is not a factor. An ellipse area is `PI` times the absolute radii, and a zero radius is `Degenerate`. A circle radius is the Euclidean distance, and identical points are `Degenerate`. The probe stays `Volume::sample_world`. This story does not add a sampler and does not compute region statistics.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts the tool classes and does not define these shapes. `docs/hld/03-architecture-and-crates.md` names `ocelli-geom` and does not give the formulas. The formulas are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-geom`, `docs/lld/geometry.md` and `docs/lld/public-api.md`. `ocelli-volume` was not edited.
+**Tests added.** Four acceptance tests in `crates/ocelli-geom/tests/measure.rs`.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-074-design.md`. No DICOM section. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/geometry.md`, `docs/lld/public-api.md` and their rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The feature commit also names `docs/lld/geometry.md` in the plan's LLD impact. The design commit was not amended.
+**Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. The defect was an ellipse test of two negative radii that stayed green without `abs`. `measure.rs` sha256 at the clean pass is `9c0be8d45fee8291914590f7ebb2296a499d3213f572613bde01df7f7a1eac52`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

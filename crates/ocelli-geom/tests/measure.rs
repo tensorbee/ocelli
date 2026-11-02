@@ -1,5 +1,5 @@
-//! Hand-computed fixtures for the local rules in `.claude/plans/F-070-design.md`
-//! and `.claude/plans/F-073-design.md`.
+//! Hand-computed fixtures for the local rules in `.claude/plans/F-070-design.md`,
+//! `.claude/plans/F-073-design.md` and `.claude/plans/F-074-design.md`.
 //!
 //! The F-070 numbers are the Euclidean results of that plan. The F-073
 //! numbers are that plan's own rules. One finite point is degenerate for
@@ -10,8 +10,8 @@
 
 use ocelli_core::{Canvas, Pt, World};
 use ocelli_geom::{
-    GeomError, angle_at, bidirectional, cobb, distance, height, hit_segment, length,
-    polyline_length, project_onto_plane, project_onto_segment,
+    GeomError, angle_at, bidirectional, circle, cobb, distance, ellipse, height, hit_segment,
+    length, polyline_length, project_onto_plane, project_onto_segment, rectangle,
 };
 
 fn world(x: f64, y: f64, z: f64) -> Pt<World> {
@@ -344,5 +344,63 @@ fn bidirectional_keeps_the_longer_length() {
     assert_eq!(
         same.map(|item| (bits(item.length), bits(item.width))),
         Ok((bits(0.0), bits(0.0)))
+    );
+}
+
+// F-074 fixtures from `.claude/plans/F-074-design.md`.
+// Width is abs(2 - 0) = 2. Height is abs(3 - 0) = 3. Area is 2 * 3 = 6.
+// The z difference 9 is not a factor. Ellipse radii 2 and 3 have absolute
+// product 6, so the area is PI * 6. A zero radius is not area 0. Circle
+// radius is sqrt(9 + 16) = 5, and the area is PI * 25.
+
+#[test]
+fn rectangle_ignores_z() {
+    let shape = rectangle(world(0.0, 0.0, 0.0), world(2.0, 3.0, 9.0));
+    assert_eq!(
+        shape.map(|item| (bits(item.width), bits(item.height), bits(item.area))),
+        Ok((bits(2.0), bits(3.0), bits(6.0)))
+    );
+    let reversed = rectangle(world(2.0, 3.0, 9.0), world(0.0, 0.0, 0.0));
+    assert_eq!(
+        reversed.map(|item| (bits(item.width), bits(item.height), bits(item.area))),
+        Ok((bits(2.0), bits(3.0), bits(6.0)))
+    );
+    assert_eq!(
+        rectangle(world(f64::NAN, 0.0, 0.0), world(2.0, 3.0, 9.0)),
+        Err(GeomError::Frame)
+    );
+}
+
+#[test]
+fn ellipse_area_is_pi_times_the_radii() {
+    let area = std::f64::consts::PI * 6.0;
+    assert_eq!(ellipse(2.0, 3.0).map(bits), Ok(bits(area)));
+    // Opposite signs. A signed product is the negation of PI * 6.
+    assert_eq!(ellipse(-2.0, 3.0).map(bits), Ok(bits(area)));
+    assert_eq!(ellipse(2.0, -3.0).map(bits), Ok(bits(area)));
+    assert_eq!(ellipse(f64::NAN, 3.0), Err(GeomError::Frame));
+}
+
+#[test]
+fn a_zero_radius_is_degenerate() {
+    assert_eq!(ellipse(0.0, 3.0), Err(GeomError::Degenerate));
+    assert_eq!(ellipse(2.0, 0.0), Err(GeomError::Degenerate));
+    assert_eq!(ellipse(-0.0, 3.0), Err(GeomError::Degenerate));
+}
+
+#[test]
+fn circle_radius_is_the_euclidean_length() {
+    let shape = circle(world(0.0, 0.0, 0.0), world(3.0, 4.0, 0.0));
+    assert_eq!(
+        shape.map(|item| (bits(item.radius), bits(item.area))),
+        Ok((bits(5.0), bits(std::f64::consts::PI * 25.0)))
+    );
+    assert_eq!(
+        circle(world(1.0, 2.0, 3.0), world(1.0, 2.0, 3.0)),
+        Err(GeomError::Degenerate)
+    );
+    assert_eq!(
+        circle(world(f64::NAN, 0.0, 0.0), world(1.0, 0.0, 0.0)),
+        Err(GeomError::Frame)
     );
 }

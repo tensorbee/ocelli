@@ -244,7 +244,7 @@ The 26 annotation classes and the ROI statistics engine.
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
 | F-073 | E12.1 | S28 | Length, Height, Angle, CobbAngle, Bidirectional | Rust+TS | 5w | F-070 | done |
-| F-074 | E12.2 | S28 | Probe, DragProbe, RectangleROI, EllipticalROI, CircleROI | Rust+TS | 5w | F-070 | pending |
+| F-074 | E12.2 | S28 | Probe, DragProbe, RectangleROI, EllipticalROI, CircleROI | Rust+TS | 5w | F-070 | done |
 | F-075 | E12.3 | S29 | ROI statistics engine: mean, SD, min, max, area, SUV, histogram | Rust+TS | 4w | F-074 | pending |
 | F-076 | E12.4 | S28 | PlanarFreehandROI, SplineROI and spline mathematics | Rust+TS | 5w | F-070 | pending |
 | F-077 | E12.5 | S29 | LivewireContour and LivewireContourSegmentation | Rust+TS | 5w | F-076 | pending |
