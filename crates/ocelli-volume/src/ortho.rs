@@ -96,7 +96,7 @@ impl Volume {
     /// Level-0 sample at a patient point.
     ///
     /// The index is the inverse of [`Self::voxel_world`]. `spacing[0]` divides
-    /// the column cosine and `spacing[1]` divides the row cosine. An index
+    /// the row cosine and `spacing[1]` divides the column cosine. An index
     /// that is not finite, or a corner that has not landed, is
     /// [`PlaneSample::Absent`]. It is not stored zero.
     pub fn sample_world(&self, point: Pt<World>) -> PlaneSample {

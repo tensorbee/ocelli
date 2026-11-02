@@ -10,6 +10,9 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- `ocelli-geom` measures a polygon area and one point on a uniform Catmull-Rom spline. The area closes the ring. The spline passes through the knots. Freehand length remains the existing length. The functions do not convert spaces and do not compute region statistics.
+- `ocelli-geom` measures a rectangle, an ellipse and a circle from caller points. A rectangle ignores `z`. A zero ellipse radius is not an area. A circle uses the Euclidean radius. The probe remains the existing volume sample. The functions do not convert spaces and do not compute region statistics.
+- `ocelli-geom` measures a named length, a caller-space height, an acute Cobb angle and a bidirectional pair. Fewer than two points is not a length. The angle tool remains the existing unsigned angle. The functions do not convert spaces.
 - An SVG drawing layer writes one group per caller mark and emits the annotation names from the difference between display lists. A hidden mark stays in the SVG. The list is not the SR content tree. The layer does not listen.
 - A tool-state wrapper emits `tool.activated` and `tool.modeChanged` after the registry accepts a mode change. The subject comes first. One cursor follows the active tool that owns primary, or the first active tool when nobody does, for both the idle phase and the dragging phase. The wrapper does not listen.
 - Pointer, touch and wheel input becomes one packed command buffer per frame. Pan, zoom and rotation come from a caller basis captured at pointer down, because those camera writes replace. A wheel sums its samples and then clamps once. The dispatcher does not call wasm.

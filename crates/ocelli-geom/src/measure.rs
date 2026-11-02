@@ -1,9 +1,21 @@
 //! Hit-testing, projection and measurement mathematics.
 //!
-//! The HLD names this crate and does not give these formulas. The rules are
-//! the local decisions in `.claude/plans/F-070-design.md`. Points stay in
-//! the space the caller already chose. This module does not convert a
-//! canvas point into a world point.
+//! The HLD names this crate and does not give these formulas. F-070 rules
+//! are the local decisions in `.claude/plans/F-070-design.md`. F-073 rules
+//! are the local decisions in `.claude/plans/F-073-design.md`. F-074 rules
+//! are the local decisions in `.claude/plans/F-074-design.md`. `length` of
+//! fewer than two points is degenerate. `polyline_length` of one finite
+//! point stays 0. Height is the absolute caller-space `z` difference, not
+//! the Euclidean length. Cobb uses the absolute dot and stays in `0..=PI/2`.
+//! A rectangle uses absolute `x` and `y` only. An ellipse area is `PI`
+//! times the absolute radii, and a zero radius is degenerate. A circle
+//! radius is the Euclidean distance, and identical points are degenerate.
+//! F-076 rules are the local decisions in `.claude/plans/F-076-design.md`.
+//! A polygon area is half the absolute shoelace sum, and the function
+//! closes the ring. Fewer than three points is degenerate. A spline point
+//! uses the uniform Catmull-Rom basis. `t` outside `0..=1` is degenerate.
+//! Points stay in the space the caller already chose. This module does not
+//! convert a canvas point into a world point.
 
 use glam::{DVec2, DVec3};
 use ocelli_core::Pt;
@@ -73,7 +85,7 @@ fn dot(left: (f64, f64, f64), right: (f64, f64, f64)) -> f64 {
     left.0 * right.0 + left.1 * right.1 + left.2 * right.2
 }
 
-fn length(value: (f64, f64, f64)) -> f64 {
+fn span_length(value: (f64, f64, f64)) -> f64 {
     // `f64::sqrt` is not in `core` for this `no_std` crate. glam's libm
     // backend is the same policy the sigmoid uses in `ocelli-pixel`.
     DVec3::new(value.0, value.1, value.2).length()
@@ -88,7 +100,7 @@ fn length(value: (f64, f64, f64)) -> f64 {
 pub fn distance<S>(start: Pt<S>, end: Pt<S>) -> Result<f64, GeomError> {
     finite_point(start)?;
     finite_point(end)?;
-    let span = length(sub(end, start));
+    let span = span_length(sub(end, start));
     if span.is_finite() {
         Ok(span)
     } else {
@@ -117,7 +129,7 @@ pub fn polyline_length<S>(points: &[Pt<S>]) -> Result<f64, GeomError> {
         let Some(end) = pair.get(1).copied() else {
             continue;
         };
-        let span = length(sub(end, start));
+        let span = span_length(sub(end, start));
         if !span.is_finite() {
             return Err(GeomError::Frame);
         }
@@ -144,8 +156,8 @@ pub fn angle_at<S>(arm_start: Pt<S>, vertex: Pt<S>, arm_end: Pt<S>) -> Result<f6
     finite_point(arm_end)?;
     let u = sub(arm_start, vertex);
     let v = sub(arm_end, vertex);
-    let u_len = length(u);
-    let v_len = length(v);
+    let u_len = span_length(u);
+    let v_len = span_length(v);
     if !u_len.is_finite() || !v_len.is_finite() {
         return Err(GeomError::Frame);
     }
@@ -157,7 +169,7 @@ pub fn angle_at<S>(arm_start: Pt<S>, vertex: Pt<S>, arm_end: Pt<S>) -> Result<f6
         u.2 * v.0 - u.0 * v.2,
         u.0 * v.1 - u.1 * v.0,
     );
-    let cross_len = length(cross);
+    let cross_len = span_length(cross);
     let dotted = dot(u, v);
     if !cross_len.is_finite() || !dotted.is_finite() {
         return Err(GeomError::Frame);
@@ -213,7 +225,7 @@ pub fn project_onto_segment<S>(
         start.z + t * direction.2,
     );
     finite_point(foot)?;
-    let span = length(sub(point, foot));
+    let span = span_length(sub(point, foot));
     if !span.is_finite() {
         return Err(GeomError::Frame);
     }
@@ -288,4 +300,320 @@ pub fn project_onto_plane<S>(
     );
     finite_point(foot)?;
     Ok(foot)
+}
+
+/// The longer and shorter of two segment lengths.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bidirectional {
+    /// The larger Euclidean length. Equal lengths use that shared value.
+    pub length: f64,
+    /// The smaller Euclidean length.
+    pub width: f64,
+}
+
+/// Polyline length. Fewer than two points is degenerate.
+///
+/// This is the F-073 length tool. It calls [`polyline_length`] after the
+/// count check, so a one-point list is not reported as 0.
+///
+/// # Errors
+///
+/// [`GeomError::Degenerate`] when `points` has fewer than two elements.
+/// [`GeomError::Frame`] when [`polyline_length`] refuses.
+pub fn length<S>(points: &[Pt<S>]) -> Result<f64, GeomError> {
+    if points.len() < 2 {
+        return Err(GeomError::Degenerate);
+    }
+    polyline_length(points)
+}
+
+/// Absolute difference of the caller-space `z` coordinates.
+///
+/// This is the F-073 height tool. It does not convert spaces and it does
+/// not pick an image axis.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when either point or the difference is non-finite.
+pub fn height<S>(start: Pt<S>, end: Pt<S>) -> Result<f64, GeomError> {
+    finite_point(start)?;
+    finite_point(end)?;
+    let delta = (end.z - start.z).abs();
+    if delta.is_finite() {
+        Ok(delta)
+    } else {
+        Err(GeomError::Frame)
+    }
+}
+
+/// Acute angle between two undirected segments, in radians, in `0..=PI/2`.
+///
+/// Reversing either segment does not change the value. A zero-length
+/// segment is degenerate.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when a point or the angle is non-finite.
+/// [`GeomError::Degenerate`] when either segment has length zero.
+pub fn cobb<S>(
+    first_start: Pt<S>,
+    first_end: Pt<S>,
+    second_start: Pt<S>,
+    second_end: Pt<S>,
+) -> Result<f64, GeomError> {
+    finite_point(first_start)?;
+    finite_point(first_end)?;
+    finite_point(second_start)?;
+    finite_point(second_end)?;
+    let first = sub(first_end, first_start);
+    let second = sub(second_end, second_start);
+    let first_len = span_length(first);
+    let second_len = span_length(second);
+    if !first_len.is_finite() || !second_len.is_finite() {
+        return Err(GeomError::Frame);
+    }
+    if exact_zero(first_len) || exact_zero(second_len) {
+        return Err(GeomError::Degenerate);
+    }
+    let cross = (
+        first.1 * second.2 - first.2 * second.1,
+        first.2 * second.0 - first.0 * second.2,
+        first.0 * second.1 - first.1 * second.0,
+    );
+    let cross_len = span_length(cross);
+    let dotted = dot(first, second).abs();
+    if !cross_len.is_finite() || !dotted.is_finite() {
+        return Err(GeomError::Frame);
+    }
+    let angle = DVec2::new(dotted, cross_len).to_angle();
+    if angle.is_finite() {
+        Ok(angle)
+    } else {
+        Err(GeomError::Frame)
+    }
+}
+
+/// Longer and shorter Euclidean lengths of two segments.
+///
+/// Identical endpoints stay length 0, because that distance is exact.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when [`distance`] refuses either segment.
+pub fn bidirectional<S>(
+    first_start: Pt<S>,
+    first_end: Pt<S>,
+    second_start: Pt<S>,
+    second_end: Pt<S>,
+) -> Result<Bidirectional, GeomError> {
+    let first = distance(first_start, first_end)?;
+    let second = distance(second_start, second_end)?;
+    // `float_cmp` is denied. Both lengths are finite, so `total_cmp` orders
+    // them without treating an equal pair as unordered.
+    let (longer, shorter) = match first.total_cmp(&second) {
+        core::cmp::Ordering::Less => (second, first),
+        core::cmp::Ordering::Equal | core::cmp::Ordering::Greater => (first, second),
+    };
+    Ok(Bidirectional {
+        length: longer,
+        width: shorter,
+    })
+}
+
+/// Width, height and area of a rectangle in the caller plane.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rectangle {
+    /// Absolute difference of the `x` coordinates.
+    pub width: f64,
+    /// Absolute difference of the `y` coordinates.
+    pub height: f64,
+    /// `width * height`. `z` is not a factor.
+    pub area: f64,
+}
+
+/// Radius and area of a circle in the caller's space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Circle {
+    /// Euclidean distance from the centre to the rim.
+    pub radius: f64,
+    /// `PI * radius * radius`.
+    pub area: f64,
+}
+
+/// Rectangle from two opposite corners. `z` is ignored.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when a point or the area is non-finite.
+pub fn rectangle<S>(corner: Pt<S>, opposite: Pt<S>) -> Result<Rectangle, GeomError> {
+    finite_point(corner)?;
+    finite_point(opposite)?;
+    let width = (opposite.x - corner.x).abs();
+    let height = (opposite.y - corner.y).abs();
+    let area = width * height;
+    if width.is_finite() && height.is_finite() && area.is_finite() {
+        Ok(Rectangle {
+            width,
+            height,
+            area,
+        })
+    } else {
+        Err(GeomError::Frame)
+    }
+}
+
+/// Ellipse area, `PI * abs(rx) * abs(ry)`.
+///
+/// The product of the absolute radii is taken first, so radii 2 and 3 are
+/// `PI * 6`. A zero radius is degenerate rather than area 0.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when a radius or the area is non-finite.
+/// [`GeomError::Degenerate`] when either radius is exact zero.
+pub fn ellipse(rx: f64, ry: f64) -> Result<f64, GeomError> {
+    if !rx.is_finite() || !ry.is_finite() {
+        return Err(GeomError::Frame);
+    }
+    if exact_zero(rx) || exact_zero(ry) {
+        return Err(GeomError::Degenerate);
+    }
+    let area = core::f64::consts::PI * (rx.abs() * ry.abs());
+    if area.is_finite() {
+        Ok(area)
+    } else {
+        Err(GeomError::Frame)
+    }
+}
+
+/// Circle from a centre and a rim point.
+///
+/// Identical points are degenerate. The radius of those points is 0, and
+/// area 0 is not a circle.
+///
+/// # Errors
+///
+/// [`GeomError::Frame`] when [`distance`] refuses, or when the area is
+/// non-finite.
+/// [`GeomError::Degenerate`] when the two points are identical.
+pub fn circle<S>(centre: Pt<S>, rim: Pt<S>) -> Result<Circle, GeomError> {
+    let radius = distance(centre, rim)?;
+    if exact_zero(radius) {
+        return Err(GeomError::Degenerate);
+    }
+    let area = core::f64::consts::PI * (radius * radius);
+    if area.is_finite() {
+        Ok(Circle { radius, area })
+    } else {
+        Err(GeomError::Frame)
+    }
+}
+
+/// Absolute shoelace area in the caller plane. The ring is closed here.
+///
+/// Fewer than three points is degenerate. `z` is not a factor.
+///
+/// # Errors
+///
+/// [`GeomError::Degenerate`] when `points` has fewer than three elements.
+/// [`GeomError::Frame`] when a point or the running sum is non-finite.
+pub fn polygon_area<S>(points: &[Pt<S>]) -> Result<f64, GeomError> {
+    if points.len() < 3 {
+        return Err(GeomError::Degenerate);
+    }
+    for point in points {
+        finite_point(*point)?;
+    }
+    let mut sum = 0.0;
+    for index in 0..points.len() {
+        let Some(current) = points.get(index).copied() else {
+            continue;
+        };
+        let next_index = if index + 1 == points.len() {
+            0
+        } else {
+            let Some(index) = index.checked_add(1) else {
+                return Err(GeomError::Frame);
+            };
+            index
+        };
+        let Some(next) = points.get(next_index).copied() else {
+            continue;
+        };
+        let cross = current.x * next.y - next.x * current.y;
+        if !cross.is_finite() {
+            return Err(GeomError::Frame);
+        }
+        sum += cross;
+        if !sum.is_finite() {
+            return Err(GeomError::Frame);
+        }
+    }
+    let area = sum.abs() * 0.5;
+    if area.is_finite() {
+        Ok(area)
+    } else {
+        Err(GeomError::Frame)
+    }
+}
+
+/// One point on a uniform Catmull-Rom segment.
+///
+/// The curve passes through the input points. Segment 0 repeats the first
+/// point as the previous ghost. The last segment repeats the last point as
+/// the next ghost. `t` is in `0..=1`.
+///
+/// # Errors
+///
+/// [`GeomError::Degenerate`] when `t` is outside `0..=1`, or when `segment`
+/// has no following point.
+/// [`GeomError::Frame`] when a used point or the result is non-finite.
+pub fn spline_point<S>(points: &[Pt<S>], segment: usize, t: f64) -> Result<Pt<S>, GeomError> {
+    if !(0.0..=1.0).contains(&t) {
+        return Err(GeomError::Degenerate);
+    }
+    let Some(next_index) = segment.checked_add(1) else {
+        return Err(GeomError::Degenerate);
+    };
+    let Some(start) = points.get(segment).copied() else {
+        return Err(GeomError::Degenerate);
+    };
+    let Some(end) = points.get(next_index).copied() else {
+        return Err(GeomError::Degenerate);
+    };
+    let previous = if segment == 0 {
+        start
+    } else {
+        let Some(point) = segment
+            .checked_sub(1)
+            .and_then(|index| points.get(index))
+            .copied()
+        else {
+            return Err(GeomError::Degenerate);
+        };
+        point
+    };
+    let following = match next_index.checked_add(1) {
+        Some(index) => points.get(index).copied().unwrap_or(end),
+        None => end,
+    };
+    finite_point(previous)?;
+    finite_point(start)?;
+    finite_point(end)?;
+    finite_point(following)?;
+    let pm = DVec3::new(previous.x, previous.y, previous.z);
+    let p0 = DVec3::new(start.x, start.y, start.z);
+    let p1 = DVec3::new(end.x, end.y, end.z);
+    let pn = DVec3::new(following.x, following.y, following.z);
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let combined = p0 * 2.0
+        + (p1 - pm) * t
+        + (pm * 2.0 - p0 * 5.0 + p1 * 4.0 - pn) * t2
+        + (p0 * 3.0 - pm - p1 * 3.0 + pn) * t3;
+    let q = combined * 0.5;
+    if !q.x.is_finite() || !q.y.is_finite() || !q.z.is_finite() {
+        return Err(GeomError::Frame);
+    }
+    Ok(Pt::new(q.x, q.y, q.z))
 }
