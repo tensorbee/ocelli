@@ -4411,3 +4411,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19e3d-e6e5-7aa1-825b-ee076c3fbfd0`. `intersection.ts` sha256 at the clean pass is `af45373302f92d8fe0785fbf8515d863831e66bddde394e179ec43003eb4c6c6`. An unclipped end returned x 12 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-092, volume cropping and volume cropping control, completed 2026-11-02
+
+**What was built.** `cropPlanes` and `cropDrag` in `packages/core`. At most six planes are copied. A zero normal is refused. A finite normal whose square is not finite is refused for a plane and kept for a drag when the result is finite. The drag adds the caller normal times the horizontal pixel delta divided by 256. The normal is not normalised. The kept-side test stays in F-062. The module does not call `set_clip_planes`.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts the tool classes and does not define this drag. The plane copy and the drag are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Six tests in `packages/core/src/crop.test.ts`. The published-name list includes the crop values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-092-design.md`. No DICOM section. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device. F-062 already reports the ray unavailable on CPU.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 1 nitpick. Reviewer `01a19e53-86b4-74e0-8ee7-8dad23ed16c7`. `crop.ts` sha256 at the clean pass is `4f145f47e977fb2ee0effbe785e94811fb899c802d50fb75e3b56fe13d133340`. A flipped drag sign went red and was restored. Pass 1 refused a finite overflow normal on the drag and that refusal was removed. Pass 2 found the plane square was not locked and one expect closed it. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

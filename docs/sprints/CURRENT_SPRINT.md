@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-089 | E14.3 | SliceIntersection, SegmentationIntersection, OverlayGrid | Rust+TS | 4w | done |
-| F-092 | E14.6 | VolumeCropping and VolumeCroppingControl | Rust+TS | 3w | pending |
+| F-092 | E14.6 | VolumeCropping and VolumeCroppingControl | Rust+TS | 3w | done |
 | F-093 | E14.7 | Sculptor, AnnotationEraser, MIPJumpToClick | Rust+TS | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes

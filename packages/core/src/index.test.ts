@@ -155,6 +155,9 @@ const PUBLISHED: readonly string[] = [
   "overlayGrid",
   "segmentationIntersection",
   "sliceIntersection",
+  // ./crop.js, F-092
+  "cropDrag",
+  "cropPlanes",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",

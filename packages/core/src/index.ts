@@ -212,6 +212,8 @@ export {
   sliceIntersection,
 } from "./intersection.js";
 
+export { cropDrag, cropPlanes } from "./crop.js";
+
 export {
   COMMAND_CURSORS,
   CURSOR_PHASES,

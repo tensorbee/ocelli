@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -223,6 +223,8 @@ F-090 adds `rotationDrag`, `orientationQuadrant` and `ROTATION_TOOLS` in `packag
 F-091 adds `magnifyCircle`, `scaleLength` and `orientationMarker` in `packages/core`. A null scale is stored as 1. An advanced scale is finite and greater than 1. A radius that is not greater than 0 is refused. A non-finite centre is refused. The scale overlay is the product of the caller millimetres and the caller pixels per millimetre. A pixels-per-millimetre that is not greater than 0 is refused. Quadrant 0 keeps the four letters. Each later quadrant moves the first letter to the end. Quadrant 4 is refused and does not wrap. The annotation layer is unchanged. These functions do not read pixels.
 
 F-089 adds `sliceIntersection`, `segmentationIntersection` and `overlayGrid` in `packages/core`. One segment is clipped to the viewport with Liang-Barsky. The edges are inside. A zero delta and a miss return nothing. A segmentation list drops a miss and refuses one non-finite coordinate. An empty list stays empty. The grid draws interior lines for an integer column count and row count of at least 1. One cell draws nothing. The module does not project and it does not call the crosshair module.
+
+F-092 adds `cropPlanes` and `cropDrag` in `packages/core`. At most six planes are copied. Every component must be finite. A normal whose squared length is not finite, or is not greater than 0, is refused. The drag adds the caller normal times the horizontal pixel delta divided by 256. The normal is not normalised. A finite normal whose square overflows is a legal drag and an illegal plane. The kept-side test stays in F-062. The module does not call `set_clip_planes`.
 
 ## React binding
 
