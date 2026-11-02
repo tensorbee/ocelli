@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -199,6 +199,10 @@ F-077 adds `livewire_path` and `livewire_mask` in `ocelli-geom`. The path is 4-c
 F-078 adds `arrowMark`, `labelMark`, `keyImageMark`, `etdrsRegion` and `etdrsMarks` in `packages/core`. They return display-list marks for the F-071 layer. The arrow head is at most 12 pixels and at most a quarter of the shaft. A key image stores the text `KEY`. ETDRS radii are 0.5, 1.5 and 3 mm, and a boundary belongs to the outer side. The spokes are exact axis offsets. The SR content tree remains F-094.
 
 F-079 adds `ultrasound_direction` and `redact_rect` in `ocelli-geom`. The angle is the image plane and the length includes `z`. A missed rectangle sets `applied` false and leaves the buffer unchanged. A non-finite sample in the intersection writes nothing. `distance` stays the F-070 function. There is no TypeScript copy.
+
+F-080 adds `stamp_brush` in `ocelli-seg`. A sample is inside when its squared index distance is less than or equal to the squared radius. A circle paints only the slice whose index equals `center_z`, and both zero bit patterns select slice 0. A sphere uses every slice. Radius 0 paints only an integer centre. A negative radius or a non-finite centre writes nothing. Segment 0 erases. `present_labelmap` is unchanged. There is no TypeScript copy.
+
+F-084 adds `segment_at`, `label_segment` and `segment_bidirectional` in `ocelli-seg`. An in-range read returns the stored number, including 0. An outside column, a zero side, or a short buffer is `Degenerate`. A label stores trimmed text and keeps an existing segment in place. Segment 0 is `Background`. Blank text is `Blank`. The longest run wins, and an equal length keeps the run found first. One sample is a run of length 1 on both axes. `bidirectional` in `ocelli-geom` is unchanged. There is no TypeScript copy.
 
 ## React binding
 

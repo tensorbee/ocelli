@@ -4220,3 +4220,35 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/geometry.md`, `docs/lld/public-api.md` and their rows in `docs/lld/README.md`.
 **Deviations from the design plan.** The plan's example length of 2 was the `y` component. The length that includes `z` is the square root of `4 + 81`. The plan's second sample was not the row-major left column. The blocking `NaN` is the third sample. Both corrections are in the plan. The decisions are unchanged.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 1 nitpick. Reviewer `01a19c6b-b9a1-7b53-9816-da19229200c3`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks after rustfmt. Reviewer `01a19c79-0028-7351-9e17-92dfe39d93ea`. `redact.rs` sha256 at the clean pass is `75a8d4ab4a4fc656772cbe3030c627edad5304154c007474230ce44089fbf58f`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-080, circle and sphere brush, completed 2026-11-02
+
+**What was built.** `stamp_brush` in `ocelli-seg`. A sample is inside when its squared index distance is less than or equal to the squared radius. A circle paints only the slice whose index is the same number as `center_z`, and both zero bit patterns select slice 0. A sphere uses every slice. Radius 0 paints only an integer centre. Both zero bit patterns are a zero radius. A negative radius is `Degenerate`. A non-finite centre or radius is `Frame`. A refusal writes nothing. Segment 0 erases. `present_labelmap` is unchanged. There is no TypeScript copy.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts tool classes and does not define a brush. `docs/hld/03-architecture-and-crates.md` names `ocelli-seg` and does not give a stamp function. The squared-distance rule is the approved local plan. PS3.3 C.8.20.2 keeps segment 0 as background.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-seg`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Eighteen tests in `crates/ocelli-seg/tests/brush.rs`. Nine are the acceptance rows. Nine more lock a negative-zero radius, a fractional slice, an empty stack and a zero side, a non-finite centre, a long buffer, column-then-row, an outside corner, a halfway sphere and a radius just under one.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-080-design.md`. PS3.3 C.8.20.2 is the background rule only. The radius test is that plan. The stamp does no pixel arithmetic. AC9 observes the existing presenter.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The stamp does not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19cb6-214d-7b10-89ff-19537da639e5`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19cc7-d0c1-78d1-8392-feb38c898891`. `brush.rs` sha256 at the clean pass is `a8756735471dd7787d2538daf1e61e12529576ab0425571984be0a76d27f96dc`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-084, segment select label and bidirectional, completed 2026-11-02
+
+**What was built.** `segment_at`, `label_segment` and `segment_bidirectional` in `ocelli-seg`. An in-range read returns the stored number, including 0. An outside index, a zero side, or a length other than `width * height` is `Degenerate`. A label stores trimmed text. Segment 0 is `Background`. Blank text is `Blank`. Either refusal leaves the list as it was. The longest run wins. An equal length keeps the run found first. One sample is length 1 on both axes. `bidirectional` in `ocelli-geom` is unchanged. There is no TypeScript copy.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts tool classes and does not define these readings. `docs/hld/03-architecture-and-crates.md` names `ocelli-seg` and does not give them. The run rule is the approved local plan. PS3.3 C.8.20.2 keeps segment 0 as background.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-seg`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Thirteen tests in `crates/ocelli-seg/tests/segment_tools.rs`. Nine are the acceptance rows. Four more lock a refusal on an existing label, a gap, a long buffer, and a zero side together with an outside row.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-084-design.md`. PS3.3 C.8.20.2 is the background rule only. The run rule is that plan. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ce1-769c-7be2-8cb7-54f1da121f02`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ced-603a-70b0-b242-e3b8343f19b6`. `segment_tools.rs` sha256 at the clean pass is `f087933c6e2e0216d8f26d4e33909682d812fbaf8374c776994cc844b145898d`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

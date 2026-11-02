@@ -10,6 +10,8 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- `ocelli-seg` reads one segment number, stores a trimmed label for a segment above 0, and reports the longest horizontal and vertical runs. An equal length keeps the earlier run. Segment 0 is not a label and not a run. A short buffer is not background. The brush and the presenter are unchanged.
+- `ocelli-seg` stamps a circle or a sphere of segment numbers into a caller label grid. A sample on the radius is inside. A circle paints one slice. A sphere uses every slice. A negative radius or a non-finite centre writes nothing. Segment 0 erases. The labelmap presenter is unchanged.
 - `ocelli-geom` reports an image-plane ultrasound direction and the Euclidean length of the same span. `z` is in the length and not in the angle. A rectangular redaction writes a caller fill into the intersection of a row-major buffer. A missed rectangle sets applied false and leaves the buffer unchanged. A non-finite sample in the intersection writes nothing.
 - The shell can build an arrow, a label, a key image and an ETDRS grid as display-list marks. The arrow head is a quarter of the shaft, capped at 12 pixels. The grid uses radii of 0.5, 1.5 and 3 mm. The drawing layer is unchanged. The marks are not an SR content tree.
 - `ocelli-geom` finds a 4-connected livewire path on a caller-supplied cost grid and marks the pixels that path visits. The start pixel adds no cost. The mask does not fill an interior. An empty path is not a blank mask. Polygon area and the spline point stay the earlier functions.
