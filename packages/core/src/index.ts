@@ -195,6 +195,22 @@ export type {
 } from "./pointer.js";
 
 export {
+  COMMAND_CURSORS,
+  CURSOR_PHASES,
+  createCursorController,
+  createToolState,
+} from "./cursor.js";
+export type {
+  CursorController,
+  CursorControllerOptions,
+  CursorPair,
+  CursorPhase,
+  CursorStyle,
+  ToolState,
+  ToolStateEvent,
+} from "./cursor.js";
+
+export {
   SNAPSHOT_ERROR,
   SNAPSHOT_MAGIC,
   SNAPSHOT_VERSION,

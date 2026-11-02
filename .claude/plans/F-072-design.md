@@ -36,7 +36,7 @@ The HLD does not name cursor strings or when `tool.activated` fires. The decisio
 
 ## Problem and reproducer
 
-F-068 can demote a tool and nothing tells the shell, so the element can keep the previous cursor. The observation is a wrapper call. Set `Pan` active on primary, then set `Zoom` active on primary. The listener receives `tool.modeChanged` for `Pan` from `active` to `passive`, then `tool.modeChanged` for `Zoom` from `off` to `active`, then `tool.activated` for `Zoom`. `sync` with phase `idle` writes `zoom-in`.
+F-068 can demote a tool and nothing tells the shell, so the element can keep the previous cursor. The observation is a wrapper call. Set `Pan` active on primary, then set `Zoom` active on primary. The listener receives `tool.modeChanged` for `Zoom` from `off` to `active`, then `tool.activated` for `Zoom`, then `tool.modeChanged` for `Pan` from `active` to `passive`. `sync` with phase `idle` writes `zoom-in`.
 
 ## Scope, API and compatibility
 

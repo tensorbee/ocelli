@@ -235,7 +235,7 @@ Interaction state in TypeScript, hit-testing and measurement mathematics in Rust
 | F-069 | E11.2 | S26 | Pointer, touch and wheel event normalisation and dispatch | Rust+TS | 3w | F-068 | done |
 | F-070 | E11.3 | S25 | ocelli-geom: hit-testing, projection and measurement mathematics | Rust+TS | 4w | F-048 | done |
 | F-071 | E11.4 | S27 | SVG annotation drawing layer | Rust+TS | 3w | F-069 | pending |
-| F-072 | E11.5 | S26 | Cursor management and tool state machine | Rust+TS | 3w | F-068 | pending |
+| F-072 | E11.5 | S26 | Cursor management and tool state machine | Rust+TS | 3w | F-068 | done |
 
 ### M8, Annotation tools
 

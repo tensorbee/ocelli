@@ -4076,3 +4076,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none. The plan gained `no-gesture`, the engaged latch, the closed-gesture queue and the single clamp after the pass 1 and pass 2 reviews. Those sentences are in this commit. The design commit was not amended.
 **Notes for future sessions.** Pass 1 reported 5 defects, 1 smell and 0 nitpicks. Pass 2 reported 2 defects, 0 smells and 0 nitpicks. Pass 3 reported 0 defects, 0 smells and 0 nitpicks. `pointer.ts` sha256 stayed `0b359fd185998ef14c8c6aa963ad85ccdaf516b10852aab502226abff60c0a63`. A zoom formula that used the segment instead of the origin made the second frame `exp(-1)` against `exp(-2)`. It was restored. F-072 owns cursors. F-071 draws. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-072, cursor management and tool state machine, completed 2026-11-02
+
+**What was built.** `createToolState` wraps one tool registry and emits `tool.modeChanged` and `tool.activated` after a successful mode change. The subject comes first. `tool.activated` fires only when the new mode is active. Demoted tools follow in the returned order and do not activate. A refusal, an identical mode, registration and removal emit nothing. `createCursorController` writes one CSS cursor for the active tool that owns primary, or for the first active tool when nobody does. The same tool supplies idle and dragging. An override replaces one command for that controller. The module does not listen.
+
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section 3. `docs/hld/07-concurrency-and-typescript.md` section 10. The cursor strings and the emission order are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core` and `docs/lld/public-api.md`.
+**Tests added.** 34 unit tests in `packages/core/src/cursor.test.ts`. The published-name list includes the cursor values. The type re-exports are imported by that test file.
+**Fixture provenance.** no pixel arithmetic. The cursor names are local CSS strings.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The wrapper does not draw and does not read a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** The reproducer sentence now lists the subject events before the demoted Pan event. The design commit was not amended.
+**Notes for future sessions.** Pass 1 reported 0 defects, 10 smells and 0 nitpicks. Pass 2 reported 0 defects, 2 smells and 0 nitpicks. Pass 3 reported 0 defects, 4 smells and 0 nitpicks. Pass 4 reported 0 defects, 2 smells and 0 nitpicks. Pass 5 reported 0 defects, 2 smells and 0 nitpicks. Pass 6 reported 0 defects, 2 smells and 0 nitpicks. Pass 7 reported 0 defects, 2 smells and 0 nitpicks. Pass 8 reported 0 defects, 0 smells and 0 nitpicks. The smells were tests that stayed green when a required behaviour was replaced. `cursor.ts` sha256 stayed `fb1c8ae76c1275c1cd1fccff90dfb92089b61a76108f93304de528e91f11fb1e`. F-071 draws. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
