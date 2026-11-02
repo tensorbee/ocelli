@@ -20,7 +20,7 @@ row here in the same hand.
 | File | Area | F-IDs |
 |------|------|-------|
 | [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001, F-005, F-018 |
-| [geometry.md](geometry.md) | `crates/ocelli-geom`, hit-testing, projection and measurement mathematics | F-070, F-073, F-074, F-075, F-076 |
+| [geometry.md](geometry.md) | `crates/ocelli-geom`, hit-testing, projection and measurement mathematics | F-070, F-073, F-074, F-075, F-076, F-077 |
 | [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-020, F-021, F-025 |
 | [pixel-pipeline.md](pixel-pipeline.md) | Image-plane evidence, stored-value extraction, and all four stages of DICOM PS3.3 C.11: modality, VOI, presentation and colour | F-018, F-029, F-030, F-041, F-044, F-046 |
 | [dicomweb.md](dicomweb.md) | TypeScript DICOMweb transport and the pure Rust response contract | F-021, F-101 |
@@ -35,7 +35,7 @@ row here in the same hand.
 | [feature-availability.md](feature-availability.md) | The three-state contract every tier-gated feature declares | F-037, F-041, F-X001, F-X003, F-056, F-X004, F-X005, F-063, F-064, F-065, F-066, F-067 |
 | [errors.md](errors.md) | The error model, the code registry, the panic record and structured logging | F-005, F-039, F-X001, F-X017, F-101 |
 | [typescript-packaging.md](typescript-packaging.md) | What the npm packages publish, and what proves it | F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003 |
-| [public-api.md](public-api.md) | Viewport, scene and tool types, the tool registry, pointer dispatch, cursor and tool state, the SVG annotation drawing layer, length, height, Cobb, bidirectional, rectangle, ellipse, circle, polygon area, spline measurement and ROI statistics, the copied command and state wire, the event names and the React binding | F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076 |
+| [public-api.md](public-api.md) | Viewport, scene and tool types, the tool registry, pointer dispatch, cursor and tool state, the SVG annotation drawing layer, length, height, Cobb, bidirectional, rectangle, ellipse, circle, polygon area, spline measurement, ROI statistics and livewire, the copied command and state wire, the event names and the React binding | F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077 |
 | [events.md](events.md) | The event catalogue, the delivery classes and the 5.8.2 mapping | F-032, F-034, F-101, F-103 |
 | [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008, F-X009, F-X012, F-X013, F-X003, F-026, F-X021 |
 | [comparator.md](comparator.md) | The harness's judging half: the tolerance predicate, the verdict vocabulary, the attribution ladder and the census | F-011, F-012, F-013, F-015, F-X012, F-X003, F-103, F-X021 |

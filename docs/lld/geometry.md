@@ -1,14 +1,15 @@
 # Geometry
 
-**F-IDs that contributed:** F-070, F-073, F-074, F-075, F-076
+**F-IDs that contributed:** F-070, F-073, F-074, F-075, F-076, F-077
 **Last updated:** 2026-11-02
 
 Hit-testing, projection and measurement in `ocelli-geom`. The HLD names the
 crate and does not give the formulas. The rules below are the local
 decisions in `.claude/plans/F-070-design.md`,
 `.claude/plans/F-073-design.md`, `.claude/plans/F-074-design.md`,
-`.claude/plans/F-075-design.md` and
-`.claude/plans/F-076-design.md`.
+`.claude/plans/F-075-design.md`,
+`.claude/plans/F-076-design.md` and
+`.claude/plans/F-077-design.md`.
 
 The functions take `Pt<S>`. They do not convert spaces. A canvas point is
 measured in canvas units and a world point in millimetres. The caller
@@ -117,6 +118,20 @@ following point is `Degenerate`. A non-finite used point or a non-finite
 result is `Frame`.
 
 Freehand length remains `length`. There is no second length function.
+
+## Livewire
+
+`livewire_path` is a 4-connected path on a caller-supplied cost grid. The
+cost is the sum of the pixels entered. The start pixel adds nothing. `z`
+is ignored and every returned point stores 0. A negative cost is
+`Degenerate`. A non-finite cost or index is `Frame`. A non-integer index
+is `Degenerate`. Start equal to goal is one point.
+
+`livewire_mask` marks the pixels that path visits. It does not fill an
+interior. An empty path is `Degenerate` and no mask is returned.
+
+`polygon_area` and `spline_point` stay the F-076 functions. This path
+does not call them.
 
 ## Segment
 

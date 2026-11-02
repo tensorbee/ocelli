@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -193,6 +193,8 @@ F-074 adds `rectangle`, `ellipse` and `circle` in `ocelli-geom`. A rectangle is 
 F-076 adds `polygon_area` and `spline_point` in `ocelli-geom`. The area is half the absolute shoelace sum on `x` and `y`, and the function closes the ring. Fewer than three points is `Degenerate`. The spline is uniform Catmull-Rom and passes through the knots. `t` outside `0..=1` is `Degenerate`. Freehand length remains `length`. These functions do not compute region statistics.
 
 F-075 adds `roi_statistics`, `histogram` and `suv_bw` in `ocelli-geom`. The mean divides by the count. The standard deviation divides by the count. The area is the caller's number. An empty sample list is `Degenerate`. A histogram value on an interior edge belongs to the higher bin. SUV is not the modality LUT. Units other than BQML are unavailable. There is no default weight. Rectangle, ellipse, circle and polygon area stay the earlier functions.
+
+F-077 adds `livewire_path` and `livewire_mask` in `ocelli-geom`. The path is 4-connected. The cost is the sum of the pixels entered, and the start pixel adds nothing. The mask marks visited pixels and does not fill an interior. An empty path is `Degenerate`. `polygon_area` and `spline_point` stay the F-076 functions. There is no TypeScript copy.
 
 ## React binding
 

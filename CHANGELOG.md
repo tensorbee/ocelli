@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- `ocelli-geom` finds a 4-connected livewire path on a caller-supplied cost grid and marks the pixels that path visits. The start pixel adds no cost. The mask does not fill an interior. An empty path is not a blank mask. Polygon area and the spline point stay the earlier functions.
 - `ocelli-geom` summarises caller samples as a mean, a population standard deviation, a minimum, a maximum and the caller's area. An empty list is not a mean of 0. A histogram uses the caller's bins. SUV is a separate path and is unavailable when the units are not BQML or a required magnitude is missing. There is no default weight.
 - `ocelli-geom` measures a polygon area and one point on a uniform Catmull-Rom spline. The area closes the ring. The spline passes through the knots. Freehand length remains the existing length. The functions do not convert spaces and do not compute region statistics.
 - `ocelli-geom` measures a rectangle, an ellipse and a circle from caller points. A rectangle ignores `z`. A zero ellipse radius is not an area. A circle uses the Euclidean radius. The probe remains the existing volume sample. The functions do not convert spaces and do not compute region statistics.
