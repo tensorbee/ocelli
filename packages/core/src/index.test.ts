@@ -151,6 +151,10 @@ const PUBLISHED: readonly string[] = [
   // ./annotation.js, F-071
   "ANNOTATION_REFUSALS",
   "createAnnotationLayer",
+  // ./crosshair.js, F-088
+  "crosshairLines",
+  "referenceCursor",
+  "referenceLines",
   // ./marks.js, F-078
   "MARK_REFUSALS",
   "arrowMark",

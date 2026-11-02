@@ -228,6 +228,9 @@ export type {
   AnnotationSyncResult,
 } from "./annotation.js";
 
+export { crosshairLines, referenceCursor, referenceLines } from "./crosshair.js";
+export type { Segment } from "./crosshair.js";
+
 export {
   MARK_REFUSALS,
   arrowMark,

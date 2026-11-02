@@ -272,7 +272,7 @@ The 25 manipulation and utility classes.
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
 | F-087 | E14.1 | S33 | Pan, Zoom, WindowLevel, WindowLevelRegion, StackScroll | Rust+TS | 4w | F-068 | done |
-| F-088 | E14.2 | S33 | Crosshairs, WorldCrosshair, ReferenceLines, ReferenceCursors | Rust+TS | 5w | F-055 | pending |
+| F-088 | E14.2 | S33 | Crosshairs, WorldCrosshair, ReferenceLines, ReferenceCursors | Rust+TS | 5w | F-055 | done |
 | F-089 | E14.3 | S34 | SliceIntersection, SegmentationIntersection, OverlayGrid | Rust+TS | 4w | F-088 | pending |
 | F-090 | E14.4 | S33 | TrackballRotate, VolumeRotate, PlanarRotate, OrientationController | Rust+TS | 4w | F-059 | pending |
 | F-091 | E14.5 | S33 | Magnify, AdvancedMagnify, ScaleOverlay, OrientationMarker | Rust+TS | 3w | F-071 | pending |
