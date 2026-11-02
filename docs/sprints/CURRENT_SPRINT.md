@@ -97,9 +97,9 @@ decision D13 already gave to that later story.
 - **F-073** measures length, height, an unsigned angle, a Cobb angle and a
   bidirectional pair from the points the caller already holds. The formulas
   are the approved plan. A degenerate input is refused.
-- **F-074** reports a probe value and the rectangle, ellipse and circle
-  statistics the approved plan names. The pixel sample comes from the
-  existing presentation path. A new LUT is not added.
+- **F-074** places a probe point and the rectangle, ellipse and circle
+  shapes the approved plan names. The ROI statistics engine is F-075 and
+  is not this sprint.
 - **F-076** measures a planar freehand length and a spline that the approved
   plan defines. The spline mathematics live in one place.
 - **Each story declares all three tier rows.** An omitted row is not an
