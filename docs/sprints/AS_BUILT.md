@@ -4395,3 +4395,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none. A non-finite centre is refused. The plan requires that refusal for the radius and the advanced scale, and the same guard covers the centre.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19dfc-c6f1-77a1-a62a-d97f0cbb9a84`. `magnify.ts` sha256 at the clean pass is `7bf17030c581109fc6e2bda6816d703477a22789b5626445bba1d5d1111e15bc`. A quadrant step that did not move went red and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-089, slice intersection, segmentation intersection and overlay grid, completed 2026-11-02
+
+**What was built.** `sliceIntersection`, `segmentationIntersection` and `overlayGrid` in `packages/core`. One segment is clipped to the viewport with Liang-Barsky. The edges are inside. A zero delta and a miss return nothing. A segmentation list drops a miss and refuses one non-finite coordinate. An empty list stays empty. The grid draws interior lines for an integer column count and row count of at least 1. One cell draws nothing. The module does not project and it does not call the crosshair module.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts the tool classes and does not define these overlays. The clip and the interior grid are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Eight tests in `packages/core/src/intersection.test.ts`. The published-name list includes the intersection values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-089-design.md`. No DICOM section. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19e3d-e6e5-7aa1-825b-ee076c3fbfd0`. `intersection.ts` sha256 at the clean pass is `af45373302f92d8fe0785fbf8515d863831e66bddde394e179ec43003eb4c6c6`. An unclipped end returned x 12 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

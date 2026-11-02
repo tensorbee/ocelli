@@ -207,6 +207,12 @@ export { ROTATION_TOOLS, orientationQuadrant, rotationDrag } from "./orientation
 export { magnifyCircle, orientationMarker, scaleLength } from "./magnify.js";
 
 export {
+  overlayGrid,
+  segmentationIntersection,
+  sliceIntersection,
+} from "./intersection.js";
+
+export {
   COMMAND_CURSORS,
   CURSOR_PHASES,
   createCursorController,
