@@ -4268,3 +4268,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Reviewer `01a19d2a-4ab3-74f3-93b5-f282472ae39a`. The defect was the public-api index omitting F-081. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19d37-53e6-7ac0-8aef-0f5953c4195b`. `scissors.rs` sha256 at the clean pass is `107eacc47f64bdfd742c6eb4b387317d924caf56cfb9d2a5e49229cdd9b45bde`. `brush.rs` sha256 is `ea1b0b8f83d5eee8a3d45241fd599516e4868acb7b0bd375e3948c038ce3cc55`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-082, flood fill and paint fill, completed 2026-11-02
+
+**What was built.** `flood_fill` and `paint_fill` in `ocelli-seg`. A flood replaces the 4-connected region of the seed value. A diagonal neighbour is not connected. A paint replaces each sample whose stored value equals the seed. The written number is the caller segment. A different value stays. Segment 0 is a legal written value. An outside seed, a zero side, or a bad length writes nothing. `present_labelmap` is unchanged. There is no TypeScript copy.
+
+**HLD sections implemented.** `docs/hld/B-parity-surface.md` counts tool classes and does not define a fill. `docs/hld/03-architecture-and-crates.md` names `ocelli-seg` and does not give one. The 4-connected rule is the approved local plan. PS3.3 C.8.20.2 keeps segment 0 as background.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-seg`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Eight tests in `crates/ocelli-seg/tests/fill.rs`. They are the acceptance rows. They lock the plus, a diagonal that stays, a gap that stops a flood and not a paint, an outside seed and a short buffer, a second flood, a background fill, the presenter after a paint to 0, and a snake that turns a corner.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-082-design.md`. PS3.3 C.8.20.2 is the background rule only. The 4-connected rule is that plan. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The function does not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Reviewer `01a19d46-f6d6-7080-a3cd-fbdb19b10e6d`. The defect was the public-api paint sentence. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19d56-7774-7e02-8ca3-4ddea41ce3fa`. `fill.rs` sha256 at the clean pass is `ba88ad6353797a694e735327d6c03f11819858089459328482eab1e85f4d98f4`. `tests/fill.rs` sha256 is `7ce9038ca1f38884fecb45ae034c31edfb7712bd4baf69dc3d55b89d13de8982`. `brush.rs` was not edited. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

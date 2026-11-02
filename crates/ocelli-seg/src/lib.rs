@@ -8,7 +8,8 @@
 //! edge as outline without fill. F-080 stamps a circle or a sphere into
 //! the label grid. F-084 reads a segment, stores a label and reports the
 //! longest runs. F-081 erases a rectangle, a circle or a sphere to
-//! background. The presenter does not import wgpu.
+//! background. F-082 flood-fills a connected region and paint-fills every
+//! copy of one value. The presenter does not import wgpu.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -16,6 +17,7 @@ extern crate alloc;
 
 mod brush;
 mod contour;
+mod fill;
 mod labelmap;
 mod scissors;
 mod segment_tools;
@@ -25,6 +27,7 @@ pub use brush::{Brush, BrushCoverage, BrushError, BrushShape, stamp_brush};
 pub use contour::{
     Contour, ContourError, ContourGeometricType, PlaneFrame, intersect_contour, present_contour,
 };
+pub use fill::{FillCoverage, FillError, flood_fill, paint_fill};
 pub use labelmap::{LabelColourLut, LabelGrid, LabelStyle, LabelmapError, Rgba8, present_labelmap};
 pub use scissors::{ScissorCoverage, ScissorError, ScissorShape, cut_scissor};
 pub use segment_tools::{

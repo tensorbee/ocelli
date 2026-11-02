@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-081 | E13.2 | Rectangle, Circle and Sphere scissors | Rust+TS | 4w | done |
-| F-082 | E13.3 | PaintFill and flood fill | Rust+TS | 3w | pending |
+| F-082 | E13.3 | PaintFill and flood fill | Rust+TS | 3w | done |
 | F-083 | E13.4 | RectangleROI and CircleROI start-end threshold tools | Rust+TS | 4w | pending |
 | F-085 | E13.6 | LabelmapEditWithContour | Rust+TS | 3w | pending |
 
