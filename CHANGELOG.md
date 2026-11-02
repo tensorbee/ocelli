@@ -10,6 +10,8 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- A tool-state wrapper emits `tool.activated` and `tool.modeChanged` after the registry accepts a mode change. The subject comes first. One cursor follows the active tool that owns primary, or the first active tool when nobody does, for both the idle phase and the dragging phase. The wrapper does not listen.
+- Pointer, touch and wheel input becomes one packed command buffer per frame. Pan, zoom and rotation come from a caller basis captured at pointer down, because those camera writes replace. A wheel sums its samples and then clamps once. The dispatcher does not call wasm.
 - `ocelli-geom` measures a distance, a polyline length, an unsigned angle, a segment projection, a segment hit and a plane projection. The functions take `Pt` and do not convert spaces. A hit includes the tolerance. An exact zero segment or normal is degenerate. Length and the angle use workspace glam because `sqrt` and `atan2` are not in `core`.
 - A caller-owned tool registry stores groups, modes and pointer bindings. Active is the only mode that owns a binding. Taking a binding moves the previous owner to passive and clears that owner's bindings. The names come back in registration order. A viewport id belongs to one group. The registry does not listen or pack a command.
 - A segmentation contour can be cut by one patient Z plane. One emitted point stays a point. Two or more emitted points are an open contour when the input was not already on that plane. A contour already on the plane keeps its kind. The labelmap edge blend draws the outline and ignores fill. Slab, volume and stack report that blend unavailable. Tier C cuts the contour and does not upload a GPU image.

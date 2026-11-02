@@ -24,7 +24,12 @@ import { coreAvailable, VERSION } from "./index.js";
  * `StackViewport`, `TierAvailability`, `ToolBinding`, `ViewportId`,
  * `VoiFunction`, `WindowPreset`, `ModeChange`, `PointerBinding`,
  * `PointerButton`, `PointerModifier`, `RegisteredTool`, `ToolGroupView`,
- * `ToolMode`, `ToolOutcome`, `ToolRefusal`, `ToolRegistry`) are erased
+ * `ToolMode`, `ToolOutcome`, `ToolRefusal`, `ToolRegistry`,
+ * `DispatchFrame`, `DispatchReason`, `GestureBasis`, `PointerDispatch`,
+ * `PointerDispatchOptions`, `PointerDomEvent`, `PointerTarget`,
+ * `ShellGestureEvent`, `CursorController`, `CursorControllerOptions`,
+ * `CursorPair`, `CursorPhase`, `CursorStyle`, `ToolState`,
+ * `ToolStateEvent`) are erased
  * before this runs, and `npx tsc` is what watches those.
  *
  * Adding an export is a deliberate act, so adding a line here is the cost of
@@ -128,6 +133,14 @@ const PUBLISHED: readonly string[] = [
   "TOOL_MODES",
   "TOOL_REFUSALS",
   "createToolRegistry",
+  // ./pointer.js, F-069
+  "DISPATCH_REASONS",
+  "createPointerDispatch",
+  // ./cursor.js, F-072
+  "COMMAND_CURSORS",
+  "CURSOR_PHASES",
+  "createCursorController",
+  "createToolState",
   // ./snapshot.js, F-050
   "SNAPSHOT_ERROR",
   "SNAPSHOT_MAGIC",

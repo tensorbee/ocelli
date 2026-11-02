@@ -1,7 +1,7 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068
-**Last updated:** 2026-11-01
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072
+**Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
 F-101 built the wire. F-104 moved every boundary number into one Rust table
@@ -141,7 +141,38 @@ The tool name is caller-chosen and is not required to equal the command.
 The command is still one of the eleven. Registering a tool does not pack
 that command and does not listen for events. Reads return copies.
 Hit-testing and measurement stay in `ocelli-geom` and are not computed
-here. F-069 will dispatch. F-072 will own cursors. F-071 will draw.
+here.
+
+## Pointer dispatch
+
+F-069 normalises pointer, touch and wheel input in
+`packages/core/src/pointer.ts`. `createPointerDispatch` returns a
+caller-owned dispatcher for one viewport in one tool group. `takeFrame`
+returns at most one packed buffer. It does not call wasm.
+
+`Pan`, `Zoom` and `Rotate` come from a caller basis captured at pointer
+down. Those camera writes replace the stored value. The last sample in
+the frame is the one sample. `Pan` is `basis.panX + (x - originX)` and
+`basis.panY + (y - originY)`. It is not the client position. `Zoom` is
+`basis.zoom * exp(-(y - originY) / 256)`. `Rotate` is
+`basis.radians + (x - originX) / 256`. `Scroll`
+is one step per frame. A wheel sums its samples and then clamps once to
+the i32 range. A drag whose command is `Scroll` contributes the sign of
+that frame's y change. The other seven commands pack nothing.
+
+A click is a net movement strictly under 3 CSS pixels. Once a sample is
+at least 3 CSS pixels from the origin, later samples of that gesture
+still pack. A second down after an up is a new gesture even before
+`takeFrame`. A second pointer id does not pack. Touch uses the touch
+names. Mouse and pen use the pointer names.
+
+## Cursor and tool state
+
+F-072 emits the shell tool events from a wrapper around the F-068 registry and writes one CSS cursor. `createToolState` does not keep a second mode store. A direct `registry.setMode` does not emit. On a successful `setMode` the subject is first. `tool.modeChanged` fires when the stored mode changes. `tool.activated` fires after that event, and only when the new mode is active. Each demoted tool then emits `tool.modeChanged` to passive, in the order the registry returns. A refusal emits nothing. `registerTool` and `removeTool` emit nothing. A throw from the listener is not caught and does not roll the registry back.
+
+`createCursorController` reads the group it was given. The active tool that owns primary supplies both the idle cursor and the dragging cursor. Primary counts in any binding slot, and a modifier does not remove it. That remains true when the cursor string is `default`. If nobody owns primary, the first active tool in registration order supplies both phases, including when that cursor is `default`. No active tool, and an unknown group, use `default`. `sync` writes `style.cursor` on every call.
+
+The local cursors are Pan `grab` and `grabbing`, Zoom `zoom-in`, Rotate and SetWindow `crosshair`, Scroll `ns-resize`, and Fit, FlipHorizontal, FlipVertical, ApplyPreset, SetInvert and SetColormap `default`. An override replaces one command for that controller. It does not change the shared table. This module does not listen and does not import the pointer dispatcher.
 
 ## React binding
 

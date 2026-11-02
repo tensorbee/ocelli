@@ -4060,3 +4060,35 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/geometry.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** The first approved sentence said no glam call is added. `f64::sqrt` and `f64::atan2` are not in `core` for this `no_std` crate, so length and the angle go through workspace glam and its libm backend. That is the same policy as the sigmoid in `ocelli-pixel`. A direct libm crate was not added. This is not a `D-NN`.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. `measure.rs` sha256 stayed `2b00b1406e5b07cebeda9fc863bee927f9615df65b68299fde1d6f179b3902e8`. Dropping the plane division made the axial foot `z` equal `-9`. An epsilon on the segment length made the `1e-12` segment degenerate. Swapping the `atan2` arguments made the right angle `0`. All three were restored. The division remains the written `t`. The hit comparison remains `<=`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-069, pointer, touch and wheel event normalisation and dispatch, completed 2026-11-02
+
+**What was built.** `createPointerDispatch` returns a caller-owned dispatcher for one viewport in one tool group. `takeFrame` returns the shell events and at most one packed command buffer. It does not call wasm. `Pan`, `Zoom` and `Rotate` come from a caller basis captured at pointer down, because those camera writes replace. `Scroll` sums the wheel samples and a captured drag, then clamps once to the i32 range. The other seven commands pack nothing. A second down after an up is a new gesture. Once a sample is at least 3 CSS pixels from the origin, later samples still pack. A click is still the net distance at pointer up.
+
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section 3. `docs/hld/04-boundary-and-data-path.md` section 5.1. `docs/hld/07-concurrency-and-typescript.md` section 10. `docs/hld/23-performance-rules.md` batches one command buffer per frame.
+**Deviations.** none. The gesture formulas are the approved local plan.
+**Crates / packages modified.** `packages/core` and `docs/lld/public-api.md`.
+**Tests added.** 31 unit tests in `packages/core/src/pointer.test.ts`. The published-name list in `packages/core/src/index.test.ts` includes the dispatcher values. The F-103 census in `events.test.ts` now expects `pointer.ts` to be the one `addEventListener` source.
+**Fixture provenance.** no pixel arithmetic. The distances 3 and 24, the 400 ms double click, the 300 ms swipe and the scale 256 are local shell numbers.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The dispatcher does not draw and does not read a device. The same bytes are packed on every tier.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none. The plan gained `no-gesture`, the engaged latch, the closed-gesture queue and the single clamp after the pass 1 and pass 2 reviews. Those sentences are in this commit. The design commit was not amended.
+**Notes for future sessions.** Pass 1 reported 5 defects, 1 smell and 0 nitpicks. Pass 2 reported 2 defects, 0 smells and 0 nitpicks. Pass 3 reported 0 defects, 0 smells and 0 nitpicks. `pointer.ts` sha256 stayed `0b359fd185998ef14c8c6aa963ad85ccdaf516b10852aab502226abff60c0a63`. A zoom formula that used the segment instead of the origin made the second frame `exp(-1)` against `exp(-2)`. It was restored. F-072 owns cursors. F-071 draws. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-072, cursor management and tool state machine, completed 2026-11-02
+
+**What was built.** `createToolState` wraps one tool registry and emits `tool.modeChanged` and `tool.activated` after a successful mode change. The subject comes first. `tool.activated` fires only when the new mode is active. Demoted tools follow in the returned order and do not activate. A refusal, an identical mode, registration and removal emit nothing. `createCursorController` writes one CSS cursor for the active tool that owns primary, or for the first active tool when nobody does. The same tool supplies idle and dragging. An override replaces one command for that controller. The module does not listen.
+
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section 3. `docs/hld/07-concurrency-and-typescript.md` section 10. The cursor strings and the emission order are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core` and `docs/lld/public-api.md`.
+**Tests added.** 34 unit tests in `packages/core/src/cursor.test.ts`. The published-name list includes the cursor values. The type re-exports are imported by that test file.
+**Fixture provenance.** no pixel arithmetic. The cursor names are local CSS strings.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The wrapper does not draw and does not read a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** The reproducer sentence now lists the subject events before the demoted Pan event. The design commit was not amended.
+**Notes for future sessions.** Pass 1 reported 0 defects, 10 smells and 0 nitpicks. Pass 2 reported 0 defects, 2 smells and 0 nitpicks. Pass 3 reported 0 defects, 4 smells and 0 nitpicks. Pass 4 reported 0 defects, 2 smells and 0 nitpicks. Pass 5 reported 0 defects, 2 smells and 0 nitpicks. Pass 6 reported 0 defects, 2 smells and 0 nitpicks. Pass 7 reported 0 defects, 2 smells and 0 nitpicks. Pass 8 reported 0 defects, 0 smells and 0 nitpicks. The smells were tests that stayed green when a required behaviour was replaced. `cursor.ts` sha256 stayed `fb1c8ae76c1275c1cd1fccff90dfb92089b61a76108f93304de528e91f11fb1e`. F-071 draws. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
