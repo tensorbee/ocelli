@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- An SVG drawing layer writes one group per caller mark and emits the annotation names from the difference between display lists. A hidden mark stays in the SVG. The list is not the SR content tree. The layer does not listen.
 - A tool-state wrapper emits `tool.activated` and `tool.modeChanged` after the registry accepts a mode change. The subject comes first. One cursor follows the active tool that owns primary, or the first active tool when nobody does, for both the idle phase and the dragging phase. The wrapper does not listen.
 - Pointer, touch and wheel input becomes one packed command buffer per frame. Pan, zoom and rotation come from a caller basis captured at pointer down, because those camera writes replace. A wheel sums its samples and then clamps once. The dispatcher does not call wasm.
 - `ocelli-geom` measures a distance, a polyline length, an unsigned angle, a segment projection, a segment hit and a plane projection. The functions take `Pt` and do not convert spaces. A hit includes the tolerance. An exact zero segment or normal is degenerate. Length and the angle use workspace glam because `sqrt` and `atan2` are not in `core`.

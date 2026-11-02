@@ -4092,3 +4092,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** The reproducer sentence now lists the subject events before the demoted Pan event. The design commit was not amended.
 **Notes for future sessions.** Pass 1 reported 0 defects, 10 smells and 0 nitpicks. Pass 2 reported 0 defects, 2 smells and 0 nitpicks. Pass 3 reported 0 defects, 4 smells and 0 nitpicks. Pass 4 reported 0 defects, 2 smells and 0 nitpicks. Pass 5 reported 0 defects, 2 smells and 0 nitpicks. Pass 6 reported 0 defects, 2 smells and 0 nitpicks. Pass 7 reported 0 defects, 2 smells and 0 nitpicks. Pass 8 reported 0 defects, 0 smells and 0 nitpicks. The smells were tests that stayed green when a required behaviour was replaced. `cursor.ts` sha256 stayed `fb1c8ae76c1275c1cd1fccff90dfb92089b61a76108f93304de528e91f11fb1e`. F-071 draws. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-071, SVG annotation drawing layer, completed 2026-11-02
+
+**What was built.** `createAnnotationLayer` binds one SVG element and one listener. `sync` validates a display list, replaces that element's children, stores a copy, and then emits the eight annotation names from the difference. A refusal writes nothing and emits nothing. Structure is checked before a blank id, and a blank id is checked before a non-finite coordinate. A hidden mark stays in the SVG. The list is not the SR content tree. The module does not listen and does not project world points.
+
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` section 3. `docs/hld/07-concurrency-and-typescript.md` section 10. `docs/hld/26-differentiating-capabilities.md` section 34, in that the drawing layer does not own the annotation type. The display list and the emission order are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core` and `docs/lld/public-api.md`.
+**Tests added.** 24 unit tests in `packages/core/src/annotation.test.ts`. The published-name list includes the annotation values. The type re-exports are imported by that test file.
+**Fixture provenance.** no pixel arithmetic. Points are canvas pixels the caller already projected.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The layer does not draw pixels and does not read a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** The feature commit adds the sentence that a list that is not an array and an SVG element with no owner document are `bad-mark`. The design commit was not amended.
+**Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. The defect was a blank id hiding a structural mistake, and an earlier non-finite point hiding a later point that is not a number. `annotation.ts` sha256 at the clean pass is `89f98b74452b63785e68a095b4cca3584cb804c1816a10a267b2ec86ab202be2`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

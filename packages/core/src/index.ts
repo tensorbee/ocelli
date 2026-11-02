@@ -210,6 +210,16 @@ export type {
   ToolStateEvent,
 } from "./cursor.js";
 
+export { ANNOTATION_REFUSALS, createAnnotationLayer } from "./annotation.js";
+export type {
+  AnnotationLayer,
+  AnnotationLayerEvent,
+  AnnotationMark,
+  AnnotationPoint,
+  AnnotationRefusal,
+  AnnotationSyncResult,
+} from "./annotation.js";
+
 export {
   SNAPSHOT_ERROR,
   SNAPSHOT_MAGIC,
