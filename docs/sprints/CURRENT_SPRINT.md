@@ -1,16 +1,14 @@
-# Current sprint, S35
+# Current sprint, S36
 
 **Milestone**: M11, annotation state and DICOM interop.
-**Branch**: `sprint/s35`
-**Opened**: 2026-11-02
-**Goal**: DICOM SR as the native in-memory annotation model, an annotation state manager with frame-of-reference indexing and undo, a DICOM SEG round trip, and an RTSTRUCT import into the contour representation.
+**Branch**: `sprint/s36`
+**Opened**: 2026-11-03
+**Goal**: Measurement persistence and serialisation format, DICOM SR TID 1500 round-trip.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-094 | E15.1 | DICOM SR as the native in-memory annotation model | Rust+TS | 4w | done |
-| F-095 | E15.2 | Annotation state manager, frame-of-reference indexing, undo/redo | Rust+TS | 4w | done |
-| F-098 | E15.5 | DICOM SEG round-trip | Rust+TS | 4w | done |
-| F-099 | E15.6 | RTSTRUCT import to contour representation | Rust+TS | 4w | done |
+| F-096 | E15.3 | Measurement persistence and serialisation format | Rust+TS | 3w | done |
+| F-097 | E15.4 | DICOM SR TID 1500 round-trip | Rust+TS | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -20,36 +18,38 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S35 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S36 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S34 closed at tag `s34`. The merge is `c3f85e5`. F-089, F-092 and F-093
-are done. Closing S34 completed M10 and did not publish. The workspace
-version stays 0.1.0.
+S35 closed at tag `s35`. The merge is `ea3f140`. F-094, F-095, F-098 and
+F-099 are done. Closing S35 did not complete M11 and did not publish.
+The workspace version stays 0.1.0.
 
-This sprint opens M11. Decision D13 says the annotation type is a DICOM
-SR content tree. Decision D10 keeps dcmjs for SR generation. HLD section
-34 says the in-memory type is that tree, the drawing layer renders from
-it, and provenance names the tool, the engine version, the algorithm
-where one was involved, and the operator. The section does not give a
-content-item layout. The plans will transcribe that limit and decide the
-gap locally. F-070 already owns measurement values. F-066 already owns
-the labelmap presenter. F-064 already owns the contour representation.
-These stories do not replace that arithmetic.
+This sprint finishes M11. Decision D13 says the annotation type is a
+DICOM SR content tree. Decision D10 keeps dcmjs for SR generation.
+HLD section 34 names two containers, the content tree for semantics and
+a bulk binary once counts pass a few thousand. The section does not give
+either byte layout. HLD section 10 keeps the TID 1500 bridge in
+TypeScript. The plans decide the layouts locally and say so. F-070
+already owns measurement values. These stories do not replace that
+arithmetic.
 
-Closing this sprint does not complete M11 and does not publish. M11 is
-S35 to S36.
+Closing this sprint completes M11 and does not publish.
 
 ## What is carried in
 
+- **S35 is closed at tag `s35`, and that close did not complete M11 and
+  did not publish.** The merge is `ea3f140`. The tag object is `466ffac`
+  and peels to that merge. The sprint tip is `1986cf2`, tree
+  `b3315fb23248`. F-094 is `32d7534`. F-095 is `4c13d23`. F-098 is
+  `bec0072`. F-099 is `2ac7844`. The open is `1c133de`. The design is
+  `79eb0ae`. No row in that close has a measured duration. No ratio is
+  invented. The comparison report is unchanged.
 - **M10 is complete at tag `s34`, and that close did not publish.** The
   merge is `c3f85e5`. The tag object is `bff12197` and peels to that
-  merge. The sprint tip is `1c1b85a`, tree `ae3fbbc21b6a`. F-089 is
-  `50d0fc0`. F-092 is `92ddd1e`. F-093 is `9e3d356`. The open is
-  `3e1ee1a`. The design is `599ddfc`. No row in that close has a measured
-  duration. No ratio is invented. The comparison report is unchanged.
+  merge.
 - **M9 is complete at tag `s32`, and that close did not publish.** The
   merge is `7ae7559`. The tag object is `1a255447` and peels to that
   merge.
@@ -76,14 +76,14 @@ S35 to S36.
   this host through headless Chromium WebGL2 and matched `LutChain::map_into`
   within 0.001, format `R32Float`. A tier B colour LUT readback was not run.
 - **The wasm size budget records 2,151,196 bytes** with tolerance 0.05.
-  The ceiling is 2,258,755. The S34 sprint gate measured 2,171,131 bytes
+  The ceiling is 2,258,755. The S35 sprint gate measured 2,171,131 bytes
   and passed that budget. The budget file was not edited. `--accept-size`
   is a design-plan declaration, not a way to make a gate green.
 - **`max_review_passes` is stored but not automatically enforced by the
   backing script.** The operator required the review loop to continue until
   a pass reports zero defects and zero smells. The stored number is not a
   stop. The per-feature microscope loop remains uncapped.
-- **No new measured duration.** The S34 tracker rows read `not measured`.
+- **No new measured duration.** The S35 tracker rows read `not measured`.
   There is no measured total and no ratio. The capacity points remain the
   S03 and S06 closes. This open does not invent a ratio and does not
   recalculate capacity.
@@ -95,36 +95,30 @@ S35 to S36.
 
 ## The defect class this sprint is exposed to
 
-**A second annotation model beside the SR content tree, a SEG written as
-a private bitmap, or an RTSTRUCT contour stored in canvas pixels.** HLD
-section 34 says the in-memory type is the content tree and the drawing
-layer does not own it. F-066 already presents a labelmap. F-064 already
-stores a contour. A second copy of either one can drift from the
-presenter. dwv, Horos, and the medical viewer Grok must not be opened.
-The SR idea is taken from DICOM PS3.3 and PS3.16.
+**A second measurement model beside the SR content tree, or a TID 1500
+document encoded without dcmjs.** HLD section 34 says the in-memory type
+is the content tree. Decision D10 keeps dcmjs for SR generation. A private
+measurement struct, or a Rust template writer, is the defect. dwv, Horos,
+and the medical viewer Grok must not be opened. The SR idea is taken from
+DICOM PS3.3 and PS3.16.
 
 ## What done means
 
-- **F-094** stores an annotation as a DICOM SR content tree. The drawing
-  layer is not the owner. Provenance can name the tool, the engine
-  version, an algorithm, and the operator. The story does not read a
-  GPL viewer.
-- **F-095** indexes those annotations by frame of reference and records
-  undo and redo. It does not invent a second measurement formula.
-- **F-098** reads and writes a DICOM SEG from the existing labelmap. It
-  does not replace the F-066 presenter.
-- **F-099** reads an RTSTRUCT into the existing contour representation.
-  It does not store the contour as canvas pixels.
+- **F-096** persists the F-094 content tree in one JSON document and
+  reads it back through `contentTree`. At the local bulk count it returns
+  nothing. It does not invent the bulk binary layout.
+- **F-097** writes and reads a TID 1500 measurement through dcmjs. The
+  number, the unit and the concept survive. It does not reimplement the
+  template in Rust.
 - **Each story declares all three tier rows.** An omitted row is not an
   answer. A measurement that cannot run on the resolved tier reports
   unavailable.
 
 ## Dependency order
 
-F-094 depends on F-070. F-095 depends on F-070. F-098 depends on F-066.
-F-099 depends on F-064. Those rows are `done`. F-096 and F-097 are S36
-and are not stories in this sprint. F-X003 stays `in-progress` and is
-not a dependency.
+F-096 depends on F-094. F-097 depends on F-095. Those rows are `done`.
+The two stories share the shell index, so they land one after the other.
+F-096 is first. F-X003 stays `in-progress` and is not a dependency.
 
 ## Standing expectations
 
@@ -143,9 +137,9 @@ A feature that cannot run on the resolved tier **reports unavailable**. It
 never quietly produces a different result, which is HLD section 31's rule
 generalised by D-07.
 
-## Audit intake, 2026-11-02
+## Audit intake, 2026-11-03
 
-S34 closed at tag `s34`. The merge is `c3f85e5`. Closing S34 completed
-M10 and did not publish. The S35 allocation rows and the S35 plan table
-name F-094, F-095, F-098 and F-099. F-X003 stays in progress.
-F-X011 remains pending.
+S35 closed at tag `s35`. The merge is `ea3f140`. Closing S35 did not
+complete M11 and did not publish. The S36 allocation rows and the S36
+plan table name F-096 and F-097. F-X003 stays in progress. F-X011 remains
+pending.

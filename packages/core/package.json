@@ -24,5 +24,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "dcmjs": "0.52.2"
   }
 }

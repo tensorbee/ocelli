@@ -31,7 +31,7 @@ import { coreAvailable, VERSION } from "./index.js";
  * `CursorPair`, `CursorPhase`, `CursorStyle`, `ToolState`,
  * `ToolStateEvent`, `AnnotationLayer`, `AnnotationLayerEvent`,
  * `AnnotationMark`, `AnnotationPoint`, `AnnotationRefusal`,
- * `AnnotationSyncResult`) are erased
+ * `AnnotationSyncResult`, `TidSource`) are erased
  * before this runs, and `npx tsc` is what watches those.
  *
  * Adding an export is a deliberate act, so adding a line here is the cost of
@@ -171,6 +171,12 @@ const PUBLISHED: readonly string[] = [
   "putAnnotation",
   "redoAnnotation",
   "undoAnnotation",
+  // ./measurement-persist.js, F-096
+  "loadMeasurements",
+  "persistMeasurements",
+  // ./tid1500.js, F-097
+  "readTid1500",
+  "writeTid1500",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",
