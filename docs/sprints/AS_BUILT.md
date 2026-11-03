@@ -4587,3 +4587,35 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/migration.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19fba-77c1-7063-b817-d9df9fb48fa6`. `alongside.ts` sha256 at the clean pass is `fcd56226cadfa29f03206dbdf2a7b169466bb899d0161963baef3da89b1ed836`. A release that also enabled the neighbour was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-107, per-viewport strangler flags, completed 2026-11-03
+
+**What was built.** `setKindEnabled`, `kindEnabled` and `enableFlagged` in `packages/core`. Three kind flags start off. Stack turns on before MPR, and MPR turns on before volume. An element is enabled only while its kind is on. Turning that kind off disables the elements this module enabled. A mount that turns the kind off does not leave the element dispatching. The other library is not imported.
+
+**HLD sections implemented.** Section 12 says a feature flag is per viewport and that stack viewports move first, then MPR, then 3D. The function names, the three kind strings, and the refusal to import the other library are the approved local plan. Shadow mode is F-109.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/migration.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Tests added.** Ten tests in `packages/core/src/flag.test.ts`. The published-name list includes `enableFlagged`, `kindEnabled` and `setKindEnabled`.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-107-design.md`. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The function does not open a device.
+**LLD updated.** `docs/lld/migration.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Reviewer `01a19feb-427f-7b12-a04d-6a862e2b0d8b`. The defect was an element stored after `viewport.mounted` had already turned the kind off. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ffc-32cd-7bc2-b294-59c58b7142d6`. `flag.ts` sha256 at the clean pass is `c4daca94e72ace24876443d7c3923dc816e80834b00b7627cb115d34b709753f`. Forcing the mount to keep the seam was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-109, shadow divergence alert, completed 2026-11-03
+
+**What was built.** `shadowDivergence` in `packages/core`. The caller passes two byte buffers and an integer limit from 0 to 255. The count is the samples whose absolute difference is greater than that limit. Unequal lengths return nothing. A limit outside that range returns nothing. The buffers are not written. The function does not render and does not import the other library.
+
+**HLD sections implemented.** Section 12 says shadow mode renders both, diffs, and alerts before the flag flips. The function name, the integer limit, and the refusal to render the other library are the approved local plan. This function is not the section 25.1 comparator.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/migration.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Tests added.** Four tests in `packages/core/src/shadow.test.ts`. The published-name list includes `shadowDivergence`.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-109-design.md`. No DICOM pixel fixture. The counts are not a rendered-frame verdict.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The function does not open a device.
+**LLD updated.** `docs/lld/migration.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a012-56d3-7c23-b882-4ccedd21c4e3`. `shadow.ts` sha256 at the clean pass is `49eb84526e5fd59f3de4a7d29f4266046e35c9593e6b23ecf1c4c9fda558a001`. Counting a difference equal to the limit was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

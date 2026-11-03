@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-105, F-108, F-106
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-105, F-108, F-106, F-107, F-109
 **Last updated:** 2026-11-03
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -245,6 +245,10 @@ F-105 adds `enableElement`, `disableElement` and `dispatchOnElement` in `package
 F-108 adds `rewriteListenerNames` in `packages/core`. A listener string literal is rewritten when the event map has an Ocelli name. An unmapped name stays. `cornerstone.enable` stays. The guide is `docs/lld/migration.md`.
 
 F-106 adds `attachSideBySide` in `packages/core`. One Ocelli element and one neighbour are stored. The same object cannot be both. Release disables only the Ocelli element. The neighbour is not enabled. Tiers A, B and C are n/a.
+
+F-107 adds `setKindEnabled`, `kindEnabled` and `enableFlagged` in `packages/core`. Three kind flags start off. Stack turns on before MPR, and MPR turns on before volume. An element is enabled only while its kind is on. Turning that kind off disables the elements this story enabled. A mount that turns the kind off does not leave the element dispatching. Tiers A, B and C are n/a.
+
+F-109 adds `shadowDivergence` in `packages/core`. The caller passes two byte buffers and an integer limit from 0 to 255. The count is the samples whose absolute difference is greater than that limit. Unequal lengths return nothing. The buffers are not written. The function does not render. Tiers A, B and C are n/a.
 
 ## React binding
 
