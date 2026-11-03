@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-105 | E17.1 | Integration seam: DOM-element contract identical to cornerstone | TS | 3w | pending |
+| F-105 | E17.1 | Integration seam: DOM-element contract identical to cornerstone | TS | 3w | done |
 | F-108 | E17.4 | Migration guide and codemods for the existing product | TS | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes

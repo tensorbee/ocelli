@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+import { dispatchOnElement, enableElement } from "@ocelli/core";
 import type { OcelliNamedEvent, PackedCommand, ViewportId } from "@ocelli/core";
 
 import type { OcelliSession } from "./pump.js";
@@ -30,11 +32,36 @@ export function OcelliViewport({
   onEvents,
   onRefused,
 }: OcelliViewportProps) {
-  useOcelliViewport({ viewport, session, onEvents, onRefused });
+  const host = useRef<HTMLDivElement>(null);
+  useOcelliViewport({
+    viewport,
+    session,
+    onRefused,
+    onEvents(events, dropped) {
+      const element = host.current;
+      if (element !== null) {
+        for (const event of events) {
+          dispatchOnElement(element, event);
+        }
+      }
+      onEvents?.(events, dropped);
+    },
+  });
+  useEffect(() => {
+    const element = host.current;
+    if (element === null) {
+      return;
+    }
+    const seam = enableElement(element);
+    return () => {
+      seam?.disable();
+    };
+  }, []);
   const core = session === null ? "absent" : "ready";
 
   return (
     <div
+      ref={host}
       className={className}
       data-ocelli-viewport={id}
       data-ocelli-core={core}

@@ -31,7 +31,7 @@ import { coreAvailable, VERSION } from "./index.js";
  * `CursorPair`, `CursorPhase`, `CursorStyle`, `ToolState`,
  * `ToolStateEvent`, `AnnotationLayer`, `AnnotationLayerEvent`,
  * `AnnotationMark`, `AnnotationPoint`, `AnnotationRefusal`,
- * `AnnotationSyncResult`, `TidSource`) are erased
+ * `AnnotationSyncResult`, `TidSource`, `ElementSeam`, `SeamEvent`) are erased
  * before this runs, and `npx tsc` is what watches those.
  *
  * Adding an export is a deliberate act, so adding a line here is the cost of
@@ -177,6 +177,10 @@ const PUBLISHED: readonly string[] = [
   // ./tid1500.js, F-097
   "readTid1500",
   "writeTid1500",
+  // ./seam.js, F-105
+  "disableElement",
+  "dispatchOnElement",
+  "enableElement",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",

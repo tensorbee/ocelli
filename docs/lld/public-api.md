@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-105
 **Last updated:** 2026-11-03
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -240,13 +240,15 @@ F-096 adds `persistMeasurements` and `loadMeasurements` in `packages/core`. The 
 
 F-097 adds `writeTid1500` and `readTid1500` in `packages/core`. dcmjs 0.52.2 writes a Comprehensive 3D SR document. The template identifier is 1500. Each root must contain one NUM. The number, the unit and the concept round-trip. An operator name is stored and is not returned. A count of 4000 content items returns nothing. SCOORD graphics are not mapped. There is no Rust twin.
 
+F-105 adds `enableElement`, `disableElement` and `dispatchOnElement` in `packages/core`. One element has one registration. The event type is the Ocelli name. The detail is the caller object. A second enable returns nothing. Disable removes the registration and then sends `viewport.unmounted`. The React host div uses the same functions. Tiers A, B and C are n/a.
+
 ## React binding
 
 `@ocelli/react` exports `OcelliViewport`, `useOcelliViewport` and
 `createViewportPump`. The component takes a session prop. There is no context
 and no module singleton. The pump enqueues commands. A frame with a non-empty queue submits one packed
 buffer through `writeCommands`. An empty queue does not. Every frame drains
-the ring once and dispatches F-103's named events. `checkpoint` reads
+the ring once and dispatches F-103's named events to the caller. `OcelliViewport` also dispatches those events on the host div. `checkpoint` reads
 `session.snapshot()` when the caller asks, and `restore` applies that record
 and then one `Scroll`. The host element is a `div` with `data-ocelli-viewport`
 and `data-ocelli-core`. This story does not render a canvas. The binding
