@@ -69,8 +69,18 @@ js-sys = "=0.3.104"
 # Async exports become promises through this crate. Pinned to the version
 # already in Cargo.lock beside wasm-bindgen 0.2.127.
 wasm-bindgen-futures = "=0.4.77"
+# D-27. Optional, so `decode-worker` does not link it. wasm32 drops the native
+# backends and keeps `webgl` for tier B. The native table names the pinned
+# default backends and does not enable `webgl`. Tier B stays on `ocelli-render`.
+wgpu = { workspace = true, optional = true, default-features = false, features = ["std", "parking_lot", "wgsl", "webgpu", "webgl"] }
 
 [features]
+# F-110. The shipping module is the render worker. `decode-worker` is the
+# split build: no renderer, so no wgpu and no Naga. The named user is
+# `bin/ocelli.sh wasm-decode`. It is not the default, and it enables nothing.
+default = ["render-worker"]
+render-worker = ["dep:ocelli-render", "dep:ocelli-viewport", "dep:wgpu"]
+decode-worker = []
 # HLD section 23's panic behaviour cannot be observed from a native test:
 # wasm32-unknown-unknown is `panic = "abort"` in every profile, so nothing
 # catches, and the only way to see what a trap leaves behind is to trap a real
@@ -85,8 +95,8 @@ panic-probe = []
 # F-042. The WebGL2 section 18.3 probe. The named user is
 # `tools/tier-b/run.mjs`, which builds a second module with this feature into
 # `target/tier-b-probe`. The module `bin/ocelli.sh wasm` measures does not
-# carry the feature.
-tier-b-probe = []
+# carry the feature. The probe lives on the render worker.
+tier-b-probe = ["render-worker"]
 
 [dev-dependencies]
 ocelli-pixel = { path = "../ocelli-pixel" }
@@ -99,15 +109,16 @@ ocelli-cache = { path = "../ocelli-cache" }
 # dependency is F-005's panic record and is not the move
 # ci/wasm-size-budget.json now records.
 ocelli-core = { path = "../ocelli-core" }
-# F-039. The first edge from this crate to the renderer. Decode workers load
-# the module and do not call the canvas exports. The size cost is the number
-# gate A4 reserved for this story, recorded in ci/wasm-size-budget.json.
-ocelli-render = { path = "../ocelli-render" }
+# F-039. The first edge from this crate to the renderer. F-110 makes the edge
+# optional. The default build still takes it. `decode-worker` does not.
+ocelli-render = { path = "../ocelli-render", optional = true }
 # F-101. The command batch and the event ring live in ocelli-viewport so the
 # native tests do not need wasm-bindgen. This crate owns the session slot.
-ocelli-viewport = { path = "../ocelli-viewport" }
+ocelli-viewport = { path = "../ocelli-viewport", optional = true }
 # `SurfaceTarget::OffscreenCanvas` is the safe constructor, and D-12 keeps the
 # canvas type out of ocelli-render, so this crate is the one that names the
-# target. The device is still created only in ocelli-render. The workspace pin
-# is the one ocelli-render already uses, webgl included by feature unification.
-wgpu = { workspace = true }
+# target. The device is still created only in ocelli-render. The wgpu
+# dependency itself is in the target tables above and below.
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { workspace = true, optional = true, features = ["std", "parking_lot", "dx12", "metal", "gles", "vulkan", "wgsl", "webgpu"] }

@@ -27,8 +27,17 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true, features = ["std"] }
-wgpu = { workspace = true }
 pollster = { workspace = true }
+
+# D-27. A shared wgpu line enables the native backends on every target,
+# including the wasm32 workspace resolve. The cross-target proof checks this
+# crate for wasm32, so that target keeps the browser set and the host keeps
+# the desktop backends.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { workspace = true, features = ["std", "parking_lot", "dx12", "metal", "gles", "vulkan", "wgsl", "webgpu"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { workspace = true, default-features = false, features = ["std", "parking_lot", "wgsl", "webgpu", "webgl"] }
 
 [dev-dependencies]
 proptest = { workspace = true }

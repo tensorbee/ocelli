@@ -298,25 +298,32 @@ def _undeclared_deviation_citation(box: Sandbox) -> None:
 
 
 def _relax_wgpu_pin(box: Sandbox) -> None:
-    box.substitute("Cargo.toml", 'wgpu = "=30.0.1"', 'wgpu = "30.0.1"')
+    # D-27 writes the pin as a table. The version key is what the guard reads.
+    box.substitute("Cargo.toml", 'version = "=30.0.1"', 'version = "30.0.1"')
 
 
 def _partial_wgpu_pin(box: Sandbox) -> None:
     # `=` and a major only. Cargo reads it as a band: it resolves against
     # 30.0.1 and `cargo update -p wgpu --precise 30.0.0` under it exits 0,
     # both measured, where `=30.0.1` refuses that version.
-    box.substitute("Cargo.toml", 'wgpu = "=30.0.1"', 'wgpu = "=30"')
+    box.substitute("Cargo.toml", 'version = "=30.0.1"', 'version = "=30"')
 
 
 def _reorder_wgpu_table(box: Sandbox) -> None:
-    # The pin is unchanged and still exact. Only the shape of the entry
-    # changes, to the table form Cargo accepts everywhere else in this file.
-    box.substitute("Cargo.toml", 'wgpu = "=30.0.1"',
-                   'wgpu = { features = ["webgl"], version = "=30.0.1" }')
+    # The pin is unchanged and still exact. D-27 already uses a table, so
+    # this probe reorders the keys. A reader that takes the first quoted
+    # string would miss `version`.
+    box.substitute(
+        "Cargo.toml",
+        'wgpu = { version = "=30.0.1", default-features = false }',
+        'wgpu = { default-features = false, version = "=30.0.1" }')
 
 
 def _drop_wgpu_entry(box: Sandbox) -> None:
-    box.substitute("Cargo.toml", 'wgpu = "=30.0.1"', "")
+    box.substitute(
+        "Cargo.toml",
+        'wgpu = { version = "=30.0.1", default-features = false }\n',
+        "")
 
 
 def _remove_openjph_published_source(box: Sandbox) -> None:
@@ -394,6 +401,67 @@ def _oversize_wasm(box: Sandbox) -> None:
               json.dumps({"bytes": 1000, "tolerance": 0.05}, indent=2) + "\n")
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 4096)
     _write_packaged_licences(box)
+
+
+def _decode_binding_text(names: tuple[str, ...]) -> str:
+    return "".join(f"export function {name}(): void;\n" for name in names)
+
+
+def _healthy_decode_package(box: Sandbox, *, decode_bytes: int = 1000,
+                            bindings: str | None = None) -> None:
+    """A render module under the recorded ceiling and a decode module.
+
+    `--with-size` checks both. The decode budget in the tree is the measured
+    16455 byte record, so a 1000 byte module is inside it.
+    """
+    import pin_and_size_check as pins
+    box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
+    _write_packaged_licences(box)
+    if bindings is None:
+        bindings = _decode_binding_text(pins.DECODE_EXPORTS)
+    box.write("crates/ocelli-wasm/pkg-decode/ocelli_wasm.d.ts", bindings)
+    box.write("crates/ocelli-wasm/pkg-decode/ocelli_wasm_bg.wasm",
+              b"\x00" * decode_bytes)
+
+
+def _oversize_decode_wasm(box: Sandbox) -> None:
+    # 20000 is over the 16455 byte record at 5 percent (ceiling 17277).
+    _healthy_decode_package(box, decode_bytes=20000)
+
+
+def _decode_drops_version(box: Sandbox) -> None:
+    import pin_and_size_check as pins
+    names = tuple(name for name in pins.DECODE_EXPORTS
+                  if name != "ocelli_version")
+    _healthy_decode_package(box, bindings=_decode_binding_text(names))
+
+
+def _decode_names_canvas(box: Sandbox) -> None:
+    import pin_and_size_check as pins
+    text = _decode_binding_text(pins.DECODE_EXPORTS)
+    text += _decode_binding_text(pins.DECODE_ABSENT)
+    _healthy_decode_package(box, bindings=text)
+
+
+def _drop_decode_budget(box: Sandbox) -> None:
+    _healthy_decode_package(box)
+    box.delete("ci/wasm-decode-size.json")
+
+
+def _drop_decode_wasm(box: Sandbox) -> None:
+    _healthy_decode_package(box)
+    box.delete("crates/ocelli-wasm/pkg-decode/ocelli_wasm_bg.wasm")
+
+
+def _drop_decode_bindings(box: Sandbox) -> None:
+    _healthy_decode_package(box)
+    box.delete("crates/ocelli-wasm/pkg-decode/ocelli_wasm.d.ts")
+
+
+def _widen_decode_tolerance(box: Sandbox) -> None:
+    _healthy_decode_package(box)
+    box.substitute("ci/wasm-decode-size.json",
+                   '"tolerance": 0.05', '"tolerance": 0.5')
 
 
 def _write_packaged_licences(box: Sandbox, *, omit: str = "") -> None:
@@ -6770,7 +6838,11 @@ GUARDS: tuple[Guard, ...] = (
                 "ritk-codecs archive inventory or its immutable digest, an "
                 "undeclared change outside either exact manifest patch or "
                 "the exact patch provenance record, "
-                "incorrect provenance, or Rayon in either target graph. "
+                "incorrect provenance, or Rayon in either target graph, "
+                "a decode module over its recorded ceiling, a decode size "
+                "record whose tolerance is not the shared 5 percent, and a "
+                "decode binding file that drops a panic export or names the "
+                "canvas. "
                 "For openjph-core under D-22, where there is NO patch: a "
                 "changed, absent or unrecorded published file, a changed "
                 "inventory or its immutable digest, a wrong packaged VCS "
@@ -6835,14 +6907,14 @@ GUARDS: tuple[Guard, ...] = (
                   script("python3", "scripts/pin_and_size_check.py"),
                   "pinned exactly",
                   polarity="accept",
-                  note="The pin is UNCHANGED and still exact, only written in "
-                       "the table form Cargo accepts. R4 is about the version "
-                       "being exact and says nothing about the entry's shape, "
-                       "so the guard must still find it. This was G-03 and "
-                       "failed until S03: the version was read positionally "
-                       "as the first quoted string in the entry, so a table "
-                       "whose first value happened to start with `=` passed "
-                       "with a caret range unread."),
+                  note="The pin is UNCHANGED and still exact. D-27 already "
+                       "writes a table, so this probe reorders the keys. R4 "
+                       "is about the version being exact and says nothing "
+                       "about key order, so the guard must still find it. "
+                       "This was G-03 and failed until S03: the version was "
+                       "read positionally as the first quoted string in the "
+                       "entry, so a table whose first value happened to start "
+                       "with `=` passed with a caret range unread."),
             Probe("pins.openjph-inventory", _remove_openjph_published_source,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "openjph-core published file is absent: src/lib.rs",
@@ -6921,7 +6993,200 @@ GUARDS: tuple[Guard, ...] = (
                   note="D-20. Restoring jpeg-decoder defaults recreates the "
                        "dependency graph the local two-manifest patch exists "
                        "to remove."),
+            Probe("pins.decode-size-ceiling", _oversize_decode_wasm,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--with-size"),
+                  "decode wasm module is",
+                  note="F-110. The render module stays under its own ceiling. "
+                       "Only the decode artefact is over the recorded one."),
+            Probe("pins.decode-export-missing", _decode_drops_version,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--with-size"),
+                  "do not export ocelli_version",
+                  note="F-110. The decode bindings are the panic surface."),
+            Probe("pins.decode-names-canvas", _decode_names_canvas,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--with-size"),
+                  "still name attachOffscreenCanvas",
+                  note="F-110. The canvas export belongs to the render worker."),
+            Probe("pins.decode-budget-absent", _drop_decode_budget,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--with-size"),
+                  "wasm-decode-size.json is absent",
+                  note="F-110. A missing decode record is a failure. The "
+                       "check does not write one."),
+            Probe("pins.decode-tolerance", _widen_decode_tolerance,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--with-size"),
+                  "decode size tolerance",
+                  note="F-110. The decode file uses the same 5 percent as the "
+                       "render budget. Raising it in that file alone is a "
+                       "tolerance change."),
+            Probe("pins.decode-module-absent", _drop_decode_wasm,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--with-size"),
+                  "no .wasm found",
+                  note="F-110. The render module is present. The decode "
+                       "module is not. A missing decode build is a failure."),
+            Probe("pins.decode-bindings-absent", _drop_decode_bindings,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--with-size"),
+                  "did not emit bindings",
+                  note="F-110. A decode wasm with no bindings file is not a "
+                       "measured module."),
         ),
+    ),
+    Guard(
+        id="decode-graph",
+        file="scripts/decode_graph_check.py",
+        gate="wasm",
+        spec="HLD 15.2, deviation D-27, story F-110",
+        refuses="A decode build that links wgpu, Naga or the renderer, a "
+                "wasm32 wgpu feature set other than the D-27 set, a native "
+                "table that drops a default backend, wasm-opt turned off, "
+                "and a workspace resolve that enables a native backend on "
+                "wasm32 or drops one on the host.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "decode-graph.decode-worker-dep", None,
+                python_snippet(
+                    "decode_graph_check.check_features, dependency",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "manifest = {'features': {\n"
+                    "    'default': ['render-worker'],\n"
+                    "    'decode-worker': ['dep:wgpu'],\n"
+                    "    'render-worker': ['dep:ocelli-render',\n"
+                    "                      'dep:ocelli-viewport', 'dep:wgpu'],\n"
+                    "}}\n"
+                    "bad = d.check_features(manifest)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "decode-worker must not enable a dependency",
+                level=1,
+                control=python_snippet(
+                    "decode_graph_check.check_features, healthy",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "bad = d.check_features(d.load(d.WASM_CRATE))\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="F-110. decode-worker enables nothing. The control is "
+                     "the manifest in the tree."),
+            Probe(
+                "decode-graph.wasm-opt-absent", None,
+                python_snippet(
+                    "decode_graph_check.check_wasm_opt, absent",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "bad = d.check_wasm_opt({})\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "wasm-opt is absent",
+                level=1,
+                control=python_snippet(
+                    "decode_graph_check.check_wasm_opt, healthy",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "bad = d.check_wasm_opt(d.load(d.WASM_CRATE))\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="F-110. wasm-opt stays a flag list on the release profile."),
+            Probe(
+                "decode-graph.wasm32-features", None,
+                python_snippet(
+                    "decode_graph_check.check_trimmed, dx12",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "features = ['std', 'parking_lot', 'wgsl', 'webgpu',\n"
+                    "            'webgl', 'dx12']\n"
+                    "native = ['std', 'parking_lot', 'dx12', 'metal', 'gles',\n"
+                    "          'vulkan', 'wgsl', 'webgpu']\n"
+                    "manifest = {'target': {\n"
+                    "    'cfg(target_arch = \"wasm32\")': {'dependencies': {\n"
+                    "        'wgpu': {'default-features': False,\n"
+                    "                 'features': features}}},\n"
+                    "    'cfg(not(target_arch = \"wasm32\"))': {'dependencies': {\n"
+                    "        'wgpu': {'default-features': False,\n"
+                    "                 'features': native}}},\n"
+                    "}}\n"
+                    "bad = d.check_trimmed('probe', manifest, False)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "not the D-27 set",
+                level=1,
+                control=python_snippet(
+                    "decode_graph_check.check_trimmed, healthy",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "manifest = d.load(d.WASM_CRATE)\n"
+                    "bad = d.check_trimmed('ocelli-wasm', manifest, False)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="F-110. dx12 on the wasm32 table is a native backend."),
+            Probe(
+                "decode-graph.still-links", None,
+                python_snippet(
+                    "decode_graph_check.classify_graph, wgpu",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "bad = d.classify_graph(0, 'wgpu v30.0.1\\n',\n"
+                    "                       0, 'wgpu v30.0.1\\n')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "decode-worker still links",
+                level=1,
+                control=python_snippet(
+                    "decode_graph_check.classify_graph, healthy",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "bad = d.classify_graph(0, 'ocelli-cache v0.1.0\\n',\n"
+                    "                       0, 'wgpu v30.0.1\\n')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="F-110. The classifier is what the cargo tree text is "
+                     "judged by. The wasm gate runs the real tree."),
+            Probe(
+                "decode-graph.workspace-backend", None,
+                python_snippet(
+                    "decode_graph_check.classify_workspace, dx12",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "wasm = set(d.WASM_FEATURES) | {'dx12'}\n"
+                    "host = set(d.NATIVE_FEATURES) | {'webgl'}\n"
+                    "bad = d.classify_workspace(0, wasm, 0, host)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "wasm32 workspace resolve enables",
+                level=1,
+                control=python_snippet(
+                    "decode_graph_check.classify_workspace, healthy",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "wasm = set(d.WASM_FEATURES)\n"
+                    "host = set(d.NATIVE_FEATURES) | {'webgl'}\n"
+                    "bad = d.classify_workspace(0, wasm, 0, host)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="F-110. The workspace resolve is not the ocelli-wasm "
+                     "package graph. A native backend on wasm32 fails here."),
+        ),
+        limit="The cargo-tree process itself is the wasm gate. A probe that "
+              "makes cargo fail to resolve needs a broken toolchain, so the "
+              "did-not-run branches have no separate probe. Sibling manifest "
+              "messages, an empty flag list or a dropped native backend, are "
+              "the same functions as the level 1 probes above.",
     ),
 
     # -- the no_std posture -------------------------------------------------
@@ -11410,6 +11675,22 @@ CONSTANTS: tuple[Constant, ...] = (
              why="Growth tolerated before the size gate fails. A story that "
                  "grows the module 5% should say why, and raising this is "
                  "one of the things it might say."),
+    Constant("pins", "scripts/pin_and_size_check.py", "DECODE_EXPORTS",
+             r"^DECODE_EXPORTS = (\(.*?^)\)",
+             why="The decode module's panic surface. Dropping a name would "
+                 "let a pack that omits it pass."),
+    Constant("pins", "scripts/pin_and_size_check.py", "DECODE_ABSENT",
+             r"^DECODE_ABSENT = (\(.*?\))",
+             why="Names the decode bindings must not carry. Emptying the "
+                 "tuple would accept a canvas export."),
+    Constant("decode-graph", "scripts/decode_graph_check.py", "WASM_FEATURES",
+             r"^WASM_FEATURES = (\{.*?\})",
+             why="The wasm32 wgpu feature set D-27 records. A native backend "
+                 "added here would no longer be trimmed."),
+    Constant("decode-graph", "scripts/decode_graph_check.py",
+             "NATIVE_FEATURES",
+             r"^NATIVE_FEATURES = (\{.*?^})",
+             why="The native backends the host resolve must keep."),
     Constant("ci-floor", "scripts/ci_floor_check.py", "NOT_IN_FLOOR",
              r"^NOT_IN_FLOOR = (\{.*?\})$",
              why="Deviation D-04. A gate leaving the floor is a decision."),

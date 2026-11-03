@@ -87,6 +87,16 @@ ROOT = Path(__file__).resolve().parent.parent
 CARGO = ROOT / "Cargo.toml"
 BUDGET = ROOT / "ci" / "wasm-size-budget.json"
 PKG = ROOT / "crates" / "ocelli-wasm" / "pkg"
+DECODE_BUDGET = ROOT / "ci" / "wasm-decode-size.json"
+DECODE_PKG = ROOT / "crates" / "ocelli-wasm" / "pkg-decode"
+# The decode bindings. Canvas exports belong to the render worker.
+DECODE_EXPORTS = (
+    "install_panic_hook",
+    "ocelli_version",
+    "panic_record_len",
+    "panic_record_ptr",
+)
+DECODE_ABSENT = ("attachOffscreenCanvas",)
 RITK_VENDOR = ROOT / "vendor" / "ritk-codecs-0.6.0"
 
 RITK_ARCHIVE_SHA256 = "5fb65755a819c6ba38bf8aaf146f4ccc23d2fe217c8161a61bf00517c9d1cce5"
@@ -354,13 +364,60 @@ def check_ritk_vendor(
     return problems
 
 
-def wasm_bytes() -> int | None:
-    if not PKG.is_dir():
+def wasm_bytes(pkg: Path = PKG) -> int | None:
+    if not pkg.is_dir():
         return None
-    modules = sorted(PKG.glob("*.wasm"))
+    modules = sorted(pkg.glob("*.wasm"))
     if not modules:
         return None
     return max(m.stat().st_size for m in modules)
+
+
+def check_decode_exports(pkg: Path) -> list[str]:
+    """The decode bindings export the panic surface and not the canvas."""
+    dts = pkg / "ocelli_wasm.d.ts"
+    if not dts.is_file():
+        return [f"{dts} is absent. The decode pack did not emit bindings."]
+    text = dts.read_text()
+    problems = []
+    for name in DECODE_EXPORTS:
+        if f"export function {name}" not in text:
+            problems.append(f"decode bindings do not export {name}")
+    for name in DECODE_ABSENT:
+        if name in text:
+            problems.append(f"decode bindings still name {name}")
+    return problems
+
+
+def check_decode_size() -> list[str]:
+    """The F-110 decode module, measured, not guessed.
+
+    The render budget stays the shipping module. This file is the other
+    artefact. A missing record is a failure, not an invitation to write one.
+    """
+    size = wasm_bytes(DECODE_PKG)
+    if size is None:
+        return [f"no .wasm found under {DECODE_PKG.relative_to(ROOT)}. "
+                f"Run `bin/ocelli.sh wasm-decode` first."]
+    if not DECODE_BUDGET.exists():
+        return ["ci/wasm-decode-size.json is absent. Record the measured "
+                "decode module. Do not invent the byte count."]
+    recorded = json.loads(DECODE_BUDGET.read_text())
+    baseline = recorded["bytes"]
+    tolerance = recorded["tolerance"]
+    if tolerance != TOLERANCE:
+        return [f"decode size tolerance is {tolerance}, not {TOLERANCE}."]
+    ceiling = int(baseline * (1 + tolerance))
+    print(f"  decode wasm size {size:,} bytes, baseline {baseline:,}, "
+          f"ceiling {ceiling:,}")
+    problems = []
+    if size > ceiling:
+        problems.append(
+            f"decode wasm module is {size:,} bytes, over the "
+            f"{ceiling:,} byte ceiling ({tolerance:.0%} above the "
+            f"{baseline:,} byte baseline).")
+    problems.extend(check_decode_exports(DECODE_PKG))
+    return problems
 
 
 def check_package_licences(pkg: Path = PKG,
@@ -415,18 +472,24 @@ def check_size(accept: bool) -> list[str]:
         verb = "re-baselined" if accept else "baselined"
         print(f"  wasm size {verb} at {size:,} bytes "
               f"({size / 1_048_576:.2f} MiB)")
-        return []
+        if accept:
+            return []
+        return check_decode_size()
 
     baseline = json.loads(BUDGET.read_text())["bytes"]
     ceiling = int(baseline * (1 + TOLERANCE))
     print(f"  wasm size {size:,} bytes, baseline {baseline:,}, "
           f"ceiling {ceiling:,}")
+    problems = []
     if size > ceiling:
-        return [f"wasm module is {size:,} bytes, over the "
-                f"{ceiling:,} byte ceiling ({TOLERANCE:.0%} above the "
-                f"{baseline:,} byte baseline). Either reduce it or "
-                f"re-baseline with --accept-size and record why."]
-    return []
+        problems.append(
+            f"wasm module is {size:,} bytes, over the "
+            f"{ceiling:,} byte ceiling ({TOLERANCE:.0%} above the "
+            f"{baseline:,} byte baseline). Either reduce it or "
+            f"re-baseline with --accept-size and record why.")
+    if not accept:
+        problems.extend(check_decode_size())
+    return problems
 
 
 

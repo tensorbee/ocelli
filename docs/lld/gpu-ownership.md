@@ -1,7 +1,7 @@
 # GPU ownership
 
-**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-038, F-039, F-041, F-042, F-X001, F-101
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-004, F-005, F-008, F-037, F-038, F-039, F-041, F-042, F-X001, F-101, F-110
+**Last updated:** 2026-11-03
 
 One device, one queue, one owner. HLD section 31's first bullet, made into a
 mechanism. The quote below alters that bullet in one place, splitting its
@@ -362,11 +362,11 @@ mode and alpha mode are the first the surface reports. An empty extent is
 refused before `configure`. On tier C the wasm export sets the canvas bitmap
 from `device_extent` and returns without calling `attach_target`.
 
-`ocelli-wasm` exports `attachOffscreenCanvas` and `resizeOffscreenCanvas`. The
-export builds `SurfaceTarget::OffscreenCanvas` and calls `attach_target`.
-Decode workers load the same module and are not required to call either
-export. The viewport table in that crate is an index of capacity 8. It is not
-the session F-101 owns.
+`ocelli-wasm` exports `attachOffscreenCanvas` and `resizeOffscreenCanvas` from
+the render module. The export builds `SurfaceTarget::OffscreenCanvas` and
+calls `attach_target`. The decode-worker artefact does not export either
+function. A decode worker does not load this module. The viewport table in
+that crate is an index of capacity 8. It is not the session F-101 owns.
 
 ## Deviations D-10 and D-12
 

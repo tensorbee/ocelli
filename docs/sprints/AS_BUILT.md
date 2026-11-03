@@ -4619,3 +4619,67 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/migration.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a012-56d3-7c23-b882-4ccedd21c4e3`. `shadow.ts` sha256 at the clean pass is `49eb84526e5fd59f3de4a7d29f4266046e35c9593e6b23ecf1c4c9fda558a001`. Counting a difference equal to the limit was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-110, binary size budget, completed 2026-11-03
+
+**What was built.** wasm32 wgpu drops the native backends. `decode-worker` builds `ocelli-wasm` without wgpu or Naga. `bin/ocelli.sh wasm-decode` writes that module. The render module stays the default. It measured 2,171,133 bytes on 2026-11-03, inside the existing ceiling, so `ci/wasm-size-budget.json` was not edited. The decode module measured 16,455 bytes and is recorded in `ci/wasm-decode-size.json`.
+
+**HLD sections implemented.** Section 15.2 is the release profile and the exact wgpu pin. The feature split is D-27. Gate A4 stays open because cold start was not remeasured.
+**Deviations.** D-27. D-14 still records why `webgl` is named.
+**Crates / packages modified.** The workspace pin, `ocelli-wasm`, `ocelli-render`, `ocelli-compute`, `ocelli-native`, `tools/oracle`, `bin/ocelli.sh`, `scripts/decode_graph_check.py`, `scripts/pin_and_size_check.py`, `scripts/guards/catalogue.py`, `scripts/guard_probe.py`, `eslint.config.js`, `ci/wasm-decode-size.json` and `ci/target-feature-baseline.json`.
+**Tests added.** The graph check, the decode size and export check, three binding tests in `scripts/tests/test_pin_and_size_check.py`, the four pin probes retargeted at the table form, seven decode probes, and five level-1 decode-graph probes. The pin catch-all moved from 48 refusal sites to 57. Seven of those sites have their own words. `pins.decode-size-ceiling`, `pins.decode-export-missing`, `pins.decode-names-canvas`, `pins.decode-budget-absent`, `pins.decode-tolerance`, `pins.decode-module-absent` and `pins.decode-bindings-absent` watch those seven. The other two new sites are `extend` calls. They forward those lists and have no words of their own. `decode-graph` is a new catch-all entry and its count is recorded with it.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a for the decode module. The render module keeps `webgl`, so tier B can still resolve.
+**LLD updated.** `docs/lld/build-targets.md`, `docs/lld/tier-resolution.md`, `docs/lld/guards.md`, `docs/lld/gpu-ownership.md` and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** `ocelli-oracle` and the `ocelli-native` dev-dependency are target-gated so a shared line cannot turn the desktop backends on in the wasm32 workspace resolve. The plan's approach records that.
+**Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a070-422a-7772-ac36-b9d91e1f322b`. The floor gate then failed. ESLint read generated `pkg-decode` glue, and the guard census had no claim for `scripts/decode_graph_check.py`. The pin catch-all had grown with no recorded count. This tree adds the ignore, the `decode-graph` entry, the decode probes and the recorded counts. Pass 4 reported 2 defects. Reviewer `01a1a08c-8002-74c2-a187-e35b79977b56`. Those were the missing-module claim and the LLD sentence that decode workers load the render module. `pins.decode-module-absent` and `pins.decode-bindings-absent` watch the two worded branches. Both LLD files now say the decode artefact does not export the canvas. Pass 5 reported 1 defect. Reviewer `01a1a09c-329c-7352-b07d-8f719c84c0b9`. The canvas module comment still said decode workers load that module. This tree says the decode-worker build does not compile it. Pass 6 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a0a6-2e09-76b3-bc6a-2f20c9cdca4d`. Passes 1 and 2 each reported 2 defects. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.
+
+## F-112, worker pool and the threading decision, completed 2026-11-03
+
+**What was built.** `openDecodePool` opens one to eight decode workers for one owner. The default count is 1. A count outside that range, a non-integer, a non-object owner, or a second open of the same owner returns null and does not call the starter. The slot is stored before start. Close deletes the slot before terminate. `threadingEscalation` returns `stable`. `sharedMemory` is false. The product file does not name a shared-memory buffer. The render worker is not started here.
+
+**HLD sections implemented.** Section 9 is one decode instance per worker and no shared-memory threading. Section 10 leaves worker construction in TypeScript. The count ceiling is the approved local plan. It is not an HLD formula.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core` and `docs/lld/public-api.md`.
+**Tests added.** Nine tests in `packages/core/src/pool.test.ts` and the published names in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic. The counts are the approved local ceiling.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The function does not open a device.
+**LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Changing the lower bound from 1 to 0 made count 0 return a pool. The bound was restored to 1. Pass 1 reported 1 defect. Reviewer `01a1a0b7-06fe-7162-b5ee-659feac418bf`. The file scan passed a URL to `readFileSync`. This tree passes a string path. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a0c5-50bc-7bb0-94c2-2fd5c93c9eb0`. S40 pass 1 reported 1 defect. Reviewer `01a1a140-d410-7150-a74d-4ecbeac31101`. Replacing the ceiling check with `>=` left the eight tests green and refused count 8. This tree opens eight workers and records indexes 0 through 7. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.
+
+## F-113, memory profile for a synthetic load, completed 2026-11-03
+
+**What was built.** `profile_load` reports encoded, decoded and GPU pressure from dimensions. Decoded bytes are the product of columns, rows, slices, the fourth dimension, samples and bytes per sample. The hand products are 157286400, 262144, 4294967296 and 786432. Encoded used is 0. A product that does not fit, a zero dimension, a sample count other than 1 or 3, or a byte width other than 1 or 2 returns nothing. A 65536 by 65536 frame fits a 64-bit address and does not fit a 32-bit address. GPU bytes are the caller figure. A figure above its budget leaves GPU used at 0. Tier C with a non-zero GPU figure returns nothing. Tier C with zero reports GPU used 0. Admission is one function, `admits`, shared with `Lru::would_admit`. The function does not allocate the volume.
+
+**HLD sections implemented.** Section 8 is the three tiers. The dimension product and the sample limits are the approved local plan. They are not an HLD formula.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-cache`.
+**Tests added.** Seven tests in `crates/ocelli-cache/src/profile.rs`. The existing budget-boundary test still calls `would_admit`.
+**Fixture provenance.** The products are multiplied by hand from the approved dimensions. They are not DICOM samples.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A and B report the caller GPU figure. Tier C reports GPU used 0 and refuses a non-zero GPU figure.
+**LLD updated.** `docs/lld/cache.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Changing `bytes <= budget` to `bytes < budget` made `would_admit` return false for a byte count equal to the budget. The hand-written expected value is true. Insert refuses that boundary because it calls `would_admit`. The comparison was restored. Pass 1 reported 2 defects. Reviewer `01a1a0d7-dff8-70a3-b37b-b3bbd0604969`. The profile tests tripped clippy, and the note said insert still admitted the boundary. Pass 2 reported 1 defect. Reviewer `01a1a0e8-d38d-7d51-8286-d9c3267cf336`. Replacing `usize::try_from` with a zero fallback left the five tests green. A 65536 by 65536 load is 4294967296 decoded bytes on a 64-bit address. `fits_address_bits` returns nothing for that product at 32 bits. Three samples of the 4D shape are 786432 bytes, and a GPU figure of 10 against a budget of 9 stays unused. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.
+
+## F-114, browser matrix and tier certification, completed 2026-11-03
+
+**What was built.** `certifyRow` recomputes one browser row. A missing observation is not-run, even when a caller status says certified. Tier B is certified only for a finished run whose renderer string does not contain SwiftShader. Tier C is certified only when the resolved tier is C and the renderer string does contain SwiftShader. SwiftShader with expected tier B returns null, including when the exit code is not 0 and when the resolved tier differs. A failed probe whose renderer does not contain SwiftShader is observed. A resolved tier that differs from the expected tier is observed when the renderer does not contain SwiftShader. The committed matrix names chromium-webgl2, chromium-swiftshader, firefox, safari and enterprise-locked. None of those rows has an observation, so none is certified. The function does not launch a browser.
+
+**HLD sections implemented.** Section 7 is tier A and tier B. Deviation D-07 adds tier C. The row names, the expected tiers and the not-run rule are the approved local plan. They are not an HLD formula.
+**Deviations.** none. D-07 is cited and is not extended.
+**Crates / packages modified.** `packages/core` and `ci/browser-matrix.json`.
+**Tests added.** Eleven tests in `packages/core/src/matrix.test.ts` and the published name in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic. The statuses are the approved plan.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** Tier A is observed and is not certified. Tier B is certified only when the renderer string does not contain SwiftShader. Tier C is certified only when the renderer string does contain SwiftShader.
+**LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Changing the SwiftShader plus expected tier B result from null to certified made that test return certified. Dropping the SwiftShader requirement from tier C certified a llvmpipe row. Both comparisons were restored. Pass 1 reported 2 defects. Reviewer `01a1a110-8ef6-7982-9345-fbf949606068`. Deleting the resolved-tier comparison left the first eight tests green. An expected tier B row whose resolved tier is C stays observed when the renderer does not contain SwiftShader. An expected tier C row whose resolved tier is B stays observed, including when the renderer contains SwiftShader. Pass 2 reported 1 defect. Reviewer `01a1a11e-fbc0-70a3-aa5b-7f88dc612f7d`. Narrowing the SwiftShader null arm to equal tiers left that suite green. SwiftShader with expected tier B stays null when the resolved tier differs. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.

@@ -26,6 +26,7 @@ __pycache__/
 
 # wasm-pack output. Built by bin/ocelli.sh wasm, never committed.
 crates/ocelli-wasm/pkg/
+crates/ocelli-wasm/pkg-decode/
 crates/ocelli-wasm/target/
 
 # Node

@@ -70,6 +70,16 @@
       "guard": "ci-floor",
       "tunable": false
     },
+    "scripts/decode_graph_check.py:NATIVE_FEATURES": {
+      "digest": "409a084b8dbe27eb",
+      "guard": "decode-graph",
+      "tunable": false
+    },
+    "scripts/decode_graph_check.py:WASM_FEATURES": {
+      "digest": "ae2b1cf627a64a04",
+      "guard": "decode-graph",
+      "tunable": false
+    },
     "scripts/lint_policy_check.py:ALLOWING_FLAGS": {
       "digest": "529fc165b0d97d7a",
       "guard": "lint-policy",
@@ -83,6 +93,16 @@
     "scripts/no_std_check.py:EXPECTED_NO_STD_CRATES": {
       "digest": "1394dad8c14d7297",
       "guard": "nostd",
+      "tunable": false
+    },
+    "scripts/pin_and_size_check.py:DECODE_ABSENT": {
+      "digest": "77eddc52f57d14c5",
+      "guard": "pins",
+      "tunable": false
+    },
+    "scripts/pin_and_size_check.py:DECODE_EXPORTS": {
+      "digest": "cc1423cc587ad924",
+      "guard": "pins",
       "tunable": false
     },
     "scripts/pin_and_size_check.py:EXACT_PINNED": {
@@ -176,7 +196,7 @@
       "tunable": false
     }
   },
-  "constants_count": 35,
+  "constants_count": 39,
   "entry_sites": {
     "backlog": 10,
     "bench": 33,
@@ -204,6 +224,7 @@
     "corpus": 28,
     "corpus-synth": 6,
     "corpus-tests": 2,
+    "decode-graph": 26,
     "deviations": 5,
     "device": 4,
     "discover": 0,
@@ -230,7 +251,7 @@
     "oracle.volume": 31,
     "packages": 21,
     "panic-probe": 1,
-    "pins": 48,
+    "pins": 57,
     "populate-corpus": 10,
     "probe-runner": 20,
     "prose": 3,

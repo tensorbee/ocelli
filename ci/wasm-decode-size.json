@@ -1,0 +1,5 @@
+{
+  "bytes": 16455,
+  "tolerance": 0.05,
+  "note": "F-110 decode-worker release module measured by bin/ocelli.sh wasm-decode on 2026-11-03 as crates/ocelli-wasm/pkg-decode/ocelli_wasm_bg.wasm. The module does not link wgpu or Naga. This file is not the render budget."
+}

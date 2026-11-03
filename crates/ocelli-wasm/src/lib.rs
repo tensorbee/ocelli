@@ -22,18 +22,24 @@
 //! shared reference. The allow-list is unchanged and still names two files
 //! that do not exist.
 //!
-//! F-039 adds `canvas`, compiled only for wasm32. It names the offscreen
-//! canvas and calls into `ocelli-render`, which owns the device. Decode
-//! workers load this same module and are not required to call those exports.
+//! F-039 adds `canvas`, compiled only for wasm32 and only with
+//! `render-worker`. It names the offscreen canvas and calls into
+//! `ocelli-render`, which owns the device. The decode-worker build does not
+//! compile `canvas` or `session`.
 //! F-101's session is `session`. `coreAvailable()` in the package stays false
 //! until a built module is loaded.
 
-#[cfg(target_arch = "wasm32")]
+// F-110. The canvas and the session are the render worker. `decode-worker`
+// does not compile them, so that build does not link the renderer.
+#[cfg(all(target_arch = "wasm32", feature = "render-worker"))]
 mod canvas;
 
 pub mod panic;
+
+#[cfg(feature = "render-worker")]
 mod session;
 
+#[cfg(feature = "render-worker")]
 pub use session::{FrameMeta, MAX_BULK_BYTES, Session, SessionError};
 
 #[cfg(target_arch = "wasm32")]

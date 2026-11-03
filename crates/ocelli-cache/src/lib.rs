@@ -22,6 +22,7 @@ extern crate alloc;
 pub mod brick;
 pub mod image;
 pub mod lru;
+pub mod profile;
 pub mod telemetry;
 pub mod tier;
 
@@ -34,6 +35,7 @@ pub use image::{
     SeriesId,
 };
 pub use lru::{Admission, Budgeted, Lru};
+pub use profile::{LoadProfile, LoadSpec, profile_load};
 pub use telemetry::{CacheTelemetry, TelemetryEvent, TierCounters, TierTelemetry};
 pub use tier::{CacheTier, Pressure, PressureBand};
 

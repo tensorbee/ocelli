@@ -1,0 +1,29 @@
+{
+  "rows": [
+    {
+      "id": "chromium-webgl2",
+      "expectedTier": "B",
+      "status": "not-run"
+    },
+    {
+      "id": "chromium-swiftshader",
+      "expectedTier": "C",
+      "status": "not-run"
+    },
+    {
+      "id": "firefox",
+      "expectedTier": "B",
+      "status": "not-run"
+    },
+    {
+      "id": "safari",
+      "expectedTier": "B",
+      "status": "not-run"
+    },
+    {
+      "id": "enterprise-locked",
+      "expectedTier": "B",
+      "status": "not-run"
+    }
+  ]
+}

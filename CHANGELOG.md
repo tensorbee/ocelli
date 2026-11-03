@@ -10,6 +10,10 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The shell certifies a browser row only from an observation. A missing run stays not-run. SwiftShader with expected tier B returns nothing. Tier C is certified only when that renderer string is present.
+- The cache reports decoded bytes from the dimensions of one synthetic load. Encoded used is 0. A tier C load with a non-zero GPU figure returns nothing.
+- The shell opens one to eight decode workers for one owner. A bad count returns nothing. The threading decision stays stable Rust.
+- A second wasm build links no wgpu. `bin/ocelli.sh wasm-decode` writes it. The render size budget is unchanged.
 - The shell counts bytes whose absolute difference is above an integer limit. Unequal lengths return nothing. The buffers are not written. The function does not render.
 - The shell keeps three kind flags. They start off. Stack turns on before MPR, and MPR turns on before volume. An element is enabled only while its kind is on. Turning that kind off disables the elements this story enabled.
 - The shell keeps one Ocelli element and one neighbour. Release disables only the Ocelli element. The neighbour keeps its own listeners.

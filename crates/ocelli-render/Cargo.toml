@@ -25,16 +25,26 @@ workspace = true
 # devices cannot share textures, which would defeat the entire point."
 #
 # THE `webgl` FEATURE IS DEVIATION D-14. Section 15.2 gives
-# `wgpu = "=30.0.1"` and this crate takes it with one feature added. wgpu
+# `wgpu = "=30.0.1"` and this crate names `webgl` as well. wgpu
 # 30.0.1's default set is `std, parking_lot, dx12, metal, gles, vulkan, wgsl,
 # webgpu`, read from the pinned crate's own manifest, and `webgl` is not among
-# them. `gles` is the NATIVE GL backend rather than the browser one. So without
-# this line the crate reaches WebGPU on wasm32 and cannot reach WebGL2 at all,
+# them. `gles` is the NATIVE GL backend rather than the browser one. Without
+# `webgl` the crate reaches WebGPU on wasm32 and cannot reach WebGL2 at all,
 # and HLD section 7's tier B could never resolve in a browser. A tier the
-# resolver can never return is not a tier. The pin and the workspace entry are
-# untouched, which is the shape D-09 set for glam.
+# resolver can never return is not a tier. The version pin is still `=30.0.1`.
+#
+# D-27. The workspace entry sets `default-features = false`, because Cargo
+# rejects that switch on a member while the workspace entry leaves the
+# defaults on. The two targets do not share one feature line. Native names
+# the pinned default backends plus `webgl`. wasm32 names `webgl` and `wgsl`
+# and drops `dx12`, `metal`, `gles` and `vulkan`.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { workspace = true, features = ["std", "parking_lot", "dx12", "metal", "gles", "vulkan", "wgsl", "webgpu", "webgl"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { workspace = true, default-features = false, features = ["std", "parking_lot", "wgsl", "webgpu", "webgl"] }
+
 [dependencies]
-wgpu = { workspace = true, features = ["webgl"] }
 # F-037. HLD section 23's first sentence is "thiserror in the core crates", and
 # `DeviceError` is this crate's first error type. Deviation D-15 keeps
 # `default-features = false` at the workspace entry, which is what stops the

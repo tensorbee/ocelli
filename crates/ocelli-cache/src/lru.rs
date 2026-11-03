@@ -113,6 +113,16 @@ pub struct Lru<K: Ord + Clone, V: Budgeted> {
     clock: u64,
 }
 
+/// Whether `bytes` can ever fit in `budget`.
+///
+/// A budget of zero admits nothing, an entry of zero bytes included. The
+/// budget itself is admitted. `Lru::would_admit` and `profile_load` both call
+/// this, so the profile cannot grow a second comparison.
+#[must_use]
+pub(crate) fn admits(budget: usize, bytes: usize) -> bool {
+    budget > 0 && bytes <= budget
+}
+
 impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
     /// An empty cache over one tier, holding at most `budget` bytes.
     pub fn new(tier: CacheTier, budget: usize) -> Self {
@@ -273,7 +283,7 @@ impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
     /// took entries into it would hold values against no budget at all.
     #[must_use]
     pub fn would_admit(&self, bytes: usize) -> bool {
-        self.budget > 0 && bytes <= self.budget
+        admits(self.budget, bytes)
     }
 
     /// The bytes the budget still has. Never underflows, because `used` is the

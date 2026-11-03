@@ -242,6 +242,17 @@ export type { ViewportKind } from "./flag.js";
 
 export { shadowDivergence } from "./shadow.js";
 
+export {
+  DEFAULT_DECODE_WORKERS,
+  MAX_DECODE_WORKERS,
+  openDecodePool,
+  threadingEscalation,
+} from "./pool.js";
+export type { DecodePool, WorkerHandle } from "./pool.js";
+
+export { certifyRow } from "./matrix.js";
+export type { MatrixInput, MatrixObservation, MatrixStatus, MatrixTier } from "./matrix.js";
+
 export { rewriteListenerNames } from "./migrate.js";
 
 export {

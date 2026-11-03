@@ -1,7 +1,7 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113
+**Last updated:** 2026-11-03
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
 section 20's `Budgeted` trait and `Lru<K, V>`, made into `crates/ocelli-cache`.
@@ -315,6 +315,21 @@ a 128 edge, and a longer volume axis is more bricks. Tier C runs the same
 code. The GPU tier of this cache holds host bricks. A texture is not one of
 its values. Encoded bytes are not in this crate. A tier C session's decoded
 tier matches a tier A session's.
+
+## Load profile
+
+`profile_load` reports the three pressures for one synthetic load. It does
+not allocate the volume and it does not read patient bytes. Decoded bytes
+are the product of columns, rows, slices, times, samples and bytes per
+sample. `times` is at least 1. Samples are 1 or 3. Bytes per sample are 1
+or 2. A zero dimension or a product that does not fit in `usize` returns
+nothing. A 65536 by 65536 frame is 4294967296 bytes. It fits a 64-bit
+address and does not fit a 32-bit address. Encoded used is 0. GPU bytes
+are the caller figure. A figure above its budget leaves GPU used at 0.
+Tier C with a non-zero GPU figure returns nothing. Tier C with zero
+reports GPU used 0. Admission is `admits` in `lru.rs`, shared with
+`Lru::would_admit`. A zero budget admits nothing. A byte count equal to
+the budget is admitted.
 
 ## What is not here
 

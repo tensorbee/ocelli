@@ -1,7 +1,7 @@
 # Tier resolution
 
-**F-IDs that contributed:** F-004, F-037, F-039, F-042, F-050, F-X001, F-X002, F-X016
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-004, F-037, F-039, F-042, F-050, F-X001, F-X002, F-X016, F-110
+**Last updated:** 2026-11-03
 
 How a session decides whether it is tier A, tier B or tier C, and how it
 records why. This describes what the code does today.
@@ -436,26 +436,34 @@ is to leave nowhere to branch on it. A field would be a place for a future
 story to write `if signals.threads` and mean it. There is no such field, so
 there is no such line, and that is a stronger guarantee than a comment.
 
-## Deviation D-14, wgpu's `webgl` feature
+## Deviation D-14 and D-27, wgpu features
 
-`crates/ocelli-render/Cargo.toml` takes wgpu with `features = ["webgl"]`.
+`ocelli-render` names `webgl` on both targets. wgpu 30.0.1's default set is
+`std`, `parking_lot`, `dx12`, `metal`, `gles`, `vulkan`, `wgsl` and `webgpu`,
+read from the pinned crate's own manifest, and `webgl` is not among them.
+`gles` is the native GL backend rather than the browser one. Without `webgl`
+the crate reaches WebGPU on wasm32 and cannot reach WebGL2 at all, and HLD
+section 7's tier B could never resolve in a browser. A tier the resolver can
+never return is not a tier.
 
-wgpu 30.0.1's default set is `std, parking_lot, dx12, metal, gles, vulkan,
-wgsl, webgpu`, read from the pinned crate's own manifest, and `webgl` is not
-among them. `gles` is the native GL backend rather than the browser one. So
-without this line the crate reaches WebGPU on wasm32 and cannot reach WebGL2
-at all, and HLD section 7's tier B could never resolve in a browser. A tier the
-resolver can never return is not a tier.
+D-27 sets the workspace entry to
+`{ version = "=30.0.1", default-features = false }` because Cargo rejects a
+member `default-features = false` while the workspace entry leaves the
+defaults on. The version pin is still `=30.0.1`. Native `ocelli-render` names
+the default backends plus `webgl`. wasm32 names `std`, `parking_lot`, `wgsl`,
+`webgpu` and `webgl`, and drops `dx12`, `metal`, `gles` and `vulkan`. `glsl`
+and `spirv` stay off.
 
-The pin and the workspace entry are untouched and only the consuming crate's
-feature set changes, which is the shape deviation D-09 set for glam. F-039
-makes `ocelli-wasm` depend on `ocelli-render` and on `wgpu`. The attach export
-calls `resolve_adapter`. The F-039 release module exported six functions and
-contains Naga. F-039 recorded that module at 1,999,061 bytes.
-`ci/wasm-size-budget.json` now records 2,151,196 bytes, measured by F-050 on
-2026-10-27. The current module exports twenty-four functions. Cold start was
-not remeasured. The 2.3 ms figure is still the F-006 measurement of the
-earlier module.
+The default `ocelli-wasm` build still depends on `ocelli-render` and on
+`wgpu`. The decode-worker build does not. The attach export calls
+`resolve_adapter` and is absent from that decode build. The F-039 release
+module exported six functions and contains Naga. F-039 recorded that module
+at 1,999,061 bytes. `ci/wasm-size-budget.json` records 2,151,196 bytes,
+measured by F-050 on 2026-10-27. F-110 measured the render module at
+2,171,133 bytes on 2026-11-03, inside the 5 percent ceiling, and did not edit
+that file. The current render module exports twenty-four functions. Cold
+start was not remeasured. The 2.3 ms figure is still the F-006 measurement of
+the earlier module.
 
 ## What this story deliberately does not do
 

@@ -12,5 +12,7 @@
     "wasm-bindgen",
     "wgpu"
   ],
-  "allowed": {}
+  "allowed": {
+    "wgpu": "D-27. wasm32 keeps std, parking_lot, wgsl, webgpu and webgl. Native names the pinned default backends, and ocelli-render also names webgl. The version pin stays =30.0.1."
+  }
 }
