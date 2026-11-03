@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116
 **Last updated:** 2026-11-03
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -356,3 +356,12 @@ and `ArrowDown`. Shift changes `ArrowUp` to `scroll-previous` and
 match is case-sensitive. The function does not listen and does not move
 a camera. Tiers A, B and C are not applicable. The key map is the
 approved local plan.
+
+## Migration order
+
+`nextMigrationKind` returns `stack`, then `mpr`, then `volume`, and only
+when the done list is a prefix of that order. An empty list returns
+`stack`. The finished list returns null. A skip, a duplicate or an
+unknown name returns null. The function does not rewrite the list and
+does not flip a flag. Tiers A, B and C are not applicable. The page is
+`docs/lld/playbook.md`.

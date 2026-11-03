@@ -204,6 +204,8 @@ const PUBLISHED: readonly string[] = [
   "summariseFirstFrame",
   // ./keys.js, F-115
   "keyAction",
+  // ./playbook.js, F-116
+  "nextMigrationKind",
   // ./migrate.js, F-108
   "rewriteListenerNames",
   // ./cursor.js, F-072

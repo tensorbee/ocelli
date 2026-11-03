@@ -4715,3 +4715,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
 **Deviations from the design plan.** none
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 1 nitpick. Reviewer `01a1a17c-2a37-7731-b6df-093a62c18120`. The type-export comment does not name KeyAction. Changing ArrowLeft to pan-right made the pan test fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.
+
+## F-116, migration order, completed 2026-11-03
+
+**What was built.** `nextMigrationKind` returns stack, then mpr, then volume, and only when the done list is a prefix of that order. An empty list returns stack. The finished list returns null. A skip, a duplicate or an unknown name returns null. The function does not rewrite the list and does not flip a flag. The playbook states the same order and does not claim that 1.0.0 is published.
+
+**HLD sections implemented.** Section 12 names stack, then MPR, then 3D. The prefix rule is the approved local plan. It is not an HLD formula.
+**Deviations.** none
+**Crates / packages modified.** `packages/core`.
+**Tests added.** Four tests in `packages/core/src/playbook.test.ts` and the published name in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** Tiers A, B and C are not applicable. The function does not render and returns the same kind on every tier.
+**LLD updated.** `docs/lld/playbook.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a18b-566b-7e63-9154-380d74232b59`. Starting the order at mpr made three tests fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.

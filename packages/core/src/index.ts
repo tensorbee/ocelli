@@ -263,6 +263,8 @@ export type { ColdPhases, StartupRole } from "./startup.js";
 export { keyAction } from "./keys.js";
 export type { KeyAction } from "./keys.js";
 
+export { nextMigrationKind } from "./playbook.js";
+
 export { rewriteListenerNames } from "./migrate.js";
 
 export {
