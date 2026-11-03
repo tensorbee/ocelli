@@ -161,6 +161,10 @@ None.
 
 None.
 
+## LLD impact
+
+- `docs/lld/public-api.md`
+
 ## Open questions
 
 None.

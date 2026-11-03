@@ -4635,3 +4635,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/build-targets.md`, `docs/lld/tier-resolution.md`, `docs/lld/guards.md`, `docs/lld/gpu-ownership.md` and the rows in `docs/lld/README.md`.
 **Deviations from the design plan.** `ocelli-oracle` and the `ocelli-native` dev-dependency are target-gated so a shared line cannot turn the desktop backends on in the wasm32 workspace resolve. The plan's approach records that.
 **Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a070-422a-7772-ac36-b9d91e1f322b`. The floor gate then failed. ESLint read generated `pkg-decode` glue, and the guard census had no claim for `scripts/decode_graph_check.py`. The pin catch-all had grown with no recorded count. This tree adds the ignore, the `decode-graph` entry, the decode probes and the recorded counts. Pass 4 reported 2 defects. Reviewer `01a1a08c-8002-74c2-a187-e35b79977b56`. Those were the missing-module claim and the LLD sentence that decode workers load the render module. `pins.decode-module-absent` and `pins.decode-bindings-absent` watch the two worded branches. Both LLD files now say the decode artefact does not export the canvas. Pass 5 reported 1 defect. Reviewer `01a1a09c-329c-7352-b07d-8f719c84c0b9`. The canvas module comment still said decode workers load that module. This tree says the decode-worker build does not compile it. Pass 6 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a0a6-2e09-76b3-bc6a-2f20c9cdca4d`. Passes 1 and 2 each reported 2 defects. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.
+
+## F-112, worker pool and the threading decision, completed 2026-11-03
+
+**What was built.** `openDecodePool` opens one to eight decode workers for one owner. The default count is 1. A count outside that range, a non-integer, a non-object owner, or a second open of the same owner returns null and does not call the starter. The slot is stored before start. Close deletes the slot before terminate. `threadingEscalation` returns `stable`. `sharedMemory` is false. The product file does not name a shared-memory buffer. The render worker is not started here.
+
+**HLD sections implemented.** Section 9 is one decode instance per worker and no shared-memory threading. Section 10 leaves worker construction in TypeScript. The count ceiling is the approved local plan. It is not an HLD formula.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core` and `docs/lld/public-api.md`.
+**Tests added.** Eight tests in `packages/core/src/pool.test.ts` and the published names in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic. The counts are the approved local ceiling.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The function does not open a device.
+**LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Changing the lower bound from 1 to 0 made count 0 return a pool. The bound was restored to 1. Pass 1 reported 1 defect. Reviewer `01a1a0b7-06fe-7162-b5ee-659feac418bf`. The file scan passed a URL to `readFileSync`. This tree passes a string path. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a0c5-50bc-7bb0-94c2-2fd5c93c9eb0`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.

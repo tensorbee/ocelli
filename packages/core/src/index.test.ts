@@ -32,7 +32,7 @@ import { coreAvailable, VERSION } from "./index.js";
  * `ToolStateEvent`, `AnnotationLayer`, `AnnotationLayerEvent`,
  * `AnnotationMark`, `AnnotationPoint`, `AnnotationRefusal`,
  * `AnnotationSyncResult`, `TidSource`, `ElementSeam`, `SeamEvent`, `SideBySide`,
- * `ViewportKind`) are erased
+ * `ViewportKind`, `DecodePool`, `WorkerHandle`) are erased
  * before this runs, and `npx tsc` is what watches those.
  *
  * Adding an export is a deliberate act, so adding a line here is the cost of
@@ -190,6 +190,11 @@ const PUBLISHED: readonly string[] = [
   "setKindEnabled",
   // ./shadow.js, F-109
   "shadowDivergence",
+  // ./pool.js, F-112
+  "DEFAULT_DECODE_WORKERS",
+  "MAX_DECODE_WORKERS",
+  "openDecodePool",
+  "threadingEscalation",
   // ./migrate.js, F-108
   "rewriteListenerNames",
   // ./cursor.js, F-072
