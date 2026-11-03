@@ -91,25 +91,24 @@ Horos, and the medical viewer Grok must not be opened.
 
 ## What done means
 
-- **F-111** measures cold start and first frame on the release artefact
-  this sprint builds. A dev-profile time is not that measurement. The
-  2.3 ms baseline is replaced only by a new measurement with its own
-  calibration. Gate A4 stays open unless both of its halves are
-  measurements of this module. The story does not edit the size budget
-  to absorb a move.
-- **F-115** adds keyboard actions on the existing tool commands. The HLD
-  does not name the key map, so the approved plan does. A key outside
-  that map does nothing. The story does not certify a browser row.
-- **F-116** writes the migration playbook and the examples on top of
-  F-108. It does not claim that 1.0.0 is published. It does not state a
-  formula the HLD does not contain.
+- **F-111** names the render or decode wasm path and sums a release
+  cold start from five finite phases. A dev profile returns nothing.
+  The function does not read the 2.3 ms baseline and does not replace
+  it. Gate A4 stays open. The story does not edit the size budget.
+- **F-115** names a keyboard action for the arrow keys, plus, equals and
+  minus. Shift changes only the vertical arrows. The function does not
+  listen and does not move a camera. The story does not certify a
+  browser row.
+- **F-116** names the next migration kind only for a prefix of stack,
+  then mpr, then volume. It does not flip a flag and it does not claim
+  that 1.0.0 is published. It does not state a formula the HLD does not
+  contain.
 - **F-117** writes the semver, changelog and deprecation policy. It does
   not publish, does not create a `v` tag, and does not run `/release`.
   D-22 still blocks publication. F-X003 stays in progress.
-- **F-118** records the generator the way HLD section 27.2 R6 specifies.
-  The commit-msg hook writes the trailer from the verify ledger. A
-  hand-written trailer is not a record. There is no agent co-author
-  trailer.
+- **F-118** classifies one commit message. The commit-msg hook stays
+  the only writer of the trailer. A hand-written trailer is not a
+  record. There is no agent co-author trailer.
 - **Each story declares all three tier rows.**
 
 ## Dependency order
@@ -117,8 +116,8 @@ Horos, and the medical viewer Grok must not be opened.
 F-111 depends on F-110. F-115 depends on F-072. F-116 depends on F-108.
 F-117 depends on F-100. F-118 depends on F-001. Those five rows are
 `done`. The five stories share the delivery ledgers, so they land one at
-a time. F-111 lands first because it measures the wasm graph F-110
-split. F-115, F-116, F-117 and F-118 follow. F-X003 stays `in-progress`
+a time. F-111 lands first because it chooses the artefact from the
+split F-110 built. F-115, F-116, F-117 and F-118 follow. F-X003 stays `in-progress`
 and is not a dependency.
 
 ## Standing expectations
