@@ -4643,14 +4643,14 @@ this branch had not touched since the base.
 **HLD sections implemented.** Section 9 is one decode instance per worker and no shared-memory threading. Section 10 leaves worker construction in TypeScript. The count ceiling is the approved local plan. It is not an HLD formula.
 **Deviations.** none.
 **Crates / packages modified.** `packages/core` and `docs/lld/public-api.md`.
-**Tests added.** Eight tests in `packages/core/src/pool.test.ts` and the published names in `index.test.ts`.
+**Tests added.** Nine tests in `packages/core/src/pool.test.ts` and the published names in `index.test.ts`.
 **Fixture provenance.** No pixel arithmetic. The counts are the approved local ceiling.
 **Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
 **Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
 **Tier coverage.** A, B and C are n/a. The function does not open a device.
 **LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
-**Notes for future sessions.** Changing the lower bound from 1 to 0 made count 0 return a pool. The bound was restored to 1. Pass 1 reported 1 defect. Reviewer `01a1a0b7-06fe-7162-b5ee-659feac418bf`. The file scan passed a URL to `readFileSync`. This tree passes a string path. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a0c5-50bc-7bb0-94c2-2fd5c93c9eb0`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.
+**Notes for future sessions.** Changing the lower bound from 1 to 0 made count 0 return a pool. The bound was restored to 1. Pass 1 reported 1 defect. Reviewer `01a1a0b7-06fe-7162-b5ee-659feac418bf`. The file scan passed a URL to `readFileSync`. This tree passes a string path. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a0c5-50bc-7bb0-94c2-2fd5c93c9eb0`. S40 pass 1 reported 1 defect. Reviewer `01a1a140-d410-7150-a74d-4ecbeac31101`. Replacing the ceiling check with `>=` left the eight tests green and refused count 8. This tree opens eight workers and records indexes 0 through 7. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.
 
 ## F-113, memory profile for a synthetic load, completed 2026-11-03
 

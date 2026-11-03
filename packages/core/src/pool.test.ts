@@ -61,6 +61,15 @@ describe("decode pool", () => {
     expect(log).toEqual([0, 1]);
   });
 
+  it("starts eight workers at indexes 0 through 7", () => {
+    const log: number[] = [];
+    const pool = openDecodePool({}, 8, starter(log));
+    expect(pool).not.toBeNull();
+    expect(pool?.count).toBe(8);
+    expect(log).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(pool?.close()).toBe(true);
+  });
+
   it("returns null for a second open of the same owner", () => {
     const owner = {};
     const first: number[] = [];
