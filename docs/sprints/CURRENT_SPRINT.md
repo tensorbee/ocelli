@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-096 | E15.3 | Measurement persistence and serialisation format | Rust+TS | 3w | done |
-| F-097 | E15.4 | DICOM SR TID 1500 round-trip | Rust+TS | 3w | pending |
+| F-097 | E15.4 | DICOM SR TID 1500 round-trip | Rust+TS | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.

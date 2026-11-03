@@ -4523,3 +4523,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 1 defect and 0 smells. Reviewer `01a19ef6-21ba-74a1-a974-984187e3349b`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19f07-516a-7612-a840-4f009f8c1328`. `measurement-persist.ts` sha256 at the clean pass is `2ab55d311dcb37ea3d64d988e8b6bca3e1f11c309489f511c1bbe4a235c40a25`. A bulk limit of 4001 stored 4000 nodes and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-097, TID 1500 round trip, completed 2026-11-03
+
+**What was built.** `writeTid1500` and `readTid1500` in `packages/core`. dcmjs 0.52.2 writes a Comprehensive 3D SR document and reads it back. Each root must contain one NUM. The number, the unit and the concept survive. An operator name is stored and is not returned. A count of 4000 content items returns nothing. Another template returns nothing. SCOORD graphics are not mapped. There is no Rust twin.
+
+**HLD sections implemented.** Decision D10 and section 10 keep the dcmjs bridge in TypeScript. The section does not map a NUM onto `MeasuredValueSequence`. The mapping, the SOP class and the transfer syntax are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Eight tests in `packages/core/src/tid1500.test.ts`. The published-name list includes the two TID 1500 values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-097-design.md`. PS3.16 names TID 1500. The NUM field mapping is the local plan. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19f1e-8b30-7d51-8412-c6cf8176982f`. `tid1500.ts` sha256 at the clean pass is `77ecc227e51813e66f7aad48a997659781a3d61c99d83a43348cd1fe5645c4cc`. A unit code of cm read back as cm and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
