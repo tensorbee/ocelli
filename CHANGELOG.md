@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- `ocelli-seg` imports an RTSTRUCT contour when every patient z is within half the slice spacing. The stored z is the caller z. Segment 0 is refused. The shell does not export the import.
 - `ocelli-seg` copies SEG frames in caller order and keeps each referenced SOP on its frame. Segment 0 stays. One bad frame writes nothing. Decode does not sort. The shell does not export the round trip.
 - The shell stores annotations by frame of reference and undoes one put at a time. A blank id, a blank UID, or a refused content tree writes nothing. A new put drops redo.
 - The shell stores an annotation as a DICOM SR content tree. One bad node returns nothing. Provenance names the tool, the engine version, an optional algorithm and the operator. The drawing layer is unchanged.

@@ -13,7 +13,9 @@
 //! a circle. F-085 paints samples inside a closed index polygon. F-086
 //! writes each between-slice from the nearer key and the union at one
 //! half. F-098 copies SEG frames in caller order and keeps each referenced
-//! SOP on its own frame. The presenter does not import wgpu.
+//! SOP on its own frame. F-099 imports an RTSTRUCT contour when every
+//! patient z is within half the slice spacing. The presenter does not
+//! import wgpu.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -33,7 +35,8 @@ mod threshold;
 
 pub use brush::{Brush, BrushCoverage, BrushError, BrushShape, stamp_brush};
 pub use contour::{
-    Contour, ContourError, ContourGeometricType, PlaneFrame, intersect_contour, present_contour,
+    Contour, ContourError, ContourGeometricType, PlaneFrame, import_rtstruct_contour,
+    intersect_contour, present_contour,
 };
 pub use contour_edit::{
     ContourEditCoverage, ContourEditError, IndexPoint, edit_labelmap_with_contour,

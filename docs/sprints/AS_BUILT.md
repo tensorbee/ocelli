@@ -4491,3 +4491,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`. The shell does not export the round trip.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19eac-192a-79c0-8484-8bb6daeab146`. `seg_roundtrip.rs` sha256 at the clean pass is `8dc88e3aed9b232509105b9c01aeb8a721d7a8c760fa8fa82fe01cd330848679`. An integer limit of 0 accepted 1.5 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-099, RTSTRUCT contour import, completed 2026-11-02
+
+**What was built.** `import_rtstruct_contour` in `ocelli-seg`. A closed planar contour needs at least three patient points. Each z must lie within half the slice spacing of the caller slice. The stored z is the caller z. Segment 0 is refused. A non-finite point is refused. The shell does not export the import. `present_contour` is unchanged.
+
+**HLD sections implemented.** Appendix B names RTSTRUCT. The section does not give the spacing fraction. Half the slice spacing is the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-seg`. The shell sentence is in `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Tests added.** Five tests in `crates/ocelli-seg/tests/rtstruct_import.rs`.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-099-design.md`. PS3.3 C.8.8.6 names the geometric type. The half-spacing slab is the local tolerance.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The import does not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`. The shell does not export the import.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ec4-73ab-7bc0-b08a-4cd3715a9849`. `contour.rs` sha256 at the clean pass is `997c27cb9a7ad6476ee60bd24acc744df42cf27191a500b7a7fe314889877ab3`. Dividing spacing by 1 accepted z 11.1 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

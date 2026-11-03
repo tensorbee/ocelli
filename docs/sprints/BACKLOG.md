@@ -290,7 +290,7 @@ SR is the native annotation type, and SEG, RTSTRUCT and TID 1500 round trip.
 | F-096 | E15.3 | S36 | Measurement persistence and serialisation format | Rust+TS | 3w | F-094 | pending |
 | F-097 | E15.4 | S36 | DICOM SR TID 1500 round-trip | Rust+TS | 3w | F-095 | pending |
 | F-098 | E15.5 | S35 | DICOM SEG round-trip | Rust+TS | 4w | F-066 | done |
-| F-099 | E15.6 | S35 | RTSTRUCT import to contour representation | Rust+TS | 4w | F-064 | pending |
+| F-099 | E15.6 | S35 | RTSTRUCT import to contour representation | Rust+TS | 4w | F-064 | done |
 
 ### M12, Migration and rollout
 
