@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The cache reports decoded bytes from the dimensions of one synthetic load. Encoded used is 0. A tier C load with a non-zero GPU figure returns nothing.
 - The shell opens one to eight decode workers for one owner. A bad count returns nothing. The threading decision stays stable Rust.
 - A second wasm build links no wgpu. `bin/ocelli.sh wasm-decode` writes it. The render size budget is unchanged.
 - The shell counts bytes whose absolute difference is above an integer limit. Unequal lengths return nothing. The buffers are not written. The function does not render.

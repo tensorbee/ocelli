@@ -4651,3 +4651,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Changing the lower bound from 1 to 0 made count 0 return a pool. The bound was restored to 1. Pass 1 reported 1 defect. Reviewer `01a1a0b7-06fe-7162-b5ee-659feac418bf`. The file scan passed a URL to `readFileSync`. This tree passes a string path. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a0c5-50bc-7bb0-94c2-2fd5c93c9eb0`. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.
+
+## F-113, memory profile for a synthetic load, completed 2026-11-03
+
+**What was built.** `profile_load` reports encoded, decoded and GPU pressure from dimensions. Decoded bytes are the product of columns, rows, slices, the fourth dimension, samples and bytes per sample. The hand products are 157286400, 262144, 4294967296 and 786432. Encoded used is 0. A product that does not fit, a zero dimension, a sample count other than 1 or 3, or a byte width other than 1 or 2 returns nothing. A 65536 by 65536 frame fits a 64-bit address and does not fit a 32-bit address. GPU bytes are the caller figure. A figure above its budget leaves GPU used at 0. Tier C with a non-zero GPU figure returns nothing. Tier C with zero reports GPU used 0. Admission is one function, `admits`, shared with `Lru::would_admit`. The function does not allocate the volume.
+
+**HLD sections implemented.** Section 8 is the three tiers. The dimension product and the sample limits are the approved local plan. They are not an HLD formula.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-cache`.
+**Tests added.** Seven tests in `crates/ocelli-cache/src/profile.rs`. The existing budget-boundary test still calls `would_admit`.
+**Fixture provenance.** The products are multiplied by hand from the approved dimensions. They are not DICOM samples.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A and B report the caller GPU figure. Tier C reports GPU used 0 and refuses a non-zero GPU figure.
+**LLD updated.** `docs/lld/cache.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Changing `bytes <= budget` to `bytes < budget` made `would_admit` return false for a byte count equal to the budget. The hand-written expected value is true. Insert refuses that boundary because it calls `would_admit`. The comparison was restored. Pass 1 reported 2 defects. Reviewer `01a1a0d7-dff8-70a3-b37b-b3bbd0604969`. The profile tests tripped clippy, and the note said insert still admitted the boundary. Pass 2 reported 1 defect. Reviewer `01a1a0e8-d38d-7d51-8286-d9c3267cf336`. Replacing `usize::try_from` with a zero fallback left the five tests green. A 65536 by 65536 load is 4294967296 decoded bytes on a 64-bit address. `fits_address_bits` returns nothing for that product at 32 bits. Three samples of the 4D shape are 786432 bytes, and a GPU figure of 10 against a budget of 9 stays unused. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.

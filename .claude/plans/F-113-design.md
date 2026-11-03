@@ -144,6 +144,10 @@ None.
 
 None.
 
+## LLD impact
+
+- `docs/lld/cache.md`
+
 ## Open questions
 
 None.
