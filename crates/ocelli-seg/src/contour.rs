@@ -376,6 +376,56 @@ fn rounded_i32(rounded: f64) -> Result<i32, ContourError> {
     i32::try_from(whole).map_err(|_| ContourError::Frame)
 }
 
+/// Build one contour from patient-space RTSTRUCT points.
+///
+/// PS3.3 C.8.8.6 names the geometric type. The points stay in patient
+/// millimetres. A z value is on the slice when its absolute distance from
+/// `slice_z` is at most half of `spacing`. The stored z is the caller z.
+/// Segment 0 is refused. This function does not project and it does not
+/// call [`present_contour`].
+///
+/// # Errors
+///
+/// [`ContourError::MissingColour`] for segment 0.
+/// [`ContourError::Length`] when the existing geometric-type length rule refuses the point count.
+/// [`ContourError::OutOfPlane`] for a spacing that is not finite and
+/// greater than 0, or for a z outside the slab.
+/// [`ContourError::Frame`] for a non-finite point.
+pub fn import_rtstruct_contour(
+    segment: u16,
+    kind: ContourGeometricType,
+    points: &[Pt<World>],
+    slice_z: f64,
+    spacing: f64,
+) -> Result<Contour, ContourError> {
+    if segment == 0 {
+        return Err(ContourError::MissingColour);
+    }
+    if !kind_len(kind, points.len()) {
+        return Err(ContourError::Length);
+    }
+    if !spacing.is_finite() || spacing <= 0.0 || !slice_z.is_finite() {
+        return Err(ContourError::OutOfPlane);
+    }
+    let half = spacing / 2.0;
+    let mut stored = Vec::with_capacity(points.len());
+    for point in points {
+        if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
+            return Err(ContourError::Frame);
+        }
+        let distance = (point.z - slice_z).abs();
+        if distance > half {
+            return Err(ContourError::OutOfPlane);
+        }
+        stored.push(Pt::new(point.x, point.y, point.z));
+    }
+    Ok(Contour {
+        segment,
+        kind,
+        points: stored,
+    })
+}
+
 fn magnitude_u32(value: f64) -> Option<u32> {
     if value > f64::from(u32::MAX) {
         return None;

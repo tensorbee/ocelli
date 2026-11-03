@@ -12,7 +12,10 @@
 //! copy of one value. F-083 paints a start-end span inside a rectangle or
 //! a circle. F-085 paints samples inside a closed index polygon. F-086
 //! writes each between-slice from the nearer key and the union at one
-//! half. The presenter does not import wgpu.
+//! half. F-098 copies SEG frames in caller order and keeps each referenced
+//! SOP on its own frame. F-099 imports an RTSTRUCT contour when every
+//! patient z is within half the slice spacing. The presenter does not
+//! import wgpu.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -25,13 +28,15 @@ mod fill;
 mod interpolate;
 mod labelmap;
 mod scissors;
+mod seg_roundtrip;
 mod segment_tools;
 mod surface;
 mod threshold;
 
 pub use brush::{Brush, BrushCoverage, BrushError, BrushShape, stamp_brush};
 pub use contour::{
-    Contour, ContourError, ContourGeometricType, PlaneFrame, intersect_contour, present_contour,
+    Contour, ContourError, ContourGeometricType, PlaneFrame, import_rtstruct_contour,
+    intersect_contour, present_contour,
 };
 pub use contour_edit::{
     ContourEditCoverage, ContourEditError, IndexPoint, edit_labelmap_with_contour,
@@ -40,6 +45,7 @@ pub use fill::{FillCoverage, FillError, flood_fill, paint_fill};
 pub use interpolate::{InterpolateCoverage, InterpolateError, interpolate_labelmap};
 pub use labelmap::{LabelColourLut, LabelGrid, LabelStyle, LabelmapError, Rgba8, present_labelmap};
 pub use scissors::{ScissorCoverage, ScissorError, ScissorShape, cut_scissor};
+pub use seg_roundtrip::{SegError, SegFrame, decode_seg, encode_seg};
 pub use segment_tools::{
     SegmentBidirectional, SegmentLabel, SegmentRun, SegmentToolError, label_segment, segment_at,
     segment_bidirectional,

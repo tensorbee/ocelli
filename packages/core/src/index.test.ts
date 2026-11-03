@@ -162,6 +162,15 @@ const PUBLISHED: readonly string[] = [
   "eraseNearest",
   "mipIndex",
   "sculptVertex",
+  // ./sr.js, F-094
+  "contentTree",
+  "provenanceItems",
+  // ./annotation-state.js, F-095
+  "annotationsForFrame",
+  "createAnnotationState",
+  "putAnnotation",
+  "redoAnnotation",
+  "undoAnnotation",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",

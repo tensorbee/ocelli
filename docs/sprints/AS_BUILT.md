@@ -4443,3 +4443,67 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19e3d-e6e5-7aa1-825b-ee2ba8de87c7`. `sculpt.ts` sha256 at the clean pass is `12bcf3bcabb54f3322f91be62d0eb4b757f237e3c47f6e0ab455dea575bf0cc8`. A later maximum tie returned index 2 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-094, DICOM SR content tree, completed 2026-11-02
+
+**What was built.** `contentTree` and `provenanceItems` in `packages/core`. The annotation type is a DICOM SR content tree. The root relationship is absent. A child uses one of five relationships. One bad node returns nothing and the caller object is not written. Provenance children are the tool, the engine version, the algorithm and the operator. A null algorithm omits that child. An empty required string returns nothing. The drawing layer is unchanged. There is no Rust twin.
+
+**HLD sections implemented.** Decision D13 and HLD section 34. The section does not give the node fields. The eight value types, the five relationships and the provenance order are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Six tests in `packages/core/src/sr.test.ts`. The published-name list includes the two content-tree values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-094-design.md`. No DICOM section. No pixel arithmetic. The concept codes on the numeric fixture are test labels.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 1 defect and 1 smell. Reviewer `01a19e85-9c0a-7c41-b1a0-cfde5c7ec570`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19e95-a66a-76b2-9be6-2c785bc3d7ad`. `sr.ts` sha256 at the clean pass is `0557fb71fc8795422fcfb2002c7eb93ffcc97d3a14e38493a7cac9283e2f1da8`. A point width of 3 made the `(1, 2)` point return null and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-095, annotation state, completed 2026-11-02
+
+**What was built.** `createAnnotationState`, `putAnnotation`, `annotationsForFrame`, `undoAnnotation` and `redoAnnotation` in `packages/core`. A record holds an id, a frame-of-reference UID and a content tree that has already passed `contentTree`. A blank id, a blank UID, or a refused tree returns nothing and does not write the previous state. Records for one UID come back in insertion order. Undo moves one successful put back. The first state has no undo. Redo restores that put. A new put drops the redo states. The module does not measure.
+
+**HLD sections implemented.** HLD section 35 names the shared frame of reference. The section does not define an undo stack. The record list and the one-step history are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Five tests in `packages/core/src/annotation-state.test.ts`. The published-name list includes the five state values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-095-design.md`. No DICOM section. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ea9-1ce9-7a72-86aa-8dcaed5b0bce`. `annotation-state.ts` sha256 at the clean pass is `6c7f9f15858248c1043f84fe95718ed22773b41ce81198183dd12ad0d7e8438c`. A blank-id length of 2 stored the empty id. The one-character ids still passed. The bytes were restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-098, SEG frame round trip, completed 2026-11-02
+
+**What was built.** `encode_seg` and `decode_seg` in `ocelli-seg`. Frames stay in caller order. Each frame keeps its referenced SOP instance UID. Two frames may name the same UID. A sample is a whole number of at least 0, and 0 is background. One bad frame refuses the whole call. Decode does not sort. The shell does not export the round trip. `present_labelmap` is unchanged. There is no TypeScript copy.
+
+**HLD sections implemented.** Appendix B names SEG. The section does not give Part 10 bytes. The logical frame list is the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-seg`. The shell sentence is in `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Tests added.** Four tests in `crates/ocelli-seg/tests/seg_roundtrip.rs`.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-098-design.md`. PS3.3 C.8.20.2 names the segment number. No DICOM file bytes.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The copy does not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`. The shell does not export the round trip.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19eac-192a-79c0-8484-8bb6daeab146`. `seg_roundtrip.rs` sha256 at the clean pass is `8dc88e3aed9b232509105b9c01aeb8a721d7a8c760fa8fa82fe01cd330848679`. An integer limit of 0 accepted 1.5 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-099, RTSTRUCT contour import, completed 2026-11-02
+
+**What was built.** `import_rtstruct_contour` in `ocelli-seg`. A closed planar contour needs at least three patient points. Each z must lie within half the slice spacing of the caller slice. The stored z is the caller z. Segment 0 is refused. A non-finite point is refused. The shell does not export the import. `present_contour` is unchanged.
+
+**HLD sections implemented.** Appendix B names RTSTRUCT. The section does not give the spacing fraction. Half the slice spacing is the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-seg`. The shell sentence is in `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Tests added.** Five tests in `crates/ocelli-seg/tests/rtstruct_import.rs`.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-099-design.md`. PS3.3 C.8.8.6 names the geometric type. The half-spacing slab is the local tolerance.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The import does not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`. The shell does not export the import.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ec4-73ab-7bc0-b08a-4cd3715a9849`. `contour.rs` sha256 at the clean pass is `997c27cb9a7ad6476ee60bd24acc744df42cf27191a500b7a7fe314889877ab3`. Dividing spacing by 1 accepted z 11.1 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

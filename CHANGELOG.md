@@ -10,6 +10,10 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- `ocelli-seg` imports an RTSTRUCT contour when every patient z is within half the slice spacing. The stored z is the caller z. Segment 0 is refused. The shell does not export the import.
+- `ocelli-seg` copies SEG frames in caller order and keeps each referenced SOP on its frame. Segment 0 stays. One bad frame writes nothing. Decode does not sort. The shell does not export the round trip.
+- The shell stores annotations by frame of reference and undoes one put at a time. A blank id, a blank UID, or a refused content tree writes nothing. A new put drops redo.
+- The shell stores an annotation as a DICOM SR content tree. One bad node returns nothing. Provenance names the tool, the engine version, an optional algorithm and the operator. The drawing layer is unchanged.
 - The shell moves one polygon vertex by the raw pixel delta. The nearest mark inside the radius keeps the earlier id on a tie. A MIP jump names the earlier maximum sample. The mark is not deleted.
 - The shell copies at most six volume crop planes and refuses a zero normal. A drag moves the origin by the caller normal times the horizontal pixel delta divided by 256. The kept side stays in the existing clip.
 - The shell clips a slice segment to the viewport and drops a segmentation segment that misses. One non-finite coordinate refuses the list. An overlay grid draws the interior lines of an integer cell count. One cell draws nothing.
