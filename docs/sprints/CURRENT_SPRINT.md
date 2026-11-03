@@ -9,7 +9,7 @@
 |------|----------|-------|-------|-----|--------|
 | F-094 | E15.1 | DICOM SR as the native in-memory annotation model | Rust+TS | 4w | done |
 | F-095 | E15.2 | Annotation state manager, frame-of-reference indexing, undo/redo | Rust+TS | 4w | done |
-| F-098 | E15.5 | DICOM SEG round-trip | Rust+TS | 4w | pending |
+| F-098 | E15.5 | DICOM SEG round-trip | Rust+TS | 4w | done |
 | F-099 | E15.6 | RTSTRUCT import to contour representation | Rust+TS | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes

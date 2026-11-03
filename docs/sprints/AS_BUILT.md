@@ -4475,3 +4475,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ea9-1ce9-7a72-86aa-8dcaed5b0bce`. `annotation-state.ts` sha256 at the clean pass is `6c7f9f15858248c1043f84fe95718ed22773b41ce81198183dd12ad0d7e8438c`. A blank-id length of 2 refused a one-character id and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-098, SEG frame round trip, completed 2026-11-02
+
+**What was built.** `encode_seg` and `decode_seg` in `ocelli-seg`. Frames stay in caller order. Each frame keeps its referenced SOP instance UID. Two frames may name the same UID. A sample is a whole number of at least 0, and 0 is background. One bad frame refuses the whole call. Decode does not sort. The shell does not export the round trip. `present_labelmap` is unchanged. There is no TypeScript copy.
+
+**HLD sections implemented.** Appendix B names SEG. The section does not give Part 10 bytes. The logical frame list is the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `ocelli-seg`. The shell sentence is in `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Tests added.** Four tests in `crates/ocelli-seg/tests/seg_roundtrip.rs`.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-098-design.md`. PS3.3 C.8.20.2 names the segment number. No DICOM file bytes.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The copy does not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`. The shell does not export the round trip.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19eac-192a-79c0-8484-8bb6daeab146`. `seg_roundtrip.rs` sha256 at the clean pass is `8dc88e3aed9b232509105b9c01aeb8a721d7a8c760fa8fa82fe01cd330848679`. An integer limit of 0 accepted 1.5 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098
 **Last updated:** 2026-11-02
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -231,6 +231,8 @@ F-093 adds `sculptVertex`, `eraseNearest` and `mipIndex` in `packages/core`. A p
 F-094 adds `contentTree` and `provenanceItems` in `packages/core`. The annotation type is a DICOM SR content tree. The root relationship is absent. A child uses one of five relationships. One bad node returns nothing and the caller object is not written. Provenance children are the tool, the engine version, the algorithm and the operator. A null algorithm omits that child. An empty required string returns nothing. The drawing layer is unchanged. There is no Rust twin.
 
 F-095 adds `createAnnotationState`, `putAnnotation`, `annotationsForFrame`, `undoAnnotation` and `redoAnnotation` in `packages/core`. A record holds an id, a frame-of-reference UID and a content tree that has already passed `contentTree`. A blank id, a blank UID, or a refused tree returns nothing and does not write the previous state. Records for one UID come back in insertion order. Undo moves one successful put back. The first state has no undo. Redo restores that put. A new put drops the redo states. The module does not measure.
+
+F-098 adds `encode_seg` and `decode_seg` in `ocelli-seg`. Frames stay in caller order. Each frame keeps its referenced SOP instance UID. Two frames may name the same UID. A sample is a whole number of at least 0, and 0 is background. One bad frame refuses the whole call. Decode does not sort. The shell does not export the round trip. `present_labelmap` is unchanged. There is no TypeScript copy.
 
 ## React binding
 
