@@ -32,5 +32,7 @@ ocelli-render = { path = "../ocelli-render" }
 # test that builds a synthetic adapter has to name them. Nothing outside
 # `#[cfg(test)]` in this crate touches wgpu, and no device-creating call
 # appears here at all, which `ci/check-device-ownership.sh` still asserts.
-[dev-dependencies]
-wgpu = { workspace = true }
+# Native tests only. A shared dev-dependency would enable the desktop
+# backends on a wasm32 resolve of this crate.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+wgpu = { workspace = true, features = ["std", "parking_lot", "dx12", "metal", "gles", "vulkan", "wgsl", "webgpu"] }

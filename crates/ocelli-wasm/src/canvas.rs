@@ -1,10 +1,9 @@
 //! Offscreen canvas attachment for one render worker.
 //!
 //! The browser type is named here and nowhere else. `ocelli-render` creates
-//! the surface from the instance that produced the device. Decode workers
-//! load this module and do not have to call either export. The session type
-//! is `crate::session`. One context serves every viewport in the
-//! table.
+//! the surface from the instance that produced the device. The decode-worker
+//! build does not compile this module. The session type is `crate::session`.
+//! One context serves every viewport in the table.
 
 use std::cell::RefCell;
 

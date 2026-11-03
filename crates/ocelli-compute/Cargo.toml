@@ -20,8 +20,16 @@ workspace = true
 # ocelli-viewport.
 [dependencies]
 ocelli-render = { path = "../ocelli-render" }
-wgpu = { workspace = true }
 thiserror = { workspace = true }
+
+# D-27. Same split as ocelli-render. This crate is not in the wasm-pack graph
+# today. The workspace wasm32 check still unifies features, so a default wgpu
+# line here would put the native backends back into that check.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { workspace = true, features = ["std", "parking_lot", "dx12", "metal", "gles", "vulkan", "wgsl", "webgpu"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { workspace = true, default-features = false, features = ["std", "parking_lot", "wgsl", "webgpu", "webgl"] }
 
 # trybuild drives the compile-fail cases under tests/ui/. They are the payoff
 # of the device-ownership contract: the defect stops COMPILING rather than

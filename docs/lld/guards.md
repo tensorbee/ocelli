@@ -1,10 +1,15 @@
 # The guard harness
 
-**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110
+**Last updated:** 2026-11-03
 
 A guard is any refusal this repository can produce: a script that exits 1, a
 hook that rejects a commit, a gate that fails.
+`scripts/decode_graph_check.py` is the wasm gate's first command. The
+catalogue entry `decode-graph` claims that file. Its floor probes call the
+manifest and classifier functions. The pin entry also refuses a decode module
+over its recorded ceiling and a decode binding file that is not the panic
+surface.
 `docs/runbooks/guard-verification.md` says why they need watching, in a
 sentence this file exists to mechanise:
 

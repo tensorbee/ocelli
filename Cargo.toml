@@ -66,7 +66,11 @@ panic = "deny"
 # tiering, and it is the story that would otherwise have needed wgpu first.
 # F-039 is E6.3 in S13 and is OffscreenCanvas.
 [workspace.dependencies]
-wgpu = "=30.0.1"
+# D-27. `default-features = false` is what lets a member select a target
+# feature set. Cargo rejects a member `default-features = false` when the
+# workspace entry leaves the defaults on. The version is still `=30.0.1`.
+# Native crates name the default set themselves. wasm32 does not.
+wgpu = { version = "=30.0.1", default-features = false }
 # Pinned EXACTLY for the same reason as wgpu and one more that is specific to
 # it: `wasm-pack` runs a wasm-bindgen CLI whose version must match this crate
 # version, so a floating range produces a version-mismatch failure that reads

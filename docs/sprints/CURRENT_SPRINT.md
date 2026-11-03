@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-110 | E18.1 | Binary size budget: Naga trimming, wasm-opt, split builds | Build | 4w | pending |
+| F-110 | E18.1 | Binary size budget: Naga trimming, wasm-opt, split builds | Build | 4w | done |
 | F-112 | E18.3 | Worker pool tuning and the threading escalation decision | Build | 4w | pending |
 | F-113 | E18.4 | Memory profiling under 4D and large-volume load | Build | 3w | pending |
 | F-114 | E19.1 | Browser matrix validation and WebGL2 tier certification | All | 4w | pending |

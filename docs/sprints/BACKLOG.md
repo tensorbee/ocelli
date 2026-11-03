@@ -310,7 +310,7 @@ Binary size and cold start inside budget, the browser matrix certified, semver a
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-110 | E18.1 | S40 | Binary size budget: Naga trimming, wasm-opt, split builds | Build | 4w | F-042 | pending |
+| F-110 | E18.1 | S40 | Binary size budget: Naga trimming, wasm-opt, split builds | Build | 4w | F-042 | done |
 | F-111 | E18.2 | S41 | Cold-start and first-frame optimisation | Build | 3w | F-110 | pending |
 | F-112 | E18.3 | S40 | Worker pool tuning and the threading escalation decision | Build | 4w | F-035 | pending |
 | F-113 | E18.4 | S40 | Memory profiling under 4D and large-volume load | Build | 3w | F-034 | pending |

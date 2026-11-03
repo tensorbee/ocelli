@@ -241,6 +241,15 @@ def _prepare_control(box: sb.Sandbox, probe: Probe) -> None:
         for name in ("LICENSE-MIT", "LICENSE-APACHE"):
             box.write(f"crates/ocelli-wasm/pkg/{name}",
                       (box.path / name).read_bytes())
+        # F-110. The size check also reads the decode module. A healthy
+        # control is a small module under the recorded ceiling, with the
+        # panic exports and without the canvas name.
+        import pin_and_size_check as pins
+        bindings = "".join(
+            f"export function {name}(): void;\n" for name in pins.DECODE_EXPORTS)
+        box.write("crates/ocelli-wasm/pkg-decode/ocelli_wasm.d.ts", bindings)
+        box.write("crates/ocelli-wasm/pkg-decode/ocelli_wasm_bg.wasm",
+                  b"\x00" * 1000)
     elif key == "python3 scripts/corpus_check.py":
         # A healthy corpus is present and matches. The real one is not in git
         # and is absent in CI, so the control builds the smallest one that is.

@@ -108,9 +108,10 @@ Not applicable. The builds do not publish and do not keep a device.
 | AC2 | Default graph on wasm32 still has wgpu | the same check | Dropping the renderer from the shipping module | implementation |
 | AC3 | wasm-opt is a list and is not false | Cargo.toml read by the check | `wasm-opt = false` | implementation |
 | AC4 | wasm32 wgpu features are the D-27 set | manifest read | Native backends left on the browser module | implementation |
-| AC5 | Native wgpu features still include webgl and the default backends | manifest read | A trim that removes tier B or the desktop backends | implementation |
+| AC5 | ocelli-render native wgpu includes webgl and the default backends. ocelli-wasm and ocelli-compute native include the default backends | manifest read | A trim that removes tier B from the renderer or a desktop backend | implementation |
 | AC6 | Decode size file matches the built decode module within 5 percent | `--with-size` after `wasm-decode` | A guessed byte count | integrated |
 | AC7 | Render budget moves only with a cause when the measurement leaves the band | existing size check | Editing the tolerance to go green | integrated |
+| AC8 | Decode bindings export the panic surface and do not name attachOffscreenCanvas | `--with-size` reads the decode `.d.ts` | A decode module that still exports the canvas | integrated |
 
 ## Approach
 
@@ -120,16 +121,24 @@ enables optional `ocelli-render`, `ocelli-viewport` and `wgpu`.
 only with `render-worker`.
 
 On wasm32, `ocelli-render`, `ocelli-wasm` and `ocelli-compute` set
-`default-features = false` and the D-27 feature list. Native dependency
-lines keep today's features.
+`default-features = false` and the D-27 feature list. The workspace
+entry sets `default-features = false` too, because Cargo rejects the
+member switch otherwise. Each native dependency line names the pinned
+default backends. `ocelli-render` also names `webgl`. `ocelli-oracle`
+and the `ocelli-native` dev-dependency use a native target table. The
+oracle also has a wasm32 table with the D-27 set, because the
+cross-target proof checks that crate for wasm32. A shared oracle line
+would turn the native backends on in that resolve.
 
 `bin/ocelli.sh wasm-decode` runs wasm-pack with `--no-default-features
 --features decode-worker` into `pkg-decode`. That directory stays
 gitignored like `pkg`.
 
-`scripts/pin_and_size_check.py --with-size` also checks the decode
-graph and the decode size file. The floor pins gate without
-`--with-size` does not build wasm.
+`scripts/decode_graph_check.py` checks the manifests and both graphs.
+`scripts/pin_and_size_check.py --with-size` checks the decode size file
+and the decode bindings. The wasm gate runs the graph check, both
+packs, then `--with-size`. The floor pins gate without `--with-size`
+does not build wasm.
 
 ## Dependencies, write ownership and resources
 
@@ -178,8 +187,18 @@ None. `docs/hld/B-parity-surface.md` has no binary-size row.
 
 ## Deviations
 
-**D-27.** The wasm32 feature set above. The row is in
-`docs/hld/DEVIATIONS.md`.
+**D-27.** The wasm32 feature set above. Cargo rejects a member
+`default-features = false` unless the workspace entry sets it too, so
+the workspace line is `{ version = "=30.0.1", default-features = false }`
+and each native crate names the default backends. The version pin is
+unchanged. The row is in `docs/hld/DEVIATIONS.md`.
+
+## LLD impact
+
+- `docs/lld/build-targets.md`
+- `docs/lld/tier-resolution.md`
+- `docs/lld/guards.md`
+- `docs/lld/gpu-ownership.md`
 
 ## Open questions
 

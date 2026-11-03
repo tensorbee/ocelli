@@ -207,6 +207,9 @@ const config = tseslint.config(
     ignores: [
       "**/dist/**",
       "**/pkg/**",
+      // F-110. wasm-pack writes the decode worker here. The glue is generated,
+      // the same as `pkg`, and the floor lint walks every file it can see.
+      "**/pkg-decode/**",
       "**/node_modules/**",
       // `**/` rather than a bare prefix: wasm-pack writes the panic-probe
       // module into `crates/ocelli-wasm/target/panic-probe`, which

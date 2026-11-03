@@ -194,5 +194,48 @@ class RitkVendor(unittest.TestCase):
                             for problem in problems), problems)
 
 
+class DecodeExports(unittest.TestCase):
+    def bindings(self, directory: str, text: str) -> Path:
+        package = Path(directory) / "pkg-decode"
+        package.mkdir()
+        (package / "ocelli_wasm.d.ts").write_text(text)
+        return package
+
+    def test_the_panic_surface_is_accepted(self):
+        text = "\n".join(
+            f"export function {name}(): void;"
+            for name in pin_and_size_check.DECODE_EXPORTS
+        ) + "\n"
+        with tempfile.TemporaryDirectory() as directory:
+            package = self.bindings(directory, text)
+            self.assertEqual(
+                pin_and_size_check.check_decode_exports(package), [])
+
+    def test_a_canvas_name_is_refused(self):
+        text = "\n".join(
+            f"export function {name}(): void;"
+            for name in pin_and_size_check.DECODE_EXPORTS
+        ) + "\nexport function attachOffscreenCanvas(): void;\n"
+        with tempfile.TemporaryDirectory() as directory:
+            package = self.bindings(directory, text)
+            problems = pin_and_size_check.check_decode_exports(package)
+        self.assertTrue(
+            any("attachOffscreenCanvas" in problem for problem in problems),
+            problems)
+
+    def test_a_missing_panic_export_is_refused(self):
+        names = [
+            name for name in pin_and_size_check.DECODE_EXPORTS
+            if name != "ocelli_version"
+        ]
+        text = "\n".join(f"export function {name}(): void;" for name in names)
+        with tempfile.TemporaryDirectory() as directory:
+            package = self.bindings(directory, text)
+            problems = pin_and_size_check.check_decode_exports(package)
+        self.assertTrue(
+            any("ocelli_version" in problem for problem in problems),
+            problems)
+
+
 if __name__ == "__main__":
     unittest.main()

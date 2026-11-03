@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110
+**Last updated:** 2026-11-03
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -38,8 +38,9 @@ here would cost real coverage to enforce a claim the table is not making.
 ## The wasm pipeline
 
 ```bash
-bin/ocelli.sh wasm            # wasm-pack build, release
-bin/ocelli.sh gate wasm       # the same build, then the size check
+bin/ocelli.sh wasm            # render worker, release
+bin/ocelli.sh wasm-decode     # decode worker, release, no wgpu
+bin/ocelli.sh gate wasm       # graph check, both builds, then the size check
 ```
 
 `bin/ocelli.sh wasm` runs `wasm-pack build crates/ocelli-wasm --target web
@@ -50,6 +51,16 @@ dev-profile size measurement is not a smaller version of the same number. It
 is a different number.
 
 `crates/ocelli-wasm/pkg/` is generated and gitignored.
+
+`bin/ocelli.sh wasm-decode` builds the same crate with
+`--no-default-features --features decode-worker` into
+`crates/ocelli-wasm/pkg-decode/`. That directory is gitignored. The decode
+module does not depend on `ocelli-render`, `ocelli-viewport` or `wgpu`.
+`eslint.config.js` ignores `**/pkg/**` and `**/pkg-decode/**`. Both are
+generated wasm-bindgen glue, and the floor lint walks the tree.
+`ci/wasm-decode-size.json` records its measured size and is not the render
+budget. The default feature is `render-worker`. `canvas` and `session`
+compile only with that feature.
 
 ### The generated package carries both licence grants
 
@@ -93,8 +104,8 @@ F-101 adds `alloc`, `bulk_ticket`, `release_bulk`, `apply_commands`,
 `publishCpuInteraction`. There is no `ring_ptr` and no pixel getter. A pointer
 would be a view over linear memory, and the drain export copies bytes out
 instead. `coreAvailable()` stays false until a built module is loaded.
-The size budget file is not edited here. A release measurement has not been
-taken for this boundary.
+The render size budget is `ci/wasm-size-budget.json`. F-110 did not edit it.
+The measurement on 2026-11-03 stayed inside the recorded band.
 
 `ocelli_version` exists for measurement rather than for features. Fat LTO with `strip =
 true` lets the linker discard anything unreachable, so a module with no
@@ -128,8 +139,9 @@ Eight steps, each exit code read from the command itself.
 | 7 | The same source builds as plain and `+simd128` release wasm modules |
 | 8 | Node executes both wasm modules. This is execution evidence, not merely a successful compile |
 
-Steps 6 to 8 are F-026's codec-specific execution proof. `gate wasm` still
-builds only `ocelli-wasm` and does not exercise `ocelli-codec`.
+Steps 6 to 8 are F-026's codec-specific execution proof. `gate wasm` builds
+the render module and the decode module of `ocelli-wasm`. It does not
+exercise `ocelli-codec`.
 
 **Step 2 deliberately omits `--all-targets` and step 3 keeps it.** For wasm32
 that flag pulls in dev-dependencies, and `proptest` reaches `wait-timeout`,
@@ -162,7 +174,12 @@ the log.
 workspace declares directly, meaning the entries in
 `[workspace.dependencies]`, resolves the same features on both targets. A
 difference there is our decision and we have to say so, in
-`ci/target-feature-baseline.json`.
+`ci/target-feature-baseline.json`. `wgpu` is that exception under D-27.
+wasm32 resolves `std`, `parking_lot`, `wgsl`, `webgpu` and `webgl`. The host
+resolve also names `dx12`, `metal`, `gles` and `vulkan`. The version pin is
+still `=30.0.1`. The `ocelli-wasm` package graph is the wasm32 set. A shared
+`wgpu` line on `ocelli-oracle` would put the native backends into the wasm32
+workspace resolve, so that line is target-gated too.
 
 **It was broader in F-007 and F-008 narrowed it. That was a correction, not a
 retreat.** The first version compared the whole transitive closure, which was
@@ -266,6 +283,14 @@ chose that record on 2026-10-27. F-039 remains the first edge from
 `ocelli-wasm` to `ocelli-render`, which pulled in wgpu and Naga and moved the
 budget from 16,388 bytes to 1,999,061.
 
+F-110 measured the same render artefact at 2,171,133 bytes on 2026-11-03.
+That is inside the 5 percent ceiling of the 2,151,196 byte baseline, so the
+budget file was not edited and the tolerance stayed 0.05. The decode-worker
+module measured 16,455 bytes the same day and is recorded in
+`ci/wasm-decode-size.json`. That file is not the render budget. The decode
+module does not link wgpu or Naga. Cold start was not remeasured, so this
+story does not close gate A4.
+
 **That number is not an answer to Appendix A gate A4 and must not be read as
 one.** A4 asks whether binary size and cold start land within budget and
 estimates 3 to 8 MB uncompressed with Naga dominating. 2,151,196 bytes is the
@@ -304,8 +329,9 @@ there. wasm-bindgen adds its own,
 and `memory`, which are the glue's and not this table's. The table below names
 the six that predate F-101, which are the measurement root, the panic probe and
 the two render-target calls. The F-101 boundary and CPU canvas exports are
-listed in the section above. Decode workers load the same module and are not
-required to call the two render-target exports.
+listed in the section above. The render module still exports
+`attachOffscreenCanvas` and `resizeOffscreenCanvas`. The decode-worker
+artefact does not. A decode worker does not load this module.
 
 | Export | Called |
 |--------|--------|
@@ -374,26 +400,26 @@ not run" and "the check ran and was happy" must not look the same.
 | `wgpu` | HLD section 15.2. Agents reliably emit wgpu 0.19-era pipeline code, and a range lets that compile against something subtly different from what the shader expects |
 | `wasm-bindgen` | `wasm-pack` runs a CLI whose version must match the crate version. A range lets the two drift, and the mismatch reads as a build break rather than as a resolution change |
 
-### `ocelli-render` adds one wgpu feature, and it is deviation D-14
+### `ocelli-render` names `webgl`, and that is deviation D-14
 
-`wgpu = { workspace = true, features = ["webgl"] }`. The pin and the workspace
-entry are untouched and only the consuming crate's feature set changes, which
-is the shape D-09 set for glam.
+The workspace entry is `{ version = "=30.0.1", default-features = false }`.
+That switch is D-27. Cargo rejects a member `default-features = false` while
+the workspace entry leaves the defaults on. The version pin is still
+`=30.0.1`.
 
-wgpu 30.0.1's default set is `std, parking_lot, dx12, metal, gles, vulkan,
-wgsl, webgpu`, read from the pinned crate's own manifest. `webgl` is a real
-feature and is not among them, and `gles` is the **native** GL backend rather
-than the browser one. Without the feature the crate reaches WebGPU on wasm32
-and cannot reach WebGL2 at all, so HLD section 7's tier B could never resolve
-in a browser, and a tier the resolver can never return is not a tier.
+Native `ocelli-render` names the pinned default backends plus `webgl`.
+wasm32 names `std`, `parking_lot`, `wgsl`, `webgpu` and `webgl`, and drops
+`dx12`, `metal`, `gles` and `vulkan`. `webgl` is not in wgpu 30.0.1's default
+set. `gles` is the native GL backend rather than the browser one. Without
+`webgl` the crate reaches WebGPU on wasm32 and cannot reach WebGL2 at all, so
+HLD section 7's tier B could never resolve in a browser, and a tier the
+resolver can never return is not a tier.
 
-**Step 4 is unaffected and that was checked rather than assumed.** The feature
-is enabled unconditionally, so both targets resolve it, and the packages it
-pulls in on wasm32 are already target-gated inside wgpu's own manifest.
-`ci/check-bindgen-isolation.sh` part 1 is unaffected for the same reason:
-`wasm-bindgen`, `js-sys` and `web-sys` sit under wgpu's
-`cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))` tables, so
-the host tree does not reach them.
+**The two targets do not resolve the same wgpu features, and step 4 says so.**
+`ci/target-feature-baseline.json` names `wgpu`. The packages `webgl` pulls in
+on wasm32 stay inside wgpu's own target tables, so the host tree does not
+reach `wasm-bindgen`. `ci/check-bindgen-isolation.sh` part 1 is unaffected for
+that reason.
 
 **Measured cost of reaching wgpu from the wasm module is the F-039 delta.**
 `ocelli-wasm` depends on `ocelli-render` and on `wgpu`, so the release module
@@ -416,13 +442,9 @@ because the alternative is shipping an override nobody can observe. See
 
 ## Known gaps
 
-- **Step 4 starts vacuous.** It compares the dependencies this workspace
-  declares directly, not the workspace's own crates, and today not one of them
-  resolves a different feature set on the two targets, so `allowed` in
-  `ci/target-feature-baseline.json` is empty. That file's
-  `checked_dependencies` is the list being watched and
-  `python3 -c "import json;print(len(json.load(open('ci/target-feature-baseline.json'))['checked_dependencies']))"`
-  prints how long it is. It was built anyway, and proved red by
-  construction, because its value is entirely in the moment a dependency is
-  added and nobody is looking, which is precisely the moment nobody would
-  build it.
+- **Step 4 names `wgpu`.** It compares the dependencies this workspace
+  declares directly, not the workspace's own crates. The other direct
+  dependencies still resolve the same features on both targets. `allowed` in
+  `ci/target-feature-baseline.json` names `wgpu` under D-27. Removing that
+  key makes the check fail. The names come from `[workspace.dependencies]`.
+  The `checked_dependencies` array in that file is not read by the check.

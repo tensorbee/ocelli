@@ -73,7 +73,7 @@ GATES=(
   "skills|no|Codex and OpenCode adapters match canonical sources and marked examples run"
   "lint|no|eslint, including the cached-wasm-view ban (HLD 17.2)"
   "types|no|tsc --build across the TypeScript workspaces"
-  "wasm|no|wasm-pack build and the size budget (E1.2, gate A4)"
+  "wasm|no|wasm-pack build, the decode split and the size budget (E1.2, F-110)"
   "native|no|the cross-target build proof and per-target features (E1.7, HLD 4)"
   "device|no|only ocelli-render creates a GPU device (E1.8, HLD 31)"
   "packages|no|npm tarball contents, exports and a consumer install (E1.3)"
@@ -190,7 +190,11 @@ run_gate() {
     # before the boundary does, because wasm-pack refuses a crate without one.
     #
     # Chained on `&&` for the reason the backlog arm gives.
-    wasm)        "$0" wasm &&
+    # F-110. The graph check is first so a decode build that still links
+    # Naga fails before either release link. The two packs are serial.
+    wasm)        python3 scripts/decode_graph_check.py &&
+                 "$0" wasm &&
+                 "$0" wasm-decode &&
                  python3 scripts/pin_and_size_check.py --with-size &&
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_pin_and_size_check.py ;;
@@ -502,6 +506,17 @@ case "$command" in
     # codegen-units 1, panic abort, strip) only applies to a release build,
     # and a dev-profile size measurement would be meaningless against gate A4.
     wasm-pack build crates/ocelli-wasm --target web --out-dir pkg "$@"
+    ;;
+
+  wasm-decode)
+    command -v wasm-pack >/dev/null || {
+      echo "wasm-pack is not installed. See docs/DEVELOPER_SETUP.md" >&2
+      exit 1
+    }
+    # F-110. Not the shipping module. No default features, so render-worker
+    # stays off and this artefact does not link wgpu. Release, same profile.
+    wasm-pack build crates/ocelli-wasm --target web --out-dir pkg-decode -- \
+      --no-default-features --features decode-worker
     ;;
 
   native)
