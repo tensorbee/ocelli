@@ -4507,3 +4507,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`. The shell does not export the import.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ec4-73ab-7bc0-b08a-4cd3715a9849`. `contour.rs` sha256 at the clean pass is `997c27cb9a7ad6476ee60bd24acc744df42cf27191a500b7a7fe314889877ab3`. Dividing spacing by 1 accepted z 11.1 and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-096, measurement persistence, completed 2026-11-03
+
+**What was built.** `persistMeasurements` and `loadMeasurements` in `packages/core`. The document is JSON with format `ocelli-measurement` and version 1. Every root is copied through `contentTree`. One bad node returns nothing. A count of 4000 content items returns nothing. An empty list loads as a new empty array. There is no bulk binary layout and no Rust twin.
+
+**HLD sections implemented.** HLD section 34 names measurement persistence. The section does not give the document layout or the bulk count. The JSON document and the count of 4000 are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Five tests in `packages/core/src/measurement-persist.test.ts`. The published-name list includes the two persistence values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-096-design.md`. No DICOM section. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 1 defect and 0 smells. Reviewer `01a19ef6-21ba-74a1-a974-984187e3349b`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19f07-516a-7612-a840-4f009f8c1328`. `measurement-persist.ts` sha256 at the clean pass is `2ab55d311dcb37ea3d64d988e8b6bca3e1f11c309489f511c1bbe4a235c40a25`. A bulk limit of 4001 stored 4000 nodes and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

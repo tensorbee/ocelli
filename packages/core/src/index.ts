@@ -226,6 +226,8 @@ export {
   undoAnnotation,
 } from "./annotation-state.js";
 
+export { loadMeasurements, persistMeasurements } from "./measurement-persist.js";
+
 export {
   COMMAND_CURSORS,
   CURSOR_PHASES,

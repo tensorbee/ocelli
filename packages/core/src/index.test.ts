@@ -171,6 +171,9 @@ const PUBLISHED: readonly string[] = [
   "putAnnotation",
   "redoAnnotation",
   "undoAnnotation",
+  // ./measurement-persist.js, F-096
+  "loadMeasurements",
+  "persistMeasurements",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",
