@@ -31,7 +31,8 @@ import { coreAvailable, VERSION } from "./index.js";
  * `CursorPair`, `CursorPhase`, `CursorStyle`, `ToolState`,
  * `ToolStateEvent`, `AnnotationLayer`, `AnnotationLayerEvent`,
  * `AnnotationMark`, `AnnotationPoint`, `AnnotationRefusal`,
- * `AnnotationSyncResult`, `TidSource`, `ElementSeam`, `SeamEvent`, `SideBySide`) are erased
+ * `AnnotationSyncResult`, `TidSource`, `ElementSeam`, `SeamEvent`, `SideBySide`,
+ * `ViewportKind`) are erased
  * before this runs, and `npx tsc` is what watches those.
  *
  * Adding an export is a deliberate act, so adding a line here is the cost of
@@ -183,6 +184,10 @@ const PUBLISHED: readonly string[] = [
   "enableElement",
   // ./alongside.js, F-106
   "attachSideBySide",
+  // ./flag.js, F-107
+  "enableFlagged",
+  "kindEnabled",
+  "setKindEnabled",
   // ./migrate.js, F-108
   "rewriteListenerNames",
   // ./cursor.js, F-072

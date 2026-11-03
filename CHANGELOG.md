@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The shell keeps three kind flags. They start off. Stack turns on before MPR, and MPR turns on before volume. An element is enabled only while its kind is on. Turning that kind off disables the elements this story enabled.
 - The shell keeps one Ocelli element and one neighbour. Release disables only the Ocelli element. The neighbour keeps its own listeners.
 - The shell rewrites a listener string literal when the event map has an Ocelli name. An unmapped name stays. `cornerstone.enable` stays.
 - The shell enables on one DOM element and dispatches a named event on it. A second enable returns nothing. An unknown name returns nothing.
