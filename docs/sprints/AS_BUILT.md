@@ -4571,3 +4571,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/migration.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Reviewer `01a19f69-1425-7bd3-be51-0ba24282feeb`. The defect was whitespace lost around a rewritten literal. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19f76-48c2-76b3-b70c-56df59f3a196`. `migrate.ts` sha256 at the clean pass is `286fe2f00b8eb2343947f9654d64554efcb262aab5e803246bb406c48c8e254e`. Pass 3 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19f87-6117-79b0-821e-ecefdda48370`. A bare listener scan listed `migrate.ts` and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-106, side-by-side runtime, completed 2026-11-03
+
+**What was built.** `attachSideBySide` in `packages/core`. One Ocelli element and one neighbour are stored. The same object cannot be both. Release disables only the Ocelli element. The neighbour keeps listeners this package did not register. The other library is not imported.
+
+**HLD sections implemented.** Section 12 says both libraries coexist in the application. The function name and the refusal to import the other library are the approved local plan. The feature flag is F-107. Shadow mode is F-109.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/migration.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Tests added.** Five tests in `packages/core/src/alongside.test.ts`. The published-name list includes `attachSideBySide`.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-106-design.md`. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The function does not open a device.
+**LLD updated.** `docs/lld/migration.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19fba-77c1-7063-b817-d9df9fb48fa6`. `alongside.ts` sha256 at the clean pass is `fcd56226cadfa29f03206dbdf2a7b169466bb899d0161963baef3da89b1ed836`. A release that also enabled the neighbour was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

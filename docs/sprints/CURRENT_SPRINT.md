@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-106 | E17.2 | Side-by-side runtime: both libraries alive in one application | TS | 4w | pending |
+| F-106 | E17.2 | Side-by-side runtime: both libraries alive in one application | TS | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
