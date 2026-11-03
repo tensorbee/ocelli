@@ -240,6 +240,8 @@ export type { SideBySide } from "./alongside.js";
 export { enableFlagged, kindEnabled, setKindEnabled } from "./flag.js";
 export type { ViewportKind } from "./flag.js";
 
+export { shadowDivergence } from "./shadow.js";
+
 export { rewriteListenerNames } from "./migrate.js";
 
 export {

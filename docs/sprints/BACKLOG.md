@@ -302,7 +302,7 @@ Both libraries coexist, viewport by viewport, with shadow mode before each cutov
 | F-106 | E17.2 | S38 | Side-by-side runtime: both libraries alive in one application | TS | 4w | F-105 | done |
 | F-107 | E17.3 | S39 | Per-viewport strangler migration behind feature flags | TS | 4w | F-106 | done |
 | F-108 | E17.4 | S37 | Migration guide and codemods for the existing product | TS | 4w | F-103 | done |
-| F-109 | E17.5 | S39 | Shadow mode: render both in production, alert on divergence | TS | 5w | F-106 | pending |
+| F-109 | E17.5 | S39 | Shadow mode: render both in production, alert on divergence | TS | 5w | F-106 | done |
 
 ### M13, Performance, hardening and release
 

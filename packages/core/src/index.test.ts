@@ -188,6 +188,8 @@ const PUBLISHED: readonly string[] = [
   "enableFlagged",
   "kindEnabled",
   "setKindEnabled",
+  // ./shadow.js, F-109
+  "shadowDivergence",
   // ./migrate.js, F-108
   "rewriteListenerNames",
   // ./cursor.js, F-072

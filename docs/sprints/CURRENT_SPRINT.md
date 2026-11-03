@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-107 | E17.3 | Per-viewport strangler migration behind feature flags | TS | 4w | done |
-| F-109 | E17.5 | Shadow mode: render both in production, alert on divergence | TS | 5w | pending |
+| F-109 | E17.5 | Shadow mode: render both in production, alert on divergence | TS | 5w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
