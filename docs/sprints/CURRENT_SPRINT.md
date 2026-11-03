@@ -1,14 +1,14 @@
-# Current sprint, S36
+# Current sprint, S37
 
-**Milestone**: M11, annotation state and DICOM interop.
-**Branch**: `sprint/s36`
+**Milestone**: M12, migration and rollout.
+**Branch**: `sprint/s37`
 **Opened**: 2026-11-03
-**Goal**: Measurement persistence and serialisation format, DICOM SR TID 1500 round-trip.
+**Goal**: Integration seam: DOM-element contract identical to cornerstone, Migration guide and codemods for the existing product.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-096 | E15.3 | Measurement persistence and serialisation format | Rust+TS | 3w | done |
-| F-097 | E15.4 | DICOM SR TID 1500 round-trip | Rust+TS | 3w | done |
+| F-105 | E17.1 | Integration seam: DOM-element contract identical to cornerstone | TS | 3w | done |
+| F-108 | E17.4 | Migration guide and codemods for the existing product | TS | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -18,35 +18,34 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S36 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S37 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S35 closed at tag `s35`. The merge is `ea3f140`. F-094, F-095, F-098 and
-F-099 are done. Closing S35 did not complete M11 and did not publish.
-The workspace version stays 0.1.0.
+S36 closed at tag `s36`. The merge is `ed60524`. F-096 and F-097 are done.
+Closing S36 completed M11 and did not publish. The workspace version stays
+0.1.0.
 
-This sprint finishes M11. Decision D13 says the annotation type is a
-DICOM SR content tree. Decision D10 keeps dcmjs for SR generation.
-HLD section 34 names two containers, the content tree for semantics and
-a bulk binary once counts pass a few thousand. The section does not give
-either byte layout. HLD section 10 keeps the TID 1500 bridge in
-TypeScript. The plans decide the layouts locally and say so. F-070
-already owns measurement values. These stories do not replace that
-arithmetic.
+This sprint starts M12. HLD section 12 says the library enables on a plain
+DOM element and dispatches events on it. Decision D1 says the API is new
+and is not a drop-in shim. Decision D4 says the ring is drained once per
+frame. The element hears the drained events. It does not hear one callback
+per wasm event. F-103 already named the event catalogue. F-102 already
+owns the React pump. These stories do not replace that catalogue or that
+pump.
 
-Closing this sprint completes M11 and does not publish.
+Closing this sprint does not complete M12 and does not publish. M12 is
+S37 to S39.
 
 ## What is carried in
 
-- **S35 is closed at tag `s35`, and that close did not complete M11 and
-  did not publish.** The merge is `ea3f140`. The tag object is `466ffac`
-  and peels to that merge. The sprint tip is `1986cf2`, tree
-  `b3315fb23248`. F-094 is `32d7534`. F-095 is `4c13d23`. F-098 is
-  `bec0072`. F-099 is `2ac7844`. The open is `1c133de`. The design is
-  `79eb0ae`. No row in that close has a measured duration. No ratio is
-  invented. The comparison report is unchanged.
+- **S36 is closed at tag `s36`, and that close completed M11 and did not
+  publish.** The merge is `ed60524`. The tag object is `ec222761` and
+  peels to that merge. The sprint tip is `5b9f784`, tree `57ed1d9808ec`.
+  F-096 is `ea915f8`. F-097 is `3636683`. The open is `e8c2852`. The
+  design is `b1f4013`. No row in that close has a measured duration. No
+  ratio is invented. The comparison report is unchanged.
 - **M10 is complete at tag `s34`, and that close did not publish.** The
   merge is `c3f85e5`. The tag object is `bff12197` and peels to that
   merge.
@@ -54,7 +53,7 @@ Closing this sprint completes M11 and does not publish.
   merge is `7ae7559`. The tag object is `1a255447` and peels to that
   merge.
 - **M8 is complete at tag `s29` and was not published.** A finished M8
-  would name 0.8.0. M1 through M10 were not published. The workspace
+  would name 0.8.0. M1 through M11 were not published. The workspace
   version is still 0.1.0. `/release` runs
   `python3 scripts/pin_and_size_check.py --require-redistribution`, and
   that command refuses while `openjph-core` 0.1.0 carries no BSD notice
@@ -76,14 +75,14 @@ Closing this sprint completes M11 and does not publish.
   this host through headless Chromium WebGL2 and matched `LutChain::map_into`
   within 0.001, format `R32Float`. A tier B colour LUT readback was not run.
 - **The wasm size budget records 2,151,196 bytes** with tolerance 0.05.
-  The ceiling is 2,258,755. The S35 sprint gate measured 2,171,131 bytes
+  The ceiling is 2,258,755. The S36 sprint gate measured 2,171,131 bytes
   and passed that budget. The budget file was not edited. `--accept-size`
   is a design-plan declaration, not a way to make a gate green.
 - **`max_review_passes` is stored but not automatically enforced by the
   backing script.** The operator required the review loop to continue until
   a pass reports zero defects and zero smells. The stored number is not a
   stop. The per-feature microscope loop remains uncapped.
-- **No new measured duration.** The S35 tracker rows read `not measured`.
+- **No new measured duration.** The S36 tracker rows read `not measured`.
   There is no measured total and no ratio. The capacity points remain the
   S03 and S06 closes. This open does not invent a ratio and does not
   recalculate capacity.
@@ -95,30 +94,32 @@ Closing this sprint completes M11 and does not publish.
 
 ## The defect class this sprint is exposed to
 
-**A second measurement model beside the SR content tree, or a TID 1500
-document encoded without dcmjs.** HLD section 34 says the in-memory type
-is the content tree. Decision D10 keeps dcmjs for SR generation. A private
-measurement struct, or a Rust template writer, is the defect. dwv, Horos,
-and the medical viewer Grok must not be opened. The SR idea is taken from
-DICOM PS3.3 and PS3.16.
+**A seam that exists only as a React callback, or a codemod that rewrites
+a concept the guide says is different.** HLD section 12 keeps the element
+and the events. Decision D1 refuses a drop-in shim. A private event bus
+that never reaches the element is the defect. A codemod that invents a
+cornerstone method name the guide left as a documented difference is the
+other defect. dwv, Horos, and the medical viewer Grok must not be opened.
 
 ## What done means
 
-- **F-096** persists the F-094 content tree in one JSON document and
-  reads it back through `contentTree`. At the local bulk count it returns
-  nothing. It does not invent the bulk binary layout.
-- **F-097** writes and reads a TID 1500 measurement through dcmjs. The
-  number, the unit and the concept survive. It does not reimplement the
-  template in Rust.
+- **F-105** enables on one plain DOM element and dispatches a named shell
+  event on that element. A second enable of the same element returns
+  nothing. An unknown event name returns nothing. Disabling an element
+  stops later delivery. The React pump stays the frame drain.
+- **F-108** writes the migration guide and one codemod for the mechanical
+  call sites that guide names. A concept the guide marks as different is
+  not rewritten.
 - **Each story declares all three tier rows.** An omitted row is not an
-  answer. A measurement that cannot run on the resolved tier reports
+  answer. A feature that cannot run on the resolved tier reports
   unavailable.
 
 ## Dependency order
 
-F-096 depends on F-094. F-097 depends on F-095. Those rows are `done`.
-The two stories share the shell index, so they land one after the other.
-F-096 is first. F-X003 stays `in-progress` and is not a dependency.
+F-105 depends on F-100. F-108 depends on F-103. Those rows are `done`.
+The two stories share the delivery ledgers, so they land one after the
+other. F-105 is first, because the guide names the seam that exists.
+F-X003 stays `in-progress` and is not a dependency.
 
 ## Standing expectations
 
@@ -139,7 +140,6 @@ generalised by D-07.
 
 ## Audit intake, 2026-11-03
 
-S35 closed at tag `s35`. The merge is `ea3f140`. Closing S35 did not
-complete M11 and did not publish. The S36 allocation rows and the S36
-plan table name F-096 and F-097. F-X003 stays in progress. F-X011 remains
-pending.
+S36 closed at tag `s36`. The merge is `ed60524`. Closing S36 completed
+M11 and did not publish. The S37 allocation rows and the S37 plan table
+name F-105 and F-108. F-X003 stays in progress. F-X011 remains pending.

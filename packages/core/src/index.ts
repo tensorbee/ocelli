@@ -231,6 +231,11 @@ export { loadMeasurements, persistMeasurements } from "./measurement-persist.js"
 export { readTid1500, writeTid1500 } from "./tid1500.js";
 export type { TidSource } from "./tid1500.js";
 
+export { disableElement, dispatchOnElement, enableElement } from "./seam.js";
+export type { ElementSeam, SeamEvent } from "./seam.js";
+
+export { rewriteListenerNames } from "./migrate.js";
+
 export {
   COMMAND_CURSORS,
   CURSOR_PHASES,

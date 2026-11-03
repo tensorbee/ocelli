@@ -4539,3 +4539,35 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19f1e-8b30-7d51-8412-c6cf8176982f`. `tid1500.ts` sha256 at the clean pass is `77ecc227e51813e66f7aad48a997659781a3d61c99d83a43348cd1fe5645c4cc`. A unit code of cm read back as cm and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-105, integration seam, completed 2026-11-03
+
+**What was built.** `enableElement`, `disableElement` and `dispatchOnElement` in `packages/core`. One element has one registration. The event type is the Ocelli name and the detail is the caller object. A second enable returns nothing. Disable removes the registration and then sends `viewport.unmounted`. The React host div uses the same functions.
+
+**HLD sections implemented.** Section 12 says the library enables on a plain DOM element and dispatches events on it. Decision D1 keeps a new API. Decision D4 keeps the once-per-frame drain. The function names and `bubbles: false` are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `packages/react`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Six tests in `packages/core/src/seam.test.ts` and one host test in `packages/react/src/OcelliViewport.test.tsx`. The published-name list includes the three seam values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-105-design.md`. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19f54-1096-7b82-a512-23836a073e43`. `seam.ts` sha256 at the clean pass is `585c06cdc220e17f3073984acaa0dec5877cb7be372c29d963d973004582c779`. A bubbles flag of true was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-108, migration guide and codemods, completed 2026-11-03
+
+**What was built.** `rewriteListenerNames` in `packages/core`. A string literal that is the first argument of `addEventListener` or `removeEventListener` is rewritten when the F-103 map has an Ocelli name. Whitespace around that call stays. `CAMERA_MODIFIED` stays. `cornerstone.enable` stays. A template literal stays. A non-string returns null. The guide is `docs/lld/migration.md`. The function does not write a file.
+
+**HLD sections implemented.** Section 12 says codemods cover the mechanical call-site changes and documents a concept that is different. The function name and the two listener calls are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/migration.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Tests added.** Five tests in `packages/core/src/migrate.test.ts`. The published-name list includes `rewriteListenerNames`. The catalogue scan counts a call and does not count the rewrite pattern.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-108-design.md`. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The function does not open a device.
+**LLD updated.** `docs/lld/migration.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Reviewer `01a19f69-1425-7bd3-be51-0ba24282feeb`. The defect was whitespace lost around a rewritten literal. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19f76-48c2-76b3-b70c-56df59f3a196`. `migrate.ts` sha256 at the clean pass is `286fe2f00b8eb2343947f9654d64554efcb262aab5e803246bb406c48c8e254e`. Pass 3 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19f87-6117-79b0-821e-ecefdda48370`. A bare listener scan listed `migrate.ts` and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

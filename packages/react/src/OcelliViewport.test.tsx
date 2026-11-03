@@ -118,6 +118,29 @@ describe("F-102 OcelliViewport", () => {
     expect(seen).toEqual([2]);
   });
 
+  it("dispatches mounted and unmounted on the host element", () => {
+    installFrames();
+    const heard: string[] = [];
+    const original = HTMLDivElement.prototype.dispatchEvent;
+    HTMLDivElement.prototype.dispatchEvent = function (
+      this: HTMLDivElement,
+      event: Event,
+    ) {
+      heard.push(event.type);
+      return original.call(this, event);
+    };
+    try {
+      const view = render(
+        <OcelliViewport id="stack-1" viewport={viewportId(1)} />,
+      );
+      expect(heard).toEqual(["viewport.mounted"]);
+      view.unmount();
+      expect(heard).toEqual(["viewport.mounted", "viewport.unmounted"]);
+    } finally {
+      HTMLDivElement.prototype.dispatchEvent = original;
+    }
+  });
+
   it("reports_tier_c_drawing", () => {
     installFrames();
     const liveSession = session();
