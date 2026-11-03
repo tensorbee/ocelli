@@ -1,13 +1,14 @@
-# Current sprint, S38
+# Current sprint, S39
 
 **Milestone**: M12, migration and rollout.
-**Branch**: `sprint/s38`
+**Branch**: `sprint/s39`
 **Opened**: 2026-11-03
-**Goal**: Side-by-side runtime: both libraries alive in one application.
+**Goal**: Per-viewport strangler migration behind feature flags, Shadow mode: render both in production, alert on divergence.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-106 | E17.2 | Side-by-side runtime: both libraries alive in one application | TS | 4w | done |
+| F-107 | E17.3 | Per-viewport strangler migration behind feature flags | TS | 4w | pending |
+| F-109 | E17.5 | Shadow mode: render both in production, alert on divergence | TS | 5w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -17,106 +18,84 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S38 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S39 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S37 closed at tag `s37`. The merge is `2dcdaff`. F-105 and F-108 are done.
-Closing S37 did not complete M12 and did not publish. The workspace version
-stays 0.1.0.
+S38 closed at tag `s38`. The merge is `3553c4d`. F-106 is done. Closing
+S38 did not complete M12 and did not publish. The workspace version stays
+0.1.0.
 
-This sprint continues M12. HLD section 12 says both libraries coexist in
-the application. The feature flag per viewport is F-107. Shadow mode is
-F-109. This story keeps an Ocelli element and a neighbour element alive
-together. Ocelli enables only its own element. It does not import the
-other library.
+This sprint finishes M12. HLD section 12 says a feature flag is per
+viewport and that stack viewports move first, then MPR, then 3D. Shadow
+mode compares both presentations and alerts before the flag flips. These
+stories do not import the other library. F-106 already keeps the neighbour
+element.
 
-Closing this sprint does not complete M12 and does not publish. M12 is
-S37 to S39.
+Closing this sprint completes M12 and does not publish. M12 is S37 to S39.
 
 ## What is carried in
 
+- **S38 is closed at tag `s38`, and that close did not complete M12 and
+  did not publish.** The merge is `3553c4d`. The tag object is `6b2121ef`
+  and peels to that merge. The sprint tip is `00010b6`, tree
+  `aa951846e3a6`. F-106 is `06eeef4`. The open is `5814ca3`. The design is
+  `9eec472`. No row in that close has a measured duration. No ratio is
+  invented. The comparison report is unchanged. The S38 sprint gate
+  measured wasm at 2,171,131 bytes.
 - **S37 is closed at tag `s37`, and that close did not complete M12 and
   did not publish.** The merge is `2dcdaff`. The tag object is `994841ec`
-  and peels to that merge. The sprint tip is `430967e`, tree
-  `1409c3c32602`. F-105 is `b6c7bdb`. F-108 is `9068255`. The open is
-  `e4562ff`. The design is `ab92b6d`. No row in that close has a measured
-  duration. No ratio is invented. The comparison report is unchanged.
-  The S37 sprint gate measured wasm at 2,171,131 bytes.
+  and peels to that merge.
 - **M11 is complete at tag `s36`, and that close did not publish.** The
   merge is `ed60524`. The tag object is `ec222761` and peels to that
   merge.
-- **M10 is complete at tag `s34`, and that close did not publish.** The
-  merge is `c3f85e5`. The tag object is `bff12197` and peels to that
-  merge.
-- **M9 is complete at tag `s32`, and that close did not publish.** The
-  merge is `7ae7559`. The tag object is `1a255447` and peels to that
-  merge.
-- **M8 is complete at tag `s29` and was not published.** A finished M8
-  would name 0.8.0. M1 through M11 were not published. The workspace
-  version is still 0.1.0. `/release` runs
-  `python3 scripts/pin_and_size_check.py --require-redistribution`, and
-  that command refuses while `openjph-core` 0.1.0 carries no BSD notice
-  material, which is D-22. That blocks publication. It does not block
-  this sprint.
-- **F-X003 is carried out of S16 and is not a story in this sprint.** AC6
-  needs a representative GPU-less incumbent host, the operator has confirmed
-  none is available, and no local diagnostic is accepted as that
-  measurement. Its backlog row stays `in-progress`. This sprint does not
-  depend on it.
-- **The open LINEAR finding against `ocelli-pixel`'s own arithmetic** stays
-  unscheduled. It has no F-ID. Clamping it so a readback matches is a
-  tolerance change.
+- **M8 through M11 were not published.** The workspace version is still
+  0.1.0. D-22 blocks publication because `openjph-core` 0.1.0 carries no
+  BSD notice material. That does not block this sprint.
+- **F-X003 stays `in-progress`.** It is not a story in this sprint. AC6
+  needs a representative GPU-less incumbent host, and none is available.
+- **The open LINEAR finding against `ocelli-pixel` stays unscheduled.**
+  It has no F-ID. Clamping a readback is a tolerance change.
 - **The SIGMOID file width stays on the product LUT.** File width 0.5 at
-  centre 40 is about 4.586 under PS3.3 C.11.2.1.3.1. The pinned renderer
-  presents recovered width 1.5, and the candidate passes that window into
-  the same function. The product formula is not changed to settle it.
-- **Tier B greyscale has been drawn.** F-042 ran the section 18.3 rows on
-  this host through headless Chromium WebGL2 and matched `LutChain::map_into`
-  within 0.001, format `R32Float`. A tier B colour LUT readback was not run.
+  centre 40 is about 4.586 under PS3.3 C.11.2.1.3.1. The product formula
+  is not changed to settle the pinned renderer's recovered width.
 - **The wasm size budget records 2,151,196 bytes** with tolerance 0.05.
-  The ceiling is 2,258,755. The S37 sprint gate measured 2,171,131 bytes
-  and passed that budget. The budget file was not edited. `--accept-size`
-  is a design-plan declaration, not a way to make a gate green.
-- **`max_review_passes` is stored but not automatically enforced by the
-  backing script.** The operator required the review loop to continue until
-  a pass reports zero defects and zero smells. The stored number is not a
-  stop. The per-feature microscope loop remains uncapped.
-- **No new measured duration.** The S37 tracker rows read `not measured`.
-  There is no measured total and no ratio. The capacity points remain the
-  S03 and S06 closes. This open does not invent a ratio and does not
+  The ceiling is 2,258,755. The S38 sprint gate measured 2,171,131 bytes
+  and passed. The budget file was not edited.
+- **`max_review_passes` is stored and is not a stop.** The review loop
+  continues until a pass reports zero defects and zero smells.
+- **No new measured duration.** There is no ratio. This open does not
   recalculate capacity.
-- **F-X011** remains pending because its evidence needs a second physical
-  machine. **ICC** is still unimplemented, the other half of HLD section 18's
-  stage-4 row. Lossless JPEG-LS RGB at 8 bits, three components and sample
-  interleave decodes. Line interleave, a non-zero NEAR and any other
-  component count stay refused.
+- **F-X011 remains pending.** ICC is still unimplemented. Colour stays
+  unmeasured under D-16.
 
 ## The defect class this sprint is exposed to
 
-**A release of one element that also disables the other, or a package
-import that turns the new API into a shim.** HLD section 12 keeps both
-libraries in the application. Decision D1 refuses a drop-in shim. Ocelli
-enables its own element and leaves the neighbour's listeners in place.
-dwv, Horos, and the medical viewer Grok must not be opened.
+**A flag that enables a later viewport kind while an earlier kind is off,
+or a shadow compare that writes a tolerance or renders a different image
+quietly.** Stack stays before MPR, and MPR stays before volume. A refused
+flag changes nothing. A shadow compare returns a count or nothing. It does
+not edit the corpus comparator. dwv, Horos, and the medical viewer Grok
+must not be opened.
 
 ## What done means
 
-- **F-106** attaches one Ocelli element and one neighbour. The same object
-  cannot be both. The neighbour keeps listeners Ocelli did not register.
-  Releasing disables only the Ocelli element. A failed Ocelli enable leaves
-  the neighbour untouched. The feature flag and shadow mode stay later
-  stories.
-- **The story declares all three tier rows.** An omitted row is not an
-  answer. A feature that cannot run on the resolved tier reports
-  unavailable.
+- **F-107** keeps three kind flags. They start off. MPR cannot turn on
+  while stack is off. Volume cannot turn on while MPR is off. Turning
+  stack off while MPR is on does nothing. An element is enabled only when
+  its kind flag is on. Turning that flag off disables the elements this
+  story enabled for that kind.
+- **F-109** counts bytes whose absolute difference is above a caller
+  limit. Different lengths return nothing. The buffers are not written.
+  The function does not render and does not import the other library.
+- **Each story declares all three tier rows.**
 
 ## Dependency order
 
-F-106 depends on F-105. That row is `done`. F-107 and F-109 depend on
-F-106 and are not in this sprint. F-X003 stays `in-progress` and is not
-a dependency.
+F-107 and F-109 both depend on F-106. That row is `done`. They share the
+delivery ledgers, so F-107 lands first and F-109 lands second. F-X003
+stays `in-progress` and is not a dependency.
 
 ## Standing expectations
 
@@ -124,19 +103,17 @@ The HLD is authoritative. A design-plan departure is recorded in
 `docs/hld/DEVIATIONS.md`, never improvised in implementation. **`wgpu` is
 pinned exactly and agents confidently emit APIs that have not existed for
 two years**, so every wgpu call is checked against the pinned version's own
-documentation rather than from memory. Treat GPU code that compiles first
-try with suspicion.
+documentation rather than from memory.
 
 No patient data enters a prompt, tracked file, fixture, log, error or
-commit. The ignored corpus remains behind `corpus/manifest.tsv` and its
-generators.
+commit. The ignored corpus remains behind `corpus/manifest.tsv`.
 
 A feature that cannot run on the resolved tier **reports unavailable**. It
-never quietly produces a different result, which is HLD section 31's rule
-generalised by D-07.
+never quietly produces a different result.
 
 ## Audit intake, 2026-11-03
 
-S37 closed at tag `s37`. The merge is `2dcdaff`. Closing S37 did not
-complete M12 and did not publish. The S38 allocation row and the S38 plan
-table name F-106. F-X003 stays in progress. F-X011 remains pending.
+S38 closed at tag `s38`. The merge is `3553c4d`. Closing S38 did not
+complete M12 and did not publish. The S39 allocation rows and the S39 plan
+table name F-107 and F-109. F-X003 stays in progress. F-X011 remains
+pending.
