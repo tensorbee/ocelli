@@ -202,6 +202,8 @@ const PUBLISHED: readonly string[] = [
   "startupArtifact",
   "summariseColdStart",
   "summariseFirstFrame",
+  // ./keys.js, F-115
+  "keyAction",
   // ./migrate.js, F-108
   "rewriteListenerNames",
   // ./cursor.js, F-072

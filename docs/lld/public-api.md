@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115
 **Last updated:** 2026-11-03
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -346,3 +346,13 @@ every phase is finite and at least 0. `summariseFirstFrame` returns the
 caller interval on that same rule. A dev profile returns null. The
 functions do not read the 2.3 ms baseline and do not close gate A4.
 Tiers A, B and C are not applicable.
+
+## Keyboard actions
+
+`keyAction` returns a pan name for `ArrowLeft`, `ArrowRight`, `ArrowUp`
+and `ArrowDown`. Shift changes `ArrowUp` to `scroll-previous` and
+`ArrowDown` to `scroll-next`. A shifted horizontal arrow stays a pan.
+`+` and `=` zoom in. `-` zooms out. Any other key returns null. The
+match is case-sensitive. The function does not listen and does not move
+a camera. Tiers A, B and C are not applicable. The key map is the
+approved local plan.

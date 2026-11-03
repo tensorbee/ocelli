@@ -4699,3 +4699,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/benchmarks.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
 **Deviations from the design plan.** none
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a16b-2bec-7850-a215-b220ac88bcca`. Replacing the render path made the render-name test fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.
+
+## F-115, keyboard actions, completed 2026-11-03
+
+**What was built.** `keyAction` returns a pan name for ArrowLeft, ArrowRight, ArrowUp and ArrowDown. Shift changes ArrowUp to scroll-previous and ArrowDown to scroll-next. A shifted horizontal arrow stays a pan. Plus and equals zoom in. Minus zooms out. Any other key returns null. The match is case-sensitive. The function does not listen and does not move a camera.
+
+**HLD sections implemented.** Section 26 batches pointer events and does not name a key map. The eight names are the approved local plan. They are not an HLD formula.
+**Deviations.** none
+**Crates / packages modified.** `packages/core`.
+**Tests added.** Six tests in `packages/core/src/keys.test.ts` and the published name in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** Tiers A, B and C are not applicable. The function does not render and returns the same name on every tier.
+**LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 1 nitpick. Reviewer `01a1a17c-2a37-7731-b6df-093a62c18120`. The type-export comment does not name KeyAction. Changing ArrowLeft to pan-right made the pan test fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.
