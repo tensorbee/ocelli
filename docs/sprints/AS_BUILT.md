@@ -4459,3 +4459,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Pass 1 reported 1 defect and 1 smell. Reviewer `01a19e85-9c0a-7c41-b1a0-cfde5c7ec570`. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19e95-a66a-76b2-9be6-2c785bc3d7ad`. `sr.ts` sha256 at the clean pass is `0557fb71fc8795422fcfb2002c7eb93ffcc97d3a14e38493a7cac9283e2f1da8`. A point width of 3 made the `(1, 2)` point return null and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+
+## F-095, annotation state, completed 2026-11-02
+
+**What was built.** `createAnnotationState`, `putAnnotation`, `annotationsForFrame`, `undoAnnotation` and `redoAnnotation` in `packages/core`. A record holds an id, a frame-of-reference UID and a content tree that has already passed `contentTree`. A blank id, a blank UID, or a refused tree returns nothing and does not write the previous state. Records for one UID come back in insertion order. Undo moves one successful put back. The first state has no undo. Redo restores that put. A new put drops the redo states. The module does not measure.
+
+**HLD sections implemented.** HLD section 35 names the shared frame of reference. The section does not define an undo stack. The record list and the one-step history are the approved local plan.
+**Deviations.** none.
+**Crates / packages modified.** `packages/core`, `docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
+**Tests added.** Five tests in `packages/core/src/annotation-state.test.ts`. The published-name list includes the five state values.
+**Fixture provenance.** Hand-computed from `.claude/plans/F-095-design.md`. No DICOM section. No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** A, B and C are n/a. The functions do not open a device.
+**LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
+**Deviations from the design plan.** none.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ea9-1ce9-7a72-86aa-8dcaed5b0bce`. `annotation-state.ts` sha256 at the clean pass is `6c7f9f15858248c1043f84fe95718ed22773b41ce81198183dd12ad0d7e8438c`. A blank-id length of 2 refused a one-character id and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.

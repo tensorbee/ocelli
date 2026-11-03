@@ -219,6 +219,14 @@ export { eraseNearest, mipIndex, sculptVertex } from "./sculpt.js";
 export { contentTree, provenanceItems } from "./sr.js";
 
 export {
+  annotationsForFrame,
+  createAnnotationState,
+  putAnnotation,
+  redoAnnotation,
+  undoAnnotation,
+} from "./annotation-state.js";
+
+export {
   COMMAND_CURSORS,
   CURSOR_PHASES,
   createCursorController,
