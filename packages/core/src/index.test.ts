@@ -206,6 +206,9 @@ const PUBLISHED: readonly string[] = [
   "keyAction",
   // ./playbook.js, F-116
   "nextMigrationKind",
+  // ./release.js, F-117
+  "mayClaimStable",
+  "removalMinorsRemaining",
   // ./migrate.js, F-108
   "rewriteListenerNames",
   // ./cursor.js, F-072

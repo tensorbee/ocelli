@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The shell refuses a stable claim while D-22 is open or any matrix row is uncertified. A 0.x channel and a patch have no removal window. A minor keeps a deprecated name for one further minor. A major may remove a name. The workspace version stays 0.1.0. Nothing is published.
 - The shell names the next migration kind only when the done list is a prefix of stack, then MPR, then volume. A skip returns nothing. The function does not flip a flag and does not claim that 1.0.0 is published.
 - The shell names a keyboard action for the arrow keys, plus, equals and minus. Shift changes only the vertical arrows into slice scroll. Any other key returns nothing. The function does not listen.
 - The shell names the render or decode wasm path. A release cold-start sum adds five finite phases. A release first-frame interval is returned unchanged. A dev profile returns nothing. The 2.3 ms baseline stays.

@@ -265,6 +265,9 @@ export type { KeyAction } from "./keys.js";
 
 export { nextMigrationKind } from "./playbook.js";
 
+export { mayClaimStable, removalMinorsRemaining } from "./release.js";
+export type { StableClaim } from "./release.js";
+
 export { rewriteListenerNames } from "./migrate.js";
 
 export {
