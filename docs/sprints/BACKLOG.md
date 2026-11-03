@@ -311,14 +311,14 @@ Binary size and cold start inside budget, the browser matrix certified, semver a
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
 | F-110 | E18.1 | S40 | Binary size budget: Naga trimming, wasm-opt, split builds | Build | 4w | F-042 | done |
-| F-111 | E18.2 | S41 | Cold-start and first-frame optimisation | Build | 3w | F-110 | pending |
+| F-111 | E18.2 | S41 | Cold-start and first-frame optimisation | Build | 3w | F-110 | done |
 | F-112 | E18.3 | S40 | Worker pool tuning and the threading escalation decision | Build | 4w | F-035 | done |
 | F-113 | E18.4 | S40 | Memory profiling under 4D and large-volume load | Build | 3w | F-034 | done |
 | F-114 | E19.1 | S40 | Browser matrix validation and WebGL2 tier certification | All | 4w | F-042 | done |
-| F-115 | E19.2 | S41 | Accessibility and keyboard interaction parity | All | 3w | F-072 | pending |
-| F-116 | E19.3 | S41 | Documentation, examples and the migration playbook | All | 4w | F-108 | pending |
-| F-117 | E19.4 | S41 | Release engineering: semver, changelog, deprecation policy | All | 2w | F-100 | pending |
-| F-118 | E19.5 | S41 | Provenance recording for agent-generated code | All | 3w | F-001 | pending |
+| F-115 | E19.2 | S41 | Accessibility and keyboard interaction parity | All | 3w | F-072 | done |
+| F-116 | E19.3 | S41 | Documentation, examples and the migration playbook | All | 4w | F-108 | done |
+| F-117 | E19.4 | S41 | Release engineering: semver, changelog, deprecation policy | All | 2w | F-100 | done |
+| F-118 | E19.5 | S41 | Provenance recording for agent-generated code | All | 3w | F-001 | done |
 
 ### M14, Out-of-core volume streaming
 

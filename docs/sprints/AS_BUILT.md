@@ -4683,3 +4683,83 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Changing the SwiftShader plus expected tier B result from null to certified made that test return certified. Dropping the SwiftShader requirement from tier C certified a llvmpipe row. Both comparisons were restored. Pass 1 reported 2 defects. Reviewer `01a1a110-8ef6-7982-9345-fbf949606068`. Deleting the resolved-tier comparison left the first eight tests green. An expected tier B row whose resolved tier is C stays observed when the renderer does not contain SwiftShader. An expected tier C row whose resolved tier is B stays observed, including when the renderer contains SwiftShader. Pass 2 reported 1 defect. Reviewer `01a1a11e-fbc0-70a3-aa5b-7f88dc612f7d`. Narrowing the SwiftShader null arm to equal tiers left that suite green. SwiftShader with expected tier B stays null when the resolved tier differs. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.
+
+## F-111, cold start and first frame, completed 2026-11-03
+
+**What was built.** `startupArtifact` returns `pkg/ocelli_wasm_bg.wasm` for render and `pkg-decode/ocelli_wasm_bg.wasm` for decode. Any other role returns null. `summariseColdStart` adds the five phases only when the profile is release and every phase is finite and at least 0. `summariseFirstFrame` returns that interval only on the same rule. The functions do not read the 2.3 ms baseline and do not close gate A4.
+
+**HLD sections implemented.** Section 26 says measure with the benchmark harness before optimising. The path names and the release-only rule are the approved local plan. They are not an HLD formula.
+**Deviations.** none
+**Crates / packages modified.** `packages/core`.
+**Tests added.** Fourteen tests in `packages/core/src/startup.test.ts` and the published names in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** Tiers A, B and C are not applicable. The functions do not render and do not return a different number on a different tier.
+**LLD updated.** `docs/lld/benchmarks.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a16b-2bec-7850-a215-b220ac88bcca`. Replacing the render path made the render-name test fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.
+
+## F-115, keyboard actions, completed 2026-11-03
+
+**What was built.** `keyAction` returns a pan name for ArrowLeft, ArrowRight, ArrowUp and ArrowDown. Shift changes ArrowUp to scroll-previous and ArrowDown to scroll-next. A shifted horizontal arrow stays a pan. Plus and equals zoom in. Minus zooms out. Any other key returns null. The match is case-sensitive. The function does not listen and does not move a camera.
+
+**HLD sections implemented.** Section 26 batches pointer events and does not name a key map. The eight names are the approved local plan. They are not an HLD formula.
+**Deviations.** none
+**Crates / packages modified.** `packages/core`.
+**Tests added.** Six tests in `packages/core/src/keys.test.ts` and the published name in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** Tiers A, B and C are not applicable. The function does not render and returns the same name on every tier.
+**LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 1 nitpick. Reviewer `01a1a17c-2a37-7731-b6df-093a62c18120`. The type-export comment does not name KeyAction. Changing ArrowLeft to pan-right made the pan test fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.
+
+## F-116, migration order, completed 2026-11-03
+
+**What was built.** `nextMigrationKind` returns stack, then mpr, then volume, and only when the done list is a prefix of that order. An empty list returns stack. The finished list returns null. A skip, a duplicate or an unknown name returns null. The function does not rewrite the list and does not flip a flag. The playbook states the same order and does not claim that 1.0.0 is published.
+
+**HLD sections implemented.** Section 12 names stack, then MPR, then 3D. The prefix rule is the approved local plan. It is not an HLD formula.
+**Deviations.** none
+**Crates / packages modified.** `packages/core`.
+**Tests added.** Four tests in `packages/core/src/playbook.test.ts` and the published name in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** Tiers A, B and C are not applicable. The function does not render and returns the same kind on every tier.
+**LLD updated.** `docs/lld/playbook.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a18b-566b-7e63-9154-380d74232b59`. Starting the order at mpr made three tests fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.
+
+## F-117, stable claim, completed 2026-11-03
+
+**What was built.** `mayClaimStable` returns true only when D-22 is closed, the matrix row count is an integer of at least 1, and the certified count is that same integer. Every other input returns false. `removalMinorsRemaining` returns null for 0.x and for patch, 1 for minor, and 0 for major. Any other channel returns null. The functions do not publish and do not change the workspace version. The workspace version stays 0.1.0.
+
+**HLD sections implemented.** `docs/RELEASE.md` says 1.0.0 waits on this story. The full-matrix rule and the deprecation window are the approved local plan. They are not an HLD formula.
+**Deviations.** none
+**Crates / packages modified.** `packages/core`.
+**Tests added.** Nine tests in `packages/core/src/release.test.ts` and the published names in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** Tiers A, B and C are not applicable. The functions do not render and return the same answer on every tier.
+**LLD updated.** `docs/lld/release-policy.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 1 nitpick. Reviewer `01a1a19b-e469-7a32-9e2f-677f8395f9f2`. The type-export comment does not name StableClaim. Changing the minor window from 1 to 2 made the channel test fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.
+
+## F-118, provenance class, completed 2026-11-03
+
+**What was built.** `classifyProvenance` returns recorded when a message has one verify line and one generated-by line and the verify line contains profile, gates, corpus and tree. It returns missing when neither trailer is present and there is no agent co-author line. It returns forged for an agent co-author line, one trailer alone, a repeated trailer, or a verify line missing one of those fields. A field may follow the colon directly. A longer token such as notprofile does not count. The function does not write a trailer. Recorded does not prove the named tree matches a commit. Missing is not success.
+
+**HLD sections implemented.** Section 27.2 R6 asks for a provenance trailer on every commit. The three words are the approved local plan. They are not an HLD formula.
+**Deviations.** none
+**Crates / packages modified.** `packages/core`.
+**Tests added.** Seven tests in `packages/core/src/provenance.test.ts` and the published name in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** Tiers A, B and C are not applicable. The function does not render and returns the same word on every tier.
+**LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Reviewer `01a1a1ad-4759-7051-9d73-63172272a1e2`. A verify field glued to the colon was forged. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a1ba-79c5-78b3-90e7-67b075efbd03`. Treating a colon as a blocking character made the glued assertion fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.

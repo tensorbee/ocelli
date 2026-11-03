@@ -253,6 +253,23 @@ export type { DecodePool, WorkerHandle } from "./pool.js";
 export { certifyRow } from "./matrix.js";
 export type { MatrixInput, MatrixObservation, MatrixStatus, MatrixTier } from "./matrix.js";
 
+export {
+  startupArtifact,
+  summariseColdStart,
+  summariseFirstFrame,
+} from "./startup.js";
+export type { ColdPhases, StartupRole } from "./startup.js";
+
+export { keyAction } from "./keys.js";
+export type { KeyAction } from "./keys.js";
+
+export { nextMigrationKind } from "./playbook.js";
+
+export { mayClaimStable, removalMinorsRemaining } from "./release.js";
+export type { StableClaim } from "./release.js";
+
+export { classifyProvenance } from "./provenance.js";
+
 export { rewriteListenerNames } from "./migrate.js";
 
 export {

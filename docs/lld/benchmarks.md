@@ -1,7 +1,7 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111
+**Last updated:** 2026-11-03
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -171,6 +171,13 @@ The F-039 release module that this measurement names exported six functions
 and contains Naga. The current release module exports twenty-four functions.
 **A4 stays open.** The 2.3 ms figure remains the F-006 regression baseline
 until a later story measures cold start on this module.
+
+F-111 is not that measurement. `startupArtifact` names
+`pkg/ocelli_wasm_bg.wasm` for a render load and
+`pkg-decode/ocelli_wasm_bg.wasm` for a decode load. `summariseColdStart`
+adds the five phases only when the profile is `release`.
+`summariseFirstFrame` returns the caller interval only for that same
+profile. Neither function reads this baseline. Gate A4 stays open.
 
 ### How it is taken
 

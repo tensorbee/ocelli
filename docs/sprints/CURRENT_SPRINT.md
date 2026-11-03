@@ -1,16 +1,17 @@
-# Current sprint, S40
+# Current sprint, S41
 
 **Milestone**: M13, performance, hardening and release.
-**Branch**: `sprint/s40`
+**Branch**: `sprint/s41`
 **Opened**: 2026-11-03
-**Goal**: Binary size budget: Naga trimming, wasm-opt, split builds, Worker pool tuning and the threading escalation decision, Memory profiling under 4D and large-volume load, Browser matrix validation and WebGL2 tier certification.
+**Goal**: Cold-start and first-frame optimisation, Accessibility and keyboard interaction parity, Documentation, examples and the migration playbook, Release engineering: semver, changelog, deprecation policy, Provenance recording for agent-generated code.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-110 | E18.1 | Binary size budget: Naga trimming, wasm-opt, split builds | Build | 4w | done |
-| F-112 | E18.3 | Worker pool tuning and the threading escalation decision | Build | 4w | done |
-| F-113 | E18.4 | Memory profiling under 4D and large-volume load | Build | 3w | done |
-| F-114 | E19.1 | Browser matrix validation and WebGL2 tier certification | All | 4w | done |
+| F-111 | E18.2 | Cold-start and first-frame optimisation | Build | 3w | done |
+| F-115 | E19.2 | Accessibility and keyboard interaction parity | All | 3w | done |
+| F-116 | E19.3 | Documentation, examples and the migration playbook | All | 4w | done |
+| F-117 | E19.4 | Release engineering: semver, changelog, deprecation policy | All | 2w | done |
+| F-118 | E19.5 | Provenance recording for agent-generated code | All | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
@@ -20,41 +21,42 @@ second command:
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
 grep -c '^| F-[0-9X]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S40 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S41 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S39 closed at tag `s39`. The merge is `f115491`. Closing S39 completed M12
-and did not publish. The workspace version stays 0.1.0.
+S40 closed at tag `s40`. The merge is `ce27223`. Closing S40 did not
+complete M13 and did not publish. The workspace version stays 0.1.0.
 
-This sprint starts M13. HLD section 15.2 sets the release profile that the
-size budget measures. HLD section 9 starts one wasm instance per decode
-worker and keeps shared-memory threading off unless a measurement demands
-it. HLD section 8 gives one budget and three tiers. HLD section 7 names
-tier B as WebGL2, and spike A7 widens the browser matrix so a software
-rasteriser is certified as tier C rather than as tier B.
+This sprint finishes the planned M13 range. HLD section 23 says measure
+before optimising, and the cold-start subject is release-profile only.
+HLD section 27.2 R6 wants a provenance trailer on every commit, written
+from a ledger rather than by hand. `docs/RELEASE.md` says 1.0.0 is gated
+on M13 and that F-117 sets the semver, changelog and deprecation policy.
+This sprint does not publish.
 
-Closing this sprint does not complete M13 and does not publish. M13 is S40
-to S41.
+Closing this sprint completes M13 and the planned Phase 1 range. It does
+not publish. Phase 1.5 starts at S42 and this close does not open it.
 
 ## What is carried in
 
+- **S40 is closed at tag `s40`, and that close did not complete M13 and
+  did not publish.** The merge is `ce27223`. The tag object is `730fdcac`
+  and peels to that merge. The sprint tip is `1a747da`, tree
+  `8234db09422f`. F-110 is `a305453`. F-112 is `b7a9992`. F-113 is
+  `39fd74d`. F-114 is `05c7691`. The open is `5164eba`. The design is
+  `e17e73e`. No row in that close has a measured duration. No ratio is
+  invented. The comparison report is unchanged. The S40 sprint gate
+  measured the render wasm module at 2,171,133 bytes and the decode wasm
+  module at 16,455 bytes. The render budget file was not edited.
 - **S39 is closed at tag `s39`, and that close completed M12 and did not
-  publish.** The merge is `f115491`. The tag object is `ebd7a4de` and peels
-  to that merge. The sprint tip is `dbc4c9c`, tree `5e41feb08a96`. F-107 is
-  `bf8981a`. F-109 is `238329c`. The open is `0d73b9a`. The design is
-  `c446a84`. No row in that close has a measured duration. No ratio is
-  invented. The comparison report is unchanged. The S39 sprint gate
-  measured wasm at 2,171,131 bytes.
-- **S38 is closed at tag `s38`, and that close did not complete M12 and
-  did not publish.** The merge is `3553c4d`. The tag object is `6b2121ef`
-  and peels to that merge.
-- **M12 is complete at tag `s39`, and that close did not publish.** M12 is
-  S37 to S39.
+  publish.** The merge is `f115491`.
+- **M13 is S40 to S41.** This open does not complete it.
 - **M8 through M12 were not published.** The workspace version is still
   0.1.0. D-22 blocks publication because `openjph-core` 0.1.0 carries no
-  BSD notice material. That does not block this sprint.
+  BSD notice material. That does not block this sprint, and it still
+  blocks publication.
 - **F-X003 stays `in-progress`.** It is not a story in this sprint. AC6
   needs a representative GPU-less incumbent host, and none is available.
 - **The open LINEAR finding against `ocelli-pixel` stays unscheduled.**
@@ -63,8 +65,11 @@ to S41.
   centre 40 is about 4.586 under PS3.3 C.11.2.1.3.1. The product formula
   is not changed to settle the pinned renderer's recovered width.
 - **The wasm size budget records 2,151,196 bytes** with tolerance 0.05.
-  The ceiling is 2,258,755. The S39 sprint gate measured 2,171,131 bytes
+  The ceiling is 2,258,755. The S40 sprint gate measured 2,171,133 bytes
   and passed. The budget file was not edited by that close.
+- **`wasm.cold_start` stays the F-006 figure of 2.3 ms** until a later
+  story measures the current release module and records its own
+  calibration. That figure is not an answer to gate A4.
 - **`max_review_passes` is stored and is not a stop.** The review loop
   continues until a pass reports zero defects and zero smells.
 - **No new measured duration.** There is no ratio. This open does not
@@ -74,38 +79,45 @@ to S41.
 
 ## The defect class this sprint is exposed to
 
-**A decode module that still links Naga while the record says the build is
-split, a size move that is not declared, a worker pool that enables
-shared-memory threading without a measurement, a memory profile that
-reports bytes it did not compute, or a browser row marked certified when
-that browser was not run.** wasm-opt stays on. Stack, MPR and volume flag
-order from S39 stays. A shadow count still does not edit the corpus
-comparator. dwv, Horos, and the medical viewer Grok must not be opened.
+**A cold-start figure copied from the F-006 baseline and reported as the
+current module, a first-frame time that includes setup and calls it
+decode, a keyboard path that claims a key the plan did not name, a
+playbook sentence that states a formula the HLD does not, a policy change
+that publishes or creates a `v` tag, or a provenance trailer typed into
+the commit message by hand.** wasm-opt stays on. The render size budget
+is not edited to hide a move. Stack, MPR and volume flag order from S39
+stays. A shadow count still does not edit the corpus comparator. dwv,
+Horos, and the medical viewer Grok must not be opened.
 
 ## What done means
 
-- **F-110** keeps wasm-opt on for the render module. The decode build of
-  the same crate does not link `wgpu` or Naga. Native backends stay on the
-  native build. A size move outside the recorded tolerance is declared
-  with a cause. The budget file is not edited to hide a move.
-- **F-112** opens N decode workers only through a caller count. Each call
-  constructs one worker. SharedArrayBuffer stays unused. The escalation
-  decision stays on stable Rust because this sprint has no measurement
-  that demands nightly threads.
-- **F-113** reports encoded, decoded and GPU bytes for a synthetic load
-  from dimensions, frame count and bytes per sample. Encoded bytes are
-  zero after decode. The report does not allocate the volume and does not
-  read patient bytes.
-- **F-114** certifies a tier only for a browser session that ran. Tier B
-  and tier C are separate rows. A browser that did not run stays not run.
+- **F-111** names the render or decode wasm path and sums a release
+  cold start from five finite phases. A dev profile returns nothing.
+  The function does not read the 2.3 ms baseline and does not replace
+  it. Gate A4 stays open. The story does not edit the size budget.
+- **F-115** names a keyboard action for the arrow keys, plus, equals and
+  minus. Shift changes only the vertical arrows. The function does not
+  listen and does not move a camera. The story does not certify a
+  browser row.
+- **F-116** names the next migration kind only for a prefix of stack,
+  then mpr, then volume. It does not flip a flag and it does not claim
+  that 1.0.0 is published. It does not state a formula the HLD does not
+  contain.
+- **F-117** writes the semver, changelog and deprecation policy. It does
+  not publish, does not create a `v` tag, and does not run `/release`.
+  D-22 still blocks publication. F-X003 stays in progress.
+- **F-118** classifies one commit message. The commit-msg hook stays
+  the only writer of the trailer. A hand-written trailer is not a
+  record. There is no agent co-author trailer.
 - **Each story declares all three tier rows.**
 
 ## Dependency order
 
-F-110 and F-114 depend on F-042. F-112 depends on F-035. F-113 depends on
-F-034. Those three rows are `done`. The four stories share the delivery
-ledgers, so they land one at a time. F-110 lands first because it changes
-the wasm graph. F-112, F-113 and F-114 follow. F-X003 stays `in-progress`
+F-111 depends on F-110. F-115 depends on F-072. F-116 depends on F-108.
+F-117 depends on F-100. F-118 depends on F-001. Those five rows are
+`done`. The five stories share the delivery ledgers, so they land one at
+a time. F-111 lands first because it chooses the artefact from the
+split F-110 built. F-115, F-116, F-117 and F-118 follow. F-X003 stays `in-progress`
 and is not a dependency.
 
 ## Standing expectations
@@ -124,7 +136,7 @@ never quietly produces a different result.
 
 ## Audit intake, 2026-11-03
 
-S39 closed at tag `s39`. The merge is `f115491`. Closing S39 completed M12
-and did not publish. The S40 allocation rows and the S40 plan table name
-F-110, F-112, F-113 and F-114. F-X003 stays in progress. F-X011 remains
-pending.
+S40 closed at tag `s40`. The merge is `ce27223`. Closing S40 did not
+complete M13 and did not publish. The S41 allocation rows and the S41
+plan table name F-111, F-115, F-116, F-117 and F-118. F-X003 stays in
+progress. F-X011 remains pending.

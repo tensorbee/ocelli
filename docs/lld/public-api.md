@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-105, F-108, F-106, F-107, F-109, F-112, F-114
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118
 **Last updated:** 2026-11-03
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -335,3 +335,59 @@ resolved tier is C and the string does contain `SwiftShader`. A
 finished run is `observed`. Tier A is observed and is not certified.
 The committed matrix has no observation, so every named row is
 `not-run`. The function does not launch a browser.
+
+## Cold start
+
+`startupArtifact` returns `pkg/ocelli_wasm_bg.wasm` for `render` and
+`pkg-decode/ocelli_wasm_bg.wasm` for `decode`. Any other role returns
+null. `summariseColdStart` adds `glue`, `fetch`, `compile`,
+`instantiate` and `firstCall` only when the profile is `release` and
+every phase is finite and at least 0. `summariseFirstFrame` returns the
+caller interval on that same rule. A dev profile returns null. The
+functions do not read the 2.3 ms baseline and do not close gate A4.
+Tiers A, B and C are not applicable.
+
+## Keyboard actions
+
+`keyAction` returns a pan name for `ArrowLeft`, `ArrowRight`, `ArrowUp`
+and `ArrowDown`. Shift changes `ArrowUp` to `scroll-previous` and
+`ArrowDown` to `scroll-next`. A shifted horizontal arrow stays a pan.
+`+` and `=` zoom in. `-` zooms out. Any other key returns null. The
+match is case-sensitive. The function does not listen and does not move
+a camera. Tiers A, B and C are not applicable. The key map is the
+approved local plan.
+
+## Migration order
+
+`nextMigrationKind` returns `stack`, then `mpr`, then `volume`, and only
+when the done list is a prefix of that order. An empty list returns
+`stack`. The finished list returns null. A skip, a duplicate or an
+unknown name returns null. The function does not rewrite the list and
+does not flip a flag. Tiers A, B and C are not applicable. The page is
+`docs/lld/playbook.md`.
+
+## Stable claim
+
+`mayClaimStable` returns true only when D-22 is closed, the matrix row
+count is an integer of at least 1, and the certified count is that same
+integer. Every other input returns false. `removalMinorsRemaining`
+returns null for `0.x` and for `patch`, 1 for `minor`, and 0 for
+`major`. Any other channel returns null. The functions do not publish
+and do not change the workspace version. Tiers A, B and C are not
+applicable. The page is `docs/lld/release-policy.md`.
+
+## Provenance class
+
+`classifyProvenance` returns `recorded` when the message has one
+`Ocelli-Verify` line and one `Ocelli-Generated-By` line, and that verify
+line has the fields `profile`, `gates`, `corpus` and `tree`. It returns
+`missing` when neither trailer line is present and there is no agent
+co-author line. It returns `forged` when an agent co-author line is
+present, when only one trailer line is present, when a trailer line is
+duplicated, or when the verify line lacks one of those four fields. The
+agent tokens are Claude, Codex, GPT and Copilot, matched without regard
+to case, after `Co-Authored-By:`. A `Co-Authored-By` line that names
+none of those tokens does not by itself forge the message. The function
+does not write a trailer. `recorded` does not prove the named tree
+matches a commit. `missing` is not success. Comparison fields are not
+required. Tiers A, B and C are not applicable.
