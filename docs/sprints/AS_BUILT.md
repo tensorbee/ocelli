@@ -4474,7 +4474,7 @@ this branch had not touched since the base.
 **Tier coverage.** A, B and C are n/a. The functions do not open a device.
 **LLD updated.** `docs/lld/public-api.md` and its row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
-**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ea9-1ce9-7a72-86aa-8dcaed5b0bce`. `annotation-state.ts` sha256 at the clean pass is `6c7f9f15858248c1043f84fe95718ed22773b41ce81198183dd12ad0d7e8438c`. A blank-id length of 2 refused a one-character id and was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a19ea9-1ce9-7a72-86aa-8dcaed5b0bce`. `annotation-state.ts` sha256 at the clean pass is `6c7f9f15858248c1043f84fe95718ed22773b41ce81198183dd12ad0d7e8438c`. A blank-id length of 2 stored the empty id. The one-character ids still passed. The bytes were restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence.
 
 ## F-098, SEG frame round trip, completed 2026-11-02
 
