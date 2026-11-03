@@ -32,7 +32,8 @@ import { coreAvailable, VERSION } from "./index.js";
  * `ToolStateEvent`, `AnnotationLayer`, `AnnotationLayerEvent`,
  * `AnnotationMark`, `AnnotationPoint`, `AnnotationRefusal`,
  * `AnnotationSyncResult`, `TidSource`, `ElementSeam`, `SeamEvent`, `SideBySide`,
- * `ViewportKind`, `DecodePool`, `WorkerHandle`) are erased
+ * `ViewportKind`, `DecodePool`, `WorkerHandle`, `MatrixInput`,
+ * `MatrixObservation`, `MatrixStatus`, `MatrixTier`) are erased
  * before this runs, and `npx tsc` is what watches those.
  *
  * Adding an export is a deliberate act, so adding a line here is the cost of
@@ -195,6 +196,8 @@ const PUBLISHED: readonly string[] = [
   "MAX_DECODE_WORKERS",
   "openDecodePool",
   "threadingEscalation",
+  // ./matrix.js, F-114
+  "certifyRow",
   // ./migrate.js, F-108
   "rewriteListenerNames",
   // ./cursor.js, F-072

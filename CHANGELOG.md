@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The shell certifies a browser row only from an observation. A missing run stays not-run. SwiftShader with expected tier B returns nothing. Tier C is certified only when that renderer string is present.
 - The cache reports decoded bytes from the dimensions of one synthetic load. Encoded used is 0. A tier C load with a non-zero GPU figure returns nothing.
 - The shell opens one to eight decode workers for one owner. A bad count returns nothing. The threading decision stays stable Rust.
 - A second wasm build links no wgpu. `bin/ocelli.sh wasm-decode` writes it. The render size budget is unchanged.

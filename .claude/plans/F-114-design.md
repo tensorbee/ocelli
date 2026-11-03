@@ -105,7 +105,10 @@ One function. The JSON file is data the test loads. Firefox, Safari
 and the locked estate are present as `not-run` with no observation.
 The Chromium rows are `not-run` in this commit unless a probe on this
 machine writes an observation that `certifyRow` accepts. A probe that
-does not finish does not upgrade the row.
+does not finish does not upgrade the row. The SwiftShader row expects
+tier C. The other four named rows expect tier B. That assignment is a
+local decision. Section 7 does not name the rows. No row in this
+commit carries an observation, so none is certified.
 
 The existing `tools/tier-b/run.mjs` and `tools/swiftshader/run.mjs`
 stay the probes. This story does not change their pixel comparison.
@@ -151,6 +154,10 @@ None.
 ## Deviations
 
 None. D-07 is already recorded. This plan cites it and does not extend it.
+
+## LLD impact
+
+`docs/lld/public-api.md` and the public-api row in `docs/lld/README.md`.
 
 ## Open questions
 

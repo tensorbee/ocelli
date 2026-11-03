@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-105, F-108, F-106, F-107, F-109, F-112
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-105, F-108, F-106, F-107, F-109, F-112, F-114
 **Last updated:** 2026-11-03
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -322,3 +322,16 @@ returns null and does not call the starter. `threadingEscalation` returns
 `stable`. `sharedMemory` is false. The product file does not name a
 shared-memory buffer. The render worker is not started here. Tiers A, B
 and C are not applicable.
+
+## Browser matrix
+
+`certifyRow` recomputes one matrix row. A caller-supplied status is
+ignored. A missing observation is `not-run`. A row is `certified` only
+when the exit code is 0, the resolved tier equals the expected tier, and
+the renderer string is non-empty. Tier B is certified only when that
+string does not contain `SwiftShader`. Tier C is certified only when the
+resolved tier is C and the string does contain `SwiftShader`. A
+`SwiftShader` string with expected tier B returns null. Any other
+finished run is `observed`. Tier A is observed and is not certified.
+The committed matrix has no observation, so every named row is
+`not-run`. The function does not launch a browser.
