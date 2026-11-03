@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The shell classifies one commit message as recorded, missing or forged. Both trailer lines and the four verify fields are recorded. A message with neither trailer is missing, and missing is not success. An agent co-author line, one trailer alone, a repeated trailer, or a verify line missing one field is forged. The function does not write a trailer.
 - The shell refuses a stable claim while D-22 is open or any matrix row is uncertified. A 0.x channel and a patch have no removal window. A minor keeps a deprecated name for one further minor. A major may remove a name. The workspace version stays 0.1.0. Nothing is published.
 - The shell names the next migration kind only when the done list is a prefix of stack, then MPR, then volume. A skip returns nothing. The function does not flip a flag and does not claim that 1.0.0 is published.
 - The shell names a keyboard action for the arrow keys, plus, equals and minus. Shift changes only the vertical arrows into slice scroll. Any other key returns nothing. The function does not listen.

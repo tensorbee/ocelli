@@ -4747,3 +4747,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/release-policy.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
 **Deviations from the design plan.** none
 **Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 1 nitpick. Reviewer `01a1a19b-e469-7a32-9e2f-677f8395f9f2`. The type-export comment does not name StableClaim. Changing the minor window from 1 to 2 made the channel test fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.
+
+## F-118, provenance class, completed 2026-11-03
+
+**What was built.** `classifyProvenance` returns recorded when a message has one verify line and one generated-by line and the verify line contains profile, gates, corpus and tree. It returns missing when neither trailer is present and there is no agent co-author line. It returns forged for an agent co-author line, one trailer alone, a repeated trailer, or a verify line missing one of those fields. A field may follow the colon directly. A longer token such as notprofile does not count. The function does not write a trailer. Recorded does not prove the named tree matches a commit. Missing is not success.
+
+**HLD sections implemented.** Section 27.2 R6 asks for a provenance trailer on every commit. The three words are the approved local plan. They are not an HLD formula.
+**Deviations.** none
+**Crates / packages modified.** `packages/core`.
+**Tests added.** Seven tests in `packages/core/src/provenance.test.ts` and the published name in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** Tiers A, B and C are not applicable. The function does not render and returns the same word on every tier.
+**LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Reviewer `01a1a1ad-4759-7051-9d73-63172272a1e2`. A verify field glued to the colon was forged. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a1ba-79c5-78b3-90e7-67b075efbd03`. Treating a colon as a blocking character made the glued assertion fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.

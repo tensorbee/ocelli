@@ -209,6 +209,8 @@ const PUBLISHED: readonly string[] = [
   // ./release.js, F-117
   "mayClaimStable",
   "removalMinorsRemaining",
+  // ./provenance.js, F-118
+  "classifyProvenance",
   // ./migrate.js, F-108
   "rewriteListenerNames",
   // ./cursor.js, F-072

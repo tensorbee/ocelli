@@ -11,7 +11,7 @@
 | F-115 | E19.2 | Accessibility and keyboard interaction parity | All | 3w | done |
 | F-116 | E19.3 | Documentation, examples and the migration playbook | All | 4w | done |
 | F-117 | E19.4 | Release engineering: semver, changelog, deprecation policy | All | 2w | done |
-| F-118 | E19.5 | Provenance recording for agent-generated code | All | 3w | pending |
+| F-118 | E19.5 | Provenance recording for agent-generated code | All | 3w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority. Read the two together.
