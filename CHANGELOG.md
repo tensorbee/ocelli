@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The shell rewrites a listener string literal when the event map has an Ocelli name. An unmapped name stays. `cornerstone.enable` stays.
 - The shell enables on one DOM element and dispatches a named event on it. A second enable returns nothing. An unknown name returns nothing.
 - The shell writes and reads a TID 1500 measurement report through dcmjs. One NUM per root round-trips. A refused tree returns nothing. Another template returns nothing.
 - The shell persists a content tree as a JSON document. One bad node returns nothing. A count of 4000 content items returns nothing. The bulk binary layout is not defined.

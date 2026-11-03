@@ -219,7 +219,9 @@ describe("F-103 event catalogue", () => {
           continue;
         }
         const text = readFileSync(join(dir, name), "utf8");
-        if (text.includes("addEventListener")) {
+        // A call registers a listener. migrate.ts names the same word
+        // inside a rewrite pattern and does not call it.
+        if (/addEventListener\s*\(/.test(text)) {
           listeners.push(name);
         }
         if (text.includes(marker)) {

@@ -181,6 +181,8 @@ const PUBLISHED: readonly string[] = [
   "disableElement",
   "dispatchOnElement",
   "enableElement",
+  // ./migrate.js, F-108
+  "rewriteListenerNames",
   // ./cursor.js, F-072
   "COMMAND_CURSORS",
   "CURSOR_PHASES",

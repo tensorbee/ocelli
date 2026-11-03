@@ -234,6 +234,8 @@ export type { TidSource } from "./tid1500.js";
 export { disableElement, dispatchOnElement, enableElement } from "./seam.js";
 export type { ElementSeam, SeamEvent } from "./seam.js";
 
+export { rewriteListenerNames } from "./migrate.js";
+
 export {
   COMMAND_CURSORS,
   CURSOR_PHASES,
