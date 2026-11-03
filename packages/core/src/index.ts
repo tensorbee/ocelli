@@ -234,6 +234,9 @@ export type { TidSource } from "./tid1500.js";
 export { disableElement, dispatchOnElement, enableElement } from "./seam.js";
 export type { ElementSeam, SeamEvent } from "./seam.js";
 
+export { attachSideBySide } from "./alongside.js";
+export type { SideBySide } from "./alongside.js";
+
 export { rewriteListenerNames } from "./migrate.js";
 
 export {
