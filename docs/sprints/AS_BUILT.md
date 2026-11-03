@@ -4683,3 +4683,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
 **Deviations from the design plan.** none.
 **Notes for future sessions.** Changing the SwiftShader plus expected tier B result from null to certified made that test return certified. Dropping the SwiftShader requirement from tier C certified a llvmpipe row. Both comparisons were restored. Pass 1 reported 2 defects. Reviewer `01a1a110-8ef6-7982-9345-fbf949606068`. Deleting the resolved-tier comparison left the first eight tests green. An expected tier B row whose resolved tier is C stays observed when the renderer does not contain SwiftShader. An expected tier C row whose resolved tier is B stays observed, including when the renderer contains SwiftShader. Pass 2 reported 1 defect. Reviewer `01a1a11e-fbc0-70a3-aa5b-7f88dc612f7d`. Narrowing the SwiftShader null arm to equal tiers left that suite green. SwiftShader with expected tier B stays null when the resolved tier differs. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S40 does not complete M13 and does not publish.
+
+## F-111, cold start and first frame, completed 2026-11-03
+
+**What was built.** `startupArtifact` returns `pkg/ocelli_wasm_bg.wasm` for render and `pkg-decode/ocelli_wasm_bg.wasm` for decode. Any other role returns null. `summariseColdStart` adds the five phases only when the profile is release and every phase is finite and at least 0. `summariseFirstFrame` returns that interval only on the same rule. The functions do not read the 2.3 ms baseline and do not close gate A4.
+
+**HLD sections implemented.** Section 26 says measure with the benchmark harness before optimising. The path names and the release-only rule are the approved local plan. They are not an HLD formula.
+**Deviations.** none
+**Crates / packages modified.** `packages/core`.
+**Tests added.** Fourteen tests in `packages/core/src/startup.test.ts` and the published names in `index.test.ts`.
+**Fixture provenance.** No pixel arithmetic.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story changes no codec path and no CPU candidate bytes.
+**Tier coverage.** Tiers A, B and C are not applicable. The functions do not render and do not return a different number on a different tier.
+**LLD updated.** `docs/lld/benchmarks.md`, `docs/lld/public-api.md` and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** Pass 1 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a16b-2bec-7850-a215-b220ac88bcca`. Replacing the render path made the render-name test fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.

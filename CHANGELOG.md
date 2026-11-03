@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The shell names the render or decode wasm path. A release cold-start sum adds five finite phases. A release first-frame interval is returned unchanged. A dev profile returns nothing. The 2.3 ms baseline stays.
 - The shell certifies a browser row only from an observation. A missing run stays not-run. SwiftShader with expected tier B returns nothing. Tier C is certified only when that renderer string is present.
 - The cache reports decoded bytes from the dimensions of one synthetic load. Encoded used is 0. A tier C load with a non-zero GPU figure returns nothing.
 - The shell opens one to eight decode workers for one owner. A bad count returns nothing. The threading decision stays stable Rust.

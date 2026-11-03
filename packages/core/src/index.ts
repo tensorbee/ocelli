@@ -253,6 +253,13 @@ export type { DecodePool, WorkerHandle } from "./pool.js";
 export { certifyRow } from "./matrix.js";
 export type { MatrixInput, MatrixObservation, MatrixStatus, MatrixTier } from "./matrix.js";
 
+export {
+  startupArtifact,
+  summariseColdStart,
+  summariseFirstFrame,
+} from "./startup.js";
+export type { ColdPhases, StartupRole } from "./startup.js";
+
 export { rewriteListenerNames } from "./migrate.js";
 
 export {

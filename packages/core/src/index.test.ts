@@ -198,6 +198,10 @@ const PUBLISHED: readonly string[] = [
   "threadingEscalation",
   // ./matrix.js, F-114
   "certifyRow",
+  // ./startup.js, F-111
+  "startupArtifact",
+  "summariseColdStart",
+  "summariseFirstFrame",
   // ./migrate.js, F-108
   "rewriteListenerNames",
   // ./cursor.js, F-072

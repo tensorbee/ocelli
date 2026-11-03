@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-111 | E18.2 | Cold-start and first-frame optimisation | Build | 3w | pending |
+| F-111 | E18.2 | Cold-start and first-frame optimisation | Build | 3w | done |
 | F-115 | E19.2 | Accessibility and keyboard interaction parity | All | 3w | pending |
 | F-116 | E19.3 | Documentation, examples and the migration playbook | All | 4w | pending |
 | F-117 | E19.4 | Release engineering: semver, changelog, deprecation policy | All | 2w | pending |
