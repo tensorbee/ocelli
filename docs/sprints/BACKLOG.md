@@ -322,7 +322,7 @@ Binary size and cold start inside budget, the browser matrix certified, semver a
 
 ### M19, Series open in the core and the viewer
 
-The series-open gaps that Phase 1 left in the core, then the folder viewer calling that core.
+The series-open gaps that Phase 1 left in the core, then the example viewer calling that core.
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|

@@ -38,6 +38,7 @@ leaves the image stays clear. Any other lane value draws nothing. Tiers A,
 B and C declare both modes available, and the stack draw refuses a mode
 `available` does not offer. `blend_on_tier` can mark tier B linear
 unavailable, and that request is refused rather than drawn as nearest.
+An orthographic plane refuses linear, including a selection made after the plane is stored, and does not draw that plane as nearest.
 
 **The composite overlay copies presenter bytes.** `show_labelmap` uploads
 the RGBA8 from `present_labelmap` in `ocelli-seg`. Index 0 is background

@@ -324,6 +324,9 @@ pub enum GraphError {
     /// The requested stack sample mode is not offered on this tier.
     #[error("this interpolation mode is not available on this tier")]
     InterpolationUnavailable,
+    /// The stored texture is an orthographic plane. Linear would sample it again.
+    #[error("orthographic presentation refuses a second interpolant")]
+    SecondInterpolant,
     /// A VOI dirty mark offered through `mark_dirty`.
     #[error(
         "VOI dirt is set only by set_voi, so a window change cannot schedule a frame without writing its uniform bytes"
@@ -1002,6 +1005,8 @@ struct SlotState {
     dpr: f64,
     /// Stack sample mode uploaded in `camera.scale.y`. Nearest until set.
     interpolation: Interpolation,
+    /// The stored texture is a host orthographic plane. A stack upload clears it.
+    orthographic: bool,
 }
 
 /// The stored-sample texture one viewport owns.
@@ -1182,6 +1187,7 @@ impl Registry {
                     camera: IDENTITY_CAMERA,
                     dpr: 1.0,
                     interpolation: Interpolation::Nearest,
+                    orthographic: false,
                     opacity: OpacityTable::preset(OpacityPreset::Flat),
                     shade: ShadeWeights::unlit(),
                     clip: ClipList::empty(),
@@ -2436,19 +2442,24 @@ impl RenderGraph {
     ///
     /// `0` stays nearest. `1` selects linear. The call rewrites the camera
     /// uniform and marks the camera dirty. It does not allocate a texture.
+    /// A stored orthographic plane refuses linear, leaves the mode at
+    /// nearest and does not write the lane. The next stack upload clears
+    /// that record.
     ///
     /// # Errors
     ///
     /// [`GraphError::UnknownViewport`] for an id this graph never issued.
     /// [`GraphError::PassHasNoUniform`] for a pass that is not a stack.
     /// [`GraphError::ViewportNotRebound`] when the slot has no GPU objects.
+    /// [`GraphError::SecondInterpolant`] when the stored texture is an
+    /// orthographic plane and `mode` is linear.
     pub fn set_stack_interpolation(
         &mut self,
         ctx: &GpuContext,
         id: ViewportId,
         mode: Interpolation,
     ) -> Result<(), GraphError> {
-        let (camera, dpr, is_stack) = {
+        let (camera, dpr, is_stack, orthographic) = {
             let state = self
                 .registry
                 .states
@@ -2459,6 +2470,7 @@ impl RenderGraph {
                 state.camera,
                 state.dpr,
                 matches!(state.pass, Pass::Stack(_)),
+                state.orthographic,
             )
         };
         if !is_stack {
@@ -2466,6 +2478,9 @@ impl RenderGraph {
         }
         if !crate::interpolation::available(mode, self.tier) {
             return Err(GraphError::InterpolationUnavailable);
+        }
+        if mode == Interpolation::Linear && orthographic {
+            return Err(GraphError::SecondInterpolant);
         }
         let slot = self
             .gpu
@@ -2628,6 +2643,9 @@ impl RenderGraph {
         if let Some(state) = self.registry.state_mut(id) {
             state.stored = Some(upload);
             state.dirty.data = true;
+            // A stack upload replaces a host reslice. `show_ortho` sets this
+            // again after its own upload returns.
+            state.orthographic = false;
         }
         Ok(())
     }
@@ -3374,12 +3392,25 @@ impl RenderGraph {
         outcome
     }
 
+    fn stack_interpolation(&self, id: ViewportId) -> Option<Interpolation> {
+        self.registry
+            .states
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .map(|state| state.interpolation)
+    }
+
     /// Upload one complete orthographic plane through the stack texture.
     ///
     /// `image` is the host reslice. This method does not sample the volume.
     /// Tier C is refused by [`ortho::present_plane`] before a sample is read.
-    /// An absent sample is [`OrthoError::PlaneIncomplete`] and `upload_stored`
-    /// is not called, so `uploads` and the previous texture stay.
+    /// A linear stack mode returns [`OrthoError::SecondInterpolant`] before
+    /// the image is read and does not change the selected mode. A successful
+    /// upload records that the stored texture is an orthographic plane.
+    /// [`RenderGraph::set_stack_interpolation`] then refuses linear until the
+    /// next stack upload. An absent sample is [`OrthoError::PlaneIncomplete`]
+    /// and `upload_stored` is not called, so `uploads` and the previous
+    /// texture stay.
     ///
     /// # Errors
     ///
@@ -3391,10 +3422,17 @@ impl RenderGraph {
         id: ViewportId,
         image: &OrthoImage,
     ) -> Result<(), OrthoError> {
+        if self.stack_interpolation(id) == Some(Interpolation::Linear) {
+            return Err(OrthoError::SecondInterpolant);
+        }
         let tier = self.tier;
         ortho::present_plane(tier, image, |samples| {
             self.upload_stored(ctx, adapter, id, image.width, image.height, samples)
-        })
+        })?;
+        if let Some(state) = self.registry.state_mut(id) {
+            state.orthographic = true;
+        }
+        Ok(())
     }
 
     /// Upload one host slab and select its compiled blend.

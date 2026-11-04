@@ -4,16 +4,15 @@ Sprint-by-sprint roadmap for Ocelli. A sprint is a coherent unit of work with
 one goal, not a fixed calendar box. The sprint clock starts at the first
 `/start-feature` of that sprint.
 
-**Phase 1 is S01 to S41**, 118 stories and 397 engineer-weeks, feature parity
+**Phase 1 is S01 to S44**, 118 stories and 397 engineer-weeks, feature parity
 with cornerstone3D. **Phase 1.5 is S45 to S75**, 39 stories and 352
 engineer-weeks, the eight differentiating capabilities of HLD Part III. Phase 2
 and Phase 3 carry F-IDs in `BACKLOG.md` and no sprint, deliberately.
 
 Those two totals agree with HLD section 38 and the Part III preamble, and they
-count the IMPORTED rows only. Every `F-X` story added since the import lands in
-Phase 1 and is outside them, and so do F-191 to F-201, so the
-allocation's Phase 1 total is larger than
-397 and both numbers are correct. `docs/sprints/BACKLOG.md`'s Summary section
+count the IMPORTED rows only. Every `F-X` story added since the import is also
+Phase 1, and so are F-191 to F-201. The allocation's Phase 1 total is therefore
+larger than 397, and both numbers are correct. `docs/sprints/BACKLOG.md`'s Summary section
 names the command that prints each. The parity target itself is 5.8.2 and not
 the HLD's v5.8.9, which does not exist, and that is deviation **D-11**.
 
@@ -609,7 +608,7 @@ _S40 to S41, 9 stories, 30 engineer-weeks._
 
 ### M19, Series open in the core and the viewer
 
-The series-open gaps that Phase 1 left in the core, then the folder viewer calling that core.
+The series-open gaps that Phase 1 left in the core, then the example viewer calling that core.
 
 _S42 to S44, 11 stories, 43 engineer-weeks._
 

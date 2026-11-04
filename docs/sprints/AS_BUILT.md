@@ -4827,3 +4827,35 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/render-graph.md` and the row in `docs/lld/README.md`.
 **Deviations from the design plan.** The design text calls `(0.5, 0.5)` one image coordinate after the centre shift. The landed pair keeps nearest on the corner origin of `texel_of`, so nearest at `(0.5, 0.5)` is 0, and linear on the centre origin, so linear at `(0.5, 0.5)` is 138.75. Those are not one geometric point. The raster passes an index to linear and `index + 0.5` to `texel_of`. A zero fraction, including `-0.0`, does not read the next texel.
 **Notes for future sessions.** Pass 5 reported 0 defects, 0 smells and 0 nitpicks. Reviewer Claude Code, read only, with no shell. A weight swap, a nearest index mutation, an in-draw allocation and a negative-zero fraction check each went red and were restored. Colour reserve grows the RGB scratch and the display plane, and the wasm session tests expect that count of 2. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-194, follow-up after the S42 review, completed 2026-11-04
+
+**What was built.** Nearest colour reserve no longer grows the linear display plane. Orthographic presentation refuses a linear stack mode and leaves that mode selected. Series assembly projects one object's metadata once and shares it across that object's frames.
+
+**HLD sections implemented.** Section 18 remains one LUT formula. Section 7 and D-07 still refuse a result the caller did not ask for. MPR does not add a second interpolant.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-dicom`, `ocelli-render`, `ocelli-wasm`.
+**Tests added.** One series-open projection count. One nearest colour reserve. One CPU plane refusal. One ignored GPU plane refusal.
+**Fixture provenance.** No new pixel arithmetic. The 138.75 centre is unchanged.
+**Verification.** The sprint profile on this tree is recorded after the consolidated gate.
+**Corpus.** The sprint record names the corpus result. This note adds no corpus row.
+**Tier coverage.** Tiers A and B refuse a linear orthographic upload. Tier C refuses a linear CPU plane. Nearest presentation is unchanged.
+**LLD updated.** `docs/lld/feature-availability.md` and one sentence in `docs/lld/render-graph.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** The F-194 entry above records the colour reserve count of 2. That count was the contract at that commit. Nearest colour reserve now increments allocations once. Do not push until the sprint review is clean. This note does not publish.
+
+## F-194, follow-up after the S42 review pass 2, completed 2026-11-04
+
+**What was built.** A nearest orthographic upload records that the stored texture is a host reslice. Selecting linear while that record is set is refused, the mode stays nearest, and the camera lane is not written. The next stack upload clears the record.
+
+**HLD sections implemented.** Section 7 and D-07 still refuse a result the caller did not ask for.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-render`.
+**Tests added.** One ignored GPU test for a nearest upload followed by a linear selection.
+**Fixture provenance.** No new pixel arithmetic.
+**Verification.** The sprint profile on this tree is recorded after the consolidated gate.
+**Corpus.** The sprint record names the corpus result. This note adds no corpus row.
+**Tier coverage.** Tiers A and B refuse linear after a nearest orthographic upload. Tier C still checks the mode on every CPU plane.
+**LLD updated.** One sentence in `docs/lld/render-graph.md` and the CPU MPR cell in `docs/lld/feature-availability.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** The earlier follow-up covers a linear mode that was already selected. This note covers the other order. The refusal is `GraphError::SecondInterpolant` because `set_stack_interpolation` returns `GraphError`. This note does not publish.

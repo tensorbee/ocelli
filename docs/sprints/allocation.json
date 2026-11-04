@@ -116,7 +116,7 @@
       "epics": [
         "E38"
       ],
-      "goal": "The series-open gaps that Phase 1 left in the core, then the folder viewer calling that core."
+      "goal": "The series-open gaps that Phase 1 left in the core, then the example viewer calling that core."
     },
     {
       "key": "M14",

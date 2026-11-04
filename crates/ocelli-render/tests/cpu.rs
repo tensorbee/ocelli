@@ -418,10 +418,10 @@ fn linear_texel_centres_match_the_nearest_texel() {
     let near_origin = raster.display_at(&view, &presentation, &samples, source, target, [0, 0]);
     let near_last = raster.display_at(&view, &presentation, &samples, source, target, [1, 1]);
     let nearest = draw(&mut raster, &view, &presentation, &samples, source);
-    assert!(raster.reserve_source(2, 2).is_ok());
-    let reserved = raster.allocations();
     assert!(raster.set_interpolation(1).is_ok());
     assert_eq!(raster.interpolation(), Interpolation::Linear);
+    assert!(raster.reserve_source(2, 2).is_ok());
+    let reserved = raster.allocations();
     let linear_origin = raster.display_at(&view, &presentation, &samples, source, target, [0, 0]);
     let linear_last = raster.display_at(&view, &presentation, &samples, source, target, [1, 1]);
     assert_same_display(near_origin, linear_origin);
@@ -470,6 +470,36 @@ fn linear_without_a_reserve_refuses_and_does_not_allocate() {
     assert!(matches!(drawn, Err(RasterError::Extent)));
     assert_eq!(out, [4, 4, 4, 4]);
     assert_eq!(raster.allocations(), before);
+}
+
+#[test]
+fn nearest_colour_reserve_leaves_the_display_plane_empty() {
+    let mut raster = require_raster(1.0, 1.0, 1.0);
+    assert!(raster.reserve_source(2, 2).is_ok());
+    assert_eq!(raster.allocations(), 1);
+    assert!(raster.set_interpolation(1).is_ok());
+    assert_eq!(raster.interpolation(), Interpolation::Linear);
+    assert_eq!(raster.allocations(), 1);
+    let rgb = require_color(PhotometricInterpretation::Rgb, None);
+    let mut out = [8_u8; 4];
+    let drawn = raster.raster_color_into(
+        &View::new(),
+        accepted(&rgb),
+        &stored(&[1.0, 2.0, 3.0]),
+        RasterGrid {
+            source: [1, 1],
+            target: [1, 1],
+        },
+        RasterQuality::Settled {
+            generation: raster.generation(),
+        },
+        &mut out,
+    );
+    assert!(matches!(drawn, Err(RasterError::Extent)));
+    assert_eq!(out, [8, 8, 8, 8]);
+    assert_eq!(raster.allocations(), 1);
+    assert!(raster.reserve_source(1, 1).is_ok());
+    assert_eq!(raster.allocations(), 2);
 }
 
 fn assert_same_display(
@@ -1093,7 +1123,7 @@ fn settled_idle_rejects_a_source_that_does_not_match_the_layout() {
         Ok(result) if !result.wrote && result.extent == [0, 0]
     ));
     assert_eq!(colour_idle, [6, 6, 6, 6]);
-    assert_eq!(colour_raster.allocations(), 2);
+    assert_eq!(colour_raster.allocations(), 1);
 }
 
 #[test]

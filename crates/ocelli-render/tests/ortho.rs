@@ -14,8 +14,8 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, FrameOutcome, OrthoError, Pass, RenderGraph, StackPass, Tier, VoiParams,
-    present_plane,
+    BlendMode, FrameOutcome, GraphError, Interpolation, OrthoError, Pass, RenderGraph, StackPass,
+    Tier, VoiParams, present_plane,
 };
 use ocelli_volume::{
     Level, OrthoImage, OrthoPlane, PlaneSample, SlicePresence, Volume, VoxelKind, VoxelStore,
@@ -395,4 +395,86 @@ fn an_absent_plane_does_not_replace_the_texture() {
     assert_eq!(graph.tick(&context), FrameOutcome::Noop);
     let kept = read_display(&context, &texture, 2, 2);
     assert_within_bound(&kept, &ramp);
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_linear_stack_refuses_the_orthographic_plane() {
+    let Some((adapter, mut context)) = session() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let built = RenderGraph::new(&mut context, 1, wgpu::TextureFormat::Rgba32Float);
+    assert!(built.is_ok());
+    let Ok(mut graph) = built else { return };
+    let chain = chain();
+    let (view, _texture) = target(context.device(), 2, 2);
+    let registered = graph.register_stored(
+        &context,
+        &adapter,
+        view,
+        2,
+        2,
+        Pass::Stack(StackPass {
+            voi: params(&chain),
+            blend: BlendMode::Composite,
+        }),
+    );
+    assert!(registered.is_ok());
+    let Ok(viewport) = registered else { return };
+    let volume = fixture();
+    let axial = volume.reslice(OrthoPlane::Axial { slice: 0.0 });
+    let Ok(axial) = axial else { return };
+    let selected = graph.set_stack_interpolation(&context, viewport, Interpolation::Linear);
+    assert!(selected.is_ok());
+    assert_eq!(graph.uploads(), 0);
+    let refused = graph.show_ortho(&context, &adapter, viewport, &axial);
+    assert!(matches!(refused, Err(OrthoError::SecondInterpolant)));
+    assert_eq!(graph.uploads(), 0);
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_linear_selection_after_an_orthographic_upload_is_refused() {
+    let Some((adapter, mut context)) = session() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let built = RenderGraph::new(&mut context, 1, wgpu::TextureFormat::Rgba32Float);
+    assert!(built.is_ok());
+    let Ok(mut graph) = built else { return };
+    let chain = chain();
+    let (view, _texture) = target(context.device(), 2, 2);
+    let registered = graph.register_stored(
+        &context,
+        &adapter,
+        view,
+        2,
+        2,
+        Pass::Stack(StackPass {
+            voi: params(&chain),
+            blend: BlendMode::Composite,
+        }),
+    );
+    assert!(registered.is_ok());
+    let Ok(viewport) = registered else { return };
+    let volume = fixture();
+    let axial = volume.reslice(OrthoPlane::Axial { slice: 0.0 });
+    let Ok(axial) = axial else { return };
+    assert!(
+        graph
+            .show_ortho(&context, &adapter, viewport, &axial)
+            .is_ok()
+    );
+    assert_eq!(graph.uploads(), 1);
+    let refused = graph.set_stack_interpolation(&context, viewport, Interpolation::Linear);
+    assert!(matches!(refused, Err(GraphError::SecondInterpolant)));
+    assert_eq!(graph.uploads(), 1);
+    // A linear mode would refuse this second plane before another upload.
+    assert!(
+        graph
+            .show_ortho(&context, &adapter, viewport, &axial)
+            .is_ok()
+    );
+    assert_eq!(graph.uploads(), 2);
 }

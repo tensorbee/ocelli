@@ -291,11 +291,14 @@ impl CpuRaster {
         self.needs_draw = false;
     }
 
-    /// Reserve colour scratch and the linear display plane for one source grid.
+    /// Reserve colour scratch for one source grid.
     ///
     /// The draw does not call this. A source larger than the last reservation
-    /// is refused until the caller reserves it again. Nearest mono draws do
-    /// not read either buffer.
+    /// is refused until the caller reserves it again. The linear display plane
+    /// grows only when the selected mode is linear, and only inside this call.
+    /// Nearest draws do not read that plane. A linear draw made after a nearest
+    /// reserve still returns [`RasterError::Extent`] until the caller reserves
+    /// again while linear is selected.
     ///
     /// # Errors
     ///
@@ -305,6 +308,9 @@ impl CpuRaster {
         if self.rgb_scratch.len() < pixels {
             self.rgb_scratch = vec![Rgb::BLACK; pixels];
             self.allocations = self.allocations.saturating_add(1);
+        }
+        if self.interpolation != Interpolation::Linear {
+            return Ok(());
         }
         let display_len = pixels.checked_mul(3).ok_or(RasterError::Extent)?;
         if self.display_scratch.len() < display_len {

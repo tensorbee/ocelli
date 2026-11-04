@@ -14,8 +14,8 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    CpuRaster, OrthoError, RasterError, RasterGrid, RasterQuality, copy_plane_stored,
-    present_cpu_plane,
+    CpuRaster, Interpolation, OrthoError, RasterError, RasterGrid, RasterQuality,
+    copy_plane_stored, present_cpu_plane,
 };
 use ocelli_viewport::presentation::{Colormap, Presentation};
 use ocelli_viewport::view::View;
@@ -116,6 +116,27 @@ fn a_refusal_publishes_nothing() {
         Err(OrthoError::Raster(RasterError::OutputLength))
     ));
     assert_eq!(bytes, vec![9_u8; 3]);
+}
+
+#[test]
+fn a_linear_raster_refuses_the_plane_and_keeps_the_mode() {
+    let volume = identity_volume();
+    let axial = resliced(&volume, OrthoPlane::Axial { slice: 0.0 });
+    let mut raster = require_raster(2.0, 2.0);
+    assert!(raster.set_interpolation(1).is_ok());
+    let quality = settled(&raster);
+    let mut out = vec![9_u8; byte_len(raster.device())];
+    let presented = present_cpu_plane(
+        &mut raster,
+        &View::new(),
+        &passthrough(),
+        &axial,
+        quality,
+        &mut out,
+    );
+    assert!(matches!(presented, Err(OrthoError::SecondInterpolant)));
+    assert!(out.iter().all(|byte| *byte == 9));
+    assert_eq!(raster.interpolation(), Interpolation::Linear);
 }
 
 fn assert_copied(image: &OrthoImage, expected: &[f32]) {

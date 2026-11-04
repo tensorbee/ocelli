@@ -13,6 +13,8 @@
 //! is invented.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use dicom_core::{Tag, VR};
 use glam::DVec3;
@@ -290,8 +292,9 @@ pub fn declared_frame_count(parsed: &ParsedDicom) -> Result<u32, SeriesOpenError
 ///
 /// Grouping uses the Series Instance UID, the Frame of Reference UID, row and
 /// column cosines, and in-plane spacing. A missing UID does not join a present
-/// one. Frames of one parsed object share one missing UID. Two parsed objects
-/// that both omit a UID do not join each other. A missing Image Position
+/// one. Frames of one parsed object share one missing UID and one metadata
+/// projection. Two parsed objects that both omit a UID do not join each other.
+/// A missing Image Position
 /// Patient is unpositioned. A malformed cosine or spacing on that frame is
 /// still an error. Any other geometry failure is an error.
 ///
@@ -300,10 +303,11 @@ pub fn declared_frame_count(parsed: &ParsedDicom) -> Result<u32, SeriesOpenError
 /// Returns [`SeriesOpenError`] with the input index of the frame that failed.
 pub fn assemble_display(frames: &[ParsedFrame<'_>]) -> Result<Vec<DisplaySeries>, SeriesOpenError> {
     let mut prepared = Vec::with_capacity(frames.len());
+    let mut shared = HashMap::new();
     for (index, frame) in frames.iter().enumerate() {
         let input_index = u32::try_from(index)
             .map_err(|_| SeriesOpenError::new(SeriesOpenReason::Metadata, 0))?;
-        prepared.push(prepare(frame, input_index)?);
+        prepared.push(prepare(frame, input_index, &mut shared)?);
     }
     let groups = group_frames(prepared);
     let mut display = Vec::with_capacity(groups.len());
@@ -344,7 +348,7 @@ struct Prepared {
     column: Option<DVec3>,
     spacing: Option<PixelSpacing>,
     own_normal: Option<DVec3>,
-    metadata: MetadataSet,
+    metadata: Arc<MetadataSet>,
 }
 
 #[derive(Clone, Copy)]
@@ -384,11 +388,31 @@ fn plane_bits(frame: &Prepared) -> Option<PlaneBits> {
 fn project(parsed: &ParsedDicom, index: u32) -> Result<MetadataSet, SeriesOpenError> {
     // `from_object` copies an explicit OW payload and refuses an encapsulated
     // pixel sequence. Frame open already skips those elements. Reuse it.
+    #[cfg(test)]
+    PROJECTIONS.with(|count| count.set(count.get().saturating_add(1)));
     project_metadata(parsed).map_err(|_| SeriesOpenError::new(SeriesOpenReason::Metadata, index))
 }
 
-fn prepare(frame: &ParsedFrame<'_>, input_index: u32) -> Result<Prepared, SeriesOpenError> {
-    let metadata = project(frame.parsed, input_index)?;
+fn shared_metadata(
+    parsed: &ParsedDicom,
+    index: u32,
+    shared: &mut HashMap<usize, Arc<MetadataSet>>,
+) -> Result<Arc<MetadataSet>, SeriesOpenError> {
+    let key = object_key(parsed);
+    if let Some(existing) = shared.get(&key) {
+        return Ok(Arc::clone(existing));
+    }
+    let projected = Arc::new(project(parsed, index)?);
+    shared.insert(key, Arc::clone(&projected));
+    Ok(projected)
+}
+
+fn prepare(
+    frame: &ParsedFrame<'_>,
+    input_index: u32,
+    shared: &mut HashMap<usize, Arc<MetadataSet>>,
+) -> Result<Prepared, SeriesOpenError> {
+    let metadata = shared_metadata(frame.parsed, input_index, shared)?;
     let multi =
         MultiframeMetadata::new(&metadata).map_err(|error| map_multi(error, input_index))?;
     let frame_usize = usize::try_from(frame.frame_index)
@@ -1124,5 +1148,153 @@ fn present_text(
         Ok(None)
     } else {
         Ok(Some(parts))
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static PROJECTIONS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn projection_count() -> u32 {
+    PROJECTIONS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+fn reset_projections() {
+    PROJECTIONS.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+mod projection_share {
+    use super::{ParsedFrame, assemble_display, projection_count, reset_projections};
+    use crate::parse_part10;
+
+    #[test]
+    fn two_frames_of_one_object_share_one_projection() {
+        let built = one_slice();
+        assert!(built.is_ok(), "fixture bytes");
+        let Ok(built) = built else {
+            unreachable!("asserted immediately above");
+        };
+        let parsed = parse_part10(&built);
+        assert!(parsed.is_ok(), "{parsed:?}");
+        let Ok(parsed) = parsed else {
+            unreachable!("asserted immediately above");
+        };
+        reset_projections();
+        let frames = [ParsedFrame::new(&parsed, 0), ParsedFrame::new(&parsed, 0)];
+        let assembled = assemble_display(&frames);
+        assert!(assembled.is_ok(), "{assembled:?}");
+        let Ok(groups) = assembled else {
+            unreachable!("asserted immediately above");
+        };
+        assert_eq!(groups.len(), 1);
+        let Some(group) = groups.first() else {
+            unreachable!("length is 1");
+        };
+        assert_eq!(group.frame_count(), 2);
+        assert_eq!(projection_count(), 1);
+
+        let again = parse_part10(&built);
+        assert!(again.is_ok(), "{again:?}");
+        let Ok(again) = again else {
+            unreachable!("asserted immediately above");
+        };
+        reset_projections();
+        let separate = [ParsedFrame::new(&parsed, 0), ParsedFrame::new(&again, 0)];
+        let both = assemble_display(&separate);
+        assert!(both.is_ok(), "{both:?}");
+        assert_eq!(projection_count(), 2);
+    }
+
+    fn one_slice() -> Result<Vec<u8>, &'static str> {
+        let mut data = Vec::new();
+        data.extend(ui_element((0x0008, 0x0016), "1.2.840.10008.5.1.4.1.1.2")?);
+        data.extend(ui_element((0x0008, 0x0018), "2.25.20")?);
+        data.extend(ui_element((0x0020, 0x000E), "2.25.10")?);
+        data.extend(ui_element((0x0020, 0x0052), "2.25.11")?);
+        data.extend(text_element((0x0020, 0x0013), *b"IS", "1")?);
+        data.extend(text_element((0x0020, 0x0032), *b"DS", "0\\0\\0")?);
+        data.extend(text_element((0x0020, 0x0037), *b"DS", "1\\0\\0\\0\\1\\0")?);
+        data.extend(text_element((0x0028, 0x0030), *b"DS", "1\\1")?);
+        data.extend(short_le((0x0028, 0x0010), *b"US", &1_u16.to_le_bytes())?);
+        data.extend(short_le((0x0028, 0x0011), *b"US", &1_u16.to_le_bytes())?);
+        part10(data)
+    }
+
+    fn ui_element(tag: (u16, u16), text: &str) -> Result<Vec<u8>, &'static str> {
+        short_le(tag, *b"UI", &ui(text.as_bytes()))
+    }
+
+    fn text_element(tag: (u16, u16), vr: [u8; 2], text: &str) -> Result<Vec<u8>, &'static str> {
+        short_le(tag, vr, &text_pad(text))
+    }
+
+    fn ui(text: &[u8]) -> Vec<u8> {
+        let mut value = text.to_vec();
+        if !value.len().is_multiple_of(2) {
+            value.push(0);
+        }
+        value
+    }
+
+    fn text_pad(text: &str) -> Vec<u8> {
+        let mut value = text.as_bytes().to_vec();
+        if !value.len().is_multiple_of(2) {
+            value.push(b' ');
+        }
+        value
+    }
+
+    fn short_le(tag: (u16, u16), vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, &'static str> {
+        if !value.len().is_multiple_of(2) {
+            return Err("odd element");
+        }
+        let length = u16::try_from(value.len()).map_err(|_| "element length")?;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&tag.0.to_le_bytes());
+        bytes.extend_from_slice(&tag.1.to_le_bytes());
+        bytes.extend_from_slice(&vr);
+        bytes.extend_from_slice(&length.to_le_bytes());
+        bytes.extend_from_slice(value);
+        Ok(bytes)
+    }
+
+    fn long_le(tag: (u16, u16), vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, &'static str> {
+        if !value.len().is_multiple_of(2) {
+            return Err("odd element");
+        }
+        let length = u32::try_from(value.len()).map_err(|_| "element length")?;
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&tag.0.to_le_bytes());
+        bytes.extend_from_slice(&tag.1.to_le_bytes());
+        bytes.extend_from_slice(&vr);
+        bytes.extend_from_slice(&[0, 0]);
+        bytes.extend_from_slice(&length.to_le_bytes());
+        bytes.extend_from_slice(value);
+        Ok(bytes)
+    }
+
+    fn part10(data: Vec<u8>) -> Result<Vec<u8>, &'static str> {
+        let mut bytes = vec![0_u8; 128];
+        bytes.extend_from_slice(b"DICM");
+        bytes.extend(file_meta()?);
+        bytes.extend(data);
+        Ok(bytes)
+    }
+
+    fn file_meta() -> Result<Vec<u8>, &'static str> {
+        let mut body = Vec::new();
+        body.extend(long_le((0x0002, 0x0001), *b"OB", &[0, 1])?);
+        body.extend(ui_element((0x0002, 0x0002), "1.2.840.10008.5.1.4.1.1.2")?);
+        body.extend(ui_element((0x0002, 0x0003), "2.25.1")?);
+        body.extend(ui_element((0x0002, 0x0010), "1.2.840.10008.1.2.1")?);
+        body.extend(ui_element((0x0002, 0x0012), "2.25.2")?);
+        let length = u32::try_from(body.len()).map_err(|_| "meta length")?;
+        let mut meta = short_le((0x0002, 0x0000), *b"UL", &length.to_le_bytes())?;
+        meta.extend(body);
+        Ok(meta)
     }
 }

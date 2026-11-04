@@ -1832,8 +1832,8 @@ mod tests {
         assert_eq!(session.presented_frame(), &full);
         assert_eq!(session.viewport().flags() & 8, 0);
         let allocations = session.cpu_allocations();
-        // Colour reserve grows the RGB scratch and the display plane.
-        assert_eq!(allocations, 2);
+        // Nearest colour reserve grows the RGB scratch only.
+        assert_eq!(allocations, 1);
         let present_capacity = session.cpu_present.capacity();
 
         let rejected = session.draw_committed_mono();
@@ -2015,8 +2015,8 @@ mod tests {
         assert!(matches!(settled, Ok(result) if result.wrote && result.generation == 1));
         assert_eq!(session.cpu_frame(), &[10, 20, 30, 255]);
         let allocations = session.cpu_allocations();
-        // Colour reserve grows the RGB scratch and the display plane.
-        assert_eq!(allocations, 2);
+        // Nearest colour reserve grows the RGB scratch only.
+        assert_eq!(allocations, 1);
         commit_stored(&mut session, &[40.0], 1, 1, 1);
         assert_eq!(session.viewport().generation(), 2);
         assert_eq!(session.viewport().flags() & 8, 8);
