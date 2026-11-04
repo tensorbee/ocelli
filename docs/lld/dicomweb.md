@@ -1,7 +1,7 @@
 # DICOMweb
 
-**F-IDs that contributed:** F-021, F-101
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-021, F-101, F-198
+**Last updated:** 2026-11-04
 
 The DICOMweb path has two explicit owners. `@ocelli/core` owns HTTP fetch,
 authentication injection, status handling, content negotiation, and
@@ -65,6 +65,18 @@ command channel, its ticketed allocation and its frame commit. It did not
 build `commit_dicomweb_response`, and F-021 still exposes no wasm function and
 invents no Part 10 ingress. That response commit is an open boundary gap with
 no scheduled F-ID, recorded here rather than left as an implied promise.
+
+The example page fetches one WADO-RS instance through `DicomwebClient` and
+posts that response body to its worker. The body is the multipart envelope.
+The worker also keeps the boundary from that response. The worker copies the
+bytes into the session bulk slot with `holdSessionBytes`. That ticket is the
+session's only bulk slot, so a later frame or command allocation refuses
+until the ticket is released. It does not call `commit_dicomweb_response`,
+and that wasm entry is still absent. The worker binds one offscreen canvas,
+commits one monochrome stored sample through the existing frame commit, and
+publishes with `publishCpuCanvas`. The page shows the tier string from
+`resolvedTier` and whether that publish returned. A failed load leaves
+`coreAvailable()` false.
 
 ## Rust source contract
 

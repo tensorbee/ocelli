@@ -2544,7 +2544,7 @@
       "phase": "P1",
       "epic": "E38 Series open",
       "epic_key": "E38",
-      "story": "Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source",
+      "story": "Example viewer loads one wasm worker, publishes one stored sample, reports the resolved tier, and posts one WADO-RS envelope",
       "layer": "TS",
       "weeks": 4,
       "depends_eids": [
@@ -2630,6 +2630,25 @@
         "F-198",
         "F-195",
         "F-196"
+      ]
+    },
+    {
+      "fid": "F-202",
+      "eid": "E38.12",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Worker decode of a posted WADO-RS envelope, the frame cache, and a render of that frame",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.8"
+      ],
+      "notes": "Remainder of the narrowed F-198 title. No sprint.",
+      "milestone": "",
+      "sprint": "",
+      "depends_fids": [
+        "F-198"
       ]
     },
     {

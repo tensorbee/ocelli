@@ -4859,3 +4859,79 @@ this branch had not touched since the base.
 **LLD updated.** One sentence in `docs/lld/render-graph.md` and the CPU MPR cell in `docs/lld/feature-availability.md`.
 **Deviations from the design plan.** none
 **Notes for future sessions.** The earlier follow-up covers a linear mode that was already selected. This note covers the other order. The refusal is `GraphError::SecondInterpolant` because `set_stack_interpolation` returns `GraphError`. This note does not publish.
+
+## F-195, calibration provenance and body-size SUV, completed 2026-11-04
+
+**What was built.** `select_calibration` chooses pixel spacing, then imager spacing divided by the estimated radiographic magnification factor, then ultrasound physical deltas, then a manual pair. A present but invalid earlier source does not fall through. Either half of the imager pair counts as present. `suv_lbm` and `suv_bsa` share the `suv_bw` decay. `length_ratio` and `contour_volume` take caller lengths and caller areas. The example page shows the imager fixture.
+
+**HLD sections implemented.** Section 15 keeps SUV off the modality LUT. The HLD gives no calibration order and no lean-body-mass or body-surface-area formula. The local rules are `.claude/plans/F-195-design.md`.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-geom`, `examples/example-server`, `examples/viewer-react`.
+**Tests added.** Nine tests in `crates/ocelli-geom/tests/calibration.rs`. Two example-server route tests.
+**Fixture provenance.** Imager 0.2 mm and factor 2 yield 0.1 mm, from PS3.3 C.8.11.4 and C.8.7.5. A second component of 0.4 mm yields 0.2 mm. SUVlbm for activity 5, lean body mass 70 kg, dose 1000 Bq and elapsed 0 is 350. SUVbsa for body surface area 1.8 m2 is 90. Areas 10 and 20 with spacing 5 mm give volume 150. Length ratio 4/2 is 2, and -4/2 is -2. Ultrasound units are PS3.3 C.8.5.5.1.15, where 0003H is centimetres. The caller converts to positive millimetres. No patient data.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+**Tier coverage.** Tiers A, B and C are not applicable. These functions do not draw.
+**LLD updated.** `docs/lld/calibration.md`, the geometry cross-link, and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The plan first cited C.8.7.3 and C.8.5.5.1.4 and called the ultrasound deltas millimetres. Pass 1 corrected those citations to C.8.7.5, C.8.5.5.1.17 and C.8.5.5.1.15. The division and the SUV scales did not change.
+**Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 3 nitpicks. Reviewer Claude Code, read only, with no shell. An ERMF multiply, a BSA scale of 1000 and `ratio.abs()` each went red and were restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-196, key object and secondary capture, completed 2026-11-04
+
+**What was built.** `writeKeyObject` and `readKeyObject` round-trip one TID 2010 description and one composite reference. `writeSecondaryCapture` and `readSecondaryCapture` round-trip an 8-bit MONOCHROME2 display buffer. The example page shows the title Key image and pixels 0, 1, 2, 3.
+
+**HLD sections implemented.** Decision D10 keeps dcmjs for SR. The HLD names TID 1500 and does not name TID 2010 or a Secondary Capture writer. The local rules are `.claude/plans/F-196-design.md`.
+**Deviations.** none
+**Crates / packages modified.** `packages/core`, `examples/viewer-react`.
+**Tests added.** Six tests in `packages/core/src/tid2010.test.ts`. Five tests in `packages/core/src/secondary-capture.test.ts`. One page test in `examples/viewer-react/src/documents.test.tsx`.
+**Fixture provenance.** The title Key image is PS3.16 TID 2010 row 7, code (113012, DCM, "Key Object Description"). The coded document title is CID 7010 (113000, DCM, "Of Interest"). The reference is one COMPOSITE. Pixels 0, 1, 2, 3 are an 8-bit MONOCHROME2 secondary capture under PS3.3 C.7.6.3. A 3 by 3 ramp 0 through 8 is the odd-length case. PS3.5 even-length padding adds one zero byte, and the reader returns the nine caller bytes. Columns above 65535 are refused because Rows and Columns are US. No patient data.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+**Tier coverage.** Tiers A, B and C are not applicable. These functions do not draw.
+**LLD updated.** `docs/lld/key-object.md`, the public-api paragraph, and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The plan names `writeSecondaryCapture` and not a reader. `readSecondaryCapture` is exported because the example page has no dcmjs dependency and must show the four pixel bytes.
+**Notes for future sessions.** Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer Claude Code, read only, with no shell. A template rewrite to 1500, a column count of 65536, a disabled pad strip and a non-zero pad each went red and were restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-197, volume from a gantry-tilted stack, completed 2026-11-04
+
+**What was built.** `Volume::assemble` still returns `ShearedVolume` for a stack whose step is 3 mm along the normal and 3 mm across the row axis. `TiltedVolume::assemble` keeps that stack. The store has the source slice dimensions and is cleared. The lateral step, the projected spacing, the sort, the origin and the direction are stored. An orthogonal stack stays on `Volume::assemble`. The example page shows the orthogonal refusal, spacing 3 mm and lateral length 3 mm.
+
+**HLD sections implemented.** `docs/hld/` describes volume construction and does not give a second constructor for a tilted stack. F-020 and F-049 already record that tilt is geometry and not the gantry tilt tag. The local rules are `.claude/plans/F-197-design.md`.
+**Deviations.** none
+**Crates / packages modified.** `crates/ocelli-volume`, `examples/example-server`, `examples/viewer-react`.
+**Tests added.** Eleven tests in `crates/ocelli-volume/tests/tilted.rs`. Two route tests in `examples/example-server`. One page test in `examples/viewer-react/src/tilt.test.tsx`.
+**Fixture provenance.** Image Position Patient for slice k is `(3k, 0, 3k)` millimetres. The row cosine is `(1, 0, 0)` and the column cosine is `(0, 1, 0)`. DICOM PS3.3 C.7.6.2.1.1 takes the normal as their cross product, `(0, 0, 1)`. The inter-slice vector is `(3, 0, 3)`. The projected gap is 3 mm and the lateral part is `(3, 0, 0)`. No gantry tilt tag is present. A gap of 3.031 mm against 3 mm is past 0.5 percent. A gap of 3.02 mm is not. A projected separation of 5e-10 mm is inside the 1e-9 mm duplicate bound. A separation of 1e-8 mm is not.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+**Tier coverage.** Tiers A, B and C are not applicable. This story does not draw.
+**LLD updated.** One paragraph in `docs/lld/volumes.md`, and the volumes row in `docs/lld/README.md`. The sentence that `Volume::assemble` refuses shear stays true.
+**Deviations from the design plan.** The plan names the voxel buffer, the projected spacing and the lateral step. The value also keeps `order`, `origin` and `direction`, which the shared sort already computed, so a later fill does not project the positions again.
+**Notes for future sessions.** Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer Claude Code, read only, with no shell. Moving the lateral bound to 1e-3, the spacing factor to 0.006 and the duplicate bound to 1e-6 each went red and was restored. The agreement bound stays at the approved 1e-6 mm. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish. The live page was not clicked.
+
+## F-198, example viewer through the wasm core, completed 2026-11-04
+
+**What was built.** `loadCore` sets `coreAvailable()` only after its initialiser returns. A thrown initialiser leaves the flag false, and a second success does not call the initialiser again. The example page starts one worker. That worker binds one offscreen canvas, commits one stored monochrome sample, and publishes with `publishCpuCanvas`. It reports the tier from `resolvedTier`. A form fetches one WADO-RS instance through `DicomwebClient` and posts the multipart envelope. The worker copies that envelope into the session bulk slot with `holdSessionBytes` and keeps the boundary beside the ticket. It does not call `commit_frame` on those bytes, and it does not call `commit_dicomweb_response`. That wasm entry is still absent. An empty address does not fetch, because the example server has no synthetic Part 10 route.
+
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` places DICOMweb fetch on the shell and rendering in the worker. Pixels do not cross that boundary. `docs/hld/07-concurrency-and-typescript.md` names one wasm instance per worker. `docs/hld/10-extension-points.md` names `SeriesSource` as the place bytes come from. The local rules are `.claude/plans/F-198-design.md`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `crates/ocelli-wasm`, `packages/core`, `examples/viewer-react`.
+
+**Tests added.** `packages/core/src/load.test.ts`, `packages/core/src/instance-bytes.test.ts`, `examples/viewer-react/src/core-panel.test.tsx`, `examples/viewer-react/src/core-strict.test.tsx`, two tests in `crates/ocelli-wasm/src/tier_label.rs`, and one `resolvedTier` case in `packages/core/src/boundary.wasm.test.ts`.
+
+**Fixture provenance.** No pixel arithmetic. The WADO-RS fixture is a one-part multipart body with boundary `ocelli` and four payload bytes `0x10`, `0x20`, `0x30`, `0x40`. The study, series and instance identifiers are `2.25.11`, `2.25.12` and `2.25.13`. The monochrome sample is the little-endian `f32` value 40 in a 1 by 1 viewport.
+
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+
+**Tier coverage.** Tier A, B and C are reported by `resolvedTier` from `resolve(Auto)`. The CPU canvas publish is the blit on every tier. A headless Chromium observation printed `A`. The Node boundary test only checks that the label is `A`, `B` or `C`.
+
+**LLD updated.** `docs/lld/dicomweb.md`, `docs/lld/typescript-packaging.md`, `docs/lld/build-targets.md`, and their rows in `docs/lld/README.md`.
+
+**Deviations from the design plan.** The plan says an empty URL uses a synthetic Part 10 route when that route is present. The example server has no such route, so an empty URL does not fetch and the page says so. The held bytes are the multipart envelope, not a parsed Part 10 part. The boundary is kept beside the ticket.
+
+**Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 2 nitpicks. Reviewer Claude Code, read only, with no shell. Pass 1 was 1 defect, 3 smells and 2 nitpicks. Pass 2 was 1 defect, 1 smell and 3 nitpicks. Setting the flag true in the `loadCore` catch, posting only the first byte, calling `commit_frame` inside `holdSessionBytes`, widening the accept check to `count >= 0`, removing the adapter branch, and reusing one canvas under StrictMode each went red and was restored. Playwright Chromium from `tools/oracle` loaded `crates/ocelli-wasm/target/boundary-wasm` and printed `resolvedTier=A`. The flags were `--use-gl=angle`, `--use-angle=metal`, `--ignore-gpu-blocklist`, `--enable-webgl`, `--enable-webgl2` and `--enable-unsafe-webgpu`. That call was not inside the example worker. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish. The two leftover nitpicks are the production `/@fs` URL and an empty tier line after a failed load. Pass 4 reported 0 defects, 1 smell and those 2 nitpicks. The smell was a `test` cfg arm that compiled `tier_label` without `render-worker`. `cargo test -p ocelli-wasm --no-default-features --features decode-worker --lib` then failed on an unresolved `ocelli_render`. The predicate is now `all(feature = "render-worker", any(test, target_arch = "wasm32"))`. That decode-worker lib test then passed 11 tests. The default `tier_label` filter passed 2. Host clippy with default features passed. The wasm32 check passed. Pass 5 reported 0 defects, 0 smells and 3 nitpicks.
+
+**Sprint review.** The allocated title promised worker decode, the cache, and a render of the fetched instance. This story loads one worker, publishes one stored sample, reports the resolved tier, and posts one envelope. Decode of that envelope, the frame cache, and a render of that frame are F-202 and remain unscheduled. `resolvedTier` keeps tier C when a session resolves no adapter. A synchronous throw from the initialiser leaves the flag false and a later success may try again. The pin is `packages/core/src/load-retry.test.ts`. `TiltedVolume` keeps the longest agreeing lateral step, so a later step above 1e-6 mm is not refused as an orthogonal stack.

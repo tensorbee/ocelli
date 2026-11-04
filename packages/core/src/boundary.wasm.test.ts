@@ -653,8 +653,17 @@ describe("wasm session boundary", () => {
     expect(names).toContain("bindCpuCanvas");
     expect(names).toContain("publishCpuCanvas");
     expect(names).toContain("resizeCpuCanvas");
+    expect(names).toContain("resolvedTier");
     for (const banned of ["cpu_frame", "stored_samples", "pixels", "getPixels", "readPixels"]) {
       expect(names).not.toContain(banned);
     }
+  });
+
+  it("reports the tier resolve kept as A, B or C", async () => {
+    const glue = await import(pathToFileURL(GLUE).href);
+    const bytes = await readFile(WASM);
+    await glue.default({ module_or_path: bytes });
+    const tier = await glue.resolvedTier();
+    expect(["A", "B", "C"]).toContain(tier);
   });
 });

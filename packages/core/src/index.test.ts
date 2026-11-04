@@ -28,6 +28,7 @@ const PUBLISHED: readonly string[] = [
   "acceptTransferredFrame",
   "exportDecodedFrame",
   "transferredFrameMessage",
+  "holdSessionBytes",
   "sessionBulkSink",
   "writeDicomwebResponse",
   "writeFrame",
@@ -36,6 +37,7 @@ const PUBLISHED: readonly string[] = [
   // ./dicomweb.js, PS3.18 sections 9.1.2, 10.4, and 10.6
   "DicomwebClient",
   "DicomwebError",
+  "postWadoInstance",
   // ./ring.js, HLD 17.3
   "drainRing",
   "readEvent",
@@ -163,6 +165,12 @@ const PUBLISHED: readonly string[] = [
   // ./tid1500.js, F-097
   "readTid1500",
   "writeTid1500",
+  // ./tid2010.js, F-196
+  "readKeyObject",
+  "writeKeyObject",
+  // ./secondary-capture.js, F-196
+  "readSecondaryCapture",
+  "writeSecondaryCapture",
   // ./seam.js, F-105
   "disableElement",
   "dispatchOnElement",
@@ -234,6 +242,7 @@ const PUBLISHED: readonly string[] = [
   // this file
   "VERSION",
   "coreAvailable",
+  "loadCore",
 ];
 
 describe("@ocelli/core", () => {
@@ -255,15 +264,11 @@ describe("@ocelli/core", () => {
   });
 
   /**
-   * A clean clone has no built wasm core, so this is `false` and that is the
-   * honest answer rather than a failure to start. The example viewer uses it
-   * to render a "core not built" state.
-   *
-   * **When F-101 makes this detect a real core, this test has to change**, and
-   * that is the point of asserting it now. The change becomes visible in a
-   * diff instead of happening quietly.
+   * A caller that does not call `loadCore` still sees false. The wasm package
+   * is a build artefact, so a clean import has no core. `load.test.ts` is
+   * what flips the flag, and only after the initialiser returns.
    */
-  it("reports no core until one is built", () => {
+  it("reports no core until one is loaded", () => {
     expect(coreAvailable()).toBe(false);
   });
 

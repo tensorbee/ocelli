@@ -191,6 +191,18 @@ pub enum VolumeError {
         /// The cosine between the inter-slice vector and the normal.
         cosine: f64,
     },
+    /// Neighbouring lateral steps do not share one vector.
+    #[error("the lateral steps disagree by {millimetres} mm")]
+    InconsistentShear {
+        /// The distance between two lateral steps, in millimetres.
+        millimetres: f64,
+    },
+    /// The largest lateral step is at or under 1e-6 mm.
+    ///
+    /// That stack belongs to [`Volume::assemble`]. A later step above the
+    /// bound is kept by [`TiltedVolume`] when the steps agree.
+    #[error("the stack has no lateral step above 1e-6 mm")]
+    OrthogonalStack,
     /// Mixed orientations reached assembly. Frames of reference are
     /// grouping's concern in `group_volumes`, because slice evidence
     /// carries no frame of reference for assembly to compare.
@@ -453,6 +465,69 @@ pub struct Volume {
     pub order: Vec<usize>,
 }
 
+/// A stack whose inter-slice step keeps one shared lateral component.
+///
+/// [`Volume::assemble`] still returns [`VolumeError::ShearedVolume`] for the
+/// same candidate. The store uses the source slice dimensions and is cleared.
+/// Samples are not copied onto another grid. The gantry tilt tag is not read.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TiltedVolume {
+    /// Voxel dimensions, x then y then z.
+    pub dims: [u32; 3],
+    /// Millimetre spacing: between columns, between rows, and the projected gap.
+    pub spacing: [f64; 3],
+    /// What one voxel holds.
+    pub voxel: VoxelKind,
+    /// The cleared source-sized allocation.
+    pub data: VoxelStore,
+    /// The first slice's `ImagePositionPatient`, the centre of voxel zero.
+    pub origin: Pt<World>,
+    /// The direction matrix from `ImageOrientationPatient` and the normal.
+    pub direction: DMat3,
+    /// The longest inter-slice lateral step, in patient millimetres.
+    ///
+    /// Equal lengths keep the earlier step. The step runs from sorted
+    /// position `n` to `n + 1`. [`Self::order`] is that sort, so a
+    /// descending arrival order does not reverse it.
+    pub lateral: [f64; 3],
+    /// The arrival index of each slice in sorted order.
+    pub order: Vec<usize>,
+}
+
+impl TiltedVolume {
+    /// The length of [`Self::lateral`], in millimetres.
+    #[must_use]
+    pub fn lateral_length(&self) -> f64 {
+        DVec3::from_array(self.lateral).length()
+    }
+
+    /// Assemble a tilted candidate, or refuse it.
+    ///
+    /// The duplicate bound, the sort and the 0.5 percent spacing rule are
+    /// shared with [`Volume::assemble`]. The largest lateral step at or
+    /// under 1e-6 mm is [`VolumeError::OrthogonalStack`]. A later lateral
+    /// step more than 1e-6 mm from the first is
+    /// [`VolumeError::InconsistentShear`].
+    ///
+    /// # Errors
+    ///
+    /// Every shared [`VolumeError`] from [`Volume::assemble`] except
+    /// [`VolumeError::ShearedVolume`], plus the two refusals above.
+    pub fn assemble(candidate: VolumeCandidate) -> Result<Self, VolumeError> {
+        let prepared = prepare(&candidate, Shear::Keep)?;
+        Ok(Self {
+            dims: prepared.dims,
+            spacing: prepared.spacing,
+            voxel: prepared.voxel,
+            data: VoxelStore::new(prepared.dims, prepared.voxel),
+            origin: Pt::new(prepared.origin.x, prepared.origin.y, prepared.origin.z),
+            direction: prepared.direction,
+            lateral: prepared.lateral.to_array(),
+            order: prepared.order,
+        })
+    }
+}
+
 impl Volume {
     /// The brick grid of this volume at level 0.
     ///
@@ -486,127 +561,22 @@ impl Volume {
     }
 
     fn assemble_from(candidate: &VolumeCandidate) -> Result<Self, VolumeError> {
-        if candidate.slices.len() < 2 {
-            return Err(VolumeError::TooFewSlices);
-        }
-        let first = candidate.slices.first().ok_or(VolumeError::TooFewSlices)?;
-        let first_plane = first.frame.plane();
-        let (dims, voxel) = describe(first)?;
-        for evidence in &candidate.slices {
-            let plane = evidence.frame.plane();
-            if plane.orientation != candidate.orientation {
-                return Err(VolumeError::NotOneVolume);
-            }
-            let (held_dims, held_kind) = describe(evidence)?;
-            if held_dims != dims || held_kind != voxel {
-                return Err(VolumeError::InconsistentDimensions);
-            }
-            // One volume has one spacing and one slice length. Evidence
-            // that disagrees on in-plane spacing, or carries more than one
-            // sample per pixel so its frames could never be placed whole,
-            // is not one volume, and the answer must not depend on which
-            // slice arrived first.
-            if plane.spacing() != first_plane.spacing()
-                || evidence.frame.description().layout.samples_per_pixel() != 1
-            {
-                return Err(VolumeError::InconsistentSpacing);
-            }
-        }
-        let normal: DVec3 = first_plane.slice_normal();
-        let mut projected: Vec<(f64, DVec3, usize)> = candidate
-            .slices
-            .iter()
-            .enumerate()
-            .map(|(arrival, evidence)| {
-                let plane = evidence.frame.plane();
-                (
-                    plane.position_vector().dot(normal),
-                    plane.position_vector(),
-                    arrival,
-                )
-            })
-            .collect();
-        projected.sort_by(|left, right| {
-            left.0
-                .partial_cmp(&right.0)
-                .unwrap_or(core::cmp::Ordering::Equal)
-        });
-        for pair in projected.windows(2) {
-            if let [lower, upper] = pair {
-                // The duplicate bound is 1e-9 mm, a nanometre. Projected
-                // positions are f64 dot products of millimetre values, whose
-                // noise is far below this, and a real duplicate is exact, so
-                // the bound separates the two without a judgement call.
-                if (upper.0 - lower.0).abs() <= 1e-9 {
-                    return Err(VolumeError::DuplicatePosition { at: upper.0 });
-                }
-                let vector = upper.1 - lower.1;
-                let lateral = vector - normal * (upper.0 - lower.0);
-                // The shear bound is 1e-6 mm of lateral step, a micrometre,
-                // on the same reasoning: geometry noise is far below it and
-                // a real shear step is millimetres.
-                if lateral.length() > 1e-6 {
-                    return Err(VolumeError::ShearedVolume {
-                        cosine: vector.normalize().dot(normal).abs(),
-                    });
-                }
-            }
-        }
-        let gaps: Vec<f64> = projected
-            .windows(2)
-            .map(|pair| {
-                let upper = pair.get(1).map(|held| held.0).unwrap_or(0.0);
-                let lower = pair.first().map(|held| held.0).unwrap_or(0.0);
-                upper - lower
-            })
-            .collect();
-        let median = median(&gaps);
-        let mut worst = median;
-        let mut worst_index = 0_usize;
-        let mut worst_departure = 0.0_f64;
-        for (index, gap) in gaps.iter().enumerate() {
-            let departure = (gap - median).abs();
-            if departure > worst_departure {
-                worst_departure = departure;
-                worst = *gap;
-                worst_index = index;
-            }
-        }
-        if worst_departure > median.abs() * 0.005 {
-            return Err(VolumeError::NonUniformSpacing {
-                median,
-                worst,
-                index: worst_index,
-            });
-        }
-        let count = u32::try_from(projected.len()).unwrap_or(u32::MAX);
-        let volume_dims = [dims[0], dims[1], count];
-        let spacing = [
-            first_plane.spacing().column_mm(),
-            first_plane.spacing().row_mm(),
-            median,
-        ];
-        let origin_position = projected
-            .first()
-            .map(|(_, position, _)| *position)
-            .unwrap_or(DVec3::ZERO);
-        let order: Vec<usize> = projected.iter().map(|(_, _, arrival)| *arrival).collect();
-        let orientation = first_plane.orientation;
-        let direction = DMat3::from_cols(orientation.row(), orientation.column(), normal);
+        let prepared = prepare(candidate, Shear::Refuse)?;
+        let count = u32::try_from(prepared.order.len()).unwrap_or(u32::MAX);
         Ok(Self {
-            dims: volume_dims,
-            spacing,
-            origin: Pt::new(origin_position.x, origin_position.y, origin_position.z),
-            direction,
-            voxel,
-            data: VoxelStore::new(volume_dims, voxel),
+            dims: prepared.dims,
+            spacing: prepared.spacing,
+            origin: Pt::new(prepared.origin.x, prepared.origin.y, prepared.origin.z),
+            direction: prepared.direction,
+            voxel: prepared.voxel,
+            data: VoxelStore::new(prepared.dims, prepared.voxel),
             levels: alloc::vec![Level {
-                dims: volume_dims,
-                spacing,
+                dims: prepared.dims,
+                spacing: prepared.spacing,
                 offset: 0,
             }],
             present: SlicePresence::new(count),
-            order,
+            order: prepared.order,
         })
     }
 
@@ -872,6 +842,191 @@ impl Budgeted for Volume {
     fn bytes(&self) -> usize {
         self.data.len()
     }
+}
+
+/// Lateral length, in millimetres, that splits the two constructors.
+///
+/// A longer step is shear to [`Volume::assemble`] and a tilted volume to
+/// [`TiltedVolume::assemble`]. A step at or under this bound is orthogonal.
+/// Two tilted steps may disagree by at most this length. A real shear is
+/// millimetres, and dot-product noise sits far below a micrometre.
+const LATERAL_BOUND_MM: f64 = 1e-6;
+
+/// Whether assembly refuses a lateral step or keeps one shared step.
+enum Shear {
+    Refuse,
+    Keep,
+}
+
+struct Prepared {
+    dims: [u32; 3],
+    spacing: [f64; 3],
+    origin: DVec3,
+    direction: DMat3,
+    voxel: VoxelKind,
+    order: Vec<usize>,
+    lateral: DVec3,
+}
+
+fn prepare(candidate: &VolumeCandidate, shear: Shear) -> Result<Prepared, VolumeError> {
+    if candidate.slices.len() < 2 {
+        return Err(VolumeError::TooFewSlices);
+    }
+    let first = candidate.slices.first().ok_or(VolumeError::TooFewSlices)?;
+    let first_plane = first.frame.plane();
+    let (dims, voxel) = describe(first)?;
+    for evidence in &candidate.slices {
+        let plane = evidence.frame.plane();
+        if plane.orientation != candidate.orientation {
+            return Err(VolumeError::NotOneVolume);
+        }
+        let (held_dims, held_kind) = describe(evidence)?;
+        if held_dims != dims || held_kind != voxel {
+            return Err(VolumeError::InconsistentDimensions);
+        }
+        // One volume has one spacing and one slice length. Evidence
+        // that disagrees on in-plane spacing, or carries more than one
+        // sample per pixel so its frames could never be placed whole,
+        // is not one volume, and the answer must not depend on which
+        // slice arrived first.
+        if plane.spacing() != first_plane.spacing()
+            || evidence.frame.description().layout.samples_per_pixel() != 1
+        {
+            return Err(VolumeError::InconsistentSpacing);
+        }
+    }
+    let normal: DVec3 = first_plane.slice_normal();
+    let mut projected: Vec<(f64, DVec3, usize)> = candidate
+        .slices
+        .iter()
+        .enumerate()
+        .map(|(arrival, evidence)| {
+            let plane = evidence.frame.plane();
+            (
+                plane.position_vector().dot(normal),
+                plane.position_vector(),
+                arrival,
+            )
+        })
+        .collect();
+    projected.sort_by(|left, right| {
+        left.0
+            .partial_cmp(&right.0)
+            .unwrap_or(core::cmp::Ordering::Equal)
+    });
+    let mut first_lateral: Option<DVec3> = None;
+    let mut peak_lateral: Option<DVec3> = None;
+    let mut disagreement = 0.0_f64;
+    for pair in projected.windows(2) {
+        if let [lower, upper] = pair {
+            // The duplicate bound is 1e-9 mm, a nanometre. Projected
+            // positions are f64 dot products of millimetre values, whose
+            // noise is far below this, and a real duplicate is exact, so
+            // the bound separates the two without a judgement call.
+            if (upper.0 - lower.0).abs() <= 1e-9 {
+                return Err(VolumeError::DuplicatePosition { at: upper.0 });
+            }
+            let vector = upper.1 - lower.1;
+            let lateral = vector - normal * (upper.0 - lower.0);
+            match shear {
+                // The shear bound is 1e-6 mm of lateral step, a micrometre,
+                // on the same reasoning: geometry noise is far below it and
+                // a real shear step is millimetres.
+                Shear::Refuse => {
+                    if lateral.length() > LATERAL_BOUND_MM {
+                        return Err(VolumeError::ShearedVolume {
+                            cosine: vector.normalize().dot(normal).abs(),
+                        });
+                    }
+                }
+                Shear::Keep => {
+                    let longer = match peak_lateral {
+                        Some(held) => lateral.length() > held.length(),
+                        None => true,
+                    };
+                    if longer {
+                        peak_lateral = Some(lateral);
+                    }
+                    match first_lateral {
+                        None => first_lateral = Some(lateral),
+                        Some(held) => {
+                            let step = (lateral - held).length();
+                            if step > disagreement {
+                                disagreement = step;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let gaps: Vec<f64> = projected
+        .windows(2)
+        .map(|pair| {
+            let upper = pair.get(1).map(|held| held.0).unwrap_or(0.0);
+            let lower = pair.first().map(|held| held.0).unwrap_or(0.0);
+            upper - lower
+        })
+        .collect();
+    let median = median(&gaps);
+    let mut worst = median;
+    let mut worst_index = 0_usize;
+    let mut worst_departure = 0.0_f64;
+    for (index, gap) in gaps.iter().enumerate() {
+        let departure = (gap - median).abs();
+        if departure > worst_departure {
+            worst_departure = departure;
+            worst = *gap;
+            worst_index = index;
+        }
+    }
+    if worst_departure > median.abs() * 0.005 {
+        return Err(VolumeError::NonUniformSpacing {
+            median,
+            worst,
+            index: worst_index,
+        });
+    }
+    let lateral = match shear {
+        Shear::Refuse => DVec3::ZERO,
+        Shear::Keep => {
+            if disagreement > LATERAL_BOUND_MM {
+                return Err(VolumeError::InconsistentShear {
+                    millimetres: disagreement,
+                });
+            }
+            let Some(lateral) = peak_lateral else {
+                return Err(VolumeError::OrthogonalStack);
+            };
+            if lateral.length() <= LATERAL_BOUND_MM {
+                return Err(VolumeError::OrthogonalStack);
+            }
+            lateral
+        }
+    };
+    let count = u32::try_from(projected.len()).unwrap_or(u32::MAX);
+    let volume_dims = [dims[0], dims[1], count];
+    let spacing = [
+        first_plane.spacing().column_mm(),
+        first_plane.spacing().row_mm(),
+        median,
+    ];
+    let origin = projected
+        .first()
+        .map(|(_, position, _)| *position)
+        .unwrap_or(DVec3::ZERO);
+    let order: Vec<usize> = projected.iter().map(|(_, _, arrival)| *arrival).collect();
+    let orientation = first_plane.orientation;
+    let direction = DMat3::from_cols(orientation.row(), orientation.column(), normal);
+    Ok(Prepared {
+        dims: volume_dims,
+        spacing,
+        origin,
+        direction,
+        voxel,
+        order,
+        lateral,
+    })
 }
 
 fn describe(evidence: &SliceEvidence) -> Result<([u32; 2], VoxelKind), VolumeError> {

@@ -19,13 +19,14 @@
  * F-035 publishes the section 24 handoff from `bulk.ts`.
  * F-100 publishes the viewport, scene and tool types from `viewport.ts`.
  * F-101 publishes command packing and the copied ring drain. `coreAvailable()`
- * stays false until a built module is loaded.
+ * stays false until `loadCore` resolves true. F-198 is that load.
  * F-078 publishes arrow, label, key image and ETDRS display-list marks.
  */
 
 export {
   acceptTransferredFrame,
   exportDecodedFrame,
+  holdSessionBytes,
   sessionBulkSink,
   transferredFrameMessage,
   writeDicomwebResponse,
@@ -47,6 +48,8 @@ export type {
 } from "./bulk.js";
 
 export { DicomwebClient, DicomwebError } from "./dicomweb.js";
+export { postWadoInstance } from "./instance-bytes.js";
+export type { WadoInstanceRequest } from "./instance-bytes.js";
 export type {
   DicomwebClientOptions,
   DicomwebErrorCode,
@@ -231,6 +234,12 @@ export { loadMeasurements, persistMeasurements } from "./measurement-persist.js"
 export { readTid1500, writeTid1500 } from "./tid1500.js";
 export type { TidSource } from "./tid1500.js";
 
+export { readKeyObject, writeKeyObject } from "./tid2010.js";
+export type { KeyObjectDocument, KeyObjectRequest } from "./tid2010.js";
+
+export { readSecondaryCapture, writeSecondaryCapture } from "./secondary-capture.js";
+export type { SecondaryCaptureImage, SecondaryCaptureRequest } from "./secondary-capture.js";
+
 export { disableElement, dispatchOnElement, enableElement } from "./seam.js";
 export type { ElementSeam, SeamEvent } from "./seam.js";
 
@@ -355,14 +364,4 @@ export type {
 /** Package version, kept in step with the crate versions by `/release`. */
 export const VERSION = "0.1.0";
 
-/**
- * Whether a built core is present.
- *
- * The wasm module is produced by `bin/ocelli.sh wasm` into
- * `crates/ocelli-wasm/pkg` and is not committed, so a clean clone has no core.
- * The example viewer uses this to render an honest "core not built" state
- * instead of failing to start.
- */
-export function coreAvailable(): boolean {
-  return false;
-}
+export { coreAvailable, loadCore } from "./load.js";

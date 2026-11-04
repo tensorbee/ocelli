@@ -1,7 +1,7 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055, F-056, F-X004
-**Last updated:** 2026-11-01
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055, F-056, F-X004, F-197
+**Last updated:** 2026-11-04
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
 `ImagePositionPatient` projected on the slice normal, DICOM PS3.3
@@ -17,6 +17,7 @@ C.7.6.2.1.1. `SpacingBetweenSlices`, `SliceThickness`, `SliceLocation`,
 | `SliceEvidence` | One `DecodedFrame` offered as a slice |
 | `VolumeCandidate` | Slices that share a frame of reference and an orientation |
 | `Volume` | Section 19's struct over one `VoxelStore` |
+| `TiltedVolume` | The same cleared store, projected spacing, sort, origin and direction, plus one shared lateral step |
 | `VoxelStore` | One contiguous `Vec<u8>`, x fastest, then y, then z |
 | `Level` | Level 0 is full resolution at offset 0. Later entries are caller-supplied coarser levels on the same store |
 | `SlicePresence` | One bit per slice over `Vec<u64>`. Deviation D-25 |
@@ -68,8 +69,20 @@ duplicate is exact, and dot-product noise sits far below a nanometre.
 
 Shear is the part of the inter-slice vector that is not parallel to the
 normal. A lateral step above 1e-6 mm is `ShearedVolume`. The tilt tag is not
-consulted. A sheared series is a parallelepiped and this story refuses it
-rather than storing it as a box.
+consulted. A sheared series is a parallelepiped and `Volume::assemble`
+refuses it rather than storing it as a box.
+
+`TiltedVolume::assemble` keeps that same stack. The voxel store has the
+source slice dimensions and is cleared, so the samples are not copied onto
+another grid. Projected spacing is the same median gap. The stored lateral
+step is the longest inter-slice lateral component, in millimetres. Equal
+lengths keep the earlier step. A later step must agree with the first
+within 1e-6 mm. The longest step at or under 1e-6 mm is `OrthogonalStack`,
+so an orthogonal stack stays on `Volume::assemble`.
+`order`, `origin` and `direction` are the projected sort, the lowest slice
+position and the row, column and normal matrix. The 1e-9 mm duplicate bound
+and the 0.5 percent spacing rule are the same checks. The gantry tilt tag
+is still not read.
 
 `order[n]` is the arrival index of the slice that landed at sorted position
 `n`. `Volume::construct` copies each slice's stored samples to that position.

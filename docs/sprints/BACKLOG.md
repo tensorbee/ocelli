@@ -63,7 +63,8 @@ print('sprints', len({x['sprint'] for x in s if x['sprint']}),
 
 _Counting rule. Each F-ID is counted exactly once, in the milestone it
 occupies. Phase 2 and Phase 3 rows carry no milestone and no sprint, they are
-tracked but unscheduled._
+tracked but unscheduled. F-202 is Phase 1 and has the same empty milestone
+and sprint. The one-liner counts it with the other unscheduled rows._
 
 _HLD section 38 states Phase 1 grows from 382 to 397 engineer-weeks to carry
 the five Part III hooks, which are F-008 (E1.8), F-015 (E2.7), F-036 (E5.6),
@@ -330,10 +331,10 @@ The series-open gaps that Phase 1 left in the core, then the example viewer call
 | F-192 | E38.2 | S42 | Series assembly: order by projected position, split mixed series, temporal axis, cine timing with loop and bounce | Rust | 5w | F-051, F-047 | done |
 | F-193 | E38.3 | S42 | Overlay planes PS3.3 C.9.2 and display shutters PS3.3 C.7.6.11 and C.7.6.15 | Rust | 3w | F-019, F-029 | done |
 | F-194 | E38.4 | S42 | Stack display interpolation, nearest and linear, declared on tiers A, B and C | Rust | 3w | F-042, F-045 | done |
-| F-195 | E38.5 | S43 | Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours | Rust | 4w | F-049, F-075 | pending |
-| F-196 | E38.6 | S43 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w | F-097 | pending |
-| F-197 | E38.7 | S43 | Volume from a gantry-tilted stack | Rust | 3w | F-051, F-049 | pending |
-| F-198 | E38.8 | S43 | Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source | TS | 4w | F-191, F-192, F-194, F-112 | pending |
+| F-195 | E38.5 | S43 | Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours | Rust | 4w | F-049, F-075 | done |
+| F-196 | E38.6 | S43 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w | F-097 | done |
+| F-197 | E38.7 | S43 | Volume from a gantry-tilted stack | Rust | 3w | F-051, F-049 | done |
+| F-198 | E38.8 | S43 | Example viewer loads one wasm worker, publishes one stored sample, reports the resolved tier, and posts one WADO-RS envelope | TS | 4w | F-191, F-192, F-194, F-112 | done |
 | F-199 | E38.9 | S44 | Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion | TS | 4w | F-198, F-197, F-088 | pending |
 | F-200 | E38.10 | S44 | Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings | TS | 4w | F-198, F-193, F-091 | pending |
 | F-201 | E38.11 | S44 | Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences | TS | 4w | F-198, F-195, F-196 | pending |
@@ -417,10 +418,13 @@ Radiology and pathology in one scene graph, sharing one annotation coordinate mo
 Tracked, unscheduled. No sprint is assigned and no milestone claims
 them. They exist here so a Phase 1 design that would make one of them
 expensive is visible at design time, which is the whole point of HLD
-section 13.
+section 13. F-202 is a Phase 1 row in this table. It has no sprint. It is
+worker decode of a posted WADO-RS envelope, the frame cache, and a render
+of that frame.
 
 | F-ID | Epic ref | Phase | Epic | Story | Layer | Est | Status |
 |------|----------|-------|------|-------|-------|-----|--------|
+| F-202 | E38.12 | P1 | E38 Series open | Worker decode of a posted WADO-RS envelope, the frame cache, and a render of that frame | TS | 4w | pending |
 | F-158 | E20.1 | P2 | E20 DICOM gateway (adopt, do not build) | Deploy and harden Orthanc or dcm4che as the DIMSE edge | Server | 6w | pending |
 | F-159 | E20.2 | P2 | E20 DICOM gateway (adopt, do not build) | C-STORE, C-FIND, C-MOVE and C-ECHO configuration with TLS | Server | 5w | pending |
 | F-160 | E20.3 | P2 | E20 DICOM gateway (adopt, do not build) | Autorouting rules and always-on listener operations | Server | 5w | pending |

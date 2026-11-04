@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198
+**Last updated:** 2026-11-04
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -101,18 +101,19 @@ F-101 adds `alloc`, `bulk_ticket`, `release_bulk`, `apply_commands`,
 `commit_frame`, `configure_stack`, `commit_selected_frame`, `copy_state`,
 `drain_events` and `ring_capacity` on wasm32, plus the CPU canvas set
 `bindCpuCanvas`, `resizeCpuCanvas`, `publishCpuCanvas`, `publishCpuColor` and
-`publishCpuInteraction`. There is no `ring_ptr` and no pixel getter. A pointer
-would be a view over linear memory, and the drain export copies bytes out
-instead. `coreAvailable()` stays false until a built module is loaded.
-The render size budget is `ci/wasm-size-budget.json`. F-110 did not edit it.
-The measurement on 2026-11-03 stayed inside the recorded band.
+`publishCpuInteraction`. F-198 adds `resolvedTier`. There is no `ring_ptr` and
+no pixel getter. A pointer would be a view over linear memory, and the drain
+export copies bytes out instead. `coreAvailable()` stays false until `loadCore`
+resolves true. The render size budget is `ci/wasm-size-budget.json`. F-110 did not
+edit it. The measurement on 2026-11-03 stayed inside the recorded band.
 
 `ocelli_version` exists for measurement rather than for features. Fat LTO with `strip =
 true` lets the linker discard anything unreachable, so a module with no
 exported root would measure the size of nothing. It also meets a real seam:
 `packages/core/src/index.ts` carries a `VERSION` constant and a
-`coreAvailable()` that returns `false` because no core has ever been built,
-and this is the value those eventually agree with.
+`coreAvailable()` that stays false until `loadCore` resolves true. `ocelli_version`
+returns `CARGO_PKG_VERSION`, the same `0.1.0` text as `VERSION`. `resolvedTier`
+reports the tier `resolve` kept and does not substitute the CPU canvas path.
 
 Its test asserts the literal `"0.1.0"` rather than `env!("CARGO_PKG_VERSION")`.
 The obvious form restates the function body, so it passes whatever the body

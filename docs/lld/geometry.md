@@ -1,7 +1,7 @@
 # Geometry
 
-**F-IDs that contributed:** F-070, F-073, F-074, F-075, F-076, F-077, F-079
-**Last updated:** 2026-11-02
+**F-IDs that contributed:** F-070, F-073, F-074, F-075, F-076, F-077, F-079, F-195
+**Last updated:** 2026-11-04
 
 Hit-testing, projection and measurement in `ocelli-geom`. The HLD names the
 crate and does not give the formulas. The rules below are the local
@@ -10,7 +10,8 @@ decisions in `.claude/plans/F-070-design.md`,
 `.claude/plans/F-075-design.md`,
 `.claude/plans/F-076-design.md`,
 `.claude/plans/F-077-design.md` and
-`.claude/plans/F-079-design.md`.
+`.claude/plans/F-079-design.md` and
+`.claude/plans/F-195-design.md`.
 
 The functions take `Pt<S>`. They do not convert spaces. A canvas point is
 measured in canvas units and a world point in millimetres. The caller
@@ -110,7 +111,9 @@ other than BQML, or a weight, dose or half-life that is not strictly
 positive, or a negative elapsed time, is unavailable. Negative zero elapsed
 time is zero. A non-finite input or a non-finite result is
 `Frame`. There is no default weight. `SuvError::Frame` is 402 and
-`SuvError::Unavailable` is 403.
+`SuvError::Unavailable` is 403. `suv_lbm`, `suv_bsa`, spacing provenance,
+length ratio and contour volume are specified in
+[calibration.md](calibration.md). `suv_bw` is unchanged.
 
 ## Polygon and spline
 

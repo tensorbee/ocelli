@@ -11,7 +11,9 @@
 //! `.claude/plans/F-073-design.md`, `.claude/plans/F-074-design.md` and
 //! `.claude/plans/F-076-design.md`. F-075 adds ROI statistics, a histogram
 //! and SUVbw in [`stats`]. Those numbers are not a second area and not the
-//! modality LUT. F-077 adds [`livewire_path`] and [`livewire_mask`]. The
+//! modality LUT. F-195 adds calibration provenance, SUVlbm, SUVbsa, a length
+//! ratio and a contour volume. Those numbers share the F-075 decay and are
+//! not a second length. F-077 adds [`livewire_path`] and [`livewire_mask`]. The
 //! mask marks visited pixels and does not fill an interior.
 //! [`polygon_area`] stays the F-076 function. F-079 adds
 //! [`ultrasound_direction`] and [`redact_rect`]. The angle is the image
@@ -23,11 +25,16 @@
 
 extern crate alloc;
 
+mod calibration;
 mod livewire;
 mod measure;
 mod redact;
 mod stats;
 
+pub use calibration::{
+    Calibration, CalibrationRequest, CalibrationSource, SpacingMm, contour_volume, length_ratio,
+    select_calibration,
+};
 pub use livewire::{livewire_mask, livewire_path};
 pub use measure::{
     Bidirectional, Circle, GeomError, Rectangle, SegmentProjection, angle_at, bidirectional,
@@ -35,7 +42,10 @@ pub use measure::{
     project_onto_plane, project_onto_segment, rectangle, spline_point,
 };
 pub use redact::{Direction, Redaction, redact_rect, ultrasound_direction};
-pub use stats::{Histogram, RoiStats, SuvError, SuvInputs, histogram, roi_statistics, suv_bw};
+pub use stats::{
+    Histogram, RoiStats, SuvActivity, SuvError, SuvInputs, histogram, roi_statistics, suv_bsa,
+    suv_bw, suv_lbm,
+};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.

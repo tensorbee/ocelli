@@ -1,7 +1,7 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198
+**Last updated:** 2026-11-04
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
@@ -181,16 +181,12 @@ does not touch it.
 
 ## The absent-core seam
 
-`packages/core/src/index.ts` exports `coreAvailable()`, which returns `false`.
-A clean clone has no built wasm core, so that is the honest answer rather than
-a failure to start, and the example viewer uses it to render a "core not built"
-state.
-
-It stays literally true after F-002, which produces
-`crates/ocelli-wasm/pkg` on a machine that ran the build. What changed is that
-the function now has a real question to answer. **Answering it belongs to
-F-101**, and a test asserts the current answer so that the change is visible in
-a diff rather than happening quietly.
+`packages/core/src/index.ts` exports `coreAvailable()` and `loadCore()`.
+`coreAvailable()` stays false until `loadCore` resolves true.
+A clean clone has no built wasm core. The example page stays on "core not built"
+when that load resolves false.
+A test that imports `coreAvailable` and does not call `loadCore` still expects
+false.
 
 `VERSION` is asserted against a literal for the same reason
 `ocelli_version()`'s test in `crates/ocelli-wasm` is: comparing the constant

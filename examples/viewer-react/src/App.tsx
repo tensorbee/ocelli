@@ -1,7 +1,16 @@
-import { coreAvailable, VERSION, viewportId } from "@ocelli/core";
+import {
+  readKeyObject,
+  readSecondaryCapture,
+  VERSION,
+  viewportId,
+  writeKeyObject,
+  writeSecondaryCapture,
+} from "@ocelli/core";
 import { OcelliViewport } from "@ocelli/react";
 import type { OcelliSession } from "@ocelli/react";
 import { useState } from "react";
+
+import { CorePanel } from "./core-panel.js";
 
 /**
  * The example viewer.
@@ -12,8 +21,9 @@ import { useState } from "react";
  *
  * A clean clone has no built wasm module, so the honest state is "core not
  * built" rather than a crash. F-002 (`bin/ocelli.sh wasm`) produces the
- * module. This story does not load that module. The factory returns null,
- * and the viewport stays absent until a caller supplies a session.
+ * module. The wasm core section loads it in one worker when the package
+ * directory is present. This factory still returns null. The stack viewport
+ * stays absent until a caller supplies a session.
  */
 function sessionFromModule(): OcelliSession | null {
   return null;
@@ -706,6 +716,113 @@ function InterpolatePanel() {
   );
 }
 
+interface CalibrationView {
+  source: string;
+  rowMm: number;
+  columnMm: number;
+  suvLbm: number;
+  suvBsa: number;
+  lengthRatio: number;
+  contourVolume: number;
+}
+
+function readCalibration(value: unknown): CalibrationView | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.source !== "string" ||
+    typeof record.rowMm !== "number" ||
+    typeof record.columnMm !== "number" ||
+    typeof record.suvLbm !== "number" ||
+    typeof record.suvBsa !== "number" ||
+    typeof record.lengthRatio !== "number" ||
+    typeof record.contourVolume !== "number"
+  ) {
+    return null;
+  }
+  return {
+    source: record.source,
+    rowMm: record.rowMm,
+    columnMm: record.columnMm,
+    suvLbm: record.suvLbm,
+    suvBsa: record.suvBsa,
+    lengthRatio: record.lengthRatio,
+    contourVolume: record.contourVolume,
+  };
+}
+
+function CalibrationPanel() {
+  const [view, setView] = useState<CalibrationView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function run(): Promise<void> {
+    setPending(true);
+    setProblem(null);
+    try {
+      const response = await fetch("/calibration", {
+        method: "POST",
+        body: "synthetic",
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        setProblem("The calibration request was refused.");
+        return;
+      }
+      const parsed: unknown = JSON.parse(text);
+      const next = readCalibration(parsed);
+      if (next === null) {
+        setProblem("The calibration response could not be read.");
+        return;
+      }
+      setView(next);
+    } catch {
+      setProblem("The calibration helper is not running.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section>
+      <h2>Calibration</h2>
+      <p>
+        The synthetic button uses imager spacing 0.2 mm and a magnification
+        factor of 2. Patient spacing is the imager spacing divided by that
+        factor. SUV by lean body mass and by body surface area use the same
+        decay as body-weight SUV. The length ratio is 4 over 2. The contour
+        volume is spacing 5 mm times areas 10 and 20.
+      </p>
+      <p>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            void run();
+          }}
+        >
+          Synthetic calibration
+        </button>
+      </p>
+      {problem !== null && <p>{problem}</p>}
+      {view !== null && (
+        <div>
+          <p>Source {view.source}</p>
+          <p>
+            Spacing {view.rowMm.toString()} mm by {view.columnMm.toString()} mm
+          </p>
+          <p>SUVlbm {view.suvLbm.toString()}</p>
+          <p>SUVbsa {view.suvBsa.toString()}</p>
+          <p>Length ratio {view.lengthRatio.toString()}</p>
+          <p>Contour volume {view.contourVolume.toString()}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FrameOpenPanel() {
   const [view, setView] = useState<FrameOpenView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -786,8 +903,178 @@ function FrameOpenPanel() {
   );
 }
 
+interface DocumentView {
+  title: string;
+  referencedClass: string;
+  referencedInstance: string;
+  pixels: string;
+}
+
+function DocumentPanel() {
+  const [view, setView] = useState<DocumentView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  function run(): void {
+    setProblem(null);
+    const keyBytes = writeKeyObject({
+      title: "Key image",
+      study: "2.25.1961",
+      series: "2.25.1962",
+      instance: "2.25.1963",
+      referencedClass: "1.2.840.10008.5.1.4.1.1.2",
+      referencedInstance: "2.25.1964",
+    });
+    const captureBytes = writeSecondaryCapture({
+      study: "2.25.1965",
+      series: "2.25.1966",
+      instance: "2.25.1967",
+      columns: 2,
+      rows: 2,
+      pixels: new Uint8Array([0, 1, 2, 3]),
+    });
+    if (keyBytes === null || captureBytes === null) {
+      setView(null);
+      setProblem("The document was refused.");
+      return;
+    }
+    const key = readKeyObject(keyBytes);
+    const capture = readSecondaryCapture(captureBytes);
+    if (key === null || capture === null) {
+      setView(null);
+      setProblem("The document could not be read.");
+      return;
+    }
+    setView({
+      title: key.title,
+      referencedClass: key.referencedClass,
+      referencedInstance: key.referencedInstance,
+      pixels: Array.from(capture.pixels).join(", "),
+    });
+  }
+
+  return (
+    <section>
+      <h2>Key object and secondary capture</h2>
+      <p>
+        The synthetic button writes a TID 2010 key object titled Key image and
+        a 2 by 2 secondary capture of bytes 0, 1, 2 and 3. The study, series
+        and instance identifiers are synthetic 2.25 values. The capture is
+        8-bit MONOCHROME2 and has no window and no patient module.
+      </p>
+      <p>
+        <button
+          type="button"
+          onClick={() => {
+            run();
+          }}
+        >
+          Synthetic documents
+        </button>
+      </p>
+      {problem !== null && <p>{problem}</p>}
+      {view !== null && (
+        <div>
+          <p>Title {view.title}</p>
+          <p>Referenced class {view.referencedClass}</p>
+          <p>Referenced instance {view.referencedInstance}</p>
+          <p>Pixels {view.pixels}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+interface TiltView {
+  orthogonal: string;
+  spacingMm: number;
+  lateralMm: number;
+}
+
+function readTilt(value: unknown): TiltView | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.orthogonal !== "sheared" ||
+    typeof record.spacingMm !== "number" ||
+    typeof record.lateralMm !== "number"
+  ) {
+    return null;
+  }
+  return {
+    orthogonal: record.orthogonal,
+    spacingMm: record.spacingMm,
+    lateralMm: record.lateralMm,
+  };
+}
+
+function TiltPanel() {
+  const [view, setView] = useState<TiltView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function run(): Promise<void> {
+    setPending(true);
+    setProblem(null);
+    try {
+      const response = await fetch("/tilt", {
+        method: "POST",
+        body: "synthetic",
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        setProblem("The tilt request was refused.");
+        return;
+      }
+      const parsed: unknown = JSON.parse(text);
+      const next = readTilt(parsed);
+      if (next === null) {
+        setProblem("The tilt response could not be read.");
+        return;
+      }
+      setView(next);
+    } catch {
+      setProblem("The tilt helper is not running.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section>
+      <h2>Tilted volume</h2>
+      <p>
+        The synthetic button sends a stack that steps 3 mm along the normal
+        and 3 mm across the row axis. Orthogonal assembly refuses that stack.
+        Tilted assembly keeps the projected spacing and the lateral length.
+        The pixels stay in the slices they arrived in.
+      </p>
+      <p>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            void run();
+          }}
+        >
+          Synthetic tilt
+        </button>
+      </p>
+      {problem !== null && <p>{problem}</p>}
+      {view !== null && (
+        <div>
+          <p>Orthogonal {view.orthogonal}</p>
+          <p>Spacing {view.spacingMm.toString()} mm</p>
+          <p>Lateral {view.lateralMm.toString()} mm</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function App() {
-  const ready = coreAvailable();
+  const [ready, setReady] = useState(false);
   const session = sessionFromModule();
 
   return (
@@ -796,7 +1083,7 @@ export function App() {
         <h1>Ocelli example viewer</h1>
         <p>
           <code>@ocelli/core</code> {VERSION} &middot;{" "}
-          {ready ? "core ready" : "core not built"}
+          <span>{ready ? "core ready" : "core not built"}</span>
         </p>
       </header>
 
@@ -819,6 +1106,10 @@ export function App() {
       <SeriesOpenPanel />
       <OverlayPanel />
       <InterpolatePanel />
+      <CalibrationPanel />
+      <DocumentPanel />
+      <TiltPanel />
+      <CorePanel onAvailable={setReady} />
 
       <section>
         <h2>Stack viewport</h2>

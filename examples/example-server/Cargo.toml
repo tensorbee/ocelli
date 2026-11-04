@@ -13,7 +13,10 @@ publish = false
 workspace = true
 
 [dependencies]
+ocelli-cache = { path = "../../crates/ocelli-cache" }
 ocelli-core = { path = "../../crates/ocelli-core" }
+ocelli-geom = { path = "../../crates/ocelli-geom" }
 ocelli-dicom = { path = "../../crates/ocelli-dicom" }
 ocelli-pixel = { path = "../../crates/ocelli-pixel" }
 ocelli-render = { path = "../../crates/ocelli-render" }
+ocelli-volume = { path = "../../crates/ocelli-volume" }
