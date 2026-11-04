@@ -636,13 +636,13 @@ _S42 to S44, 11 stories, 43 engineer-weeks._
 
 #### Sprint S44
 
-**Goal**: Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion, Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings, Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences.
+**Goal**: Example layout grid, series drag, full screen, reference lines and reference cursor, Example presets, window drag, region window, rotate, flip, marker, magnifier, colour map, scale length, crop planes and error sentence, Example measurement document, annotation list, undo, TID 1500, key image mark, shortcut and touch.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
-| F-199 | E38.9 | Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion | TS | 4w |
-| F-200 | E38.10 | Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings | TS | 4w |
-| F-201 | E38.11 | Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences | TS | 4w |
+| F-199 | E38.9 | Example layout grid, series drag, full screen, reference lines and reference cursor | TS | 4w |
+| F-200 | E38.10 | Example presets, window drag, region window, rotate, flip, marker, magnifier, colour map, scale length, crop planes and error sentence | TS | 4w |
+| F-201 | E38.11 | Example measurement document, annotation list, undo, TID 1500, key image mark, shortcut and touch | TS | 4w |
 
 ### M14, Out-of-core volume streaming
 

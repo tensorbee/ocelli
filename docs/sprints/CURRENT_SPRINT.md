@@ -7,9 +7,9 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-199 | E38.9 | Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion | TS | 4w | pending |
-| F-200 | E38.10 | Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings | TS | 4w | pending |
-| F-201 | E38.11 | Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences | TS | 4w | pending |
+| F-199 | E38.9 | Example layout grid, series drag, full screen, reference lines and reference cursor | TS | 4w | pending |
+| F-200 | E38.10 | Example presets, window drag, region window, rotate, flip, marker, magnifier, colour map, scale length, crop planes and error sentence | TS | 4w | pending |
+| F-201 | E38.11 | Example measurement document, annotation list, undo, TID 1500, key image mark, shortcut and touch | TS | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -57,5 +57,8 @@ have reports unavailable. It does not invent a result.
 
 Each story's design names the example-page controls and the core functions
 they call. A backlog row is not marked done while it claims a control the
-page does not have. Layout, manipulation and measurement use the functions
-S42 and S43 already shipped. F-202 stays unscheduled.
+page does not have. The controls call functions already exported by
+`@ocelli/core`. They do not start a second renderer. Prior studies, linked
+scroll, synced window, MPR, slab, volume rendering, fusion, one to one,
+histogram, four corners, a metadata browser and preferences are unscheduled
+F-203, F-204 and F-205. F-202 stays unscheduled.

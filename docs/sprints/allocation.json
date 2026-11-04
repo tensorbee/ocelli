@@ -2569,7 +2569,7 @@
       "phase": "P1",
       "epic": "E38 Series open",
       "epic_key": "E38",
-      "story": "Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion",
+      "story": "Example layout grid, series drag, full screen, reference lines and reference cursor",
       "layer": "TS",
       "weeks": 4,
       "depends_eids": [
@@ -2592,7 +2592,7 @@
       "phase": "P1",
       "epic": "E38 Series open",
       "epic_key": "E38",
-      "story": "Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings",
+      "story": "Example presets, window drag, region window, rotate, flip, marker, magnifier, colour map, scale length, crop planes and error sentence",
       "layer": "TS",
       "weeks": 4,
       "depends_eids": [
@@ -2615,7 +2615,7 @@
       "phase": "P1",
       "epic": "E38 Series open",
       "epic_key": "E38",
-      "story": "Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences",
+      "story": "Example measurement document, annotation list, undo, TID 1500, key image mark, shortcut and touch",
       "layer": "TS",
       "weeks": 4,
       "depends_eids": [
@@ -2649,6 +2649,63 @@
       "sprint": "",
       "depends_fids": [
         "F-198"
+      ]
+    },
+    {
+      "fid": "F-203",
+      "eid": "E38.13",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Example prior studies, linked scroll, synced window and zoom, frame-of-reference cursor, MPR, slab, volume rendering and fusion",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.9"
+      ],
+      "notes": "Remainder of the narrowed F-199 title. No sprint.",
+      "milestone": "",
+      "sprint": "",
+      "depends_fids": [
+        "F-199"
+      ]
+    },
+    {
+      "fid": "F-204",
+      "eid": "E38.14",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Example one to one, histogram, four corners, and a shutter beyond the overlay panel",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.10"
+      ],
+      "notes": "Remainder of the narrowed F-200 title. No sprint.",
+      "milestone": "",
+      "sprint": "",
+      "depends_fids": [
+        "F-200"
+      ]
+    },
+    {
+      "fid": "F-205",
+      "eid": "E38.15",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Example metadata browser with compare and copy, export beyond the document panel, and preferences",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.11"
+      ],
+      "notes": "Remainder of the narrowed F-201 title. No sprint.",
+      "milestone": "",
+      "sprint": "",
+      "depends_fids": [
+        "F-201"
       ]
     },
     {
