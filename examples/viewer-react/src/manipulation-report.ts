@@ -32,6 +32,7 @@ export interface ManipulationInput {
   readonly magnifyScale: number | null;
   readonly millimetres: number;
   readonly pixelsPerMillimetre: number;
+  readonly cropPlaneCount: number;
   readonly code: number;
 }
 
@@ -75,6 +76,7 @@ export const PAGE_MANIPULATION: ManipulationInput = {
   magnifyScale: null,
   millimetres: 10,
   pixelsPerMillimetre: 2,
+  cropPlaneCount: 1,
   code: ERROR_CODE.Unavailable,
 };
 
@@ -96,6 +98,21 @@ export function isColormap(value: string): value is Colormap {
   return false;
 }
 
+function copiedPlanes(count: number) {
+  if (!Number.isInteger(count) || count < 0) {
+    return null;
+  }
+  const planes: {
+    origin: readonly [number, number, number];
+    normal: readonly [number, number, number];
+  }[] = [];
+  const built = count > 7 ? 7 : count;
+  for (let index = 0; index < built; index += 1) {
+    planes.push({ origin: [0, 0, 0], normal: [0, 0, 1] });
+  }
+  return cropPlanes(planes);
+}
+
 /** Preset, window, rotate, flip, marker, magnify, colour map, scale, crop, warning. */
 export function manipulationReport(input: ManipulationInput): ManipulationReport {
   const presetPacked = packCommands(1, [{ kind: "ApplyPreset", preset: input.preset }]);
@@ -115,9 +132,7 @@ export function manipulationReport(input: ManipulationInput): ManipulationReport
   const turned = rotationDrag(input.radians, input.originX, input.rotateLastX);
   const marked = orientationMarker(["R", "A", "L", "P"], input.markerQuadrant);
   const glass = magnifyCircle(4, 5, 8, input.magnifyScale);
-  const planes = cropPlanes([
-    { origin: [0, 0, 0], normal: [0, 0, 1] },
-  ]);
+  const planes = copiedPlanes(input.cropPlaneCount);
   return {
     preset: input.preset,
     presetBytes: presetPacked.byteLength,

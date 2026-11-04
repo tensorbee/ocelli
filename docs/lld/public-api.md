@@ -415,8 +415,10 @@ The example page manipulation section calls `windowDrag`, `windowRegion`,
 `describeError`. Preset, flip and colour map are packed for viewport 1
 and the page shows the packed length. The packed bytes are the command
 evidence. Window centre follows the horizontal drag and width follows
-the upward drag. The crop line is crop planes. It is not a display
-shutter. One to one, histogram and four corners read unavailable. Those
+the upward drag. The page can change the rotation drag, the magnify
+scale and the crop count. The default button uses rotation x 512, a
+null magnify scale and one plane. The crop line is crop planes. It is
+not a display shutter. One to one, histogram and four corners read unavailable. Those
 controls are F-204. The section does not draw and it does not add a
 window formula. Tiers A, B and C are not applicable.
 

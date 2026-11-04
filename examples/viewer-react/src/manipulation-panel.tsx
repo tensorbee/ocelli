@@ -18,6 +18,9 @@ function word(value: number | string | null): string {
 export function ManipulationPanel() {
   const [preset, setPreset] = useState(PAGE_MANIPULATION.preset);
   const [colormap, setColormap] = useState(PAGE_MANIPULATION.colormap);
+  const [rotateLastX, setRotateLastX] = useState(String(PAGE_MANIPULATION.rotateLastX));
+  const [magnifyText, setMagnifyText] = useState("");
+  const [cropCountText, setCropCountText] = useState(String(PAGE_MANIPULATION.cropPlaneCount));
   const [report, setReport] = useState<ManipulationReport | null>(null);
 
   return (
@@ -66,10 +69,50 @@ export function ManipulationPanel() {
         </label>
       </p>
       <p>
+        <label>
+          Rotate last X
+          <input
+            aria-label="Rotate last X"
+            value={rotateLastX}
+            onChange={(event) => {
+              setRotateLastX(event.target.value);
+            }}
+          />
+        </label>
+        <label>
+          Magnify scale
+          <input
+            aria-label="Magnify scale"
+            value={magnifyText}
+            onChange={(event) => {
+              setMagnifyText(event.target.value);
+            }}
+          />
+        </label>
+        <label>
+          Crop count
+          <input
+            aria-label="Crop count"
+            value={cropCountText}
+            onChange={(event) => {
+              setCropCountText(event.target.value);
+            }}
+          />
+        </label>
+      </p>
+      <p>
         <button
           type="button"
           onClick={() => {
-            setReport(manipulationReport({ ...PAGE_MANIPULATION, preset, colormap }));
+            const magnifyScale = magnifyText.trim() === "" ? null : Number(magnifyText);
+            setReport(manipulationReport({
+              ...PAGE_MANIPULATION,
+              preset,
+              colormap,
+              rotateLastX: Number(rotateLastX),
+              magnifyScale,
+              cropPlaneCount: Number(cropCountText),
+            }));
           }}
         >
           Show manipulation

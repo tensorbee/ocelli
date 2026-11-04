@@ -19,8 +19,10 @@ describe("layout report", () => {
     expect(report.horizontal).toBe("0,20 to 100,20");
     expect(report.vertical).toBe("10,0 to 10,80");
     expect(report.cursor).toBe("10,20");
-    expect(layoutReport({ ...PAGE_LAYOUT, x: -1 }).cursor).toBeNull();
-    expect(layoutReport({ ...PAGE_LAYOUT, x: -1 }).horizontal).toBeNull();
+    const outside = layoutReport({ ...PAGE_LAYOUT, x: -1 });
+    expect(outside.cursor).toBeNull();
+    expect(outside.horizontal).toBeNull();
+    expect(outside.vertical).toBeNull();
   });
 
   it("names full screen unavailable when the browser flag is off", () => {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App.js";
 
@@ -30,5 +30,31 @@ describe("measurement panel", () => {
     fireEvent.click(screen.getByLabelText("Shortcut shift"));
     fireEvent.click(screen.getByRole("button", { name: "Show measurement" }));
     expect(screen.getByText("Shortcut pan-down")).toBeTruthy();
+  });
+
+  it("shows the TID number read back, not the stored document", async () => {
+    const core = await import("@ocelli/core");
+    const real = core.readTid1500;
+    const spy = vi.spyOn(core, "readTid1500").mockImplementation((bytes) => {
+      const items = real(bytes);
+      if (items === null) {
+        return null;
+      }
+      return items.map((item) => {
+        if (item.valueType !== "NUM") {
+          return item;
+        }
+        return { ...item, number: 3 };
+      });
+    });
+    try {
+      render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: "Show measurement" }));
+      expect(spy).toHaveBeenCalled();
+      expect(screen.getByText("Measurement 12.5")).toBeTruthy();
+      expect(screen.getByText("TID 1500 3")).toBeTruthy();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

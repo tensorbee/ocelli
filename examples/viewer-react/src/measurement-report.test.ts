@@ -59,6 +59,7 @@ describe("measurement report", () => {
     });
     expect(report.stored).toBeNull();
     expect(report.annotations).toBeNull();
+    expect(report.undo).toBeNull();
     expect(report.tid).toBeNull();
   });
 
@@ -77,5 +78,50 @@ describe("measurement report", () => {
     expect(touchStartName()).toBe("touch.start");
     expect(pointerStartName("mouse")).toBe("pointer.down");
     expect(pointerStartName("mouse")).not.toBe("touch.start");
+  });
+
+  it("shows the key image text the mark returns", async () => {
+    const core = await import("@ocelli/core");
+    const real = core.keyImageMark;
+    const spy = vi.spyOn(core, "keyImageMark").mockImplementation((id, point) => {
+      const result = real(id, point);
+      if (!result.ok) {
+        return result;
+      }
+      return { ok: true, mark: { ...result.mark, text: "MARK" } };
+    });
+    try {
+      const report = measurementReport(PAGE_MEASUREMENT);
+      expect(spy).toHaveBeenCalled();
+      expect(report.keyImage).toBe("MARK");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("shows the event name the pointer dispatch returns", async () => {
+    const core = await import("@ocelli/core");
+    const real = core.createPointerDispatch;
+    const spy = vi.spyOn(core, "createPointerDispatch").mockImplementation((options) => {
+      const dispatch = real(options);
+      const takeFrame = dispatch.takeFrame.bind(dispatch);
+      return {
+        ...dispatch,
+        takeFrame() {
+          const frame = takeFrame();
+          return {
+            ...frame,
+            events: frame.events.map((event) => ({ ...event, name: "touch.drag" as const })),
+          };
+        },
+      };
+    });
+    try {
+      const report = measurementReport(PAGE_MEASUREMENT);
+      expect(spy).toHaveBeenCalled();
+      expect(report.touch).toBe("touch.drag");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

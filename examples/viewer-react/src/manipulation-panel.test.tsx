@@ -41,5 +41,13 @@ describe("manipulation panel", () => {
     expect(screen.getByText("Scale pixels 20")).toBeTruthy();
     expect(screen.getByText("Crop planes 1")).toBeTruthy();
     expect(screen.getByText(`Warning ${describeError(ERROR_CODE.Unavailable)}`)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Rotate last X"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Magnify scale"), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText("Crop count"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show manipulation" }));
+    expect(screen.getByText("Rotate radians 0")).toBeTruthy();
+    expect(screen.getByText("Quadrant 0")).toBeTruthy();
+    expect(screen.getByText("Magnify scale 3")).toBeTruthy();
+    expect(screen.getByText("Crop planes 2")).toBeTruthy();
   });
 });
