@@ -5,13 +5,14 @@ one goal, not a fixed calendar box. The sprint clock starts at the first
 `/start-feature` of that sprint.
 
 **Phase 1 is S01 to S41**, 118 stories and 397 engineer-weeks, feature parity
-with cornerstone3D. **Phase 1.5 is S42 to S72**, 39 stories and 352
+with cornerstone3D. **Phase 1.5 is S45 to S75**, 39 stories and 352
 engineer-weeks, the eight differentiating capabilities of HLD Part III. Phase 2
 and Phase 3 carry F-IDs in `BACKLOG.md` and no sprint, deliberately.
 
 Those two totals agree with HLD section 38 and the Part III preamble, and they
 count the IMPORTED rows only. Every `F-X` story added since the import lands in
-Phase 1 and is outside them, so the allocation's Phase 1 total is larger than
+Phase 1 and is outside them, and so do F-191 to F-201, so the
+allocation's Phase 1 total is larger than
 397 and both numbers are correct. `docs/sprints/BACKLOG.md`'s Summary section
 names the command that prints each. The parity target itself is 5.8.2 and not
 the HLD's v5.8.9, which does not exist, and that is deviation **D-11**.
@@ -67,7 +68,7 @@ capacity claim follows from it.
 ## What re-planning looks like
 
 Phase 1.5 sizing is provisional by the HLD's own statement, 352 engineer-weeks
-"to be re-estimated once Phase 1 evidence exists". Do not treat S42 onward as
+"to be re-estimated once Phase 1 evidence exists". Do not treat S45 onward as
 committed.
 
 The six Appendix A spike gates each carry the authority to stop or reshape the
@@ -606,13 +607,51 @@ _S40 to S41, 9 stories, 30 engineer-weeks._
 | F-117 | E19.4 | Release engineering: semver, changelog, deprecation policy | All | 2w |
 | F-118 | E19.5 | Provenance recording for agent-generated code | All | 3w |
 
+### M19, Series open in the core and the viewer
+
+The series-open gaps that Phase 1 left in the core, then the folder viewer calling that core.
+
+_S42 to S44, 11 stories, 43 engineer-weeks._
+
+#### Sprint S42
+
+**Goal**: Frame open from a Part 10 object: chain inputs including Modality and VOI LUT Sequences, colour selection, pixel padding PS3.3 C.7.5.1.1.2, Lossy Image Compression and Burned In Annotation flags, private creators, Series assembly: order by projected position, split mixed series, temporal axis, cine timing with loop and bounce, Overlay planes PS3.3 C.9.2 and display shutters PS3.3 C.7.6.11 and C.7.6.15, Stack display interpolation, nearest and linear, declared on tiers A, B and C.
+
+| F-ID | Epic ref | Story | Layer | Est |
+|------|----------|-------|-------|-----|
+| F-191 | E38.1 | Frame open from a Part 10 object: chain inputs including Modality and VOI LUT Sequences, colour selection, pixel padding PS3.3 C.7.5.1.1.2, Lossy Image Compression and Burned In Annotation flags, private creators | Rust | 5w |
+| F-192 | E38.2 | Series assembly: order by projected position, split mixed series, temporal axis, cine timing with loop and bounce | Rust | 5w |
+| F-193 | E38.3 | Overlay planes PS3.3 C.9.2 and display shutters PS3.3 C.7.6.11 and C.7.6.15 | Rust | 3w |
+| F-194 | E38.4 | Stack display interpolation, nearest and linear, declared on tiers A, B and C | Rust | 3w |
+
+#### Sprint S43
+
+**Goal**: Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours, Key Object Selection read and write (TID 2010) and Secondary Capture write, Volume from a gantry-tilted stack, Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source.
+
+| F-ID | Epic ref | Story | Layer | Est |
+|------|----------|-------|-------|-----|
+| F-195 | E38.5 | Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours | Rust | 4w |
+| F-196 | E38.6 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w |
+| F-197 | E38.7 | Volume from a gantry-tilted stack | Rust | 3w |
+| F-198 | E38.8 | Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source | TS | 4w |
+
+#### Sprint S44
+
+**Goal**: Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion, Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings, Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences.
+
+| F-ID | Epic ref | Story | Layer | Est |
+|------|----------|-------|-------|-----|
+| F-199 | E38.9 | Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion | TS | 4w |
+| F-200 | E38.10 | Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings | TS | 4w |
+| F-201 | E38.11 | Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences | TS | 4w |
+
 ### M14, Out-of-core volume streaming
 
 Bounded GPU residency on unbounded data. The first of the three checkable claims in HLD C.7.
 
-_S42 to S45, 6 stories, 49 engineer-weeks._
+_S45 to S48, 6 stories, 49 engineer-weeks._
 
-#### Sprint S42
+#### Sprint S45
 
 **Goal**: Brick decomposition and multiscale pyramid generation.
 
@@ -620,7 +659,7 @@ _S42 to S45, 6 stories, 49 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-119 | E30.1 | Brick decomposition and multiscale pyramid generation | Rust | 10w |
 
-#### Sprint S43
+#### Sprint S46
 
 **Goal**: Frustum and LOD chunk selection.
 
@@ -628,7 +667,7 @@ _S42 to S45, 6 stories, 49 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-120 | E30.2 | Frustum and LOD chunk selection | Rust | 8w |
 
-#### Sprint S44
+#### Sprint S47
 
 **Goal**: Adaptive per-LOD sample count with opacity correction, Residency budget, prefetch and eviction policy.
 
@@ -637,7 +676,7 @@ _S42 to S45, 6 stories, 49 engineer-weeks._
 | F-121 | E30.3 | Adaptive per-LOD sample count with opacity correction | Rust | 8w |
 | F-122 | E30.4 | Residency budget, prefetch and eviction policy | Rust | 8w |
 
-#### Sprint S45
+#### Sprint S48
 
 **Goal**: Chunk-cost indicator surface, 4D and time-series as a first-class chunked axis.
 
@@ -650,9 +689,9 @@ _S42 to S45, 6 stories, 49 engineer-weeks._
 
 Kernels sharing the renderer's device, every tier-A kernel carrying a declared fallback.
 
-_S46 to S51, 7 stories, 68 engineer-weeks._
+_S49 to S54, 7 stories, 68 engineer-weeks._
 
-#### Sprint S46
+#### Sprint S49
 
 **Goal**: ocelli-compute: dispatch, buffer pools, device sharing with the renderer.
 
@@ -660,7 +699,7 @@ _S46 to S51, 7 stories, 68 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-125 | E31.1 | ocelli-compute: dispatch, buffer pools, device sharing with the renderer | Rust | 10w |
 
-#### Sprint S47
+#### Sprint S50
 
 **Goal**: Region growing and interactive segmentation kernels.
 
@@ -668,7 +707,7 @@ _S46 to S51, 7 stories, 68 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-126 | E31.2 | Region growing and interactive segmentation kernels | Rust | 12w |
 
-#### Sprint S48
+#### Sprint S51
 
 **Goal**: Filtering: denoise, smooth, sharpen, gradient.
 
@@ -676,7 +715,7 @@ _S46 to S51, 7 stories, 68 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-127 | E31.3 | Filtering: denoise, smooth, sharpen, gradient | Rust | 10w |
 
-#### Sprint S49
+#### Sprint S52
 
 **Goal**: Per-frame histogram and ROI statistics on GPU, Tier-B fallback path for every kernel.
 
@@ -685,7 +724,7 @@ _S46 to S51, 7 stories, 68 engineer-weeks._
 | F-128 | E31.4 | Per-frame histogram and ROI statistics on GPU | Rust | 8w |
 | F-131 | E31.7 | Tier-B fallback path for every kernel | Rust | 8w |
 
-#### Sprint S50
+#### Sprint S53
 
 **Goal**: Full-resolution MPR and oblique resampling on compute.
 
@@ -693,7 +732,7 @@ _S46 to S51, 7 stories, 68 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-129 | E31.5 | Full-resolution MPR and oblique resampling on compute | Rust | 10w |
 
-#### Sprint S51
+#### Sprint S54
 
 **Goal**: Registration refinement kernels.
 
@@ -705,9 +744,9 @@ _S46 to S51, 7 stories, 68 engineer-weeks._
 
 SAM2-class prompting against GPU-resident tensors, and GSPS write with coded concepts.
 
-_S52 to S56, 8 stories, 57 engineer-weeks._
+_S55 to S59, 8 stories, 57 engineer-weeks._
 
-#### Sprint S52
+#### Sprint S55
 
 **Goal**: ONNX Runtime Web on WebGPU with GPU-resident tensors, GSPS write.
 
@@ -716,7 +755,7 @@ _S52 to S56, 8 stories, 57 engineer-weeks._
 | F-132 | E32.1 | ONNX Runtime Web on WebGPU with GPU-resident tensors | Rust+TS | 10w |
 | F-139 | E34.1 | GSPS write | Rust | 6w |
 
-#### Sprint S53
+#### Sprint S56
 
 **Goal**: Zero-copy bridge from volume textures to model input, SNOMED CT and UCUM coded concept library.
 
@@ -725,7 +764,7 @@ _S52 to S56, 8 stories, 57 engineer-weeks._
 | F-133 | E32.2 | Zero-copy bridge from volume textures to model input | Rust+TS | 8w |
 | F-140 | E34.2 | SNOMED CT and UCUM coded concept library | Rust | 6w |
 
-#### Sprint S54
+#### Sprint S57
 
 **Goal**: Prompt surface: point, box, and 3D propagation, Bulk annotations tier for very large object counts.
 
@@ -734,7 +773,7 @@ _S52 to S56, 8 stories, 57 engineer-weeks._
 | F-134 | E32.3 | Prompt surface: point, box, and 3D propagation | Rust+TS | 8w |
 | F-141 | E34.3 | Bulk annotations tier for very large object counts | Rust | 8w |
 
-#### Sprint S55
+#### Sprint S58
 
 **Goal**: Annotation provenance: tool, version, algorithm, operator.
 
@@ -742,7 +781,7 @@ _S52 to S56, 8 stories, 57 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-142 | E34.4 | Annotation provenance: tool, version, algorithm, operator | Rust | 5w |
 
-#### Sprint S56
+#### Sprint S59
 
 **Goal**: Result to DICOM SEG with model and prompt provenance.
 
@@ -754,9 +793,9 @@ _S52 to S56, 8 stories, 57 engineer-weeks._
 
 Real multi-monitor, a published divergence bound, and a CRDT over state that is already a serialisable struct.
 
-_S57 to S65, 11 stories, 104 engineer-weeks._
+_S60 to S68, 11 stories, 104 engineer-weeks._
 
-#### Sprint S57
+#### Sprint S60
 
 **Goal**: Window Management API: enumeration, placement, persistence, Render attestation: presentation state plus output hash.
 
@@ -765,7 +804,7 @@ _S57 to S65, 11 stories, 104 engineer-weeks._
 | F-136 | E33.1 | Window Management API: enumeration, placement, persistence | TS | 8w |
 | F-151 | E36.2 | Render attestation: presentation state plus output hash | Rust | 8w |
 
-#### Sprint S58
+#### Sprint S61
 
 **Goal**: Multi-window session state sync across displays, Per-display calibration probe and DICOM Part 14 reporting.
 
@@ -774,7 +813,7 @@ _S57 to S65, 11 stories, 104 engineer-weeks._
 | F-137 | E33.2 | Multi-window session state sync across displays | TS | 7w |
 | F-138 | E33.3 | Per-display calibration probe and DICOM Part 14 reporting | TS | 8w |
 
-#### Sprint S59
+#### Sprint S62
 
 **Goal**: Deterministic pipeline audit: pin every source of variance.
 
@@ -782,7 +821,7 @@ _S57 to S65, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-150 | E36.1 | Deterministic pipeline audit: pin every source of variance | Rust | 10w |
 
-#### Sprint S60
+#### Sprint S63
 
 **Goal**: Cross-target reproducibility harness: browser, desktop, server.
 
@@ -790,7 +829,7 @@ _S57 to S65, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-152 | E36.3 | Cross-target reproducibility harness: browser, desktop, server | Rust | 10w |
 
-#### Sprint S61
+#### Sprint S64
 
 **Goal**: Divergence measurement and reporting.
 
@@ -798,7 +837,7 @@ _S57 to S65, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-153 | E36.4 | Divergence measurement and reporting | Rust | 6w |
 
-#### Sprint S62
+#### Sprint S65
 
 **Goal**: CRDT over viewport presentation state.
 
@@ -806,7 +845,7 @@ _S57 to S65, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-154 | E37.1 | CRDT over viewport presentation state | Rust+TS | 12w |
 
-#### Sprint S63
+#### Sprint S66
 
 **Goal**: Shared annotation editing with conflict resolution.
 
@@ -814,7 +853,7 @@ _S57 to S65, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-155 | E37.2 | Shared annotation editing with conflict resolution | Rust+TS | 14w |
 
-#### Sprint S64
+#### Sprint S67
 
 **Goal**: Presence: cursors, viewport follow, participant list.
 
@@ -822,7 +861,7 @@ _S57 to S65, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-156 | E37.3 | Presence: cursors, viewport follow, participant list | Rust+TS | 10w |
 
-#### Sprint S65
+#### Sprint S68
 
 **Goal**: Transport, auth and session lifecycle.
 
@@ -834,9 +873,9 @@ _S57 to S65, 11 stories, 104 engineer-weeks._
 
 Radiology and pathology in one scene graph, sharing one annotation coordinate model.
 
-_S66 to S72, 7 stories, 74 engineer-weeks._
+_S69 to S75, 7 stories, 74 engineer-weeks._
 
-#### Sprint S66
+#### Sprint S69
 
 **Goal**: Runtime pyramid discovery from VL Whole Slide Microscopy metadata.
 
@@ -844,7 +883,7 @@ _S66 to S72, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-143 | E35.1 | Runtime pyramid discovery from VL Whole Slide Microscopy metadata | Rust | 10w |
 
-#### Sprint S67
+#### Sprint S70
 
 **Goal**: Frame-level DICOMweb tile retrieval and tile cache.
 
@@ -852,7 +891,7 @@ _S66 to S72, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-144 | E35.2 | Frame-level DICOMweb tile retrieval and tile cache | Rust | 10w |
 
-#### Sprint S68
+#### Sprint S71
 
 **Goal**: ICC colour management pipeline.
 
@@ -860,7 +899,7 @@ _S66 to S72, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-145 | E35.3 | ICC colour management pipeline | Rust | 10w |
 
-#### Sprint S69
+#### Sprint S72
 
 **Goal**: Additive multi-channel blending for immunofluorescence.
 
@@ -868,7 +907,7 @@ _S66 to S72, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-146 | E35.4 | Additive multi-channel blending for immunofluorescence | Rust | 10w |
 
-#### Sprint S70
+#### Sprint S73
 
 **Goal**: Unified viewport model: WSI and volume in one scene graph.
 
@@ -876,7 +915,7 @@ _S66 to S72, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-147 | E35.5 | Unified viewport model: WSI and volume in one scene graph | Rust | 14w |
 
-#### Sprint S71
+#### Sprint S74
 
 **Goal**: Cross-modality annotation correlation.
 
@@ -884,7 +923,7 @@ _S66 to S72, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-148 | E35.6 | Cross-modality annotation correlation | Rust | 12w |
 
-#### Sprint S72
+#### Sprint S75
 
 **Goal**: Multi-server data sources within one study.
 

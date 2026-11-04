@@ -320,18 +320,36 @@ Binary size and cold start inside budget, the browser matrix certified, semver a
 | F-117 | E19.4 | S41 | Release engineering: semver, changelog, deprecation policy | All | 2w | F-100 | done |
 | F-118 | E19.5 | S41 | Provenance recording for agent-generated code | All | 3w | F-001 | done |
 
+### M19, Series open in the core and the viewer
+
+The series-open gaps that Phase 1 left in the core, then the folder viewer calling that core.
+
+| F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
+|------|----------|--------|-------|-------|-----|------------|--------|
+| F-191 | E38.1 | S42 | Frame open from a Part 10 object: chain inputs including Modality and VOI LUT Sequences, colour selection, pixel padding PS3.3 C.7.5.1.1.2, Lossy Image Compression and Burned In Annotation flags, private creators | Rust | 5w | F-030, F-020 | pending |
+| F-192 | E38.2 | S42 | Series assembly: order by projected position, split mixed series, temporal axis, cine timing with loop and bounce | Rust | 5w | F-051, F-047 | pending |
+| F-193 | E38.3 | S42 | Overlay planes PS3.3 C.9.2 and display shutters PS3.3 C.7.6.11 and C.7.6.15 | Rust | 3w | F-019, F-029 | pending |
+| F-194 | E38.4 | S42 | Stack display interpolation, nearest and linear, declared on tiers A, B and C | Rust | 3w | F-042, F-045 | pending |
+| F-195 | E38.5 | S43 | Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours | Rust | 4w | F-049, F-075 | pending |
+| F-196 | E38.6 | S43 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w | F-097 | pending |
+| F-197 | E38.7 | S43 | Volume from a gantry-tilted stack | Rust | 3w | F-051, F-049 | pending |
+| F-198 | E38.8 | S43 | Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source | TS | 4w | F-191, F-192, F-194, F-112 | pending |
+| F-199 | E38.9 | S44 | Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion | TS | 4w | F-198, F-197, F-088 | pending |
+| F-200 | E38.10 | S44 | Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings | TS | 4w | F-198, F-193, F-091 | pending |
+| F-201 | E38.11 | S44 | Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences | TS | 4w | F-198, F-195, F-196 | pending |
+
 ### M14, Out-of-core volume streaming
 
 Bounded GPU residency on unbounded data. The first of the three checkable claims in HLD C.7.
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-119 | E30.1 | S42 | Brick decomposition and multiscale pyramid generation | Rust | 10w | F-058 | pending |
-| F-120 | E30.2 | S43 | Frustum and LOD chunk selection | Rust | 8w | F-119 | pending |
-| F-121 | E30.3 | S44 | Adaptive per-LOD sample count with opacity correction | Rust | 8w | F-120 | pending |
-| F-122 | E30.4 | S44 | Residency budget, prefetch and eviction policy | Rust | 8w | F-120 | pending |
-| F-123 | E30.5 | S45 | Chunk-cost indicator surface | Rust | 3w | F-122 | pending |
-| F-124 | E30.6 | S45 | 4D and time-series as a first-class chunked axis | Rust | 12w | F-122 | pending |
+| F-119 | E30.1 | S45 | Brick decomposition and multiscale pyramid generation | Rust | 10w | F-058 | pending |
+| F-120 | E30.2 | S46 | Frustum and LOD chunk selection | Rust | 8w | F-119 | pending |
+| F-121 | E30.3 | S47 | Adaptive per-LOD sample count with opacity correction | Rust | 8w | F-120 | pending |
+| F-122 | E30.4 | S47 | Residency budget, prefetch and eviction policy | Rust | 8w | F-120 | pending |
+| F-123 | E30.5 | S48 | Chunk-cost indicator surface | Rust | 3w | F-122 | pending |
+| F-124 | E30.6 | S48 | 4D and time-series as a first-class chunked axis | Rust | 12w | F-122 | pending |
 
 ### M15, The WebGPU compute subsystem
 
@@ -339,13 +357,13 @@ Kernels sharing the renderer's device, every tier-A kernel carrying a declared f
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-125 | E31.1 | S46 | ocelli-compute: dispatch, buffer pools, device sharing with the renderer | Rust | 10w | F-008 | pending |
-| F-126 | E31.2 | S47 | Region growing and interactive segmentation kernels | Rust | 12w | F-125 | pending |
-| F-127 | E31.3 | S48 | Filtering: denoise, smooth, sharpen, gradient | Rust | 10w | F-125 | pending |
-| F-128 | E31.4 | S49 | Per-frame histogram and ROI statistics on GPU | Rust | 8w | F-125 | pending |
-| F-129 | E31.5 | S50 | Full-resolution MPR and oblique resampling on compute | Rust | 10w | F-125 | pending |
-| F-130 | E31.6 | S51 | Registration refinement kernels | Rust | 10w | F-127 | pending |
-| F-131 | E31.7 | S49 | Tier-B fallback path for every kernel | Rust | 8w | F-126 | pending |
+| F-125 | E31.1 | S49 | ocelli-compute: dispatch, buffer pools, device sharing with the renderer | Rust | 10w | F-008 | pending |
+| F-126 | E31.2 | S50 | Region growing and interactive segmentation kernels | Rust | 12w | F-125 | pending |
+| F-127 | E31.3 | S51 | Filtering: denoise, smooth, sharpen, gradient | Rust | 10w | F-125 | pending |
+| F-128 | E31.4 | S52 | Per-frame histogram and ROI statistics on GPU | Rust | 8w | F-125 | pending |
+| F-129 | E31.5 | S53 | Full-resolution MPR and oblique resampling on compute | Rust | 10w | F-125 | pending |
+| F-130 | E31.6 | S54 | Registration refinement kernels | Rust | 10w | F-127 | pending |
+| F-131 | E31.7 | S52 | Tier-B fallback path for every kernel | Rust | 8w | F-126 | pending |
 
 ### M16, Prompted segmentation and standards-native annotations
 
@@ -353,14 +371,14 @@ SAM2-class prompting against GPU-resident tensors, and GSPS write with coded con
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-132 | E32.1 | S52 | ONNX Runtime Web on WebGPU with GPU-resident tensors | Rust+TS | 10w | F-125 | pending |
-| F-133 | E32.2 | S53 | Zero-copy bridge from volume textures to model input | Rust+TS | 8w | F-132 | pending |
-| F-134 | E32.3 | S54 | Prompt surface: point, box, and 3D propagation | Rust+TS | 8w | F-133 | pending |
-| F-135 | E32.4 | S56 | Result to DICOM SEG with model and prompt provenance | Rust+TS | 6w | F-142 | pending |
-| F-139 | E34.1 | S52 | GSPS write | Rust | 6w | F-094 | pending |
-| F-140 | E34.2 | S53 | SNOMED CT and UCUM coded concept library | Rust | 6w | F-095 | pending |
-| F-141 | E34.3 | S54 | Bulk annotations tier for very large object counts | Rust | 8w | F-140 | pending |
-| F-142 | E34.4 | S55 | Annotation provenance: tool, version, algorithm, operator | Rust | 5w | F-094 | pending |
+| F-132 | E32.1 | S55 | ONNX Runtime Web on WebGPU with GPU-resident tensors | Rust+TS | 10w | F-125 | pending |
+| F-133 | E32.2 | S56 | Zero-copy bridge from volume textures to model input | Rust+TS | 8w | F-132 | pending |
+| F-134 | E32.3 | S57 | Prompt surface: point, box, and 3D propagation | Rust+TS | 8w | F-133 | pending |
+| F-135 | E32.4 | S59 | Result to DICOM SEG with model and prompt provenance | Rust+TS | 6w | F-142 | pending |
+| F-139 | E34.1 | S55 | GSPS write | Rust | 6w | F-094 | pending |
+| F-140 | E34.2 | S56 | SNOMED CT and UCUM coded concept library | Rust | 6w | F-095 | pending |
+| F-141 | E34.3 | S57 | Bulk annotations tier for very large object counts | Rust | 8w | F-140 | pending |
+| F-142 | E34.4 | S58 | Annotation provenance: tool, version, algorithm, operator | Rust | 5w | F-094 | pending |
 
 ### M17, Multi-monitor, attestation and live sessions
 
@@ -368,17 +386,17 @@ Real multi-monitor, a published divergence bound, and a CRDT over state that is 
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-136 | E33.1 | S57 | Window Management API: enumeration, placement, persistence | TS | 8w | F-102 | pending |
-| F-137 | E33.2 | S58 | Multi-window session state sync across displays | TS | 7w | F-136 | pending |
-| F-138 | E33.3 | S58 | Per-display calibration probe and DICOM Part 14 reporting | TS | 8w | F-136 | pending |
-| F-150 | E36.1 | S59 | Deterministic pipeline audit: pin every source of variance | Rust | 10w | F-037 | pending |
-| F-151 | E36.2 | S57 | Render attestation: presentation state plus output hash | Rust | 8w | F-015 | pending |
-| F-152 | E36.3 | S60 | Cross-target reproducibility harness: browser, desktop, server | Rust | 10w | F-169 | pending |
-| F-153 | E36.4 | S61 | Divergence measurement and reporting | Rust | 6w | F-152 | pending |
-| F-154 | E37.1 | S62 | CRDT over viewport presentation state | Rust+TS | 12w | F-050 | pending |
-| F-155 | E37.2 | S63 | Shared annotation editing with conflict resolution | Rust+TS | 14w | F-154 | pending |
-| F-156 | E37.3 | S64 | Presence: cursors, viewport follow, participant list | Rust+TS | 10w | F-154 | pending |
-| F-157 | E37.4 | S65 | Transport, auth and session lifecycle | Rust+TS | 11w | F-154 | pending |
+| F-136 | E33.1 | S60 | Window Management API: enumeration, placement, persistence | TS | 8w | F-102 | pending |
+| F-137 | E33.2 | S61 | Multi-window session state sync across displays | TS | 7w | F-136 | pending |
+| F-138 | E33.3 | S61 | Per-display calibration probe and DICOM Part 14 reporting | TS | 8w | F-136 | pending |
+| F-150 | E36.1 | S62 | Deterministic pipeline audit: pin every source of variance | Rust | 10w | F-037 | pending |
+| F-151 | E36.2 | S60 | Render attestation: presentation state plus output hash | Rust | 8w | F-015 | pending |
+| F-152 | E36.3 | S63 | Cross-target reproducibility harness: browser, desktop, server | Rust | 10w | F-169 | pending |
+| F-153 | E36.4 | S64 | Divergence measurement and reporting | Rust | 6w | F-152 | pending |
+| F-154 | E37.1 | S65 | CRDT over viewport presentation state | Rust+TS | 12w | F-050 | pending |
+| F-155 | E37.2 | S66 | Shared annotation editing with conflict resolution | Rust+TS | 14w | F-154 | pending |
+| F-156 | E37.3 | S67 | Presence: cursors, viewport follow, participant list | Rust+TS | 10w | F-154 | pending |
+| F-157 | E37.4 | S68 | Transport, auth and session lifecycle | Rust+TS | 11w | F-154 | pending |
 
 ### M18, Whole-slide imaging and the unified scene graph
 
@@ -386,13 +404,13 @@ Radiology and pathology in one scene graph, sharing one annotation coordinate mo
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-143 | E35.1 | S66 | Runtime pyramid discovery from VL Whole Slide Microscopy metadata | Rust | 10w | F-119 | pending |
-| F-144 | E35.2 | S67 | Frame-level DICOMweb tile retrieval and tile cache | Rust | 10w | F-143 | pending |
-| F-145 | E35.3 | S68 | ICC colour management pipeline | Rust | 10w | E4.9 (UNRESOLVED) | pending |
-| F-146 | E35.4 | S69 | Additive multi-channel blending for immunofluorescence | Rust | 10w | F-145 | pending |
-| F-147 | E35.5 | S70 | Unified viewport model: WSI and volume in one scene graph | Rust | 14w | F-144 | pending |
-| F-148 | E35.6 | S71 | Cross-modality annotation correlation | Rust | 12w | F-147 | pending |
-| F-149 | E35.7 | S72 | Multi-server data sources within one study | Rust | 8w | F-144 | pending |
+| F-143 | E35.1 | S69 | Runtime pyramid discovery from VL Whole Slide Microscopy metadata | Rust | 10w | F-119 | pending |
+| F-144 | E35.2 | S70 | Frame-level DICOMweb tile retrieval and tile cache | Rust | 10w | F-143 | pending |
+| F-145 | E35.3 | S71 | ICC colour management pipeline | Rust | 10w | E4.9 (UNRESOLVED) | pending |
+| F-146 | E35.4 | S72 | Additive multi-channel blending for immunofluorescence | Rust | 10w | F-145 | pending |
+| F-147 | E35.5 | S73 | Unified viewport model: WSI and volume in one scene graph | Rust | 14w | F-144 | pending |
+| F-148 | E35.6 | S74 | Cross-modality annotation correlation | Rust | 12w | F-147 | pending |
+| F-149 | E35.7 | S75 | Multi-server data sources within one study | Rust | 8w | F-144 | pending |
 
 ### Roadmap, Phase 2 and Phase 3
 
