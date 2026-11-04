@@ -7,6 +7,7 @@
 use ocelli_seg::LabelmapError;
 
 use crate::gpu::GpuContext;
+use crate::graph::aligned_row_bytes;
 
 /// The copy shader. Compiled at graph creation, not inside a tick.
 pub(crate) const LABELMAP_WGSL: &str = include_str!("../shaders/labelmap.wgsl");
@@ -28,7 +29,8 @@ pub enum LabelmapDrawError {
     UnknownViewport,
     /// Device recovery dropped the GPU objects. Show again after rebind.
     NotRebound,
-    /// The presented size does not fit a padded upload.
+    /// The presented size does not fit a padded upload, or an axis is longer
+    /// than the device `max_texture_dimension_2d`.
     Extent,
 }
 
@@ -52,10 +54,15 @@ impl LabelmapBinding {
     }
 }
 
+fn overlay_axis_fits(width: u32, height: u32, max_texture_dimension_2d: u32) -> bool {
+    width <= max_texture_dimension_2d && height <= max_texture_dimension_2d
+}
+
 /// Pad each row to the copy alignment, then upload.
 ///
 /// The binding is returned only after the texture exists. The caller
 /// replaces the slot after that, so a failure keeps the previous binding.
+/// An axis longer than the device limit returns before that texture exists.
 pub(crate) fn stage(
     layout: &wgpu::BindGroupLayout,
     ctx: &GpuContext,
@@ -64,7 +71,7 @@ pub(crate) fn stage(
     bytes: Vec<u8>,
 ) -> Result<LabelmapBinding, LabelmapDrawError> {
     let tight = width.checked_mul(4).ok_or(LabelmapDrawError::Extent)?;
-    let row = aligned_row_bytes(tight)?;
+    let row = aligned_row_bytes(tight).ok_or(LabelmapDrawError::Extent)?;
     let row_us = usize::try_from(row).map_err(|_| LabelmapDrawError::Extent)?;
     let height_us = usize::try_from(height).map_err(|_| LabelmapDrawError::Extent)?;
     let tight_us = usize::try_from(tight).map_err(|_| LabelmapDrawError::Extent)?;
@@ -72,6 +79,10 @@ pub(crate) fn stage(
         .checked_mul(height_us)
         .ok_or(LabelmapDrawError::Extent)?;
     if bytes.len() != expected || height == 0 || width == 0 {
+        return Err(LabelmapDrawError::Extent);
+    }
+    let limit = ctx.device().limits().max_texture_dimension_2d;
+    if !overlay_axis_fits(width, height, limit) {
         return Err(LabelmapDrawError::Extent);
     }
     let padded_len = row_us
@@ -143,10 +154,14 @@ pub(crate) fn stage(
     })
 }
 
-fn aligned_row_bytes(unpadded: u32) -> Result<u32, LabelmapDrawError> {
-    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let room = unpadded
-        .checked_add(align - 1)
-        .ok_or(LabelmapDrawError::Extent)?;
-    Ok(room / align * align)
+#[cfg(test)]
+mod tests {
+    use super::overlay_axis_fits;
+
+    #[test]
+    fn an_overlay_axis_past_the_device_limit_does_not_fit() {
+        assert!(overlay_axis_fits(2, 2, 2));
+        assert!(!overlay_axis_fits(3, 2, 2));
+        assert!(!overlay_axis_fits(2, 3, 2));
+    }
 }

@@ -13,8 +13,8 @@
 use dicom_core::{Tag, VR};
 use ocelli_core::{Index, Transform, World};
 use ocelli_pixel::{
-    ImageDimensions, ImageOrientationPatient, ImagePlane, ImagePositionPatient, PixelError,
-    PixelSpacing,
+    DIRECTION_COSINE_TOLERANCE, ImageDimensions, ImageOrientationPatient, ImagePlane,
+    ImagePositionPatient, PixelError, PixelSpacing,
 };
 
 use crate::{
@@ -112,6 +112,23 @@ pub enum FrameGeometryError {
     /// Projected inter-frame steps are not equal within tolerance.
     #[error("inter-frame spacing is not uniform")]
     NonUniformFrameSpacing,
+    /// A later frame's Image Orientation Patient is not the first frame's.
+    ///
+    /// Positions can still lie on the first normal. That is not a box.
+    #[error("frames are not parallel")]
+    NonParallelFrames,
+    /// A later frame's Pixel Spacing is not the first frame's.
+    ///
+    /// Orientation and position can still describe a box. Later slices would
+    /// be measured with the first frame's in-plane spacing.
+    #[error("in-plane pixel spacing differs between frames")]
+    NonUniformPixelSpacing,
+    /// Every projected step is zero within tolerance.
+    ///
+    /// The frames occupy one plane, including a shift inside that plane.
+    /// A volume built from that step is singular.
+    #[error("frames occupy one plane")]
+    CoincidentFrames,
     /// Functional-group resolution itself failed.
     #[error("multiframe resolution failed: {0}")]
     Multiframe(#[from] MultiframeError),
@@ -386,7 +403,13 @@ impl StackGeometry {
     ///
     /// Propagates [`FrameGeometry::derive`]'s refusals, and returns
     /// [`FrameGeometryError::NonUniformFrameSpacing`] when the projected steps
-    /// of an otherwise axis-aligned stack are not equal within tolerance.
+    /// are not equal within tolerance, before a sheared verdict.
+    /// [`FrameGeometryError::NonParallelFrames`] is returned when a later
+    /// frame's row or column cosine differs from the first frame's.
+    /// [`FrameGeometryError::NonUniformPixelSpacing`] is returned when a later
+    /// frame's Pixel Spacing differs. [`FrameGeometryError::CoincidentFrames`]
+    /// is returned when every projected step is zero within tolerance, before
+    /// a sheared verdict. A shift inside that plane is the same refusal.
     /// Non-uniform spacing is real in dose-modulated and multi-slab
     /// acquisitions, and rendering it as uniform distorts geometry in a way no
     /// measurement tool flags, so it is refused rather than averaged.
@@ -410,13 +433,28 @@ impl StackGeometry {
         let mut first_step_mm: Option<f64> = None;
         let mut max_offaxis_mm = 0.0_f64;
         let mut uniform = true;
+        let mut coplanar = true;
 
         for frame in 1..frame_count {
-            let current = FrameGeometry::derive(metadata, frame)?
-                .plane
-                .position_vector();
+            let derived = FrameGeometry::derive(metadata, frame)?;
+            if !cosines_agree(
+                derived.plane.orientation.row(),
+                first.plane.orientation.row(),
+            ) || !cosines_agree(
+                derived.plane.orientation.column(),
+                first.plane.orientation.column(),
+            ) {
+                return Err(FrameGeometryError::NonParallelFrames);
+            }
+            if !spacing_agrees(derived.plane.spacing(), first.plane.spacing()) {
+                return Err(FrameGeometryError::NonUniformPixelSpacing);
+            }
+            let current = derived.plane.position_vector();
             let step = current - previous;
             let projected = step.dot(normal);
+            if projected.abs() > GEOMETRY_TOLERANCE_MM {
+                coplanar = false;
+            }
             let offaxis = (step - normal * projected).length();
             if offaxis > max_offaxis_mm {
                 max_offaxis_mm = offaxis;
@@ -429,6 +467,17 @@ impl StackGeometry {
                 Some(_) => {}
             }
             previous = current;
+        }
+
+        // A zero projected step on every frame is one plane. An in-plane
+        // shift would otherwise look sheared, and that volume is singular.
+        if coplanar {
+            return Err(FrameGeometryError::CoincidentFrames);
+        }
+        // Unequal steps are refused before a sheared verdict. A sheared
+        // stack with two spacings is not one parallelepiped.
+        if !uniform {
+            return Err(FrameGeometryError::NonUniformFrameSpacing);
         }
 
         if max_offaxis_mm > GEOMETRY_TOLERANCE_MM {
@@ -447,10 +496,6 @@ impl StackGeometry {
                 nominal_tilt_degrees,
             });
         };
-        if !uniform {
-            return Err(FrameGeometryError::NonUniformFrameSpacing);
-        }
-
         Ok(Self {
             shear: StackShear::AxisAligned { step_mm },
             nominal_tilt_degrees,
@@ -493,6 +538,17 @@ impl<'a> Resolved<'a> {
     const fn duplicates(self) -> DuplicateSources {
         self.duplicates
     }
+}
+
+fn cosines_agree(left: glam::DVec3, right: glam::DVec3) -> bool {
+    (left.x - right.x).abs() <= DIRECTION_COSINE_TOLERANCE
+        && (left.y - right.y).abs() <= DIRECTION_COSINE_TOLERANCE
+        && (left.z - right.z).abs() <= DIRECTION_COSINE_TOLERANCE
+}
+
+fn spacing_agrees(left: PixelSpacing, right: PixelSpacing) -> bool {
+    (left.row_mm() - right.row_mm()).abs() <= SPACING_EQUALITY_MM
+        && (left.column_mm() - right.column_mm()).abs() <= SPACING_EQUALITY_MM
 }
 
 fn resolve<'a>(
@@ -643,7 +699,7 @@ fn decimal_values<const N: usize>(
 /// finiteness check. Rust's `1_0` digit separator is refused by the character
 /// filter, which is why the filter runs before the parse rather than relying on
 /// the parser. A leading `+` is legal DS and both accept it.
-fn parse_decimal_string(raw: &str) -> Option<f64> {
+pub fn parse_decimal_string(raw: &str) -> Option<f64> {
     if raw.len() > DECIMAL_STRING_MAX_BYTES {
         return None;
     }

@@ -1,7 +1,7 @@
 # NIfTI ingest
 
 **F-IDs that contributed:** F-022
-**Last updated:** 2026-09-09
+**Last updated:** 2026-11-03
 
 `ocelli-dicom::parse_nifti` is a direct, safe, in-memory parser for one bounded
 NIfTI-1.1 profile. The wire format and its RAS coordinates remain separate
@@ -57,8 +57,10 @@ exact `vox_offset..payload_end` range without copying or interpreting payload
 values. Input ending before that range is refused. Bytes after the range are
 allowed.
 
-`vox_offset` is decoded from its IEEE-754 representation into an exact integer
-without an `as` cast. Values below 352 are an Ocelli product-scope refusal.
+`vox_offset` is decoded by `ocelli_core::exact_f32_integer` into an exact
+integer without an `as` cast. A negative value is invalid before that
+function's overflow is considered. Values below 352 are an Ocelli
+product-scope refusal.
 NIfTI-1 itself treats them as 352. A 16-byte-aligned offset is recommended by
 the format but is not required here. An offset greater than 352 is valid when
 the extension flag is zero.

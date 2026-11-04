@@ -82,7 +82,10 @@ impl Decoder for Jpeg2000Decoder {
         }
         validate_descriptor(desc)?;
         let codestream = logical_codestream(src)?;
-        let header = inspect_main_header(codestream)?;
+        let (header, tile_at) = inspect_main_header(codestream)?;
+        if self.mode == Mode::LosslessOnly {
+            refuse_tile_coding_overrides(codestream, tile_at, false)?;
+        }
         validate_header(self.mode, header, desc)?;
 
         let signedness = match desc.pixel_representation() {
@@ -130,7 +133,7 @@ struct MainHeader {
     quantization_style: u8,
 }
 
-fn logical_codestream(src: &[u8]) -> Result<&[u8], CodecError> {
+pub(crate) fn logical_codestream(src: &[u8]) -> Result<&[u8], CodecError> {
     if src.len() < 4 || !src.starts_with(&[0xff, 0x4f]) {
         return Err(CodecError::InvalidCodestream);
     }
@@ -148,7 +151,7 @@ fn logical_codestream(src: &[u8]) -> Result<&[u8], CodecError> {
     Err(CodecError::InvalidCodestream)
 }
 
-fn inspect_main_header(src: &[u8]) -> Result<MainHeader, CodecError> {
+fn inspect_main_header(src: &[u8]) -> Result<(MainHeader, usize), CodecError> {
     let mut offset = 2usize;
     let mut siz = None;
     let mut cod = None;
@@ -198,7 +201,9 @@ fn inspect_main_header(src: &[u8]) -> Result<MainHeader, CodecError> {
                 }
                 qcd = Some(parse_qcd(payload)?);
             }
-            0x5d => return Err(CodecError::UnsupportedPixelFormat),
+            // COC and QCC override the main-header wavelet or quantizer for one
+            // component. A lossless UID cannot accept either.
+            0x53 | 0x5d => return Err(CodecError::UnsupportedPixelFormat),
             _ => {}
         }
         offset = end;
@@ -212,19 +217,104 @@ fn inspect_main_header(src: &[u8]) -> Result<MainHeader, CodecError> {
         quantization_entries,
         decomposition_levels,
     )?;
-    Ok(MainHeader {
-        width,
-        height,
-        components,
-        precision,
-        signed,
-        mct,
-        transform,
-        quantization_style,
-    })
+    Ok((
+        MainHeader {
+            width,
+            height,
+            components,
+            precision,
+            signed,
+            mct,
+            transform,
+            quantization_style,
+        },
+        offset,
+    ))
 }
 
-fn parse_qcd(payload: &[u8]) -> Result<(u8, usize), CodecError> {
+/// Refuse a tile-part COD, COC, QCD or QCC.
+///
+/// `offset` is the first SOT. ISO/IEC 15444-1 lets that tile-part header
+/// replace the main-header wavelet and quantizer. Lossless-only syntaxes
+/// cannot accept the replacement. `Psot` skips the packet bytes, which are
+/// not a marker list.
+pub(crate) fn refuse_tile_coding_overrides(
+    src: &[u8],
+    mut offset: usize,
+    refuse_progression_change: bool,
+) -> Result<(), CodecError> {
+    while offset.checked_add(2).is_some_and(|end| end <= src.len()) {
+        if src.get(offset) != Some(&0xff) {
+            return Err(CodecError::InvalidCodestream);
+        }
+        let marker = *src.get(offset + 1).ok_or(CodecError::InvalidCodestream)?;
+        if marker == 0xd9 {
+            return Ok(());
+        }
+        if marker != 0x90 {
+            return Err(CodecError::InvalidCodestream);
+        }
+        let length = usize::from(read_u16(src, offset + 2)?);
+        if length < 10 {
+            return Err(CodecError::InvalidCodestream);
+        }
+        let tile_bytes = usize::try_from(read_u32(src, offset + 6)?)
+            .map_err(|_| CodecError::InvalidCodestream)?;
+        let header_at = offset
+            .checked_add(2)
+            .and_then(|start| start.checked_add(length))
+            .ok_or(CodecError::InvalidCodestream)?;
+        walk_tile_header(src, header_at, refuse_progression_change)?;
+        if tile_bytes == 0 {
+            return Ok(());
+        }
+        let next = offset
+            .checked_add(tile_bytes)
+            .ok_or(CodecError::InvalidCodestream)?;
+        if next <= header_at || next > src.len() {
+            return Err(CodecError::InvalidCodestream);
+        }
+        offset = next;
+    }
+    Ok(())
+}
+
+fn walk_tile_header(
+    src: &[u8],
+    mut offset: usize,
+    refuse_progression_change: bool,
+) -> Result<(), CodecError> {
+    loop {
+        if src.get(offset) != Some(&0xff) {
+            return Err(CodecError::InvalidCodestream);
+        }
+        let marker = *src.get(offset + 1).ok_or(CodecError::InvalidCodestream)?;
+        if marker == 0x93 {
+            return Ok(());
+        }
+        if matches!(marker, 0x52 | 0x53 | 0x5c | 0x5d) {
+            return Err(CodecError::UnsupportedPixelFormat);
+        }
+        // POC replaces the COD progression order. Only a caller that requires
+        // one progression, currently HTJ2K `.202`, asks for this refusal.
+        if marker == 0x5f && refuse_progression_change {
+            return Err(CodecError::FrameMismatch);
+        }
+        if (0x30..=0x3f).contains(&marker) || matches!(marker, 0x4f | 0x90 | 0xd9) {
+            return Err(CodecError::InvalidCodestream);
+        }
+        let length = usize::from(read_u16(src, offset + 2)?);
+        if length < 2 {
+            return Err(CodecError::InvalidCodestream);
+        }
+        offset = offset
+            .checked_add(2)
+            .and_then(|start| start.checked_add(length))
+            .ok_or(CodecError::InvalidCodestream)?;
+    }
+}
+
+pub(crate) fn parse_qcd(payload: &[u8]) -> Result<(u8, usize), CodecError> {
     let sqcd = *payload.first().ok_or(CodecError::InvalidCodestream)?;
     let style = sqcd & 0x1f;
     if !matches!(style, 0..=2) {
@@ -252,7 +342,7 @@ fn validate_qcd(style: u8, entries: usize, decomposition_levels: u8) -> Result<(
     Ok(())
 }
 
-fn parse_siz(payload: &[u8]) -> Result<(u32, u32, u16, u8, bool), CodecError> {
+pub(crate) fn parse_siz(payload: &[u8]) -> Result<(u32, u32, u16, u8, bool), CodecError> {
     if payload.len() < 39 {
         return Err(CodecError::InvalidCodestream);
     }
@@ -305,7 +395,7 @@ fn validate_header(mode: Mode, header: MainHeader, desc: &FrameDesc) -> Result<(
     Ok(())
 }
 
-fn read_u16(src: &[u8], offset: usize) -> Result<u16, CodecError> {
+pub(crate) fn read_u16(src: &[u8], offset: usize) -> Result<u16, CodecError> {
     let bytes = src
         .get(offset..offset + 2)
         .ok_or(CodecError::InvalidCodestream)?;
@@ -314,7 +404,7 @@ fn read_u16(src: &[u8], offset: usize) -> Result<u16, CodecError> {
     ))
 }
 
-fn read_u32(src: &[u8], offset: usize) -> Result<u32, CodecError> {
+pub(crate) fn read_u32(src: &[u8], offset: usize) -> Result<u32, CodecError> {
     let bytes = src
         .get(offset..offset + 4)
         .ok_or(CodecError::InvalidCodestream)?;

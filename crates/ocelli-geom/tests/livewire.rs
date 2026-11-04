@@ -58,6 +58,26 @@ fn a_seed_is_a_one_pixel_path() {
 }
 
 #[test]
+fn a_negative_zero_seed_is_the_origin() {
+    let found = path(
+        &[1.0, 1.0, 1.0, 1.0],
+        world(-0.0, -0.0, 0.0),
+        world(-0.0, -0.0, 0.0),
+    );
+    assert_eq!(found, vec![world(0.0, 0.0, 0.0)]);
+}
+
+#[test]
+fn a_negative_zero_cost_is_not_negative() {
+    let found = path(
+        &[-0.0, 1.0, 1.0, 1.0],
+        world(0.0, 0.0, 0.0),
+        world(1.0, 0.0, 0.0),
+    );
+    assert_eq!(found, vec![world(0.0, 0.0, 0.0), world(1.0, 0.0, 0.0)]);
+}
+
+#[test]
 fn a_negative_cost_is_degenerate() {
     assert_eq!(
         livewire_path::<World>(

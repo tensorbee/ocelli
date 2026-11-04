@@ -105,15 +105,28 @@ pub fn tier_request(raw: Option<&str>) -> TierRequest {
 
 /// Resolve the tier for this process, honouring `OCELLI_TIER`.
 ///
+/// A missing variable is auto. A value that is not Unicode is refused.
 /// `None` means the resolver did not complete, which on a native backend it
 /// always should. See [`drive`].
 #[must_use]
 pub fn resolve_tier() -> Option<Resolution> {
-    let raw = std::env::var(TIER_OVERRIDE_VAR).ok();
-    let request = tier_request(raw.as_deref());
+    let request = tier_request_from_var(std::env::var(TIER_OVERRIDE_VAR));
     let start = Instant::now();
     let mut clock = || u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
     drive(ocelli_render::resolve(request, &mut clock))
+}
+
+/// Turn one environment read into a tier request.
+///
+/// An absent variable is auto. A value that is not Unicode is unrecognised,
+/// the same as a word that is not one of the four. Folding that error into
+/// absence would report that nothing was requested.
+fn tier_request_from_var(raw: Result<String, std::env::VarError>) -> TierRequest {
+    match raw {
+        Ok(value) => tier_request(Some(&value)),
+        Err(std::env::VarError::NotPresent) => tier_request(None),
+        Err(std::env::VarError::NotUnicode(_)) => TierRequest::Unrecognised,
+    }
 }
 
 /// How many times [`drive`] polls before giving up.
@@ -248,7 +261,9 @@ mod tests {
 
     /// An absent variable and `auto` are the same answer, so a deployment can
     /// set it unconditionally. Everything else round-trips through
-    /// `ocelli-render`'s parser, including the refusal.
+    /// `ocelli-render`'s parser, including the refusal. A value that is not
+    /// Unicode never reaches that parser, so the environment error is tested
+    /// on its own.
     #[test]
     fn the_override_variable_is_parsed_and_an_absent_one_means_auto() {
         use ocelli_render::{Tier, TierRequest};
@@ -261,6 +276,26 @@ mod tests {
         assert_eq!(
             super::tier_request(Some("nonsense")),
             TierRequest::Unrecognised
+        );
+    }
+
+    /// A deployment value that is not Unicode is a refusal. Treating the
+    /// read error as an absent variable would print that nothing was asked for.
+    /// The error exists only on Unix.
+    #[cfg(unix)]
+    #[test]
+    fn a_non_unicode_override_is_refused() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+        assert_eq!(
+            super::tier_request_from_var(Err(std::env::VarError::NotPresent)),
+            ocelli_render::TierRequest::Auto
+        );
+        let raw = OsString::from_vec(vec![0xff]);
+        assert!(raw.to_str().is_none());
+        assert_eq!(
+            super::tier_request_from_var(Err(std::env::VarError::NotUnicode(raw))),
+            ocelli_render::TierRequest::Unrecognised
         );
     }
 

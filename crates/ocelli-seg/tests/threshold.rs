@@ -120,6 +120,65 @@ fn a_non_finite_value_inside_the_shape_writes_nothing() {
 }
 
 #[test]
+fn a_radius_of_zero_paints_only_an_integer_centre() {
+    let mut painted = grid(3, 3, vec![1; 9]);
+    let values = values_zero_through_eight();
+    let coverage = must_paint(
+        &mut painted,
+        &values,
+        roi(circle(1.0, 1.0, 0.0), 0.0, 8.0, 7),
+    );
+    assert_eq!(coverage.covered, 1);
+    assert_eq!(
+        painted.indices.as_slice(),
+        [1, 1, 1, 1, 7, 1, 1, 1, 1].as_slice()
+    );
+    let mut missed = grid(3, 3, vec![1; 9]);
+    let coverage = must_paint(
+        &mut missed,
+        &values,
+        roi(circle(1.0e-170, 0.0, 0.0), 0.0, 8.0, 7),
+    );
+    assert_eq!(coverage.covered, 0);
+    assert_eq!(missed.indices.as_slice(), [1; 9].as_slice());
+}
+
+#[test]
+fn a_non_zero_radius_whose_square_is_not_normal_writes_nothing() {
+    // Sample (0, 0) is 1e-170 from the centre. The radius is 1e-200.
+    // 1e-170 is not on or inside that radius, and every value is in span.
+    let mut grid = grid(3, 3, vec![1; 9]);
+    let values = values_zero_through_eight();
+    assert!(matches!(
+        threshold_roi(
+            &mut grid,
+            &values,
+            roi(circle(1.0e-170, 0.0, 1.0e-200), 0.0, 8.0, 7),
+        ),
+        Err(ThresholdError::Frame)
+    ));
+    assert_eq!(grid.indices.as_slice(), [1; 9].as_slice());
+}
+
+#[test]
+fn a_squared_radius_past_the_finite_range_writes_nothing() {
+    // Sample (0, 0) is 1e200 from the centre. The radius is 1e160.
+    // 1e200 is not on or inside that radius, and every value is in span,
+    // so a success would paint the whole grid. Every stored 1 stays.
+    let mut grid = grid(3, 3, vec![1; 9]);
+    let values = values_zero_through_eight();
+    assert!(matches!(
+        threshold_roi(
+            &mut grid,
+            &values,
+            roi(circle(1.0e200, 0.0, 1.0e160), 0.0, 8.0, 7),
+        ),
+        Err(ThresholdError::Frame)
+    ));
+    assert_eq!(grid.indices.as_slice(), [1; 9].as_slice());
+}
+
+#[test]
 fn an_inverted_span_and_a_negative_radius_write_nothing() {
     let mut grid = grid(3, 3, vec![1; 9]);
     let values = values_zero_through_eight();

@@ -12,6 +12,8 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
+# The exact f32 integer decomposition is shared with NIfTI offsets.
+ocelli-core = { path = "../ocelli-core" }
 jpeg-decoder.workspace = true
 oxideav-core.workspace = true
 oxideav-mjpeg.workspace = true

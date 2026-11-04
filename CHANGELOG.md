@@ -10,6 +10,61 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- A local page opens a chosen folder, lists each series, and shows one image at a time with contours and text notes.
+- A volume ray drops its binding when its brick texture is uploaded again.
+- A fusion slice that arrives with unchanged bytes is drawn as present.
+- A surface axis longer than the device texture limit is refused before configure.
+- A palette table covers its mapped range and does not extend to stored 0.
+- A clip normal whose square underflows in `f32` is kept when a component is not zero.
+- A camera with one empty axis keeps the other axis when the scale overflows.
+- A camera whose determinant overflows still inverts the scaled basis.
+- A camera coefficient that does not fit in `f32` writes the image centre.
+- A non-Unicode `OCELLI_TIER` value is refused.
+- A closed ring in the cut plane does not draw across a negative-zero vertex.
+- A negative-zero vertex on a closed cut does not hide a gap. Opposite signs of zero do not both count as above a ray.
+- A negative-zero endpoint does not cross the positive plane.
+- A closed contour cut is ordered along the chord.
+- A closed contour cut that joins across a gap outside the ring is refused.
+- A closed contour cut with more than two crossings is refused.
+- A closed contour cut keeps a vertex that lies on the plane once.
+- A contour cut keeps a finite crossing, including one that rounds to an end. A non-finite denominator is refused.
+- A surface whose triangle denominator is not finite writes nothing.
+- A polygon edit refuses a non-finite edge product and an intersection offset that flushed to zero.
+- A polygon edit whose edge product of two non-zero deltas is zero writes nothing.
+- A brush or a threshold circle whose squared radius cannot be compared writes nothing. Radius 0 still paints only an integer centre.
+- A pressure band compares half and nine tenths in `u128`. A half-full tier stays elevated when the wider product does not fit in `u64`.
+- A staged type change is read from the index. A path that starts with a digit and a colon stays that path.
+- A CPU sample takes the device centre as `(pixel + 0.5) * device / target`. Equal extents stay on `pixel + 0.5`.
+- A histogram edge is the minimum plus the width times the bin. A value on that edge stays in the higher bin. Negative zero is that same value. A livewire index of negative zero is the origin and a cost of negative zero is not negative.
+- A fusion plane or a ray residency row longer than the device texture limit is refused. The previous binding stays.
+- An overlay axis longer than the device texture limit is refused. The texture is not created and the previous binding stays.
+- A stored texture axis longer than the device limit is refused. The texture is not created and the sample upload count stays put.
+- A colour table wider than the device texture limit is refused. The texture is not created and the colour upload count stays put.
+- The grey reference ramp reads its rounded byte from the integer. A draw decides that ramp once. An equal channel distance still keeps the higher byte.
+- A sheared stack whose projected steps disagree is refused. A zero step beside a real step stays non-uniform.
+- Tier C checks a palette once, when the colour transform is accepted. A later draw does not walk the table. A colour sample outside 0 to 255 is still refused on the draw.
+- Frames shifted inside one plane are refused. A zero step beside a real step stays non-uniform.
+- A 4:2:2 colour mapping refuses an odd column count. An even pixel count can still pair chroma across a row.
+- Lossless HTJ2K refuses a main-header quantizer other than none. The RPCL syntax also refuses a progression-change marker.
+- A stack whose later frame has different pixel spacing is refused. Frames that occupy one plane are refused.
+- Lossless JPEG 2000 and HTJ2K refuse a COC, and a tile-part COD, COC, QCD or QCC. A later header cannot replace the reversible wavelet.
+- A stack whose later frame is not parallel to the first is refused. Positions on the first normal do not make it a box.
+- Number of Frames above the signed 32-bit range is an overflow refusal.
+- A palette lookup searches the shared input ramp once.
+- An aligned native frame is copied from its bytes. Big-endian OW still swaps each pair. A frame that starts mid-byte still walks bits.
+- One exact-integer reading of an f32 lives in ocelli-core and serves sample conversion and NIfTI offsets.
+- The codec note names the registered JPEG 2000, JPEG-LS and HTJ2K adapters.
+- A grey LINEAR or LINEAR_EXACT window with a negative-zero floor uses the reference 1024 ramp. Stored 149 at 40/400 stays 198. The shader comparison is unchanged.
+- A CPU display channel still stores the nearest byte. An equal distance keeps the higher byte. A value outside 0 to 255 still becomes 0 or 255.
+- Slab, labelmap and fusion pad a texture row with one alignment function. A row that cannot grow is refused.
+- A packed float reuses one eight-byte scratch. The returned bytes are a copy.
+- The content, provenance and prose guards read a staged blob from the index. A path with a space is one name. A missing git listing is a failure.
+- A cine rate divides changed frames by the cine call.
+- A wide CPU presentation copies each device pixel from the drawn cell that covers it. The cell index is a full-width product.
+- Livewire finds the same 4-connected path with a heap. An equal cost still keeps the lower index.
+- A histogram keeps the maximum in the last bin when a bin edge cannot move. Equal samples stay in the first bin. Negative zero elapsed time is zero for SUV. A non-finite SUV is a frame error.
+- A thick slab uploads its samples in one texture write. An absent column stays mask zero and is not drawn.
+- The shell does not treat a hyphenated suffix as a verify field. A field starts after whitespace or the colon. `comparison-tree` is not `tree`.
 - The shell classifies one commit message as recorded, missing or forged. Both trailer lines and the four verify fields are recorded. A message with neither trailer is missing, and missing is not success. An agent co-author line, one trailer alone, a repeated trailer, or a verify line missing one field is forged. The function does not write a trailer.
 - The shell refuses a stable claim while D-22 is open or any matrix row is uncertified. A 0.x channel and a patch have no removal window. A minor keeps a deprecated name for one further minor. A major may remove a name. The workspace version stays 0.1.0. Nothing is published.
 - The shell names the next migration kind only when the done list is a prefix of stack, then MPR, then volume. A skip returns nothing. The function does not flip a flag and does not claim that 1.0.0 is published.

@@ -237,8 +237,12 @@ impl View {
     /// This is the inverse of [`Self::image_to_canvas`]. The fragment shader
     /// divides the device position by the device pixel ratio first, then
     /// multiplies `(css_x, css_y, 0, 1)` by it. A zero spacing on one axis
-    /// keeps the other axis and that axis's shift. A map with no extent
-    /// writes the image centre. Neither path writes a non-finite value.
+    /// keeps the other axis and that axis's shift. That axis is scaled
+    /// before the squared length. A map with no extent
+    /// writes the image centre. A coefficient that does not narrow to a
+    /// finite `f32` writes that same centre. A determinant that overflows
+    /// is inverted from the basis scaled by its largest entry. No path
+    /// writes a non-finite value.
     #[must_use]
     pub fn camera_matrix(&self, columns: u32, rows: u32) -> [f32; 16] {
         let (centre_x, centre_y) = centre(columns, rows);
@@ -247,6 +251,8 @@ impl View {
         let (translate_x, translate_y) = self.translation(columns, rows);
         let (a, b, d, e) = if linear_is_invertible(p, q, r, u, det, translate_x, translate_y) {
             (u / det, -q / det, -r / det, p / det)
+        } else if let Some(inverse) = scaled_full_inverse(p, q, r, u, translate_x, translate_y) {
+            inverse
         } else if let Some(inverse) = rank_one_inverse(p, q, r, u) {
             inverse
         } else {
@@ -254,32 +260,23 @@ impl View {
         };
         let c = centre_x - a * translate_x - b * translate_y;
         let f = centre_y - d * translate_x - e * translate_y;
-        if !c.is_finite()
-            || !f.is_finite()
-            || !a.is_finite()
-            || !b.is_finite()
-            || !d.is_finite()
-            || !e.is_finite()
+        let a_n = f32_from_f64(a);
+        let b_n = f32_from_f64(b);
+        let c_n = f32_from_f64(c);
+        let d_n = f32_from_f64(d);
+        let e_n = f32_from_f64(e);
+        let f_n = f32_from_f64(f);
+        if !a_n.is_finite()
+            || !b_n.is_finite()
+            || !c_n.is_finite()
+            || !d_n.is_finite()
+            || !e_n.is_finite()
+            || !f_n.is_finite()
         {
             return centre_matrix(centre_x, centre_y);
         }
         [
-            f32_from_f64(a),
-            f32_from_f64(d),
-            0.0,
-            0.0,
-            f32_from_f64(b),
-            f32_from_f64(e),
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
-            0.0,
-            f32_from_f64(c),
-            f32_from_f64(f),
-            0.0,
-            1.0,
+            a_n, d_n, 0.0, 0.0, b_n, e_n, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, c_n, f_n, 0.0, 1.0,
         ]
     }
 
@@ -575,6 +572,34 @@ fn axis_scale(canvas: f64, extent: f64) -> f64 {
     }
 }
 
+/// Inverse of a full-rank basis whose product overflowed.
+///
+/// The basis is divided by its largest magnitude, inverted, then divided
+/// by that magnitude again. A singular or non-finite basis returns nothing
+/// so the rank-one path and the centre stay in charge.
+fn scaled_full_inverse(
+    p: f64,
+    q: f64,
+    r: f64,
+    u: f64,
+    tx: f64,
+    ty: f64,
+) -> Option<(f64, f64, f64, f64)> {
+    let k = p.abs().max(q.abs()).max(r.abs()).max(u.abs());
+    if !k.is_finite() || k.to_bits() == 0 {
+        return None;
+    }
+    let p = p / k;
+    let q = q / k;
+    let r = r / k;
+    let u = u / k;
+    let det = p * u - q * r;
+    if !linear_is_invertible(p, q, r, u, det, tx, ty) {
+        return None;
+    }
+    Some((u / det / k, -q / det / k, -r / det / k, p / det / k))
+}
+
 fn linear_is_invertible(p: f64, q: f64, r: f64, u: f64, det: f64, tx: f64, ty: f64) -> bool {
     det.is_finite()
         && det.abs().to_bits() != 0.0_f64.to_bits()
@@ -590,14 +615,28 @@ fn linear_is_invertible(p: f64, q: f64, r: f64, u: f64, det: f64, tx: f64, ty: f
 ///
 /// A zero column spacing makes the column of `M` zero and leaves the row.
 /// Dividing by the squared length keeps that row and drops the empty axis
-/// onto the image centre. The zero matrix has no extent, so the caller
-/// uses the centre instead.
+/// onto the image centre. The basis is divided by its largest magnitude
+/// first, so a large row does not overflow that square. The zero matrix
+/// has no extent, so the caller uses the centre instead.
 fn rank_one_inverse(p: f64, q: f64, r: f64, u: f64) -> Option<(f64, f64, f64, f64)> {
+    let k = p.abs().max(q.abs()).max(r.abs()).max(u.abs());
+    if !k.is_finite() || k.to_bits() == 0 {
+        return None;
+    }
+    let p = p / k;
+    let q = q / k;
+    let r = r / k;
+    let u = u / k;
     let length_sq = p * p + q * q + r * r + u * u;
     if !length_sq.is_finite() || length_sq.abs().to_bits() == 0.0_f64.to_bits() {
         return None;
     }
-    Some((p / length_sq, r / length_sq, q / length_sq, u / length_sq))
+    Some((
+        p / length_sq / k,
+        r / length_sq / k,
+        q / length_sq / k,
+        u / length_sq / k,
+    ))
 }
 
 fn centre_matrix(centre_x: f64, centre_y: f64) -> [f32; 16] {

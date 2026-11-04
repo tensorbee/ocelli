@@ -17,23 +17,7 @@ import { coreAvailable, VERSION } from "./index.js";
  * published index" as the reason they matter, and that fact was held by no
  * check.
  *
- * Only value exports are observable here. The type-only exports (`BulkSink`,
- * `WasmMemory`, `HandoffMeta`, `FrameMessage`, `DrainResult`, `OcelliEvent`,
- * `OcelliRecord`, `RecordOperands`, `PanicMemory`, `PanicRecord`,
- * `CoreStatus`, `Camera`, `Colormap`, `Invert`, `Scene`, `StackCommand`,
- * `StackViewport`, `TierAvailability`, `ToolBinding`, `ViewportId`,
- * `VoiFunction`, `WindowPreset`, `ModeChange`, `PointerBinding`,
- * `PointerButton`, `PointerModifier`, `RegisteredTool`, `ToolGroupView`,
- * `ToolMode`, `ToolOutcome`, `ToolRefusal`, `ToolRegistry`,
- * `DispatchFrame`, `DispatchReason`, `GestureBasis`, `PointerDispatch`,
- * `PointerDispatchOptions`, `PointerDomEvent`, `PointerTarget`,
- * `ShellGestureEvent`, `CursorController`, `CursorControllerOptions`,
- * `CursorPair`, `CursorPhase`, `CursorStyle`, `ToolState`,
- * `ToolStateEvent`, `AnnotationLayer`, `AnnotationLayerEvent`,
- * `AnnotationMark`, `AnnotationPoint`, `AnnotationRefusal`,
- * `AnnotationSyncResult`, `TidSource`, `ElementSeam`, `SeamEvent`, `SideBySide`,
- * `ViewportKind`, `DecodePool`, `WorkerHandle`, `MatrixInput`,
- * `MatrixObservation`, `MatrixStatus`, `MatrixTier`) are erased
+ * Only value exports are observable here. Type-only exports are erased
  * before this runs, and `npx tsc` is what watches those.
  *
  * Adding an export is a deliberate act, so adding a line here is the cost of

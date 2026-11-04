@@ -118,6 +118,23 @@ fn contour_and_surface_disagree_on_the_hand_triangle() {
 }
 
 #[test]
+fn an_infinite_denominator_writes_nothing() {
+    // The centre is above the line through (0, 0) and (1, 0.5).
+    // The third vertex makes the denominator overflow, so nothing is written.
+    let mesh = SurfaceMesh {
+        segment: 1,
+        vertices: vec![at(0.0, 0.0), at(1.5e308, -1.5e308), at(1.0, 0.5)],
+        triangles: vec![[0, 1, 2]],
+    };
+    let mut out = vec![0xA5_u8; 4];
+    assert_eq!(
+        present_surface(&mesh, &frame(), &lut(), 1, 1, &mut out),
+        Err(SurfaceError::Frame)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xA5));
+}
+
+#[test]
 fn a_degenerate_triangle_is_skipped() {
     let flat = SurfaceMesh {
         segment: 1,

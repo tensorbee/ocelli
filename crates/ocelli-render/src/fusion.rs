@@ -8,13 +8,13 @@
 use bytemuck::{Pod, Zeroable};
 use ocelli_core::{Display, Stored};
 use ocelli_pixel::{DIRECTION_COSINE_TOLERANCE, LutChain, Rgb};
-use ocelli_volume::{FusionPlane, PlaneSample, Volume, world_on_plane};
+use ocelli_volume::{FusionPlane, PlaneSample, Volume, VoxelKind, world_on_plane};
 use wgpu::util::DeviceExt;
 
 use crate::caps::Tier;
 use crate::colour::{byte_from_channel, display_index};
 use crate::gpu::GpuContext;
-use crate::graph::{Dirty, TABLE_INDEX_WGSL, Upload};
+use crate::graph::{Dirty, TABLE_INDEX_WGSL, Upload, aligned_row_bytes};
 use crate::probe::ResolvedAdapter;
 use crate::voi::{VOI_WGSL, VoiParams, VoiParamsError};
 
@@ -375,6 +375,10 @@ fn table_len_ok(table: Option<&[Rgb]>) -> bool {
     }
 }
 
+fn plane_fits_limit(width: u32, height: u32, max_texture_dimension_2d: u32) -> bool {
+    width <= max_texture_dimension_2d && height <= max_texture_dimension_2d
+}
+
 fn plane_ok(plane: &FusionPlane) -> bool {
     finite_point(plane.origin)
         && unit_dir(plane.row_dir)
@@ -424,10 +428,15 @@ fn table_hash(table: Option<&[Rgb]>) -> u64 {
     hash
 }
 
+/// Bytes plus each slice's presence bit.
+///
+/// A zero slice that arrives does not change the bytes. It is still a
+/// different sample, because absence is not stored zero.
 fn sample_hash(volume: &Volume) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     let mut z = 0_u32;
     while z < volume.dims[2] {
+        hash = mix(hash, u64::from(volume.present.test(z)));
         match volume.data.slice(z) {
             Some(bytes) => {
                 for byte in bytes {
@@ -441,8 +450,16 @@ fn sample_hash(volume: &Volume) -> u64 {
     hash
 }
 
+/// Spacing, origin, direction, dimensions and voxel kind.
+///
+/// `sample_at` reads the dimensions and the kind. Neither is visible in
+/// the byte hash.
 fn geometry_hash(volume: &Volume) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    hash = mix(hash, u64::from(volume.dims[0]));
+    hash = mix(hash, u64::from(volume.dims[1]));
+    hash = mix(hash, u64::from(volume.dims[2]));
+    hash = mix(hash, kind_code(volume.voxel));
     for value in volume.spacing {
         hash = mix(hash, value.to_bits());
     }
@@ -458,6 +475,15 @@ fn geometry_hash(volume: &Volume) -> u64 {
         column = column.saturating_add(1);
     }
     hash
+}
+
+fn kind_code(kind: VoxelKind) -> u64 {
+    match kind {
+        VoxelKind::U8 => 0,
+        VoxelKind::I16 => 1,
+        VoxelKind::U16 => 2,
+        VoxelKind::F32 => 3,
+    }
 }
 
 fn mix(hash: u64, value: u64) -> u64 {
@@ -854,6 +880,10 @@ pub(crate) fn stage(
     request: &FusionRequest<'_>,
     stamp: FusionStamp,
 ) -> Result<(), FusionError> {
+    let limit = ctx.device().limits().max_texture_dimension_2d;
+    if !plane_fits_limit(request.plane.width, request.plane.height, limit) {
+        return Err(FusionError::Unavailable);
+    }
     if slot
         .as_ref()
         .is_some_and(|view| view.matches_extent(request.plane))
@@ -950,7 +980,8 @@ fn prepare_plane_samples(
         &mut ct_samples,
         &mut ct_mask,
     )?;
-    let row_bytes = padded_row_bytes(width, texel_bytes)?;
+    let raw = width.checked_mul(texel_bytes).ok_or(FusionError::Plane)?;
+    let row_bytes = aligned_row_bytes(raw).ok_or(FusionError::Plane)?;
     Ok(PreparedPlanes {
         row_bytes,
         width,
@@ -1130,17 +1161,6 @@ fn pixel_index(column: u32, row: u32, width: u32) -> Result<usize, FusionError> 
     y.checked_mul(columns)
         .and_then(|base| base.checked_add(x))
         .ok_or(FusionError::Plane)
-}
-
-fn padded_row_bytes(width: u32, texel_bytes: u32) -> Result<u32, FusionError> {
-    let raw = width.checked_mul(texel_bytes).ok_or(FusionError::Plane)?;
-    let align = 256_u32;
-    let rem = raw % align;
-    if rem == 0 {
-        Ok(raw)
-    } else {
-        raw.checked_add(align - rem).ok_or(FusionError::Plane)
-    }
 }
 
 fn pack_f32(
@@ -1432,6 +1452,13 @@ mod format_decision {
             allowed_usages: wgpu::TextureUsages::COPY_SRC,
             flags: wgpu::TextureFormatFeatureFlags::empty(),
         }
+    }
+
+    #[test]
+    fn a_fusion_plane_past_the_device_limit_does_not_fit() {
+        assert!(super::plane_fits_limit(4, 4, 4));
+        assert!(!super::plane_fits_limit(5, 4, 4));
+        assert!(!super::plane_fits_limit(4, 5, 4));
     }
 
     fn window_ok() -> wgpu::TextureFormatFeatures {

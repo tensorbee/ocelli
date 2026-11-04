@@ -171,10 +171,16 @@ impl LutDescriptor {
         self.inputs.first().copied().unwrap_or(0.0).to_bits()
     }
 
-    pub(crate) fn lookup(&self, input: f32) -> f32 {
+    pub(crate) fn lookup_index(&self, input: f32) -> usize {
         let after = self.inputs.partition_point(|candidate| *candidate <= input);
-        let index = after.saturating_sub(1).min(self.values.len() - 1);
-        self.values.get(index).copied().unwrap_or(0.0)
+        after.saturating_sub(1).min(self.values.len() - 1)
+    }
+
+    pub(crate) fn lookup(&self, input: f32) -> f32 {
+        self.values
+            .get(self.lookup_index(input))
+            .copied()
+            .unwrap_or(0.0)
     }
 }
 

@@ -1,12 +1,14 @@
 # Codec registry
 
 **F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028, F-030, F-X021
-**Last updated:** 2026-11-01
+**Last updated:** 2026-11-03
 
 `ocelli-codec` owns decoder capability, registration, and exact Transfer
 Syntax UID dispatch. Concrete adapters cover native Implicit and Explicit VR
 Little Endian, native Explicit VR Big Endian, RLE Lossless, JPEG Baseline
-`.50`, JPEG Extended `.51`, JPEG Lossless `.57`, and JPEG Lossless SV1 `.70`.
+`.50`, JPEG Extended `.51`, JPEG Lossless `.57`, JPEG Lossless SV1 `.70`,
+JPEG 2000 `.90` and `.91`, JPEG-LS `.80` and `.81`, and HTJ2K `.201`, `.202`
+and `.203`.
 The crate builds for native and `wasm32-unknown-unknown` from the same Rust
 implementation.
 
@@ -46,9 +48,9 @@ plus necessary DICOM NULL padding. The supported domain is one MONOCHROME1 or
 MONOCHROME2 component in an 8-bit or 16-bit signed or unsigned container with
 identity rescale. Per DICOM PS3.5 A.4.4, `.90` requires reversible 5/3 and QCD
 no-quantization style. `.91` accepts reversible 5/3 or irreversible 9/7 with
-any valid Part 1 QCD style. Missing or duplicate QCD, invalid style lengths,
-and QCC quantization override are refused before decode. Colour and MCT are
-refused.
+any valid Part 1 QCD style. Missing or duplicate QCD, invalid style lengths, a COC coding override, and a
+QCC quantization override are refused before decode. Lossless-only `.90` also
+refuses a tile-part COD, COC, QCD or QCC. Colour and MCT are refused.
 
 A deterministic fixture generator rewrites the tracked reversible fixture's
 expounded QCD segment into a legal scalar-derived segment and asks OpenJPEG
@@ -206,7 +208,11 @@ adapter parses it itself rather than asking the dependency, because
 to have read the marker that decides what the file *is* would be trusting it
 with the question. A codestream without CAP is `FrameMismatch`, asserted with
 the Part 1 `.90` corpus fixture, which is the same synthetic ramp and passes
-every other check.
+every other check. A COC or QCC in the main header is refused. `.201` and
+`.202` also refuse a tile-part COD, COC, QCD or QCC, so a later header cannot
+replace the reversible wavelet. Those two syntaxes also refuse a main-header
+QCD whose style is not no-quantization. `.202` refuses a POC in the main
+header or in a tile-part header, because that marker replaces the RPCL order.
 
 ### The three syntaxes, and the asymmetry between two of them
 
@@ -506,14 +512,8 @@ touch the GPU, so rendering tiers A, B, and C do not select different registry
 behavior. `ocelli-codec` imports neither `wgpu` nor `wasm-bindgen`, and it uses
 no unsafe code.
 
-The remaining resolved codec routes are future adapter work:
-
-- JPEG-LS uses `pure_jpegls` 2.0.0 subject to the production story's coverage
-  and conformance gates.
-- HTJ2K uses `openjph-core` 0.1.0 or a reviewed successor subject to the
-  production gates in `docs/spikes/A1-htj2k-route.md`.
-
-Until those adapters land, their known UIDs remain `KnownUnavailable`.
+JPEG 2000, JPEG-LS and HTJ2K are registered. The sections above are their
+contracts. A known UID with no adapter remains `KnownUnavailable`.
 
 ## Evidence and measurement boundary
 

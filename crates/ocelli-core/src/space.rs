@@ -487,11 +487,10 @@ mod tests {
     /// `inverse` does not check invertibility, and this executes what the
     /// doc comment on it claims rather than leaving the claim as prose.
     ///
-    /// The matrix is the DICOM PS3.3 C.7.6.2.1.1 image-plane matrix, whose
-    /// third column is zero because the equation is in-plane, so a
-    /// single-slice transform is singular by construction and this is the
-    /// realistic case rather than a contrived one. glam returns non-finite
-    /// components instead of failing.
+    /// The fixture is the DICOM PS3.3 C.7.6.2.1.1 equation with a zero third
+    /// column. `ImagePlane::index_to_world` is a different matrix. It puts a
+    /// unit normal in that column and is invertible. glam returns non-finite
+    /// components for this singular fixture instead of failing.
     ///
     /// This matters because `glam = "0.30"` is a caret range and not the
     /// exact pin `wgpu` gets, so a patch release could change the behaviour

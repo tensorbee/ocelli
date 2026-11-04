@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use openjph_core::{codestream::Codestream, file::MemInfile};
 
+use crate::jpeg2000::{logical_codestream, parse_siz, read_u16, refuse_tile_coding_overrides};
 use crate::{
     Capability, CodecError, Decoder, FrameDesc, PixelDataVr, PixelRepresentation, Registry,
     RegistryError, sample_convert::convert_samples,
@@ -32,6 +33,10 @@ const SOC: u8 = 0x4f;
 const EOC: u8 = 0xd9;
 const SIZ: u8 = 0x51;
 const COD: u8 = 0x52;
+const COC: u8 = 0x53;
+const QCD: u8 = 0x5c;
+const QCC: u8 = 0x5d;
+const POC: u8 = 0x5f;
 const CAP: u8 = 0x50;
 const SOT: u8 = 0x90;
 
@@ -120,7 +125,10 @@ impl Decoder for Htj2kDecoder {
         }
         validate_descriptor(desc)?;
         let codestream = logical_codestream(src)?;
-        let header = inspect_main_header(codestream)?;
+        let (header, tile_at) = inspect_main_header(codestream)?;
+        if self.mode != Mode::General {
+            refuse_tile_coding_overrides(codestream, tile_at, self.mode == Mode::LosslessRpcl)?;
+        }
         validate_header(self.mode, header, desc)?;
 
         let decoded = decode_rows(codestream, desc)?;
@@ -155,34 +163,20 @@ struct MainHeader {
     progression: u8,
     reversible: bool,
     multiple_component_transform: u8,
-}
-
-/// Bound the codestream to SOC through EOC, PS3.5 A.4.
-fn logical_codestream(src: &[u8]) -> Result<&[u8], CodecError> {
-    if src.len() < 4 || !src.starts_with(&[0xff, SOC]) {
-        return Err(CodecError::InvalidCodestream);
-    }
-    if src.ends_with(&[0xff, EOC]) {
-        return Ok(src);
-    }
-    // PS3.5 A.4 pads an odd fragment to an even length with a single byte.
-    if src.ends_with(&[0xff, EOC, 0]) && !(src.len() - 1).is_multiple_of(2) {
-        return src
-            .get(..src.len() - 1)
-            .ok_or(CodecError::InvalidCodestream);
-    }
-    if src.windows(2).any(|window| window == [0xff, EOC]) {
-        return Err(CodecError::TrailingData);
-    }
-    Err(CodecError::InvalidCodestream)
+    /// QCD `Sqcd` style, when a main-header QCD is present.
+    quantization_style: Option<u8>,
+    /// A POC marker was present. It can replace the COD progression order.
+    progression_order_change: bool,
 }
 
 /// Read SIZ, COD and CAP from the main header, stopping at SOT.
-fn inspect_main_header(src: &[u8]) -> Result<MainHeader, CodecError> {
+fn inspect_main_header(src: &[u8]) -> Result<(MainHeader, usize), CodecError> {
     let mut offset = 2usize;
     let mut siz = None;
     let mut cod = None;
     let mut high_throughput = false;
+    let mut quantization_style = None;
+    let mut progression_order_change = false;
     while offset.checked_add(2).is_some_and(|end| end <= src.len()) {
         if src.get(offset) != Some(&0xff) {
             return Err(CodecError::InvalidCodestream);
@@ -224,6 +218,17 @@ fn inspect_main_header(src: &[u8]) -> Result<MainHeader, CodecError> {
                 }
                 high_throughput = true;
             }
+            // A component override can replace the reversible wavelet or add
+            // quantization after the main-header COD has been accepted.
+            COC | QCC => return Err(CodecError::UnsupportedPixelFormat),
+            QCD => {
+                if quantization_style.is_some() {
+                    return Err(CodecError::InvalidCodestream);
+                }
+                let (style, _) = crate::jpeg2000::parse_qcd(payload)?;
+                quantization_style = Some(style);
+            }
+            POC => progression_order_change = true,
             _ => {}
         }
         offset = end;
@@ -232,46 +237,21 @@ fn inspect_main_header(src: &[u8]) -> Result<MainHeader, CodecError> {
         siz.ok_or(CodecError::InvalidCodestream)?;
     let (progression, multiple_component_transform, reversible) =
         cod.ok_or(CodecError::InvalidCodestream)?;
-    Ok(MainHeader {
-        width,
-        height,
-        components,
-        precision,
-        signed,
-        high_throughput,
-        progression,
-        reversible,
-        multiple_component_transform,
-    })
-}
-
-/// SIZ, ISO/IEC 15444-1 A.5.1.
-fn parse_siz(payload: &[u8]) -> Result<(u32, u32, u16, u8, bool), CodecError> {
-    if payload.len() < 39 {
-        return Err(CodecError::InvalidCodestream);
-    }
-    let xsiz = read_u32(payload, 2)?;
-    let ysiz = read_u32(payload, 6)?;
-    let xosiz = read_u32(payload, 10)?;
-    let yosiz = read_u32(payload, 14)?;
-    let components = read_u16(payload, 34)?;
-    let expected = 36usize
-        .checked_add(
-            usize::from(components)
-                .checked_mul(3)
-                .ok_or(CodecError::InvalidCodestream)?,
-        )
-        .ok_or(CodecError::InvalidCodestream)?;
-    if payload.len() != expected || components == 0 || xsiz <= xosiz || ysiz <= yosiz {
-        return Err(CodecError::InvalidCodestream);
-    }
-    let ssiz = *payload.get(36).ok_or(CodecError::InvalidCodestream)?;
     Ok((
-        xsiz - xosiz,
-        ysiz - yosiz,
-        components,
-        (ssiz & 0x7f) + 1,
-        ssiz & 0x80 != 0,
+        MainHeader {
+            width,
+            height,
+            components,
+            precision,
+            signed,
+            high_throughput,
+            progression,
+            reversible,
+            multiple_component_transform,
+            quantization_style,
+            progression_order_change,
+        },
+        offset,
     ))
 }
 
@@ -332,11 +312,23 @@ fn validate_header(mode: Mode, header: MainHeader, desc: &FrameDesc) -> Result<(
             }
         }
         Mode::LosslessRpcl => {
-            if !header.reversible || header.progression != PROGRESSION_RPCL {
+            if !header.reversible
+                || header.progression != PROGRESSION_RPCL
+                || header.progression_order_change
+            {
                 return Err(CodecError::FrameMismatch);
             }
         }
         Mode::General => {}
+    }
+    // PS3.5 A.4.4's no-quantization rule, applied to the HTJ2K lossless UIDs.
+    // A reversible COD with a scalar or expounded QCD is still lossy.
+    if matches!(mode, Mode::Lossless | Mode::LosslessRpcl) {
+        match header.quantization_style {
+            Some(0) => {}
+            Some(_) => return Err(CodecError::FrameMismatch),
+            None => return Err(CodecError::InvalidCodestream),
+        }
     }
     Ok(())
 }
@@ -406,24 +398,6 @@ fn exact_f32(value: i32) -> Option<f32> {
         return Some(f32::from(unsigned));
     }
     None
-}
-
-fn read_u16(src: &[u8], offset: usize) -> Result<u16, CodecError> {
-    let bytes = src
-        .get(offset..offset + 2)
-        .ok_or(CodecError::InvalidCodestream)?;
-    Ok(u16::from_be_bytes(
-        <[u8; 2]>::try_from(bytes).map_err(|_| CodecError::InvalidCodestream)?,
-    ))
-}
-
-fn read_u32(src: &[u8], offset: usize) -> Result<u32, CodecError> {
-    let bytes = src
-        .get(offset..offset + 4)
-        .ok_or(CodecError::InvalidCodestream)?;
-    Ok(u32::from_be_bytes(
-        <[u8; 4]>::try_from(bytes).map_err(|_| CodecError::InvalidCodestream)?,
-    ))
 }
 
 #[cfg(test)]

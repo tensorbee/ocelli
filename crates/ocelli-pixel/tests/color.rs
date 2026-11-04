@@ -132,7 +132,7 @@ fn ybr_full_inverts_the_ps3_3_c_7_6_3_1_2_matrix() {
     for (ybr, expected) in YBR_FULL_ROWS {
         let source = stored(&ybr);
         let mut destination = [Rgb::BLACK];
-        assert_eq!(transform.map_into(&source, &mut destination), Ok(()));
+        assert_eq!(transform.map_into(&source, &mut destination, 1), Ok(()));
         assert_rgb_close(destination[0], expected);
     }
 }
@@ -149,7 +149,7 @@ fn out_of_gamut_results_are_reported_rather_than_clamped() {
     let transform = require_ok!(native_interleaved(PhotometricInterpretation::YbrFull));
     let source = stored(&[16.0, 16.0, 240.0]);
     let mut destination = [Rgb::BLACK];
-    assert_eq!(transform.map_into(&source, &mut destination), Ok(()));
+    assert_eq!(transform.map_into(&source, &mut destination, 1), Ok(()));
     assert!(destination[0].b < -182.0);
     assert!(destination[0].r > 173.0);
 }
@@ -200,7 +200,7 @@ fn ybr_partial_422_applies_the_studio_swing_offset_and_gain() {
         let [y, cb, cr] = ybr;
         let source = stored(&[y, y, cb, cr]);
         let mut destination = [Rgb::BLACK; 2];
-        assert_eq!(transform.map_into(&source, &mut destination), Ok(()));
+        assert_eq!(transform.map_into(&source, &mut destination, 2), Ok(()));
         assert_rgb_close(destination[0], expected);
         assert_rgb_close(destination[1], expected);
     }
@@ -215,7 +215,7 @@ fn the_two_ybr_ranges_do_not_agree_on_the_same_triple() {
     let full = require_ok!(native_interleaved(PhotometricInterpretation::YbrFull));
     let source = stored(&[16.0, 128.0, 128.0]);
     let mut destination = [Rgb::BLACK];
-    assert_eq!(full.map_into(&source, &mut destination), Ok(()));
+    assert_eq!(full.map_into(&source, &mut destination, 1), Ok(()));
     // Full range reads studio black as 16, partial range reads it as 0.
     assert_rgb_close(destination[0], (16.0, 16.0, 16.0));
 }
@@ -234,7 +234,7 @@ fn ybr_full_422_replicates_chroma_across_the_pair() {
     // Y1 = 60, Y2 = 200, Cb = 90, Cr = 170.
     let source = stored(&[60.0, 200.0, 90.0, 170.0]);
     let mut destination = [Rgb::BLACK; 2];
-    assert_eq!(transform.map_into(&source, &mut destination), Ok(()));
+    assert_eq!(transform.map_into(&source, &mut destination, 2), Ok(()));
     // Exact: (118.8848774, 43.0839442, -7.3408209) and
     //        (258.8848774, 183.0839442, 132.6591791). Written as the shortest
     //        decimals that round-trip to the nearest f32, per
@@ -341,10 +341,13 @@ fn the_same_image_reads_identically_in_both_planar_layouts() {
     let mut from_interleaved = [Rgb::BLACK; 3];
     let mut from_planar = [Rgb::BLACK; 3];
     assert_eq!(
-        interleaved.map_into(&stored(&INTERLEAVED), &mut from_interleaved),
+        interleaved.map_into(&stored(&INTERLEAVED), &mut from_interleaved, 3),
         Ok(())
     );
-    assert_eq!(planar.map_into(&stored(&PLANAR), &mut from_planar), Ok(()));
+    assert_eq!(
+        planar.map_into(&stored(&PLANAR), &mut from_planar, 3),
+        Ok(())
+    );
 
     for (interleaved_pixel, planar_pixel) in from_interleaved.iter().zip(from_planar.iter()) {
         assert_rgb_close(
@@ -388,9 +391,12 @@ fn planar_configuration_is_honoured_natively_and_ignored_when_encapsulated() {
 
     let mut native_out = [Rgb::BLACK; 3];
     let mut encapsulated_out = [Rgb::BLACK; 3];
-    assert_eq!(native.map_into(&stored(&PLANAR), &mut native_out), Ok(()));
     assert_eq!(
-        encapsulated.map_into(&stored(&PLANAR), &mut encapsulated_out),
+        native.map_into(&stored(&PLANAR), &mut native_out, 3),
+        Ok(())
+    );
+    assert_eq!(
+        encapsulated.map_into(&stored(&PLANAR), &mut encapsulated_out, 3),
         Ok(())
     );
 
@@ -432,7 +438,7 @@ fn a_decoder_converted_frame_is_not_converted_a_second_time() {
     ));
     let mut untouched = [Rgb::BLACK; 2];
     assert_eq!(
-        already_rgb.map_into(&stored(&samples), &mut untouched),
+        already_rgb.map_into(&stored(&samples), &mut untouched, 2),
         Ok(())
     );
     assert_rgb_close(untouched[0], (200.0, 30.0, 40.0));
@@ -450,7 +456,7 @@ fn a_decoder_converted_frame_is_not_converted_a_second_time() {
     ));
     let mut converted = [Rgb::BLACK; 2];
     assert_eq!(
-        preserved.map_into(&stored(&samples[0..4]), &mut converted),
+        preserved.map_into(&stored(&samples[0..4]), &mut converted, 2),
         Ok(())
     );
     assert!((converted[0].r - 200.0).abs() > 1.0);
@@ -530,15 +536,35 @@ fn mapping_refuses_a_length_mismatch_before_writing() {
     // One pixel of RGB is three stored samples, so two is short and four is
     // long. Both are refused and neither writes.
     assert_eq!(
-        transform.map_into(&stored(&[1.0, 2.0]), &mut destination),
+        transform.map_into(&stored(&[1.0, 2.0]), &mut destination, 1),
         Err(PixelError::SourceLength)
     );
     assert_eq!(destination[0].r.to_bits(), 77.0_f32.to_bits());
     assert_eq!(
-        transform.map_into(&stored(&[1.0, 2.0, 3.0, 4.0]), &mut destination),
+        transform.map_into(&stored(&[1.0, 2.0, 3.0, 4.0]), &mut destination, 1,),
         Err(PixelError::SourceLength)
     );
     assert_eq!(destination[0].r.to_bits(), 77.0_f32.to_bits());
+}
+
+/// PS3.3 C.7.6.3.1.2 pairs pixels horizontally. Three columns and two rows
+/// is six pixels, which is even, and the third pixel still shares chroma
+/// with the first pixel of the next row.
+#[test]
+fn odd_columns_are_refused_even_when_the_pixel_count_is_even() {
+    let transform = require_ok!(native_interleaved(PhotometricInterpretation::YbrFull422));
+    let mut destination = [Rgb::BLACK; 6];
+    assert_eq!(
+        transform.map_into(
+            &stored(&[
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+            ]),
+            &mut destination,
+            3,
+        ),
+        Err(PixelError::SubsampledChromaAlignment)
+    );
+    assert_eq!(destination[0].r.to_bits(), 0.0_f32.to_bits());
 }
 
 /// A 4:2:2 destination holding an odd number of pixels splits a chroma pair.
@@ -547,7 +573,11 @@ fn an_odd_pixel_count_is_refused_for_subsampled_chroma() {
     let transform = require_ok!(native_interleaved(PhotometricInterpretation::YbrFull422));
     let mut destination = [Rgb::BLACK; 3];
     assert_eq!(
-        transform.map_into(&stored(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), &mut destination),
+        transform.map_into(
+            &stored(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            &mut destination,
+            2,
+        ),
         Err(PixelError::SubsampledChromaAlignment)
     );
 }

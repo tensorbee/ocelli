@@ -8,6 +8,8 @@ use alloc::vec::Vec;
 
 use ocelli_core::{Pt, World};
 
+use crate::brush::same_number;
+use crate::contour_edit::{IndexPoint, inside_polygon, on_segment};
 use crate::labelmap::LabelColourLut;
 
 /// DICOM PS3.3 C.8.8.6 Contour Geometric Type, as a value rather than a file.
@@ -53,7 +55,10 @@ pub struct Contour {
 pub enum ContourError {
     /// Width or height is 0, or the stroke painted nothing inside the grid.
     Empty,
-    /// The point list does not match the geometric type.
+    /// The point list does not match the geometric type. A closed cut with
+    /// more than two interpolated crossings, a joined span that leaves the
+    /// ring, or a ring in the cut plane that joins across a vertex, uses
+    /// this same refusal.
     Length,
     /// The segment has no colour. Nothing was written.
     MissingColour,
@@ -127,15 +132,28 @@ pub fn present_contour(
 /// Cut `contour` by the patient plane `z = plane_z`.
 ///
 /// A point is on the plane when its Z bits match `plane_z`, so `-0.0` and
-/// `+0.0` stay different. A crossing uses `t = (plane_z - z0) / (z1 - z0)`
-/// with `0 < t < 1` and stores `plane_z` itself. The whole contour is
-/// returned unchanged when every point is already on the plane.
+/// `+0.0` stay different. A zero of the other sign adds no point. A crossing
+/// uses `t = (plane_z - z0) / (z1 - z0)`.
+/// A finite `t` is used, including one that rounds to 0 or 1, and the stored
+/// Z is `plane_z`. A non-finite denominator or a non-finite `t` is refused.
+/// A closed contour with more than two interpolated crossings is refused.
+/// A closed cut is also refused when a joined span leaves the ring. A
+/// negative-zero vertex on that span does not hide the gap. A ring that
+/// lies in the cut plane does not join across that vertex. A span
+/// that is a source edge on the plane stays. One contour cannot hold two
+/// pieces. The points of a closed cut are ordered along the chord. The
+/// whole contour is returned unchanged when every point is already on
+/// the plane.
 ///
 /// # Errors
 ///
-/// [`ContourError::Frame`] for a non-finite plane or coordinate.
+/// [`ContourError::Frame`] for a non-finite plane, coordinate, denominator, `t`,
+/// midpoint or ring normal.
 /// [`ContourError::Length`] when the geometric type does not match the
-/// point count. [`ContourError::Empty`] when the plane misses the contour.
+/// point count, when a closed contour has more than two interpolated
+/// crossings, when a joined span leaves the ring, or when a ring in the
+/// cut plane joins a pair that is not a source edge.
+/// [`ContourError::Empty`] when the plane misses the contour.
 pub fn intersect_contour(contour: &Contour, plane_z: f64) -> Result<Contour, ContourError> {
     if !plane_z.is_finite() {
         return Err(ContourError::Frame);
@@ -172,6 +190,7 @@ pub fn intersect_contour(contour: &Contour, plane_z: f64) -> Result<Contour, Con
     } else {
         count - 1
     };
+    let mut crossings = 0_usize;
     for index in 0..segments {
         let Some(start) = contour.points.get(index) else {
             return Err(ContourError::Length);
@@ -180,7 +199,19 @@ pub fn intersect_contour(contour: &Contour, plane_z: f64) -> Result<Contour, Con
         let Some(end) = contour.points.get(next) else {
             return Err(ContourError::Length);
         };
-        emit_segment(&mut emitted, *start, *end, plane_z)?;
+        if emit_segment(&mut emitted, *start, *end, plane_z)? {
+            crossings += 1;
+        }
+    }
+    if contour.kind == ContourGeometricType::ClosedPlanar {
+        // One contour holds one piece. More than two interpolated crossings
+        // joins separate arms across the gap outside the ring.
+        if crossings > 2 {
+            return Err(ContourError::Length);
+        }
+        close_ring(&mut emitted);
+        order_along_chord(&mut emitted)?;
+        refuse_gap_outside_ring(contour, plane_z, &emitted)?;
     }
     if emitted.is_empty() {
         return Err(ContourError::Empty);
@@ -197,36 +228,47 @@ pub fn intersect_contour(contour: &Contour, plane_z: f64) -> Result<Contour, Con
     })
 }
 
+/// Emit the plane hit of one segment.
+///
+/// The boolean is true only for an interpolated crossing. A vertex that
+/// already lies on the plane does not count.
 fn emit_segment(
     out: &mut Vec<Pt<World>>,
     start: Pt<World>,
     end: Pt<World>,
     plane_z: f64,
-) -> Result<(), ContourError> {
+) -> Result<bool, ContourError> {
     let start_on = start.z.to_bits() == plane_z.to_bits();
     let end_on = end.z.to_bits() == plane_z.to_bits();
     if start_on && end_on {
         push_unique(out, start);
         push_unique(out, end);
-        return Ok(());
+        return Ok(false);
     }
     if start_on {
         push_unique(out, start);
-        return Ok(());
+        return Ok(false);
     }
     if end_on {
         push_unique(out, end);
-        return Ok(());
+        return Ok(false);
+    }
+    // A zero of the other sign is not on the plane and it is not a side.
+    if same_number(start.z, plane_z) || same_number(end.z, plane_z) {
+        return Ok(false);
     }
     let start_below = start.z < plane_z;
     let end_below = end.z < plane_z;
     if start_below == end_below {
-        return Ok(());
+        return Ok(false);
     }
     let dz = end.z - start.z;
+    if !dz.is_finite() {
+        return Err(ContourError::Frame);
+    }
     let t = (plane_z - start.z) / dz;
-    if !t.is_finite() || t <= 0.0 || t >= 1.0 {
-        return Ok(());
+    if !t.is_finite() {
+        return Err(ContourError::Frame);
     }
     let x = start.x + t * (end.x - start.x);
     let y = start.y + t * (end.y - start.y);
@@ -234,14 +276,288 @@ fn emit_segment(
         return Err(ContourError::Frame);
     }
     push_unique(out, Pt::new(x, y, plane_z));
+    Ok(true)
+}
+
+/// A closed ring emits its first vertex again from the last segment.
+fn close_ring(out: &mut Vec<Pt<World>>) {
+    let Some(first) = out.first().copied() else {
+        return;
+    };
+    let Some(last) = out.last().copied() else {
+        return;
+    };
+    if out.len() > 1 && same_point(first, last) {
+        out.pop();
+    }
+}
+
+/// Order a closed cut along the chord.
+///
+/// The walk can start on a vertex in the middle. After the repeated end
+/// is dropped, the first and last points name the direction.
+fn order_along_chord(points: &mut [Pt<World>]) -> Result<(), ContourError> {
+    if points.len() < 2 {
+        return Ok(());
+    }
+    let Some(first) = points.first().copied() else {
+        return Ok(());
+    };
+    let Some(last) = points.last().copied() else {
+        return Ok(());
+    };
+    let dx = last.x - first.x;
+    let dy = last.y - first.y;
+    let dz = last.z - first.z;
+    if !dx.is_finite() || !dy.is_finite() || !dz.is_finite() {
+        return Err(ContourError::Frame);
+    }
+    if same_number(dx, 0.0) && same_number(dy, 0.0) && same_number(dz, 0.0) {
+        return Ok(());
+    }
+    let mut keys = Vec::with_capacity(points.len());
+    for point in points.iter() {
+        let dot = point.x * dx + point.y * dy + point.z * dz;
+        if !dot.is_finite() {
+            return Err(ContourError::Frame);
+        }
+        let key = if same_number(dot, 0.0) { 0.0 } else { dot };
+        keys.push(key);
+    }
+    let mut order: Vec<usize> = (0..points.len()).collect();
+    order.sort_by(|&left, &right| {
+        let Some(left_key) = keys.get(left) else {
+            return core::cmp::Ordering::Equal;
+        };
+        let Some(right_key) = keys.get(right) else {
+            return core::cmp::Ordering::Equal;
+        };
+        left_key.total_cmp(right_key)
+    });
+    let mut sorted = Vec::with_capacity(points.len());
+    for index in order {
+        let Some(point) = points.get(index).copied() else {
+            return Err(ContourError::Length);
+        };
+        sorted.push(point);
+    }
+    points.copy_from_slice(&sorted);
     Ok(())
+}
+
+fn same_point(left: Pt<World>, right: Pt<World>) -> bool {
+    left.x.to_bits() == right.x.to_bits()
+        && left.y.to_bits() == right.y.to_bits()
+        && left.z.to_bits() == right.z.to_bits()
+}
+
+/// Refuse a closed cut whose joined span is not inside the ring.
+///
+/// A source edge that already lies on the plane is the boundary, so that
+/// span stays. Any other span is kept only when its midpoint is inside.
+fn refuse_gap_outside_ring(
+    contour: &Contour,
+    plane_z: f64,
+    emitted: &[Pt<World>],
+) -> Result<(), ContourError> {
+    if emitted.len() < 2 {
+        return Ok(());
+    }
+    let axis = drop_axis(&contour.points)?;
+    let mut polygon = Vec::with_capacity(contour.points.len());
+    for point in &contour.points {
+        let (x, y) = dropped_pair(*point, axis);
+        if !x.is_finite() || !y.is_finite() {
+            return Err(ContourError::Frame);
+        }
+        polygon.push(IndexPoint { x, y });
+    }
+    for pair in emitted.windows(2) {
+        let Some(start) = pair.first().copied() else {
+            return Err(ContourError::Length);
+        };
+        let Some(end) = pair.get(1).copied() else {
+            return Err(ContourError::Length);
+        };
+        if same_point(start, end) || pair_is_on_plane_edge(contour, plane_z, start, end) {
+            continue;
+        }
+        // The ring lies in the cut plane. A pair that is not a source edge
+        // joins across a vertex the cut did not emit.
+        if contour
+            .points
+            .iter()
+            .all(|point| same_number(point.z, plane_z))
+        {
+            return Err(ContourError::Length);
+        }
+        let splits = span_splits(contour, plane_z, start, end)?;
+        for piece in splits.windows(2) {
+            let Some(piece_start) = piece.first().copied() else {
+                return Err(ContourError::Length);
+            };
+            let Some(piece_end) = piece.get(1).copied() else {
+                return Err(ContourError::Length);
+            };
+            if same_point(piece_start, piece_end) {
+                continue;
+            }
+            let mid = midpoint(piece_start, piece_end)?;
+            let (px, py) = dropped_pair(mid, axis);
+            if !px.is_finite() || !py.is_finite() {
+                return Err(ContourError::Frame);
+            }
+            let inside = inside_polygon(px, py, &polygon).map_err(|_| ContourError::Frame)?;
+            if !inside {
+                return Err(ContourError::Length);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Split a span at negative-zero vertices that lie on it.
+///
+/// Those vertices are not emitted. They still divide the span, so a gap
+/// between them is tested on its own.
+fn span_splits(
+    contour: &Contour,
+    plane_z: f64,
+    start: Pt<World>,
+    end: Pt<World>,
+) -> Result<Vec<Pt<World>>, ContourError> {
+    let mut splits = Vec::new();
+    splits.push(start);
+    for point in &contour.points {
+        if point.z.to_bits() == plane_z.to_bits() || !same_number(point.z, plane_z) {
+            continue;
+        }
+        if !strictly_between_xy(*point, start, end)? {
+            continue;
+        }
+        splits.push(*point);
+    }
+    splits.push(end);
+    order_along_chord(&mut splits)?;
+    Ok(splits)
+}
+
+fn strictly_between_xy(
+    point: Pt<World>,
+    start: Pt<World>,
+    end: Pt<World>,
+) -> Result<bool, ContourError> {
+    if same_xy(point, start) || same_xy(point, end) {
+        return Ok(false);
+    }
+    on_segment(
+        point.x,
+        point.y,
+        IndexPoint {
+            x: start.x,
+            y: start.y,
+        },
+        IndexPoint { x: end.x, y: end.y },
+    )
+    .map_err(|_| ContourError::Frame)
+}
+
+fn same_xy(left: Pt<World>, right: Pt<World>) -> bool {
+    same_number(left.x, right.x) && same_number(left.y, right.y)
+}
+
+fn pair_is_on_plane_edge(
+    contour: &Contour,
+    plane_z: f64,
+    start: Pt<World>,
+    end: Pt<World>,
+) -> bool {
+    let count = contour.points.len();
+    for index in 0..count {
+        let Some(edge_start) = contour.points.get(index).copied() else {
+            return false;
+        };
+        let next = if index + 1 == count { 0 } else { index + 1 };
+        let Some(edge_end) = contour.points.get(next).copied() else {
+            return false;
+        };
+        if edge_start.z.to_bits() != plane_z.to_bits() || edge_end.z.to_bits() != plane_z.to_bits()
+        {
+            continue;
+        }
+        let forward = same_point(edge_start, start) && same_point(edge_end, end);
+        let reverse = same_point(edge_start, end) && same_point(edge_end, start);
+        if forward || reverse {
+            return true;
+        }
+    }
+    false
+}
+
+fn midpoint(start: Pt<World>, end: Pt<World>) -> Result<Pt<World>, ContourError> {
+    let x = start.x * 0.5 + end.x * 0.5;
+    let y = start.y * 0.5 + end.y * 0.5;
+    let z = start.z * 0.5 + end.z * 0.5;
+    if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+        return Err(ContourError::Frame);
+    }
+    Ok(Pt::new(x, y, z))
+}
+
+#[derive(Clone, Copy)]
+enum DropAxis {
+    X,
+    Y,
+    Z,
+}
+
+/// Drop the largest normal axis. A tie drops Z before Y.
+fn drop_axis(points: &[Pt<World>]) -> Result<DropAxis, ContourError> {
+    let mut nx = 0.0_f64;
+    let mut ny = 0.0_f64;
+    let mut nz = 0.0_f64;
+    let count = points.len();
+    for index in 0..count {
+        let Some(current) = points.get(index) else {
+            return Err(ContourError::Length);
+        };
+        let next_index = if index + 1 == count { 0 } else { index + 1 };
+        let Some(next) = points.get(next_index) else {
+            return Err(ContourError::Length);
+        };
+        nx += (current.y - next.y) * (current.z + next.z);
+        ny += (current.z - next.z) * (current.x + next.x);
+        nz += (current.x - next.x) * (current.y + next.y);
+    }
+    if !nx.is_finite() || !ny.is_finite() || !nz.is_finite() {
+        return Err(ContourError::Frame);
+    }
+    let ax = nx.abs();
+    let ay = ny.abs();
+    let az = nz.abs();
+    if same_number(ax, 0.0) && same_number(ay, 0.0) && same_number(az, 0.0) {
+        return Err(ContourError::Frame);
+    }
+    if az >= ax && az >= ay {
+        Ok(DropAxis::Z)
+    } else if ay >= ax {
+        Ok(DropAxis::Y)
+    } else {
+        Ok(DropAxis::X)
+    }
+}
+
+fn dropped_pair(point: Pt<World>, axis: DropAxis) -> (f64, f64) {
+    match axis {
+        DropAxis::X => (point.y, point.z),
+        DropAxis::Y => (point.x, point.z),
+        DropAxis::Z => (point.x, point.y),
+    }
 }
 
 fn push_unique(out: &mut Vec<Pt<World>>, point: Pt<World>) {
     if let Some(last) = out.last()
-        && last.x.to_bits() == point.x.to_bits()
-        && last.y.to_bits() == point.y.to_bits()
-        && last.z.to_bits() == point.z.to_bits()
+        && same_point(*last, point)
     {
         return;
     }

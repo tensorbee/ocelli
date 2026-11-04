@@ -3,13 +3,13 @@
 **Area**: `crates/ocelli-core`
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1
 **F-IDs that contributed:** F-001, F-005, F-018
-**Last updated:** 2026-09-10
+**Last updated:** 2026-11-03
 
 Living current-state document. It describes what the code does today.
 
 ## What is here
 
-`ocelli-core` holds three modules, all re-exported at the crate root so callers
+`ocelli-core` holds four modules, all re-exported at the crate root so callers
 write `ocelli_core::Pt` rather than `ocelli_core::space::Pt`.
 
 | Module | Contents |
@@ -17,6 +17,7 @@ write `ocelli_core::Pt` rather than `ocelli_core::space::Pt`.
 | `space` | `Canvas`, `World`, `Index`, `Pt<S>`, `Transform<A, B>` |
 | `value` | `Stored`, `Modality`, `Display` |
 | `error` | `ErrorCode`, `Severity`, `LogLevel`, `Record`, `RecordError` |
+| `exact_f32` | `exact_f32_integer`, `ExactF32Integer`, `ExactF32Error` |
 
 The crate is `#![cfg_attr(not(test), no_std)]` and has two dependencies, `glam`
 for `DMat4` and `thiserror` for the error model. No `unsafe`, no
@@ -27,6 +28,11 @@ reads "Types, coordinate spaces, geometry primitives, error model. No I/O." It
 is not `ocelli-wasm`'s, whose row is "The only crate that may import
 wasm-bindgen. Boundary, commands, event ring." The module is specified in
 `docs/lld/errors.md` and only its placement belongs to this file.
+
+`exact_f32` is the one IEEE-754 decomposition of an exact integer `f32`.
+Sample conversion and NIfTI voxel offsets both call it. Negative zero is a
+non-negative zero. A fraction is `NotAnInteger`. A magnitude above `u64` is
+`ExceedsU64`.
 
 `thiserror` is this crate's first non-`glam` dependency, and it arrives under
 deviation **D-15**, which disables its default `std` feature at the workspace
@@ -115,12 +121,13 @@ to whoever builds a camera, and no caller today would have anything useful to
 do with an error return. **Whoever writes that camera must not assume this
 method checked.**
 
-The case is realistic rather than theoretical: the PS3.3 C.7.6.2.1.1
-image-plane matrix has a zero third column, so a single-slice
-`Transform<Index, World>` is singular by construction.
-`inverse_does_not_check_invertibility` executes this against exactly that
-matrix, so the behaviour is a test rather than folklore, and a glam release
-inside the `0.30` caret range that changed it would turn that test red.
+The case is realistic rather than theoretical.
+`inverse_does_not_check_invertibility` builds the DICOM PS3.3 C.7.6.2.1.1
+equation with a zero third column and inverts that fixture.
+`ImagePlane::index_to_world` is a different matrix. It puts a unit slice
+normal in the third column, so the transform it returns is invertible.
+A glam release inside the `0.30` caret range that changed the singular
+inverse would turn that test red.
 
 One qualification. glam's `inverse` carries a `glam_assert!` on the
 determinant, which expands to `assert!` under

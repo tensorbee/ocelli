@@ -38,7 +38,9 @@ uploads the RGBA8 from `present_surface`. A pixel centre is covered when
 every barycentric weight is at least zero. Vertices are not rounded. A
 zero-area triangle is skipped. The same shader copies each image. It does
 not run the image VOI and it does not recompute the outline, the stroke
-or the coverage. Equal bytes do not allocate a new texture. Tier C is
+or the coverage. Equal bytes do not allocate a new texture. An axis longer
+than the device `max_texture_dimension_2d` is `Extent`. The texture is not
+created and the previous binding stays. Tier C is
 those presenters. `show_labelmap` returns unavailable before it reads the
 grid. `show_contour` returns unavailable before it reads the points.
 `show_surface` returns unavailable before it reads the mesh. Labelmap edge
@@ -48,7 +50,7 @@ unavailable and do not draw composite. `show_contour` and `show_surface`
 return unavailable for that blend. Tier C `show_labelmap` returns
 unavailable before it reads the grid. `intersect_contour` cuts one contour
 by a patient Z plane on every tier. A point is on the plane when the Z bits
-match. One emitted point is `Point`. Two or more emitted points are
+match. A zero of the other sign adds no point. A finite crossing parameter is kept, including one that rounds to an end. A non-finite denominator is refused. A closed ring does not repeat the vertex that lies on the plane. A closed contour with more than two interpolated crossings is refused. A closed cut that joins across a gap outside the ring is refused. A negative-zero vertex on the chord does not hide that gap. A ring that lies in the cut plane does not join across that vertex. A closed cut is ordered along the chord. One emitted point is `Point`. Two or more emitted points are
 open planar when the contour was not entirely on the plane. A contour
 already on the plane keeps its kind. The frame still submits once.
 
@@ -114,7 +116,11 @@ channels at upload time, which is not a frame-loop allocation. The `R32Float`
 path copies the caller `&[f32]` with `bytemuck::cast_slice` and
 `queue.write_texture`. Samples are stored values and are not clamped. The
 length must be width times height. A wrong length returns before the copy and
-before `uploads` changes. A matching extent reuses the texture. A different
+before `uploads` changes. An axis of 0 is `EmptyExtent`. An axis longer than
+the device `max_texture_dimension_2d` is `ExtentUnavailable`. The texture is
+not created and `uploads` stays put. An axis equal to the limit is accepted.
+`rebind_stored` applies the same limit to the extent registration recorded.
+A matching extent reuses the texture. A different
 extent replaces it at that call, which is a data change and not a frame-loop
 allocation. The tick only binds the view it already holds. Rebind checks the
 format the slot remembered.
@@ -129,13 +135,18 @@ stays the stored-sample counter. `set_voi` still writes thirty-two bytes. It
 does not write the colour texture and it does not increment `lut_uploads`.
 A device-loss restore writes the remembered table again and does not
 increment `lut_uploads`. The placeholder texture created at registration is
-not a selection and is not counted.
+not a selection and is not counted. A table wider than the device
+`max_texture_dimension_2d` is `ColourUnavailable`. The texture is not created
+and `lut_uploads` stays put. Tier C does not upload that table. It still
+draws the palette.
 
 Two keys, and they are not interchangeable. A preset is indexed by the
 display value `lut_chain` already produced. The texel replaces greyscale
 normalisation. The section 18.4 uniform stays the LUT decision, including
 `invert`. A palette is indexed by the stored sample, per deviation D-23.
-Its texels are `ColorTransform::map_into`, copied once. The shader does not
+Its texels are `ColorTransform::map_into`, copied once. The baked range is
+the first mapped input through the last entry. It does not extend to stored
+0. A stored value outside that range uses an endpoint texel. The shader does not
 walk the descriptor and does not run `lut_chain` for a palette. When no
 colour LUT is bound, mode 0 keeps the greyscale normalisation, and that path
 still emits the unclamped LINEAR value.
@@ -241,7 +252,10 @@ differ from the stamp. The stamp is those bytes. It is written only after
 the upload returns. A repeated sync of equal bytes does not increment
 `brick_uploads`. A brick the list omits gets no texture and no zeros.
 `install_recovered` drops the stamps with the textures, so the next sync
-uploads ready bricks again. Tier C returns `BrickUploadError::Unavailable`
+uploads ready bricks again. An upload that replaces a texture a volume ray
+is bound to drops that ray and marks the viewport data-dirty. The next tick
+is `Unavailable` until `bind_volume_ray` builds views of the new texture.
+Tier C returns `BrickUploadError::Unavailable`
 before a cut and before a stamp write. A grid product that does not fit in
 `u32` is `ProgressError::Grid`. Coarser levels are not uploaded.
 `ProgressReport` returns `present_count` and `dims[2]`. `sync_volume` takes
@@ -253,9 +267,12 @@ the same `&ResolvedAdapter` `upload_brick` already requires.
 `VolumeRaycast`, composite, and the tier. Tier A and tier B use one fragment
 module. `VOI_WGSL` is included once. The ray entry has one `texture_3d<u32>`
 binding per brick slot and a `texture_2d<u32>` residency texture on the next
-binding. There is no compute entry and no storage buffer. MIP and the other
-volume blends stay uncompiled. `request_outcome` for those keys is
-`Unavailable`.
+binding. Its width is fixed at the first bind from the longest volume axis.
+A later bind that needs a longer axis is `CapacityExhausted` and the previous
+binding stays. A width above the device `max_texture_dimension_2d` is
+`RayUnavailable` before the texture is created and the previous binding stays.
+There is no compute entry and no storage buffer. MIP and the other volume
+blends stay uncompiled. `request_outcome` for those keys is `Unavailable`.
 
 **The integral is front to back on voxel centres.** A step whose residency
 flag is 0 is skipped before the brick is read. Display colour comes from the
@@ -286,7 +303,8 @@ normal w of 0 is disabled. The kept side is `dot(point - plane_origin, normal) >
 so a sample on the plane stays. A discarded sample adds no colour and no alpha.
 The brick stays bound. `set_clip_planes` accepts at most six planes. A
 non-finite component or a zero-length normal is refused and the previous list
-stays. Zero planes leaves the measured ray unchanged. The uniform is created
+stays. Length zero means every component is zero. A square that underflows
+does not refuse a component that narrowed to a non-zero value. Zero planes leaves the measured ray unchanged. The uniform is created
 at bind. `set_clip_planes` writes it and does not upload a brick.
 
 **Every brick in the caller set is bound, or none of this call is.** Room is
@@ -315,7 +333,10 @@ this pass is uncompiled. `show_slab` returns `BlendUnavailable` and does
 not bind composite.
 
 The colour attachment uses `LoadOp::Load`. An absent pixel discards before
-a value load, so the previous colour stays. A dimension of zero, or a
+a value load, so the previous colour stays. The value texture is one
+`write_texture` of the full width, height and sample count. Each row is
+padded to the copy alignment once. An absent column is zero in that
+texture and zero in the mask. A dimension of zero, or a
 dimension above the device `max_tex_3d`, returns `ExtentUnavailable` and
 does not upload a smaller image. Tier C returns `TierCUnavailable` before
 the image is read.
@@ -334,7 +355,9 @@ composite is `pet * opacity_pet + ct * opacity_ct * (1.0 - opacity_pet)`.
 An absent sample writes 0 into the stored plane and 0 into the presence
 plane. The shader does not window a texel whose presence is not greater
 than 0. The composite does not treat that stored 0 as a present sample. A
-present volume whose partner is absent is drawn on its own. A 256-entry
+present volume whose partner is absent is drawn on its own. A slice that
+becomes present is a new sample even when its bytes are unchanged. So is a
+change of voxel kind or of the volume dimensions. A 256-entry
 colormap is read at the display index after the window. An omitted table
 scales the windowed display value by that chain's output range, the same
 ratio the stack shader uses.
@@ -346,6 +369,8 @@ encode. Tier C returns `FusionError::TierCUnavailable` before a sample is
 read. A UID mismatch, an empty UID, an opacity outside 0 to 1, a chain with
 no section 18.4 uniform, a colormap whose length is not 256, and a plane or
 spacing that cannot be sampled return before the published frame changes.
+A plane axis longer than the device `max_texture_dimension_2d` is
+`Unavailable`. The previous fusion view stays.
 A lost device is `Unavailable` and is not a frame mismatch. The sample
 planes use the preserving float format a slab upload would choose. When
 that format or the `Rgba16Float` window target cannot be bound, the bind

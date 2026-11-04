@@ -28,7 +28,7 @@ pub struct ContourEditCoverage {
 /// Why an edit wrote nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContourEditError {
-    /// A vertex is not finite, or an intersection is not finite.
+    /// A vertex or an intersection is not finite, or an edge product cannot be compared.
     Frame,
     /// Fewer than three points, or the grid is not one rectangle.
     Degenerate,
@@ -41,7 +41,9 @@ pub enum ContourEditError {
 ///
 /// # Errors
 ///
-/// [`ContourEditError::Frame`] when a vertex or an intersection is not finite.
+/// [`ContourEditError::Frame`] when a vertex or an intersection is not finite,
+/// an edge product is not finite, or a product or offset of two non-zero
+/// deltas is zero.
 /// [`ContourEditError::Degenerate`] when fewer than three points are supplied
 /// or the grid is empty, has a zero side, or has the wrong length.
 pub fn edit_labelmap_with_contour(
@@ -90,12 +92,16 @@ pub fn edit_labelmap_with_contour(
     Ok(ContourEditCoverage { covered, changed })
 }
 
-fn inside_polygon(px: f64, py: f64, polygon: &[IndexPoint]) -> Result<bool, ContourEditError> {
+pub(crate) fn inside_polygon(
+    px: f64,
+    py: f64,
+    polygon: &[IndexPoint],
+) -> Result<bool, ContourEditError> {
     let count = polygon.len();
     for index in 0..count {
         let start = point_at(polygon, index)?;
         let end = point_at(polygon, index.saturating_add(1) % count)?;
-        if on_segment(px, py, start, end) {
+        if on_segment(px, py, start, end)? {
             return Ok(true);
         }
     }
@@ -110,7 +116,14 @@ fn inside_polygon(px: f64, py: f64, polygon: &[IndexPoint]) -> Result<bool, Cont
             continue;
         }
         let t_den = end.y - start.y;
-        let x_hit = start.x + (py - start.y) * (end.x - start.x) / t_den;
+        let rise = py - start.y;
+        let run = end.x - start.x;
+        let numerator = rise * run;
+        let offset = numerator / t_den;
+        if !same_number(numerator, 0.0) && same_number(offset, 0.0) {
+            return Err(ContourEditError::Frame);
+        }
+        let x_hit = start.x + offset;
         if !x_hit.is_finite() {
             return Err(ContourEditError::Frame);
         }
@@ -131,29 +144,57 @@ fn point_at(polygon: &[IndexPoint], index: usize) -> Result<IndexPoint, ContourE
         .ok_or(ContourEditError::Degenerate)
 }
 
-fn on_segment(px: f64, py: f64, start: IndexPoint, end: IndexPoint) -> bool {
+pub(crate) fn on_segment(
+    px: f64,
+    py: f64,
+    start: IndexPoint,
+    end: IndexPoint,
+) -> Result<bool, ContourEditError> {
     let dx = end.x - start.x;
     let dy = end.y - start.y;
     if same_number(dx, 0.0) && same_number(dy, 0.0) {
-        return same_number(px, start.x) && same_number(py, start.y);
+        return Ok(same_number(px, start.x) && same_number(py, start.y));
     }
     let sx = px - start.x;
     let sy = py - start.y;
-    let cross = dx * sy - dy * sx;
-    if !same_number(cross, 0.0) {
-        return false;
+    let dx_sy = dx * sy;
+    let dy_sx = dy * sx;
+    let sx_dx = sx * dx;
+    let sy_dy = sy * dy;
+    let dx_dx = dx * dx;
+    let dy_dy = dy * dy;
+    if product_underflowed(dx, sy, dx_sy)
+        || product_underflowed(dy, sx, dy_sx)
+        || product_underflowed(sx, dx, sx_dx)
+        || product_underflowed(sy, dy, sy_dy)
+        || product_underflowed(dx, dx, dx_dx)
+        || product_underflowed(dy, dy, dy_dy)
+    {
+        return Err(ContourEditError::Frame);
     }
-    let dot = sx * dx + sy * dy;
-    let len_sq = dx * dx + dy * dy;
+    let cross = dx_sy - dy_sx;
+    let dot = sx_dx + sy_dy;
+    let len_sq = dx_dx + dy_dy;
+    if !cross.is_finite() || !dot.is_finite() || !len_sq.is_finite() {
+        return Err(ContourEditError::Frame);
+    }
+    if !same_number(cross, 0.0) {
+        return Ok(false);
+    }
     let above = same_number(dot, 0.0) || dot.total_cmp(&0.0).is_gt();
     let below = same_number(dot, len_sq) || dot.total_cmp(&len_sq).is_lt();
-    above && below
+    Ok(above && below)
+}
+
+/// Two non-zero factors whose product flushed to zero.
+fn product_underflowed(left: f64, right: f64, product: f64) -> bool {
+    !same_number(left, 0.0) && !same_number(right, 0.0) && same_number(product, 0.0)
 }
 
 fn straddles(y1: f64, y2: f64, py: f64) -> bool {
     let y1_at_or_below = same_number(y1, py) || y1.total_cmp(&py).is_lt();
-    let y2_above = y2.total_cmp(&py).is_gt();
+    let y2_above = !same_number(y2, py) && y2.total_cmp(&py).is_gt();
     let y2_at_or_below = same_number(y2, py) || y2.total_cmp(&py).is_lt();
-    let y1_above = y1.total_cmp(&py).is_gt();
+    let y1_above = !same_number(y1, py) && y1.total_cmp(&py).is_gt();
     (y1_at_or_below && y2_above) || (y2_at_or_below && y1_above)
 }

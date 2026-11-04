@@ -60,6 +60,16 @@ describe("classifyProvenance", () => {
         RECORDED.replace("profile=feature", "notprofile=feature"),
       ),
     ).toBe("forged");
+    expect(
+      classifyProvenance(
+        RECORDED.replace("tree=abc", "comparison-tree=abc"),
+      ),
+    ).toBe("forged");
+    expect(
+      classifyProvenance(
+        RECORDED.replace("corpus=pass tree=abc", "corpus=pass-tree=abc"),
+      ),
+    ).toBe("forged");
   });
 
   it("returns forged when the verify line lacks tree", () => {

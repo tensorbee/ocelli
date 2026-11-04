@@ -153,3 +153,62 @@ fn zero_spacing_stays_finite() {
     }
     assert_image(image_of(collapsed, 9.0, 6.0), 0.5, 2.0);
 }
+
+#[test]
+fn a_coefficient_that_does_not_narrow_writes_the_image_centre() {
+    let mut fitted = View::new();
+    fitted.fit(512.0, 512.0, 512, 512);
+    // The same fit at zoom 1 still names texel 0 from canvas 0.
+    let kept = fitted.camera_matrix(512, 512);
+    assert_image(image_of(kept, 0.0, 0.0), 0.0, 0.0);
+
+    fitted.set_zoom(Zoom::new(1.0e-40));
+    let zoomed = fitted.camera_matrix(512, 512);
+    for value in zoomed {
+        assert!(value.is_finite());
+    }
+    assert_image(image_of(zoomed, 0.0, 0.0), 256.0, 256.0);
+    assert_image(image_of(zoomed, 100.0, 40.0), 256.0, 256.0);
+
+    let mut panned = View::new();
+    panned.fit(512.0, 512.0, 512, 512);
+    assert!(panned.set_pan(Pt::<Canvas>::new(1.0e39, 0.0, 0.0)).is_ok());
+    let shifted = panned.camera_matrix(512, 512);
+    for value in shifted {
+        assert!(value.is_finite());
+    }
+    assert_image(image_of(shifted, 0.0, 0.0), 256.0, 256.0);
+}
+
+#[test]
+fn a_determinant_that_overflows_keeps_the_inverse() {
+    // Scale 1e160 and pan 1e162. The anchor's 256 is lost in the pan sum,
+    // and 1e162 / 1e160 is 100, so canvas 0 is image x 156. The y pan is 0,
+    // so image y stays 256.
+    let mut view = View::new();
+    view.fit(512.0, 512.0, 512, 512);
+    view.set_zoom(Zoom::new(1.0e160));
+    assert!(view.set_pan(Pt::<Canvas>::new(1.0e162, 0.0, 0.0)).is_ok());
+    let matrix = view.camera_matrix(512, 512);
+    for value in matrix {
+        assert!(value.is_finite());
+    }
+    assert_image(image_of(matrix, 0.0, 0.0), 156.0, 256.0);
+}
+
+#[test]
+fn a_rank_one_basis_that_overflows_keeps_the_row() {
+    // Column spacing is 0. Zoom 1e160 and a y pan of 1e162. The pan sum
+    // loses the anchor, and 1e162 / 1e160 is 100, so canvas 0 is image y 156.
+    // Image x stays on the centre column, 256.
+    let mut view = View::new();
+    view.set_spacing(0.0, 1.0);
+    view.fit(512.0, 512.0, 512, 512);
+    view.set_zoom(Zoom::new(1.0e160));
+    assert!(view.set_pan(Pt::<Canvas>::new(0.0, 1.0e162, 0.0)).is_ok());
+    let matrix = view.camera_matrix(512, 512);
+    for value in matrix {
+        assert!(value.is_finite());
+    }
+    assert_image(image_of(matrix, 0.0, 0.0), 256.0, 156.0);
+}

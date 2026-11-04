@@ -109,10 +109,24 @@ fn a_zero_budget_is_low_when_empty_and_critical_when_it_holds_bytes() {
     );
     // 3_000_000_000 * 2 does not fit in a u32. Wrapping both products in u32
     // makes 3_000_000_000 * 10 compare above 3_500_000_000 * 9, so that
-    // control flow reports Critical. The u64 comparison is at or above half
+    // control flow reports Critical. The comparison is at or above half
     // and below nine tenths, so Elevated. Either wrong band fails this test.
     let wide = pressure(CacheTier::Gpu, 3_000_000_000, 3_500_000_000);
     assert_eq!(wide.band(), PressureBand::Elevated);
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn a_half_full_tier_past_the_u64_product_stays_elevated() {
+    // 2^62 used against a budget of 2^63 is exactly half. Both `used * 10`
+    // and `budget * 9` sit above `u64::MAX`, so clamping each product to
+    // that maximum reports Critical.
+    let used = 1_usize << 62;
+    let budget = 1_usize << 63;
+    assert_eq!(
+        pressure(CacheTier::Gpu, used, budget).band(),
+        PressureBand::Elevated
+    );
 }
 
 #[test]

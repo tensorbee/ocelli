@@ -87,6 +87,17 @@ pub fn present_surface(
         let a = vertex_at(&plane, i0)?;
         let b = vertex_at(&plane, i1)?;
         let c = vertex_at(&plane, i2)?;
+        let abx = b.x - a.x;
+        let aby = b.y - a.y;
+        let acx = c.x - a.x;
+        let acy = c.y - a.y;
+        let den = abx * acy - acx * aby;
+        if cross_is_zero(den) {
+            continue;
+        }
+        if !den.is_finite() {
+            return Err(SurfaceError::Frame);
+        }
         let mut row = 0_u32;
         while row < height {
             let mut column = 0_u32;
@@ -95,7 +106,7 @@ pub fn present_surface(
                     x: f64::from(column) + 0.5,
                     y: f64::from(row) + 0.5,
                 };
-                if covered(a, b, c, centre)? {
+                if covered(a, abx, aby, acx, acy, den, centre)? {
                     paint(&mut pending, width, column, row, colour)?;
                     painted = true;
                 }
@@ -164,18 +175,13 @@ fn cross_is_zero(value: f64) -> bool {
 
 fn covered(
     a: PlanePoint,
-    b: PlanePoint,
-    c: PlanePoint,
+    abx: f64,
+    aby: f64,
+    acx: f64,
+    acy: f64,
+    den: f64,
     p: PlanePoint,
 ) -> Result<bool, SurfaceError> {
-    let abx = b.x - a.x;
-    let aby = b.y - a.y;
-    let acx = c.x - a.x;
-    let acy = c.y - a.y;
-    let den = abx * acy - acx * aby;
-    if cross_is_zero(den) {
-        return Ok(false);
-    }
     let apx = p.x - a.x;
     let apy = p.y - a.y;
     let weight_b = (apx * acy - acx * apy) / den;

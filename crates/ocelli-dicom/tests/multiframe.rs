@@ -223,7 +223,7 @@ fn number_of_frames_defaults_only_when_absent() {
         ),
         (
             text(VR::IS, "2147483648"),
-            MultiframeError::InvalidNumberOfFrames,
+            MultiframeError::NumberOfFramesOverflow,
         ),
         (
             texts(VR::IS, &["1", "2"]),

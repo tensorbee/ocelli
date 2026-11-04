@@ -84,6 +84,16 @@ async function serve() {
   return { origin: `http://127.0.0.1:${server.address().port}`, close: () => new Promise(resolve => server.close(resolve)) };
 }
 
+export function cineRate(changedFrames, workloadWallSeconds) {
+  if (!Number.isFinite(changedFrames) || changedFrames < 0) {
+    throw new Error("cine frame count is invalid");
+  }
+  if (!(workloadWallSeconds > 0) || !Number.isFinite(workloadWallSeconds)) {
+    throw new Error("cine workload interval is invalid");
+  }
+  return changedFrames / workloadWallSeconds;
+}
+
 export function cpuFraction(before, after, wallSeconds) {
   if (!(wallSeconds > 0) || !Number.isFinite(wallSeconds)) throw new Error("CPU wall interval is invalid");
   for (const sample of [before, after]) {
@@ -176,10 +186,14 @@ export async function runBrowserSession(subject, { build = true, iterations = 11
           // an estimate with an explicit worst-case boundary uncertainty.
           const wallSeconds = ((end + afterEnd) / 2 - (beforeStart + start) / 2) / 1000;
           const boundaryUncertaintySeconds = ((start - beforeStart) + (afterEnd - end)) / 2000;
+          // Changed frames are counted only inside the cine call. The CDP
+          // midpoint also covers the process snapshots, so it stays the CPU
+          // fraction denominator.
+          const workloadWallSeconds = (end - start) / 1000;
           if (subject === "session.cpu_idle" && (observation.changedFrames !== 0 || observation.scheduled)) throw new Error("idle session scheduled rendering");
           const cpu = cpuFraction(before, after, wallSeconds);
-          measurements.push(subject === "cine.frame_change_rate" ? observation.changedFrames / wallSeconds : cpu);
-          observation = { ...observation, wallSeconds, boundaryUncertaintySeconds, workloadWallSeconds: (end - start) / 1000, collector: "CDP SystemInfo.getProcessInfo.cpuTime over all processes in a dedicated Chromium instance" };
+          measurements.push(subject === "cine.frame_change_rate" ? cineRate(observation.changedFrames, workloadWallSeconds) : cpu);
+          observation = { ...observation, wallSeconds, boundaryUncertaintySeconds, workloadWallSeconds, collector: "CDP SystemInfo.getProcessInfo.cpuTime over all processes in a dedicated Chromium instance" };
           await cdp.detach();
         }
       } finally { await page.close(); }

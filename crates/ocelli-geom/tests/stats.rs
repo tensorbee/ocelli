@@ -77,6 +77,40 @@ fn one_sample_has_sd_zero() {
 }
 
 #[test]
+fn a_sample_above_a_stalled_edge_stays_in_that_bin() {
+    // One ulp of 10_000_000 is 2^-29. Width is 5 ulp / 8. Edge 2 does not
+    // rise above edge 1, so the walk stops at bin 1. low + 2 ulp also
+    // equals the later edges and still stays in bin 1. The maximum is last.
+    let low: f64 = 10_000_000.0;
+    let unit = f64::from_bits(low.to_bits() + 1) - low;
+    let mut counts = [0_u32; 8];
+    let _histogram = bins(&[low, low + 2.0 * unit, low + 5.0 * unit], &mut counts);
+    assert_eq!(counts, [1, 1, 0, 0, 0, 0, 0, 1]);
+}
+
+#[test]
+fn a_negative_zero_on_an_interior_edge_is_the_higher_bin() {
+    // Width is (1 - -1) / 2 = 1. Both signs of zero sit on that edge.
+    let mut counts = [0, 0];
+    let histogram = bins(&[-1.0, -0.0, 0.0, 1.0], &mut counts);
+    assert_eq!(counts, [1, 3]);
+    assert_eq!(bits(histogram.min), bits(-1.0));
+    assert_eq!(bits(histogram.max), bits(1.0));
+    assert_eq!(bits(histogram.width), bits(1.0));
+}
+
+#[test]
+fn an_edge_times_the_bin_stays_in_the_higher_bin() {
+    // Width is (2 - 1) / 10 = 0.1. The value 1.5 sits on edge 5.
+    let mut counts = [0_u32; 10];
+    let histogram = bins(&[1.0, 1.5, 2.0], &mut counts);
+    assert_eq!(counts, [1, 0, 0, 0, 0, 1, 0, 0, 0, 1]);
+    assert_eq!(bits(histogram.min), bits(1.0));
+    assert_eq!(bits(histogram.max), bits(2.0));
+    assert_eq!(bits(histogram.width), bits(0.1));
+}
+
+#[test]
 fn an_interior_edge_belongs_to_the_higher_bin() {
     let mut counts = [0, 7];
     let histogram = bins(&[0.0, 0.5, 1.0], &mut counts);
@@ -132,6 +166,32 @@ fn a_non_finite_sample_does_not_write_bins() {
 #[test]
 fn elapsed_zero_is_one_hundred_forty() {
     assert_eq!(suv_bw(pet(0.0, true, 70.0)).map(bits), Ok(bits(140.0)));
+    assert_eq!(suv_bw(pet(-0.0, true, 70.0)).map(bits), Ok(bits(140.0)));
+}
+
+#[test]
+fn a_stuck_bin_edge_keeps_the_maximum_in_the_last_bin() {
+    let mut counts = [0_u32; 16];
+    let low = 10_000_000.0;
+    let _histogram = bins(&[low, low + 1.0e-8], &mut counts);
+    assert_eq!(counts.first().copied(), Some(1));
+    assert_eq!(counts.last().copied(), Some(1));
+    assert_eq!(counts.iter().sum::<u32>(), 2);
+
+    let mut subnormal = [0, 0];
+    let _histogram = bins(&[0.0, 5.0e-324], &mut subnormal);
+    assert_eq!(subnormal, [1, 1]);
+}
+
+#[test]
+fn a_non_finite_suv_is_frame() {
+    let overflow = SuvInputs {
+        stored: 1.0e200,
+        slope: 1.0e200,
+        ..pet(0.0, true, 70.0)
+    };
+    assert_eq!(suv_bw(overflow), Err(SuvError::Frame));
+    assert_eq!(suv_bw(pet(1.0e20, true, 70.0)), Err(SuvError::Frame));
 }
 
 #[test]

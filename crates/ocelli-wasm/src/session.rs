@@ -964,8 +964,14 @@ fn cell_index(
     if device_extent == 0 || drawn_extent == 0 {
         return Err(RasterError::Extent);
     }
-    let mapped = device_index.saturating_mul(drawn_extent) / device_extent;
-    Ok(mapped.min(drawn_extent.saturating_sub(1)))
+    // The product is wider than a device index. A saturating `u32` multiply
+    // folds the last cells of a wide presentation onto the previous cell.
+    let product = u64::from(device_index)
+        .checked_mul(u64::from(drawn_extent))
+        .ok_or(RasterError::Extent)?;
+    let mapped = product / u64::from(device_extent);
+    let limit = u64::from(drawn_extent.saturating_sub(1));
+    u32::try_from(mapped.min(limit)).map_err(|_| RasterError::Extent)
 }
 
 fn replicate_cells(
@@ -2312,5 +2318,41 @@ mod tests {
             RasterQuality::Settled { generation: 0 },
         );
         assert!(matches!(still, Ok(result) if !result.wrote));
+    }
+
+    #[test]
+    fn presentation_cell_index_uses_the_full_product() {
+        assert_eq!(super::cell_index(1, 4, 2), Ok(0));
+        assert_eq!(super::cell_index(3, 4, 2), Ok(1));
+        assert_eq!(super::cell_index(65536, 65537, 65537), Ok(65536));
+        assert_eq!(super::cell_index(92683, 92684, 46342), Ok(46341));
+
+        let drawn_width = 46_342_u32;
+        let device_width = 92_684_u32;
+        let drawn_bytes = usize::try_from(drawn_width).unwrap_or(0).saturating_mul(4);
+        let device_bytes = usize::try_from(device_width).unwrap_or(0).saturating_mul(4);
+        let mut source = vec![0_u8; drawn_bytes];
+        let mut destination = vec![0_u8; device_bytes];
+        let correct = usize::try_from(46_341_u32).unwrap_or(0).saturating_mul(4);
+        let previous = usize::try_from(46_339_u32).unwrap_or(0).saturating_mul(4);
+        let Some(correct_px) = source.get_mut(correct..correct + 4) else {
+            unreachable!("drawn buffer holds the covering cell");
+        };
+        correct_px.copy_from_slice(&[1, 2, 3, 4]);
+        let Some(previous_px) = source.get_mut(previous..previous + 4) else {
+            unreachable!("drawn buffer holds the previous cell");
+        };
+        previous_px.copy_from_slice(&[9, 9, 9, 9]);
+        assert!(
+            super::replicate_cells(
+                [drawn_width, 1],
+                [device_width, 1],
+                &source,
+                &mut destination,
+            )
+            .is_ok()
+        );
+        let at = usize::try_from(92_683_u32).unwrap_or(0).saturating_mul(4);
+        assert_eq!(destination.get(at..at + 4), Some(&[1, 2, 3, 4][..]));
     }
 }

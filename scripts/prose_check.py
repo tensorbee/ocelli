@@ -89,16 +89,46 @@ def scan(text: str, label: str) -> list[str]:
     return problems
 
 
-def files(staged: bool) -> list[Path]:
-    cmd = (["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"]
-           if staged else ["git", "ls-files"])
-    try:
-        out = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
-                             check=True).stdout
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return []
-    return [ROOT / n for n in out.splitlines()
-            if in_scope(n) and (ROOT / n).is_file()]
+def listed_names(staged: bool) -> list[str]:
+    # T is a type change, such as a symlink becoming a file. That new blob
+    # is what the commit records. D stays out: a deletion has no blob.
+    command = (["git", "diff", "--cached", "--name-only", "-z",
+                "--diff-filter=ACMRT"] if staged else ["git", "ls-files", "-z"])
+    completed = subprocess.run(command, cwd=ROOT, capture_output=True,
+                               text=True, check=True)
+    return [name for name in completed.stdout.split("\0") if name]
+
+
+def load_text(name: str, staged: bool) -> str | None:
+    # Staged mode reads the index blob. A reverted worktree copy is not the
+    # commit. Tracked mode reads the worktree file when it is present.
+    if staged:
+        # The stage is explicit. `:0:name` is stage 0 of `name`, so a path
+        # whose name is `0:name` has to be written `:0:0:name`.
+        completed = subprocess.run(["git", "show", f":0:{name}"], cwd=ROOT,
+                                   capture_output=True, text=True, check=True)
+        return completed.stdout
+    path = ROOT / name
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def texts(staged: bool) -> tuple[list[tuple[str, str]], list[str]]:
+    found: list[tuple[str, str]] = []
+    problems: list[str] = []
+    for name in listed_names(staged):
+        if not in_scope(name):
+            continue
+        try:
+            text = load_text(name, staged)
+        except (subprocess.CalledProcessError, OSError, UnicodeError):
+            problems.append(f"{name}: prose source is unreadable")
+            continue
+        if text is None:
+            continue
+        found.append((name, text))
+    return found, problems
 
 
 def main() -> int:
@@ -115,11 +145,15 @@ def main() -> int:
         problems += scan(body, "commit message")
         checked = 1
     else:
-        targets = files(args.staged)
+        try:
+            targets, unread = texts(args.staged)
+        except (subprocess.CalledProcessError, OSError, UnicodeError):
+            print("FAIL: voice inventory is unavailable")
+            return 1
         checked = len(targets)
-        for path in targets:
-            problems += scan(path.read_text(encoding="utf-8"),
-                             path.relative_to(ROOT).as_posix())
+        problems += unread
+        for label, text in targets:
+            problems += scan(text, label)
 
     if problems:
         print("FAIL: voice rules")

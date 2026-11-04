@@ -21,7 +21,7 @@ function hasField(line: string, name: string): boolean {
       return false;
     }
     const before = at === 0 ? "" : line.charAt(at - 1);
-    if (before === "" || !/[A-Za-z0-9_]/.test(before)) {
+    if (before === "" || before === ":" || /\s/.test(before)) {
       return true;
     }
     from = at + needle.length;

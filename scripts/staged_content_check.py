@@ -70,25 +70,43 @@ DICM_OFFSET = 128
 DICM_MAGIC = b"DICM"
 
 
-def looks_like_dicom(path: Path) -> bool:
-    if path.suffix.lower() in DICOM_SUFFIXES:
+def looks_like_dicom(name: str, data: bytes) -> bool:
+    if Path(name).suffix.lower() in DICOM_SUFFIXES:
         return True
-    try:
-        with path.open("rb") as handle:
-            handle.seek(DICM_OFFSET)
-            return handle.read(4) == DICM_MAGIC
-    except OSError:
-        return False
+    end = DICM_OFFSET + len(DICM_MAGIC)
+    return len(data) >= end and data[DICM_OFFSET:end] == DICM_MAGIC
 
 
-def staged(tracked: bool) -> list[str]:
-    cmd = (["git", "ls-files"] if tracked else
-           ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"])
-    try:
-        return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
-                              check=True).stdout.split()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return []
+def listed_names(tracked: bool) -> list[str]:
+    # NUL-separated names. A space is part of one path. Splitting on
+    # whitespace dropped that path and the guard then reported the empty
+    # remainder as clean.
+    # T is a type change, such as a symlink becoming a file. That new blob
+    # is what the commit records. D stays out: a deletion has no blob.
+    command = (["git", "ls-files", "-z"] if tracked else
+               ["git", "diff", "--cached", "--name-only", "-z",
+                "--diff-filter=ACMRT"])
+    completed = subprocess.run(command, cwd=ROOT, capture_output=True,
+                               text=True, check=True)
+    return [name for name in completed.stdout.split("\0") if name]
+
+
+def index_bytes(name: str) -> bytes:
+    # The stage is explicit. `:0:name` is stage 0 of `name`, so a path
+    # whose name is `0:name` has to be written `:0:0:name`.
+    completed = subprocess.run(["git", "show", f":0:{name}"], cwd=ROOT,
+                               capture_output=True, check=True)
+    return completed.stdout
+
+
+def payload(name: str, tracked: bool) -> bytes:
+    # Staged mode reads the index. A deleted or reverted worktree file is
+    # not the commit. Tracked mode reads the worktree when that file is
+    # still there, and the index when it is not.
+    path = ROOT / name
+    if tracked and path.is_file():
+        return path.read_bytes()
+    return index_bytes(name)
 
 
 def main() -> int:
@@ -96,12 +114,21 @@ def main() -> int:
     parser.add_argument("--tracked", action="store_true")
     args = parser.parse_args()
 
+    try:
+        names = listed_names(args.tracked)
+    except (subprocess.CalledProcessError, OSError, UnicodeError):
+        print("FAIL: staged content inventory is unavailable")
+        return 1
+
     problems = []
-    for name in staged(args.tracked):
-        path = ROOT / name
-        if not path.is_file():
+    for name in names:
+        path = Path(name)
+        try:
+            data = payload(name, args.tracked)
+        except (OSError, subprocess.CalledProcessError):
+            problems.append(f"{name}: content is unreadable")
             continue
-        parts = set(Path(name).parts)
+        parts = set(path.parts)
 
         if name.startswith(ORACLE_OUTPUT_PREFIXES):
             problems.append(
@@ -130,7 +157,7 @@ def main() -> int:
                 f"`uv run tools/spikes/common/extract.py`.")
             continue
 
-        if looks_like_dicom(path):
+        if looks_like_dicom(name, data):
             problems.append(
                 f"{name}: this is DICOM. No patient data enters this "
                 f"repository, ever. There is no allowlist. Put it under "
@@ -145,7 +172,7 @@ def main() -> int:
                 f"commit.")
             continue
 
-        size = path.stat().st_size
+        size = len(data)
         if size > MAX_BYTES and path.suffix not in {".md", ".json", ".tsv",
                                                     ".lock", ".docx", ".xlsx"}:
             problems.append(

@@ -200,7 +200,7 @@ F-078 adds `arrowMark`, `labelMark`, `keyImageMark`, `etdrsRegion` and `etdrsMar
 
 F-079 adds `ultrasound_direction` and `redact_rect` in `ocelli-geom`. The angle is the image plane and the length includes `z`. A missed rectangle sets `applied` false and leaves the buffer unchanged. A non-finite sample in the intersection writes nothing. `distance` stays the F-070 function. There is no TypeScript copy.
 
-F-080 adds `stamp_brush` in `ocelli-seg`. A sample is inside when its squared index distance is less than or equal to the squared radius. A circle paints only the slice whose index equals `center_z`, and both zero bit patterns select slice 0. A sphere uses every slice. Radius 0 paints only an integer centre. A negative radius or a non-finite centre writes nothing. Segment 0 erases. `present_labelmap` is unchanged. There is no TypeScript copy.
+F-080 adds `stamp_brush` in `ocelli-seg`. A sample is inside when its squared index distance is less than or equal to the squared radius. A circle paints only the slice whose index equals `center_z`, and both zero bit patterns select slice 0. A sphere uses every slice. Radius 0 paints only an integer centre. A negative radius, a non-finite centre, or a radius whose square cannot be compared writes nothing. Segment 0 erases. `present_labelmap` is unchanged. There is no TypeScript copy.
 
 F-084 adds `segment_at`, `label_segment` and `segment_bidirectional` in `ocelli-seg`. An in-range read returns the stored number, including 0. An outside column, a zero side, or a short buffer is `Degenerate`. A label stores trimmed text and keeps an existing segment in place. Segment 0 is `Background`. Blank text is `Blank`. The longest run wins, and an equal length keeps the run found first. One sample is a run of length 1 on both axes. `bidirectional` in `ocelli-geom` is unchanged. There is no TypeScript copy.
 
@@ -208,9 +208,9 @@ F-081 adds `cut_scissor` in `ocelli-seg`. It writes segment 0. A circle and a sp
 
 F-082 adds `flood_fill` and `paint_fill` in `ocelli-seg`. A flood replaces the 4-connected region of the seed value. A paint replaces each sample whose stored value equals the seed. The written number is the caller segment. A different value stays. A diagonal is not connected. Segment 0 is a legal written value. An outside seed writes nothing. `present_labelmap` is unchanged. There is no TypeScript copy.
 
-F-083 adds `threshold_roi` in `ocelli-seg`. A sample inside a rectangle or a circle is painted when its caller value is at or above `start` and at or below `end`. Both ends are included. Both zero bit patterns match. A value outside the shape stays, including a non-finite value. A non-finite value inside the shape writes nothing. An inverted span or a negative radius writes nothing. `present_labelmap` is unchanged. There is no TypeScript copy.
+F-083 adds `threshold_roi` in `ocelli-seg`. A sample inside a rectangle or a circle is painted when its caller value is at or above `start` and at or below `end`. Both ends are included. Both zero bit patterns match. A value outside the shape stays, including a non-finite value. A non-finite value inside the shape writes nothing. An inverted span, a negative radius, or a radius whose square cannot be compared writes nothing. `present_labelmap` is unchanged. There is no TypeScript copy.
 
-F-085 adds `edit_labelmap_with_contour` in `ocelli-seg`. A sample at an integer column and row is inside when it lies on a closed edge or when a ray toward increasing `x` crosses an odd number of edges. The ring closes from the last point to the first. A horizontal edge does not count. A non-finite vertex or a non-finite intersection writes nothing. Fewer than three points writes nothing. `present_contour` and the representation enum are unchanged. There is no TypeScript copy.
+F-085 adds `edit_labelmap_with_contour` in `ocelli-seg`. A sample at an integer column and row is inside when it lies on a closed edge or when a ray toward increasing `x` crosses an odd number of edges. The ring closes from the last point to the first. A horizontal edge does not count. A non-finite vertex, a non-finite edge product, a non-finite intersection, or a product or offset of two non-zero deltas that is zero writes nothing. Fewer than three points writes nothing. `present_contour` and the representation enum are unchanged. There is no TypeScript copy.
 
 F-086 adds `interpolate_labelmap` in `ocelli-seg`. A slice is a key when any sample equals the caller segment. Only slices strictly between consecutive keys are written. A nearer slice takes that end's mask. The exact halfway slice takes the union. Endpoint keys stay. Fewer than two keys writes nothing. An empty stack, a zero side, a bad length or mismatched slices write nothing. `present_labelmap` is unchanged. There is no TypeScript copy.
 
@@ -380,9 +380,10 @@ applicable. The page is `docs/lld/release-policy.md`.
 
 `classifyProvenance` returns `recorded` when the message has one
 `Ocelli-Verify` line and one `Ocelli-Generated-By` line, and that verify
-line has the fields `profile`, `gates`, `corpus` and `tree`. It returns
-`missing` when neither trailer line is present and there is no agent
-co-author line. It returns `forged` when an agent co-author line is
+line has the fields `profile`, `gates`, `corpus` and `tree`. A field
+starts after whitespace or the colon. A longer token does not count.
+It returns `missing` when neither trailer line is present and there is
+no agent co-author line. It returns `forged` when an agent co-author line is
 present, when only one trailer line is present, when a trailer line is
 duplicated, or when the verify line lacks one of those four fields. The
 agent tokens are Claude, Codex, GPT and Copilot, matched without regard

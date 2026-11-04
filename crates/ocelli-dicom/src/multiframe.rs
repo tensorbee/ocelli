@@ -4,6 +4,8 @@
 //! group lookup. This module retains source evidence without interpreting the
 //! geometry, stack, temporal, or calibration attributes that F-020 owns.
 
+use std::num::IntErrorKind;
+
 use dicom_core::{Tag, VR};
 
 use crate::{MetadataElement, MetadataSet, MetadataValue};
@@ -326,9 +328,13 @@ fn parse_frame_count(metadata: &MetadataSet) -> Result<usize, MultiframeError> {
     if text.is_empty() {
         return Err(MultiframeError::EmptyNumberOfFrames);
     }
-    let parsed = text
-        .parse::<i32>()
-        .map_err(|_| MultiframeError::InvalidNumberOfFrames)?;
+    let parsed = match text.parse::<i32>() {
+        Ok(value) => value,
+        Err(error) if error.kind() == &IntErrorKind::PosOverflow => {
+            return Err(MultiframeError::NumberOfFramesOverflow);
+        }
+        Err(_) => return Err(MultiframeError::InvalidNumberOfFrames),
+    };
     if parsed == 0 {
         return Err(MultiframeError::ZeroNumberOfFrames);
     }

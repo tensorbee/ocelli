@@ -310,6 +310,154 @@ fn negative_zero_is_not_the_positive_plane() {
         vec![at_z(0.0, 0.0, -0.0), at_z(4.0, 0.0, 4.0)],
     );
     assert_eq!(intersect_contour(&rising, 0.0), Err(ContourError::Empty));
+    let falling = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![at_z(0.0, 0.0, -0.0), at_z(4.0, 0.0, -4.0)],
+    );
+    assert_eq!(intersect_contour(&falling, 0.0), Err(ContourError::Empty));
+    let ring = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, 0.0, -0.0),
+            at_z(4.0, 0.0, -4.0),
+            at_z(0.0, 4.0, -4.0),
+        ],
+    );
+    assert_eq!(intersect_contour(&ring, 0.0), Err(ContourError::Empty));
+}
+
+#[test]
+fn a_coplanar_ring_with_one_negative_zero_vertex_is_refused() {
+    // The square lies in the cut plane. The vertex (4, 4) is -0, so the
+    // walk joins (4, 0) to (0, 4) across the interior.
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, 0.0, 0.0),
+            at_z(4.0, 0.0, 0.0),
+            at_z(4.0, 4.0, -0.0),
+            at_z(0.0, 4.0, 0.0),
+        ],
+    );
+    assert_eq!(intersect_contour(&closed, 0.0), Err(ContourError::Length));
+}
+
+#[test]
+fn a_coplanar_edge_with_one_negative_zero_vertex_stays() {
+    // Only the bottom edge has both ends on the positive plane.
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, 0.0, 0.0),
+            at_z(4.0, 0.0, 0.0),
+            at_z(0.0, 4.0, -0.0),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&closed, 0.0),
+        Ok(contour(
+            ContourGeometricType::OpenPlanar,
+            vec![at_z(0.0, 0.0, 0.0), at_z(4.0, 0.0, 0.0)]
+        ))
+    );
+}
+
+#[test]
+fn a_negative_zero_vertex_does_not_hide_a_gap() {
+    // Two legs joined above the plane. The vertex at x = 4 has z = -0,
+    // so it is not emitted. The span from x = 2 to x = 10 still crosses
+    // the gap, and the midpoint at x = 6 is inside the far leg.
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, 0.0, 4.0),
+            at_z(0.0, 0.0, -2.0),
+            at_z(2.0, 0.0, -2.0),
+            at_z(2.0, 0.0, 0.0),
+            at_z(2.0, 0.0, 2.0),
+            at_z(4.0, 0.0, 2.0),
+            at_z(4.0, 0.0, -0.0),
+            at_z(4.0, 0.0, -2.0),
+            at_z(10.0, 0.0, -2.0),
+            at_z(10.0, 0.0, 4.0),
+        ],
+    );
+    assert_eq!(intersect_contour(&closed, 0.0), Err(ContourError::Length));
+}
+
+#[test]
+fn a_negative_zero_touch_on_a_chord_stays() {
+    // The touch at x = 3 lies on the chord from x = 0 to x = 6.
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, 0.0, -2.0),
+            at_z(0.0, 0.0, 2.0),
+            at_z(3.0, 0.0, -0.0),
+            at_z(6.0, 0.0, 2.0),
+            at_z(6.0, 0.0, -2.0),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&closed, 0.0),
+        Ok(contour(
+            ContourGeometricType::OpenPlanar,
+            vec![at_z(0.0, 0.0, 0.0), at_z(6.0, 0.0, 0.0)]
+        ))
+    );
+}
+
+#[test]
+fn a_zero_sign_on_y_does_not_refuse_the_chord() {
+    // The notch touches y = 0. One touch uses +0 and the others use -0.
+    // Those are the same place, and the chord stays one piece.
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, 2.0, 2.0),
+            at_z(0.0, -0.0, 1.0),
+            at_z(0.0, -2.0, 0.0),
+            at_z(4.0, -2.0, 0.0),
+            at_z(4.0, 0.0, 1.0),
+            at_z(4.0, 2.0, 2.0),
+            at_z(3.0, 2.0, 2.0),
+            at_z(2.0, -0.0, 1.0),
+            at_z(1.0, 2.0, 2.0),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&closed, 1.0),
+        Ok(contour(
+            ContourGeometricType::OpenPlanar,
+            vec![
+                at_z(0.0, -0.0, 1.0),
+                at_z(2.0, -0.0, 1.0),
+                at_z(4.0, 0.0, 1.0)
+            ]
+        ))
+    );
+}
+
+#[test]
+fn a_closed_ring_emits_its_shared_vertex_once() {
+    // Vertex 0 lies on the plane and closes the ring. The cut is the vertex
+    // and the crossing of the opposite edge, not the vertex a second time.
+    // t = (1 - 0) / (2 - 0) = 0.5, so the crossing is (2, 1, 1).
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, 0.0, 1.0),
+            at_z(2.0, 0.0, 0.0),
+            at_z(2.0, 2.0, 2.0),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&closed, 1.0),
+        Ok(contour(
+            ContourGeometricType::OpenPlanar,
+            vec![at_z(0.0, 0.0, 1.0), at_z(2.0, 1.0, 1.0)]
+        ))
+    );
 }
 
 #[test]
@@ -332,6 +480,130 @@ fn a_closed_contour_cut_stays_open() {
 }
 
 #[test]
+fn a_closed_ring_with_more_than_two_crossings_is_refused() {
+    // The ring is a U on the plane z = y. The cut z = 1 meets four edges
+    // at (3, 1), (2, 1), (1, 1) and (0, 1). The span from x = 2 to x = 1
+    // lies in the notch. One contour cannot hold both arms.
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, -2.0, -2.0),
+            at_z(3.0, -2.0, -2.0),
+            at_z(3.0, 2.0, 2.0),
+            at_z(2.0, 2.0, 2.0),
+            at_z(2.0, 0.0, 0.0),
+            at_z(1.0, 0.0, 0.0),
+            at_z(1.0, 2.0, 2.0),
+            at_z(0.0, 2.0, 2.0),
+        ],
+    );
+    assert_eq!(intersect_contour(&closed, 1.0), Err(ContourError::Length));
+}
+
+#[test]
+fn a_closed_ring_touched_only_at_vertices_is_refused() {
+    // The same U cut at z = 2 meets the four top vertices and no edge
+    // interior. The span from (2, 2) to (1, 2) is the open mouth.
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, -2.0, -2.0),
+            at_z(3.0, -2.0, -2.0),
+            at_z(3.0, 2.0, 2.0),
+            at_z(2.0, 2.0, 2.0),
+            at_z(2.0, 0.0, 0.0),
+            at_z(1.0, 0.0, 0.0),
+            at_z(1.0, 2.0, 2.0),
+            at_z(0.0, 2.0, 2.0),
+        ],
+    );
+    assert_eq!(intersect_contour(&closed, 2.0), Err(ContourError::Length));
+}
+
+#[test]
+fn a_closed_cut_through_one_on_plane_vertex_stays_open() {
+    // The vertex (2, 2, 2) lies on the chord from (4, 2, 2) to (0, 2, 2).
+    // That is one piece, so the cut stays the chord.
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, 0.0, 0.0),
+            at_z(4.0, 0.0, 0.0),
+            at_z(4.0, 4.0, 4.0),
+            at_z(2.0, 2.0, 2.0),
+            at_z(0.0, 4.0, 4.0),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&closed, 2.0),
+        Ok(contour(
+            ContourGeometricType::OpenPlanar,
+            vec![
+                at_z(4.0, 2.0, 2.0),
+                at_z(2.0, 2.0, 2.0),
+                at_z(0.0, 2.0, 2.0)
+            ]
+        ))
+    );
+}
+
+#[test]
+fn a_closed_cut_started_on_the_chord_stays_in_line_order() {
+    // The same pentagon, started at the on-plane vertex. The chord runs
+    // from x = 0 through x = 2 to x = 4. Walking the ring first would
+    // emit the middle, then one end, then the other.
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(2.0, 2.0, 2.0),
+            at_z(0.0, 4.0, 4.0),
+            at_z(0.0, 0.0, 0.0),
+            at_z(4.0, 0.0, 0.0),
+            at_z(4.0, 4.0, 4.0),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&closed, 2.0),
+        Ok(contour(
+            ContourGeometricType::OpenPlanar,
+            vec![
+                at_z(0.0, 2.0, 2.0),
+                at_z(2.0, 2.0, 2.0),
+                at_z(4.0, 2.0, 2.0)
+            ]
+        ))
+    );
+}
+
+#[test]
+fn a_notch_that_touches_the_chord_stays_in_line_order() {
+    // The tip (2, 2, 2) lies on the chord from x = 0 to x = 6.
+    let closed = contour(
+        ContourGeometricType::ClosedPlanar,
+        vec![
+            at_z(0.0, 0.0, 0.0),
+            at_z(1.0, 0.0, 0.0),
+            at_z(2.0, 2.0, 2.0),
+            at_z(3.0, 0.0, 0.0),
+            at_z(6.0, 0.0, 0.0),
+            at_z(6.0, 4.0, 4.0),
+            at_z(0.0, 4.0, 4.0),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&closed, 2.0),
+        Ok(contour(
+            ContourGeometricType::OpenPlanar,
+            vec![
+                at_z(6.0, 2.0, 2.0),
+                at_z(2.0, 2.0, 2.0),
+                at_z(0.0, 2.0, 2.0)
+            ]
+        ))
+    );
+}
+
+#[test]
 fn a_non_finite_plane_is_refused() {
     let line = contour(
         ContourGeometricType::OpenPlanar,
@@ -343,6 +615,36 @@ fn a_non_finite_plane_is_refused() {
         vec![at_z(0.0, 0.0, f64::NAN), at_z(0.0, 0.0, 4.0)],
     );
     assert_eq!(intersect_contour(&broken, 1.0), Err(ContourError::Frame));
+}
+
+#[test]
+fn a_crossing_that_rounds_onto_the_endpoint_is_kept() {
+    // t = (1e-30 + 1) / (1e-20 + 1) rounds to 1. The plane still separates
+    // the first edge, so the cut keeps that end and the point already on it.
+    let line = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![
+            at_z(0.0, 0.0, -1.0),
+            at_z(4.0, 0.0, 1.0e-20),
+            at_z(8.0, 0.0, 1.0e-30),
+        ],
+    );
+    assert_eq!(
+        intersect_contour(&line, 1.0e-30),
+        Ok(contour(
+            ContourGeometricType::OpenPlanar,
+            vec![at_z(4.0, 0.0, 1.0e-30), at_z(8.0, 0.0, 1.0e-30)]
+        ))
+    );
+}
+
+#[test]
+fn a_non_finite_denominator_is_refused() {
+    let line = contour(
+        ContourGeometricType::OpenPlanar,
+        vec![at_z(0.0, 0.0, -1.0e308), at_z(4.0, 0.0, 1.0e308)],
+    );
+    assert_eq!(intersect_contour(&line, 0.0), Err(ContourError::Frame));
 }
 
 #[test]

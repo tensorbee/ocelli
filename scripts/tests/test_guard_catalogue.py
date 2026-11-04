@@ -185,6 +185,7 @@ class CatalogueIsWellFormed(unittest.TestCase):
                 "test_sprint_workflow.py",
                 "test_gen_sprint_plan.py",
                 "test_guard_readers.py",
+                "test_staged_readers.py",
             ],
         )
 

@@ -359,7 +359,9 @@ backing store fails that case.
 `attach_target` takes `impl Into<wgpu::SurfaceTarget<'_>>`.
 `configure_viewport` does not hard-code `Rgba8Unorm` or `Bgra8Unorm`. Present
 mode and alpha mode are the first the surface reports. An empty extent is
-refused before `configure`. On tier C the wasm export sets the canvas bitmap
+refused before `configure`. An axis longer than the device
+`max_texture_dimension_2d` is refused before `configure`. An axis equal to
+that limit is accepted. On tier C the wasm export sets the canvas bitmap
 from `device_extent` and returns without calling `attach_target`.
 
 `ocelli-wasm` exports `attachOffscreenCanvas` and `resizeOffscreenCanvas` from

@@ -1221,3 +1221,13 @@ and blob-read errors fail closed. Neither mode changes the two permitted
 source paths or recorded vendored construct counts. The unsafe gate runs
 `test_unsafe_allowlist_check.py` temporary-repository controls as well as the
 guard. A clean working file cannot hide an unsafe staged blob.
+
+`staged_content_check.py`, `source_provenance_check.py --staged` and
+`prose_check.py --staged` read each staged blob from the index, including a
+type change. Names are NUL-separated, so a path containing a space is one
+path. The index stage is written in front of the path, so a name that starts
+with a digit and a colon stays that name. A deleted or reverted worktree
+file does not hide the blob the commit would record.
+Tracked mode still reads a present worktree file. A missing git listing or
+an unreadable blob fails closed. The guards gate runs
+`test_staged_readers.py` over temporary repositories.

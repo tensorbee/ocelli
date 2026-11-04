@@ -155,11 +155,60 @@ pub fn roi_statistics(samples: &[f64], area: f64) -> Result<RoiStats, GeomError>
     })
 }
 
+fn edge_at(min: f64, width: f64, bin: usize) -> Option<f64> {
+    let index = u32::try_from(bin).ok()?;
+    Some(min + width * f64::from(index))
+}
+
+/// Highest bin whose edge still moves. A later multiple is not accepted.
+fn first_stall(min: f64, width: f64, last: usize) -> usize {
+    let mut stall = 0_usize;
+    while stall < last {
+        let Some(next) = stall.checked_add(1) else {
+            break;
+        };
+        let (Some(edge), Some(prev)) = (edge_at(min, width, next), edge_at(min, width, stall))
+        else {
+            break;
+        };
+        if !edge.total_cmp(&prev).is_gt() {
+            break;
+        }
+        stall = next;
+    }
+    stall
+}
+
+/// Largest bin at or before `stall` whose edge is still at or below `sample`.
+fn bin_before_stall(sample: f64, min: f64, width: f64, stall: usize) -> usize {
+    let mut lo = 0_usize;
+    let mut hi = stall;
+    while lo < hi {
+        let Some(step) = (hi - lo).checked_add(1) else {
+            break;
+        };
+        let mid = lo + step / 2;
+        let Some(edge) = edge_at(min, width, mid) else {
+            hi = mid.saturating_sub(1);
+            continue;
+        };
+        if sample.total_cmp(&edge).is_ge() {
+            lo = mid;
+        } else {
+            hi = mid.saturating_sub(1);
+        }
+    }
+    lo
+}
+
 /// Fill `counts` from `samples`.
 ///
-/// A value on an interior edge belongs to the higher bin. The maximum belongs
-/// to the last bin, including when adding the width steps past it. Equal
-/// samples all land in bin 0.
+/// A value on an interior edge belongs to the higher bin. The edge is the
+/// minimum plus the width times the bin. Negative zero is that same value.
+/// Edges count only up to the first one that does not rise above the edge
+/// before it. A sample above that edge, other than the maximum, is in the
+/// bin of the edge before it. The maximum belongs to the last bin, including
+/// when that edge does not advance. Equal samples all land in bin 0.
 ///
 /// # Errors
 ///
@@ -195,10 +244,16 @@ pub fn histogram(samples: &[f64], counts: &mut [u32]) -> Result<Histogram, GeomE
     let Ok(sample_count) = u32::try_from(samples.len()) else {
         return Err(GeomError::Frame);
     };
-    let width = if min.total_cmp(&max).is_eq() {
+    // An exact zero span, including both signs of zero, is one value. A span
+    // that underflows when divided by the bin count is not one value. The
+    // maximum still belongs in the last bin. Negative zero matches zero.
+    let min_edge = min + 0.0;
+    let max_edge = max + 0.0;
+    let span = max_edge - min_edge;
+    let width = if exact_zero(span) {
         0.0
     } else {
-        (max - min) / f64::from(bin_count)
+        span / f64::from(bin_count)
     };
     if !width.is_finite() {
         return Err(GeomError::Frame);
@@ -206,24 +261,20 @@ pub fn histogram(samples: &[f64], counts: &mut [u32]) -> Result<Histogram, GeomE
     for slot in counts.iter_mut() {
         *slot = 0;
     }
-    if exact_zero(width) {
+    if exact_zero(span) {
         if let Some(slot) = counts.first_mut() {
             *slot = sample_count;
         }
         return Ok(Histogram { min, max, width });
     }
     let last = counts.len() - 1;
+    let stall = first_stall(min_edge, width, last);
     for &sample in samples {
-        let index = if sample.total_cmp(&max).is_eq() {
+        let sample = sample + 0.0;
+        let index = if sample.total_cmp(&max_edge).is_eq() {
             last
         } else {
-            let mut index = 0;
-            let mut edge = min + width;
-            while index < last && sample.total_cmp(&edge).is_ge() {
-                index += 1;
-                edge += width;
-            }
-            index
+            bin_before_stall(sample, min_edge, width, stall)
         };
         if let Some(slot) = counts.get_mut(index) {
             *slot = slot.saturating_add(1);
@@ -260,7 +311,7 @@ pub fn suv_bw(inputs: SuvInputs) -> Result<f64, SuvError> {
         || inputs.patient_weight_kg.total_cmp(&0.0).is_le()
         || inputs.total_dose_bq.total_cmp(&0.0).is_le()
         || inputs.half_life_seconds.total_cmp(&0.0).is_le()
-        || inputs.elapsed_seconds.total_cmp(&0.0).is_lt()
+        || inputs.elapsed_seconds < 0.0
     {
         return Err(SuvError::Unavailable);
     }
@@ -268,9 +319,6 @@ pub fn suv_bw(inputs: SuvInputs) -> Result<f64, SuvError> {
     let exponent = -inputs.elapsed_seconds / inputs.half_life_seconds;
     let decay = DVec2::new(2.0, 0.0).powf(exponent).x;
     let decayed = inputs.total_dose_bq * decay;
-    if !activity.is_finite() || !decayed.is_finite() || decayed.total_cmp(&0.0).is_le() {
-        return Err(SuvError::Unavailable);
-    }
     let suv = activity * inputs.patient_weight_kg * 1000.0 / decayed;
     if !suv.is_finite() {
         return Err(SuvError::Frame);

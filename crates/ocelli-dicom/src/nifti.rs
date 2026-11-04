@@ -9,7 +9,7 @@
 use core::{num::FpCategory, ops::Range};
 
 use glam::{DMat4, DVec4};
-use ocelli_core::{Index, Transform, World};
+use ocelli_core::{ExactF32Error, Index, Transform, World, exact_f32_integer};
 
 const HEADER_LENGTH: usize = 348;
 const HEADER_AND_EXTENDER: usize = 352;
@@ -638,33 +638,10 @@ fn exact_u64_from_f32(value: f32) -> Result<u64, OffsetConversionError> {
     if !value.is_finite() || value.is_sign_negative() {
         return Err(OffsetConversionError::Invalid);
     }
-
-    let bits = value.to_bits();
-    let exponent_bits = (bits >> 23) & 0xff;
-    let exponent = i32::try_from(exponent_bits).map_err(|_| OffsetConversionError::Overflow)? - 127;
-    if exponent < 0 {
-        return Err(OffsetConversionError::Invalid);
-    }
-    let significand = u64::from((bits & 0x007f_ffff) | 0x0080_0000);
-    if exponent >= 23 {
-        let shift = u32::try_from(exponent - 23).map_err(|_| OffsetConversionError::Overflow)?;
-        let maximum_significand = u64::MAX
-            .checked_shr(shift)
-            .ok_or(OffsetConversionError::Overflow)?;
-        if significand > maximum_significand {
-            return Err(OffsetConversionError::Overflow);
-        }
-        Ok(significand << shift)
-    } else {
-        let shift = u32::try_from(23 - exponent).map_err(|_| OffsetConversionError::Overflow)?;
-        let fractional_mask = 1_u64
-            .checked_shl(shift)
-            .and_then(|value| value.checked_sub(1))
-            .ok_or(OffsetConversionError::Overflow)?;
-        if significand & fractional_mask != 0 {
-            return Err(OffsetConversionError::Invalid);
-        }
-        Ok(significand >> shift)
+    match exact_f32_integer(value) {
+        Ok(parsed) => Ok(parsed.magnitude),
+        Err(ExactF32Error::NotAnInteger) => Err(OffsetConversionError::Invalid),
+        Err(ExactF32Error::ExceedsU64) => Err(OffsetConversionError::Overflow),
     }
 }
 

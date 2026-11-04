@@ -12,6 +12,27 @@ const JPEG2000_LOSSLESS: &str = "1.2.840.10008.1.2.4.90";
 const JPEG2000: &str = "1.2.840.10008.1.2.4.91";
 
 #[test]
+fn lossless_refuses_a_tile_part_coding_override() -> TestResult {
+    // ISO/IEC 15444-1 A.4.2. A COD between SOT and SOD replaces the
+    // main-header wavelet for that tile. `.90` has to refuse it before decode.
+    let source = include_bytes!("fixtures/jpeg2000_lossless_u8.j2k");
+    let desc = frame(64, 64, 8, 8, PixelRepresentation::Unsigned, "MONOCHROME2")?;
+    let sod = marker_offset(source, [0xff, 0x93])?;
+    let mut tile_cod = source.to_vec();
+    tile_cod.splice(
+        sod..sod,
+        [0xff, 0x52, 0x00, 0x0c, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    );
+    assert_atomic_error(
+        &Jpeg2000Decoder::lossless_only(),
+        &tile_cod,
+        &desc,
+        CodecError::UnsupportedPixelFormat,
+    );
+    Ok(())
+}
+
+#[test]
 fn lossless_decodes_hand_computed_eight_and_sixteen_bit_signed_domains() -> TestResult {
     // DICOM PS3.5 A.4.4 reconstructs JPEG 2000 samples into the Image Pixel
     // module's native containers. Each OpenJPEG fixture repeats four boundary
@@ -142,6 +163,17 @@ fn lossless_requires_reversible_transform_and_no_quantization() -> TestResult {
     assert_atomic_error(
         &Jpeg2000Decoder::lossless_only(),
         &override_qcc,
+        &desc,
+        CodecError::UnsupportedPixelFormat,
+    );
+
+    let mut override_coc = source.to_vec();
+    *override_coc
+        .get_mut(qcd + 1)
+        .ok_or("QCD marker is truncated")? = 0x53;
+    assert_atomic_error(
+        &Jpeg2000Decoder::lossless_only(),
+        &override_coc,
         &desc,
         CodecError::UnsupportedPixelFormat,
     );

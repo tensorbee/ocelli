@@ -13,7 +13,7 @@ import { pathToFileURL } from "node:url";
 
 import * as command from "../run.mjs";
 import { runnerPath, repoPath } from "../src/paths.mjs";
-import { cpuFraction, runBrowserSession } from "../src/browser_session.mjs";
+import { cineRate, cpuFraction, runBrowserSession } from "../src/browser_session.mjs";
 
 const ARGUMENT_REFUSALS = [
   [["--out"], /--out needs a value/],
@@ -105,6 +105,13 @@ test("CPU acceptance refuses an unrelated host attestation", async () => {
     else process.env.OCELLI_CPU_BASELINE_HOST = previous;
     await rm(directory, { recursive: true });
   }
+});
+
+test("cine rate divides changed frames by the cine call", () => {
+  assert.equal(cineRate(4, 0.25), 16);
+  assert.throws(() => cineRate(4, 0), /workload interval/);
+  assert.throws(() => cineRate(Number.NaN, 1), /frame count/);
+  assert.throws(() => cineRate(-1, 1), /frame count/);
 });
 
 test("CPU fraction sums dedicated browser processes and rejects invalid intervals", () => {

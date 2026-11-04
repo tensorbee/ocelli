@@ -45,9 +45,11 @@ centre and `fit_scale` is 1, so a default view at spacing 1 is the identity.
 shader divides the device position by the device pixel ratio first, then
 multiplies `(css_x, css_y, 0, 1)` by it and truncates with `i32` toward
 zero. A zero spacing on one axis keeps the other axis and that axis's shift.
-A map with no extent writes the image centre. Neither path writes a
-non-finite value. Narrowing `f64` to `f32` is ties-to-even. It is not a
-Rust `as` cast.
+That axis is scaled before the squared length. A map with no extent writes the image centre. A coefficient that does not
+narrow to a finite `f32` writes that same centre. A determinant that
+overflows is inverted from the basis scaled by its largest entry. No path
+writes a non-finite value. Narrowing `f64` to `f32` is ties-to-even.
+It is not a Rust `as` cast.
 
 ## Canvas, index and world
 

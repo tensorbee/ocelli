@@ -97,13 +97,18 @@ area is the caller's number. This function does not call `rectangle`,
 
 `histogram` writes a caller-supplied bin buffer. An empty sample list or an
 empty bin buffer is `Degenerate`, and the buffer stays unchanged. A value on
-an interior edge belongs to the higher bin. The maximum belongs to the last
-bin, including when adding the width steps past it. Equal samples land in
+an interior edge belongs to the higher bin. The edge is the minimum plus the
+width times the bin. Negative zero is the same value as zero. Edges count
+only up to the first one that does not rise above the edge before it. A
+sample above that edge, other than the maximum, is in the bin of the edge
+before it. The maximum belongs to the last bin. A span whose edges cannot
+advance still puts the maximum in the last bin. Equal samples land in
 bin 0 and the width is 0.
 
 `suv_bw` is the separate PET path. It does not call the modality LUT. Units
 other than BQML, or a weight, dose or half-life that is not strictly
-positive, or a negative elapsed time, is unavailable. A non-finite input is
+positive, or a negative elapsed time, is unavailable. Negative zero elapsed
+time is zero. A non-finite input or a non-finite result is
 `Frame`. There is no default weight. `SuvError::Frame` is 402 and
 `SuvError::Unavailable` is 403.
 
@@ -126,8 +131,9 @@ Freehand length remains `length`. There is no second length function.
 `livewire_path` is a 4-connected path on a caller-supplied cost grid. The
 cost is the sum of the pixels entered. The start pixel adds nothing. `z`
 is ignored and every returned point stores 0. A negative cost is
-`Degenerate`. A non-finite cost or index is `Frame`. A non-integer index
-is `Degenerate`. Start equal to goal is one point.
+`Degenerate`. A cost of negative zero is not negative. A non-finite cost
+or index is `Frame`. A non-integer index is `Degenerate`. Negative zero is
+the integer 0. Start equal to goal is one point.
 
 `livewire_mask` marks the pixels that path visits. It does not fill an
 interior. An empty path is `Degenerate` and no mask is returned.

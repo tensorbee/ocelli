@@ -178,6 +178,9 @@ impl NativeFrameIndex<'_> {
         if final_physical_byte >= self.value.len() {
             return Err(CodecError::InvalidCodestream);
         }
+        if self.copy_aligned(frame_start, out)? {
+            return Ok(());
+        }
 
         for (output_byte, target) in (0_u64..).zip(out.iter_mut()) {
             let local_start = output_byte * 8;
@@ -192,6 +195,44 @@ impl NativeFrameIndex<'_> {
             *target = packed;
         }
         Ok(())
+    }
+
+    /// Byte copy for a frame that starts on a byte and fills whole bytes.
+    ///
+    /// Big-endian OW still exchanges each pair. A one-bit frame that starts
+    /// mid-byte returns false and keeps the bit walk.
+    fn copy_aligned(&self, frame_start: u64, out: &mut [u8]) -> Result<bool, CodecError> {
+        if !frame_start.is_multiple_of(8) || !self.frame_bits.is_multiple_of(8) {
+            return Ok(false);
+        }
+        let byte_len = self.frame_bits / 8;
+        if byte_len != u64::try_from(out.len()).map_err(|_| CodecError::FrameMismatch)? {
+            return Ok(false);
+        }
+        let start = usize::try_from(frame_start / 8).map_err(|_| CodecError::FrameMismatch)?;
+        match (self.byte_order, self.pixel_data_vr) {
+            (NativeByteOrder::BigEndian, PixelDataVr::Ow) => {
+                // `decode_frame` already proved the last swapped byte exists.
+                // Every index in this frame is at or below that byte.
+                for (index, target) in out.iter_mut().enumerate() {
+                    let canonical = start.checked_add(index).ok_or(CodecError::FrameMismatch)?;
+                    let Some(byte) = self.value.get(canonical ^ 1) else {
+                        return Err(CodecError::InvalidCodestream);
+                    };
+                    *target = *byte;
+                }
+            }
+            _ => {
+                let end = start
+                    .checked_add(out.len())
+                    .ok_or(CodecError::FrameMismatch)?;
+                let Some(bytes) = self.value.get(start..end) else {
+                    return Err(CodecError::InvalidCodestream);
+                };
+                out.copy_from_slice(bytes);
+            }
+        }
+        Ok(true)
     }
 
     fn source_bit(&self, bit: u64) -> bool {

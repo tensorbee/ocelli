@@ -1,0 +1,22 @@
+[package]
+name = "ocelli-folder-viewer"
+description = "Local page that lists DICOM series from a chosen folder and shows one image at a time."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+dicom-core = { workspace = true }
+dicom-object = { workspace = true }
+ocelli-codec = { path = "../../crates/ocelli-codec" }
+ocelli-core = { path = "../../crates/ocelli-core" }
+ocelli-dicom = { path = "../../crates/ocelli-dicom" }
+ocelli-pixel = { path = "../../crates/ocelli-pixel" }
+ocelli-render = { path = "../../crates/ocelli-render" }
+ocelli-viewport = { path = "../../crates/ocelli-viewport" }
+thiserror = { workspace = true }

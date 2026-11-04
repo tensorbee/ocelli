@@ -144,7 +144,9 @@ the `synthetic/us_ybr_full_422.dcm` corpus row could not be unpacked at all:
 `unpack` demanded three bytes per pixel from a source holding two, and nothing
 observed it. An odd `Columns` with a 4:2:2 interpretation is refused with
 `SubsampledChromaAlignment`, before any length arithmetic, because half a
-chroma group cannot be stored.
+chroma group cannot be stored. `ColorTransform::map_into` applies the same
+refusal to the column count it is given. An even pixel count with odd columns
+still pairs the last pixel of one row with the first pixel of the next.
 
 ## Modality stage
 
@@ -478,7 +480,12 @@ is unavailable.
 
 Tier C uses the same table bytes. A preset indexes them after
 `LutChain::map_into`. A palette goes through `ColorTransform::map_into`.
-There is no second palette formula. A tier B colour comparison was not run.
+There is no second palette formula. A palette entry that is not an integer
+in 0 to 255 is unavailable when the tier C colour transform is accepted,
+which is the same refusal as the GPU bake. A later draw does not walk the
+table again. A colour sample outside 0 to 255 is unavailable on tier C until a
+scale exists. An in-range sample still rounds to a byte, and a YBR result
+outside 0 to 255 still becomes 0 or 255. A tier B colour comparison was not run.
 
 `bin/ocelli.sh gate native` proves native linkage and shared-crate wasm
 compilation. The focused `cargo check -p ocelli-pixel --all-targets --target

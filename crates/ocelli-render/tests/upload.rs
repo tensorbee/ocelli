@@ -40,7 +40,7 @@ fn binding_features(usages: wgpu::TextureUsages) -> wgpu::TextureFormatFeatures 
 fn a_wrong_length_is_refused_and_a_missing_binding_is_unavailable() {
     let present =
         binding_features(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
-    let built = Upload::stored(present, 2, 2);
+    let built = Upload::stored(present, 2, 2, 2);
     assert!(built.is_ok());
     let Ok(upload) = built else { return };
     // 2 by 2 is four samples. Three is a refusal and uploads nothing.
@@ -52,14 +52,14 @@ fn a_wrong_length_is_refused_and_a_missing_binding_is_unavailable() {
 
     let no_binding = binding_features(wgpu::TextureUsages::COPY_DST);
     assert!(matches!(
-        Upload::stored(no_binding, 2, 2),
+        Upload::stored(no_binding, 2, 2, 2),
         Err(UploadError::FormatUnavailable)
     ));
     // COPY_DST is the other usage `write_texture` needs. Missing it is the
     // same refusal, and no other format is produced.
     let binding_only = binding_features(wgpu::TextureUsages::TEXTURE_BINDING);
     assert!(matches!(
-        Upload::stored(binding_only, 2, 2),
+        Upload::stored(binding_only, 2, 2, 2),
         Err(UploadError::FormatUnavailable)
     ));
     assert_eq!(ocelli_render::STORED_FORMAT, wgpu::TextureFormat::R32Float);
@@ -67,6 +67,25 @@ fn a_wrong_length_is_refused_and_a_missing_binding_is_unavailable() {
         ocelli_render::STORED_FORMAT,
         wgpu::TextureFormat::Rgba8Unorm
     );
+}
+
+#[test]
+fn an_axis_past_the_texture_limit_is_refused_before_a_texture_exists() {
+    let present =
+        binding_features(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
+    assert!(matches!(
+        Upload::stored(present, 3, 2, 2),
+        Err(UploadError::ExtentUnavailable)
+    ));
+    assert!(matches!(
+        Upload::stored(present, 2, 3, 2),
+        Err(UploadError::ExtentUnavailable)
+    ));
+    assert!(Upload::stored(present, 2, 2, 2).is_ok());
+    assert!(matches!(
+        Upload::stored(present, 0, 2, 8),
+        Err(UploadError::EmptyExtent)
+    ));
 }
 
 fn native_clock() -> impl FnMut() -> u64 {

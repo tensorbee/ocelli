@@ -280,12 +280,6 @@ fn length_is_zero(x: f64, y: f64, z: f64) -> bool {
     bits == 0 || bits == (1_u64 << 63)
 }
 
-fn length_f32_is_zero(x: f32, y: f32, z: f32) -> bool {
-    let sum = x.mul_add(x, y.mul_add(y, z * z));
-    let bits = sum.to_bits();
-    bits == 0 || bits == (1_u32 << 31)
-}
-
 /// Narrow one patient component. A non-zero value that flushes to zero is
 /// not representable in the uniform.
 fn narrow_scalar(value: f64) -> Option<f32> {
@@ -307,9 +301,9 @@ fn narrow_point(point: [f64; 3]) -> Option<[f32; 3]> {
     Some([narrow_scalar(x)?, narrow_scalar(y)?, narrow_scalar(z)?])
 }
 
-/// Narrow a normal. A flushed component is kept when the `f32` length stays
-/// non-zero, because that component was below the uniform's resolution. A
-/// normal whose whole `f32` image has length zero is refused.
+/// Narrow a normal. A component that flushes to zero is kept when another
+/// component stays non-zero. The normal is refused when every narrowed
+/// component is zero. A square that underflows is not that test.
 fn narrow_normal(normal: [f64; 3]) -> Result<[f32; 3], ClipError> {
     let (x, y, z) = xyz(normal);
     let image = [
@@ -327,7 +321,7 @@ fn narrow_normal(normal: [f64; 3]) -> Result<[f32; 3], ClipError> {
         },
     ];
     let (ix, iy, iz) = xyz_f32(image);
-    if length_f32_is_zero(ix, iy, iz) {
+    if f32_is_zero(ix) && f32_is_zero(iy) && f32_is_zero(iz) {
         return Err(ClipError::ZeroNormal);
     }
     Ok(image)
@@ -546,6 +540,18 @@ mod tests {
         ));
         assert!(!previous.keeps(near));
         assert!(previous.keeps(far));
+    }
+
+    #[test]
+    fn a_normal_whose_square_underflows_is_kept() {
+        // 1e-23 is a normal f32. Its square is below every f32 subnormal.
+        assert!(
+            ClipList::from_planes(&[ClipPlane {
+                origin_mm: [0.0, 0.0, 0.0],
+                normal: [1.0e-23, 0.0, 0.0],
+            }])
+            .is_ok()
+        );
     }
 
     #[test]

@@ -196,8 +196,9 @@ is frequently absent and frequently wrong.
 
 `StackGeometry` projects each inter-frame step onto the slice normal
 `N = X cross Y`. A stack is `AxisAligned` when every off-axis component is within
-tolerance, and the reported `step_mm` is the **signed** projection, so a
-descending stack is negative. Otherwise it is `Sheared` with the largest
+tolerance and the projected steps agree. The reported `step_mm` is the
+**signed** projection, so a descending stack is negative. An off-axis
+stack whose projected steps agree is `Sheared` with the largest
 off-axis component, which means the volume is a sheared parallelepiped rather
 than a box.
 
@@ -206,10 +207,21 @@ angle and Type 3. It is retained as evidence, and fixtures assert both
 directions: a tag of `0` with sheared geometry reports `Sheared`, and a tag of
 `30` with axis-aligned geometry reports `AxisAligned`.
 
-An axis-aligned stack whose projected steps are not equal within tolerance is
-**refused** as `NonUniformFrameSpacing` rather than averaged. Non-uniform
+A stack whose projected steps are not equal within tolerance is
+**refused** as `NonUniformFrameSpacing` rather than averaged. The refusal
+includes a sheared stack, and it is decided before that verdict. Non-uniform
 spacing is real in dose-modulated and multi-slab acquisitions, and rendering it
 as uniform distorts geometry in a way no measurement tool flags.
+
+A later frame whose Pixel Spacing differs from the first is refused as
+`NonUniformPixelSpacing`. The positions can still lie on one normal. Later
+slices would be measured with the first frame's in-plane spacing.
+
+A stack whose every projected step is zero within tolerance is refused as
+`CoincidentFrames`. The frames occupy one plane. A shift inside that plane is
+the same refusal, and it is decided before a sheared verdict. A volume built
+from that step is singular. A zero step beside a real step stays
+`NonUniformFrameSpacing`.
 
 Cross-instance slice spacing over a series is not here. Within one multiframe
 instance every frame's position comes from the same instance, which is what

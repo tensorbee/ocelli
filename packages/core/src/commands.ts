@@ -264,8 +264,20 @@ function i32(value: number): number[] {
   return [bits & 0xff, (bits >> 8) & 0xff, (bits >> 16) & 0xff, (bits >> 24) & 0xff];
 }
 
+// One scratch for every packed float. The returned array is a copy, so the
+// next call cannot change bytes already handed to the packer.
+const floatBytes = new DataView(new ArrayBuffer(8));
+
 function f64(value: number): number[] {
-  const buffer = new ArrayBuffer(8);
-  new DataView(buffer).setFloat64(0, value, true);
-  return [...new Uint8Array(buffer)];
+  floatBytes.setFloat64(0, value, true);
+  return [
+    floatBytes.getUint8(0),
+    floatBytes.getUint8(1),
+    floatBytes.getUint8(2),
+    floatBytes.getUint8(3),
+    floatBytes.getUint8(4),
+    floatBytes.getUint8(5),
+    floatBytes.getUint8(6),
+    floatBytes.getUint8(7),
+  ];
 }

@@ -212,7 +212,7 @@ volume type and still does not read a voxel.
 
 `Pressure::band` places a reading in `Low`, `Elevated` or `Critical`. The
 edges are half and nine tenths of that tier's own budget, compared as
-`used * 2` against `budget` and `used * 10` against `budget * 9`, in `u64`.
+`used * 2` against `budget` and `used * 10` against `budget * 9`, in `u128`.
 A budget of zero is `Low` when it holds nothing and `Critical` when it holds
 bytes. `PressureBand::crossing` returns one `TelemetryEvent::Pressure` when
 the band has changed and nothing when it has not. The caller keeps the last

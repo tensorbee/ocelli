@@ -247,7 +247,11 @@ run_gate() {
                  # globbed, so a file added under scripts/tests/ does not
                  # silently join or leave this gate.
                  python3 -B -m unittest discover -s scripts/tests \
-                   -p test_guard_readers.py ;;
+                   -p test_guard_readers.py &&
+                 # Staged content, provenance and prose read the index blob.
+                 # Named rather than globbed, for the same reason as above.
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_staged_readers.py ;;
     # The level-3 runs that need a toolchain. NOT in the floor, and excluded
     # by name in the --floor arm below and in scripts/ci_floor_check.py's
     # NOT_IN_FLOOR. The two lists are compared for set equality there, so

@@ -564,6 +564,134 @@ mod fusion {
         assert_eq!(ledger.published().first().copied(), Some(8));
     }
 
+    /// The store starts at zero. Marking that slice present does not change
+    /// a byte. The front volume is still a new sample, because absence is
+    /// not stored zero.
+    #[test]
+    fn a_zero_byte_slice_that_arrives_is_published_again() {
+        let mut ledger = prepared();
+        let mut back = absent_volume();
+        match back.place(0, &[0]) {
+            Ok(()) => {}
+            Err(_) => unreachable!("the back slice matches the store"),
+        }
+        let mut front = absent_volume();
+        let uid = FrameOfReferenceUid(String::from("1.2.3"));
+        let chain = window_chain();
+        let plane = unit_plane();
+        {
+            let request = pair(
+                &back,
+                &uid,
+                &front,
+                &uid,
+                (&chain, &chain),
+                (1.0, 0.5),
+                &plane,
+            );
+            let first = ledger.present(Tier::A, &request, |_| Ok(()));
+            assert!(first.is_ok());
+            assert_eq!(ledger.submits(), 1);
+            let settled = ledger.present(Tier::A, &request, |_| {
+                unreachable!("the absent front volume has not changed");
+            });
+            assert!(settled.is_ok());
+            assert_eq!(ledger.submits(), 1);
+        }
+        match front.place(0, &[0]) {
+            Ok(()) => {}
+            Err(_) => unreachable!("the arriving slice matches the store"),
+        }
+        let arrived = pair(
+            &back,
+            &uid,
+            &front,
+            &uid,
+            (&chain, &chain),
+            (1.0, 0.5),
+            &plane,
+        );
+        let second = ledger.present(Tier::A, &arrived, |_| Ok(()));
+        assert!(second.is_ok());
+        assert_eq!(ledger.submits(), 2);
+    }
+
+    /// `sample_at` reads the voxel kind. The same bytes as `I16` are not the
+    /// `U8` sample already published.
+    #[test]
+    fn a_voxel_kind_change_is_published_again() {
+        let mut ledger = prepared();
+        let mut volume = voxel();
+        let uid = FrameOfReferenceUid(String::from("1.2.3"));
+        let chain = window_chain();
+        let plane = unit_plane();
+        let request = pair(
+            &volume,
+            &uid,
+            &volume,
+            &uid,
+            (&chain, &chain),
+            (1.0, 1.0),
+            &plane,
+        );
+        let first = ledger.present(Tier::A, &request, |_| Ok(()));
+        assert!(first.is_ok());
+        let settled = ledger.present(Tier::A, &request, |_| {
+            unreachable!("the same kind does not encode");
+        });
+        assert!(settled.is_ok());
+        assert_eq!(ledger.submits(), 1);
+        volume.voxel = VoxelKind::I16;
+        let changed = pair(
+            &volume,
+            &uid,
+            &volume,
+            &uid,
+            (&chain, &chain),
+            (1.0, 1.0),
+            &plane,
+        );
+        let second = ledger.present(Tier::A, &changed, |_| Ok(()));
+        assert!(second.is_ok());
+        assert_eq!(ledger.submits(), 2);
+    }
+
+    /// `sample_at` reads `dims`. A wider axis with the same bytes is not the
+    /// sample already published.
+    #[test]
+    fn a_dimension_change_is_published_again() {
+        let mut ledger = prepared();
+        let mut volume = voxel();
+        let uid = FrameOfReferenceUid(String::from("1.2.3"));
+        let chain = window_chain();
+        let plane = unit_plane();
+        let request = pair(
+            &volume,
+            &uid,
+            &volume,
+            &uid,
+            (&chain, &chain),
+            (1.0, 1.0),
+            &plane,
+        );
+        let first = ledger.present(Tier::A, &request, |_| Ok(()));
+        assert!(first.is_ok());
+        assert_eq!(ledger.submits(), 1);
+        volume.dims[0] = 2;
+        let changed = pair(
+            &volume,
+            &uid,
+            &volume,
+            &uid,
+            (&chain, &chain),
+            (1.0, 1.0),
+            &plane,
+        );
+        let second = ledger.present(Tier::A, &changed, |_| Ok(()));
+        assert!(second.is_ok());
+        assert_eq!(ledger.submits(), 2);
+    }
+
     #[test]
     fn the_shader_calls_the_existing_window_and_puts_pet_in_front() {
         let module = fusion_module();
@@ -741,6 +869,25 @@ mod fusion {
         ) {
             Ok(chain) => chain,
             Err(_) => unreachable!("the fixture chain composes"),
+        }
+    }
+
+    fn absent_volume() -> Volume {
+        let dims = [1, 1, 1];
+        Volume {
+            dims,
+            spacing: [1.0, 1.0, 1.0],
+            origin: Pt::<World>::new(0.0, 0.0, 0.0),
+            direction: DMat3::IDENTITY,
+            voxel: VoxelKind::U8,
+            data: VoxelStore::new(dims, VoxelKind::U8),
+            levels: vec![Level {
+                dims,
+                spacing: [1.0, 1.0, 1.0],
+                offset: 0,
+            }],
+            present: SlicePresence::new(1),
+            order: Vec::new(),
         }
     }
 

@@ -600,6 +600,8 @@ Interactive CPU dispatches DOM pointer events, batches commands on RAF and
 settles after the workload. Idle schedules no drawing and checks zero changed
 frames. Cine alternates two predecoded synthetic frames and verifies actual
 black and white canvas pixels inside the owning worker before measurement.
+The published rate divides changed frames by the duration of that cine call.
+Snapshot midpoints stay the denominator of the CPU fraction only.
 Pixels do not reach the shell. These fixtures do not model an incumbent
 workload or establish its noise floor.
 

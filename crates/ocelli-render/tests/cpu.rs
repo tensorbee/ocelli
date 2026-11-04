@@ -519,6 +519,61 @@ fn fit_anisotropic_spacing_shift_flip_quarter_turn_and_zoom() {
 }
 
 #[test]
+fn a_fitted_column_keeps_the_odd_texel() {
+    // PS3.3 C.7.6.2.1.1 puts the integer index on the pixel centre. Image
+    // space stores the corner. Fitting 98 columns into 49 CSS pixels at
+    // spacing 1 mm is scale one half. Column 0's centre is CSS 0.5, which is
+    // image coordinate 1, so the floor texel is column 1. Column 13's centre
+    // is CSS 13.5, image coordinate 27.
+    let mut fitted = View::new();
+    fitted.fit(49.0, 1.0, 98, 1);
+    let mut raster = require_raster(49.0, 1.0, 1.0);
+    assert_eq!(raster.device(), [49, 1]);
+    let mut values = vec![0.0_f32; 98];
+    *values
+        .get_mut(1)
+        .unwrap_or_else(|| unreachable!("column 1 is inside the row")) = 200.0;
+    *values
+        .get_mut(27)
+        .unwrap_or_else(|| unreachable!("column 27 is inside the row")) = 180.0;
+    let frame = draw(
+        &mut raster,
+        &fitted,
+        &passthrough(),
+        &stored(&values),
+        [98, 1],
+    );
+    assert_grey_near(&frame, 0, 200);
+    assert_grey_near(&frame, 13, 180);
+}
+
+#[test]
+fn a_settled_wide_axis_keeps_the_pixel_centre() {
+    // PS3.3 C.7.6.2.1.1 puts the integer index on the pixel centre. Two
+    // columns fitted across a settled axis of 2^27 - 1 device pixels meet at
+    // the canvas midpoint. That midpoint is the centre of device column
+    // extent/2, and it is image coordinate 1, so the floor texel is column 1.
+    // LINEAR_EXACT at centre 127.5 and width 255 reproduces the stored value.
+    let columns: u32 = (1_u32 << 27) - 1;
+    let width = f64::from(columns);
+    let mut fitted = View::new();
+    fitted.fit(width, 1.0, 2, 1);
+    let raster = require_raster(width, 1.0, 1.0);
+    assert_eq!(raster.device(), [columns, 1]);
+    assert_display(
+        raster.display_at(
+            &fitted,
+            &passthrough(),
+            &stored(&[0.0, 200.0]),
+            [2, 1],
+            [columns, 1],
+            [columns / 2, 0],
+        ),
+        200.0,
+    );
+}
+
+#[test]
 fn a_singular_map_writes_nothing_and_leaves_the_view() {
     let mut raster = require_raster(1.0, 1.0, 1.0);
     let mut view = View::new();
@@ -699,7 +754,7 @@ fn a_colour_source_larger_than_the_target_is_drawn() {
     let mut out = [3_u8; 4];
     let drawn = raster.raster_color_into(
         &view,
-        RasterColor::Supported(&rgb),
+        accepted(&rgb),
         &stored(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0]),
         RasterGrid {
             source: [2, 1],
@@ -717,7 +772,7 @@ fn a_colour_source_larger_than_the_target_is_drawn() {
     let mut smaller = [3_u8; 8];
     let fitted = wide.raster_color_into(
         &view,
-        RasterColor::Supported(&rgb),
+        accepted(&rgb),
         &stored(&[10.0, 20.0, 30.0]),
         RasterGrid {
             source: [1, 1],
@@ -741,7 +796,7 @@ fn a_colour_source_larger_than_the_target_is_drawn() {
     raster.invalidate();
     let keyed_draw = raster.raster_color_into(
         &view,
-        RasterColor::Supported(&keyed),
+        accepted(&keyed),
         &stored(&[0.0, 1.0]),
         RasterGrid {
             source: [2, 1],
@@ -765,7 +820,7 @@ fn supported_colour_is_drawn_and_icc_is_not_scored() {
     let mut out = [0_u8; 4];
     let drawn = raster.raster_color_into(
         &view,
-        RasterColor::Supported(&rgb),
+        accepted(&rgb),
         &stored(&[10.0, 20.0, 30.0]),
         RasterGrid {
             source: [1, 1],
@@ -787,7 +842,7 @@ fn supported_colour_is_drawn_and_icc_is_not_scored() {
     raster.invalidate();
     let colored = raster.raster_color_into(
         &view,
-        RasterColor::Supported(&transform),
+        accepted(&transform),
         &stored(&[1.0]),
         RasterGrid {
             source: [1, 1],
@@ -813,6 +868,55 @@ fn supported_colour_is_drawn_and_icc_is_not_scored() {
     );
     assert!(matches!(icc, Err(RasterError::Unavailable)));
     assert_eq!(refused, [9, 9, 9, 9]);
+}
+
+#[test]
+fn a_colour_sample_or_palette_entry_above_255_is_unavailable() {
+    // The GPU bake refuses a palette entry that is not a display byte.
+    // A stored colour sample above 255 has no scale. Drawing either as 255
+    // would be a different image from the tier that refuses it.
+    let mut raster = require_raster(1.0, 1.0, 1.0);
+    let view = View::new();
+    let rgb = require_color(PhotometricInterpretation::Rgb, None);
+    assert!(raster.reserve_source(1, 1).is_ok());
+    let mut wide = [7_u8; 4];
+    let refused = raster.raster_color_into(
+        &view,
+        accepted(&rgb),
+        &stored(&[256.0, 0.0, 0.0]),
+        RasterGrid {
+            source: [1, 1],
+            target: [1, 1],
+        },
+        RasterQuality::Settled { generation: 0 },
+        &mut wide,
+    );
+    assert!(matches!(refused, Err(RasterError::Unavailable)));
+    assert_eq!(wide, [7, 7, 7, 7]);
+
+    let mut at_byte = [7_u8; 4];
+    let drawn = raster.raster_rgb_into(
+        &view,
+        &stored(&[255.0, 0.0, 0.0]),
+        RasterGrid {
+            source: [1, 1],
+            target: [1, 1],
+        },
+        RasterQuality::Settled { generation: 0 },
+        &mut at_byte,
+    );
+    assert!(drawn.is_ok());
+    assert_eq!(at_byte, [255, 0, 0, 255]);
+
+    let red = wide_descriptor(&[0.0, 1_000.0]);
+    let green = wide_descriptor(&[0.0, 0.0]);
+    let blue = wide_descriptor(&[0.0, 0.0]);
+    let palette = PaletteColorLut::new(red, green, blue);
+    assert!(palette.is_ok());
+    let Ok(palette) = palette else { return };
+    let transform = require_color(PhotometricInterpretation::PaletteColor, Some(palette));
+    let palette_refused = RasterColor::supported(&transform);
+    assert!(matches!(palette_refused, Err(RasterError::Unavailable)));
 }
 
 #[test]
@@ -924,7 +1028,7 @@ fn ybr_partial_422_keeps_studio_black_and_the_matrix_row() {
     let mut black = [5_u8; 8];
     let drawn = raster.raster_color_into(
         &view,
-        RasterColor::Supported(&transform),
+        accepted(&transform),
         &stored(&[16.0, 16.0, 128.0, 128.0]),
         RasterGrid {
             source: [2, 1],
@@ -943,7 +1047,7 @@ fn ybr_partial_422_keeps_studio_black_and_the_matrix_row() {
     let mut row = [5_u8; 8];
     let colored = raster.raster_color_into(
         &view,
-        RasterColor::Supported(&transform),
+        accepted(&transform),
         &stored(&[81.0, 81.0, 90.0, 240.0]),
         RasterGrid {
             source: [2, 1],
@@ -955,6 +1059,25 @@ fn ybr_partial_422_keeps_studio_black_and_the_matrix_row() {
     assert!(colored.is_ok());
     assert_eq!(rgba_at(&row, 0), [254, 0, 0, 255]);
     assert_eq!(rgba_at(&row, 1), [254, 0, 0, 255]);
+}
+
+fn accepted(transform: &ColorTransform) -> RasterColor<'_> {
+    let built = RasterColor::supported(transform);
+    assert!(built.is_ok());
+    match built {
+        Ok(color) => color,
+        Err(_) => unreachable!("colour entries fit a display byte"),
+    }
+}
+
+fn wide_descriptor(values: &[f32]) -> LutDescriptor {
+    let count = u16::try_from(values.len()).unwrap_or(0);
+    let built = LutDescriptor::new(count, 0, 16, values.to_vec());
+    assert!(built.is_ok());
+    match built {
+        Ok(value) => value,
+        Err(_) => unreachable!("16-bit palette descriptor is in domain"),
+    }
 }
 
 fn descriptor(first: i32, values: &[f32]) -> LutDescriptor {

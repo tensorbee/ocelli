@@ -354,6 +354,120 @@ fn a_single_frame_instance_has_no_inter_frame_vector() {
 }
 
 #[test]
+fn a_later_frame_with_a_different_orientation_is_not_a_box() {
+    // PS3.3 C.7.6.2.1.1. Frame 0 is axial, so N is +z. Frame 1 is sagittal,
+    // row +x and column +z, but its position is on that same normal. A check
+    // that only projects positions reports an axis-aligned box.
+    const SAGITTAL: &[&str] = &["1", "0", "0", "0", "0", "1"];
+    let mut metadata = MetadataSet::new();
+    insert(&mut metadata, ROWS, unsigned_short(8));
+    insert(&mut metadata, COLUMNS, unsigned_short(8));
+    insert(&mut metadata, NUMBER_OF_FRAMES, text(VR::IS, "2"));
+    insert(
+        &mut metadata,
+        SHARED_FUNCTIONAL_GROUPS,
+        MetadataElement::sequence(vec![groups(vec![
+            orientation(AXIAL),
+            measures(&["1", "1"]),
+        ])]),
+    );
+    insert(
+        &mut metadata,
+        PER_FRAME_FUNCTIONAL_GROUPS,
+        MetadataElement::sequence(vec![
+            position(&["0", "0", "0"]),
+            groups(vec![position(&["0", "0", "2"]), orientation(SAGITTAL)]),
+        ]),
+    );
+    let multiframe = require_ok!(MultiframeMetadata::new(&metadata));
+    assert_eq!(
+        StackGeometry::derive(&multiframe),
+        Err(FrameGeometryError::NonParallelFrames)
+    );
+}
+
+#[test]
+fn a_later_frame_with_different_pixel_spacing_is_not_one_box() {
+    // PS3.3 C.7.6.16.2.1. Frame 0 uses the shared spacing of 1 mm by 1 mm.
+    // Frame 1 carries 2 mm by 1 mm and a position on the same normal. The
+    // positions alone are an axis-aligned step of 2 mm.
+    let mut metadata = MetadataSet::new();
+    insert(&mut metadata, ROWS, unsigned_short(8));
+    insert(&mut metadata, COLUMNS, unsigned_short(8));
+    insert(&mut metadata, NUMBER_OF_FRAMES, text(VR::IS, "2"));
+    insert(
+        &mut metadata,
+        SHARED_FUNCTIONAL_GROUPS,
+        MetadataElement::sequence(vec![groups(vec![
+            orientation(AXIAL),
+            measures(&["1", "1"]),
+        ])]),
+    );
+    insert(
+        &mut metadata,
+        PER_FRAME_FUNCTIONAL_GROUPS,
+        MetadataElement::sequence(vec![
+            position(&["0", "0", "0"]),
+            groups(vec![position(&["0", "0", "2"]), measures(&["2", "1"])]),
+        ]),
+    );
+    let multiframe = require_ok!(MultiframeMetadata::new(&metadata));
+    assert_eq!(
+        StackGeometry::derive(&multiframe),
+        Err(FrameGeometryError::NonUniformPixelSpacing)
+    );
+}
+
+#[test]
+fn frames_shifted_inside_one_plane_are_not_a_sheared_stack() {
+    // Axial normal is (0, 0, 1). The steps (5, 0, 0) and (5, 0, 0) project
+    // to 0 and leave 5 mm inside the plane. That is one plane, not a
+    // parallelepiped with a slice axis.
+    let metadata = enhanced_instance(&[&["0", "0", "0"], &["5", "0", "0"], &["10", "0", "0"]]);
+    let multiframe = require_ok!(MultiframeMetadata::new(&metadata));
+    assert_eq!(
+        StackGeometry::derive(&multiframe),
+        Err(FrameGeometryError::CoincidentFrames)
+    );
+}
+
+#[test]
+fn a_zero_step_with_an_in_plane_shift_is_not_sheared() {
+    // Axial normal is (0, 0, 1). The first step is 5 mm inside the plane and
+    // the second is 2 mm along the normal. The off-axis part is 5 mm, and
+    // the projected steps are 0 and 2. That is not one parallelepiped.
+    let metadata = enhanced_instance(&[&["0", "0", "0"], &["5", "0", "0"], &["5", "0", "2"]]);
+    let multiframe = require_ok!(MultiframeMetadata::new(&metadata));
+    assert_eq!(
+        StackGeometry::derive(&multiframe),
+        Err(FrameGeometryError::NonUniformFrameSpacing)
+    );
+}
+
+#[test]
+fn a_zero_step_beside_a_real_step_stays_non_uniform() {
+    // Steps of 0 mm and 2 mm are not one plane, and they are not one spacing.
+    let metadata = enhanced_instance(&[&["0", "0", "0"], &["0", "0", "0"], &["0", "0", "2"]]);
+    let multiframe = require_ok!(MultiframeMetadata::new(&metadata));
+    assert_eq!(
+        StackGeometry::derive(&multiframe),
+        Err(FrameGeometryError::NonUniformFrameSpacing)
+    );
+}
+
+#[test]
+fn coincident_frames_are_not_an_axis_aligned_stack() {
+    // Both frames share one Image Position Patient. The projected step is 0.
+    // Reporting that as slice spacing would build a singular volume.
+    let metadata = enhanced_instance(&[&["0", "0", "0"], &["0", "0", "0"]]);
+    let multiframe = require_ok!(MultiframeMetadata::new(&metadata));
+    assert_eq!(
+        StackGeometry::derive(&multiframe),
+        Err(FrameGeometryError::CoincidentFrames)
+    );
+}
+
+#[test]
 fn non_uniform_frame_spacing_is_refused_rather_than_averaged() {
     // Projected positions 0, 2 and 5 give steps of 2 and 3. A volume model that
     // assumed uniform spacing would render this stretched along the normal,

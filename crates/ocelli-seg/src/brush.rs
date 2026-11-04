@@ -46,7 +46,7 @@ pub struct BrushCoverage {
 /// Why a stamp wrote nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrushError {
-    /// The centre or the radius is not finite.
+    /// The centre or the radius is not finite, or the squared radius cannot be compared.
     Frame,
     /// The radius is negative, or the grids are not one stack of equal slices.
     Degenerate,
@@ -58,7 +58,8 @@ pub enum BrushError {
 ///
 /// # Errors
 ///
-/// [`BrushError::Frame`] when the centre or the radius is not finite.
+/// [`BrushError::Frame`] when the centre or the radius is not finite, or
+/// the squared radius cannot be compared.
 /// [`BrushError::Degenerate`] when the radius is negative or the grids do
 /// not form one stack of equal non-empty slices.
 pub fn stamp_brush(grids: &mut [LabelGrid], brush: Brush) -> Result<BrushCoverage, BrushError> {
@@ -74,7 +75,9 @@ pub fn stamp_brush(grids: &mut [LabelGrid], brush: Brush) -> Result<BrushCoverag
     }
     let (width, height) = require_stack(grids)?;
 
-    let radius_sq = brush.radius * brush.radius;
+    let Some(radius_sq) = squared_radius(brush.radius) else {
+        return Err(BrushError::Frame);
+    };
     let mut staged = Vec::new();
     for grid in grids.iter() {
         staged.push(grid.indices.clone());
@@ -137,10 +140,29 @@ fn inside(brush: &Brush, x: u32, y: u32, z_f: f64, radius_sq: f64) -> bool {
     }
 }
 
+/// Squared radius, or nothing when that square cannot be compared.
+///
+/// A finite radius can square to infinity. A non-zero radius can also square
+/// to zero or to a subnormal. Either one compares equal to a distance that
+/// is not on or inside the radius. Radius 0 is kept, and its test is exact.
+pub(crate) fn squared_radius(radius: f64) -> Option<f64> {
+    let radius_sq = radius * radius;
+    if !radius_sq.is_finite() {
+        return None;
+    }
+    if !same_number(radius, 0.0) && radius_sq < f64::MIN_POSITIVE {
+        return None;
+    }
+    Some(radius_sq)
+}
+
 /// Squared index distance on `x` and `y` is within `radius_sq`.
 pub(crate) fn disk_contains(center_x: f64, center_y: f64, radius_sq: f64, x: u32, y: u32) -> bool {
     let dx = f64::from(x) - center_x;
     let dy = f64::from(y) - center_y;
+    if same_number(radius_sq, 0.0) {
+        return same_number(dx, 0.0) && same_number(dy, 0.0);
+    }
     let dist_sq = dx * dx + dy * dy;
     dist_sq.total_cmp(&radius_sq).is_le()
 }
@@ -158,6 +180,9 @@ pub(crate) fn ball_contains(
     let dx = f64::from(x) - center_x;
     let dy = f64::from(y) - center_y;
     let dz = z_f - center_z;
+    if same_number(radius_sq, 0.0) {
+        return same_number(dx, 0.0) && same_number(dy, 0.0) && same_number(dz, 0.0);
+    }
     let dist_sq = dx * dx + dy * dy + dz * dz;
     dist_sq.total_cmp(&radius_sq).is_le()
 }

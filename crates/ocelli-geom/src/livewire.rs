@@ -16,12 +16,14 @@ use crate::GeomError;
 /// Column `x` and row `y` as a finite integer strictly inside `limit`.
 ///
 /// Every `u32` is an exact `f64`, so a value past the last legal index is
-/// outside the grid. The index is counted by subtracting one, which avoids
-/// a cast.
+/// outside the grid. Negative zero is the integer 0. The index is the bits
+/// of that integer, which avoids a cast.
 fn integer_index(value: f64, limit: u32) -> Result<u32, GeomError> {
     if !value.is_finite() {
         return Err(GeomError::Frame);
     }
+    // Adding positive zero changes only the sign of zero.
+    let value = value + 0.0;
     if value.total_cmp(&0.0).is_lt() {
         return Err(GeomError::Degenerate);
     }
@@ -37,18 +39,18 @@ fn integer_index(value: f64, limit: u32) -> Result<u32, GeomError> {
         return Err(GeomError::Degenerate);
     }
     let mut remaining = value;
-    let mut index = 0u32;
-    while index < limit {
-        if remaining.total_cmp(&0.0).is_eq() {
-            return Ok(index);
+    let mut index = 0_u32;
+    for bit in (0_u32..32).rev() {
+        let place = f64::from(1_u32 << bit);
+        if remaining.total_cmp(&place).is_ge() {
+            remaining -= place;
+            index |= 1_u32 << bit;
         }
-        remaining -= 1.0;
-        index = match index.checked_add(1) {
-            Some(next) => next,
-            None => return Err(GeomError::Degenerate),
-        };
     }
-    Err(GeomError::Degenerate)
+    if remaining.total_cmp(&0.0).is_ne() {
+        return Err(GeomError::Degenerate);
+    }
+    Ok(index)
 }
 
 fn usize_from_u32(value: u32) -> Result<usize, GeomError> {
@@ -97,78 +99,91 @@ fn validate_costs(costs: &[f64], cells: usize) -> Result<(), GeomError> {
         if !cost.is_finite() {
             return Err(GeomError::Frame);
         }
-        if cost.total_cmp(&0.0).is_lt() {
+        if cost < 0.0 {
             return Err(GeomError::Degenerate);
         }
     }
     Ok(())
 }
 
-fn cheapest_unsettled(distance: &[f64], settled: &[bool]) -> Option<usize> {
-    let mut best_index = None;
-    let mut best_cost = 0.0;
-    for (index, &cost) in distance.iter().enumerate() {
-        let settled_here = settled.get(index).copied().unwrap_or(true);
-        if settled_here || !cost.is_finite() {
-            continue;
-        }
-        let replace = match best_index {
-            None => true,
-            Some(_) => cost.total_cmp(&best_cost).is_lt(),
-        };
-        if replace {
-            best_index = Some(index);
-            best_cost = cost;
-        }
+/// Open-set order. Smaller cost first, and the lower index on an equal cost.
+struct Rank {
+    cost: f64,
+    index: usize,
+}
+
+impl PartialEq for Rank {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == core::cmp::Ordering::Equal
     }
-    best_index
+}
+
+impl Eq for Rank {}
+
+impl PartialOrd for Rank {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Rank {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        other
+            .cost
+            .total_cmp(&self.cost)
+            .then_with(|| other.index.cmp(&self.index))
+    }
+}
+
+/// The buffers one search owns. Grouped so a neighbor step does not take
+/// each of them as its own argument.
+struct Wave<'a> {
+    costs: &'a [f64],
+    distance: &'a mut [f64],
+    parent: &'a mut [Option<usize>],
+    settled: &'a [bool],
+    open: &'a mut alloc::collections::BinaryHeap<Rank>,
 }
 
 /// Enter `neighbor`. A candidate replaces the stored cost only when it is
 /// strictly smaller. An equal cost keeps the parent already stored.
-fn relax(
-    costs: &[f64],
-    distance: &mut [f64],
-    parent: &mut [Option<usize>],
-    settled: &[bool],
-    current: usize,
-    neighbor: usize,
-) -> Result<(), GeomError> {
-    if settled.get(neighbor).copied() == Some(true) {
+fn relax(wave: &mut Wave<'_>, current: usize, neighbor: usize) -> Result<(), GeomError> {
+    if wave.settled.get(neighbor).copied() == Some(true) {
         return Ok(());
     }
-    let Some(step) = costs.get(neighbor).copied() else {
+    let Some(step) = wave.costs.get(neighbor).copied() else {
         return Err(GeomError::Degenerate);
     };
-    let Some(current_dist) = distance.get(current).copied() else {
+    let Some(current_dist) = wave.distance.get(current).copied() else {
         return Err(GeomError::Degenerate);
     };
     let candidate = current_dist + step;
     if !candidate.is_finite() {
         return Err(GeomError::Frame);
     }
-    let Some(known) = distance.get(neighbor).copied() else {
+    let Some(known) = wave.distance.get(neighbor).copied() else {
         return Err(GeomError::Degenerate);
     };
     if !candidate.total_cmp(&known).is_lt() {
         return Ok(());
     }
-    let Some(slot) = distance.get_mut(neighbor) else {
+    let Some(slot) = wave.distance.get_mut(neighbor) else {
         return Err(GeomError::Degenerate);
     };
     *slot = candidate;
-    let Some(slot) = parent.get_mut(neighbor) else {
+    let Some(slot) = wave.parent.get_mut(neighbor) else {
         return Err(GeomError::Degenerate);
     };
     *slot = Some(current);
+    wave.open.push(Rank {
+        cost: candidate,
+        index: neighbor,
+    });
     Ok(())
 }
 
 fn relax_neighbours(
-    costs: &[f64],
-    distance: &mut [f64],
-    parent: &mut [Option<usize>],
-    settled: &[bool],
+    wave: &mut Wave<'_>,
     current: usize,
     width: u32,
     cells: usize,
@@ -180,19 +195,19 @@ fn relax_neighbours(
     let x = current % width_us;
     let y = current / width_us;
     if x > 0 {
-        relax(costs, distance, parent, settled, current, current - 1)?;
+        relax(wave, current, current - 1)?;
     }
     if x + 1 < width_us {
-        relax(costs, distance, parent, settled, current, current + 1)?;
+        relax(wave, current, current + 1)?;
     }
     if y > 0 {
         let above = current.checked_sub(width_us).ok_or(GeomError::Degenerate)?;
-        relax(costs, distance, parent, settled, current, above)?;
+        relax(wave, current, above)?;
     }
     if let Some(below) = current.checked_add(width_us)
         && below < cells
     {
-        relax(costs, distance, parent, settled, current, below)?;
+        relax(wave, current, below)?;
     }
     Ok(())
 }
@@ -246,15 +261,35 @@ fn search<S>(
         return Err(GeomError::Degenerate);
     };
     *origin = 0.0;
-    let mut guard = cells;
-    loop {
+    let mut open = alloc::collections::BinaryHeap::new();
+    open.push(Rank {
+        cost: 0.0,
+        index: start,
+    });
+    // Each cell is entered from at most four neighbors, and each entry is
+    // popped once. The bound stops a broken open set from looping.
+    let mut guard = cells.saturating_mul(4).saturating_add(1);
+    while let Some(Rank {
+        cost,
+        index: current,
+    }) = open.pop()
+    {
         if guard == 0 {
             break;
         }
         guard -= 1;
-        let Some(current) = cheapest_unsettled(&distance, &settled) else {
-            break;
+        let Some(already) = settled.get(current).copied() else {
+            return Err(GeomError::Degenerate);
         };
+        if already {
+            continue;
+        }
+        let Some(known) = distance.get(current).copied() else {
+            return Err(GeomError::Degenerate);
+        };
+        if known.total_cmp(&cost).is_ne() {
+            continue;
+        }
         let Some(flag) = settled.get_mut(current) else {
             return Err(GeomError::Degenerate);
         };
@@ -263,10 +298,13 @@ fn search<S>(
             break;
         }
         relax_neighbours(
-            costs,
-            &mut distance,
-            &mut parent,
-            &settled,
+            &mut Wave {
+                costs,
+                distance: &mut distance,
+                parent: &mut parent,
+                settled: &settled,
+                open: &mut open,
+            },
             current,
             width,
             cells,

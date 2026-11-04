@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ocelli</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #16130f;
+    --panel: #221e19;
+    --ink: #f3ecdf;
+    --muted: #b7ab9a;
+    --line: #3c342c;
+    --accent: #c4a36a;
+    --fault: #e0a090;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.4 Georgia, "Iowan Old Style", serif;
+  }
+  header.bar {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  header.bar h1 { font-size: 22px; font-weight: 500; margin: 0; }
+  header.bar p { margin: 0; color: var(--muted); font-size: 14px; }
+  header.bar label.pick { margin-left: auto; }
+  input[type="file"] { color: var(--muted); }
+  .viewer-wrap {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    height: calc(100vh - 62px);
+  }
+  #series {
+    overflow: auto;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+  }
+  #series button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    color: var(--ink);
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-left: 3px solid transparent;
+    padding: 10px 12px;
+    font: inherit;
+    cursor: pointer;
+  }
+  #series button strong { display: block; font-weight: 600; }
+  #series button span { display: block; color: var(--muted); font-size: 14px; }
+  #series button.active { border-left-color: var(--accent); background: #2b261f; }
+  .viewer-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .toolbar button, .sheet button, #close-headers {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font: inherit;
+    cursor: pointer;
+  }
+  .toolbar button.active { background: var(--accent); color: #1a140c; border-color: var(--accent); }
+  .toolbar .split { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+  .toolbar label { color: var(--muted); font-size: 14px; display: flex; gap: 6px; align-items: center; }
+  #fps { width: 120px; }
+  .canvas-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #stage { position: relative; flex: none; }
+  #stage canvas, #stage svg { position: absolute; left: 0; top: 0; }
+  #view { image-rendering: pixelated; }
+  #ink { overflow: visible; }
+  #ink polygon, #ink polyline {
+    fill: rgba(196, 163, 106, 0.12);
+    stroke: #e7c98a;
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+    pointer-events: stroke;
+  }
+  #ink text {
+    fill: #f3ecdf;
+    stroke: #000;
+    stroke-width: 0.4;
+    paint-order: stroke;
+    pointer-events: visiblePainted;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  #ink .on { stroke: #fff; }
+  .overlay {
+    position: absolute;
+    color: #f4efe4;
+    font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-shadow: 0 1px 2px #000;
+    white-space: pre;
+    pointer-events: none;
+  }
+  .tl { top: 8px; left: 10px; }
+  .tr { top: 8px; right: 10px; text-align: right; }
+  .bl { bottom: 8px; left: 10px; }
+  .br { bottom: 8px; right: 10px; text-align: right; }
+  #fault {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    margin: 0;
+    color: var(--fault);
+    pointer-events: none;
+  }
+  .scrubber {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 12px;
+    border-top: 1px solid var(--line);
+  }
+  #scrub { flex: 1; }
+  #counter { min-width: 7em; color: var(--muted); }
+  #note {
+    position: fixed;
+    z-index: 6;
+    background: #1d1a16;
+    color: var(--ink);
+    border: 1px solid var(--accent);
+    padding: 4px 6px;
+    font: 14px ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  #modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 7;
+  }
+  #modal[hidden] { display: none; }
+  .sheet {
+    width: min(960px, 94vw);
+    max-height: 86vh;
+    background: #1d1a16;
+    border: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 8px;
+  }
+  .sheet header { display: flex; justify-content: space-between; align-items: center; }
+  .sheet h2 { margin: 0; font-size: 18px; font-weight: 500; }
+  #filter { width: 100%; background: #111; color: var(--ink); border: 1px solid var(--line); padding: 6px 8px; font: inherit; }
+  .table-wrap { overflow: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td {
+    border-bottom: 1px solid var(--line);
+    padding: 4px 8px;
+    text-align: left;
+    vertical-align: top;
+    font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  td:last-child { white-space: pre-wrap; word-break: break-word; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>Ocelli</h1>
+  <p id="status">Choose a folder. Each series opens on the right.</p>
+  <label class="pick">Folder <input id="folder" type="file" webkitdirectory directory multiple></label>
+</header>
+<main class="viewer-wrap">
+  <aside id="series"></aside>
+  <section class="viewer-main">
+    <div class="toolbar">
+      <button type="button" id="tool-scroll" class="active">Scroll</button>
+      <button type="button" id="tool-pan">Pan</button>
+      <button type="button" id="tool-zoom">Zoom</button>
+      <button type="button" id="tool-wl">W/L</button>
+      <button type="button" id="tool-contour">Contour</button>
+      <button type="button" id="tool-text">Text</button>
+      <span class="split"></span>
+      <button type="button" id="reset">Reset</button>
+      <button type="button" id="fit">Fit</button>
+      <button type="button" id="invert">Invert</button>
+      <button type="button" id="headers">Headers</button>
+      <span class="split"></span>
+      <button type="button" id="play">Play</button>
+      <label>FPS <input id="fps" type="range" min="1" max="30" value="10"></label>
+      <span id="fps-value">10</span>
+    </div>
+    <div class="canvas-wrap" id="wrap">
+      <div id="stage" hidden>
+        <canvas id="view"></canvas>
+        <svg id="ink" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+      <div class="overlay tl" id="ov-tl"></div>
+      <div class="overlay tr" id="ov-tr"></div>
+      <div class="overlay bl" id="ov-bl"></div>
+      <div class="overlay br" id="ov-br"></div>
+      <p id="fault" hidden></p>
+    </div>
+    <div class="scrubber">
+      <input id="scrub" type="range" min="0" max="0" value="0" disabled>
+      <span id="counter">0 / 0</span>
+    </div>
+  </section>
+</main>
+<input id="note" hidden placeholder="Note">
+<div id="modal" hidden>
+  <div class="sheet" id="sheet">
+    <header>
+      <h2>Headers</h2>
+      <button type="button" id="close-headers">Close</button>
+    </header>
+    <input id="filter" placeholder="Filter tag, name, or value">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tag</th><th>VR</th><th>Name</th><th>Value</th></tr></thead>
+        <tbody id="header-rows"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script>
+const SVGNS = "http://www.w3.org/2000/svg";
+const FRAME_LIST_CAP = 65536;
+const FILE_CAP = 1024 * 1024 * 1024;
+const CACHE_BYTE_BUDGET = 256 * 1024 * 1024;
+const folderInput = document.getElementById("folder");
+const status = document.getElementById("status");
+const seriesEl = document.getElementById("series");
+const wrap = document.getElementById("wrap");
+const stage = document.getElementById("stage");
+const canvas = document.getElementById("view");
+const ink = document.getElementById("ink");
+const fault = document.getElementById("fault");
+const scrubber = document.getElementById("scrub");
+const counter = document.getElementById("counter");
+const playButton = document.getElementById("play");
+const fpsInput = document.getElementById("fps");
+const fpsValue = document.getElementById("fps-value");
+const noteInput = document.getElementById("note");
+const modal = document.getElementById("modal");
+const filter = document.getElementById("filter");
+const headerRowsEl = document.getElementById("header-rows");
+const corners = {
+  tl: document.getElementById("ov-tl"),
+  tr: document.getElementById("ov-tr"),
+  bl: document.getElementById("ov-bl"),
+  br: document.getElementById("ov-br")
+};
+
+let currentGeneration = 0;
+let seriesList = [];
+let activeIndex = -1;
+let viewIndex = 0;
+const positions = new Map();
+const cache = new Map();
+const inflight = new Map();
+let cacheGeneration = 0;
+let cacheBytes = 0;
+const notes = new Map();
+let tool = "scroll";
+let fitMode = true;
+let scale = 1;
+let panX = 0;
+let panY = 0;
+let imageWidth = 0;
+let imageHeight = 0;
+let overrideWindow = null;
+let draftWindow = null;
+let invert = false;
+let shownWindow = null;
+let playing = false;
+let playToken = 0;
+let loadToken = 0;
+let headerRows = [];
+let nextNote = 1;
+let selected = null;
+let drag = null;
+let draft = null;
+let move = null;
+let pendingPoint = null;
+let pendingKey = "";
+let headerToken = 0;
+let zoomLabel = "100%";
+
+folderInput.addEventListener("change", () => {
+  const files = folderInput.files;
+  if (files && files.length) readFolder(files);
+});
+
+document.getElementById("tool-scroll").addEventListener("click", () => setTool("scroll"));
+document.getElementById("tool-pan").addEventListener("click", () => setTool("pan"));
+document.getElementById("tool-zoom").addEventListener("click", () => setTool("zoom"));
+document.getElementById("tool-wl").addEventListener("click", () => setTool("wl"));
+document.getElementById("tool-contour").addEventListener("click", () => setTool("contour"));
+document.getElementById("tool-text").addEventListener("click", () => setTool("text"));
+document.getElementById("reset").addEventListener("click", resetView);
+document.getElementById("fit").addEventListener("click", () => { fitMode = true; layout(); });
+document.getElementById("invert").addEventListener("click", () => {
+  invert = !invert;
+  document.getElementById("invert").classList.toggle("active", invert);
+  showIndex(viewIndex);
+});
+document.getElementById("headers").addEventListener("click", openHeaders);
+document.getElementById("close-headers").addEventListener("click", closeModal);
+document.getElementById("sheet").addEventListener("click", (event) => event.stopPropagation());
+modal.addEventListener("click", closeModal);
+filter.addEventListener("input", paintHeaderRows);
+playButton.addEventListener("click", togglePlay);
+fpsInput.addEventListener("input", () => { fpsValue.textContent = fpsInput.value; });
+scrubber.addEventListener("input", () => showIndex(Number(scrubber.value)));
+wrap.addEventListener("contextmenu", (event) => event.preventDefault());
+wrap.addEventListener("wheel", onWheel, { passive: false });
+wrap.addEventListener("pointerdown", onPointerDown);
+wrap.addEventListener("pointermove", onPointerMove);
+wrap.addEventListener("pointerup", onPointerUp);
+wrap.addEventListener("pointercancel", onPointerUp);
+noteInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); commitNote(); }
+  if (event.key === "Escape") { event.preventDefault(); cancelNote(); }
+});
+noteInput.addEventListener("blur", () => { if (!noteInput.hidden) commitNote(); });
+window.addEventListener("keydown", onKey);
+window.addEventListener("resize", layout);
+new ResizeObserver(layout).observe(wrap);
+
+function setTool(next) {
+  tool = next;
+  cancelDraft();
+  for (const name of ["scroll", "pan", "zoom", "wl", "contour", "text"]) {
+    document.getElementById("tool-" + name).classList.toggle("active", name === next);
+  }
+}
+
+function numeric(text) {
+  if (text === "" || text == null) return Number.POSITIVE_INFINITY;
+  const value = Number(text);
+  return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+}
+
+async function readFolder(fileList) {
+  const generation = ++currentGeneration;
+  stopPlay();
+  seriesList = [];
+  notes.clear();
+  dropCache();
+  positions.clear();
+  activeIndex = -1;
+  viewIndex = 0;
+  selected = null;
+  clearView();
+  const files = Array.from(fileList);
+  let cursor = 0;
+  let skipped = 0;
+  let failed = 0;
+  let oversized = 0;
+  const found = [];
+  async function worker() {
+    while (generation === currentGeneration) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= files.length) return;
+      status.textContent = "Reading " + (index + 1) + " of " + files.length;
+      const file = files[index];
+      if (file.size > FILE_CAP) {
+        oversized += 1;
+        continue;
+      }
+      let response;
+      try {
+        response = await fetch("/inspect", { method: "POST", body: file });
+      } catch {
+        failed += 1;
+        continue;
+      }
+      if (generation !== currentGeneration) return;
+      if (!response.ok) {
+        if (response.headers.get("X-Ocelli-Error") === "not-part10") skipped += 1;
+        else if (response.headers.get("X-Ocelli-Error") === "body") oversized += 1;
+        else failed += 1;
+        continue;
+      }
+      try {
+        found.push({ file, info: await response.json() });
+      } catch {
+        failed += 1;
+      }
+    }
+  }
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  if (generation !== currentGeneration) return;
+  groupSeries(found);
+  const skipText = skipped ? " Skipped " + skipped + " files that are not DICOM Part 10." : "";
+  const failText = failed ? " " + failed + " files could not be read." : "";
+  const largeText = oversized
+    ? " " + oversized + (oversized === 1 ? " file is" : " files are") + " larger than this viewer will open."
+    : "";
+  if (!seriesList.length) {
+    status.textContent = "No DICOM series in that folder." + skipText + failText + largeText;
+    renderSeries();
+    return;
+  }
+  status.textContent = seriesList.length + (seriesList.length === 1 ? " series." : " series.") + skipText + failText + largeText;
+  let best = 0;
+  for (let index = 1; index < seriesList.length; index += 1) {
+    if (seriesList[index].images.length > seriesList[best].images.length) best = index;
+  }
+  selectSeries(best);
+}
+
+function groupSeries(found) {
+  const map = new Map();
+  found.forEach((row, order) => {
+    const info = row.info || {};
+    const key = info.seriesUid ? "uid:" + info.seriesUid : "file:" + order;
+    let series = map.get(key);
+    if (!series) {
+      series = {
+        key,
+        number: info.seriesNumber || "",
+        modality: info.modality || "",
+        description: info.seriesDescription || "",
+        images: [],
+        omitted: 0
+      };
+      map.set(key, series);
+    }
+    const reported = Number(info.frames);
+    const listed = info.monochrome && Number.isFinite(reported) && reported > 1
+      ? Math.floor(reported)
+      : 1;
+    const steps = Math.min(listed, FRAME_LIST_CAP);
+    if (listed > steps) series.omitted += listed - steps;
+    for (let frame = 0; frame < steps; frame += 1) {
+      series.images.push({
+        file: row.file,
+        frame,
+        info,
+        reported: Number.isFinite(reported) && reported > 0 ? Math.floor(reported) : 1
+      });
+    }
+  });
+  seriesList = Array.from(map.values());
+  seriesList.sort((a, b) => numeric(a.number) - numeric(b.number) || a.description.localeCompare(b.description) || a.key.localeCompare(b.key));
+  for (const series of seriesList) {
+    series.images.sort((a, b) => numeric(a.info.instanceNumber) - numeric(b.info.instanceNumber) || a.file.name.localeCompare(b.file.name) || a.frame - b.frame);
+  }
+}
+
+function renderSeries() {
+  seriesEl.replaceChildren();
+  seriesList.forEach((series, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    if (index === activeIndex) button.className = "active";
+    const title = document.createElement("strong");
+    const bits = [];
+    if (series.number !== "") bits.push("#" + series.number);
+    if (series.modality !== "") bits.push(series.modality);
+    title.textContent = bits.length ? bits.join(" · ") : "Series";
+    const description = document.createElement("span");
+    description.textContent = series.description || "No description";
+    const count = document.createElement("span");
+    const images = series.images.length;
+    const total = images + (series.omitted || 0);
+    count.textContent = series.omitted
+      ? images + " of " + total + " images"
+      : images + (images === 1 ? " image" : " images");
+    button.append(title, description, count);
+    button.addEventListener("click", () => selectSeries(index));
+    seriesEl.append(button);
+  });
+}
+
+function selectSeries(index) {
+  stopPlay();
+  activeIndex = index;
+  fitMode = true;
+  overrideWindow = null;
+  draftWindow = null;
+  const series = seriesList[index];
+  const remembered = series ? positions.get(series.key) : 0;
+  renderSeries();
+  showIndex(Number.isInteger(remembered) ? remembered : 0);
+}
+
+function currentImage() {
+  const series = seriesList[activeIndex];
+  if (!series) return null;
+  return series.images[viewIndex] || null;
+}
+
+function fileIdentity(file) {
+  const path = file.webkitRelativePath || file.name;
+  return path + "\0" + file.size + "\0" + file.lastModified;
+}
+
+function noteKey(image) {
+  if (!image) return "";
+  return fileIdentity(image.file) + "\0" + image.frame;
+}
+
+async function showIndex(next) {
+  const series = seriesList[activeIndex];
+  if (!series || !series.images.length) return;
+  const count = series.images.length;
+  viewIndex = ((next % count) + count) % count;
+  positions.set(series.key, viewIndex);
+  const image = series.images[viewIndex];
+  scrubber.disabled = count <= 1;
+  scrubber.max = String(Math.max(0, count - 1));
+  scrubber.value = String(viewIndex);
+  const total = count + (series.omitted || 0);
+  counter.textContent = series.omitted
+    ? (viewIndex + 1) + " / " + count + " of " + total
+    : (viewIndex + 1) + " / " + count;
+  selected = null;
+  const token = ++loadToken;
+  if (!image.info.monochrome) {
+    shownWindow = null;
+    stage.hidden = true;
+    ink.replaceChildren();
+    paintOverlays(image);
+    showFault("this preview shows monochrome frames only");
+    return;
+  }
+  const hit = takeGrey(cacheKey(image));
+  if (hit) {
+    shownWindow = {
+      center: hit.center,
+      width: hit.widthText,
+      fn: hit.fn || "LINEAR",
+      fullRange: hit.fullRange
+    };
+    drawGrey(hit);
+    hideFault();
+    paintOverlays(image);
+    prefetch(viewIndex + 1);
+    return;
+  }
+  shownWindow = null;
+  stage.hidden = true;
+  ink.replaceChildren();
+  paintOverlays(image);
+  try {
+    const grey = await fetchGrey(image);
+    if (token !== loadToken) return;
+    shownWindow = {
+      center: grey.center,
+      width: grey.widthText,
+      fn: grey.fn || "LINEAR",
+      fullRange: grey.fullRange
+    };
+    drawGrey(grey);
+    hideFault();
+    paintOverlays(image);
+    prefetch(viewIndex + 1);
+  } catch (error) {
+    if (token !== loadToken) return;
+    shownWindow = null;
+    paintOverlays(image);
+    showFault(error instanceof Error ? error.message : "the frame could not be shown");
+  }
+}
+
+function cacheKey(image) {
+  const win = overrideWindow ? overrideWindow.center + "/" + overrideWindow.width + "/" + overrideWindow.fn : "file";
+  return fileIdentity(image.file) + "\0" + image.frame + "\0" + win + "\0" + (invert ? "1" : "0");
+}
+
+function dropCache() {
+  cacheGeneration += 1;
+  cache.clear();
+  inflight.clear();
+  cacheBytes = 0;
+}
+
+function greyBytes(grey) {
+  return grey && grey.bytes ? grey.bytes.byteLength : 0;
+}
+
+function takeGrey(key) {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  cache.delete(key);
+  cache.set(key, hit);
+  return hit;
+}
+
+function rememberGrey(key, grey) {
+  if (cache.has(key)) {
+    cacheBytes -= greyBytes(cache.get(key));
+    cache.delete(key);
+  }
+  cache.set(key, grey);
+  cacheBytes += greyBytes(grey);
+  while (cache.size > 1 && cacheBytes > CACHE_BYTE_BUDGET) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cacheBytes -= greyBytes(cache.get(oldest));
+    cache.delete(oldest);
+  }
+}
+
+async function fetchGrey(image) {
+  const key = cacheKey(image);
+  const hit = takeGrey(key);
+  if (hit) return hit;
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const generation = cacheGeneration;
+  const job = requestGrey(image).then((grey) => {
+    if (generation === cacheGeneration) rememberGrey(key, grey);
+    return grey;
+  }).finally(() => {
+    if (inflight.get(key) === job) inflight.delete(key);
+  });
+  inflight.set(key, job);
+  return job;
+}
+
+async function requestGrey(image) {
+  const headers = { "X-Ocelli-Frame": String(image.frame) };
+  if (invert) headers["X-Ocelli-Invert"] = "1";
+  if (overrideWindow) {
+    headers["X-Ocelli-Window-Center"] = String(overrideWindow.center);
+    headers["X-Ocelli-Window-Width"] = String(overrideWindow.width);
+    headers["X-Ocelli-Window-Function"] = overrideWindow.fn;
+  }
+  const response = await fetch("/preview", { method: "POST", headers, body: image.file });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "the frame could not be shown");
+  }
+  const width = Number(response.headers.get("X-Ocelli-Width"));
+  const height = Number(response.headers.get("X-Ocelli-Height"));
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!width || !height || bytes.length !== width * height) {
+    throw new Error("the preview response did not match the frame");
+  }
+  return {
+    width,
+    height,
+    fullRange: response.headers.get("X-Ocelli-Full-Range") === "1",
+    center: response.headers.get("X-Ocelli-Window-Center") || "",
+    widthText: response.headers.get("X-Ocelli-Window-Width") || "",
+    fn: response.headers.get("X-Ocelli-Window-Function") || "",
+    bytes
+  };
+}
+
+function prefetch(index) {
+  const series = seriesList[activeIndex];
+  if (!series || !series.images.length) return;
+  const image = series.images[((index % series.images.length) + series.images.length) % series.images.length];
+  if (!image || !image.info.monochrome) return;
+  fetchGrey(image).catch(() => {});
+}
+
+function drawGrey(grey) {
+  imageWidth = grey.width;
+  imageHeight = grey.height;
+  canvas.width = grey.width;
+  canvas.height = grey.height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    showFault("this browser did not provide a canvas");
+    return;
+  }
+  const image = context.createImageData(grey.width, grey.height);
+  for (let index = 0; index < grey.bytes.length; index += 1) {
+    const offset = index * 4;
+    const value = grey.bytes[index];
+    image.data[offset] = value;
+    image.data[offset + 1] = value;
+    image.data[offset + 2] = value;
+    image.data[offset + 3] = 255;
+  }
+  context.putImageData(image, 0, 0);
+  stage.hidden = false;
+  ink.setAttribute("viewBox", "0 0 " + grey.width + " " + grey.height);
+  layout();
+  renderInk();
+}
+
+function fitScale() {
+  const rect = wrap.getBoundingClientRect();
+  if (!imageWidth || !imageHeight || rect.width < 1 || rect.height < 1) return 1;
+  return Math.min(rect.width / imageWidth, rect.height / imageHeight);
+}
+
+function layout() {
+  if (!imageWidth || stage.hidden) return;
+  if (fitMode) {
+    scale = fitScale();
+    panX = 0;
+    panY = 0;
+  }
+  const widthPx = Math.max(1, imageWidth * scale);
+  const heightPx = Math.max(1, imageHeight * scale);
+  stage.style.width = widthPx + "px";
+  stage.style.height = heightPx + "px";
+  canvas.style.width = widthPx + "px";
+  canvas.style.height = heightPx + "px";
+  ink.style.width = widthPx + "px";
+  ink.style.height = heightPx + "px";
+  stage.style.transform = "translate(" + panX + "px, " + panY + "px)";
+  const fitted = fitScale();
+  zoomLabel = (fitted > 0 ? Math.round((scale / fitted) * 100) : 100) + "%";
+  paintOverlays(currentImage());
+  const px = scale > 0 ? 15 / scale : 15;
+  ink.querySelectorAll("text").forEach((node) => node.setAttribute("font-size", String(px)));
+}
+
+function paintOverlays(image) {
+  if (!image) {
+    corners.tl.textContent = "";
+    corners.tr.textContent = "";
+    corners.bl.textContent = "";
+    corners.br.textContent = "";
+    return;
+  }
+  const info = image.info || {};
+  const series = seriesList[activeIndex];
+  const count = series ? series.images.length : 0;
+  corners.tl.textContent = [info.patientName, info.patientId, info.studyDate].filter(Boolean).join("\n");
+  const head = [info.modality, info.seriesDescription].filter(Boolean).join(" ");
+  corners.tr.textContent = [head, info.accession].filter(Boolean).join("\n");
+  const lower = ["Image " + (viewIndex + 1) + " / " + count];
+  if (series && series.omitted) lower.push("Series shortened");
+  if (info.instanceNumber) lower.push("Instance " + info.instanceNumber);
+  if (image.reported > 1) lower.push("Frame " + (image.frame + 1) + " / " + image.reported);
+  corners.bl.textContent = lower.join("\n");
+  const win = draftWindow || overrideWindow || shownWindow;
+  const center = win ? win.center : (info.windowCenter || "");
+  const width = win ? win.width : (info.windowWidth || "");
+  let windowLine = "WW " + width + "  WL " + center;
+  if (shownWindow && shownWindow.fullRange && !overrideWindow && !draftWindow) windowLine += "  full range";
+  corners.br.textContent = windowLine + "\nZoom " + zoomLabel;
+}
+
+function showFault(message) {
+  fault.hidden = false;
+  fault.textContent = message;
+  stage.hidden = true;
+}
+
+function hideFault() {
+  fault.hidden = true;
+  fault.textContent = "";
+}
+
+function clearView() {
+  loadToken += 1;
+  shownWindow = null;
+  cancelDraft();
+  cancelNote();
+  imageWidth = 0;
+  imageHeight = 0;
+  stage.hidden = true;
+  hideFault();
+  ink.replaceChildren();
+  counter.textContent = "0 / 0";
+  scrubber.value = "0";
+  scrubber.disabled = true;
+  renderSeries();
+  paintOverlays(null);
+}
+
+function resetView() {
+  overrideWindow = null;
+  draftWindow = null;
+  invert = false;
+  document.getElementById("invert").classList.remove("active");
+  fitMode = true;
+  panX = 0;
+  panY = 0;
+  showIndex(viewIndex);
+}
+
+function onWheel(event) {
+  if (!currentImage()) return;
+  event.preventDefault();
+  if (draft || !noteInput.hidden || !modal.hidden) return;
+  if (event.deltaY > 0) showIndex(viewIndex + 1);
+  else if (event.deltaY < 0) showIndex(viewIndex - 1);
+}
+
+function leftMode(button) {
+  if (button === 2) return "pan";
+  if (button === 1) return "zoom";
+  return tool;
+}
+
+function onPointerDown(event) {
+  if (!currentImage()) return;
+  const editing = event.button === 0 && (tool === "contour" || tool === "text");
+  if (editing && event.target.closest("#ink polygon, #ink text, #ink polyline")) return;
+  if (leftMode(event.button) === "wl" && !shownWindow && !overrideWindow && currentWindowText("windowCenter") === "") return;
+  if (tool === "text" && event.button === 0) {
+    drag = { id: event.pointerId, button: 0, originX: event.clientX, originY: event.clientY, textClick: true };
+    wrap.setPointerCapture(event.pointerId);
+    return;
+  }
+  drag = {
+    id: event.pointerId,
+    button: event.button,
+    x: event.clientX,
+    y: event.clientY,
+    originX: event.clientX,
+    originY: event.clientY,
+    moved: 0,
+    originCenter: Number(dragWindow().center),
+    originWidth: Number(dragWindow().width) || 1,
+    originFn: knownFunction(dragWindow().fn)
+  };
+  wrap.setPointerCapture(event.pointerId);
+  if (leftMode(event.button) === "contour" && event.button === 0) {
+    stopPlay();
+    const point = imagePoint(event);
+    if (point) draft = { points: [point], key: noteKey(currentImage()) };
+  }
+}
+
+function onPointerMove(event) {
+  if (move && move.pointer === event.pointerId) {
+    moveNote(event);
+    return;
+  }
+  if (!drag || drag.id !== event.pointerId) return;
+  const mode = leftMode(drag.button);
+  if (mode === "pan") {
+    fitMode = false;
+    panX += event.clientX - drag.x;
+    panY += event.clientY - drag.y;
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    layout();
+  } else if (mode === "zoom") {
+    const factor = Math.exp(-(event.clientY - drag.y) * 0.01);
+    drag.y = event.clientY;
+    const fitted = fitScale();
+    const next = scale * factor;
+    const low = fitted * 0.05;
+    const high = fitted * 40;
+    scale = Math.min(high, Math.max(low, next));
+    fitMode = false;
+    layout();
+  } else if (mode === "scroll") {
+    drag.moved += event.clientY - drag.y;
+    drag.y = event.clientY;
+    while (drag.moved >= 24) { drag.moved -= 24; showIndex(viewIndex + 1); }
+    while (drag.moved <= -24) { drag.moved += 24; showIndex(viewIndex - 1); }
+  } else if (mode === "wl") {
+    const speed = Math.max(0.5, Math.abs(drag.originWidth) / 200);
+    const minWidth = drag.originFn === "LINEAR" ? 1 : 0.01;
+    draftWindow = {
+      center: drag.originCenter + (drag.originY - event.clientY) * speed,
+      width: Math.max(minWidth, drag.originWidth + (event.clientX - drag.originX) * speed),
+      fn: drag.originFn
+    };
+    paintOverlays(currentImage());
+  } else if (mode === "contour" && draft) {
+    const point = imagePoint(event);
+    const last = draft.points[draft.points.length - 1];
+    if (point && last) {
+      const dx = point.x - last.x;
+      const dy = point.y - last.y;
+      if (dx * dx + dy * dy >= 2) {
+        draft.points.push(point);
+        paintDraft();
+      }
+    }
+  }
+}
+
+function onPointerUp(event) {
+  if (move && move.pointer === event.pointerId) {
+    move = null;
+    renderInk();
+  }
+  if (!drag || drag.id !== event.pointerId) return;
+  const mode = leftMode(drag.button);
+  if (mode === "wl" && draftWindow) {
+    overrideWindow = draftWindow;
+    draftWindow = null;
+    showIndex(viewIndex);
+  }
+  if (mode === "contour" && draft) {
+    if (draft.points.length >= 3) addNote({ type: "contour", points: draft.points.slice() }, draft.key);
+    draft = null;
+    const line = document.getElementById("draft");
+    if (line) line.remove();
+  }
+  if (drag.textClick) {
+    const dx = event.clientX - drag.originX;
+    const dy = event.clientY - drag.originY;
+    if (dx * dx + dy * dy < 25) {
+      const point = imagePoint(event);
+      if (point) openNote(point, event.clientX, event.clientY);
+    }
+  }
+  drag = null;
+}
+
+function imagePoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height || !imageWidth || !imageHeight) return null;
+  const x = (event.clientX - rect.left) / rect.width * imageWidth;
+  const y = (event.clientY - rect.top) / rect.height * imageHeight;
+  if (x < 0 || y < 0 || x > imageWidth || y > imageHeight) return null;
+  return { x, y };
+}
+
+function paintDraft() {
+  if (!draft) return;
+  let line = document.getElementById("draft");
+  if (!line) {
+    line = document.createElementNS(SVGNS, "polyline");
+    line.id = "draft";
+    ink.append(line);
+  }
+  line.setAttribute("points", pointsAttr(draft.points));
+}
+
+function cancelDraft() {
+  draft = null;
+  const line = document.getElementById("draft");
+  if (line) line.remove();
+}
+
+function pointsAttr(points) {
+  return points.map((point) => point.x + "," + point.y).join(" ");
+}
+
+function addNote(note, key) {
+  if (!key) return;
+  const list = notes.get(key) || [];
+  note.id = nextNote;
+  nextNote += 1;
+  list.push(note);
+  notes.set(key, list);
+  if (key !== noteKey(currentImage())) return;
+  selected = note.id;
+  renderInk();
+}
+
+function renderInk() {
+  ink.replaceChildren();
+  const list = notes.get(noteKey(currentImage())) || [];
+  const px = scale > 0 ? 15 / scale : 15;
+  for (const note of list) {
+    if (note.type === "contour") {
+      const poly = document.createElementNS(SVGNS, "polygon");
+      poly.setAttribute("points", pointsAttr(note.points));
+      poly.dataset.id = String(note.id);
+      if (note.id === selected) poly.setAttribute("class", "on");
+      bindShape(poly, note);
+      ink.append(poly);
+    } else {
+      const text = document.createElementNS(SVGNS, "text");
+      const point = note.points[0] || { x: 0, y: 0 };
+      text.setAttribute("x", String(point.x));
+      text.setAttribute("y", String(point.y));
+      text.setAttribute("font-size", String(px));
+      text.dataset.id = String(note.id);
+      text.textContent = note.text || "";
+      if (note.id === selected) text.setAttribute("class", "on");
+      bindShape(text, note);
+      ink.append(text);
+    }
+  }
+  if (draft && draft.key === noteKey(currentImage())) paintDraft();
+}
+
+function bindShape(node, note) {
+  node.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || (tool !== "contour" && tool !== "text")) return;
+    event.stopPropagation();
+    event.preventDefault();
+    selected = note.id;
+    ink.querySelectorAll(".on").forEach((item) => item.classList.remove("on"));
+    node.classList.add("on");
+    move = {
+      pointer: event.pointerId,
+      id: note.id,
+      x: event.clientX,
+      y: event.clientY,
+      origin: note.points.map((point) => ({ x: point.x, y: point.y }))
+    };
+    node.setPointerCapture(event.pointerId);
+  });
+}
+
+function moveNote(event) {
+  const note = findNote(move.id);
+  if (!note) return;
+  const start = clientToImage(move.x, move.y);
+  const now = clientToImage(event.clientX, event.clientY);
+  if (!start || !now) return;
+  const dx = now.x - start.x;
+  const dy = now.y - start.y;
+  note.points = move.origin.map((point) => ({ x: point.x + dx, y: point.y + dy }));
+  const node = ink.querySelector('[data-id="' + note.id + '"]');
+  if (!node) return;
+  if (note.type === "contour") node.setAttribute("points", pointsAttr(note.points));
+  else {
+    const point = note.points[0];
+    if (!point) return;
+    node.setAttribute("x", String(point.x));
+    node.setAttribute("y", String(point.y));
+  }
+}
+
+function clientToImage(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height || !imageWidth || !imageHeight) return null;
+  return {
+    x: (clientX - rect.left) / rect.width * imageWidth,
+    y: (clientY - rect.top) / rect.height * imageHeight
+  };
+}
+
+function findNote(id) {
+  const list = notes.get(noteKey(currentImage())) || [];
+  return list.find((note) => note.id === id) || null;
+}
+
+function deleteSelected() {
+  const key = noteKey(currentImage());
+  const list = notes.get(key);
+  if (!list || selected == null) return;
+  notes.set(key, list.filter((note) => note.id !== selected));
+  selected = null;
+  renderInk();
+}
+
+function openNote(point, clientX, clientY) {
+  stopPlay();
+  pendingPoint = point;
+  pendingKey = noteKey(currentImage());
+  noteInput.hidden = false;
+  noteInput.style.left = clientX + "px";
+  noteInput.style.top = clientY + "px";
+  noteInput.value = "";
+  noteInput.focus();
+}
+
+function commitNote() {
+  if (noteInput.hidden) return;
+  const text = noteInput.value.trim();
+  const point = pendingPoint;
+  const key = pendingKey;
+  pendingPoint = null;
+  pendingKey = "";
+  noteInput.value = "";
+  noteInput.hidden = true;
+  if (!text || !point || !key) return;
+  addNote({ type: "text", points: [point], text }, key);
+}
+
+function cancelNote() {
+  pendingPoint = null;
+  pendingKey = "";
+  noteInput.value = "";
+  noteInput.hidden = true;
+}
+
+function onKey(event) {
+  if (event.key === "Escape") {
+    if (!noteInput.hidden) cancelNote();
+    else closeModal();
+    cancelDraft();
+    return;
+  }
+  if (!modal.hidden || draft) return;
+  if (typingTarget(event)) return;
+  if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+    event.preventDefault();
+    showIndex(viewIndex + 1);
+  } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    event.preventDefault();
+    showIndex(viewIndex - 1);
+  } else if (event.key === " ") {
+    event.preventDefault();
+    togglePlay();
+  } else if (event.key === "Delete" || event.key === "Backspace") {
+    if (selected != null) {
+      event.preventDefault();
+      deleteSelected();
+    }
+  }
+}
+
+function typingTarget(event) {
+  const node = event.target;
+  if (!node || !node.tagName) return false;
+  if (node.tagName === "TEXTAREA") return true;
+  if (node.tagName !== "INPUT") return false;
+  const type = String(node.type || "text").toLowerCase();
+  return type === "text" || type === "search";
+}
+
+function togglePlay() {
+  if (playing) stopPlay();
+  else startPlay();
+}
+
+function startPlay() {
+  if (!currentImage()) return;
+  playing = true;
+  playButton.textContent = "Pause";
+  playButton.classList.add("active");
+  const token = ++playToken;
+  const loop = async () => {
+    while (playing && token === playToken) {
+      const started = performance.now();
+      await showIndex(viewIndex + 1);
+      const fps = Number(fpsInput.value) || 10;
+      const remain = 1000 / fps - (performance.now() - started);
+      if (remain > 0) await delay(remain);
+    }
+  };
+  loop();
+}
+
+function stopPlay() {
+  playing = false;
+  playToken += 1;
+  playButton.textContent = "Play";
+  playButton.classList.remove("active");
+}
+
+function delay(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+async function openHeaders() {
+  const image = currentImage();
+  if (!image) return;
+  const token = ++headerToken;
+  const file = image.file;
+  stopPlay();
+  modal.hidden = false;
+  filter.value = "";
+  headerRows = [];
+  headerRowsEl.replaceChildren();
+  let response;
+  try {
+    response = await fetch("/headers", { method: "POST", body: file });
+  } catch {
+    if (token !== headerToken) return;
+    showHeaderMessage("the headers could not be read");
+    return;
+  }
+  if (token !== headerToken) return;
+  if (!response.ok) {
+    const message = await response.text();
+    if (token !== headerToken) return;
+    showHeaderMessage(message);
+    return;
+  }
+  let rows;
+  try {
+    rows = await response.json();
+  } catch {
+    if (token !== headerToken) return;
+    showHeaderMessage("the headers could not be read");
+    return;
+  }
+  if (token !== headerToken) return;
+  if (!Array.isArray(rows)) {
+    showHeaderMessage("the headers could not be read");
+    return;
+  }
+  headerRows = rows;
+  paintHeaderRows();
+}
+
+function showHeaderMessage(message) {
+  headerRowsEl.replaceChildren();
+  const row = document.createElement("tr");
+  const cell = document.createElement("td");
+  cell.colSpan = 4;
+  cell.textContent = message || "the headers could not be read";
+  row.append(cell);
+  headerRowsEl.append(row);
+}
+
+function paintHeaderRows() {
+  const query = filter.value.trim().toLowerCase();
+  headerRowsEl.replaceChildren();
+  for (const item of headerRows) {
+    const tag = item.tag || "";
+    const vr = item.vr || "";
+    const name = item.name || "";
+    const value = item.value || "";
+    if (query && !(tag + " " + vr + " " + name + " " + value).toLowerCase().includes(query)) continue;
+    const row = document.createElement("tr");
+    for (const field of [tag, vr, name, value]) {
+      const cell = document.createElement("td");
+      cell.textContent = field;
+      row.append(cell);
+    }
+    headerRowsEl.append(row);
+  }
+}
+
+function closeModal() {
+  modal.hidden = true;
+  headerToken += 1;
+}
+
+function currentWindowText(field) {
+  const image = currentImage();
+  const value = image && image.info ? image.info[field] : "";
+  return String(value || "").split("\\")[0];
+}
+
+function currentWindowNumber(field) {
+  const value = Number(currentWindowText(field));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function knownFunction(text) {
+  if (text === "LINEAR" || text === "LINEAR_EXACT" || text === "SIGMOID") return text;
+  return "LINEAR";
+}
+
+function dragWindow() {
+  if (shownWindow) return { center: shownWindow.center, width: shownWindow.width, fn: shownWindow.fn };
+  if (overrideWindow) return { center: overrideWindow.center, width: overrideWindow.width, fn: overrideWindow.fn };
+  return {
+    center: currentWindowNumber("windowCenter"),
+    width: currentWindowNumber("windowWidth") || 1,
+    fn: knownFunction(currentWindowText("windowFunction"))
+  };
+}
+</script>
+</body>
+</html>

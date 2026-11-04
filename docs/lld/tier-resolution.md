@@ -314,7 +314,8 @@ it cannot run on the resolved tier.
 ### The override's named user
 
 `crates/ocelli-native`, both entry points. They read `OCELLI_TIER`, resolve,
-and print the tier with its evidence.
+and print the tier with its evidence. A value that is not valid Unicode is
+an unrecognised override.
 
 ```text
 $ OCELLI_TIER=b cargo run -p ocelli-native --bin ocelli-desktop

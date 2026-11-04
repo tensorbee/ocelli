@@ -89,12 +89,43 @@ pub struct RasterGrid {
     pub target: [u32; 2],
 }
 
+/// A colour transform whose palette, when it has one, fits a display byte.
+///
+/// The check runs in [`RasterColor::supported`]. A draw does not repeat it.
+#[derive(Clone, Copy)]
+pub struct AcceptedColor<'a> {
+    transform: &'a ColorTransform,
+}
+
 /// A resolved colour transform, or a space this raster will not invent.
 pub enum RasterColor<'a> {
-    /// Decoder-reported space [`ColorTransform`] already accepted.
-    Supported(&'a ColorTransform),
+    /// Decoder-reported space [`AcceptedColor`] already accepted.
+    Supported(AcceptedColor<'a>),
     /// ICC and any other unsupported space. The call draws nothing.
     Unsupported,
+}
+
+impl<'a> RasterColor<'a> {
+    /// Accept a colour transform for tier C.
+    ///
+    /// A palette entry that is not an exact display byte is refused here.
+    /// The GPU bake uses the same predicate, once, when the table is built.
+    ///
+    /// # Errors
+    ///
+    /// [`RasterError::Unavailable`] when a palette entry is outside `0..=255`
+    /// or is not an integer.
+    pub fn supported(transform: &'a ColorTransform) -> Result<Self, RasterError> {
+        if let Some(palette) = transform.palette() {
+            let display_byte = palette
+                .channel_entries()
+                .all(|entry| crate::colour::byte_from_channel(entry).is_some());
+            if !display_byte {
+                return Err(RasterError::Unavailable);
+            }
+        }
+        Ok(Self::Supported(AcceptedColor { transform }))
+    }
 }
 
 /// Pre-sized scalar raster for one stack viewport.
@@ -295,19 +326,25 @@ impl CpuRaster {
         let RasterGrid { source, target } = grid;
         let transform = match color {
             RasterColor::Unsupported => return Err(RasterError::Unavailable),
-            RasterColor::Supported(transform) => transform,
+            RasterColor::Supported(accepted) => accepted.transform,
         };
         let gated = self.gate(target, quality, out)?;
         source_extent(source)?;
         let pixels = pixel_count(source)?;
+        let columns = usize::try_from(source[0]).map_err(|_| RasterError::Extent)?;
         transform
-            .accept_source(stored, pixels)
+            .accept_source(stored, pixels, columns)
             .map_err(color_error)?;
         if let Some(done) = gated {
             return Ok(done);
         }
+        // A palette was checked when it was accepted. A stored colour sample
+        // outside 0 to 255 has no scale yet, and the samples change per draw.
+        if !stored_colour_is_a_display_byte(transform, stored) {
+            return Err(RasterError::Unavailable);
+        }
         let map = index_map(view, source)?;
-        self.prepare_color(transform, stored, pixels)?;
+        self.prepare_color(transform, stored, pixels, columns)?;
         self.write_color(source, target, &map, out)?;
         Ok(self.finish(target, quality))
     }
@@ -334,7 +371,7 @@ impl CpuRaster {
         let transform = interleaved_native_rgb()?;
         self.raster_color_into(
             view,
-            RasterColor::Supported(&transform),
+            RasterColor::supported(&transform)?,
             stored,
             grid,
             quality,
@@ -369,8 +406,9 @@ impl CpuRaster {
     pub fn accept_rgb_source(stored: &[Stored], source: [u32; 2]) -> Result<(), RasterError> {
         source_extent(source)?;
         let pixels = pixel_count(source)?;
+        let columns = usize::try_from(source[0]).map_err(|_| RasterError::Extent)?;
         interleaved_native_rgb()?
-            .accept_source(stored, pixels)
+            .accept_source(stored, pixels, columns)
             .map_err(color_error)
     }
 
@@ -501,11 +539,14 @@ impl CpuRaster {
         transform: &ColorTransform,
         stored: &[Stored],
         pixels: usize,
+        columns: usize,
     ) -> Result<(), RasterError> {
         let Some(destination) = self.rgb_scratch.get_mut(..pixels) else {
             return Err(RasterError::Extent);
         };
-        transform.map_into(stored, destination).map_err(color_error)
+        transform
+            .map_into(stored, destination, columns)
+            .map_err(color_error)
     }
 
     fn write_mono(
@@ -524,8 +565,10 @@ impl CpuRaster {
             Colormap::Grey => &self.grey,
             Colormap::Stops => &self.stops,
         };
+        let chain = presentation.chain();
+        let ramp = crate::colour::linear_byte_ramp(chain);
         self.shade(source, target, map, out, |texel| {
-            rgba_of_preset(table, presentation.chain(), stored, texel)
+            rgba_of_preset(table, chain, stored, texel, ramp)
         })
     }
 
@@ -553,9 +596,11 @@ impl CpuRaster {
     ) -> Result<(), RasterError> {
         let mut y = 0_u32;
         while y < target[1] {
+            let css_y = css_of(y, target[1], self.device[1], self.dpr)?;
             let mut x = 0_u32;
             while x < target[0] {
-                let rgba = match self.texel(source, target, map, [x, y])? {
+                let css_x = css_of(x, target[0], self.device[0], self.dpr)?;
+                let rgba = match self.sample_at(source, map, css_x, css_y)? {
                     None => OPAQUE_BLACK,
                     Some(texel) => rgba_of(texel)?,
                 };
@@ -579,6 +624,16 @@ impl CpuRaster {
         }
         let css_x = css_of(pixel[0], target[0], self.device[0], self.dpr)?;
         let css_y = css_of(pixel[1], target[1], self.device[1], self.dpr)?;
+        self.sample_at(source, map, css_x, css_y)
+    }
+
+    fn sample_at(
+        &self,
+        source: [u32; 2],
+        map: &Transform<Canvas, Index>,
+        css_x: f64,
+        css_y: f64,
+    ) -> Result<Option<usize>, RasterError> {
         let index = map.apply(Pt::<Canvas>::new(css_x, css_y, 0.0));
         let Some(column) = texel_of(index.x + INDEX_TO_IMAGE_CENTRE, source[0]) else {
             return Ok(None);
@@ -639,11 +694,12 @@ fn rgba_of_preset(
     chain: &LutChain,
     stored: &[Stored],
     texel: usize,
+    ramp: bool,
 ) -> Result<[u8; 4], RasterError> {
     let sample = stored.get(texel).copied().ok_or(RasterError::Length)?;
     let mut rgb = [Rgb::BLACK];
     table
-        .map_preset_into(chain, &[sample], &mut rgb)
+        .map_preset(chain, &[sample], &mut rgb, ramp)
         .map_err(|error| match error {
             ColourLutError::Length => RasterError::Length,
             ColourLutError::Unavailable => RasterError::Unavailable,
@@ -660,6 +716,15 @@ fn rgba_from_rgb(rgb: Rgb) -> [u8; 4] {
     ]
 }
 
+fn stored_colour_is_a_display_byte(transform: &ColorTransform, stored: &[Stored]) -> bool {
+    if transform.palette().is_some() {
+        return true;
+    }
+    stored
+        .iter()
+        .all(|sample| (0.0..=255.0).contains(&sample.0))
+}
+
 fn color_error(error: PixelError) -> RasterError {
     match error {
         PixelError::SourceLength
@@ -670,12 +735,20 @@ fn color_error(error: PixelError) -> RasterError {
     }
 }
 
+/// Device centre of one target pixel, then one division by the device pixel ratio.
+///
+/// The centre is `(pixel + 0.5) * device / target`. Equal extents skip that
+/// ratio and stay on `pixel + 0.5`. That value is exact for every `u32`.
 fn css_of(pixel: u32, target: u32, device: u32, dpr: f64) -> Result<f64, RasterError> {
     let target_f = f64_from_u32(target);
     if target_f.to_bits() == 0.0_f64.to_bits() {
         return Err(RasterError::Extent);
     }
-    let device_center = (f64_from_u32(pixel) + 0.5) / target_f * f64_from_u32(device);
+    let device_center = if device == target {
+        f64_from_u32(pixel) + 0.5
+    } else {
+        (f64_from_u32(pixel) + 0.5) * f64_from_u32(device) / target_f
+    };
     css_from_device(device_center, dpr).map_err(|_| RasterError::Canvas)
 }
 
@@ -734,6 +807,11 @@ fn write_pixel(out: &mut [u8], index: usize, rgba: [u8; 4]) -> Result<(), Raster
 
 /// Nearest byte in `0..=255`. Ties pick the higher byte.
 ///
+/// The comparison is `value >= code - 0.5`. That half is exact. It is not
+/// `value + 0.5` in f32. That addition rounds the float just below a tie up
+/// to the next code, which is what `display_index` does so the address matches
+/// the shader. The float just below `0.5` stays `0` here.
+///
 /// Values outside that range become 0 or 255 because the destination is an
 /// 8-bit channel. The display value itself is not clamped before this store.
 fn byte_from_channel(value: f32) -> u8 {
@@ -743,25 +821,48 @@ fn byte_from_channel(value: f32) -> u8 {
     if value >= 255.0 {
         return 255;
     }
-    let mut best = 0_u8;
-    let mut best_delta = (f32::from(0_u8) - value).abs();
-    let mut candidate = 0_u8;
-    loop {
-        let delta = (f32::from(candidate) - value).abs();
-        if delta < best_delta || delta.to_bits() == best_delta.to_bits() {
-            best = candidate;
-            best_delta = delta;
+    // Greatest code whose preceding half is still at or below the value.
+    // That is the higher neighbor when the two distances are equal.
+    let mut lo = 0_u8;
+    let mut hi = 255_u8;
+    while lo < hi {
+        let mid = (u16::from(lo) + u16::from(hi)).div_ceil(2);
+        let code = u8::try_from(mid).unwrap_or(255);
+        if value >= f32::from(code) - 0.5 {
+            lo = code;
+        } else {
+            hi = code.saturating_sub(1);
         }
-        if candidate == 255 {
-            break;
-        }
-        candidate = candidate.saturating_add(1);
     }
-    best
+    lo
 }
 
 fn f64_from_u32(value: u32) -> f64 {
     let high = u16::try_from(value >> 16).unwrap_or(0);
     let low = u16::try_from(value & 0xffff).unwrap_or(0);
     f64::from(high) * 65_536.0 + f64::from(low)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::byte_from_channel;
+
+    #[test]
+    fn a_tie_picks_the_higher_channel_byte() {
+        // 0.5 is the same distance from 0 and from 1, so the higher byte is 1.
+        assert_eq!(byte_from_channel(0.5), 1);
+        assert_eq!(byte_from_channel(1.0), 1);
+        assert_eq!(byte_from_channel(1.5), 2);
+        assert_eq!(byte_from_channel(254.5), 255);
+        // The float just below a tie is closer to the lower byte.
+        let below_half = f32::from_bits(0.5_f32.to_bits() - 1);
+        assert_eq!(byte_from_channel(below_half), 0);
+        let below_one_and_a_half = f32::from_bits(1.5_f32.to_bits() - 1);
+        assert_eq!(byte_from_channel(below_one_and_a_half), 1);
+        assert_eq!(byte_from_channel(-0.0), 0);
+        assert_eq!(byte_from_channel(f32::NAN), 0);
+        assert_eq!(byte_from_channel(-1.0), 0);
+        assert_eq!(byte_from_channel(255.0), 255);
+        assert_eq!(byte_from_channel(256.0), 255);
+    }
 }

@@ -65,6 +65,13 @@ pub enum SurfaceError {
     /// Width or height is 0, and configuring a surface of that size panics.
     #[error("a surface extent is empty")]
     EmptyExtent,
+    /// An axis is longer than the device `max_texture_dimension_2d`.
+    ///
+    /// `Surface::configure` reports that size through the device error sink.
+    /// Nothing here installs a handler, so the call is refused first. An axis
+    /// equal to the limit is still accepted.
+    #[error("a surface extent is longer than the device texture limit")]
+    ExtentUnavailable,
     /// No reported format can be a render attachment.
     #[error("the surface reported no format that can be a render attachment")]
     NoRenderAttachment,
@@ -82,6 +89,14 @@ pub enum SurfaceError {
     /// Returned before `configure`, so the previous configuration stays.
     #[error("the surface format is not the format the graph was compiled for")]
     FormatDiffers,
+}
+
+/// Whether both axes fit in `max_texture_dimension_2d`.
+///
+/// An axis equal to the limit fits. A longer axis does not. Zero is not
+/// decided here. The caller refuses an empty extent on its own.
+fn surface_extent_fits(width: u32, height: u32, max_texture_dimension_2d: u32) -> bool {
+    width <= max_texture_dimension_2d && height <= max_texture_dimension_2d
 }
 
 /// The first reported format whose usages include a render attachment.
@@ -320,6 +335,9 @@ impl GpuContext {
     ///
     /// [`SurfaceError::EmptyExtent`] when either axis is 0, because
     /// `Surface::configure` panics on an empty swap chain.
+    /// [`SurfaceError::ExtentUnavailable`] when an axis is longer than the
+    /// device `max_texture_dimension_2d`. An axis equal to that limit is
+    /// accepted. The check uses `>` so the limit itself still configures.
     /// [`SurfaceError::NoRenderAttachment`] when no reported format can be
     /// drawn to. [`SurfaceError::NoPresentMode`] or
     /// [`SurfaceError::NoAlphaMode`] when the surface reports none.
@@ -332,6 +350,10 @@ impl GpuContext {
         let (width, height) = extent;
         if width == 0 || height == 0 {
             return Err(SurfaceError::EmptyExtent);
+        }
+        let max = self.device().limits().max_texture_dimension_2d;
+        if !surface_extent_fits(width, height, max) {
+            return Err(SurfaceError::ExtentUnavailable);
         }
         let capabilities = surface.get_capabilities(adapter.wgpu_adapter());
         let format = first_render_attachment(&capabilities.formats, |format| {
@@ -616,6 +638,16 @@ mod tests {
         fn assert_clone<T: Clone>() {}
         assert_clone::<wgpu::Device>();
         assert_clone::<wgpu::Queue>();
+    }
+
+    /// 8192 equals the limit and is accepted. 8193 on either axis is not.
+    #[test]
+    fn an_extent_equal_to_the_texture_limit_fits_and_one_past_it_does_not() {
+        assert!(super::surface_extent_fits(8192, 8192, 8192));
+        assert!(super::surface_extent_fits(8192, 1, 8192));
+        assert!(super::surface_extent_fits(1, 8192, 8192));
+        assert!(!super::surface_extent_fits(8193, 1, 8192));
+        assert!(!super::surface_extent_fits(1, 8193, 8192));
     }
 
     /// **The rebuild arm of `recover`, which nothing else reaches.**

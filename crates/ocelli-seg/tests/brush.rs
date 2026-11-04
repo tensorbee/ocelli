@@ -66,6 +66,92 @@ fn a_sphere_reaches_the_next_slice_only_at_the_centre() {
 }
 
 #[test]
+fn a_radius_of_zero_does_not_paint_a_centre_that_is_not_an_integer() {
+    // Sample (0, 0) is 1e-170 from the centre. Radius 0 includes only an
+    // integer centre, so every stored 9 stays and the call still succeeds.
+    let mut circle = vec![grid(3, 3, vec![9; 9])];
+    let coverage = must_stamp(
+        &mut circle,
+        brush(BrushShape::Circle, 1.0e-170, 0.0, 0.0, 0.0, 3),
+    );
+    assert_eq!(coverage.covered, 0);
+    assert_eq!(
+        circle.first().map(|item| item.indices.as_slice()),
+        Some([9, 9, 9, 9, 9, 9, 9, 9, 9].as_slice())
+    );
+    let mut sphere = vec![grid(3, 3, vec![9; 9])];
+    let coverage = must_stamp(
+        &mut sphere,
+        brush(BrushShape::Sphere, 0.0, 0.0, 1.0e-170, 0.0, 3),
+    );
+    assert_eq!(coverage.covered, 0);
+    assert_eq!(
+        sphere.first().map(|item| item.indices.as_slice()),
+        Some([9, 9, 9, 9, 9, 9, 9, 9, 9].as_slice())
+    );
+}
+
+#[test]
+fn a_non_zero_radius_whose_square_is_not_normal_writes_nothing() {
+    // Sample (0, 0) is 1e-170 from the centre. The radius is 1e-200.
+    // 1e-170 is not on or inside that radius, so every stored 9 stays.
+    let mut circle = vec![grid(3, 3, vec![9; 9])];
+    assert!(matches!(
+        stamp_brush(
+            &mut circle,
+            brush(BrushShape::Circle, 1.0e-170, 0.0, 0.0, 1.0e-200, 3),
+        ),
+        Err(BrushError::Frame)
+    ));
+    assert_eq!(
+        circle.first().map(|item| item.indices.as_slice()),
+        Some([9, 9, 9, 9, 9, 9, 9, 9, 9].as_slice())
+    );
+    let mut sphere = vec![grid(3, 3, vec![9; 9])];
+    assert!(matches!(
+        stamp_brush(
+            &mut sphere,
+            brush(BrushShape::Sphere, 0.0, 0.0, 1.0e-170, 1.0e-200, 3),
+        ),
+        Err(BrushError::Frame)
+    ));
+    assert_eq!(
+        sphere.first().map(|item| item.indices.as_slice()),
+        Some([9, 9, 9, 9, 9, 9, 9, 9, 9].as_slice())
+    );
+}
+
+#[test]
+fn a_squared_radius_past_the_finite_range_writes_nothing() {
+    // Sample (0, 0) is 1e200 from the centre. The radius is 1e160.
+    // 1e200 is not on or inside that radius, so every stored 9 stays.
+    let mut circle = vec![grid(3, 3, vec![9; 9])];
+    assert!(matches!(
+        stamp_brush(
+            &mut circle,
+            brush(BrushShape::Circle, 1.0e200, 0.0, 0.0, 1.0e160, 3),
+        ),
+        Err(BrushError::Frame)
+    ));
+    assert_eq!(
+        circle.first().map(|item| item.indices.as_slice()),
+        Some([9, 9, 9, 9, 9, 9, 9, 9, 9].as_slice())
+    );
+    let mut sphere = vec![grid(3, 3, vec![9; 9])];
+    assert!(matches!(
+        stamp_brush(
+            &mut sphere,
+            brush(BrushShape::Sphere, 1.0e200, 0.0, 0.0, 1.0e160, 3),
+        ),
+        Err(BrushError::Frame)
+    ));
+    assert_eq!(
+        sphere.first().map(|item| item.indices.as_slice()),
+        Some([9, 9, 9, 9, 9, 9, 9, 9, 9].as_slice())
+    );
+}
+
+#[test]
 fn a_negative_radius_and_a_non_finite_radius_write_nothing() {
     let mut negative = vec![grid(3, 3, vec![9; 9])];
     assert!(matches!(

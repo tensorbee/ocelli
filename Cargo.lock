@@ -967,6 +967,7 @@ name = "ocelli-codec"
 version = "0.1.0"
 dependencies = [
  "jpeg-decoder",
+ "ocelli-core",
  "openjph-core",
  "oxideav-core",
  "oxideav-mjpeg",
@@ -1013,6 +1014,21 @@ dependencies = [
  "serde_json",
  "thiserror",
  "uriparse",
+]
+
+[[package]]
+name = "ocelli-folder-viewer"
+version = "0.1.0"
+dependencies = [
+ "dicom-core",
+ "dicom-object",
+ "ocelli-codec",
+ "ocelli-core",
+ "ocelli-dicom",
+ "ocelli-pixel",
+ "ocelli-render",
+ "ocelli-viewport",
+ "thiserror",
 ]
 
 [[package]]

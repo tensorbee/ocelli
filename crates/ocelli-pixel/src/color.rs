@@ -126,10 +126,12 @@ impl PaletteColorLut {
     }
 
     fn lookup(&self, stored: Stored) -> Rgb {
+        // The three ramps are the same input mapping. Search once.
+        let index = self.red.lookup_index(stored.0);
         Rgb {
-            r: self.red.lookup(stored.0),
-            g: self.green.lookup(stored.0),
-            b: self.blue.lookup(stored.0),
+            r: self.red.values().get(index).copied().unwrap_or(0.0),
+            g: self.green.values().get(index).copied().unwrap_or(0.0),
+            b: self.blue.values().get(index).copied().unwrap_or(0.0),
         }
     }
 
@@ -145,6 +147,16 @@ impl PaletteColorLut {
     /// Shared by the three channels. [`ColorTransform::map_into`] applies it.
     pub fn first_mapped_input(&self) -> i32 {
         self.red.first_mapped_input()
+    }
+
+    /// Red, then green, then blue LUT entries.
+    pub fn channel_entries(&self) -> impl Iterator<Item = f32> + '_ {
+        self.red
+            .values()
+            .iter()
+            .copied()
+            .chain(self.green.values().iter().copied())
+            .chain(self.blue.values().iter().copied())
     }
 }
 
@@ -187,6 +199,12 @@ pub struct ColorTransform {
 }
 
 impl ColorTransform {
+    /// The palette, when this transform is palette colour.
+    #[must_use]
+    pub fn palette(&self) -> Option<&PaletteColorLut> {
+        self.palette.as_ref()
+    }
+
     /// Resolve the colour space and sample layout, each from one rule.
     ///
     /// **The colour transform is decided here and nowhere else**, which is what
@@ -279,11 +297,17 @@ impl ColorTransform {
     ///
     /// [`PixelError::SourceLength`] when the source is not exactly one frame
     /// for the resolved space. [`PixelError::SubsampledChromaAlignment`] when
-    /// a 4:2:2 space is asked for an odd number of pixels, which would split a
-    /// chroma pair.
-    pub fn map_into(&self, source: &[Stored], destination: &mut [Rgb]) -> Result<(), PixelError> {
+    /// a 4:2:2 space is asked for an odd number of pixels or an odd column
+    /// count. The chroma pair is horizontal, so an even pixel count with odd
+    /// columns still joins the last pixel of one row to the first of the next.
+    pub fn map_into(
+        &self,
+        source: &[Stored],
+        destination: &mut [Rgb],
+        columns: usize,
+    ) -> Result<(), PixelError> {
         let pixels = destination.len();
-        self.accept_source(source, pixels)?;
+        self.accept_source(source, pixels, columns)?;
         for (index, output) in destination.iter_mut().enumerate() {
             *output = self.pixel(source, index, pixels);
         }
@@ -292,18 +316,27 @@ impl ColorTransform {
 
     /// Accept one frame's stored samples before any destination write.
     ///
-    /// `pixels` is the frame's pixel count. [`Self::map_into`] passes the
-    /// destination length. A caller that has not allocated the destination
-    /// yet can use the same rule.
+    /// `pixels` is the frame's pixel count and `columns` is its column count.
+    /// [`Self::map_into`] passes the destination length and the caller's
+    /// column count. A caller that has not allocated the destination yet can
+    /// use the same rule.
     ///
     /// # Errors
     ///
     /// [`PixelError::SourceLength`] when the source is not exactly one frame
     /// for the resolved space. [`PixelError::SubsampledChromaAlignment`] when
-    /// a 4:2:2 space is asked for an odd number of pixels.
-    /// [`PixelError::LengthOverflow`] when the expected sample count overflows.
-    pub fn accept_source(&self, source: &[Stored], pixels: usize) -> Result<(), PixelError> {
-        if self.space.is_subsampled() && !pixels.is_multiple_of(2) {
+    /// a 4:2:2 space is asked for an odd number of pixels or an odd column
+    /// count. [`PixelError::LengthOverflow`] when the expected sample count
+    /// overflows.
+    pub fn accept_source(
+        &self,
+        source: &[Stored],
+        pixels: usize,
+        columns: usize,
+    ) -> Result<(), PixelError> {
+        if self.space.is_subsampled()
+            && (columns == 0 || !columns.is_multiple_of(2) || !pixels.is_multiple_of(2))
+        {
             return Err(PixelError::SubsampledChromaAlignment);
         }
         let expected = pixels
@@ -565,7 +598,7 @@ mod tests {
         let Ok(resolved) = resolved else { return };
         let mut destination = [Rgb::BLACK; 1];
         assert_eq!(
-            resolved.map_into(&[Stored(1.0), Stored(2.0)], &mut destination),
+            resolved.map_into(&[Stored(1.0), Stored(2.0)], &mut destination, 2),
             Err(PixelError::SubsampledChromaAlignment)
         );
     }

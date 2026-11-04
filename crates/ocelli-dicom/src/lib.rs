@@ -24,7 +24,7 @@ pub use dicomweb::{
 };
 pub use frame_geometry::{
     FrameGeometry, FrameGeometryError, FrameGeometrySources, SpacingEvidence, SpacingRelationship,
-    StackGeometry, StackShear,
+    StackGeometry, StackShear, parse_decimal_string,
 };
 pub use frame_index::{EncapsulatedFrameIndex, FrameIndexError};
 pub use metadata::{

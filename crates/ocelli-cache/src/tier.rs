@@ -44,11 +44,11 @@ pub struct Pressure {
 }
 
 /// Twice a byte count. `used * TWICE` against `budget` is the half boundary.
-const TWICE: u64 = 2;
+const TWICE: u128 = 2;
 /// Ten times a byte count. `used * TEN` against `budget * NINE` is nine tenths.
-const TEN: u64 = 10;
+const TEN: u128 = 10;
 /// Nine times a budget. The other half of the nine-tenths comparison.
-const NINE: u64 = 9;
+const NINE: u128 = 9;
 
 /// The pressure bands a tier reports crossings between.
 ///
@@ -69,11 +69,10 @@ pub enum PressureBand {
 impl Pressure {
     /// Which band this reading sits in.
     ///
-    /// The products are `u64`, so a budget that fits in a 32-bit `usize` cannot
-    /// wrap the comparison. A budget of zero is `Low` when `used` is zero and
-    /// `Critical` otherwise, which keeps the zero-budget tier that
-    /// `Lru::would_admit` calls off from looking merely empty once it holds
-    /// bytes.
+    /// The products are `u128`, so every `usize` budget compares exactly.
+    /// A budget of zero is `Low` when `used` is zero and `Critical` otherwise,
+    /// which keeps the zero-budget tier that `Lru::would_admit` calls off
+    /// from looking merely empty once it holds bytes.
     #[must_use]
     pub fn band(&self) -> PressureBand {
         if self.budget == 0 {
@@ -83,14 +82,17 @@ impl Pressure {
                 PressureBand::Critical
             };
         }
-        let used = u64::try_from(self.used).unwrap_or(u64::MAX);
-        let budget = u64::try_from(self.budget).unwrap_or(u64::MAX);
-        let ten_used = used.saturating_mul(TEN);
-        let nine_budgets = budget.saturating_mul(NINE);
+        // `u128::from(usize)` is not a trait impl. A `u64` conversion is exact
+        // on every pointer width this crate builds, and the products below
+        // then fit in `u128`.
+        let used = u128::from(u64::try_from(self.used).unwrap_or(u64::MAX));
+        let budget = u128::from(u64::try_from(self.budget).unwrap_or(u64::MAX));
+        let ten_used = used * TEN;
+        let nine_budgets = budget * NINE;
         if ten_used >= nine_budgets {
             return PressureBand::Critical;
         }
-        let twice_used = used.saturating_mul(TWICE);
+        let twice_used = used * TWICE;
         if twice_used >= budget {
             PressureBand::Elevated
         } else {

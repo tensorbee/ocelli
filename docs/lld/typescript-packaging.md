@@ -1,7 +1,7 @@
 # TypeScript packaging
 
 **F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003
-**Last updated:** 2026-10-27
+**Last updated:** 2026-11-03
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
@@ -9,7 +9,7 @@ What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
 | Package | What it is | Runtime dependencies |
 |---------|-----------|---------------------|
-| `@ocelli/core` | The TypeScript shell of HLD section 10 | none |
+| `@ocelli/core` | The TypeScript shell of HLD section 10 | `dcmjs` at `0.52.2` |
 | `@ocelli/react` | The React binding | `@ocelli/core` at an exact version |
 
 `@ocelli/react` publishes the viewport pump, the hook and the host component.
@@ -103,9 +103,9 @@ buffer and never builds a view over linear memory.
 
 ## There is no bundler, and that is a decision rather than an omission
 
-`@ocelli/core` has no runtime dependency and emits ESM with declarations
-through `tsc --build`. A bundler over a dependency-free ESM package produces
-the same modules with an extra tool in the path. `AGENTS.md`'s structural test
+`@ocelli/core` depends on `dcmjs` at `0.52.2` and emits ESM with
+declarations through `tsc --build`. A bundler is not part of this
+pipeline. The consumer resolves `dcmjs`. `AGENTS.md`'s structural test
 asks whether a construct reduces the cases a reader must consider or increases
 the places they must look, and a rollup config increases them.
 

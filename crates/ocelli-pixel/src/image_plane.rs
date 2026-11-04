@@ -217,11 +217,7 @@ impl ImagePlane {
         };
         let row_step = self.orientation.row * column_spacing;
         let column_step = self.orientation.column * row_spacing;
-        let normal = self
-            .orientation
-            .row
-            .cross(self.orientation.column)
-            .normalize();
+        let normal = self.slice_normal();
         let position = DVec3::from_array(self.position.0);
         Transform::from_mat4(DMat4::from_cols(
             row_step.extend(0.0),

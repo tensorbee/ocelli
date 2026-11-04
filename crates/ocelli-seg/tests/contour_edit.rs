@@ -61,6 +61,23 @@ fn a_triangle_includes_the_apex_and_the_interior_sample() {
 }
 
 #[test]
+fn an_edge_product_that_underflows_writes_nothing() {
+    // Sample (0, 0) is about 1e-170 from every vertex. It is not on an edge,
+    // and a ray toward increasing x crosses none, so every stored 9 stays.
+    let mut grid = grid(3, 3, vec![9; 9]);
+    let polygon = [
+        point(1.0e-170, 1.0e-170),
+        point(2.0e-170, 3.0e-170),
+        point(3.0e-170, 1.0e-170),
+    ];
+    assert!(matches!(
+        edit_labelmap_with_contour(&mut grid, &polygon, 3),
+        Err(ContourEditError::Frame)
+    ));
+    assert_eq!(grid.indices.as_slice(), [9; 9].as_slice());
+}
+
+#[test]
 fn two_points_and_a_short_buffer_write_nothing() {
     let mut short_poly = grid(3, 3, vec![7; 9]);
     assert!(matches!(
@@ -92,6 +109,35 @@ fn a_non_finite_vertex_writes_nothing() {
         Err(ContourEditError::Frame)
     ));
     assert_eq!(grid.indices.as_slice(), [7; 9].as_slice());
+}
+
+#[test]
+fn an_infinite_squared_length_writes_nothing() {
+    // Row 0 sits at x >= 0. The triangle lies at x <= -1, so every stored 0 stays.
+    let mut grid = grid(4, 6, vec![0; 24]);
+    let polygon = [point(-1.0e200, 0.0), point(-1.0, 0.0), point(-1.0, 5.0)];
+    assert!(matches!(
+        edit_labelmap_with_contour(&mut grid, &polygon, 3),
+        Err(ContourEditError::Frame)
+    ));
+    assert_eq!(grid.indices.as_slice(), [0; 24].as_slice());
+}
+
+#[test]
+fn a_flushed_intersection_writes_nothing() {
+    // At y = 0 the left edge is just to the right of x = 0.
+    // Sample (0, 0) is outside, so a success must not paint it.
+    let mut grid = grid(2, 1, vec![0, 0]);
+    let polygon = [
+        point(0.0, -1.0e-200),
+        point(1.0, 1.0e150),
+        point(2.0, -1.0e-200),
+    ];
+    assert!(matches!(
+        edit_labelmap_with_contour(&mut grid, &polygon, 3),
+        Err(ContourEditError::Frame)
+    ));
+    assert_eq!(grid.indices.as_slice(), [0, 0].as_slice());
 }
 
 #[test]

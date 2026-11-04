@@ -117,6 +117,17 @@ fn finding_chain() -> LutChain {
     }
 }
 
+fn palette_channels(
+    count: u16,
+    first: i32,
+    samples: Vec<f32>,
+) -> Result<PaletteColorLut, PixelError> {
+    let red = LutDescriptor::new(count, first, 8, samples.clone())?;
+    let green = LutDescriptor::new(count, first, 8, samples.clone())?;
+    let blue = LutDescriptor::new(count, first, 8, samples)?;
+    PaletteColorLut::new(red, green, blue)
+}
+
 fn palette_lut() -> Result<PaletteColorLut, PixelError> {
     let red = LutDescriptor::new(2, FIRST_MAPPED, 8, vec![FIRST_ENTRY[0], SECOND_ENTRY[0]])?;
     let green = LutDescriptor::new(2, FIRST_MAPPED, 8, vec![FIRST_ENTRY[1], SECOND_ENTRY[1]])?;
@@ -223,24 +234,85 @@ fn palette_first_mapped_input_10_clamps_stored_9_and_maps_stored_10() {
 
     let mut from_chain = [Rgb::BLACK; 3];
     assert_eq!(
-        transform.map_into(&[Stored(9.0), Stored(10.0), Stored(11.0)], &mut from_chain),
+        transform.map_into(
+            &[Stored(9.0), Stored(10.0), Stored(11.0)],
+            &mut from_chain,
+            3,
+        ),
         Ok(())
     );
     assert_rgb_bits(from_chain[0], FIRST_ENTRY);
     assert_rgb_bits(from_chain[1], FIRST_ENTRY);
     assert_rgb_bits(from_chain[2], SECOND_ENTRY);
 
-    assert_eq!(texel(bytes, 9), [11, 22, 33, 255], "stored 9 clamps");
-    assert_eq!(texel(bytes, 10), [11, 22, 33, 255], "stored 10 is entry 0");
-    assert_eq!(texel(bytes, 11), [44, 55, 66, 255], "stored 11 is entry 1");
+    // Texel 0 is the first mapped input. Stored 9 is not a separate texel.
+    assert_eq!(bytes.len(), 8);
+    assert_eq!(texel(bytes, 0), [11, 22, 33, 255], "stored 10 is texel 0");
+    assert_eq!(texel(bytes, 1), [44, 55, 66, 255], "stored 11 is texel 1");
     assert_eq!(
         from_chain[0].r.to_bits(),
-        f32::from(texel(bytes, 9)[0]).to_bits()
+        f32::from(texel(bytes, 0)[0]).to_bits()
     );
     assert_eq!(
         from_chain[2].b.to_bits(),
-        f32::from(texel(bytes, 11)[2]).to_bits()
+        f32::from(texel(bytes, 1)[2]).to_bits()
     );
+}
+
+/// A mapped range that does not contain 0 stays that wide.
+///
+/// PS3.3 C.7.6.3.1.5. First mapped input 8192 and 256 entries end at 8447.
+/// Extending the table down to stored 0 makes 8448 texels, which a device
+/// whose limit is 8192 then refuses. Entry 0 is 7 and entry 255 is 9, so a
+/// texel taken from the padded prefix cannot pass for the last entry.
+#[test]
+fn a_palette_from_8192_stays_256_texels_wide() {
+    let mut samples = vec![7.0_f32];
+    samples.resize(255, 0.0);
+    samples.push(9.0);
+    let lut = require_ok!(palette_channels(256, 8192, samples));
+    let transform = require_ok!(palette_transform(lut.clone()));
+    let colour = require_ok!(ColourLut::palette(
+        lut,
+        PhotometricInterpretation::PaletteColor
+    ));
+    let bytes = colour.texture_bytes();
+    assert_eq!(bytes.len(), 256 * 4);
+
+    let mut from_chain = [Rgb::BLACK; 3];
+    assert_eq!(
+        transform.map_into(
+            &[Stored(8191.0), Stored(8192.0), Stored(8447.0)],
+            &mut from_chain,
+            3,
+        ),
+        Ok(())
+    );
+    assert_eq!(texel(bytes, 0), [7, 7, 7, 255]);
+    assert_eq!(texel(bytes, 255), [9, 9, 9, 255]);
+    assert_eq!(
+        from_chain[0].r.to_bits(),
+        f32::from(texel(bytes, 0)[0]).to_bits()
+    );
+    assert_eq!(
+        from_chain[2].r.to_bits(),
+        f32::from(texel(bytes, 255)[0]).to_bits()
+    );
+}
+
+/// The same bound on the negative side. First mapped input -4 and two
+/// entries end at -3. Growing the table up to stored 0 would add three texels.
+#[test]
+fn a_palette_below_zero_does_not_grow_up_to_stored_zero() {
+    let lut = require_ok!(palette_channels(2, -4, vec![1.0, 2.0]));
+    let colour = require_ok!(ColourLut::palette(
+        lut,
+        PhotometricInterpretation::PaletteColor
+    ));
+    let bytes = colour.texture_bytes();
+    assert_eq!(bytes.len(), 8);
+    assert_eq!(texel(bytes, 0), [1, 1, 1, 255]);
+    assert_eq!(texel(bytes, 1), [2, 2, 2, 255]);
 }
 
 /// The table address clamps. `LutChain` does not.

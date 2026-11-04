@@ -2157,7 +2157,7 @@ fn raster_colour(
     let drawn = raster
         .raster_color_into(
             &view,
-            RasterColor::Supported(transform),
+            RasterColor::supported(transform).map_err(|_| "raster-refused")?,
             stored,
             RasterGrid {
                 source: [columns, rows],

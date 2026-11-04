@@ -5,9 +5,10 @@
 //! returns `Vec<f32>`, and `openjph-core` returns `Vec<i32>` per row. The
 //! stored domain for every DICOM syntax those cover is integer, so the
 //! conversion back has to refuse anything that is not exactly an integer inside
-//! the descriptor's stored range. That check exists once, here, because a
-//! byte-identical copy of it in each adapter is the defect class this
-//! repository exists to catch.
+//! the descriptor's stored range. The IEEE-754 decomposition lives once in
+//! `ocelli-core`. This module applies the DICOM range.
+
+use ocelli_core::exact_f32_integer;
 
 use crate::{CodecError, FrameDesc, PixelRepresentation};
 
@@ -94,33 +95,12 @@ fn append_sample(bytes: &mut Vec<u8>, value: f32, desc: &FrameDesc) -> Result<()
 }
 
 fn exact_i64(value: f32) -> Option<i64> {
-    if !value.is_finite() || value.fract() != 0.0 {
-        return None;
-    }
-    if value == 0.0 {
-        return Some(0);
-    }
-    let bits = value.to_bits();
-    let exponent = i32::try_from((bits >> 23) & 0xff).ok()?.checked_sub(127)?;
-    if !(0..=62).contains(&exponent) {
-        return None;
-    }
-    let mantissa = u64::from((bits & 0x7f_ffff) | 0x80_0000);
-    let magnitude = if exponent >= 23 {
-        mantissa.checked_shl(u32::try_from(exponent - 23).ok()?)?
-    } else {
-        let shift = u32::try_from(23 - exponent).ok()?;
-        let mask = (1_u64.checked_shl(shift)?).checked_sub(1)?;
-        if mantissa & mask != 0 {
-            return None;
-        }
-        mantissa >> shift
-    };
-    let signed = i64::try_from(magnitude).ok()?;
-    if bits >> 31 == 0 {
-        Some(signed)
-    } else {
+    let parsed = exact_f32_integer(value).ok()?;
+    let signed = i64::try_from(parsed.magnitude).ok()?;
+    if parsed.negative {
         signed.checked_neg()
+    } else {
+        Some(signed)
     }
 }
 

@@ -397,6 +397,67 @@ fn sample_interleaved_rgb_reproduces_the_uncompressed_ramp() -> TestResult {
     Ok(())
 }
 
+fn decode_constructed_rgb(rows: u16, columns: u16, source: &[u8], pixels: &[[u8; 3]]) -> TestResult {
+    assert_eq!(pixels.len(), usize::from(rows) * usize::from(columns));
+    let desc = FrameDesc::new(FrameDescInput {
+        rows,
+        columns,
+        samples_per_pixel: 3,
+        bits_allocated: 8,
+        bits_stored: 8,
+        high_bit: 7,
+        pixel_representation: PixelRepresentation::Unsigned,
+        photometric_interpretation: "RGB".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
+    })?;
+    let mut expected = Vec::with_capacity(pixels.len() * 3);
+    for pixel in pixels {
+        expected.extend_from_slice(pixel);
+    }
+    let mut out = vec![0xa5; desc.output_len()];
+    JpegLsDecoder::lossless().decode(source, &desc, &mut out)?;
+    assert_eq!(out, expected);
+    Ok(())
+}
+
+fn solid(count: usize, fill: [u8; 3]) -> Vec<[u8; 3]> {
+    vec![fill; count]
+}
+
+#[test]
+fn a_flat_rgb_run_interruption_keeps_the_constructed_sample() -> TestResult {
+    // The field is flat, so the scan enters run mode, and one sample is the
+    // interruption. A second frame puts that interruption on a row whose value
+    // differs from the row above. Each codestream is a lossless 8-bit ILV=2
+    // encoding. The expected pixels are the arrays built here.
+    let columns = 8usize;
+    let mut flat = solid(4 * columns, [10, 20, 30]);
+    let slot = flat.get_mut(columns + 3).ok_or("interruption outside the frame")?;
+    *slot = [10, 20, 29];
+    let lowered: &[u8] = &[
+        0xff, 0xd8, 0xff, 0xf7, 0x00, 0x11, 0x08, 0x00, 0x04, 0x00, 0x08, 0x03, 0x01, 0x11, 0x00,
+        0x02, 0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x00,
+        0x03, 0x00, 0x00, 0x02, 0x00, 0x02, 0x02, 0x07, 0x25, 0x2d, 0xdf, 0xff, 0x14, 0xd0, 0x84,
+        0x65, 0xbf, 0xe0, 0xff, 0xd9,
+    ];
+    decode_constructed_rgb(4, 8, lowered, &flat)?;
+
+    let mut banded = solid(columns, [10, 20, 30]);
+    banded.extend(solid(columns, [40, 50, 60]));
+    let slot = banded
+        .get_mut(columns + 3)
+        .ok_or("interruption outside the frame")?;
+    *slot = [40, 50, 59];
+    let interrupted: &[u8] = &[
+        0xff, 0xd8, 0xff, 0xf7, 0x00, 0x11, 0x08, 0x00, 0x02, 0x00, 0x08, 0x03, 0x01, 0x11, 0x00,
+        0x02, 0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xda, 0x00, 0x0c, 0x03, 0x01, 0x00, 0x02, 0x00,
+        0x03, 0x00, 0x00, 0x02, 0x00, 0x02, 0x02, 0x07, 0x25, 0x2d, 0xdf, 0xfe, 0x00, 0x02, 0x3a,
+        0x00, 0x01, 0x3f, 0xce, 0x7f, 0xe0, 0xff, 0xd9,
+    ];
+    decode_constructed_rgb(2, 8, interrupted, &banded)?;
+    Ok(())
+}
+
 #[test]
 fn a_near_lossless_rgb_codestream_is_refused() -> TestResult {
     // The lossless fixture's NEAR byte is zero. Raising it to one makes a

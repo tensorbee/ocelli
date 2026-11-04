@@ -334,7 +334,8 @@ pub enum GraphError {
     /// `rebind` was called on a viewport that owns a stored-sample texture.
     #[error("this viewport owns a stored-sample texture, rebind it with rebind_stored")]
     StoredNeedsRebind,
-    /// `Rgba8Unorm` cannot be sampled and copied, or the table has no texels.
+    /// `Rgba8Unorm` cannot be sampled and copied, the table has no texels,
+    /// or the table is wider than the device `max_texture_dimension_2d`.
     #[error("the colour LUT texture cannot be sampled and copied")]
     ColourUnavailable,
     /// A device pixel ratio that is not finite and strictly positive, or that
@@ -426,12 +427,16 @@ impl Upload {
     /// `features` is what `get_texture_format_features` returned for
     /// [`STORED_FORMAT`]. `TEXTURE_BINDING` or `COPY_DST` absent is
     /// [`UploadError::FormatUnavailable`]. No other format is selected.
+    /// `max_texture_dimension_2d` is the device limit. An axis longer than
+    /// that limit is [`UploadError::ExtentUnavailable`]. An axis equal to it
+    /// is accepted.
     pub fn stored(
         features: wgpu::TextureFormatFeatures,
         width: u32,
         height: u32,
+        max_texture_dimension_2d: u32,
     ) -> Result<Self, UploadError> {
-        let upload = Self::from_extent(width, height)?;
+        let upload = Self::from_extent(width, height, max_texture_dimension_2d)?;
         if !binding_available(features) {
             return Err(UploadError::FormatUnavailable);
         }
@@ -468,9 +473,16 @@ impl Upload {
         Err(UploadError::FormatUnavailable)
     }
 
-    fn from_extent(width: u32, height: u32) -> Result<Self, UploadError> {
+    fn from_extent(
+        width: u32,
+        height: u32,
+        max_texture_dimension_2d: u32,
+    ) -> Result<Self, UploadError> {
         if width == 0 || height == 0 {
             return Err(UploadError::EmptyExtent);
+        }
+        if width > max_texture_dimension_2d || height > max_texture_dimension_2d {
+            return Err(UploadError::ExtentUnavailable);
         }
         if width.checked_mul(4).is_none() {
             return Err(UploadError::ExtentOverflow);
@@ -571,6 +583,11 @@ pub enum UploadError {
     /// Width or height is zero, so there is no texture to create.
     #[error("a stored texture extent is empty")]
     EmptyExtent,
+    /// An axis is longer than the device `max_texture_dimension_2d`.
+    ///
+    /// The texture is not created.
+    #[error("a stored texture axis is longer than the device texture limit")]
+    ExtentUnavailable,
     /// Width times height does not fit in the copy dimensions.
     #[error("a stored texture extent does not fit the copy")]
     ExtentOverflow,
@@ -1036,6 +1053,9 @@ struct VolumeRayBinding {
     clip: wgpu::Buffer,
     bind_uniform: wgpu::BindGroup,
     bind_source: wgpu::BindGroup,
+    /// Bricks whose views this binding samples. A later upload of one of
+    /// these keys replaces the texture and drops the binding.
+    keys: Vec<BrickKey>,
 }
 
 /// Fixed prefix of the ray uniform. Field order matches `raycast.wgsl`.
@@ -1757,9 +1777,11 @@ impl RenderGraph {
     /// # Errors
     ///
     /// [`UploadError::FormatUnavailable`] when the format cannot be sampled
-    /// and written. [`UploadError::EmptyExtent`] or
-    /// [`UploadError::ExtentOverflow`] for an extent that cannot be a texture.
-    /// [`UploadError::CapacityExhausted`] beyond the capacity fixed at
+    /// and written. [`UploadError::EmptyExtent`] when an axis is zero.
+    /// [`UploadError::ExtentUnavailable`] when an axis is longer than the
+    /// device `max_texture_dimension_2d`. [`UploadError::ExtentOverflow`]
+    /// when the extent does not fit the copy. Nothing is registered in those
+    /// cases. [`UploadError::CapacityExhausted`] beyond the capacity fixed at
     /// creation, changing no existing slot.
     pub fn register_stored(
         &mut self,
@@ -1771,7 +1793,11 @@ impl RenderGraph {
         pass: Pass,
     ) -> Result<ViewportId, UploadError> {
         let format = selected_stored_format(adapter.wgpu_adapter(), self.tier)?;
-        let upload = Upload::from_extent(width, height)?;
+        let upload = Upload::from_extent(
+            width,
+            height,
+            ctx.device().limits().max_texture_dimension_2d,
+        )?;
         let voi = voi_of(&pass);
         let id = self
             .registry
@@ -1818,6 +1844,11 @@ impl RenderGraph {
         let (voi, camera, dpr) = uniforms;
         let uploaded = device_camera(camera, dpr);
         let device = ctx.device();
+        // A table wider than this device is not a texture. Selection already
+        // refused it. Restore keeps the unbound path rather than creating one.
+        let colour = colour.filter(|held| {
+            colour_width(&held.bytes, device.limits().max_texture_dimension_2d).is_some()
+        });
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ocelli graph voi"),
             contents: bytemuck::bytes_of(&voi),
@@ -2086,7 +2117,9 @@ impl RenderGraph {
     /// [`UploadError::FormatUnavailable`] when the format chosen at
     /// registration can no longer be sampled or written, in which case the
     /// slot stays empty. The check is that remembered format, not a fresh
-    /// search.
+    /// search. [`UploadError::ExtentUnavailable`] when a recorded axis is
+    /// longer than this device's `max_texture_dimension_2d`. The texture is
+    /// not created and the slot stays empty.
     pub fn rebind_stored(
         &mut self,
         ctx: &GpuContext,
@@ -2116,6 +2149,11 @@ impl RenderGraph {
         if !binding_available(features) {
             return Err(UploadError::FormatUnavailable);
         }
+        let upload = Upload::from_extent(
+            upload.width(),
+            upload.height(),
+            ctx.device().limits().max_texture_dimension_2d,
+        )?;
         let texture = create_stored_texture(ctx.device(), upload, format);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let stored = StoredTexture {
@@ -2308,8 +2346,9 @@ impl RenderGraph {
     /// [`GraphError::UnknownViewport`] for an id this graph never issued.
     /// [`GraphError::ViewportNotRebound`] when a rebuild has not yet
     /// recreated the slot. [`GraphError::ColourUnavailable`] when
-    /// `Rgba8Unorm` cannot be sampled and copied, or the table has no texels.
-    /// Nothing is counted in that case.
+    /// `Rgba8Unorm` cannot be sampled and copied, the table has no texels,
+    /// or the table is wider than the device `max_texture_dimension_2d`.
+    /// Nothing is counted in that case. The texture is not created.
     pub fn select_colour_lut(
         &mut self,
         ctx: &GpuContext,
@@ -2338,7 +2377,8 @@ impl RenderGraph {
             return Err(GraphError::ColourUnavailable);
         }
         let bytes = lut.texture_bytes();
-        let Some(width) = colour_texel_count(bytes) else {
+        let Some(width) = colour_width(bytes, ctx.device().limits().max_texture_dimension_2d)
+        else {
             return Err(GraphError::ColourUnavailable);
         };
         let params = ColourParams::from_lut(lut);
@@ -2394,7 +2434,9 @@ impl RenderGraph {
     /// in which case nothing is written. [`UploadError::NotRebound`] when a
     /// rebuild has not yet recreated the slot. [`UploadError::FormatUnavailable`]
     /// when a new extent cannot be sampled, in which case the old texture
-    /// stays.
+    /// stays. [`UploadError::ExtentUnavailable`] when an axis is longer than
+    /// the device `max_texture_dimension_2d`. The old texture stays and
+    /// `uploads` does not change.
     pub fn upload_stored(
         &mut self,
         ctx: &GpuContext,
@@ -2406,7 +2448,11 @@ impl RenderGraph {
     ) -> Result<(), UploadError> {
         let current = self.remembered(id)?;
         let format = self.remembered_format(id)?;
-        let upload = Upload::from_extent(width, height)?;
+        let upload = Upload::from_extent(
+            width,
+            height,
+            ctx.device().limits().max_texture_dimension_2d,
+        )?;
         upload.accepts(samples)?;
         stored_bytes_per_row(upload.width(), format)?;
         let slot_present = self
@@ -2534,7 +2580,37 @@ impl RenderGraph {
     ) -> Result<(), (Brick, BrickUploadError)> {
         let format = brick_format(brick.sample);
         let features = adapter.wgpu_adapter().get_texture_format_features(format);
-        self.bricks.upload(ctx, format, features, key, brick)
+        self.bricks.upload(ctx, format, features, key, brick)?;
+        // The new texture is a different object. A ray that still holds the
+        // old view would sample the bytes this upload replaced.
+        self.drop_ray_bound_to(key);
+        Ok(())
+    }
+
+    /// Drop every ray that samples `key`, and mark that viewport data-dirty.
+    ///
+    /// `bind_volume_ray` is what builds views of the texture now stored for
+    /// the key. Until that call, the viewport cannot encode, so `tick`
+    /// reports it unavailable and keeps the dirt.
+    fn drop_ray_bound_to(&mut self, key: BrickKey) {
+        for index in 0..self.gpu.len() {
+            let holds = self
+                .gpu
+                .get(index)
+                .and_then(Option::as_ref)
+                .and_then(|slot| slot.ray.as_ref())
+                .is_some_and(|ray| ray.keys.contains(&key));
+            if !holds {
+                continue;
+            }
+            if let Some(slot) = self.gpu.get_mut(index).and_then(Option::as_mut) {
+                slot.ray = None;
+            }
+            let id = ViewportId(u32::try_from(index).unwrap_or(u32::MAX));
+            if let Some(state) = self.registry.state_mut(id) {
+                state.dirty.data = true;
+            }
+        }
     }
 
     /// Bind the bricks in `source` and a residency row for a volume viewport.
@@ -2544,6 +2620,9 @@ impl RenderGraph {
     /// bind from `max(dims)`. A later bind that needs a longer axis returns
     /// [`GraphError::CapacityExhausted`] and keeps the previous binding.
     /// [`volume_ray_admission`] runs before any texture is created.
+    /// A residency row longer than the device `max_texture_dimension_2d` is
+    /// [`GraphError::RayUnavailable`] before that texture is created. The
+    /// previous binding stays.
     ///
     /// # Errors
     ///
@@ -2657,6 +2736,9 @@ impl RenderGraph {
             .wgpu_adapter()
             .get_texture_format_features(wgpu::TextureFormat::R32Uint);
         if !residency_features.allowed_usages.contains(needed) {
+            return Err(GraphError::RayUnavailable);
+        }
+        if !residency_row_fits(capacity, ctx.device().limits().max_texture_dimension_2d) {
             return Err(GraphError::RayUnavailable);
         }
         let texel_count = usize::try_from(capacity).map_err(|_| GraphError::RayUnavailable)?;
@@ -2830,6 +2912,7 @@ impl RenderGraph {
             .get_mut(index)
             .and_then(Option::as_mut)
             .ok_or(GraphError::ViewportNotRebound)?;
+        let keys = bricks.iter().map(|ready| *ready.key).collect();
         let binding = VolumeRayBinding {
             capacity,
             residency,
@@ -2839,6 +2922,7 @@ impl RenderGraph {
             clip: clip_buffer,
             bind_uniform,
             bind_source,
+            keys,
         };
         // The texture and the uniforms stay on the slot. Dropping any of
         // them would free a resource the bind group samples.
@@ -3103,7 +3187,10 @@ impl RenderGraph {
     /// [`progressive::sync_ready_bricks`] before a cut and before a stamp
     /// write. A brick `ready_bricks` omits is not uploaded and is not filled
     /// with zeros. Recovery drops brick textures and their stamps, and the
-    /// next sync uploads ready bricks again.
+    /// next sync uploads ready bricks again. An upload that replaces a
+    /// texture a volume ray is bound to drops that ray. The viewport stays
+    /// data-dirty, and the next tick is unavailable until
+    /// [`RenderGraph::bind_volume_ray`] builds views of the new texture.
     ///
     /// # Errors
     ///
@@ -4014,13 +4101,19 @@ fn stage_slab(
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    let mask_row = aligned_row_bytes(
+    let row_bytes = aligned_row_bytes(
         image
             .width
             .checked_mul(texel)
             .ok_or(UploadError::ExtentOverflow)?,
-    )?;
-    let mask_bytes = slab_mask_bytes(image, channels, mask_row)?;
+    )
+    .ok_or(UploadError::ExtentOverflow)?;
+    let mask_bytes = slab_mask_bytes(image, channels, row_bytes)?;
+    // One copy of the whole volume. A 1 by 1 write rounds that single texel
+    // up to 256 bytes inside the queue, so a wide slab must not upload a
+    // column at a time. An absent column stays the zero fill. The mask is 0
+    // there, and the shader discards that pixel before it loads a value.
+    let value_bytes = slab_value_bytes(image, channels, row_bytes)?;
     ctx.queue().write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &mask,
@@ -4031,7 +4124,7 @@ fn stage_slab(
         &mask_bytes,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(mask_row),
+            bytes_per_row: Some(row_bytes),
             rows_per_image: Some(image.height),
         },
         wgpu::Extent3d {
@@ -4040,41 +4133,25 @@ fn stage_slab(
             depth_or_array_layers: 1,
         },
     );
-    let column_row = aligned_row_bytes(texel)?;
-    let mut row = 0_u32;
-    while row < image.height {
-        let mut column = 0_u32;
-        while column < image.width {
-            if let Some(values_column) = present_column(image, column, row)? {
-                let bytes = slab_column_bytes(&values_column, channels, column_row)?;
-                ctx.queue().write_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &values,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d {
-                            x: column,
-                            y: row,
-                            z: 0,
-                        },
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    &bytes,
-                    wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(column_row),
-                        rows_per_image: Some(1),
-                    },
-                    wgpu::Extent3d {
-                        width: 1,
-                        height: 1,
-                        depth_or_array_layers: image.sample_count,
-                    },
-                );
-            }
-            column = column.checked_add(1).ok_or(UploadError::ExtentOverflow)?;
-        }
-        row = row.checked_add(1).ok_or(UploadError::ExtentOverflow)?;
-    }
+    ctx.queue().write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &values,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &value_bytes,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(row_bytes),
+            rows_per_image: Some(image.height),
+        },
+        wgpu::Extent3d {
+            width: image.width,
+            height: image.height,
+            depth_or_array_layers: image.sample_count,
+        },
+    );
     let values_view = values.create_view(&wgpu::TextureViewDescriptor::default());
     let mask_view = mask.create_view(&wgpu::TextureViewDescriptor::default());
     let bind_uniform = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -4106,7 +4183,7 @@ fn stage_slab(
     })
 }
 
-fn present_column(image: &SlabImage, x: u32, y: u32) -> Result<Option<Vec<f32>>, UploadError> {
+fn column_samples(image: &SlabImage, x: u32, y: u32) -> Result<&[PlaneSample], UploadError> {
     let width = usize::try_from(image.width).map_err(|_| UploadError::ExtentOverflow)?;
     let count = usize::try_from(image.sample_count).map_err(|_| UploadError::ExtentOverflow)?;
     let column = usize::try_from(x).map_err(|_| UploadError::ExtentOverflow)?;
@@ -4121,23 +4198,16 @@ fn present_column(image: &SlabImage, x: u32, y: u32) -> Result<Option<Vec<f32>>,
     let end = start
         .checked_add(count)
         .ok_or(UploadError::ExtentOverflow)?;
-    let Some(samples) = image.samples.get(start..end) else {
-        return Err(UploadError::WrongLength);
-    };
-    if samples
+    image
+        .samples
+        .get(start..end)
+        .ok_or(UploadError::WrongLength)
+}
+
+fn column_present(samples: &[PlaneSample]) -> bool {
+    samples
         .iter()
-        .any(|sample| matches!(sample, PlaneSample::Absent))
-    {
-        return Ok(None);
-    }
-    let mut values = Vec::with_capacity(count);
-    for sample in samples {
-        match *sample {
-            PlaneSample::Present(value) => values.push(value),
-            PlaneSample::Absent => return Ok(None),
-        }
-    }
-    Ok(Some(values))
+        .all(|sample| matches!(sample, PlaneSample::Present(_)))
 }
 
 fn slab_mask_bytes(
@@ -4155,7 +4225,7 @@ fn slab_mask_bytes(
     while y < image.height {
         let mut x = 0_u32;
         while x < image.width {
-            if present_column(image, x, y)?.is_some() {
+            if column_present(column_samples(image, x, y)?) {
                 let x_us = usize::try_from(x).map_err(|_| UploadError::ExtentOverflow)?;
                 let y_us = usize::try_from(y).map_err(|_| UploadError::ExtentOverflow)?;
                 let offset = y_us
@@ -4171,20 +4241,48 @@ fn slab_mask_bytes(
     Ok(bytes)
 }
 
-fn slab_column_bytes(
-    values: &[f32],
+fn slab_value_bytes(
+    image: &SlabImage,
     channels: u32,
     row_bytes: u32,
 ) -> Result<Vec<u8>, UploadError> {
+    let height = usize::try_from(image.height).map_err(|_| UploadError::ExtentOverflow)?;
+    let depth = usize::try_from(image.sample_count).map_err(|_| UploadError::ExtentOverflow)?;
     let row = usize::try_from(row_bytes).map_err(|_| UploadError::ExtentOverflow)?;
-    let len = values
-        .len()
-        .checked_mul(row)
+    let texel = usize::try_from(channels.checked_mul(4).ok_or(UploadError::ExtentOverflow)?)
+        .map_err(|_| UploadError::ExtentOverflow)?;
+    let plane = row.checked_mul(height).ok_or(UploadError::ExtentOverflow)?;
+    let len = plane
+        .checked_mul(depth)
         .ok_or(UploadError::ExtentOverflow)?;
     let mut bytes = vec![0_u8; len];
-    for (index, value) in values.iter().copied().enumerate() {
-        let offset = index.checked_mul(row).ok_or(UploadError::ExtentOverflow)?;
-        write_float_lanes(&mut bytes, offset, channels, value)?;
+    let mut y = 0_u32;
+    while y < image.height {
+        let mut x = 0_u32;
+        while x < image.width {
+            let samples = column_samples(image, x, y)?;
+            if column_present(samples) {
+                let x_us = usize::try_from(x).map_err(|_| UploadError::ExtentOverflow)?;
+                let y_us = usize::try_from(y).map_err(|_| UploadError::ExtentOverflow)?;
+                let across = x_us.checked_mul(texel).ok_or(UploadError::ExtentOverflow)?;
+                let row_at = y_us
+                    .checked_mul(row)
+                    .and_then(|start| start.checked_add(across))
+                    .ok_or(UploadError::ExtentOverflow)?;
+                for (z, sample) in samples.iter().copied().enumerate() {
+                    let PlaneSample::Present(value) = sample else {
+                        return Err(UploadError::WrongLength);
+                    };
+                    let offset = z
+                        .checked_mul(plane)
+                        .and_then(|start| start.checked_add(row_at))
+                        .ok_or(UploadError::ExtentOverflow)?;
+                    write_float_lanes(&mut bytes, offset, channels, value)?;
+                }
+            }
+            x = x.checked_add(1).ok_or(UploadError::ExtentOverflow)?;
+        }
+        y = y.checked_add(1).ok_or(UploadError::ExtentOverflow)?;
     }
     Ok(bytes)
 }
@@ -4215,12 +4313,14 @@ fn write_float_lanes(
     Ok(())
 }
 
-fn aligned_row_bytes(unpadded: u32) -> Result<u32, UploadError> {
+pub(crate) fn aligned_row_bytes(unpadded: u32) -> Option<u32> {
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let room = unpadded
-        .checked_add(align - 1)
-        .ok_or(UploadError::ExtentOverflow)?;
-    Ok(room / align * align)
+    let room = unpadded.checked_add(align - 1)?;
+    Some(room / align * align)
+}
+
+fn residency_row_fits(capacity: u32, max_texture_dimension_2d: u32) -> bool {
+    capacity <= max_texture_dimension_2d
 }
 
 fn colour_texel_count(bytes: &[u8]) -> Option<u32> {
@@ -4228,6 +4328,19 @@ fn colour_texel_count(bytes: &[u8]) -> Option<u32> {
         return None;
     }
     u32::try_from(bytes.len() / 4).ok()
+}
+
+/// Texel width of a colour table that this device can create.
+///
+/// `max_texture_dimension_2d` is [`wgpu::Limits::max_texture_dimension_2d`]
+/// from [`wgpu::Device::limits`]. A wider table is refused before
+/// `create_texture`. A width equal to the limit still fits.
+fn colour_width(bytes: &[u8], max_texture_dimension_2d: u32) -> Option<u32> {
+    let width = colour_texel_count(bytes)?;
+    if width > max_texture_dimension_2d {
+        return None;
+    }
+    Some(width)
 }
 
 fn create_colour_texture(device: &wgpu::Device, width: u32) -> wgpu::Texture {
@@ -4284,8 +4397,9 @@ fn colour_texture_for(
     queue: &wgpu::Queue,
     held: Option<&HeldColour>,
 ) -> wgpu::Texture {
+    let limit = device.limits().max_texture_dimension_2d;
     if let Some((held, width)) =
-        held.and_then(|held| colour_texel_count(&held.bytes).map(|width| (held, width)))
+        held.and_then(|held| colour_width(&held.bytes, limit).map(|width| (held, width)))
     {
         let texture = create_colour_texture(device, width);
         write_colour_lut(queue, &texture, &held.bytes, width);
@@ -4368,12 +4482,144 @@ fn write_stored_samples(
 
 #[cfg(test)]
 mod tests {
-    use super::{CompiledKey, Dirty, Registry, SlotState, pipeline_index};
+    use super::{
+        CompiledKey, Dirty, Registry, SlotState, aligned_row_bytes, pipeline_index,
+        slab_mask_bytes, slab_value_bytes,
+    };
     use crate::caps::Tier;
     use crate::graph::{
         BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RayAxis, RenderGraph,
         Upload, UploadError, ViewportId, VolumePass,
     };
+    use ocelli_volume::{PlaneSample, SlabImage};
+
+    fn slab_of(width: u32, height: u32, depth: u32, absent_at: (u32, u32)) -> SlabImage {
+        let mut samples = Vec::new();
+        let mut y = 0_u32;
+        while y < height {
+            let mut x = 0_u32;
+            while x < width {
+                let mut z = 0_u32;
+                while z < depth {
+                    if (x, y) == absent_at {
+                        samples.push(PlaneSample::Absent);
+                    } else {
+                        let Ok(x_byte) = u8::try_from(x) else {
+                            unreachable!("the fixture column fits in a byte");
+                        };
+                        let Ok(y_byte) = u8::try_from(y) else {
+                            unreachable!("the fixture row fits in a byte");
+                        };
+                        let Ok(z_byte) = u8::try_from(z) else {
+                            unreachable!("the fixture depth fits in a byte");
+                        };
+                        let value =
+                            f32::from(x_byte) + f32::from(y_byte) * 64.0 + f32::from(z_byte) * 0.5;
+                        samples.push(PlaneSample::Present(value));
+                    }
+                    z = z.saturating_add(1);
+                }
+                x = x.saturating_add(1);
+            }
+            y = y.saturating_add(1);
+        }
+        SlabImage {
+            width,
+            height,
+            step_mm: 1.0,
+            index_step: [0.0, 0.0, 1.0],
+            sample_count: depth,
+            samples,
+        }
+    }
+
+    fn f32_at(bytes: &[u8], offset: usize) -> Option<f32> {
+        let end = offset.checked_add(4)?;
+        let chunk = bytes.get(offset..end)?;
+        let Ok(array) = <[u8; 4]>::try_from(chunk) else {
+            return None;
+        };
+        Some(f32::from_le_bytes(array))
+    }
+
+    #[test]
+    fn a_residency_row_past_the_device_limit_does_not_fit() {
+        assert!(super::residency_row_fits(8, 8));
+        assert!(!super::residency_row_fits(9, 8));
+    }
+
+    #[test]
+    fn a_colour_table_wider_than_the_device_limit_is_refused() {
+        let two = [0_u8, 0, 0, 255, 1, 1, 1, 255];
+        assert_eq!(super::colour_width(&two, 2), Some(2));
+        assert_eq!(super::colour_width(&two, 1), None);
+        assert_eq!(super::colour_width(&[], 8), None);
+        assert_eq!(super::colour_width(&[0, 0, 0], 8), None);
+    }
+
+    #[test]
+    fn a_slab_volume_is_one_aligned_upload() {
+        let width = 64_u32;
+        let height = 2_u32;
+        let depth = 3_u32;
+        let image = slab_of(width, height, depth, (1, 0));
+        let Some(row) = aligned_row_bytes(width * 4) else {
+            unreachable!("64 texels of 4 bytes is one aligned row");
+        };
+        assert_eq!(row, 256);
+        let Ok(values) = slab_value_bytes(&image, 1, row) else {
+            unreachable!("the fixture extent fits");
+        };
+        let row_us = usize::try_from(row).unwrap_or(0);
+        let height_us = usize::try_from(height).unwrap_or(0);
+        let depth_us = usize::try_from(depth).unwrap_or(0);
+        let plane = row_us.saturating_mul(height_us);
+        assert_eq!(values.len(), plane.saturating_mul(depth_us));
+        assert_eq!(values.len(), 1536);
+        let present = f32_at(&values, row_us + 3 * 4);
+        assert_eq!(present, Some(3.0 + 64.0));
+        let deep = f32_at(&values, plane.saturating_mul(2) + row_us + 3 * 4);
+        assert_eq!(deep, Some(3.0 + 64.0 + 1.0));
+        assert_eq!(f32_at(&values, 4), Some(0.0));
+        assert_eq!(f32_at(&values, plane + 4), Some(0.0));
+        assert_eq!(f32_at(&values, plane.saturating_mul(2) + 4), Some(0.0));
+        let Ok(mask) = slab_mask_bytes(&image, 1, row) else {
+            unreachable!("the fixture extent fits");
+        };
+        assert_eq!(mask.len(), plane);
+        assert_eq!(f32_at(&mask, 0), Some(1.0));
+        assert_eq!(f32_at(&mask, 4), Some(0.0));
+        assert_eq!(f32_at(&mask, row_us + 4), Some(1.0));
+        let narrow = slab_of(2, 1, 2, (u32::MAX, u32::MAX));
+        let Some(narrow_row) = aligned_row_bytes(16) else {
+            unreachable!("two rg texels still round up to the copy alignment");
+        };
+        assert_eq!(narrow_row, 256);
+        let Ok(narrow_values) = slab_value_bytes(&narrow, 2, narrow_row) else {
+            unreachable!("the narrow fixture fits");
+        };
+        assert_eq!(narrow_values.len(), 512);
+        assert_eq!(f32_at(&narrow_values, 8), Some(1.0));
+        assert_eq!(f32_at(&narrow_values, 12), Some(0.0));
+        assert_eq!(f32_at(&narrow_values, 264), Some(1.5));
+        let mixed = SlabImage {
+            width: 1,
+            height: 1,
+            step_mm: 1.0,
+            index_step: [0.0, 0.0, 1.0],
+            sample_count: 2,
+            samples: vec![PlaneSample::Present(9.0), PlaneSample::Absent],
+        };
+        let Ok(mixed_values) = slab_value_bytes(&mixed, 1, 256) else {
+            unreachable!("one texel fits");
+        };
+        let Ok(mixed_mask) = slab_mask_bytes(&mixed, 1, 256) else {
+            unreachable!("one texel fits");
+        };
+        assert_eq!(f32_at(&mixed_values, 0), Some(0.0));
+        assert_eq!(f32_at(&mixed_values, 256), Some(0.0));
+        assert_eq!(f32_at(&mixed_mask, 0), Some(0.0));
+    }
 
     fn any_volume() -> VolumePass {
         VolumePass {

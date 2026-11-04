@@ -189,6 +189,98 @@ fn the_lossless_syntaxes_refuse_an_irreversible_codestream() -> TestResult {
 }
 
 #[test]
+fn lossless_refuses_a_component_override_and_a_tile_part_cod() -> TestResult {
+    let source = include_bytes!("fixtures/htj2k_corpus_lossless.j2c");
+    let desc = corpus_desc()?;
+    let cod = source
+        .windows(2)
+        .position(|window| window == [0xff, 0x52])
+        .ok_or("COD marker is absent")?;
+    let mut coc = source.to_vec();
+    *coc.get_mut(cod + 1).ok_or("COD marker is truncated")? = 0x53;
+    let mut out = vec![0xa5; desc.output_len()];
+    assert_eq!(
+        Htj2kDecoder::lossless().decode(&coc, &desc, &mut out),
+        Err(CodecError::UnsupportedPixelFormat)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+
+    let sod = source
+        .windows(2)
+        .position(|window| window == [0xff, 0x93])
+        .ok_or("SOD marker is absent")?;
+    let mut tile_cod = source.to_vec();
+    tile_cod.splice(
+        sod..sod,
+        [0xff, 0x52, 0x00, 0x0c, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    );
+    let mut out = vec![0xa5; desc.output_len()];
+    assert_eq!(
+        Htj2kDecoder::lossless().decode(&tile_cod, &desc, &mut out),
+        Err(CodecError::UnsupportedPixelFormat)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+    Ok(())
+}
+
+#[test]
+fn lossless_refuses_quantization_and_rpcl_refuses_a_progression_change() -> TestResult {
+    // ISO/IEC 15444-1 A.6.4. Style 1 is scalar derived. A reversible COD does
+    // not make that quantizer lossless.
+    let source = include_bytes!("fixtures/htj2k_corpus_lossless.j2c");
+    let desc = corpus_desc()?;
+    let qcd = source
+        .windows(2)
+        .position(|window| window == [0xff, 0x5c])
+        .ok_or("QCD marker is absent")?;
+    let mut quantized = source.to_vec();
+    let style = quantized
+        .get_mut(qcd + 4)
+        .ok_or("QCD payload is truncated")?;
+    *style = (*style & 0xe0) | 1;
+    let mut out = vec![0xa5; desc.output_len()];
+    assert_eq!(
+        Htj2kDecoder::lossless().decode(&quantized, &desc, &mut out),
+        Err(CodecError::FrameMismatch)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+
+    // ISO/IEC 15444-1 A.6.6. A POC replaces the COD progression order. `.202`
+    // requires RPCL. `.201` does not, so the same marker is not that refusal.
+    let rpcl = include_bytes!("fixtures/htj2k_corpus_lossless_rpcl.j2c");
+    let sot = rpcl
+        .windows(2)
+        .position(|window| window == [0xff, 0x90])
+        .ok_or("SOT marker is absent")?;
+    let mut main_poc = rpcl.to_vec();
+    main_poc.splice(sot..sot, [0xff, 0x5f, 0x00, 0x04, 0, 0]);
+    let mut out = vec![0xa5; desc.output_len()];
+    assert_eq!(
+        Htj2kDecoder::lossless_rpcl().decode(&main_poc, &desc, &mut out),
+        Err(CodecError::FrameMismatch)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+    assert_ne!(
+        Htj2kDecoder::lossless().decode(&main_poc, &desc, &mut out),
+        Err(CodecError::FrameMismatch)
+    );
+
+    let sod = rpcl
+        .windows(2)
+        .position(|window| window == [0xff, 0x93])
+        .ok_or("SOD marker is absent")?;
+    let mut tile_poc = rpcl.to_vec();
+    tile_poc.splice(sod..sod, [0xff, 0x5f, 0x00, 0x04, 0, 0]);
+    let mut out = vec![0xa5; desc.output_len()];
+    assert_eq!(
+        Htj2kDecoder::lossless_rpcl().decode(&tile_poc, &desc, &mut out),
+        Err(CodecError::FrameMismatch)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+    Ok(())
+}
+
+#[test]
 fn a_multi_component_codestream_is_refused_by_the_header_check() -> TestResult {
     // No multi-component HTJ2K corpus row exists, and the descriptor check
     // cannot reach this condition: a three-sample descriptor is refused before

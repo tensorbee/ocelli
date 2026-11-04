@@ -5,7 +5,8 @@
 //! PS3.3 C.8.20.2 keeps segment 0 as background, and writing 0 erases.
 
 use crate::brush::{
-    disk_contains, index_in_span, number_in_span, require_stack, span_inverted, strictly_negative,
+    disk_contains, index_in_span, number_in_span, require_stack, span_inverted, squared_radius,
+    strictly_negative,
 };
 use crate::labelmap::LabelGrid;
 
@@ -59,7 +60,8 @@ pub struct ThresholdCoverage {
 /// Why a threshold wrote nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThresholdError {
-    /// A parameter is not finite, or a value inside the shape is not finite.
+    /// A parameter is not finite, the squared radius cannot be compared, or a
+    /// value inside the shape is not finite.
     Frame,
     /// The span is inverted, the radius is negative, or the buffers disagree.
     Degenerate,
@@ -72,8 +74,8 @@ pub enum ThresholdError {
 ///
 /// # Errors
 ///
-/// [`ThresholdError::Frame`] when a parameter is not finite, or a value
-/// inside the shape is not finite.
+/// [`ThresholdError::Frame`] when a parameter is not finite, the squared
+/// radius cannot be compared, or a value inside the shape is not finite.
 /// [`ThresholdError::Degenerate`] when the span is inverted, the radius is
 /// negative, or the grid and the value buffer are not one rectangle.
 pub fn threshold_roi(
@@ -110,7 +112,9 @@ pub fn threshold_roi(
             if strictly_negative(radius) {
                 return Err(ThresholdError::Degenerate);
             }
-            let radius_sq = radius * radius;
+            let Some(radius_sq) = squared_radius(radius) else {
+                return Err(ThresholdError::Frame);
+            };
             paint(grid, values, roi.start, roi.end, roi.segment, |x, y| {
                 disk_contains(center_x, center_y, radius_sq, x, y)
             })

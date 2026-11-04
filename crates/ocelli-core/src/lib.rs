@@ -14,10 +14,12 @@
 #![cfg_attr(not(test), no_std)]
 
 pub mod error;
+pub mod exact_f32;
 pub mod space;
 pub mod value;
 
 pub use error::{ErrorCode, LogLevel, Record, RecordError, Severity};
+pub use exact_f32::{ExactF32Error, ExactF32Integer, exact_f32_integer};
 pub use space::{Canvas, Index, Pt, Transform, World};
 pub use value::{Display, Modality, Stored};
 

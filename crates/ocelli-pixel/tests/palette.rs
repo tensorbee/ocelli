@@ -113,7 +113,7 @@ fn the_first_mapped_stored_value_offsets_the_whole_table() {
     ] {
         let mut destination = [Rgb::BLACK];
         assert_eq!(
-            transform.map_into(&[Stored(stored)], &mut destination),
+            transform.map_into(&[Stored(stored)], &mut destination, 1),
             Ok(()),
             "{why}"
         );
@@ -134,8 +134,8 @@ fn ignoring_the_offset_shifts_the_whole_colour_map() {
 
     let mut with = [Rgb::BLACK];
     let mut without = [Rgb::BLACK];
-    assert_eq!(offset.map_into(&[Stored(10.0)], &mut with), Ok(()));
-    assert_eq!(no_offset.map_into(&[Stored(10.0)], &mut without), Ok(()));
+    assert_eq!(offset.map_into(&[Stored(10.0)], &mut with, 1), Ok(()));
+    assert_eq!(no_offset.map_into(&[Stored(10.0)], &mut without, 1), Ok(()));
 
     assert_rgb_close(with[0], (0.0, 255.0, 0.0));
     assert_rgb_close(without[0], (10.0, 245.0, 30.0));
@@ -164,7 +164,8 @@ fn a_declared_entry_count_of_zero_means_sixty_five_thousand_five_hundred_and_thi
     assert_eq!(
         transform.map_into(
             &[Stored(0.0), Stored(40_000.0), Stored(65_535.0)],
-            &mut destination
+            &mut destination,
+            3,
         ),
         Ok(())
     );
@@ -212,7 +213,7 @@ fn bits_per_entry_comes_from_the_descriptor_and_not_from_the_data() {
     ))));
     let mut destination = [Rgb::BLACK];
     assert_eq!(
-        transform.map_into(&[Stored(255.0)], &mut destination),
+        transform.map_into(&[Stored(255.0)], &mut destination, 1),
         Ok(())
     );
     assert_rgb_close(destination[0], (65_535.0, 65_535.0, 65_535.0));
@@ -281,7 +282,7 @@ fn mapping_refuses_a_length_mismatch_before_writing() {
         b: 77.0,
     }];
     assert_eq!(
-        transform.map_into(&[Stored(10.0), Stored(11.0)], &mut destination),
+        transform.map_into(&[Stored(10.0), Stored(11.0)], &mut destination, 1,),
         Err(PixelError::SourceLength)
     );
     assert_eq!(destination[0].r.to_bits(), 77.0_f32.to_bits());

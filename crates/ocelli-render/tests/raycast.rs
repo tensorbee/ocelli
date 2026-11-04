@@ -558,6 +558,120 @@ fn draw_ray_table(
 
 #[test]
 #[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_replaced_brick_is_not_sampled_until_the_ray_is_bound_again() {
+    // PS3.3 C.11.2.1.3.2 LINEAR_EXACT, centre 127.5, width 255.
+    // Stored 0 maps to display 0. Stored 255 maps to display 255.
+    // Flat opacity is 0.5. Front to back accumulates
+    // `(1 - A) * colour * alpha` and `(1 - A) * alpha`.
+    // Near 0 and far 255: colour `0.5 * 1 * 0.5 = 0.25`, alpha `0.75`.
+    // Both 255: colour `0.5 + 0.5 * 0.5 = 0.75`, alpha `0.75`.
+    let Some(mut fixture) = open_ray() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let mut volume = place_pair(0, 255);
+    let synced =
+        fixture
+            .graph
+            .sync_volume(&fixture.context, &fixture.adapter, VolumeId(1), &volume);
+    assert!(synced.is_ok());
+    let chain = exact_chain(127.5, 255.0);
+    let (view, texture) = target(fixture.context.device());
+    let source = dummy_source(fixture.context.device());
+    let viewport = match fixture.graph.register(
+        &fixture.context,
+        view,
+        source,
+        Pass::VolumeRaycast(VolumePass {
+            blend: BlendMode::Composite,
+            voi: params(&chain),
+            axis: RayAxis::Slice,
+            from_far: false,
+        }),
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("one viewport fits"),
+    };
+    let ready = volume.ready_bricks();
+    let Some(coord) = ready.first().copied() else {
+        unreachable!("one ready brick");
+    };
+    let key = key_at(1, coord);
+    let bricks = [VolumeBrick { key: &key, coord }];
+    let source = VolumeRaySource {
+        bricks: &bricks,
+        edge: volume.brick_grid().edge,
+        dims: volume.dims,
+        flags: &[1, 1],
+        sampled_limit: fixture.limit,
+        spacing_mm: [1.0, 1.0, 1.0],
+        origin_mm: ORIGIN_MM,
+        direction: IDENTITY_DIRECTION,
+    };
+    assert!(
+        fixture
+            .graph
+            .bind_volume_ray(&fixture.context, &fixture.adapter, viewport, source)
+            .is_ok()
+    );
+    assert_eq!(
+        fixture.graph.tick(&fixture.context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    assert_ray(read_pixel(&fixture.context, &texture), 0.25, 0.75);
+    assert_eq!(fixture.graph.tick(&fixture.context), FrameOutcome::Noop);
+    assert!(volume.place(0, &[255]).is_ok());
+    let before = fixture.graph.brick_uploads();
+    let replaced =
+        fixture
+            .graph
+            .sync_volume(&fixture.context, &fixture.adapter, VolumeId(1), &volume);
+    let Ok(report) = replaced else {
+        unreachable!("a replaced present slice is still a ready brick");
+    };
+    assert_eq!(report.uploaded, 1);
+    assert_eq!(fixture.graph.brick_uploads(), before + 1);
+    // The old view must not be drawn. The tick stays unavailable until bind.
+    assert_eq!(
+        fixture.graph.tick(&fixture.context),
+        FrameOutcome::Unavailable { viewport }
+    );
+    let dirt = fixture
+        .graph
+        .dirty(viewport)
+        .unwrap_or(ocelli_render::Dirty::default());
+    assert!(dirt.data);
+    let source = VolumeRaySource {
+        bricks: &bricks,
+        edge: volume.brick_grid().edge,
+        dims: volume.dims,
+        flags: &[1, 1],
+        sampled_limit: fixture.limit,
+        spacing_mm: [1.0, 1.0, 1.0],
+        origin_mm: ORIGIN_MM,
+        direction: IDENTITY_DIRECTION,
+    };
+    assert!(
+        fixture
+            .graph
+            .bind_volume_ray(&fixture.context, &fixture.adapter, viewport, source)
+            .is_ok()
+    );
+    assert_eq!(
+        fixture.graph.tick(&fixture.context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    assert_ray(read_pixel(&fixture.context, &texture), 0.75, 0.75);
+}
+
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
 fn two_resident_steps_match_the_integral() {
     let Some(pixel) = draw_ray(false, (0, 200), [1, 1]) else {
         println!("this machine resolved tier C, so there is no device");

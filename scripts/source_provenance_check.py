@@ -86,30 +86,55 @@ POLICY_FILES = {
 }
 
 
-def tracked_files(staged: bool) -> list[Path]:
-    cmd = (["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"]
-           if staged else ["git", "ls-files"])
-    try:
-        out = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
-                             check=True).stdout
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return []
-    files = []
-    for name in out.splitlines():
-        path = ROOT / name
-        if path.is_file() and (path.suffix in TEXT_SUFFIXES
-                               or path.name in MANIFESTS):
-            files.append(path)
-    return files
+def listed_names(staged: bool) -> list[str]:
+    # T is a type change, such as a symlink becoming a file. That new blob
+    # is what the commit records. D stays out: a deletion has no blob.
+    command = (["git", "diff", "--cached", "--name-only", "-z",
+                "--diff-filter=ACMRT"] if staged else ["git", "ls-files", "-z"])
+    completed = subprocess.run(command, cwd=ROOT, capture_output=True,
+                               text=True, check=True)
+    return [name for name in completed.stdout.split("\0") if name]
 
 
-def check_file(path: Path) -> list[str]:
-    rel = path.relative_to(ROOT).as_posix()
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (UnicodeDecodeError, OSError):
-        return []
+def readable(name: str) -> bool:
+    path = Path(name)
+    return path.suffix in TEXT_SUFFIXES or path.name in MANIFESTS
 
+
+def load_text(name: str, staged: bool) -> str | None:
+    # Staged mode reads the index blob. A reverted worktree copy is not the
+    # commit. Tracked mode reads the worktree file when it is present.
+    if staged:
+        # The stage is explicit. `:0:name` is stage 0 of `name`, so a path
+        # whose name is `0:name` has to be written `:0:0:name`.
+        completed = subprocess.run(["git", "show", f":0:{name}"], cwd=ROOT,
+                                   capture_output=True, text=True, check=True)
+        return completed.stdout
+    path = ROOT / name
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def texts(staged: bool) -> tuple[list[tuple[str, str]], list[str]]:
+    found: list[tuple[str, str]] = []
+    problems: list[str] = []
+    for name in listed_names(staged):
+        if not readable(name):
+            continue
+        try:
+            text = load_text(name, staged)
+        except (subprocess.CalledProcessError, OSError, UnicodeError):
+            problems.append(f"{name}: source is unreadable")
+            continue
+        if text is None:
+            continue
+        found.append((name, text))
+    return found, problems
+
+
+def check_text(rel: str, text: str) -> list[str]:
+    path = Path(rel)
     problems = []
 
     for pattern in BLOCKED_URLS:
@@ -146,8 +171,14 @@ def main() -> int:
     parser.add_argument("--staged", action="store_true")
     args = parser.parse_args()
 
-    files = tracked_files(args.staged)
-    problems = [p for f in files for p in check_file(f)]
+    try:
+        files, unread = texts(args.staged)
+    except (subprocess.CalledProcessError, OSError, UnicodeError):
+        print("FAIL: source-provenance inventory is unavailable")
+        return 1
+    problems = list(unread)
+    problems.extend(problem for rel, text in files
+                    for problem in check_text(rel, text))
 
     if problems:
         print("FAIL: source-provenance policy violated "

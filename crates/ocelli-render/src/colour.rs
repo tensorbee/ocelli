@@ -10,7 +10,7 @@
 //! per deviation D-23, and the shader does not walk the descriptor.
 
 use bytemuck::{Pod, Zeroable};
-use ocelli_core::{Display, Stored};
+use ocelli_core::{Display, Stored, exact_f32_integer};
 use ocelli_pixel::{
     ColorTransform, DecodedLayout, DecodedPhotometric, LutChain, PaletteColorLut,
     PhotometricInterpretation, PixelDataEncoding, PlanarConfiguration, Rgb, SampleLayout,
@@ -119,8 +119,10 @@ impl ColourLut {
 
     /// Bake palette texels with [`ColorTransform::map_into`].
     ///
-    /// Texel `i` is the lookup of stored value `origin + i`. The shader
-    /// subtracts `origin` and does not read the descriptor.
+    /// Texel `i` is the lookup of stored value `origin + i`. `origin` is the
+    /// first mapped input and the last texel is the last entry. The table
+    /// does not extend to stored 0. The shader subtracts `origin` and clamps
+    /// an index outside the table onto an endpoint.
     ///
     /// # Errors
     ///
@@ -204,6 +206,21 @@ impl ColourLut {
         stored: &[Stored],
         destination: &mut [Rgb],
     ) -> Result<(), ColourLutError> {
+        self.map_preset(chain, stored, destination, linear_byte_ramp(chain))
+    }
+
+    /// Same bytes as [`Self::map_preset_into`].
+    ///
+    /// `ramp` is the draw's one decision from [`linear_byte_ramp`]. A caller
+    /// that shades many texels passes that decision in, so the window is not
+    /// read again for each texel.
+    pub(crate) fn map_preset(
+        &self,
+        chain: &LutChain,
+        stored: &[Stored],
+        destination: &mut [Rgb],
+        ramp: bool,
+    ) -> Result<(), ColourLutError> {
         let bytes = match &self.kind {
             ColourKind::Preset { bytes, .. } => bytes.as_slice(),
             ColourKind::Palette { .. } => return Err(ColourLutError::Unavailable),
@@ -218,7 +235,7 @@ impl ColourLut {
                 .map_into(&[sample], &mut display)
                 .map_err(|_| ColourLutError::Length)?;
             let shown = display.first().copied().unwrap_or(Display(0.0));
-            let index = preset_index(self, chain, shown.0, last);
+            let index = preset_index(self, chain, shown.0, last, ramp);
             *output = rgb_at(bytes, index);
         }
         Ok(())
@@ -276,7 +293,7 @@ fn address_span(palette: &PaletteColorLut) -> Result<(i32, i32), ColourLutError>
     let last = first
         .checked_add(count.checked_sub(1).ok_or(ColourLutError::Unavailable)?)
         .ok_or(ColourLutError::Unavailable)?;
-    Ok((first.min(0), last.max(0)))
+    Ok((first, last))
 }
 
 fn resolve_palette(
@@ -325,7 +342,7 @@ fn bake(transform: &ColorTransform, origin: i32, end: i32) -> Result<Vec<u8>, Co
         let sample = f32_from_i32(stored).ok_or(ColourLutError::Unavailable)?;
         let mut destination = [Rgb::BLACK];
         transform
-            .map_into(&[Stored(sample)], &mut destination)
+            .map_into(&[Stored(sample)], &mut destination, 1)
             .map_err(|_| ColourLutError::Unavailable)?;
         let rgb = destination.first().copied().unwrap_or(Rgb::BLACK);
         let channels = [
@@ -351,22 +368,26 @@ fn bake(transform: &ColorTransform, origin: i32, end: i32) -> Result<Vec<u8>, Co
 /// Nearest-byte of the continuous display misses that table by one code on
 /// the values the signed-mean bound can see. `SIGMOID` is not this ramp.
 /// A VOI LUT sequence is not this ramp. `stops` keeps the 256-entry address.
-fn preset_index(lut: &ColourLut, chain: &LutChain, display: f32, last: u32) -> u32 {
-    if lut.preset_id() == Some(PresetId::Grey) && linear_byte_ramp(chain) {
+fn preset_index(lut: &ColourLut, chain: &LutChain, display: f32, last: u32, ramp: bool) -> u32 {
+    if lut.preset_id() == Some(PresetId::Grey) && ramp {
         reference_ramp_index(display, chain.inverts())
     } else {
         display_index(display, last)
     }
 }
 
-fn linear_byte_ramp(chain: &LutChain) -> bool {
+pub(crate) fn linear_byte_ramp(chain: &LutChain) -> bool {
     let function = chain.voi().window().map(|(_, _, function)| function);
     let linear = matches!(
         function,
         Some(VoiFunction::Linear | VoiFunction::LinearExact)
     );
     let (ymin, ymax) = chain.voi().output_range();
-    linear && ymin.to_bits() == 0.0_f32.to_bits() && (ymax - 255.0).to_bits() == 0.0_f32.to_bits()
+    // Either sign of zero is zero. The shader uses `==`, which has the same
+    // answer. Comparing the stored bits would miss a negative-zero floor.
+    let floor_is_zero = (ymin.to_bits() & !0x8000_0000) == 0;
+    let ceil_is_byte = ymax.to_bits() == 255.0_f32.to_bits();
+    linear && floor_is_zero && ceil_is_byte
 }
 
 /// Byte stored by the 1024-wide ramp. `inverted` complements the table entry,
@@ -392,7 +413,14 @@ fn reference_ramp_index(display: f32, inverted: bool) -> u32 {
     }
     let bin = (coord * width).floor() / 1023.0;
     let sample = if inverted { 1.0 - bin } else { bin };
-    u32::from(byte_from_channel(round_half_even(sample * 255.0)).unwrap_or(0))
+    // `round_half_even` already returned a whole number in 0 to 255.
+    // Reading that integer replaces a walk over every byte code.
+    let rounded = round_half_even(sample * 255.0);
+    let byte = match exact_f32_integer(rounded) {
+        Ok(integer) => u8::try_from(integer.magnitude).unwrap_or(0),
+        Err(_) => 0,
+    };
+    u32::from(byte)
 }
 
 /// Round half to even. `Uint8ClampedArray` uses that rule when the image
@@ -427,10 +455,12 @@ fn round_half_even(value: f32) -> f32 {
 /// it back through an 8-bit texture, so it rounds. Deviation D-11 makes that
 /// reference the definition of correct, and truncation darkens every frame by
 /// about half a display code on the informative region, which HLD 25.1's
-/// signed-mean bound of `0.1` rejects. `byte_from_channel` already rounds for
-/// the colour path, so truncating here was also an internal inconsistency.
-/// `table_index` in `graph.rs` applies the same rule in WGSL.
-pub(crate) fn display_index(display: f32, last: u32) -> u32 {
+/// signed-mean bound of `0.1` rejects. `table_index` in `graph.rs` adds `0.5`
+/// in f32 the same way and then truncates. The tier C channel store does not
+/// use this addition. It compares with the exact half, so the float just
+/// below a tie stays on the lower byte. Adding `0.5` in f32 can carry that
+/// float onto the next code.
+pub fn display_index(display: f32, last: u32) -> u32 {
     if !display.is_finite() || display <= 0.0 {
         return 0;
     }
@@ -600,6 +630,37 @@ mod tests {
         let first = stored.first().copied().unwrap_or(Stored(0.0));
         let nearest = super::display_index(chain.apply(first).0, 255);
         assert_eq!(nearest, 197);
+    }
+
+    #[test]
+    fn a_negative_zero_floor_still_uses_the_reference_ramp() {
+        use ocelli_core::Stored;
+        use ocelli_pixel::{
+            LutChain, ModalityTransform, PhotometricInterpretation, PresentationLutEvidence,
+            VoiFunction, VoiTransform,
+        };
+
+        let lut = grey_lut(PhotometricInterpretation::Monochrome2);
+        let modality = ModalityTransform::new(None, Some(1.0), Some(0.0));
+        let voi = VoiTransform::new(None, &[40.0], &[400.0], 0, VoiFunction::Linear, -0.0, 255.0);
+        let (Ok(modality), Ok(voi)) = (modality, voi) else {
+            unreachable!("40/400 with a negative-zero floor is a legal window");
+        };
+        let chain = LutChain::new(
+            modality,
+            voi,
+            PhotometricInterpretation::Monochrome2,
+            PresentationLutEvidence::Absent,
+        );
+        let Ok(chain) = chain else {
+            unreachable!("the chain accepts this window");
+        };
+        let mut destination = [ocelli_pixel::Rgb::BLACK; 1];
+        assert!(
+            lut.map_preset_into(&chain, &[Stored(149.0)], &mut destination)
+                .is_ok()
+        );
+        assert_eq!(channel_byte(&destination, 0), 198);
     }
 
     #[test]
