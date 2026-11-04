@@ -9,6 +9,7 @@ mod interpolate;
 mod overlay;
 mod reply;
 mod series;
+mod tilt;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod http;

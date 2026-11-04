@@ -1020,11 +1020,13 @@ dependencies = [
 name = "ocelli-example-server"
 version = "0.1.0"
 dependencies = [
+ "ocelli-cache",
  "ocelli-core",
  "ocelli-dicom",
  "ocelli-geom",
  "ocelli-pixel",
  "ocelli-render",
+ "ocelli-volume",
 ]
 
 [[package]]

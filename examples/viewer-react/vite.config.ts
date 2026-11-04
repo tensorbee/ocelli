@@ -21,6 +21,7 @@ export default defineConfig({
             "/overlay": { target: helper },
             "/interpolate": { target: helper },
             "/calibration": { target: helper },
+            "/tilt": { target: helper },
           },
   },
   // The wasm module lands in crates/ocelli-wasm/pkg via `bin/ocelli.sh wasm`.

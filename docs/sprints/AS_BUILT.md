@@ -4891,3 +4891,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/key-object.md`, the public-api paragraph, and the rows in `docs/lld/README.md`.
 **Deviations from the design plan.** The plan names `writeSecondaryCapture` and not a reader. `readSecondaryCapture` is exported because the example page has no dcmjs dependency and must show the four pixel bytes.
 **Notes for future sessions.** Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer Claude Code, read only, with no shell. A template rewrite to 1500, a column count of 65536, a disabled pad strip and a non-zero pad each went red and were restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-197, volume from a gantry-tilted stack, completed 2026-11-04
+
+**What was built.** `Volume::assemble` still returns `ShearedVolume` for a stack whose step is 3 mm along the normal and 3 mm across the row axis. `TiltedVolume::assemble` keeps that stack. The store has the source slice dimensions and is cleared. The lateral step, the projected spacing, the sort, the origin and the direction are stored. An orthogonal stack stays on `Volume::assemble`. The example page shows the orthogonal refusal, spacing 3 mm and lateral length 3 mm.
+
+**HLD sections implemented.** `docs/hld/` describes volume construction and does not give a second constructor for a tilted stack. F-020 and F-049 already record that tilt is geometry and not the gantry tilt tag. The local rules are `.claude/plans/F-197-design.md`.
+**Deviations.** none
+**Crates / packages modified.** `crates/ocelli-volume`, `examples/example-server`, `examples/viewer-react`.
+**Tests added.** Ten tests in `crates/ocelli-volume/tests/tilted.rs`. Two route tests in `examples/example-server`. One page test in `examples/viewer-react/src/tilt.test.tsx`.
+**Fixture provenance.** Image Position Patient for slice k is `(3k, 0, 3k)` millimetres. The row cosine is `(1, 0, 0)` and the column cosine is `(0, 1, 0)`. DICOM PS3.3 C.7.6.2.1.1 takes the normal as their cross product, `(0, 0, 1)`. The inter-slice vector is `(3, 0, 3)`. The projected gap is 3 mm and the lateral part is `(3, 0, 0)`. No gantry tilt tag is present. A gap of 3.031 mm against 3 mm is past 0.5 percent. A gap of 3.02 mm is not. A projected separation of 5e-10 mm is inside the 1e-9 mm duplicate bound. A separation of 1e-8 mm is not.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+**Tier coverage.** Tiers A, B and C are not applicable. This story does not draw.
+**LLD updated.** One paragraph in `docs/lld/volumes.md`, and the volumes row in `docs/lld/README.md`. The sentence that `Volume::assemble` refuses shear stays true.
+**Deviations from the design plan.** The plan names the voxel buffer, the projected spacing and the lateral step. The value also keeps `order`, `origin` and `direction`, which the shared sort already computed, so a later fill does not project the positions again.
+**Notes for future sessions.** Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer Claude Code, read only, with no shell. Moving the lateral bound to 1e-3, the spacing factor to 0.006 and the duplicate bound to 1e-6 each went red and was restored. The agreement bound stays at the approved 1e-6 mm. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish. The live page was not clicked.

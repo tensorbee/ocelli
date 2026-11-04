@@ -982,6 +982,95 @@ function DocumentPanel() {
   );
 }
 
+interface TiltView {
+  orthogonal: string;
+  spacingMm: number;
+  lateralMm: number;
+}
+
+function readTilt(value: unknown): TiltView | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.orthogonal !== "sheared" ||
+    typeof record.spacingMm !== "number" ||
+    typeof record.lateralMm !== "number"
+  ) {
+    return null;
+  }
+  return {
+    orthogonal: record.orthogonal,
+    spacingMm: record.spacingMm,
+    lateralMm: record.lateralMm,
+  };
+}
+
+function TiltPanel() {
+  const [view, setView] = useState<TiltView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function run(): Promise<void> {
+    setPending(true);
+    setProblem(null);
+    try {
+      const response = await fetch("/tilt", {
+        method: "POST",
+        body: "synthetic",
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        setProblem("The tilt request was refused.");
+        return;
+      }
+      const parsed: unknown = JSON.parse(text);
+      const next = readTilt(parsed);
+      if (next === null) {
+        setProblem("The tilt response could not be read.");
+        return;
+      }
+      setView(next);
+    } catch {
+      setProblem("The tilt helper is not running.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section>
+      <h2>Tilted volume</h2>
+      <p>
+        The synthetic button sends a stack that steps 3 mm along the normal
+        and 3 mm across the row axis. Orthogonal assembly refuses that stack.
+        Tilted assembly keeps the projected spacing and the lateral length.
+        The pixels stay in the slices they arrived in.
+      </p>
+      <p>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            void run();
+          }}
+        >
+          Synthetic tilt
+        </button>
+      </p>
+      {problem !== null && <p>{problem}</p>}
+      {view !== null && (
+        <div>
+          <p>Orthogonal {view.orthogonal}</p>
+          <p>Spacing {view.spacingMm.toString()} mm</p>
+          <p>Lateral {view.lateralMm.toString()} mm</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function App() {
   const ready = coreAvailable();
   const session = sessionFromModule();
@@ -1017,6 +1106,7 @@ export function App() {
       <InterpolatePanel />
       <CalibrationPanel />
       <DocumentPanel />
+      <TiltPanel />
 
       <section>
         <h2>Stack viewport</h2>

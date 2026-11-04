@@ -9,6 +9,7 @@ use crate::interpolate::interpolate_reply;
 use crate::overlay::overlay_reply;
 use crate::reply::reply_body;
 use crate::series::series_reply;
+use crate::tilt::tilt_reply;
 
 const HEADER_CAP: usize = 16 * 1024;
 /// One posted file. The cap matches the folder page.
@@ -82,6 +83,8 @@ fn route(loaded: &Loaded) -> Reply {
         interpolate_reply(&loaded.body)
     } else if loaded.path == "/calibration" {
         calibration_reply(&loaded.body)
+    } else if loaded.path == "/tilt" {
+        tilt_reply(&loaded.body)
     } else {
         reply_body(&loaded.body, loaded.frame)
     };
@@ -303,6 +306,7 @@ fn open_path(path: &str) -> bool {
         || path == "/overlay"
         || path == "/interpolate"
         || path == "/calibration"
+        || path == "/tilt"
 }
 
 fn body_messages(path: &str) -> (&'static str, &'static str) {
@@ -325,6 +329,11 @@ fn body_messages(path: &str) -> (&'static str, &'static str) {
         (
             "the calibration request is too large",
             "the calibration request has no length",
+        )
+    } else if path == "/tilt" {
+        (
+            "the tilt request is too large",
+            "the tilt request has no length",
         )
     } else {
         (
@@ -528,5 +537,23 @@ mod tests {
         assert!(response.contains("\"suvBsa\":90,"));
         assert!(response.contains("\"lengthRatio\":2,"));
         assert!(response.contains("\"contourVolume\":150}"));
+    }
+
+    #[test]
+    fn tilt_options_is_empty() {
+        let request = b"OPTIONS /tilt HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        let response = exchange(request);
+        assert!(response.contains("204"));
+    }
+
+    #[test]
+    fn synthetic_tilt_post_reports_the_refusal_and_the_spacing() {
+        let request =
+            b"POST /tilt HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 9\r\n\r\nsynthetic";
+        let response = exchange(request);
+        assert!(response.contains("HTTP/1.1 200"));
+        assert!(response.contains("\"orthogonal\":\"sheared\""));
+        assert!(response.contains("\"spacingMm\":3,"));
+        assert!(response.contains("\"lateralMm\":3}"));
     }
 }
