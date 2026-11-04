@@ -242,6 +242,25 @@ impl ColourLut {
     }
 }
 
+/// One preset texel for a display value the chain has already produced.
+///
+/// # Errors
+///
+/// [`ColourLutError::Unavailable`] for a palette table.
+pub(crate) fn preset_rgb(
+    lut: &ColourLut,
+    chain: &LutChain,
+    display: f32,
+    ramp: bool,
+) -> Result<Rgb, ColourLutError> {
+    let bytes = match &lut.kind {
+        ColourKind::Preset { bytes, .. } => bytes.as_slice(),
+        ColourKind::Palette { .. } => return Err(ColourLutError::Unavailable),
+    };
+    let index = preset_index(lut, chain, display, lut.last_index(), ramp);
+    Ok(rgb_at(bytes, index))
+}
+
 /// Map [`Colormap`] onto the two preset tables and build that table.
 ///
 /// Palette colour stays [`ColourLutError::Unavailable`], because a preset is

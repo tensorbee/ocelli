@@ -16,3 +16,4 @@ workspace = true
 ocelli-core = { path = "../../crates/ocelli-core" }
 ocelli-dicom = { path = "../../crates/ocelli-dicom" }
 ocelli-pixel = { path = "../../crates/ocelli-pixel" }
+ocelli-render = { path = "../../crates/ocelli-render" }

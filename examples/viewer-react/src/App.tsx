@@ -568,6 +568,144 @@ function OverlayPanel() {
   );
 }
 
+interface TierRow {
+  tier: string;
+  nearest: string;
+  linear: string;
+}
+
+interface InterpolateView {
+  nearest: number;
+  linear: number;
+  tiers: TierRow[];
+}
+
+function readInterpolate(value: unknown): InterpolateView | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.nearest !== "number" || typeof record.linear !== "number") {
+    return null;
+  }
+  if (!Array.isArray(record.tiers) || record.tiers.length !== 3) {
+    return null;
+  }
+  const tiers: TierRow[] = [];
+  for (const item of record.tiers) {
+    if (typeof item !== "object" || item === null) {
+      return null;
+    }
+    const row = item as Record<string, unknown>;
+    if (
+      typeof row.tier !== "string" ||
+      typeof row.nearest !== "string" ||
+      typeof row.linear !== "string"
+    ) {
+      return null;
+    }
+    tiers.push({
+      tier: row.tier,
+      nearest: row.nearest,
+      linear: row.linear,
+    });
+  }
+  return {
+    nearest: record.nearest,
+    linear: record.linear,
+    tiers,
+  };
+}
+
+function InterpolatePanel() {
+  const [view, setView] = useState<InterpolateView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [mode, setMode] = useState<"nearest" | "linear">("nearest");
+
+  async function run(): Promise<void> {
+    setPending(true);
+    setProblem(null);
+    try {
+      const response = await fetch("/interpolate", {
+        method: "POST",
+        body: "synthetic",
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        setProblem("The interpolation request was refused.");
+        return;
+      }
+      const parsed: unknown = JSON.parse(text);
+      const next = readInterpolate(parsed);
+      if (next === null) {
+        setProblem("The interpolation response could not be read.");
+        return;
+      }
+      setView(next);
+    } catch {
+      setProblem("The interpolation helper is not running.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const sentence =
+    view === null
+      ? null
+      : mode === "linear"
+        ? `Linear ${view.linear.toString()}.`
+        : `Nearest ${view.nearest.toString()}.`;
+
+  return (
+    <section>
+      <h2>Interpolation</h2>
+      <p>
+        The synthetic button samples a 2 by 2 display image at the centre of
+        the four texels. Nearest stays on one corner. Linear is the mean of
+        the four values.
+      </p>
+      <p>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            void run();
+          }}
+        >
+          Synthetic sample
+        </button>
+      </p>
+      {problem !== null && <p>{problem}</p>}
+      {view !== null && sentence !== null && (
+        <div>
+          <label>
+            Mode{" "}
+            <select
+              value={mode}
+              onChange={(event) => {
+                setMode(
+                  event.currentTarget.value === "linear" ? "linear" : "nearest",
+                );
+              }}
+            >
+              <option value="nearest">Nearest</option>
+              <option value="linear">Linear</option>
+            </select>
+          </label>
+          <p>{sentence}</p>
+          {view.tiers.map((row) => (
+            <p key={row.tier}>
+              Tier {row.tier} nearest {row.nearest}. Tier {row.tier} linear{" "}
+              {row.linear}.
+            </p>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FrameOpenPanel() {
   const [view, setView] = useState<FrameOpenView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -680,6 +818,7 @@ export function App() {
       <FrameOpenPanel />
       <SeriesOpenPanel />
       <OverlayPanel />
+      <InterpolatePanel />
 
       <section>
         <h2>Stack viewport</h2>

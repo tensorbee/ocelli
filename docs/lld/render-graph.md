@@ -1,7 +1,7 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062, F-063, F-064, F-065, F-066, F-067
-**Last updated:** 2026-11-01
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062, F-063, F-064, F-065, F-066, F-067, F-194
+**Last updated:** 2026-11-04
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
@@ -27,6 +27,17 @@ labelmap edge projection on the same copy shader. Volume MIP, stack MIP,
 and labelmap edge on slab, volume and stack stay uncompiled. A lookup for
 an uncompiled key reports unavailable rather than aliasing composite, which
 is deviation D-07's honesty rule applied to a blend mode.
+
+**Stack sampling is nearest or linear.** The mode is the spare camera lane
+`scale.y`. Exact `0` is nearest and stays `textureLoad` of the truncated
+mapped coordinate. Exact `1` is linear. The blend origin is the texel
+centre, so the shader subtracts half a texel from the mapped image
+coordinate and then uses the same weights as `blend_display`. A zero
+fraction does not read the next texel. A non-zero fraction whose footprint
+leaves the image stays clear. Any other lane value draws nothing. Tiers A,
+B and C declare both modes available, and the stack draw refuses a mode
+`available` does not offer. `blend_on_tier` can mark tier B linear
+unavailable, and that request is refused rather than drawn as nearest.
 
 **The composite overlay copies presenter bytes.** `show_labelmap` uploads
 the RGBA8 from `present_labelmap` in `ocelli-seg`. Index 0 is background

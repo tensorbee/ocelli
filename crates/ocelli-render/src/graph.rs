@@ -46,6 +46,7 @@ use crate::clip::{CLIP_UNIFORM_BYTES, ClipList, PatientFrame};
 use crate::colour::{ColourLut, ColourParams};
 use crate::fusion::{self, FusionError, FusionGpu, FusionRequest};
 use crate::gpu::{GpuContext, Recovered, SurfaceError, first_render_attachment};
+use crate::interpolation::Interpolation;
 pub use crate::labelmap::LabelmapDrawError;
 use crate::opacity::{OpacityPreset, OpacityTable};
 use crate::ortho::{self, OrthoError};
@@ -320,6 +321,9 @@ pub enum GraphError {
     /// Graph creation on tier C, which holds no device and reports unavailable.
     #[error("the render graph is unavailable on tier C, which holds no device")]
     TierCUnavailable,
+    /// The requested stack sample mode is not offered on this tier.
+    #[error("this interpolation mode is not available on this tier")]
+    InterpolationUnavailable,
     /// A VOI dirty mark offered through `mark_dirty`.
     #[error(
         "VOI dirt is set only by set_voi, so a window change cannot schedule a frame without writing its uniform bytes"
@@ -388,7 +392,8 @@ const IDENTITY_CAMERA: [f32; 16] = [
 
 /// CSS camera plus the device-to-CSS scale the fragment shader divides by.
 ///
-/// `scale.x` is the device pixel ratio. The other lanes are padding so the
+/// `scale.x` is the device pixel ratio. `scale.y` is the interpolation mode,
+/// `0` nearest and `1` linear. The remaining lanes are padding so the
 /// uniform stays a multiple of 16 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -397,17 +402,22 @@ struct DeviceCamera {
     scale: [f32; 4],
 }
 
-fn device_camera(css: [f32; 16], dpr: f64) -> DeviceCamera {
+fn device_camera(css: [f32; 16], dpr: f64, mode: Interpolation) -> DeviceCamera {
     DeviceCamera {
         css,
-        scale: [ocelli_viewport::view::f32_from_f64(dpr), 0.0, 0.0, 0.0],
+        scale: [
+            ocelli_viewport::view::f32_from_f64(dpr),
+            mode.lane(),
+            0.0,
+            0.0,
+        ],
     }
 }
 
 /// The 20 floats uploaded for one camera. Index 16 is the device pixel ratio.
 #[must_use]
 pub fn device_camera_words(css: [f32; 16], dpr: f64) -> [f32; 20] {
-    let uploaded = device_camera(css, dpr);
+    let uploaded = device_camera(css, dpr, Interpolation::Nearest);
     let mut words = [0.0_f32; 20];
     words[..16].copy_from_slice(&uploaded.css);
     words[16..].copy_from_slice(&uploaded.scale);
@@ -611,6 +621,10 @@ pub enum UploadError {
 /// `colour.pad` 1 read the same 1024 ramp as `reference_ramp_index`. SIGMOID
 /// stays on `table_index`. Mode 0 is the greyscale normalisation, and it
 /// still emits the unclamped display value.
+///
+/// Linear reads the four stored texels, runs `lut_chain` on each, and blends
+/// those display values with the same weights as `blend_display`. Palette
+/// linear blends the four table colours. It does not blend stored indices.
 const GRAPH_WGSL: &str = r"
 struct ColourParams {
     mode : u32,
@@ -687,6 +701,29 @@ fn reference_ramp_byte(display : f32, inverted : bool) -> i32 {
     return i32(round_half_even_byte(sample * 255.0));
 }
 
+fn present_display(display : f32) -> vec4<f32> {
+    if (colour.mode == 1u) {
+        let linear = voi.fn_kind == 0u || voi.fn_kind == 1u;
+        let unit_range = voi.ymin == 0.0 && voi.ymax == 255.0;
+        let ramp = colour.pad == 1u && linear && unit_range;
+        let index = select(
+            table_index(display, colour.last),
+            reference_ramp_byte(display, voi.invert != 0u),
+            ramp
+        );
+        return textureLoad(colour_lut, vec2<i32>(index, 0), 0);
+    }
+    let range = voi.ymax - voi.ymin;
+    let unit = select(0.0, (display - voi.ymin) / range, range > 0.0);
+    return vec4<f32>(unit, unit, unit, 1.0);
+}
+
+fn palette_at(at : vec2<i32>) -> vec4<f32> {
+    let stored = textureLoad(stored_tex, at, 0).r;
+    let index = table_index(stored - f32(colour.origin), colour.last);
+    return textureLoad(colour_lut, vec2<i32>(index, 0), 0);
+}
+
 @vertex
 fn vs_main(@builtin(vertex_index) index : u32) -> @builtin(position) vec4<f32> {
     let u = f32((index << 1u) & 2u);
@@ -706,33 +743,68 @@ fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
     if (mapped.x < 0.0 || mapped.y < 0.0 || mapped.x >= f32(dims.x) || mapped.y >= f32(dims.y)) {
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
+    let lane = camera.scale.y;
+    if (lane != 0.0 && lane != 1.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    let mode = u32(camera.scale.y);
+    if (mode == 1u) {
+        // Image space stores the corner. The blend origin is the texel centre.
+        let sx = mapped.x - 0.5;
+        let sy = mapped.y - 0.5;
+        if (sx < 0.0 || sy < 0.0) {
+            return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
+        let x0 = floor(sx);
+        let y0 = floor(sy);
+        let tx = sx - x0;
+        let ty = sy - y0;
+        let need_x = tx != 0.0;
+        let need_y = ty != 0.0;
+        if ((need_x && x0 + 1.0 >= f32(dims.x)) || (need_y && y0 + 1.0 >= f32(dims.y))) {
+            return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
+        if (colour.mode == 2u) {
+            let c00 = palette_at(vec2<i32>(i32(x0), i32(y0)));
+            var c10 = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+            var c01 = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+            var c11 = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+            if (need_x) {
+                c10 = palette_at(vec2<i32>(i32(x0 + 1.0), i32(y0)));
+            }
+            if (need_y) {
+                c01 = palette_at(vec2<i32>(i32(x0), i32(y0 + 1.0)));
+            }
+            if (need_x && need_y) {
+                c11 = palette_at(vec2<i32>(i32(x0 + 1.0), i32(y0 + 1.0)));
+            }
+            return (1.0 - tx) * (1.0 - ty) * c00 + tx * (1.0 - ty) * c10 + (1.0 - tx) * ty * c01 + tx * ty * c11;
+        }
+        let p00 = lut_chain(textureLoad(stored_tex, vec2<i32>(i32(x0), i32(y0)), 0).r);
+        var p10 = 0.0;
+        var p01 = 0.0;
+        var p11 = 0.0;
+        if (need_x) {
+            p10 = lut_chain(textureLoad(stored_tex, vec2<i32>(i32(x0 + 1.0), i32(y0)), 0).r);
+        }
+        if (need_y) {
+            p01 = lut_chain(textureLoad(stored_tex, vec2<i32>(i32(x0), i32(y0 + 1.0)), 0).r);
+        }
+        if (need_x && need_y) {
+            p11 = lut_chain(textureLoad(stored_tex, vec2<i32>(i32(x0 + 1.0), i32(y0 + 1.0)), 0).r);
+        }
+        let display = (1.0 - tx) * (1.0 - ty) * p00 + tx * (1.0 - ty) * p10 + (1.0 - tx) * ty * p01 + tx * ty * p11;
+        return present_display(display);
+    }
     let texel = vec2<i32>(i32(mapped.x), i32(mapped.y));
     let stored = textureLoad(stored_tex, texel, 0).r;
     if (colour.mode == 2u) {
         let index = table_index(stored - f32(colour.origin), colour.last);
         return textureLoad(colour_lut, vec2<i32>(index, 0), 0);
     }
-    let display = lut_chain(stored);
-    if (colour.mode == 1u) {
-        let linear = voi.fn_kind == 0u || voi.fn_kind == 1u;
-        let unit_range = voi.ymin == 0.0 && voi.ymax == 255.0;
-        let ramp = colour.pad == 1u && linear && unit_range;
-        let index = select(
-            table_index(display, colour.last),
-            reference_ramp_byte(display, voi.invert != 0u),
-            ramp
-        );
-        return textureLoad(colour_lut, vec2<i32>(index, 0), 0);
-    }
-    // Normalise the display value into the colour target range. The full
-    // declared output range maps to 0 to 1 whatever its magnitude, because
-    // the target is a colour and the range is a value scale, and a zero range
-    // has no normalisation, so it writes black rather than dividing by zero.
-    // This path does not clamp `display`. A LINEAR body outside `[ymin, ymax]`
-    // stays outside it.
-    let range = voi.ymax - voi.ymin;
-    let unit = select(0.0, (display - voi.ymin) / range, range > 0.0);
-    return vec4<f32>(unit, unit, unit, 1.0);
+    // `present_display` normalises into the colour target, or indexes a
+    // preset. A LINEAR body outside `[ymin, ymax]` stays outside it.
+    return present_display(lut_chain(stored));
 }
 ";
 
@@ -928,6 +1000,8 @@ struct SlotState {
     frame: PatientFrame,
     /// Device pixels per CSS pixel uploaded beside the CSS camera.
     dpr: f64,
+    /// Stack sample mode uploaded in `camera.scale.y`. Nearest until set.
+    interpolation: Interpolation,
 }
 
 /// The stored-sample texture one viewport owns.
@@ -1107,6 +1181,7 @@ impl Registry {
                     colour: None,
                     camera: IDENTITY_CAMERA,
                     dpr: 1.0,
+                    interpolation: Interpolation::Nearest,
                     opacity: OpacityTable::preset(OpacityPreset::Flat),
                     shade: ShadeWeights::unlit(),
                     clip: ClipList::empty(),
@@ -1752,8 +1827,14 @@ impl RenderGraph {
     ) -> Result<ViewportId, GraphError> {
         let voi = voi_of(&pass);
         let id = self.registry.register(pass)?;
-        let slot =
-            self.create_gpu_slot(ctx, target, source, (voi, IDENTITY_CAMERA, 1.0), None, None);
+        let slot = self.create_gpu_slot(
+            ctx,
+            target,
+            source,
+            (voi, IDENTITY_CAMERA, 1.0, Interpolation::Nearest),
+            None,
+            None,
+        );
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1819,7 +1900,7 @@ impl RenderGraph {
             ctx,
             target,
             view,
-            (voi, IDENTITY_CAMERA, 1.0),
+            (voi, IDENTITY_CAMERA, 1.0, Interpolation::Nearest),
             Some(stored),
             None,
         );
@@ -1837,12 +1918,12 @@ impl RenderGraph {
         ctx: &GpuContext,
         target: wgpu::TextureView,
         source: wgpu::TextureView,
-        uniforms: (VoiParams, [f32; 16], f64),
+        uniforms: (VoiParams, [f32; 16], f64, Interpolation),
         stored: Option<StoredTexture>,
         colour: Option<HeldColour>,
     ) -> GpuSlot {
-        let (voi, camera, dpr) = uniforms;
-        let uploaded = device_camera(camera, dpr);
+        let (voi, camera, dpr, mode) = uniforms;
+        let uploaded = device_camera(camera, dpr, mode);
         let device = ctx.device();
         // A table wider than this device is not a texture. Selection already
         // refused it. Restore keeps the unbound path rather than creating one.
@@ -2075,7 +2156,7 @@ impl RenderGraph {
         target: wgpu::TextureView,
         source: wgpu::TextureView,
     ) -> Result<(), GraphError> {
-        let (voi, camera, dpr, colour) = {
+        let (voi, camera, dpr, interpolation, colour) = {
             let state = self
                 .registry
                 .states
@@ -2089,10 +2170,18 @@ impl RenderGraph {
                 voi_of(&state.pass),
                 state.camera,
                 state.dpr,
+                state.interpolation,
                 state.colour.clone(),
             )
         };
-        let slot = self.create_gpu_slot(ctx, target, source, (voi, camera, dpr), None, colour);
+        let slot = self.create_gpu_slot(
+            ctx,
+            target,
+            source,
+            (voi, camera, dpr, interpolation),
+            None,
+            colour,
+        );
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -2127,7 +2216,7 @@ impl RenderGraph {
         id: ViewportId,
         target: wgpu::TextureView,
     ) -> Result<(), UploadError> {
-        let (upload, voi, camera, dpr, format, colour) = {
+        let (upload, voi, camera, dpr, interpolation, format, colour) = {
             let state = self
                 .registry
                 .states
@@ -2141,6 +2230,7 @@ impl RenderGraph {
                 voi_of(&state.pass),
                 state.camera,
                 state.dpr,
+                state.interpolation,
                 format,
                 state.colour.clone(),
             )
@@ -2162,8 +2252,14 @@ impl RenderGraph {
             height: upload.height(),
             format,
         };
-        let slot =
-            self.create_gpu_slot(ctx, target, view, (voi, camera, dpr), Some(stored), colour);
+        let slot = self.create_gpu_slot(
+            ctx,
+            target,
+            view,
+            (voi, camera, dpr, interpolation),
+            Some(stored),
+            colour,
+        );
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -2313,17 +2409,74 @@ impl RenderGraph {
         if !crate::extent::usable_ratio(dpr) {
             return Err(GraphError::DevicePixelRatio);
         }
+        let interpolation = self
+            .registry
+            .states
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .map(|state| state.interpolation)
+            .ok_or(GraphError::UnknownViewport)?;
         let slot = self
             .gpu
             .get(usize::try_from(id.0).unwrap_or(usize::MAX))
             .and_then(Option::as_ref)
             .ok_or(GraphError::ViewportNotRebound)?;
-        let uploaded = device_camera(camera, dpr);
+        let uploaded = device_camera(camera, dpr, interpolation);
         ctx.queue()
             .write_buffer(&slot.camera, 0, bytemuck::bytes_of(&uploaded));
         if let Some(state) = self.registry.state_mut(id) {
             state.camera = camera;
             state.dpr = dpr;
+            state.dirty.camera = true;
+        }
+        Ok(())
+    }
+
+    /// Write the stack sample mode into the spare camera lane.
+    ///
+    /// `0` stays nearest. `1` selects linear. The call rewrites the camera
+    /// uniform and marks the camera dirty. It does not allocate a texture.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::UnknownViewport`] for an id this graph never issued.
+    /// [`GraphError::PassHasNoUniform`] for a pass that is not a stack.
+    /// [`GraphError::ViewportNotRebound`] when the slot has no GPU objects.
+    pub fn set_stack_interpolation(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        mode: Interpolation,
+    ) -> Result<(), GraphError> {
+        let (camera, dpr, is_stack) = {
+            let state = self
+                .registry
+                .states
+                .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+                .and_then(Option::as_ref)
+                .ok_or(GraphError::UnknownViewport)?;
+            (
+                state.camera,
+                state.dpr,
+                matches!(state.pass, Pass::Stack(_)),
+            )
+        };
+        if !is_stack {
+            return Err(GraphError::PassHasNoUniform);
+        }
+        if !crate::interpolation::available(mode, self.tier) {
+            return Err(GraphError::InterpolationUnavailable);
+        }
+        let slot = self
+            .gpu
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .ok_or(GraphError::ViewportNotRebound)?;
+        let uploaded = device_camera(camera, dpr, mode);
+        ctx.queue()
+            .write_buffer(&slot.camera, 0, bytemuck::bytes_of(&uploaded));
+        if let Some(state) = self.registry.state_mut(id) {
+            state.interpolation = mode;
             state.dirty.camera = true;
         }
         Ok(())

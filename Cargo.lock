@@ -1023,6 +1023,7 @@ dependencies = [
  "ocelli-core",
  "ocelli-dicom",
  "ocelli-pixel",
+ "ocelli-render",
 ]
 
 [[package]]

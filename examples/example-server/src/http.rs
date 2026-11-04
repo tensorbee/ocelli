@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
+use crate::interpolate::interpolate_reply;
 use crate::overlay::overlay_reply;
 use crate::reply::reply_body;
 use crate::series::series_reply;
@@ -76,6 +77,8 @@ fn route(loaded: &Loaded) -> Reply {
         series_reply(&loaded.body, loaded.content_type.as_deref())
     } else if loaded.path == "/overlay" {
         overlay_reply(&loaded.body, loaded.frame)
+    } else if loaded.path == "/interpolate" {
+        interpolate_reply(&loaded.body)
     } else {
         reply_body(&loaded.body, loaded.frame)
     };
@@ -292,7 +295,7 @@ fn parse_header(header: &str) -> Result<Header, ReadStop> {
 }
 
 fn open_path(path: &str) -> bool {
-    path == "/frame-open" || path == "/series-open" || path == "/overlay"
+    path == "/frame-open" || path == "/series-open" || path == "/overlay" || path == "/interpolate"
 }
 
 fn body_messages(path: &str) -> (&'static str, &'static str) {
@@ -305,6 +308,11 @@ fn body_messages(path: &str) -> (&'static str, &'static str) {
         (
             "the overlay request is too large",
             "the overlay request has no length",
+        )
+    } else if path == "/interpolate" {
+        (
+            "the interpolate request is too large",
+            "the interpolate request has no length",
         )
     } else {
         (
@@ -464,5 +472,27 @@ mod tests {
         let response = exchange(request.as_bytes());
         assert!(response.contains("400"));
         assert!(response.contains("the overlay request is too large"));
+    }
+
+    #[test]
+    fn interpolate_options_is_empty() {
+        let request = b"OPTIONS /interpolate HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        let response = exchange(request);
+        assert!(response.contains("204"));
+    }
+
+    #[test]
+    fn synthetic_interpolate_post_reports_both_modes_and_the_tiers() {
+        let request =
+            b"POST /interpolate HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 9\r\n\r\nsynthetic";
+        let response = exchange(request);
+        assert!(response.contains("200"));
+        assert!(response.contains("\"nearest\":0"));
+        assert!(response.contains("\"linear\":138.75"));
+        assert!(response.contains("\"tier\":\"A\""));
+        assert!(response.contains("\"tier\":\"B\""));
+        assert!(response.contains("\"tier\":\"C\""));
+        assert!(response.contains("\"nearest\":\"available\""));
+        assert!(response.contains("\"linear\":\"available\""));
     }
 }

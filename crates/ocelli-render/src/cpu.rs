@@ -13,8 +13,12 @@ use ocelli_pixel::{
 use ocelli_viewport::presentation::{Colormap, Presentation};
 use ocelli_viewport::view::{CoordinateError, INDEX_TO_IMAGE_CENTRE, View};
 
+use crate::caps::Tier;
 use crate::colour::{ColourLut, ColourLutError, PresetId};
 use crate::extent::{css_from_device, device_extent};
+use crate::interpolation::{
+    Interpolation, InterpolationError, available, blend_display, blend_points,
+};
 
 // PS3.3 C.7.6.2.1.1 puts the integer index on the pixel centre. Image space
 // stores the corner, so the centre is `index + 0.5`. `INDEX_TO_IMAGE_CENTRE`
@@ -143,6 +147,8 @@ pub struct CpuRaster {
     settled: Option<u32>,
     needs_draw: bool,
     allocations: u32,
+    interpolation: Interpolation,
+    display_scratch: Vec<f32>,
 }
 
 impl CpuRaster {
@@ -167,6 +173,8 @@ impl CpuRaster {
             settled: None,
             needs_draw: true,
             allocations: 0,
+            interpolation: Interpolation::Nearest,
+            display_scratch: Vec::new(),
         };
         raster.resize_storage(css_width, css_height, dpr)?;
         Ok(raster)
@@ -221,6 +229,32 @@ impl CpuRaster {
         self.needs_draw = true;
     }
 
+    /// Mode used by the next draw. The default is nearest.
+    #[must_use]
+    pub const fn interpolation(&self) -> Interpolation {
+        self.interpolation
+    }
+
+    /// Select nearest or linear. `0` is nearest and `1` is linear.
+    ///
+    /// A change marks the frame dirty. Any other integer is refused and
+    /// leaves the mode and the caller's frame buffer untouched.
+    ///
+    /// # Errors
+    ///
+    /// [`RasterError::Unavailable`] when `mode` is not 0 or 1.
+    pub fn set_interpolation(&mut self, mode: u32) -> Result<(), RasterError> {
+        let next = Interpolation::from_mode(mode).map_err(|_| RasterError::Unavailable)?;
+        if !available(next, Tier::Cpu) {
+            return Err(RasterError::Unavailable);
+        }
+        if next != self.interpolation {
+            self.interpolation = next;
+            self.invalidate();
+        }
+        Ok(())
+    }
+
     /// Replace the current generation and drop any settled frame.
     ///
     /// A completion that still names the previous generation is
@@ -257,10 +291,11 @@ impl CpuRaster {
         self.needs_draw = false;
     }
 
-    /// Reserve colour scratch for one source grid.
+    /// Reserve colour scratch and the linear display plane for one source grid.
     ///
     /// The draw does not call this. A source larger than the last reservation
-    /// is refused until the caller reserves it again.
+    /// is refused until the caller reserves it again. Nearest mono draws do
+    /// not read either buffer.
     ///
     /// # Errors
     ///
@@ -269,6 +304,11 @@ impl CpuRaster {
         let pixels = pixel_count([columns, rows])?;
         if self.rgb_scratch.len() < pixels {
             self.rgb_scratch = vec![Rgb::BLACK; pixels];
+            self.allocations = self.allocations.saturating_add(1);
+        }
+        let display_len = pixels.checked_mul(3).ok_or(RasterError::Extent)?;
+        if self.display_scratch.len() < display_len {
+            self.display_scratch = vec![0.0; display_len];
             self.allocations = self.allocations.saturating_add(1);
         }
         Ok(())
@@ -435,6 +475,9 @@ impl CpuRaster {
             return Err(RasterError::Length);
         }
         let map = index_map(view, source)?;
+        if self.interpolation == Interpolation::Linear {
+            return self.display_linear(presentation, stored, source, target, &map, pixel);
+        }
         match self.texel(source, target, &map, pixel)? {
             None => Ok(None),
             Some(texel) => Ok(Some(display_of(presentation, stored, texel)?)),
@@ -550,7 +593,7 @@ impl CpuRaster {
     }
 
     fn write_mono(
-        &self,
+        &mut self,
         presentation: &Presentation,
         stored: &[Stored],
         source: [u32; 2],
@@ -560,6 +603,9 @@ impl CpuRaster {
     ) -> Result<(), RasterError> {
         if stored.len() != pixel_count(source)? {
             return Err(RasterError::Length);
+        }
+        if self.interpolation == Interpolation::Linear {
+            return self.write_mono_linear(presentation, stored, source, target, map, out);
         }
         let table = match presentation.colormap() {
             Colormap::Grey => &self.grey,
@@ -573,17 +619,194 @@ impl CpuRaster {
     }
 
     fn write_color(
-        &self,
+        &mut self,
         source: [u32; 2],
         target: [u32; 2],
         map: &Transform<Canvas, Index>,
         out: &mut [u8],
     ) -> Result<(), RasterError> {
+        if self.interpolation == Interpolation::Linear {
+            return self.write_color_linear(source, target, map, out);
+        }
         let scratch = &self.rgb_scratch;
         self.shade(source, target, map, out, |texel| {
             let rgb = scratch.get(texel).copied().unwrap_or(Rgb::BLACK);
             Ok(rgba_from_rgb(rgb))
         })
+    }
+
+    fn write_mono_linear(
+        &mut self,
+        presentation: &Presentation,
+        stored: &[Stored],
+        source: [u32; 2],
+        target: [u32; 2],
+        map: &Transform<Canvas, Index>,
+        out: &mut [u8],
+    ) -> Result<(), RasterError> {
+        self.fill_display(presentation, stored)?;
+        let ramp = crate::colour::linear_byte_ramp(presentation.chain());
+        let count = stored.len();
+        let mut y = 0_u32;
+        while y < target[1] {
+            let css_y = css_of(y, target[1], self.device[1], self.dpr)?;
+            let mut x = 0_u32;
+            while x < target[0] {
+                let css_x = css_of(x, target[0], self.device[0], self.dpr)?;
+                let rgba = match self.blended_display(source[0], 0, count, map, css_x, css_y)? {
+                    None => OPAQUE_BLACK,
+                    Some(display) => {
+                        let table = match presentation.colormap() {
+                            Colormap::Grey => &self.grey,
+                            Colormap::Stops => &self.stops,
+                        };
+                        let rgb =
+                            crate::colour::preset_rgb(table, presentation.chain(), display, ramp)
+                                .map_err(|error| match error {
+                                ColourLutError::Length => RasterError::Length,
+                                ColourLutError::Unavailable => RasterError::Unavailable,
+                            })?;
+                        rgba_from_rgb(rgb)
+                    }
+                };
+                write_pixel(out, pixel_index(x, y, target[0])?, rgba)?;
+                x = x.saturating_add(1);
+            }
+            y = y.saturating_add(1);
+        }
+        Ok(())
+    }
+
+    fn write_color_linear(
+        &mut self,
+        source: [u32; 2],
+        target: [u32; 2],
+        map: &Transform<Canvas, Index>,
+        out: &mut [u8],
+    ) -> Result<(), RasterError> {
+        let pixels = pixel_count(source)?;
+        self.fill_rgb_planes(pixels)?;
+        let mut y = 0_u32;
+        while y < target[1] {
+            let css_y = css_of(y, target[1], self.device[1], self.dpr)?;
+            let mut x = 0_u32;
+            while x < target[0] {
+                let css_x = css_of(x, target[0], self.device[0], self.dpr)?;
+                let red = self.blended_display(source[0], 0, pixels, map, css_x, css_y)?;
+                let green = self.blended_display(source[0], pixels, pixels, map, css_x, css_y)?;
+                let blue = self.blended_display(
+                    source[0],
+                    pixels.saturating_mul(2),
+                    pixels,
+                    map,
+                    css_x,
+                    css_y,
+                )?;
+                let rgba = match (red, green, blue) {
+                    (Some(r), Some(g), Some(b)) => rgba_from_rgb(Rgb { r, g, b }),
+                    _ => OPAQUE_BLACK,
+                };
+                write_pixel(out, pixel_index(x, y, target[0])?, rgba)?;
+                x = x.saturating_add(1);
+            }
+            y = y.saturating_add(1);
+        }
+        Ok(())
+    }
+
+    fn display_linear(
+        &self,
+        presentation: &Presentation,
+        stored: &[Stored],
+        source: [u32; 2],
+        target: [u32; 2],
+        map: &Transform<Canvas, Index>,
+        pixel: [u32; 2],
+    ) -> Result<Option<f32>, RasterError> {
+        if pixel[0] >= target[0] || pixel[1] >= target[1] {
+            return Err(RasterError::Extent);
+        }
+        let css_x = css_of(pixel[0], target[0], self.device[0], self.dpr)?;
+        let css_y = css_of(pixel[1], target[1], self.device[1], self.dpr)?;
+        let (x, y) = centre_sample(map, css_x, css_y);
+        let blended = blend_points(source[0], source[1], x, y, |column, row| {
+            let texel = pixel_index(column, row, source[0]).ok()?;
+            display_of(presentation, stored, texel).ok()
+        });
+        match blended {
+            Ok(value) => Ok(Some(value)),
+            Err(InterpolationError::Outside) => Ok(None),
+            Err(InterpolationError::Unavailable) => Err(RasterError::Unavailable),
+        }
+    }
+
+    fn fill_display(
+        &mut self,
+        presentation: &Presentation,
+        stored: &[Stored],
+    ) -> Result<(), RasterError> {
+        if self.display_scratch.len() < stored.len() {
+            return Err(RasterError::Extent);
+        }
+        let chain = presentation.chain();
+        for (index, sample) in stored.iter().copied().enumerate() {
+            let Some(slot) = self.display_scratch.get_mut(index) else {
+                return Err(RasterError::Length);
+            };
+            *slot = chain.apply(sample).0;
+        }
+        Ok(())
+    }
+
+    fn fill_rgb_planes(&mut self, pixels: usize) -> Result<(), RasterError> {
+        let needed = pixels.checked_mul(3).ok_or(RasterError::Extent)?;
+        if self.display_scratch.len() < needed {
+            return Err(RasterError::Extent);
+        }
+        for index in 0..pixels {
+            let rgb = self
+                .rgb_scratch
+                .get(index)
+                .copied()
+                .ok_or(RasterError::Length)?;
+            let Some(red) = self.display_scratch.get_mut(index) else {
+                return Err(RasterError::Length);
+            };
+            *red = rgb.r;
+            let green_at = index.saturating_add(pixels);
+            let Some(green) = self.display_scratch.get_mut(green_at) else {
+                return Err(RasterError::Length);
+            };
+            *green = rgb.g;
+            let blue_at = index.saturating_add(pixels.saturating_mul(2));
+            let Some(blue) = self.display_scratch.get_mut(blue_at) else {
+                return Err(RasterError::Length);
+            };
+            *blue = rgb.b;
+        }
+        Ok(())
+    }
+
+    fn blended_display(
+        &self,
+        width: u32,
+        offset: usize,
+        count: usize,
+        map: &Transform<Canvas, Index>,
+        css_x: f64,
+        css_y: f64,
+    ) -> Result<Option<f32>, RasterError> {
+        let end = offset.checked_add(count).ok_or(RasterError::Length)?;
+        let samples = self
+            .display_scratch
+            .get(offset..end)
+            .ok_or(RasterError::Length)?;
+        let (x, y) = centre_sample(map, css_x, css_y);
+        match blend_display(width, samples, x, y, Interpolation::Linear) {
+            Ok(value) => Ok(Some(value)),
+            Err(InterpolationError::Outside) => Ok(None),
+            Err(InterpolationError::Unavailable) => Err(RasterError::Unavailable),
+        }
     }
 
     fn shade(
@@ -680,6 +903,15 @@ fn index_map(view: &View, source: [u32; 2]) -> Result<Transform<Canvas, Index>, 
         })
 }
 
+/// Centre-origin coordinate. Index space already puts `0` on the texel centre.
+fn centre_sample(map: &Transform<Canvas, Index>, css_x: f64, css_y: f64) -> (f32, f32) {
+    let index = map.apply(Pt::<Canvas>::new(css_x, css_y, 0.0));
+    (
+        ocelli_viewport::view::f32_from_f64(index.x),
+        ocelli_viewport::view::f32_from_f64(index.y),
+    )
+}
+
 fn display_of(
     presentation: &Presentation,
     stored: &[Stored],
@@ -752,7 +984,7 @@ fn css_of(pixel: u32, target: u32, device: u32, dpr: f64) -> Result<f64, RasterE
     css_from_device(device_center, dpr).map_err(|_| RasterError::Canvas)
 }
 
-fn texel_of(image: f64, limit: u32) -> Option<u32> {
+pub(crate) fn texel_of(image: f64, limit: u32) -> Option<u32> {
     if !image.is_finite() || image < 0.0 {
         return None;
     }

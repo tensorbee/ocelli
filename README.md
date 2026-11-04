@@ -149,7 +149,9 @@ centre 100 and width 200, then shows the display value and the padding count.
 The Series section posts three synthetic objects, or a multipart body of files
 you choose, and shows each display group, its order, its timing and Loop or
 Bounce. The Overlay section posts the synthetic 4 by 4 and shows whether image
-pixel (1, 1) is set and whether the shutter hides it. A file you choose is
+pixel (1, 1) is set and whether the shutter hides it. The Interpolation
+section posts the 2 by 2 fixture and shows 138.75 for linear and the
+nearest corner for nearest. A file you choose is
 posted and discarded. It is not written into this
 repository. The header still reads `core not built` until a later story loads
 the wasm module.

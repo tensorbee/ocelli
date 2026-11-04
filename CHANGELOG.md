@@ -13,6 +13,7 @@ Repository bootstrap. Nothing is published.
 - Frame open reads one Part 10 object into the existing LUT chain inputs. The example page shows the synthetic display value and the padding count.
 - Series assembly orders parsed frames by projected position and reads cine timing from the first frame. The example page shows the groups and Loop or Bounce.
 - Overlay planes are read from the top-level overlay groups, and display shutters from the shutter attributes. The example page shows the synthetic hit, the shutter hide, and an absent neutral value.
+- Stack display interpolation selects nearest or linear. The example page shows 138.75 for the linear centre and the nearest corner for nearest, and each tier row says available.
 - A local page opens a chosen folder, lists each series, and shows one image at a time with contours and text notes.
 - A volume ray drops its binding when its brick texture is uploaded again.
 - A fusion slice that arrives with unchanged bytes is drawn as present.
