@@ -4875,3 +4875,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/calibration.md`, the geometry cross-link, and the rows in `docs/lld/README.md`.
 **Deviations from the design plan.** The plan first cited C.8.7.3 and C.8.5.5.1.4 and called the ultrasound deltas millimetres. Pass 1 corrected those citations to C.8.7.5, C.8.5.5.1.17 and C.8.5.5.1.15. The division and the SUV scales did not change.
 **Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 3 nitpicks. Reviewer Claude Code, read only, with no shell. An ERMF multiply, a BSA scale of 1000 and `ratio.abs()` each went red and were restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-196, key object and secondary capture, completed 2026-11-04
+
+**What was built.** `writeKeyObject` and `readKeyObject` round-trip one TID 2010 description and one composite reference. `writeSecondaryCapture` and `readSecondaryCapture` round-trip an 8-bit MONOCHROME2 display buffer. The example page shows the title Key image and pixels 0, 1, 2, 3.
+
+**HLD sections implemented.** Decision D10 keeps dcmjs for SR. The HLD names TID 1500 and does not name TID 2010 or a Secondary Capture writer. The local rules are `.claude/plans/F-196-design.md`.
+**Deviations.** none
+**Crates / packages modified.** `packages/core`, `examples/viewer-react`.
+**Tests added.** Six tests in `packages/core/src/tid2010.test.ts`. Five tests in `packages/core/src/secondary-capture.test.ts`. One page test in `examples/viewer-react/src/documents.test.tsx`.
+**Fixture provenance.** The title Key image is PS3.16 TID 2010 row 7, code (113012, DCM, "Key Object Description"). The coded document title is CID 7010 (113000, DCM, "Of Interest"). The reference is one COMPOSITE. Pixels 0, 1, 2, 3 are an 8-bit MONOCHROME2 secondary capture under PS3.3 C.7.6.3. A 3 by 3 ramp 0 through 8 is the odd-length case. PS3.5 even-length padding adds one zero byte, and the reader returns the nine caller bytes. Columns above 65535 are refused because Rows and Columns are US. No patient data.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+**Tier coverage.** Tiers A, B and C are not applicable. These functions do not draw.
+**LLD updated.** `docs/lld/key-object.md`, the public-api paragraph, and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The plan names `writeSecondaryCapture` and not a reader. `readSecondaryCapture` is exported because the example page has no dcmjs dependency and must show the four pixel bytes.
+**Notes for future sessions.** Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer Claude Code, read only, with no shell. A template rewrite to 1500, a column count of 65536, a disabled pad strip and a non-zero pad each went red and were restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.

@@ -1,4 +1,12 @@
-import { coreAvailable, VERSION, viewportId } from "@ocelli/core";
+import {
+  coreAvailable,
+  readKeyObject,
+  readSecondaryCapture,
+  VERSION,
+  viewportId,
+  writeKeyObject,
+  writeSecondaryCapture,
+} from "@ocelli/core";
 import { OcelliViewport } from "@ocelli/react";
 import type { OcelliSession } from "@ocelli/react";
 import { useState } from "react";
@@ -893,6 +901,87 @@ function FrameOpenPanel() {
   );
 }
 
+interface DocumentView {
+  title: string;
+  referencedClass: string;
+  referencedInstance: string;
+  pixels: string;
+}
+
+function DocumentPanel() {
+  const [view, setView] = useState<DocumentView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  function run(): void {
+    setProblem(null);
+    const keyBytes = writeKeyObject({
+      title: "Key image",
+      study: "2.25.1961",
+      series: "2.25.1962",
+      instance: "2.25.1963",
+      referencedClass: "1.2.840.10008.5.1.4.1.1.2",
+      referencedInstance: "2.25.1964",
+    });
+    const captureBytes = writeSecondaryCapture({
+      study: "2.25.1965",
+      series: "2.25.1966",
+      instance: "2.25.1967",
+      columns: 2,
+      rows: 2,
+      pixels: new Uint8Array([0, 1, 2, 3]),
+    });
+    if (keyBytes === null || captureBytes === null) {
+      setView(null);
+      setProblem("The document was refused.");
+      return;
+    }
+    const key = readKeyObject(keyBytes);
+    const capture = readSecondaryCapture(captureBytes);
+    if (key === null || capture === null) {
+      setView(null);
+      setProblem("The document could not be read.");
+      return;
+    }
+    setView({
+      title: key.title,
+      referencedClass: key.referencedClass,
+      referencedInstance: key.referencedInstance,
+      pixels: Array.from(capture.pixels).join(", "),
+    });
+  }
+
+  return (
+    <section>
+      <h2>Key object and secondary capture</h2>
+      <p>
+        The synthetic button writes a TID 2010 key object titled Key image and
+        a 2 by 2 secondary capture of bytes 0, 1, 2 and 3. The study, series
+        and instance identifiers are synthetic 2.25 values. The capture is
+        8-bit MONOCHROME2 and has no window and no patient module.
+      </p>
+      <p>
+        <button
+          type="button"
+          onClick={() => {
+            run();
+          }}
+        >
+          Synthetic documents
+        </button>
+      </p>
+      {problem !== null && <p>{problem}</p>}
+      {view !== null && (
+        <div>
+          <p>Title {view.title}</p>
+          <p>Referenced class {view.referencedClass}</p>
+          <p>Referenced instance {view.referencedInstance}</p>
+          <p>Pixels {view.pixels}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function App() {
   const ready = coreAvailable();
   const session = sessionFromModule();
@@ -927,6 +1016,7 @@ export function App() {
       <OverlayPanel />
       <InterpolatePanel />
       <CalibrationPanel />
+      <DocumentPanel />
 
       <section>
         <h2>Stack viewport</h2>

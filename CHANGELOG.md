@@ -15,6 +15,7 @@ Repository bootstrap. Nothing is published.
 - Overlay planes are read from the top-level overlay groups, and display shutters from the shutter attributes. The example page shows the synthetic hit, the shutter hide, and an absent neutral value.
 - Stack display interpolation selects nearest or linear. The example page shows 138.75 for the linear centre and the nearest corner for nearest, and each tier row says available.
 - Calibration names its spacing source, and SUV by lean body mass and by body surface area sit beside body-weight SUV. The example page shows imager spacing 0.1 mm, SUVlbm 350, SUVbsa 90, length ratio 2 and contour volume 150.
+- A key-object document stores one title and one referenced composite, and a secondary capture stores the caller's 8-bit display bytes. The example page shows the title Key image and pixels 0, 1, 2, 3.
 - A local page opens a chosen folder, lists each series, and shows one image at a time with contours and text notes.
 - A volume ray drops its binding when its brick texture is uploaded again.
 - A fusion slice that arrives with unchanged bytes is drawn as present.

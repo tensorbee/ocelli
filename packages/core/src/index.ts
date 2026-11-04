@@ -231,6 +231,12 @@ export { loadMeasurements, persistMeasurements } from "./measurement-persist.js"
 export { readTid1500, writeTid1500 } from "./tid1500.js";
 export type { TidSource } from "./tid1500.js";
 
+export { readKeyObject, writeKeyObject } from "./tid2010.js";
+export type { KeyObjectDocument, KeyObjectRequest } from "./tid2010.js";
+
+export { readSecondaryCapture, writeSecondaryCapture } from "./secondary-capture.js";
+export type { SecondaryCaptureImage, SecondaryCaptureRequest } from "./secondary-capture.js";
+
 export { disableElement, dispatchOnElement, enableElement } from "./seam.js";
 export type { ElementSeam, SeamEvent } from "./seam.js";
 

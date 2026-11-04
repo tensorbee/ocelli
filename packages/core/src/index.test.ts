@@ -163,6 +163,12 @@ const PUBLISHED: readonly string[] = [
   // ./tid1500.js, F-097
   "readTid1500",
   "writeTid1500",
+  // ./tid2010.js, F-196
+  "readKeyObject",
+  "writeKeyObject",
+  // ./secondary-capture.js, F-196
+  "readSecondaryCapture",
+  "writeSecondaryCapture",
   // ./seam.js, F-105
   "disableElement",
   "dispatchOnElement",
