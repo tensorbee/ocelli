@@ -34,6 +34,12 @@
 #[cfg(all(target_arch = "wasm32", feature = "render-worker"))]
 mod canvas;
 
+// Host clippy does not compile `canvas`, so the label helpers would be dead
+// there. Keep them with `render-worker`, for its tests and for wasm32.
+// `decode-worker` does not link `ocelli-render`.
+#[cfg(all(feature = "render-worker", any(test, target_arch = "wasm32")))]
+mod tier_label;
+
 pub mod panic;
 
 #[cfg(feature = "render-worker")]
@@ -51,21 +57,14 @@ pub const CRATE_NAME: &str = env!("CARGO_PKG_NAME");
 
 /// The built core's version, as the shell sees it.
 ///
-/// The product module also exports the panic record and the two canvas
-/// functions. F-101 (E16.2) still owns the rest of the boundary. This
-/// function remains for two reasons that are both about measurement
-/// rather than about features.
+/// A wasm module with no export measures nothing. HLD section 15.2's release
+/// profile is `lto = "fat"` with `strip = true`, and a linker given no
+/// reachable root is free to discard the world. The size budget of
+/// `ci/wasm-size-budget.json` would then be recording the size of nothing.
 ///
-/// The first is that a wasm module with no export measures nothing. HLD
-/// section 15.2's release profile is `lto = "fat"` with `strip = true`, and a
-/// linker given no reachable root is free to discard the world. The size
-/// budget of `ci/wasm-size-budget.json` would then be recording the size of
-/// nothing.
-///
-/// The second is that `packages/core/src/index.ts` already carries a
-/// `VERSION` constant and a `coreAvailable()` that returns `false` because no
-/// core has ever been built. This is the value those two eventually agree
-/// with, so the seam is real rather than invented to have an export.
+/// `packages/core/src/index.ts` carries `VERSION` as `0.1.0`.
+/// `coreAvailable()` stays false until `loadCore` resolves true. This function
+/// returns `CARGO_PKG_VERSION`, the same text.
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 #[must_use]
 pub fn ocelli_version() -> String {

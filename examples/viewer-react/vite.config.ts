@@ -8,10 +8,22 @@ interface ExampleProcess {
 const helper = (globalThis as { process?: ExampleProcess }).process?.env
   .VITE_EXAMPLE_SERVER;
 
+const wasmPackage = new URL(
+  "../../crates/ocelli-wasm/pkg/ocelli_wasm.js",
+  import.meta.url,
+);
+const repoRoot = new URL("../..", import.meta.url);
+
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __OCELLI_WASM_URL__: JSON.stringify(`/@fs${wasmPackage.pathname}`),
+  },
   server: {
     port: 5173,
+    fs: {
+      allow: [repoRoot.pathname],
+    },
     proxy:
       helper === undefined
         ? undefined

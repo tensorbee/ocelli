@@ -333,7 +333,7 @@ The series-open gaps that Phase 1 left in the core, then the example viewer call
 | F-195 | E38.5 | S43 | Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours | Rust | 4w | F-049, F-075 | done |
 | F-196 | E38.6 | S43 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w | F-097 | done |
 | F-197 | E38.7 | S43 | Volume from a gantry-tilted stack | Rust | 3w | F-051, F-049 | done |
-| F-198 | E38.8 | S43 | Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source | TS | 4w | F-191, F-192, F-194, F-112 | pending |
+| F-198 | E38.8 | S43 | Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source | TS | 4w | F-191, F-192, F-194, F-112 | done |
 | F-199 | E38.9 | S44 | Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion | TS | 4w | F-198, F-197, F-088 | pending |
 | F-200 | E38.10 | S44 | Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings | TS | 4w | F-198, F-193, F-091 | pending |
 | F-201 | E38.11 | S44 | Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences | TS | 4w | F-198, F-195, F-196 | pending |

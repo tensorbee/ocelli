@@ -4907,3 +4907,29 @@ this branch had not touched since the base.
 **LLD updated.** One paragraph in `docs/lld/volumes.md`, and the volumes row in `docs/lld/README.md`. The sentence that `Volume::assemble` refuses shear stays true.
 **Deviations from the design plan.** The plan names the voxel buffer, the projected spacing and the lateral step. The value also keeps `order`, `origin` and `direction`, which the shared sort already computed, so a later fill does not project the positions again.
 **Notes for future sessions.** Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer Claude Code, read only, with no shell. Moving the lateral bound to 1e-3, the spacing factor to 0.006 and the duplicate bound to 1e-6 each went red and was restored. The agreement bound stays at the approved 1e-6 mm. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish. The live page was not clicked.
+
+## F-198, example viewer through the wasm core, completed 2026-11-04
+
+**What was built.** `loadCore` sets `coreAvailable()` only after its initialiser returns. A thrown initialiser leaves the flag false, and a second success does not call the initialiser again. The example page starts one worker. That worker binds one offscreen canvas, commits one stored monochrome sample, and publishes with `publishCpuCanvas`. It reports the tier from `resolvedTier`. A form fetches one WADO-RS instance through `DicomwebClient` and posts the multipart envelope. The worker copies that envelope into the session bulk slot with `holdSessionBytes` and keeps the boundary beside the ticket. It does not call `commit_frame` on those bytes, and it does not call `commit_dicomweb_response`. That wasm entry is still absent. An empty address does not fetch, because the example server has no synthetic Part 10 route.
+
+**HLD sections implemented.** `docs/hld/03-architecture-and-crates.md` places DICOMweb fetch on the shell and rendering in the worker. Pixels do not cross that boundary. `docs/hld/07-concurrency-and-typescript.md` names one wasm instance per worker. `docs/hld/10-extension-points.md` names `SeriesSource` as the place bytes come from. The local rules are `.claude/plans/F-198-design.md`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `crates/ocelli-wasm`, `packages/core`, `examples/viewer-react`.
+
+**Tests added.** `packages/core/src/load.test.ts`, `packages/core/src/instance-bytes.test.ts`, `examples/viewer-react/src/core-panel.test.tsx`, `examples/viewer-react/src/core-strict.test.tsx`, two tests in `crates/ocelli-wasm/src/tier_label.rs`, and one `resolvedTier` case in `packages/core/src/boundary.wasm.test.ts`.
+
+**Fixture provenance.** No pixel arithmetic. The WADO-RS fixture is a one-part multipart body with boundary `ocelli` and four payload bytes `0x10`, `0x20`, `0x30`, `0x40`. The study, series and instance identifiers are `2.25.11`, `2.25.12` and `2.25.13`. The monochrome sample is the little-endian `f32` value 40 in a 1 by 1 viewport.
+
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+
+**Tier coverage.** Tier A, B and C are reported by `resolvedTier` from `resolve(Auto)`. The CPU canvas publish is the blit on every tier. A headless Chromium observation printed `A`. The Node boundary test only checks that the label is `A`, `B` or `C`.
+
+**LLD updated.** `docs/lld/dicomweb.md`, `docs/lld/typescript-packaging.md`, `docs/lld/build-targets.md`, and their rows in `docs/lld/README.md`.
+
+**Deviations from the design plan.** The plan says an empty URL uses a synthetic Part 10 route when that route is present. The example server has no such route, so an empty URL does not fetch and the page says so. The held bytes are the multipart envelope, not a parsed Part 10 part. The boundary is kept beside the ticket.
+
+**Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 2 nitpicks. Reviewer Claude Code, read only, with no shell. Pass 1 was 1 defect, 3 smells and 2 nitpicks. Pass 2 was 1 defect, 1 smell and 3 nitpicks. Setting the flag true in the `loadCore` catch, posting only the first byte, calling `commit_frame` inside `holdSessionBytes`, widening the accept check to `count >= 0`, removing the adapter branch, and reusing one canvas under StrictMode each went red and was restored. Playwright Chromium from `tools/oracle` loaded `crates/ocelli-wasm/target/boundary-wasm` and printed `resolvedTier=A`. The flags were `--use-gl=angle`, `--use-angle=metal`, `--ignore-gpu-blocklist`, `--enable-webgl`, `--enable-webgl2` and `--enable-unsafe-webgpu`. That call was not inside the example worker. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish. The two leftover nitpicks are the production `/@fs` URL and an empty tier line after a failed load. Pass 4 reported 0 defects, 1 smell and those 2 nitpicks. The smell was a `test` cfg arm that compiled `tier_label` without `render-worker`. `cargo test -p ocelli-wasm --no-default-features --features decode-worker --lib` then failed on an unresolved `ocelli_render`. The predicate is now `all(feature = "render-worker", any(test, target_arch = "wasm32"))`. That decode-worker lib test then passed 11 tests. The default `tier_label` filter passed 2. Host clippy with default features passed. The wasm32 check passed. Pass 5 reported 0 defects, 0 smells and 3 nitpicks.

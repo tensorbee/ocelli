@@ -153,14 +153,14 @@ pixel (1, 1) is set and whether the shutter hides it. The Interpolation
 section posts the 2 by 2 fixture and shows 138.75 for linear and the
 nearest corner for nearest. A file you choose is
 posted and discarded. It is not written into this
-repository. The header still reads `core not built` until a later story loads
+repository. The header reads `core not built` until the page worker loads
 the wasm module.
 
 `bin/ocelli.sh wasm` writes the module to `crates/ocelli-wasm/pkg`. That
 directory is a build artefact and is not committed, so a clean clone still
-opens. The header then reads `core not built`, and the page tells you to build
-the module. `coreAvailable()` in `@ocelli/core` stays false until the page
-loads that module, so the header does not change to ready from the build alone.
+opens with the header on `core not built`. After that build, reload the page.
+The worker loads the module, and the header reads `core ready` only after
+that load succeeds. The build alone does not flip the header.
 
 The page mounts one stack viewport. It is the showcase, so a library behaviour
 is finished only when this page has a control for it. To open a folder of

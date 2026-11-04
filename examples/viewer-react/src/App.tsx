@@ -1,5 +1,4 @@
 import {
-  coreAvailable,
   readKeyObject,
   readSecondaryCapture,
   VERSION,
@@ -11,6 +10,8 @@ import { OcelliViewport } from "@ocelli/react";
 import type { OcelliSession } from "@ocelli/react";
 import { useState } from "react";
 
+import { CorePanel } from "./core-panel.js";
+
 /**
  * The example viewer.
  *
@@ -20,8 +21,9 @@ import { useState } from "react";
  *
  * A clean clone has no built wasm module, so the honest state is "core not
  * built" rather than a crash. F-002 (`bin/ocelli.sh wasm`) produces the
- * module. This story does not load that module. The factory returns null,
- * and the viewport stays absent until a caller supplies a session.
+ * module. The wasm core section loads it in one worker when the package
+ * directory is present. This factory still returns null. The stack viewport
+ * stays absent until a caller supplies a session.
  */
 function sessionFromModule(): OcelliSession | null {
   return null;
@@ -1072,7 +1074,7 @@ function TiltPanel() {
 }
 
 export function App() {
-  const ready = coreAvailable();
+  const [ready, setReady] = useState(false);
   const session = sessionFromModule();
 
   return (
@@ -1081,7 +1083,7 @@ export function App() {
         <h1>Ocelli example viewer</h1>
         <p>
           <code>@ocelli/core</code> {VERSION} &middot;{" "}
-          {ready ? "core ready" : "core not built"}
+          <span>{ready ? "core ready" : "core not built"}</span>
         </p>
       </header>
 
@@ -1107,6 +1109,7 @@ export function App() {
       <CalibrationPanel />
       <DocumentPanel />
       <TiltPanel />
+      <CorePanel onAvailable={setReady} />
 
       <section>
         <h2>Stack viewport</h2>

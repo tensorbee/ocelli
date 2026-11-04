@@ -10,7 +10,7 @@
 | F-195 | E38.5 | Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours | Rust | 4w | done |
 | F-196 | E38.6 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w | done |
 | F-197 | E38.7 | Volume from a gantry-tilted stack | Rust | 3w | done |
-| F-198 | E38.8 | Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source | TS | 4w | pending |
+| F-198 | E38.8 | Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source | TS | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -37,8 +37,9 @@ local folder page and is not a second product.
 - **The LUT chain already exists.** `ocelli-pixel::LutChain` is the only
   pixel formula. Calibration and SUV read geometry and tags. They do not
   map samples.
-- **`coreAvailable()` stays false until F-198.** The example page already
-  shows the S42 sections beside that gate.
+- **`coreAvailable()` is true only after `loadCore` succeeds.** A clean import
+  stays false. The example worker is the caller. The page still shows the
+  S42 sections beside that gate.
 - **A gantry tilt is measured from geometry.** F-020 and F-049 already
   refuse a sheared stack. F-197 decides whether a tilted stack can become
   a volume. It does not read the gantry tilt tag as the shear.

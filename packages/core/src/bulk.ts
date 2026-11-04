@@ -286,6 +286,44 @@ export function sessionBulkSink(wasm: SessionBulkExports): BulkSink {
 }
 
 /**
+ * Copy `bytes` into the outstanding session slot and return its ticket.
+ *
+ * A previous ticket is released first. This does not call `commit_frame`
+ * and it does not parse the bytes. There is no `commit_dicomweb_response`
+ * export, so the bytes stay in the outstanding slot. That slot is the
+ * session's only bulk allocation. `writeFrame`, `writeCommands` and
+ * `writeStack` refuse until `release_bulk` drops the ticket.
+ * The view is built after `alloc` and is not stored.
+ */
+export function holdSessionBytes(
+  wasm: SessionBulkExports,
+  bytes: Uint8Array,
+  previousTicket: number,
+): number {
+  if (previousTicket !== 0) {
+    wasm.release_bulk(previousTicket);
+  }
+  if (bytes.byteLength === 0) {
+    return 0;
+  }
+  const ptr = wasm.alloc(bytes.byteLength);
+  if (ptr === 0) {
+    return 0;
+  }
+  const ticket = wasm.bulk_ticket();
+  if (ticket === 0) {
+    return 0;
+  }
+  try {
+    new Uint8Array(wasm.memory.buffer, ptr, bytes.byteLength).set(bytes);
+  } catch (error) {
+    wasm.release_bulk(ticket);
+    throw error;
+  }
+  return ticket;
+}
+
+/**
  * Copy one complete validated DICOMweb response into the future core sink.
  *
  * F-101 supplies the live Session method. Keeping this operation against a

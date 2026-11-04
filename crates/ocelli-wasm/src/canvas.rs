@@ -11,7 +11,7 @@ use js_sys::Reflect;
 use js_sys::Uint8ClampedArray;
 use ocelli_render::{
     BlendMode, GpuContext, Pass, RasterResult, RenderGraph, ResolvedAdapter, StackPass,
-    TierRequest, ViewportId, VoiParams, device_extent, resolve_adapter,
+    TierRequest, ViewportId, VoiParams, device_extent, resolve, resolve_adapter,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -35,6 +35,9 @@ struct Table {
     adapter: Option<ResolvedAdapter>,
     context: Option<GpuContext>,
     graph: Option<RenderGraph>,
+    /// The tier from `resolve` when no adapter is retained. An opened adapter
+    /// wins over this, so a later device does not keep a stale label.
+    tier: Option<&'static str>,
     rows: Vec<Option<ViewportRow>>,
 }
 
@@ -48,6 +51,7 @@ impl Table {
             adapter: None,
             context: None,
             graph: None,
+            tier: None,
             rows,
         }
     }
@@ -395,7 +399,7 @@ pub async fn tier_b_section_183(canvas: OffscreenCanvas) -> String {
             None,
         ),
         WebGlProbe::Opened(opened) => {
-            let tier = tier_label(opened.adapter.resolution().caps.tier);
+            let tier = crate::tier_label::tier_name(opened.adapter.resolution().caps.tier);
             let renderer = match opened.adapter.resolution().evidence.candidate.as_ref() {
                 Some(candidate) => candidate.name.clone(),
                 None => String::new(),
@@ -429,7 +433,7 @@ pub async fn tier_b_section_183(canvas: OffscreenCanvas) -> String {
             match read_section_18_3(&mut context, &opened.adapter) {
                 Ok(pixels) => json_report(
                     "drew",
-                    tier_label(context.caps().tier),
+                    crate::tier_label::tier_name(context.caps().tier),
                     &renderer,
                     stored_format_name(pixels.format),
                     decided,
@@ -438,7 +442,7 @@ pub async fn tier_b_section_183(canvas: OffscreenCanvas) -> String {
                 ),
                 Err(Section183Error::Unavailable) => json_report(
                     "unavailable",
-                    tier_label(context.caps().tier),
+                    crate::tier_label::tier_name(context.caps().tier),
                     &renderer,
                     "",
                     decided,
@@ -456,7 +460,7 @@ pub async fn tier_b_section_183(canvas: OffscreenCanvas) -> String {
                 ),
                 Err(Section183Error::NotSubmitted) => json_report(
                     "unavailable",
-                    tier_label(context.caps().tier),
+                    crate::tier_label::tier_name(context.caps().tier),
                     &renderer,
                     "",
                     decided,
@@ -465,7 +469,7 @@ pub async fn tier_b_section_183(canvas: OffscreenCanvas) -> String {
                 ),
                 Err(Section183Error::Readback(reason)) => json_report(
                     "unavailable",
-                    tier_label(context.caps().tier),
+                    crate::tier_label::tier_name(context.caps().tier),
                     &renderer,
                     "",
                     decided,
@@ -474,15 +478,6 @@ pub async fn tier_b_section_183(canvas: OffscreenCanvas) -> String {
                 ),
             }
         }
-    }
-}
-
-#[cfg(feature = "tier-b-probe")]
-fn tier_label(tier: ocelli_render::Tier) -> &'static str {
-    match tier {
-        ocelli_render::Tier::A => "A",
-        ocelli_render::Tier::B => "B",
-        ocelli_render::Tier::Cpu => "C",
     }
 }
 
@@ -621,6 +616,47 @@ thread_local! {
 struct StagedFrame {
     extent: [u32; 2],
     generation: u32,
+}
+
+fn stored_tier(table: &Table) -> Option<&'static str> {
+    let adapter = table
+        .adapter
+        .as_ref()
+        .map(|adapter| adapter.resolution().caps.tier);
+    crate::tier_label::stored_tier_label(adapter, table.tier)
+}
+
+/// The tier `resolve` kept for this worker. A retained adapter wins, so the
+/// label is not replaced with the CPU canvas path.
+#[wasm_bindgen(js_name = resolvedTier)]
+pub async fn resolved_tier() -> String {
+    let cached = TABLE.with(|table| {
+        table
+            .try_borrow()
+            .ok()
+            .and_then(|table| stored_tier(&table))
+    });
+    if let Some(label) = cached {
+        return label.to_owned();
+    }
+    let mut clock = browser_clock();
+    let resolution = resolve(TierRequest::Auto, &mut clock).await;
+    let label = crate::tier_label::tier_name(resolution.caps.tier);
+    TABLE.with(|table| {
+        if let Ok(mut table) = table.try_borrow_mut()
+            && table.adapter.is_none()
+            && table.tier.is_none()
+        {
+            table.tier = Some(label);
+        }
+    });
+    let chosen = TABLE.with(|table| {
+        table
+            .try_borrow()
+            .ok()
+            .and_then(|table| stored_tier(&table))
+    });
+    chosen.unwrap_or(label).to_owned()
 }
 
 /// Bind the session CPU raster to an owned canvas. The shell does not receive pixels.
