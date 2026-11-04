@@ -54,7 +54,7 @@ The page holds the report in React state. TID bytes are counted by the read-back
 | AC3 | One put lists 1 annotation and undo lists 0 | same | Undo that keeps the put | implementation |
 | AC4 | TID 1500 reads the same number back | same | An operator name shown as the measurement | implementation |
 | AC5 | The key image text is KEY, ArrowUp with shift is scroll-previous, and the touch event is touch.start | same | A mouse down named as touch | implementation |
-| AC6 | The page shows the report and the unavailable lines | `s44-panels.test.tsx` | A second secondary-capture writer | integrated |
+| AC6 | The page shows the report and the unavailable lines | `measurement-panel.test.tsx` | A second secondary-capture writer | integrated |
 
 ## Approach
 
@@ -83,7 +83,7 @@ Example vitest files. Feature profile at story close. dcmjs stays the TID 1500 w
 | Category | What it proves | Where |
 |----------|----------------|-------|
 | contract | the document, the list, undo, TID 1500, the mark, the shortcut and the touch name | `examples/viewer-react/src/measurement-report.test.ts` |
-| contract | the page shows them and does not add a second export writer | `examples/viewer-react/src/s44-panels.test.tsx` |
+| contract | the page shows them and does not add a second export writer | `examples/viewer-react/src/measurement-panel.test.tsx` |
 
 No new pixel arithmetic.
 

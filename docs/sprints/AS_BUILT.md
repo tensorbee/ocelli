@@ -4987,3 +4987,29 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The approved plan named `s44-panels.test.tsx`. The panel observation is `manipulation-panel.test.tsx`. The combined file was not added.
 
 **Notes for future sessions.** Setting the vertical flip enabled flag made the packed bytes differ by one and the report test went red, then the flag was restored. Ignoring the colour map select left the name at stops and the panel test went red, then the select was restored. Pass 1 was 0 defects, 2 smells and 2 nitpicks. Pass 2 reported 0 defects, 0 smells and 2 nitpicks. Reviewer Claude Code, read only, with no shell. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-201, example measurement document and shortcut, completed 2026-11-04
+
+**What was built.** The example page measurement section calls `persistMeasurements`, `loadMeasurements`, `putAnnotation`, `annotationsForFrame`, `undoAnnotation`, `writeTid1500`, `readTid1500`, `keyImageMark`, `keyAction` and `createPointerDispatch`. The page passes 12.5 mm for the stored document and for the TID item. The TID line is the number `readTid1500` returns. The concept scheme is SCT, value 410668003 and meaning Length. The study, series, instance and annotation frame identifiers are synthetic 2.25 values. Each button run starts a new annotation state. Undo of that one put is empty. A touch pointer down reads `touch.start` and a mouse down reads `pointer.down`. Metadata browser and preferences read unavailable. Those controls are unscheduled F-205. Secondary capture stays on the document panel.
+
+**HLD sections implemented.** `docs/hld/07-concurrency-and-typescript.md` section 10. Decision D13. Appendix B is not marked measured. The local rules are `.claude/plans/F-201-design.md`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/viewer-react`.
+
+**Tests added.** `examples/viewer-react/src/measurement-report.test.ts` and `examples/viewer-react/src/measurement-panel.test.tsx`.
+
+**Fixture provenance.** No pixel arithmetic. The page inputs are 12.5 mm, shortcut ArrowUp with shift, key image id k1 at point (1, 2), and one touch pointer down at client (4, 6).
+
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+
+**Tier coverage.** Tiers A, B and C are not applicable. This section does not draw.
+
+**LLD updated.** `docs/lld/public-api.md`.
+
+**Deviations from the design plan.** The approved plan named `s44-panels.test.tsx`. The panel observation is `measurement-panel.test.tsx`. The combined file was not added.
+
+**Notes for future sessions.** Ignoring the shortcut key left the action at scroll-previous and the panel test went red, then the key was restored. Copying the TID number from the loaded document left 12.5 when the source instance was blank, and that test went red. Using the loaded document after a successful write left 12.5 in the TID line when the written number was 7, and that test went red. Echoing the written number left 7 when the read-back was replaced with 3, and that test went red. The TID line was restored to the read-back. Pass 4 reported 0 defects, 0 smells and 3 nitpicks. Reviewer Claude Code, read only, with no shell. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
