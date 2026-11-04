@@ -1,6 +1,6 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199, F-200
 **Last updated:** 2026-11-04
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
@@ -406,3 +406,16 @@ Prior studies, linked scroll, synced window, MPR, slab, volume rendering
 and fusion read unavailable. Those controls are F-203. The section does
 not draw and it does not add a formula. Tiers A, B and C are not
 applicable.
+
+## Example manipulation
+
+The example page manipulation section calls `windowDrag`, `windowRegion`,
+`rotationDrag`, `orientationQuadrant`, `orientationMarker`,
+`magnifyCircle`, `scaleLength`, `cropPlanes`, `packCommands` and
+`describeError`. Preset, flip and colour map are packed for viewport 1
+and the page shows the packed length. The packed bytes are the command
+evidence. Window centre follows the horizontal drag and width follows
+the upward drag. The crop line is crop planes. It is not a display
+shutter. One to one, histogram and four corners read unavailable. Those
+controls are F-204. The section does not draw and it does not add a
+window formula. Tiers A, B and C are not applicable.

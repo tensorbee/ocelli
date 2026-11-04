@@ -59,7 +59,7 @@ No wasm write. `packCommands` returns bytes the page counts and drops. The error
 | AC4 | A 512 px rotation from 0 reports 2 radians and quadrant 1 | same | Wrapping quadrant 4 | implementation |
 | AC5 | Marker quadrant 1 moves R to the end, magnify null scale is 1, and 10 mm at 2 px/mm is 20 | same | Reading pixels | implementation |
 | AC6 | One finite crop plane reports count 1, and the warning text is `describeError` of the caller code | same | Matching on the sentence | implementation |
-| AC7 | The page shows the report and the unavailable lines | `s44-panels.test.tsx` | Labelling `cropPlanes` as a display shutter | integrated |
+| AC7 | The page shows the report and the unavailable lines | `manipulation-panel.test.tsx` | Labelling `cropPlanes` as a display shutter | integrated |
 
 ## Approach
 
@@ -88,7 +88,7 @@ Example vitest files. Feature profile at story close.
 | Category | What it proves | Where |
 |----------|----------------|-------|
 | contract | each control follows its existing function | `examples/viewer-react/src/manipulation-report.test.ts` |
-| contract | the page shows the names and the unavailable lines | `examples/viewer-react/src/s44-panels.test.tsx` |
+| contract | the page shows the names and the unavailable lines | `examples/viewer-react/src/manipulation-panel.test.tsx` |
 
 No new pixel arithmetic.
 

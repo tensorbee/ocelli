@@ -4961,3 +4961,29 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The first approved title said series drag. Pass 1 called that label a smell because the value is the stack step. The title now says stack drag in the allocation, the sprint plan, the backlog and the current sprint.
 
 **Notes for future sessions.** Pass 2 reported 0 defects, 0 smells and 0 nitpicks. The feature floor then failed eslint because the fullscreen test assigned `this` to a local. The stub now returns the requesting element from a getter. An immediate return in the handler left the word off and the click test went red, then the return was removed. Pass 3 reported 0 defects, 0 smells and 1 nitpick. The nitpick is an untested exitFullscreen call and it does not block. Reviewer Claude Code, read only, with no shell. Pass 1 was 0 defects, 1 smell and 3 nitpicks. A constant grid count of 2 failed the one-cell test and was restored. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-200, example presets and window drag, completed 2026-11-04
+
+**What was built.** The example page manipulation section calls `windowDrag`, `windowRegion`, `rotationDrag`, `orientationQuadrant`, `orientationMarker`, `magnifyCircle`, `scaleLength`, `cropPlanes`, `packCommands` and `describeError`. Preset, horizontal flip, vertical flip and colour map are packed for viewport 1. The page shows the preset name, the colour map name and the packed lengths. The report keeps the packed bytes so a flag change fails the test. One to one, histogram and four corners read unavailable. Those controls are unscheduled F-204. Overlay planes and display shutters stay on the overlay panel. The crop line is crop planes.
+
+**HLD sections implemented.** `docs/hld/05-rendering.md` section 7 and `docs/hld/07-concurrency-and-typescript.md` section 10. Appendix B is not marked measured. The local rules are `.claude/plans/F-200-design.md`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/viewer-react`.
+
+**Tests added.** `examples/viewer-react/src/manipulation-report.test.ts` and `examples/viewer-react/src/manipulation-panel.test.tsx`.
+
+**Fixture provenance.** No pixel arithmetic. The page inputs are preset lung, centre 40 and width 400, a window drag of x 256 and y -256, a rotation drag of x 512, samples 0 and 10, marker quadrant 1, a null magnify scale, 10 mm at 2 pixels per millimetre, one crop plane, and `ERROR_CODE.Unavailable`.
+
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+
+**Tier coverage.** Tiers A, B and C are not applicable. This section does not draw and it does not start histogram compute.
+
+**LLD updated.** `docs/lld/public-api.md`.
+
+**Deviations from the design plan.** The approved plan named `s44-panels.test.tsx`. The panel observation is `manipulation-panel.test.tsx`. The combined file was not added.
+
+**Notes for future sessions.** Setting the vertical flip enabled flag made the packed bytes differ by one and the report test went red, then the flag was restored. Ignoring the colour map select left the name at stops and the panel test went red, then the select was restored. Pass 1 was 0 defects, 2 smells and 2 nitpicks. Pass 2 reported 0 defects, 0 smells and 2 nitpicks. Reviewer Claude Code, read only, with no shell. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.

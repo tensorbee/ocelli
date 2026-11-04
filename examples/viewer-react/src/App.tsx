@@ -12,6 +12,7 @@ import { useState } from "react";
 
 import { CorePanel } from "./core-panel.js";
 import { LayoutPanel } from "./layout-panel.js";
+import { ManipulationPanel } from "./manipulation-panel.js";
 
 /**
  * The example viewer.
@@ -1111,6 +1112,7 @@ export function App() {
       <DocumentPanel />
       <TiltPanel />
       <LayoutPanel />
+      <ManipulationPanel />
       <CorePanel onAvailable={setReady} />
 
       <section>
