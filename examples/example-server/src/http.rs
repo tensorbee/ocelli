@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
+use crate::overlay::overlay_reply;
 use crate::reply::reply_body;
 use crate::series::series_reply;
 
@@ -73,6 +74,8 @@ struct Loaded {
 fn route(loaded: &Loaded) -> Reply {
     let (status, json) = if loaded.path == "/series-open" {
         series_reply(&loaded.body, loaded.content_type.as_deref())
+    } else if loaded.path == "/overlay" {
+        overlay_reply(&loaded.body, loaded.frame)
     } else {
         reply_body(&loaded.body, loaded.frame)
     };
@@ -151,27 +154,17 @@ fn read_body(stream: &mut TcpStream) -> Result<Loaded, ReadStop> {
     let header = std::str::from_utf8(header_bytes)
         .map_err(|_| ReadStop::Reply(text_reply(400, "the frame-open header is not text")))?;
     let header = parse_header(header)?;
-    if header.method == "OPTIONS" && (header.path == "/frame-open" || header.path == "/series-open")
-    {
+    if header.method == "OPTIONS" && open_path(&header.path) {
         return Err(ReadStop::Reply(Reply {
             status: 204,
             content_type: "text/plain; charset=utf-8",
             body: Vec::new(),
         }));
     }
-    if header.method != "POST" || (header.path != "/frame-open" && header.path != "/series-open") {
+    if header.method != "POST" || !open_path(&header.path) {
         return Err(ReadStop::Reply(text_reply(404, "not found")));
     }
-    let too_large = if header.path == "/series-open" {
-        "the series-open request is too large"
-    } else {
-        "the frame-open request is too large"
-    };
-    let no_length = if header.path == "/series-open" {
-        "the series-open request has no length"
-    } else {
-        "the frame-open request has no length"
-    };
+    let (too_large, no_length) = body_messages(&header.path);
     let declared = match header.length {
         Some(value) if value > BODY_CAP => {
             return Err(ReadStop::Reply(text_reply(400, too_large)));
@@ -298,6 +291,29 @@ fn parse_header(header: &str) -> Result<Header, ReadStop> {
     })
 }
 
+fn open_path(path: &str) -> bool {
+    path == "/frame-open" || path == "/series-open" || path == "/overlay"
+}
+
+fn body_messages(path: &str) -> (&'static str, &'static str) {
+    if path == "/series-open" {
+        (
+            "the series-open request is too large",
+            "the series-open request has no length",
+        )
+    } else if path == "/overlay" {
+        (
+            "the overlay request is too large",
+            "the overlay request has no length",
+        )
+    } else {
+        (
+            "the frame-open request is too large",
+            "the frame-open request has no length",
+        )
+    }
+}
+
 fn split_path(raw_path: &str) -> Result<(String, u32), ReadStop> {
     let (path, query) = match raw_path.split_once('?') {
         Some((path, query)) => (path.to_owned(), Some(query)),
@@ -408,5 +424,45 @@ mod tests {
         );
         assert!(response.contains("\"milliseconds\":100"));
         assert!(response.contains("\"playback\":\"sweep\""));
+    }
+
+    #[test]
+    fn overlay_options_is_empty() {
+        let request = b"OPTIONS /overlay HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        let response = exchange(request);
+        assert!(response.contains("204"));
+    }
+
+    #[test]
+    fn synthetic_overlay_post_reports_the_hit_and_the_hide() {
+        let request =
+            b"POST /overlay HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 9\r\n\r\nsynthetic";
+        let response = exchange(request);
+        assert!(response.contains("200"));
+        assert!(response.contains("\"hit\":true"));
+        assert!(response.contains("\"hidden\":true"));
+        assert!(response.contains("\"presentation\":null"));
+        assert!(!response.contains("\"presentation\":0"));
+        assert!(response.contains("\"mask\":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]"));
+    }
+
+    #[test]
+    fn overlay_frame_query_past_the_end_is_refused() {
+        let request = b"POST /overlay?frame=1 HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 9\r\n\r\nsynthetic";
+        let response = exchange(request);
+        assert!(response.contains("400"));
+        assert!(response.contains("\"error\":\"frame_out_of_range\""));
+        assert!(response.contains("\"frame\":1"));
+    }
+
+    #[test]
+    fn an_over_cap_overlay_length_names_the_overlay_route() {
+        let request = format!(
+            "POST /overlay HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\n\r\n",
+            BODY_CAP.saturating_add(1)
+        );
+        let response = exchange(request.as_bytes());
+        assert!(response.contains("400"));
+        assert!(response.contains("the overlay request is too large"));
     }
 }

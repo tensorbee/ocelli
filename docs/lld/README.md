@@ -24,6 +24,7 @@ row here in the same hand.
 | [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-020, F-021, F-025 |
 | [frame-open.md](frame-open.md) | Chain inputs for one Part 10 frame, padding fill, lossy and burned-in flags, private creators, and the example-viewer helper | F-191 |
 | [series-open.md](series-open.md) | Display groups, projected order, temporal slots, cine timing, and the example-viewer series panel | F-192 |
+| [overlays.md](overlays.md) | Overlay planes, display shutters, and the example-viewer overlay panel | F-193 |
 | [pixel-pipeline.md](pixel-pipeline.md) | Image-plane evidence, stored-value extraction, and all four stages of DICOM PS3.3 C.11: modality, VOI, presentation and colour | F-018, F-029, F-030, F-041, F-044, F-046 |
 | [dicomweb.md](dicomweb.md) | TypeScript DICOMweb transport and the pure Rust response contract | F-021, F-101 |
 | [nifti-ingest.md](nifti-ingest.md) | NIfTI-1.1 header, affine, coordinate conversion, and payload validation | F-022 |

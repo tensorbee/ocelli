@@ -9,7 +9,7 @@
 |------|----------|-------|-------|-----|--------|
 | F-191 | E38.1 | Frame open from a Part 10 object: chain inputs including Modality and VOI LUT Sequences, colour selection, pixel padding PS3.3 C.7.5.1.1.2, Lossy Image Compression and Burned In Annotation flags, private creators | Rust | 5w | done |
 | F-192 | E38.2 | Series assembly: order by projected position, split mixed series, temporal axis, cine timing with loop and bounce | Rust | 5w | done |
-| F-193 | E38.3 | Overlay planes PS3.3 C.9.2 and display shutters PS3.3 C.7.6.11 and C.7.6.15 | Rust | 3w | pending |
+| F-193 | E38.3 | Overlay planes PS3.3 C.9.2 and display shutters PS3.3 C.7.6.11 and C.7.6.15 | Rust | 3w | done |
 | F-194 | E38.4 | Stack display interpolation, nearest and linear, declared on tiers A, B and C | Rust | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes

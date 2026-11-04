@@ -210,6 +210,43 @@ pub(crate) fn frame_time_zero_part() -> Result<Vec<u8>, &'static str> {
     )
 }
 
+/// One 4 by 4 object.
+///
+/// Overlay group `6000` has origin `1\1` and the first bit set. The rectangular
+/// shutter opens from column 2, so image `(1, 1)` is outside the opening.
+/// Shutter Presentation Value is absent.
+pub(crate) fn synthetic_overlay_object() -> Result<Vec<u8>, &'static str> {
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    data.extend(short_le((0x0008, 0x0018), *b"UI", &ui(b"2.25.40"))?);
+    data.extend(short_le(
+        (0x0018, 0x1600),
+        *b"CS",
+        &text_pad("RECTANGULAR"),
+    )?);
+    data.extend(short_le((0x0018, 0x1602), *b"IS", &text_pad("2"))?);
+    data.extend(short_le((0x0018, 0x1604), *b"IS", &text_pad("4"))?);
+    data.extend(short_le((0x0018, 0x1606), *b"IS", &text_pad("1"))?);
+    data.extend(short_le((0x0018, 0x1608), *b"IS", &text_pad("4"))?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &4_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &4_u16.to_le_bytes())?);
+    data.extend(short_le((0x6000, 0x0010), *b"US", &4_u16.to_le_bytes())?);
+    data.extend(short_le((0x6000, 0x0011), *b"US", &4_u16.to_le_bytes())?);
+    data.extend(short_le((0x6000, 0x0040), *b"CS", &text_pad("G"))?);
+    let mut origin = Vec::new();
+    origin.extend_from_slice(&1_i16.to_le_bytes());
+    origin.extend_from_slice(&1_i16.to_le_bytes());
+    data.extend(short_le((0x6000, 0x0050), *b"SS", &origin)?);
+    data.extend(short_le((0x6000, 0x0100), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le((0x6000, 0x0102), *b"US", &0_u16.to_le_bytes())?);
+    data.extend(long_le((0x6000, 0x3000), *b"OB", &[0x01, 0x00])?);
+    part10(data)
+}
+
 fn long_le(tag: (u16, u16), vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, &'static str> {
     if !value.len().is_multiple_of(2) {
         return Err("odd element");

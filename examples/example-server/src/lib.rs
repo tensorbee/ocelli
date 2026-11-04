@@ -1,9 +1,10 @@
-//! Frame-open and series-open helper for the example viewer.
+//! Frame-open, series-open and overlay helper for the example viewer.
 //!
 //! The page posts either the token `synthetic` or Part 10 bytes. This crate
 //! does not write those bytes to disk and does not log them.
 
 mod bytes;
+mod overlay;
 mod reply;
 mod series;
 

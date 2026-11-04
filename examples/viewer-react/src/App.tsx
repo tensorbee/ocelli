@@ -407,6 +407,167 @@ function SeriesOpenPanel() {
   );
 }
 
+interface OverlayView {
+  rows: number;
+  columns: number;
+  hit: boolean;
+  hidden: boolean;
+  outside: number;
+  presentation: number | null;
+  mask: number[] | null;
+}
+
+function readOverlay(value: unknown): OverlayView | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.rows !== "number" || typeof record.columns !== "number") {
+    return null;
+  }
+  if (typeof record.hit !== "boolean" || typeof record.hidden !== "boolean") {
+    return null;
+  }
+  if (typeof record.outside !== "number") {
+    return null;
+  }
+  const presentation = record.presentation;
+  if (presentation !== null && typeof presentation !== "number") {
+    return null;
+  }
+  const mask = readMask(record.mask);
+  if (mask === undefined) {
+    return null;
+  }
+  return {
+    rows: record.rows,
+    columns: record.columns,
+    hit: record.hit,
+    hidden: record.hidden,
+    outside: record.outside,
+    presentation: typeof presentation === "number" ? presentation : null,
+    mask,
+  };
+}
+
+function readMask(value: unknown): number[] | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const bits: number[] = [];
+  for (const item of value) {
+    if (item !== 0 && item !== 1) {
+      return undefined;
+    }
+    bits.push(item);
+  }
+  return bits;
+}
+
+function overlayProblem(text: string): string {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
+      const code = (parsed as { error?: unknown }).error;
+      if (typeof code === "string") {
+        return `The overlay could not be read (${code}).`;
+      }
+    }
+  } catch {
+    return "The overlay could not be read.";
+  }
+  return "The overlay could not be read.";
+}
+
+function OverlayPanel() {
+  const [view, setView] = useState<OverlayView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function run(body: BodyInit): Promise<void> {
+    setPending(true);
+    setProblem(null);
+    try {
+      const response = await fetch("/overlay", { method: "POST", body });
+      const text = await response.text();
+      if (!response.ok) {
+        setProblem(overlayProblem(text));
+        return;
+      }
+      const parsed: unknown = JSON.parse(text);
+      const next = readOverlay(parsed);
+      if (next === null) {
+        setProblem("The overlay response could not be read.");
+        return;
+      }
+      setView(next);
+    } catch {
+      setProblem("The overlay helper is not running.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section>
+      <h2>Overlay</h2>
+      <p>
+        The synthetic button posts a built-in 4 by 4 object. One overlay bit is
+        set at image (1, 1) and the rectangular shutter hides that pixel. A
+        file you choose is posted to the helper on this machine and is not
+        saved.
+      </p>
+      <p>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            void run("synthetic");
+          }}
+        >
+          Synthetic overlay
+        </button>{" "}
+        <input
+          type="file"
+          disabled={pending}
+          aria-label="Choose a Part 10 file for overlay"
+          onChange={(event) => {
+            const file = event.currentTarget.files?.item(0);
+            if (file !== undefined && file !== null) {
+              void run(file);
+            }
+          }}
+        />
+      </p>
+      {problem !== null && <p>{problem}</p>}
+      {view !== null && (
+        <div>
+          <p>
+            {view.hit
+              ? "Overlay hit at (1, 1)."
+              : "Overlay misses (1, 1)."}
+          </p>
+          <p>
+            {view.hidden
+              ? "Shutter hides (1, 1)."
+              : "Shutter leaves (1, 1) open."}
+          </p>
+          <p>Outside {view.outside.toString()}.</p>
+          {view.presentation === null ? (
+            <p>The neutral value is absent.</p>
+          ) : (
+            <p>Neutral value {view.presentation.toString()}.</p>
+          )}
+          {view.mask !== null && <p>Mask {view.mask.join(" ")}</p>}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FrameOpenPanel() {
   const [view, setView] = useState<FrameOpenView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -518,6 +679,7 @@ export function App() {
 
       <FrameOpenPanel />
       <SeriesOpenPanel />
+      <OverlayPanel />
 
       <section>
         <h2>Stack viewport</h2>

@@ -7,6 +7,7 @@
 //! F-022 adds direct NIfTI-1.1 header, affine, and payload validation.
 //! F-020 derives per-frame geometry, stack shear and calibrated spacing.
 //! F-192 orders a bag of frames into display groups and reads cine timing.
+//! F-193 reads overlay planes and display shutters.
 
 mod dicomweb;
 mod frame_geometry;
@@ -15,6 +16,7 @@ mod frame_open;
 mod metadata;
 mod multiframe;
 mod nifti;
+mod overlay;
 mod parse;
 mod provider;
 mod series_open;
@@ -45,6 +47,10 @@ pub use multiframe::{
 pub use nifti::{
     NiftiAffineSource, NiftiByteOrder, NiftiDataType, NiftiError, NiftiHeader, NiftiQForm,
     NiftiSForm, NiftiScaling, NiftiSpatialUnits, ParsedNifti, parse_nifti,
+};
+pub use overlay::{
+    OverlayError, OverlayPlane, OverlayReason, OverlaySet, OverlayType, Shutter, ShutterShape,
+    read_overlays,
 };
 pub use parse::{DispatchPath, ParseError, ParsedDicom, TransferSyntaxInfo, parse_part10};
 pub use provider::{

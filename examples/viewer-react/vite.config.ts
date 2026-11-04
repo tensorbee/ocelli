@@ -18,6 +18,7 @@ export default defineConfig({
         : {
             "/frame-open": { target: helper },
             "/series-open": { target: helper },
+            "/overlay": { target: helper },
           },
   },
   // The wasm module lands in crates/ocelli-wasm/pkg via `bin/ocelli.sh wasm`.
