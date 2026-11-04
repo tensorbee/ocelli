@@ -1,9 +1,11 @@
 //! ROI statistics.
 //!
-//! The HLD does not give these formulas. The local rules are in
-//! `.claude/plans/F-075-design.md`. SUV is a separate path and this module
-//! does not call the modality LUT. An empty sample list is degenerate. The
-//! standard deviation divides by the count. The area is the caller's number.
+//! The HLD does not give these formulas. The local rules for statistics and
+//! SUVbw are in `.claude/plans/F-075-design.md`. SUVlbm and SUVbsa follow
+//! `.claude/plans/F-195-design.md` and share this decay. SUV is a separate
+//! path and this module does not call the modality LUT. An empty sample list
+//! is degenerate. The standard deviation divides by the count. The area is
+//! the caller's number.
 //! A histogram writes the caller's bins only after the samples validate.
 
 use glam::DVec2;
@@ -38,6 +40,28 @@ pub struct Histogram {
     pub width: f64,
 }
 
+/// PET activity inputs shared by the SUV methods.
+///
+/// Weight, lean body mass and body surface area are not fields. Each method
+/// receives its own body-size magnitude.
+#[derive(Debug, Clone, Copy)]
+pub struct SuvActivity {
+    /// Stored pixel value.
+    pub stored: f64,
+    /// Rescale slope supplied by the caller.
+    pub slope: f64,
+    /// Rescale intercept supplied by the caller.
+    pub intercept: f64,
+    /// Radionuclide total dose in becquerels.
+    pub total_dose_bq: f64,
+    /// Radionuclide half-life in seconds.
+    pub half_life_seconds: f64,
+    /// Seconds from injection to series time.
+    pub elapsed_seconds: f64,
+    /// True only when Units is `BQML`.
+    pub units_bqml: bool,
+}
+
 /// Inputs for one SUVbw. The caller has already read the tags.
 #[derive(Debug, Clone, Copy)]
 pub struct SuvInputs {
@@ -59,10 +83,13 @@ pub struct SuvInputs {
     pub units_bqml: bool,
 }
 
-/// A refused SUV.
+/// A refused SUV or calibration.
 ///
 /// `Frame` is 402 and `Unavailable` is 403. Those numbers sit beside the
 /// `ocelli-geom` measurement range and are not [`GeomError`] values.
+/// Calibration uses the same codes. A non-finite present value is `Frame`.
+/// A missing source or a magnitude that is not strictly positive is
+/// `Unavailable`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuvError {
     /// An input or the result is not finite.
@@ -286,6 +313,7 @@ pub fn histogram(samples: &[f64], counts: &mut [u32]) -> Result<Histogram, GeomE
 /// Body-weight SUV from caller-supplied inputs.
 ///
 /// This is not the modality LUT. The activity line is the separate PET path.
+/// The decay is the same function `suv_lbm` and `suv_bsa` call.
 ///
 /// # Errors
 ///
@@ -293,33 +321,83 @@ pub fn histogram(samples: &[f64], counts: &mut [u32]) -> Result<Histogram, GeomE
 /// [`SuvError::Unavailable`] when units are not BQML, or weight, dose or
 /// half-life is not strictly positive, or elapsed time is negative.
 pub fn suv_bw(inputs: SuvInputs) -> Result<f64, SuvError> {
+    scaled_suv(activity_from(inputs), inputs.patient_weight_kg, 1000.0)
+}
+
+/// SUV by lean body mass.
+///
+/// The caller supplies lean body mass in kilograms. This function does not
+/// derive it from height and weight. The scale is 1000, the same grams
+/// conversion as [`suv_bw`]. The HLD gives no formula. The local rule is
+/// `.claude/plans/F-195-design.md`.
+///
+/// # Errors
+///
+/// [`SuvError::Frame`] when an input or the result is non-finite.
+/// [`SuvError::Unavailable`] when units are not BQML, or lean body mass,
+/// dose or half-life is not strictly positive, or elapsed time is negative.
+pub fn suv_lbm(activity: SuvActivity, lbm_kg: f64) -> Result<f64, SuvError> {
+    scaled_suv(activity, lbm_kg, 1000.0)
+}
+
+/// SUV by body surface area.
+///
+/// The caller supplies body surface area in square metres. The scale is
+/// 10000 so square metres become square centimetres beside the grams
+/// conversion in [`suv_bw`]. The HLD gives no formula. The local rule is
+/// `.claude/plans/F-195-design.md`.
+///
+/// # Errors
+///
+/// [`SuvError::Frame`] when an input or the result is non-finite.
+/// [`SuvError::Unavailable`] when units are not BQML, or body surface area,
+/// dose or half-life is not strictly positive, or elapsed time is negative.
+pub fn suv_bsa(activity: SuvActivity, bsa_m2: f64) -> Result<f64, SuvError> {
+    scaled_suv(activity, bsa_m2, 10_000.0)
+}
+
+fn activity_from(inputs: SuvInputs) -> SuvActivity {
+    SuvActivity {
+        stored: inputs.stored,
+        slope: inputs.slope,
+        intercept: inputs.intercept,
+        total_dose_bq: inputs.total_dose_bq,
+        half_life_seconds: inputs.half_life_seconds,
+        elapsed_seconds: inputs.elapsed_seconds,
+        units_bqml: inputs.units_bqml,
+    }
+}
+
+fn scaled_suv(activity: SuvActivity, magnitude: f64, scale: f64) -> Result<f64, SuvError> {
     let fields = [
-        inputs.stored,
-        inputs.slope,
-        inputs.intercept,
-        inputs.patient_weight_kg,
-        inputs.total_dose_bq,
-        inputs.half_life_seconds,
-        inputs.elapsed_seconds,
+        activity.stored,
+        activity.slope,
+        activity.intercept,
+        activity.total_dose_bq,
+        activity.half_life_seconds,
+        activity.elapsed_seconds,
+        magnitude,
+        scale,
     ];
     for value in fields {
         if !value.is_finite() {
             return Err(SuvError::Frame);
         }
     }
-    if !inputs.units_bqml
-        || inputs.patient_weight_kg.total_cmp(&0.0).is_le()
-        || inputs.total_dose_bq.total_cmp(&0.0).is_le()
-        || inputs.half_life_seconds.total_cmp(&0.0).is_le()
-        || inputs.elapsed_seconds < 0.0
+    if !activity.units_bqml
+        || magnitude.total_cmp(&0.0).is_le()
+        || activity.total_dose_bq.total_cmp(&0.0).is_le()
+        || activity.half_life_seconds.total_cmp(&0.0).is_le()
+        || activity.elapsed_seconds < 0.0
+        || scale.total_cmp(&0.0).is_le()
     {
         return Err(SuvError::Unavailable);
     }
-    let activity = inputs.stored * inputs.slope + inputs.intercept;
-    let exponent = -inputs.elapsed_seconds / inputs.half_life_seconds;
+    let concentration = activity.stored * activity.slope + activity.intercept;
+    let exponent = -activity.elapsed_seconds / activity.half_life_seconds;
     let decay = DVec2::new(2.0, 0.0).powf(exponent).x;
-    let decayed = inputs.total_dose_bq * decay;
-    let suv = activity * inputs.patient_weight_kg * 1000.0 / decayed;
+    let decayed = activity.total_dose_bq * decay;
+    let suv = concentration * magnitude * scale / decayed;
     if !suv.is_finite() {
         return Err(SuvError::Frame);
     }

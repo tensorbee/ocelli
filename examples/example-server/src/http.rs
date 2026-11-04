@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
+use crate::calibration::calibration_reply;
 use crate::interpolate::interpolate_reply;
 use crate::overlay::overlay_reply;
 use crate::reply::reply_body;
@@ -79,6 +80,8 @@ fn route(loaded: &Loaded) -> Reply {
         overlay_reply(&loaded.body, loaded.frame)
     } else if loaded.path == "/interpolate" {
         interpolate_reply(&loaded.body)
+    } else if loaded.path == "/calibration" {
+        calibration_reply(&loaded.body)
     } else {
         reply_body(&loaded.body, loaded.frame)
     };
@@ -295,7 +298,11 @@ fn parse_header(header: &str) -> Result<Header, ReadStop> {
 }
 
 fn open_path(path: &str) -> bool {
-    path == "/frame-open" || path == "/series-open" || path == "/overlay" || path == "/interpolate"
+    path == "/frame-open"
+        || path == "/series-open"
+        || path == "/overlay"
+        || path == "/interpolate"
+        || path == "/calibration"
 }
 
 fn body_messages(path: &str) -> (&'static str, &'static str) {
@@ -313,6 +320,11 @@ fn body_messages(path: &str) -> (&'static str, &'static str) {
         (
             "the interpolate request is too large",
             "the interpolate request has no length",
+        )
+    } else if path == "/calibration" {
+        (
+            "the calibration request is too large",
+            "the calibration request has no length",
         )
     } else {
         (
@@ -494,5 +506,27 @@ mod tests {
         assert!(response.contains("\"tier\":\"C\""));
         assert!(response.contains("\"nearest\":\"available\""));
         assert!(response.contains("\"linear\":\"available\""));
+    }
+
+    #[test]
+    fn calibration_options_is_empty() {
+        let request = b"OPTIONS /calibration HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        let response = exchange(request);
+        assert!(response.contains("204"));
+    }
+
+    #[test]
+    fn synthetic_calibration_post_reports_the_hand_fixtures() {
+        let request =
+            b"POST /calibration HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 9\r\n\r\nsynthetic";
+        let response = exchange(request);
+        assert!(response.contains("HTTP/1.1 200"));
+        assert!(response.contains("\"source\":\"imager-spacing\""));
+        assert!(response.contains("\"rowMm\":0.1,"));
+        assert!(response.contains("\"columnMm\":0.1,"));
+        assert!(response.contains("\"suvLbm\":350,"));
+        assert!(response.contains("\"suvBsa\":90,"));
+        assert!(response.contains("\"lengthRatio\":2,"));
+        assert!(response.contains("\"contourVolume\":150}"));
     }
 }

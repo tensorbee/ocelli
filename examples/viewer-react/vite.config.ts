@@ -20,6 +20,7 @@ export default defineConfig({
             "/series-open": { target: helper },
             "/overlay": { target: helper },
             "/interpolate": { target: helper },
+            "/calibration": { target: helper },
           },
   },
   // The wasm module lands in crates/ocelli-wasm/pkg via `bin/ocelli.sh wasm`.

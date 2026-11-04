@@ -13,7 +13,7 @@
 
 The local SUV body-weight rule is `suv_bw` in `crates/ocelli-geom/src/stats.rs`, approved in F-075. Activity is `stored * slope + intercept`. Decay is `2^(-elapsed / half_life)`. The result is `activity * weight_kg * 1000 / decayed_dose`. Units must be BQML.
 
-DICOM PS3.3 C.7.6.2 gives Pixel Spacing as the patient spacing, row then column. PS3.3 C.8.11.4 gives Imager Pixel Spacing at the detector. PS3.3 C.8.7.3 gives Estimated Radiographic Magnification Factor as source-to-detector distance divided by source-to-object distance, so patient spacing derived from the imager is imager spacing divided by that factor. PS3.3 C.8.5.5.1.4 gives ultrasound Physical Delta X and Physical Delta Y in millimetres.
+DICOM PS3.3 C.7.6.2 gives Pixel Spacing as the patient spacing, row then column. PS3.3 C.8.11.4 gives Imager Pixel Spacing at the detector housing in millimetres, and that value is not adjusted for geometric magnification. PS3.3 C.8.7.5 gives Estimated Radiographic Magnification Factor as the ratio of source image receptor distance over source object distance, so patient spacing derived from the imager is imager spacing divided by that factor. PS3.3 C.8.5.5.1.17 gives Physical Delta X and Physical Delta Y as increments per pixel. PS3.3 C.8.5.5.1.15 names their units, and enumerated value 0003H is centimetres. The caller converts a length unit into positive millimetres before the call. This function does not read the unit code.
 
 ## What the specification does not cover
 
@@ -37,7 +37,7 @@ In scope, in `ocelli-geom`:
 
 Out of scope: reading DICOM tags inside `ocelli-geom`, changing `suv_bw`, changing spacing tolerances in `ocelli-dicom`, and resampling pixels.
 
-A missing source, a non-finite value, a non-positive spacing, a non-positive ERMF, a non-positive body-size magnitude, or a zero length denominator returns the existing error. Nothing is substituted from a later source when an earlier source is present but invalid. An invalid earlier source is an error, not a fall-through.
+A missing source, a non-finite value, a non-positive spacing, a non-positive ERMF, a non-positive body-size magnitude, or a zero length denominator returns the existing error. Nothing is substituted from a later source when an earlier source is present but invalid. An invalid earlier source is an error, not a fall-through. Either half of the imager pair counts as present. A non-finite half is `Frame` before the incompleteness check. An incomplete pair is `Unavailable` and does not reach ultrasound or manual. `length_ratio` keeps a negative sign. A zero denominator includes negative zero.
 
 ## Consumer and provider map
 

@@ -706,6 +706,113 @@ function InterpolatePanel() {
   );
 }
 
+interface CalibrationView {
+  source: string;
+  rowMm: number;
+  columnMm: number;
+  suvLbm: number;
+  suvBsa: number;
+  lengthRatio: number;
+  contourVolume: number;
+}
+
+function readCalibration(value: unknown): CalibrationView | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.source !== "string" ||
+    typeof record.rowMm !== "number" ||
+    typeof record.columnMm !== "number" ||
+    typeof record.suvLbm !== "number" ||
+    typeof record.suvBsa !== "number" ||
+    typeof record.lengthRatio !== "number" ||
+    typeof record.contourVolume !== "number"
+  ) {
+    return null;
+  }
+  return {
+    source: record.source,
+    rowMm: record.rowMm,
+    columnMm: record.columnMm,
+    suvLbm: record.suvLbm,
+    suvBsa: record.suvBsa,
+    lengthRatio: record.lengthRatio,
+    contourVolume: record.contourVolume,
+  };
+}
+
+function CalibrationPanel() {
+  const [view, setView] = useState<CalibrationView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function run(): Promise<void> {
+    setPending(true);
+    setProblem(null);
+    try {
+      const response = await fetch("/calibration", {
+        method: "POST",
+        body: "synthetic",
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        setProblem("The calibration request was refused.");
+        return;
+      }
+      const parsed: unknown = JSON.parse(text);
+      const next = readCalibration(parsed);
+      if (next === null) {
+        setProblem("The calibration response could not be read.");
+        return;
+      }
+      setView(next);
+    } catch {
+      setProblem("The calibration helper is not running.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section>
+      <h2>Calibration</h2>
+      <p>
+        The synthetic button uses imager spacing 0.2 mm and a magnification
+        factor of 2. Patient spacing is the imager spacing divided by that
+        factor. SUV by lean body mass and by body surface area use the same
+        decay as body-weight SUV. The length ratio is 4 over 2. The contour
+        volume is spacing 5 mm times areas 10 and 20.
+      </p>
+      <p>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            void run();
+          }}
+        >
+          Synthetic calibration
+        </button>
+      </p>
+      {problem !== null && <p>{problem}</p>}
+      {view !== null && (
+        <div>
+          <p>Source {view.source}</p>
+          <p>
+            Spacing {view.rowMm.toString()} mm by {view.columnMm.toString()} mm
+          </p>
+          <p>SUVlbm {view.suvLbm.toString()}</p>
+          <p>SUVbsa {view.suvBsa.toString()}</p>
+          <p>Length ratio {view.lengthRatio.toString()}</p>
+          <p>Contour volume {view.contourVolume.toString()}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FrameOpenPanel() {
   const [view, setView] = useState<FrameOpenView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -819,6 +926,7 @@ export function App() {
       <SeriesOpenPanel />
       <OverlayPanel />
       <InterpolatePanel />
+      <CalibrationPanel />
 
       <section>
         <h2>Stack viewport</h2>

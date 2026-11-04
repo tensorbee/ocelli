@@ -4859,3 +4859,19 @@ this branch had not touched since the base.
 **LLD updated.** One sentence in `docs/lld/render-graph.md` and the CPU MPR cell in `docs/lld/feature-availability.md`.
 **Deviations from the design plan.** none
 **Notes for future sessions.** The earlier follow-up covers a linear mode that was already selected. This note covers the other order. The refusal is `GraphError::SecondInterpolant` because `set_stack_interpolation` returns `GraphError`. This note does not publish.
+
+## F-195, calibration provenance and body-size SUV, completed 2026-11-04
+
+**What was built.** `select_calibration` chooses pixel spacing, then imager spacing divided by the estimated radiographic magnification factor, then ultrasound physical deltas, then a manual pair. A present but invalid earlier source does not fall through. Either half of the imager pair counts as present. `suv_lbm` and `suv_bsa` share the `suv_bw` decay. `length_ratio` and `contour_volume` take caller lengths and caller areas. The example page shows the imager fixture.
+
+**HLD sections implemented.** Section 15 keeps SUV off the modality LUT. The HLD gives no calibration order and no lean-body-mass or body-surface-area formula. The local rules are `.claude/plans/F-195-design.md`.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-geom`, `examples/example-server`, `examples/viewer-react`.
+**Tests added.** Nine tests in `crates/ocelli-geom/tests/calibration.rs`. Two example-server route tests.
+**Fixture provenance.** Imager 0.2 mm and factor 2 yield 0.1 mm, from PS3.3 C.8.11.4 and C.8.7.5. A second component of 0.4 mm yields 0.2 mm. SUVlbm for activity 5, lean body mass 70 kg, dose 1000 Bq and elapsed 0 is 350. SUVbsa for body surface area 1.8 m2 is 90. Areas 10 and 20 with spacing 5 mm give volume 150. Length ratio 4/2 is 2, and -4/2 is -2. Ultrasound units are PS3.3 C.8.5.5.1.15, where 0003H is centimetres. The caller converts to positive millimetres. No patient data.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+**Tier coverage.** Tiers A, B and C are not applicable. These functions do not draw.
+**LLD updated.** `docs/lld/calibration.md`, the geometry cross-link, and the rows in `docs/lld/README.md`.
+**Deviations from the design plan.** The plan first cited C.8.7.3 and C.8.5.5.1.4 and called the ultrasound deltas millimetres. Pass 1 corrected those citations to C.8.7.5, C.8.5.5.1.17 and C.8.5.5.1.15. The division and the SUV scales did not change.
+**Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 3 nitpicks. Reviewer Claude Code, read only, with no shell. An ERMF multiply, a BSA scale of 1000 and `ratio.abs()` each went red and were restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.

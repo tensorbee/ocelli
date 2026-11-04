@@ -1,0 +1,14 @@
+# Calibration and body-size SUV
+
+**F-IDs that contributed:** F-195
+**Last updated:** 2026-11-04
+
+`select_calibration` in `ocelli-geom` chooses one spacing pair. The order is pixel spacing, then imager pixel spacing divided by the estimated radiographic magnification factor, then ultrasound physical deltas, then a manual pair. An earlier source that is present but invalid is an error. It does not fall through. Either half of the imager pair counts as present, so a lone factor or lone imager spacing does not reach ultrasound or a manual pair. Pixel spacing is DICOM PS3.3 C.7.6.2, row then column. Imager pixel spacing is PS3.3 C.8.11.4, in millimetres at the detector housing, and it is not adjusted for geometric magnification. The magnification factor is PS3.3 C.8.7.5, the ratio of source image receptor distance over source object distance, and the patient spacing is the imager spacing divided by that factor. Ultrasound deltas are the caller's pair in that same row and column order. PS3.3 C.8.5.5.1.17 defines Physical Delta X and Physical Delta Y as increments per pixel. PS3.3 C.8.5.5.1.15 names their units, and 0003H is centimetres. The caller converts a length unit into positive millimetres and maps Physical Delta Y to the row and Physical Delta X to the column. This crate does not read those tags or the unit code.
+
+A non-finite value on a present field is `SuvError::Frame` (402), including a non-finite half of the imager pair. A missing source, an incomplete imager pair, or a magnitude that is not strictly positive is `SuvError::Unavailable` (403).
+
+`suv_lbm` and `suv_bsa` share the decay inside `suv_bw`. The HLD gives no lean-body-mass or body-surface-area formula. The caller supplies lean body mass in kilograms and body surface area in square metres. SUVlbm is `activity * lbm_kg * 1000 / decayed_dose`. SUVbsa is `activity * bsa_m2 * 10000 / decayed_dose`. `suv_bw` is unchanged.
+
+`length_ratio` is the caller's numerator divided by the caller's denominator. A negative input keeps its sign. A zero denominator, including negative zero, is `GeomError::Degenerate` (401). A non-finite input or result is `GeomError::Frame` (400).
+
+`contour_volume` is spacing times the sum of the caller areas. It is not a trapezoid. An empty area list or a spacing that is not strictly positive is `Degenerate`. A non-finite area, spacing or result, or a negative area, is `Frame`.

@@ -330,7 +330,7 @@ The series-open gaps that Phase 1 left in the core, then the example viewer call
 | F-192 | E38.2 | S42 | Series assembly: order by projected position, split mixed series, temporal axis, cine timing with loop and bounce | Rust | 5w | F-051, F-047 | done |
 | F-193 | E38.3 | S42 | Overlay planes PS3.3 C.9.2 and display shutters PS3.3 C.7.6.11 and C.7.6.15 | Rust | 3w | F-019, F-029 | done |
 | F-194 | E38.4 | S42 | Stack display interpolation, nearest and linear, declared on tiers A, B and C | Rust | 3w | F-042, F-045 | done |
-| F-195 | E38.5 | S43 | Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours | Rust | 4w | F-049, F-075 | pending |
+| F-195 | E38.5 | S43 | Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours | Rust | 4w | F-049, F-075 | done |
 | F-196 | E38.6 | S43 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w | F-097 | pending |
 | F-197 | E38.7 | S43 | Volume from a gantry-tilted stack | Rust | 3w | F-051, F-049 | pending |
 | F-198 | E38.8 | S43 | Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source | TS | 4w | F-191, F-192, F-194, F-112 | pending |
