@@ -969,7 +969,8 @@ fn map_pixel(_error: PixelError) -> FrameOpenError {
 /// `MetadataSet::from_object` keeps an explicit OW payload and refuses an
 /// encapsulated Pixel Sequence. Frame open skips Pixel Data and the float
 /// pixel data elements, so those bytes are not copied into this projection.
-fn project_metadata(parsed: &ParsedDicom) -> Result<MetadataSet, FrameOpenError> {
+/// Series assembly uses the same projection.
+pub(crate) fn project_metadata(parsed: &ParsedDicom) -> Result<MetadataSet, FrameOpenError> {
     project_elements(parsed.object().iter())
 }
 

@@ -6,6 +6,7 @@
 //! F-017 adds lossless metadata projection and ordered providers.
 //! F-022 adds direct NIfTI-1.1 header, affine, and payload validation.
 //! F-020 derives per-frame geometry, stack shear and calibrated spacing.
+//! F-192 orders a bag of frames into display groups and reads cine timing.
 
 mod dicomweb;
 mod frame_geometry;
@@ -16,6 +17,7 @@ mod multiframe;
 mod nifti;
 mod parse;
 mod provider;
+mod series_open;
 
 pub use dicom_core::VR;
 pub use dicom_object::{DefaultDicomObject, Tag};
@@ -48,6 +50,10 @@ pub use parse::{DispatchPath, ParseError, ParsedDicom, TransferSyntaxInfo, parse
 pub use provider::{
     MetadataRequest, ProviderAnswer, ProviderFn, ProviderId, ProviderRegistry,
     ProviderRegistryError, data_set_provider, file_meta_provider,
+};
+pub use series_open::{
+    CineTiming, DisplaySeries, FramePlace, ParsedFrame, Playback, SeriesOpenError,
+    SeriesOpenReason, SpatialOrder, assemble_display, declared_frame_count,
 };
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which

@@ -12,7 +12,13 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    proxy: helper === undefined ? undefined : { "/frame-open": { target: helper } },
+    proxy:
+      helper === undefined
+        ? undefined
+        : {
+            "/frame-open": { target: helper },
+            "/series-open": { target: helper },
+          },
   },
   // The wasm module lands in crates/ocelli-wasm/pkg via `bin/ocelli.sh wasm`.
   // It is not committed, so a clean clone runs this app in its "core not

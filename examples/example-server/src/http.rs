@@ -5,6 +5,7 @@ use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
 use crate::reply::reply_body;
+use crate::series::series_reply;
 
 const HEADER_CAP: usize = 16 * 1024;
 /// One posted file. The cap matches the folder page.
@@ -55,15 +56,26 @@ pub fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(60)))?;
     stream.set_write_timeout(Some(Duration::from_secs(60)))?;
     let reply = match read_body(&mut stream) {
-        Ok((body, frame)) => route(&body, frame),
+        Ok(loaded) => route(&loaded),
         Err(ReadStop::Io(error)) => return Err(error),
         Err(ReadStop::Reply(reply)) => reply,
     };
     write_reply(&mut stream, &reply)
 }
 
-fn route(body: &[u8], frame: u32) -> Reply {
-    let (status, json) = reply_body(body, frame);
+struct Loaded {
+    path: String,
+    body: Vec<u8>,
+    frame: u32,
+    content_type: Option<String>,
+}
+
+fn route(loaded: &Loaded) -> Reply {
+    let (status, json) = if loaded.path == "/series-open" {
+        series_reply(&loaded.body, loaded.content_type.as_deref())
+    } else {
+        reply_body(&loaded.body, loaded.frame)
+    };
     Reply {
         status,
         content_type: "application/json; charset=utf-8",
@@ -102,7 +114,7 @@ fn text_reply(status: u16, message: &str) -> Reply {
     }
 }
 
-fn read_body(stream: &mut TcpStream) -> Result<(Vec<u8>, u32), ReadStop> {
+fn read_body(stream: &mut TcpStream) -> Result<Loaded, ReadStop> {
     let mut buf = Vec::new();
     let mut chunk = [0_u8; 8192];
     let header_end = loop {
@@ -138,30 +150,35 @@ fn read_body(stream: &mut TcpStream) -> Result<(Vec<u8>, u32), ReadStop> {
     };
     let header = std::str::from_utf8(header_bytes)
         .map_err(|_| ReadStop::Reply(text_reply(400, "the frame-open header is not text")))?;
-    let (method, path, frame, length) = parse_header(header)?;
-    if method == "OPTIONS" && path == "/frame-open" {
+    let header = parse_header(header)?;
+    if header.method == "OPTIONS" && (header.path == "/frame-open" || header.path == "/series-open")
+    {
         return Err(ReadStop::Reply(Reply {
             status: 204,
             content_type: "text/plain; charset=utf-8",
             body: Vec::new(),
         }));
     }
-    if method != "POST" || path != "/frame-open" {
+    if header.method != "POST" || (header.path != "/frame-open" && header.path != "/series-open") {
         return Err(ReadStop::Reply(text_reply(404, "not found")));
     }
-    let declared = match length {
+    let too_large = if header.path == "/series-open" {
+        "the series-open request is too large"
+    } else {
+        "the frame-open request is too large"
+    };
+    let no_length = if header.path == "/series-open" {
+        "the series-open request has no length"
+    } else {
+        "the frame-open request has no length"
+    };
+    let declared = match header.length {
         Some(value) if value > BODY_CAP => {
-            return Err(ReadStop::Reply(text_reply(
-                400,
-                "the frame-open request is too large",
-            )));
+            return Err(ReadStop::Reply(text_reply(400, too_large)));
         }
         Some(value) => value,
         None => {
-            return Err(ReadStop::Reply(text_reply(
-                400,
-                "the frame-open request has no length",
-            )));
+            return Err(ReadStop::Reply(text_reply(400, no_length)));
         }
     };
     let mut body = match buf.get(header_end..) {
@@ -189,7 +206,12 @@ fn read_body(stream: &mut TcpStream) -> Result<(Vec<u8>, u32), ReadStop> {
         };
         body.extend_from_slice(got);
     }
-    Ok((body, frame))
+    Ok(Loaded {
+        path: header.path,
+        body,
+        frame: header.frame,
+        content_type: header.content_type,
+    })
 }
 
 fn header_end_at(buf: &[u8]) -> Option<usize> {
@@ -198,7 +220,15 @@ fn header_end_at(buf: &[u8]) -> Option<usize> {
         .map(|index| index.saturating_add(4))
 }
 
-fn parse_header(header: &str) -> Result<(String, String, u32, Option<usize>), ReadStop> {
+struct Header {
+    method: String,
+    path: String,
+    frame: u32,
+    length: Option<usize>,
+    content_type: Option<String>,
+}
+
+fn parse_header(header: &str) -> Result<Header, ReadStop> {
     let mut lines = header.split("\r\n");
     let Some(request) = lines.next() else {
         return Err(ReadStop::Reply(text_reply(
@@ -222,6 +252,8 @@ fn parse_header(header: &str) -> Result<(String, String, u32, Option<usize>), Re
     let (path, frame) = split_path(raw_path)?;
     let mut length = None;
     let mut seen_length = false;
+    let mut content_type = None;
+    let mut seen_type = false;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -246,8 +278,24 @@ fn parse_header(header: &str) -> Result<(String, String, u32, Option<usize>), Re
             })?;
             length = Some(parsed);
         }
+        if name.eq_ignore_ascii_case("content-type") {
+            if seen_type {
+                return Err(ReadStop::Reply(text_reply(
+                    400,
+                    "the request has two content types",
+                )));
+            }
+            seen_type = true;
+            content_type = Some(value.trim_matches(' ').to_owned());
+        }
     }
-    Ok((method.to_owned(), path, frame, length))
+    Ok(Header {
+        method: method.to_owned(),
+        path,
+        frame,
+        length,
+        content_type,
+    })
 }
 
 fn split_path(raw_path: &str) -> Result<(String, u32), ReadStop> {
@@ -339,5 +387,26 @@ mod tests {
         assert!(response.contains("400"));
         assert!(response.contains("too large"));
         assert!(!response.contains("\"display\""));
+    }
+
+    #[test]
+    fn series_open_options_is_empty() {
+        let request = b"OPTIONS /series-open HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        let response = exchange(request);
+        assert!(response.contains("204"));
+    }
+
+    #[test]
+    fn synthetic_series_post_returns_the_axial_order() {
+        let request =
+            b"POST /series-open HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 9\r\n\r\nsynthetic";
+        let response = exchange(request);
+        assert!(response.contains("200"));
+        assert!(
+            response
+                .contains("\"slots\":[[{\"input\":1,\"frame\":0}],[{\"input\":0,\"frame\":0}]]")
+        );
+        assert!(response.contains("\"milliseconds\":100"));
+        assert!(response.contains("\"playback\":\"sweep\""));
     }
 }

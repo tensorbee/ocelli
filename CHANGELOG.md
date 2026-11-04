@@ -11,6 +11,7 @@ Repository bootstrap. Nothing is published.
 ### Added
 
 - Frame open reads one Part 10 object into the existing LUT chain inputs. The example page shows the synthetic display value and the padding count.
+- Series assembly orders parsed frames by projected position and reads cine timing from the first frame. The example page shows the groups and Loop or Bounce.
 - A local page opens a chosen folder, lists each series, and shows one image at a time with contours and text notes.
 - A volume ray drops its binding when its brick texture is uploaded again.
 - A fusion slice that arrives with unchanged bytes is drawn as present.

@@ -1,6 +1,6 @@
 [package]
 name = "ocelli-example-server"
-description = "Loopback helper that opens one DICOM frame for the example viewer."
+description = "Loopback helper that opens one DICOM frame or assembles a series for the example viewer."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

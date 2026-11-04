@@ -103,6 +103,310 @@ function problemSentence(text: string): string {
   return "The frame could not be opened.";
 }
 
+interface SeriesPlace {
+  input: number;
+  frame: number;
+}
+
+interface SeriesGroupView {
+  order: string;
+  frames: number;
+  slots: SeriesPlace[][];
+  timing: string;
+  milliseconds: number | null;
+  framesPerSecond: number | null;
+  playback: string;
+  sheared: boolean;
+  nonUniform: boolean;
+}
+
+interface SeriesView {
+  groups: SeriesGroupView[];
+}
+
+function readSeries(value: unknown): SeriesView | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.groups)) {
+    return null;
+  }
+  const groups: SeriesGroupView[] = [];
+  for (const item of record.groups) {
+    const group = readSeriesGroup(item);
+    if (group === null) {
+      return null;
+    }
+    groups.push(group);
+  }
+  return { groups };
+}
+
+function readSeriesGroup(value: unknown): SeriesGroupView | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const slots = readSeriesSlots(record.slots);
+  if (slots === null) {
+    return null;
+  }
+  if (
+    typeof record.order !== "string" ||
+    typeof record.frames !== "number" ||
+    typeof record.timing !== "string" ||
+    typeof record.playback !== "string" ||
+    typeof record.sheared !== "boolean" ||
+    typeof record.non_uniform_step !== "boolean"
+  ) {
+    return null;
+  }
+  const milliseconds = record.milliseconds;
+  const framesPerSecond = record.frames_per_second;
+  if (milliseconds !== undefined && typeof milliseconds !== "number") {
+    return null;
+  }
+  if (framesPerSecond !== undefined && typeof framesPerSecond !== "number") {
+    return null;
+  }
+  return {
+    order: record.order,
+    frames: record.frames,
+    slots,
+    timing: record.timing,
+    milliseconds: typeof milliseconds === "number" ? milliseconds : null,
+    framesPerSecond: typeof framesPerSecond === "number" ? framesPerSecond : null,
+    playback: record.playback,
+    sheared: record.sheared,
+    nonUniform: record.non_uniform_step,
+  };
+}
+
+function readSeriesSlots(value: unknown): SeriesPlace[][] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const slots: SeriesPlace[][] = [];
+  for (const slot of value) {
+    if (!Array.isArray(slot)) {
+      return null;
+    }
+    const places: SeriesPlace[] = [];
+    for (const place of slot) {
+      if (typeof place !== "object" || place === null) {
+        return null;
+      }
+      const record = place as Record<string, unknown>;
+      if (typeof record.input !== "number" || typeof record.frame !== "number") {
+        return null;
+      }
+      places.push({ input: record.input, frame: record.frame });
+    }
+    slots.push(places);
+  }
+  return slots;
+}
+
+function seriesProblem(text: string): string {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
+      const record = parsed as { error?: unknown; part?: unknown; frame?: unknown };
+      if (typeof record.error === "string") {
+        if (typeof record.part === "number") {
+          return `The series could not be opened (${record.error} at part ${record.part.toString()}).`;
+        }
+        if (typeof record.frame === "number") {
+          return `The series could not be opened (${record.error} at frame ${record.frame.toString()}).`;
+        }
+        return `The series could not be opened (${record.error}).`;
+      }
+    }
+  } catch {
+    return "The series could not be opened.";
+  }
+  return "The series could not be opened.";
+}
+
+function orderLabel(order: string): string {
+  if (order === "projected") {
+    return "Projected";
+  }
+  if (order === "instance_number") {
+    return "Instance number";
+  }
+  return order;
+}
+
+function timingLabel(timing: string): string {
+  if (timing === "frame_time") {
+    return "Frame time";
+  }
+  if (timing === "frame_time_vector") {
+    return "Frame time vector";
+  }
+  if (timing === "recommended_display_frame_rate") {
+    return "Recommended display frame rate";
+  }
+  if (timing === "cine_rate") {
+    return "Cine rate";
+  }
+  if (timing === "unavailable") {
+    return "Unavailable";
+  }
+  return timing;
+}
+
+function intervalLabel(group: SeriesGroupView): string {
+  if (group.milliseconds !== null) {
+    return `${group.milliseconds.toString()} ms`;
+  }
+  if (group.framesPerSecond !== null) {
+    return `${group.framesPerSecond.toString()} fps`;
+  }
+  if (group.timing === "frame_time_vector") {
+    return "per frame";
+  }
+  return "none";
+}
+
+function placeLabel(place: SeriesPlace): string {
+  return `${place.input.toString()}.${place.frame.toString()}`;
+}
+
+function frameLine(group: SeriesGroupView): string {
+  const labels: string[] = [];
+  for (const slot of group.slots) {
+    for (const place of slot) {
+      labels.push(placeLabel(place));
+    }
+  }
+  if (labels.length === 0) {
+    return "none";
+  }
+  return labels.join(" then ");
+}
+
+function slotLengths(group: SeriesGroupView): string {
+  if (group.slots.length === 0) {
+    return "none";
+  }
+  return group.slots.map((slot) => slot.length.toString()).join(", ");
+}
+
+function SeriesOpenPanel() {
+  const [view, setView] = useState<SeriesView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [playback, setPlayback] = useState<string[]>([]);
+
+  async function run(body: BodyInit): Promise<void> {
+    setPending(true);
+    setProblem(null);
+    try {
+      const response = await fetch("/series-open", { method: "POST", body });
+      const text = await response.text();
+      if (!response.ok) {
+        setProblem(seriesProblem(text));
+        return;
+      }
+      const parsed: unknown = JSON.parse(text);
+      const next = readSeries(parsed);
+      if (next === null) {
+        setProblem("The series-open response could not be read.");
+        return;
+      }
+      setView(next);
+      setPlayback(next.groups.map((group) => group.playback));
+    } catch {
+      setProblem("The series-open helper is not running.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section>
+      <h2>Series open</h2>
+      <p>
+        The synthetic button sends three built-in objects. Two are axial slices
+        at different positions and one is sagittal. A file you choose is posted
+        to the helper on this machine and is not saved. A shown position is the
+        frame list index and the frame inside that object.
+      </p>
+      <p>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            void run("synthetic");
+          }}
+        >
+          Synthetic series
+        </button>{" "}
+        <input
+          type="file"
+          multiple
+          disabled={pending}
+          aria-label="Choose Part 10 files"
+          onChange={(event) => {
+            const files = event.currentTarget.files;
+            if (files === null || files.length === 0) {
+              return;
+            }
+            const form = new FormData();
+            for (const file of files) {
+              form.append("file", file);
+            }
+            void run(form);
+          }}
+        />
+      </p>
+      {problem !== null && <p>{problem}</p>}
+      {view !== null && (
+        <div>
+          <p>{view.groups.length.toString()} groups</p>
+          {view.groups.map((group, index) => (
+            <div key={index}>
+              <p>
+                Group {(index + 1).toString()}: {orderLabel(group.order)}. Frames{" "}
+                {frameLine(group)}. Slot lengths {slotLengths(group)}.
+              </p>
+              <p>
+                Timing {timingLabel(group.timing)}. Interval {intervalLabel(group)}.
+              </p>
+              <p>
+                Sheared {group.sheared ? "yes" : "no"}. Non-uniform step{" "}
+                {group.nonUniform ? "yes" : "no"}.
+              </p>
+              <label>
+                Playback{" "}
+                <select
+                  aria-label={`Playback for group ${(index + 1).toString()}`}
+                  value={playback[index] ?? group.playback}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setPlayback((current) => {
+                      const next = current.slice();
+                      next[index] = value;
+                      return next;
+                    });
+                  }}
+                >
+                  <option value="loop">Loop</option>
+                  <option value="sweep">Bounce</option>
+                </select>
+              </label>
+            </div>
+          ))}
+          <p>The control starts from the file. Playing images stays on the folder page.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FrameOpenPanel() {
   const [view, setView] = useState<FrameOpenView | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -213,6 +517,7 @@ export function App() {
       )}
 
       <FrameOpenPanel />
+      <SeriesOpenPanel />
 
       <section>
         <h2>Stack viewport</h2>

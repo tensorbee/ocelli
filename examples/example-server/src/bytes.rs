@@ -119,6 +119,97 @@ fn short_le(tag: (u16, u16), vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, &'sta
     Ok(bytes)
 }
 
+/// Three synthetic objects.
+///
+/// The design text says the button sends two objects. Two groups and an axial
+/// order of two slices need three, so the button sends three. The axial pair
+/// is ordered against instance number: z = 3 is first in the body and z = 0
+/// is second. The third object is sagittal.
+pub(crate) fn synthetic_series_parts() -> Result<Vec<Vec<u8>>, &'static str> {
+    Ok(vec![
+        series_slice(
+            b"2.25.21",
+            "1",
+            "0\\0\\3",
+            "1\\0\\0\\0\\1\\0",
+            None,
+            Some("30"),
+            None,
+        )?,
+        series_slice(
+            b"2.25.20",
+            "2",
+            "0\\0\\0",
+            "1\\0\\0\\0\\1\\0",
+            Some("100"),
+            None,
+            None,
+        )?,
+        series_slice(
+            b"2.25.22",
+            "1",
+            "0\\0\\0",
+            "0\\1\\0\\0\\0\\-1",
+            None,
+            None,
+            Some(1),
+        )?,
+    ])
+}
+
+fn series_slice(
+    sop: &[u8],
+    instance: &str,
+    position: &str,
+    orientation: &str,
+    frame_time: Option<&str>,
+    recommended_rate: Option<&str>,
+    playback: Option<u16>,
+) -> Result<Vec<u8>, &'static str> {
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    data.extend(short_le((0x0008, 0x0018), *b"UI", &ui(sop))?);
+    if let Some(rate) = recommended_rate {
+        data.extend(short_le((0x0008, 0x2144), *b"IS", &text_pad(rate))?);
+    }
+    if let Some(time) = frame_time {
+        data.extend(short_le((0x0018, 0x1063), *b"DS", &text_pad(time))?);
+    }
+    if let Some(playback) = playback {
+        // PS3.6 (0018,1244) is US. Value 1 is sweeping.
+        data.extend(short_le((0x0018, 0x1244), *b"US", &playback.to_le_bytes())?);
+    }
+    data.extend(short_le((0x0020, 0x000E), *b"UI", &ui(b"2.25.10"))?);
+    data.extend(short_le((0x0020, 0x0013), *b"IS", &text_pad(instance))?);
+    data.extend(short_le((0x0020, 0x0032), *b"DS", &text_pad(position))?);
+    data.extend(short_le((0x0020, 0x0037), *b"DS", &text_pad(orientation))?);
+    data.extend(short_le((0x0020, 0x0052), *b"UI", &ui(b"2.25.11"))?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0030), *b"DS", &text_pad("1\\1"))?);
+    part10(data)
+}
+
+/// One axial slice at z = 0 whose Frame Time is 0.
+///
+/// Assembly refuses that value as cine and does not fall through.
+#[cfg(test)]
+pub(crate) fn frame_time_zero_part() -> Result<Vec<u8>, &'static str> {
+    series_slice(
+        b"2.25.23",
+        "3",
+        "0\\0\\0",
+        "1\\0\\0\\0\\1\\0",
+        Some("0"),
+        None,
+        None,
+    )
+}
+
 fn long_le(tag: (u16, u16), vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, &'static str> {
     if !value.len().is_multiple_of(2) {
         return Err("odd element");

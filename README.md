@@ -102,7 +102,7 @@ packages/
 
 examples/
   viewer-react/     the example viewer, and the manual smoke test
-  example-server/   loopback helper for the example viewer's frame-open panel
+  example-server/   loopback helper for the example viewer's frame-open and series-open panels
   folder-viewer/    local series page for a folder on this machine
 
 tools/
@@ -146,7 +146,9 @@ Open <http://localhost:5173>. Vite prints that address when the server is ready.
 prints only its base URL. The Frame open section posts to it through Vite.
 The synthetic button asks the helper to map stored 50 through LINEAR_EXACT
 centre 100 and width 200, then shows the display value and the padding count.
-A file you choose is posted and discarded. It is not written into this
+The Series section posts three synthetic objects, or a multipart body of files
+you choose, and shows each display group, its order, its timing and Loop or
+Bounce. A file you choose is posted and discarded. It is not written into this
 repository. The header still reads `core not built` until a later story loads
 the wasm module.
 

@@ -1,10 +1,11 @@
-//! Frame-open helper for the example viewer.
+//! Frame-open and series-open helper for the example viewer.
 //!
-//! The page posts either the token `synthetic` or one Part 10 object. This
-//! crate does not write that object to disk and does not log it.
+//! The page posts either the token `synthetic` or Part 10 bytes. This crate
+//! does not write those bytes to disk and does not log them.
 
 mod bytes;
 mod reply;
+mod series;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod http;
