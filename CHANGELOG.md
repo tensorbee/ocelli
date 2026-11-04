@@ -18,6 +18,9 @@ Repository bootstrap. Nothing is published.
 - A key-object document stores one title and one referenced composite, and a secondary capture stores the caller's 8-bit display bytes. The example page shows the title Key image and pixels 0, 1, 2, 3.
 - A tilted stack keeps its lateral step beside the projected spacing. The example page shows the orthogonal refusal, spacing 3 mm and lateral length 3 mm.
 - The example page loads one wasm worker, shows the tier `resolve` kept, and posts one WADO-RS instance body to that worker. The header reads `core ready` only after that load resolves true.
+- The example page shows a layout grid, a stack drag step, reference lines and a reference cursor. Full screen follows the browser flag. Prior studies, linked scroll, synced window, MPR, slab, volume rendering and fusion read unavailable.
+- The example page shows presets, a window drag, a region window, rotation, flips, an orientation marker, a magnifier scale, a colour map, a scale length, crop planes and an error sentence. The rotation drag, the magnify scale and the crop count can be changed. One to one, histogram and four corners read unavailable.
+- The example page shows a measurement document, an annotation list, undo, a TID 1500 number, a key image mark, a shortcut and a touch start. A metadata browser and preferences read unavailable.
 - A local page opens a chosen folder, lists each series, and shows one image at a time with contours and text notes.
 - A volume ray drops its binding when its brick texture is uploaded again.
 - A fusion slice that arrives with unchanged bytes is drawn as present.

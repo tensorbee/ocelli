@@ -335,9 +335,9 @@ The series-open gaps that Phase 1 left in the core, then the example viewer call
 | F-196 | E38.6 | S43 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w | F-097 | done |
 | F-197 | E38.7 | S43 | Volume from a gantry-tilted stack | Rust | 3w | F-051, F-049 | done |
 | F-198 | E38.8 | S43 | Example viewer loads one wasm worker, publishes one stored sample, reports the resolved tier, and posts one WADO-RS envelope | TS | 4w | F-191, F-192, F-194, F-112 | done |
-| F-199 | E38.9 | S44 | Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion | TS | 4w | F-198, F-197, F-088 | pending |
-| F-200 | E38.10 | S44 | Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings | TS | 4w | F-198, F-193, F-091 | pending |
-| F-201 | E38.11 | S44 | Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences | TS | 4w | F-198, F-195, F-196 | pending |
+| F-199 | E38.9 | S44 | Example layout grid, stack drag, full screen, reference lines and reference cursor | TS | 4w | F-198, F-197, F-088 | done |
+| F-200 | E38.10 | S44 | Example presets, window drag, region window, rotate, flip, marker, magnifier, colour map, scale length, crop planes and error sentence | TS | 4w | F-198, F-193, F-091 | done |
+| F-201 | E38.11 | S44 | Example measurement document, annotation list, undo, TID 1500, key image mark, shortcut and touch | TS | 4w | F-198, F-195, F-196 | done |
 
 ### M14, Out-of-core volume streaming
 
@@ -418,13 +418,16 @@ Radiology and pathology in one scene graph, sharing one annotation coordinate mo
 Tracked, unscheduled. No sprint is assigned and no milestone claims
 them. They exist here so a Phase 1 design that would make one of them
 expensive is visible at design time, which is the whole point of HLD
-section 13. F-202 is a Phase 1 row in this table. It has no sprint. It is
-worker decode of a posted WADO-RS envelope, the frame cache, and a render
-of that frame.
+section 13. F-202, F-203, F-204 and F-205 are Phase 1 rows in this table.
+They have no sprint. F-202 is worker decode of a posted WADO-RS envelope.
+F-203, F-204 and F-205 are the example controls S44 does not invent.
 
 | F-ID | Epic ref | Phase | Epic | Story | Layer | Est | Status |
 |------|----------|-------|------|-------|-------|-----|--------|
 | F-202 | E38.12 | P1 | E38 Series open | Worker decode of a posted WADO-RS envelope, the frame cache, and a render of that frame | TS | 4w | pending |
+| F-203 | E38.13 | P1 | E38 Series open | Example prior studies, linked scroll, synced window and zoom, frame-of-reference cursor, MPR, slab, volume rendering and fusion | TS | 4w | pending |
+| F-204 | E38.14 | P1 | E38 Series open | Example one to one, histogram, four corners, and a shutter beyond the overlay panel | TS | 4w | pending |
+| F-205 | E38.15 | P1 | E38 Series open | Example metadata browser with compare and copy, export beyond the document panel, and preferences | TS | 4w | pending |
 | F-158 | E20.1 | P2 | E20 DICOM gateway (adopt, do not build) | Deploy and harden Orthanc or dcm4che as the DIMSE edge | Server | 6w | pending |
 | F-159 | E20.2 | P2 | E20 DICOM gateway (adopt, do not build) | C-STORE, C-FIND, C-MOVE and C-ECHO configuration with TLS | Server | 5w | pending |
 | F-160 | E20.3 | P2 | E20 DICOM gateway (adopt, do not build) | Autorouting rules and always-on listener operations | Server | 5w | pending |

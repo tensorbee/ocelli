@@ -4935,3 +4935,81 @@ this branch had not touched since the base.
 **Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 2 nitpicks. Reviewer Claude Code, read only, with no shell. Pass 1 was 1 defect, 3 smells and 2 nitpicks. Pass 2 was 1 defect, 1 smell and 3 nitpicks. Setting the flag true in the `loadCore` catch, posting only the first byte, calling `commit_frame` inside `holdSessionBytes`, widening the accept check to `count >= 0`, removing the adapter branch, and reusing one canvas under StrictMode each went red and was restored. Playwright Chromium from `tools/oracle` loaded `crates/ocelli-wasm/target/boundary-wasm` and printed `resolvedTier=A`. The flags were `--use-gl=angle`, `--use-angle=metal`, `--ignore-gpu-blocklist`, `--enable-webgl`, `--enable-webgl2` and `--enable-unsafe-webgpu`. That call was not inside the example worker. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish. The two leftover nitpicks are the production `/@fs` URL and an empty tier line after a failed load. Pass 4 reported 0 defects, 1 smell and those 2 nitpicks. The smell was a `test` cfg arm that compiled `tier_label` without `render-worker`. `cargo test -p ocelli-wasm --no-default-features --features decode-worker --lib` then failed on an unresolved `ocelli_render`. The predicate is now `all(feature = "render-worker", any(test, target_arch = "wasm32"))`. That decode-worker lib test then passed 11 tests. The default `tier_label` filter passed 2. Host clippy with default features passed. The wasm32 check passed. Pass 5 reported 0 defects, 0 smells and 3 nitpicks.
 
 **Sprint review.** The allocated title promised worker decode, the cache, and a render of the fetched instance. This story loads one worker, publishes one stored sample, reports the resolved tier, and posts one envelope. Decode of that envelope, the frame cache, and a render of that frame are F-202 and remain unscheduled. `resolvedTier` keeps tier C when a session resolves no adapter. A synchronous throw from the initialiser leaves the flag false and a later success may try again. The pin is `packages/core/src/load-retry.test.ts`. `TiltedVolume` keeps the longest agreeing lateral step, so a later step above 1e-6 mm is not refused as an orthogonal stack.
+
+## F-199, example layout grid and stack drag, completed 2026-11-04
+
+**What was built.** The example page layout section calls `overlayGrid`, `stackDrag`, `referenceLines` and `referenceCursor` and shows their results. The drag label is Stack drag. Full screen follows `document.fullscreenEnabled` and reads unavailable when that flag is not true. Prior studies, linked scroll, synced window, MPR, slab, volume rendering and fusion read unavailable. Those controls are unscheduled F-203. The existing series panel is unchanged.
+
+**HLD sections implemented.** `docs/hld/01-purpose-and-scope.md` section 1, `docs/hld/05-rendering.md` section 7, and `docs/hld/07-concurrency-and-typescript.md` sections 9 and 10. Appendix B is not marked measured. The local rules are `.claude/plans/F-199-design.md`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/viewer-react`.
+
+**Tests added.** `examples/viewer-react/src/layout-report.test.ts` and `examples/viewer-react/src/layout-panel.test.tsx`.
+
+**Fixture provenance.** No pixel arithmetic. The page inputs are a 2 by 2 grid on a 100 by 80 viewport, cursor (10, 20), and a stack drag from y 0 to y -256.
+
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+
+**Tier coverage.** Tiers A, B and C are not applicable. This section does not draw.
+
+**LLD updated.** `docs/lld/public-api.md`.
+
+**Deviations from the design plan.** The first approved title said series drag. Pass 1 called that label a smell because the value is the stack step. The title now says stack drag in the allocation, the sprint plan, the backlog and the current sprint.
+
+**Notes for future sessions.** Pass 2 reported 0 defects, 0 smells and 0 nitpicks. The feature floor then failed eslint because the fullscreen test assigned `this` to a local. The stub now returns the requesting element from a getter. An immediate return in the handler left the word off and the click test went red, then the return was removed. Pass 3 reported 0 defects, 0 smells and 1 nitpick. The nitpick is an untested exitFullscreen call and it does not block. Reviewer Claude Code, read only, with no shell. Pass 1 was 0 defects, 1 smell and 3 nitpicks. A constant grid count of 2 failed the one-cell test and was restored. After pass 1 the vertical test expects null when x is -1. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-200, example presets and window drag, completed 2026-11-04
+
+**What was built.** The example page manipulation section calls `windowDrag`, `windowRegion`, `rotationDrag`, `orientationQuadrant`, `orientationMarker`, `magnifyCircle`, `scaleLength`, `cropPlanes`, `packCommands` and `describeError`. Preset, horizontal flip, vertical flip and colour map are packed for viewport 1. The page shows the preset name, the colour map name and the packed lengths. The report keeps the packed bytes so a flag change fails the test. One to one, histogram and four corners read unavailable. Those controls are unscheduled F-204. Overlay planes and display shutters stay on the overlay panel. The crop line is crop planes.
+
+**HLD sections implemented.** `docs/hld/05-rendering.md` section 7 and `docs/hld/07-concurrency-and-typescript.md` section 10. Appendix B is not marked measured. The local rules are `.claude/plans/F-200-design.md`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/viewer-react`.
+
+**Tests added.** `examples/viewer-react/src/manipulation-report.test.ts` and `examples/viewer-react/src/manipulation-panel.test.tsx`.
+
+**Fixture provenance.** No pixel arithmetic. The page inputs are preset lung, centre 40 and width 400, a window drag of x 256 and y -256, a rotation drag of x 512, samples 0 and 10, marker quadrant 1, a null magnify scale, 10 mm at 2 pixels per millimetre, one crop plane, and `ERROR_CODE.Unavailable`.
+
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+
+**Tier coverage.** Tiers A, B and C are not applicable. This section does not draw and it does not start histogram compute.
+
+**LLD updated.** `docs/lld/public-api.md`.
+
+**Deviations from the design plan.** The approved plan named `s44-panels.test.tsx`. The panel observation is `manipulation-panel.test.tsx`. The combined file was not added. After pass 1 the page gained rotation, magnify scale and crop count inputs.
+
+**Notes for future sessions.** Setting the vertical flip enabled flag made the packed bytes differ by one and the report test went red, then the flag was restored. Ignoring the colour map select left the name at stops and the panel test went red, then the select was restored. Pass 1 was 0 defects, 2 smells and 2 nitpicks. Pass 2 reported 0 defects, 0 smells and 2 nitpicks. Reviewer Claude Code, read only, with no shell. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish. Sprint review pass 1 found the quadrant, magnify scale and crop count lines all read 1. A second click uses rotation x 0, scale 3 and two planes, so the lines read 0, 3 and 2. A constant crop count of 1 failed the two-plane case and was restored. Reading the crop count in the quadrant line failed the second click and was restored. A crop count of 100 is handed to the core as 7 planes, which the core refuses.
+
+## F-201, example measurement document and shortcut, completed 2026-11-04
+
+**What was built.** The example page measurement section calls `persistMeasurements`, `loadMeasurements`, `putAnnotation`, `annotationsForFrame`, `undoAnnotation`, `writeTid1500`, `readTid1500`, `keyImageMark`, `keyAction` and `createPointerDispatch`. The page passes 12.5 mm for the stored document and for the TID item. The TID line is the number `readTid1500` returns. The concept scheme is SCT, value 410668003 and meaning Length. The study, series, instance and annotation frame identifiers are synthetic 2.25 values. Each button run starts a new annotation state. Undo of that one put is empty. A touch pointer down reads `touch.start` and a mouse down reads `pointer.down`. Metadata browser and preferences read unavailable. Those controls are unscheduled F-205. Secondary capture stays on the document panel.
+
+**HLD sections implemented.** `docs/hld/07-concurrency-and-typescript.md` section 10. Decision D13. Appendix B is not marked measured. The local rules are `.claude/plans/F-201-design.md`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/viewer-react`.
+
+**Tests added.** `examples/viewer-react/src/measurement-report.test.ts` and `examples/viewer-react/src/measurement-panel.test.tsx`.
+
+**Fixture provenance.** No pixel arithmetic. The page inputs are 12.5 mm, shortcut ArrowUp with shift, key image id k1 at point (1, 2), and one touch pointer down at client (4, 6).
+
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+
+**Tier coverage.** Tiers A, B and C are not applicable. This section does not draw.
+
+**LLD updated.** `docs/lld/public-api.md`.
+
+**Deviations from the design plan.** The approved plan named `s44-panels.test.tsx`. The panel observation is `measurement-panel.test.tsx`. The combined file was not added.
+
+**Notes for future sessions.** Ignoring the shortcut key left the action at scroll-previous and the panel test went red, then the key was restored. Copying the TID number from the loaded document left 12.5 when the source instance was blank, and that test went red. Using the loaded document after a successful write left 12.5 in the TID line when the written number was 7, and that test went red. Echoing the written number left 7 when the read-back was replaced with 3, and that test went red. The TID line was restored to the read-back. Pass 4 reported 0 defects, 0 smells and 3 nitpicks. Reviewer Claude Code, read only, with no shell. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish. Sprint review pass 1 found the panel TID line could copy the stored 12.5 and stay green. The panel test now replaces the read-back with 3. Copying the stored number left 12.5 on that line and the spy went red, then the line was restored. A constant key image text and a constant touch name each failed their spy and were restored.
