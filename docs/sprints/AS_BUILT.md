@@ -4763,3 +4763,19 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
 **Deviations from the design plan.** none
 **Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Reviewer `01a1a1ad-4759-7051-9d73-63172272a1e2`. A verify field glued to the colon was forged. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a1ba-79c5-78b3-90e7-67b075efbd03`. Treating a colon as a blocking character made the glued assertion fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.
+
+## F-191, frame open from a Part 10 object, completed 2026-11-04
+
+**What was built.** `open_frame` reads one Part 10 object and returns the modality transform, the window input, the photometric interpretation, the presentation evidence, the colour selection, the padding range, the lossy and burned-in flags, and the private creators. It does not map samples. `fill_padding` writes the black end of the caller's `LutChain` after that chain has mapped. The example helper maps the synthetic fixture, and the example page shows the display value and the padding count.
+
+**HLD sections implemented.** Section 18. The chain stays in `ocelli-pixel`. This story only chooses the inputs that chain already accepts.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-dicom`, `examples/example-server`, `examples/viewer-react`, and the root package scripts.
+**Tests added.** Twenty-three tests in `crates/ocelli-dicom/tests/frame_open.rs`. Five tests in `examples/example-server`.
+**Fixture provenance.** Stored 50, slope 1, intercept 0, LINEAR_EXACT centre 100, width 200 and output 0 to 255 is 63.75 from PS3.3 C.11.2.1.3.2. Padding order is PS3.3 C.7.5.1.1.2. Descriptor signedness is PS3.3 C.11.1.1.1 and C.11.2.1.1. A 16-bit VOI LUT fill is 65535 from C.11.2.1.1, and the inverse reflection is C.11.6.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+**Tier coverage.** Tiers A, B and C are not applicable. The story does not draw.
+**LLD updated.** `docs/lld/frame-open.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** The plan said MONOCHROME1 black is ymax. After the chain's default inverse, black is ymin. `fill_padding` takes the chain and reads `LutChain::inverts` and the chain output range. An absent rescale pair is slope 1 and intercept 0. Frame open skips pixel-data tags instead of calling `MetadataSet::from_object`. `PrivateCreator` fields are private.
+**Notes for future sessions.** Pass 4 reported 0 defects, 0 smells and 2 nitpicks. Reviewer Claude Code, read only. Replacing the chain output range with the 0 to 255 literals made the 16-bit test fail and the file was restored. `cargo fmt` also wrapped two lines in the committed JPEG-LS test so the fmt gate can pass. That wrap is not a behaviour change. `bin/example-dev.sh` refuses to start Vite when the helper prints no URL, and that refusal is catalogued. The census site counts for the staged-reader and cine refusals are recorded here. Those refusals already have standing tests. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.

@@ -6606,6 +6606,51 @@ HARNESS_OVER_ONE_PROBE = Invoke(
     run=_the_harness_must_refuse_a_guard_that_refuses_nothing)
 
 
+def _example_dev_silent_helper(box: Sandbox) -> None:
+    """The helper never prints a URL, and the wait is one tenth of a second.
+
+    F-191's plan says `npm run dev` starts Vite only beside a helper that
+    prints its base URL. The rejected state is that print never arriving.
+    Cargo and the binary are stubbed because a sandbox has no build cache,
+    and the loop bound is lowered so the probe does not sleep for ten
+    seconds. The product script is unchanged.
+    """
+    box.substitute(
+        "bin/example-dev.sh",
+        "cargo build -p ocelli-example-server",
+        "true")
+    box.substitute(
+        "bin/example-dev.sh",
+        '"$root/target/debug/ocelli-example-server" >"$url_file" &',
+        'sleep 30 >"$url_file" &')
+    box.substitute(
+        "bin/example-dev.sh",
+        '[ "$i" -gt 100 ]',
+        '[ "$i" -gt 1 ]')
+
+
+def _example_dev_reaches_a_url(
+        box: Sandbox) -> subprocess.CompletedProcess[str]:
+    """A helper that prints a URL, with cargo, the binary and Vite stubbed.
+
+    The control has to exit 0. The real script would compile and then start
+    Vite, and neither of those is present in a `git ls-files` sandbox.
+    """
+    box.substitute(
+        "bin/example-dev.sh",
+        "cargo build -p ocelli-example-server",
+        "true")
+    box.substitute(
+        "bin/example-dev.sh",
+        '"$root/target/debug/ocelli-example-server" >"$url_file" &',
+        "printf '%s\\n' 'http://127.0.0.1:9' >\"$url_file\"")
+    box.substitute(
+        "bin/example-dev.sh",
+        "npm run dev -w @ocelli/example-viewer",
+        "true")
+    return box.run(["bin/example-dev.sh"])
+
+
 # ---------------------------------------------------------------------------
 # The catalogue
 # ---------------------------------------------------------------------------
@@ -6671,6 +6716,10 @@ GUARDS: tuple[Guard, ...] = (
                          "--tracked"),
                   "byte limit"),
         ),
+        limit="A missing git listing and an unreadable blob fail closed. "
+              "`scripts/tests/test_staged_readers.py` drives both and the "
+              "guards gate runs that file, so neither has a catalogue probe "
+              "of its own.",
     ),
 
     # -- HLD 27.2 R5 --------------------------------------------------------
@@ -6756,6 +6805,10 @@ GUARDS: tuple[Guard, ...] = (
                        "the same rules, and .githooks/commit-msg is the only "
                        "thing that calls it."),
         ),
+        limit="A missing git listing and an unreadable blob fail closed. "
+              "`scripts/tests/test_staged_readers.py` drives both and the "
+              "guards gate runs that file, so neither has a catalogue probe "
+              "of its own.",
     ),
 
     # -- the deviation register --------------------------------------------
@@ -6818,7 +6871,10 @@ GUARDS: tuple[Guard, ...] = (
               "catalogue exists to avoid: it would assert the current regex "
               "and pass forever once the regex was weakened. The list itself "
               "is a declared constant in the ratchet, so a change to it is "
-              "caught there and lands in front of a reviewer.",
+              "caught there and lands in front of a reviewer. A missing git "
+              "listing and an unreadable blob fail closed. "
+              "`scripts/tests/test_staged_readers.py` drives both and the "
+              "guards gate runs that file.",
     ),
 
     # -- pins and the size ceiling -----------------------------------------
@@ -9673,6 +9729,34 @@ GUARDS: tuple[Guard, ...] = (
               "runs them against the real install on every push.",
     ),
 
+    # -- the example viewer launcher --------------------------------------
+    Guard(
+        id="example-dev",
+        file="bin/example-dev.sh",
+        gate="-",
+        spec="`.claude/plans/F-191-design.md`, the helper prints its base URL "
+             "before the example viewer starts",
+        refuses="Starting the example viewer when the helper never prints "
+                "its base URL, rather than launching Vite against an empty "
+                "address.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "example-dev.silent-helper",
+                _example_dev_silent_helper,
+                script("bin/example-dev.sh"),
+                "the example helper did not print a URL",
+                control=Invoke(
+                    "example-dev reaches a printed URL",
+                    _example_dev_reaches_a_url),
+                note="The plan requires the helper's base URL before Vite. "
+                     "The probe stubs the build and the binary so the sandbox "
+                     "can reach the wait, and shortens that wait. The control "
+                     "stubs the build, writes one URL and stubs Vite, and "
+                     "must not print this refusal."),
+        ),
+    ),
+
     # -- the runner and the source resolver --------------------------------
     Guard(
         id="runner",
@@ -11233,7 +11317,10 @@ GUARDS: tuple[Guard, ...] = (
               "and scroll publication controls run with OCELLI_BENCH_BROWSER=1. "
               "Startup and pointer/scroll failure propagation are defensive "
               "paths, not an independently fault-injected proof for each "
-              "message. No missing physical-host acceptance is inferred.",
+              "message. No missing physical-host acceptance is inferred. "
+              "The cine frame-count and workload-interval refusals are driven "
+              "by `tools/bench/tests/run_test.mjs`, which this entry already "
+              "names.",
     ),
     Guard(
         id="bench.session.page",

@@ -102,6 +102,7 @@ packages/
 
 examples/
   viewer-react/     the example viewer, and the manual smoke test
+  example-server/   loopback helper for the example viewer's frame-open panel
   folder-viewer/    local series page for a folder on this machine
 
 tools/
@@ -140,6 +141,14 @@ npm run dev
 ```
 
 Open <http://localhost:5173>. Vite prints that address when the server is ready.
+
+`npm run dev` also starts `ocelli-example-server` on `127.0.0.1`. The helper
+prints only its base URL. The Frame open section posts to it through Vite.
+The synthetic button asks the helper to map stored 50 through LINEAR_EXACT
+centre 100 and width 200, then shows the display value and the padding count.
+A file you choose is posted and discarded. It is not written into this
+repository. The header still reads `core not built` until a later story loads
+the wasm module.
 
 `bin/ocelli.sh wasm` writes the module to `crates/ocelli-wasm/pkg`. That
 directory is a build artefact and is not committed, so a clean clone still

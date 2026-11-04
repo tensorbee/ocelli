@@ -76,7 +76,8 @@ npm run dev                   # http://localhost:5173
 ```
 
 A clean clone has no built core, so the viewer starts in its "core not built"
-state rather than failing. That is deliberate.
+state rather than failing. That is deliberate. `npm run dev` also starts the
+loopback frame-open helper on `127.0.0.1`. The Frame open section uses it.
 
 ## Why some things are the way they are
 

@@ -1017,6 +1017,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ocelli-example-server"
+version = "0.1.0"
+dependencies = [
+ "ocelli-core",
+ "ocelli-dicom",
+ "ocelli-pixel",
+]
+
+[[package]]
 name = "ocelli-folder-viewer"
 version = "0.1.0"
 dependencies = [

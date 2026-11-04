@@ -10,6 +10,7 @@
 mod dicomweb;
 mod frame_geometry;
 mod frame_index;
+mod frame_open;
 mod metadata;
 mod multiframe;
 mod nifti;
@@ -27,6 +28,10 @@ pub use frame_geometry::{
     StackGeometry, StackShear, parse_decimal_string,
 };
 pub use frame_index::{EncapsulatedFrameIndex, FrameIndexError};
+pub use frame_open::{
+    BurnedInFlag, ColourSelection, FrameOpenError, LossyFlag, OpenedFrame, PaddingRange,
+    PrivateCreator, WindowInput, fill_padding, open_frame,
+};
 pub use metadata::{
     BulkDataUri, InlineBinary, MetadataElement, MetadataError, MetadataSet, MetadataValue,
     NullSlots, PersonName,

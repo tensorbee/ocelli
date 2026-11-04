@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "tools/oracle", "examples/folder-viewer"]
+members = ["crates/*", "tools/oracle", "examples/folder-viewer", "examples/example-server"]
 exclude = ["vendor/ritk-codecs-0.6.0", "vendor/openjph-core-0.1.0"]
 
 [workspace.package]

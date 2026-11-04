@@ -326,7 +326,7 @@ The series-open gaps that Phase 1 left in the core, then the folder viewer calli
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-191 | E38.1 | S42 | Frame open from a Part 10 object: chain inputs including Modality and VOI LUT Sequences, colour selection, pixel padding PS3.3 C.7.5.1.1.2, Lossy Image Compression and Burned In Annotation flags, private creators | Rust | 5w | F-030, F-020 | pending |
+| F-191 | E38.1 | S42 | Frame open from a Part 10 object: chain inputs including Modality and VOI LUT Sequences, colour selection, pixel padding PS3.3 C.7.5.1.1.2, Lossy Image Compression and Burned In Annotation flags, private creators | Rust | 5w | F-030, F-020 | done |
 | F-192 | E38.2 | S42 | Series assembly: order by projected position, split mixed series, temporal axis, cine timing with loop and bounce | Rust | 5w | F-051, F-047 | pending |
 | F-193 | E38.3 | S42 | Overlay planes PS3.3 C.9.2 and display shutters PS3.3 C.7.6.11 and C.7.6.15 | Rust | 3w | F-019, F-029 | pending |
 | F-194 | E38.4 | S42 | Stack display interpolation, nearest and linear, declared on tiers A, B and C | Rust | 3w | F-042, F-045 | pending |
