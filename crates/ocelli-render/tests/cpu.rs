@@ -11,7 +11,9 @@ use ocelli_pixel::{
     PaletteColorLut, PhotometricInterpretation, PixelDataEncoding, PlanarConfiguration,
     PresentationLutEvidence, SampleLayout, VoiFunction, VoiTransform,
 };
-use ocelli_render::{CpuRaster, RasterColor, RasterError, RasterGrid, RasterQuality};
+use ocelli_render::{
+    CpuRaster, Interpolation, RasterColor, RasterError, RasterGrid, RasterQuality,
+};
 use ocelli_viewport::presentation::{Colormap, Presentation};
 use ocelli_viewport::view::{Radians, View, Zoom};
 
@@ -403,6 +405,111 @@ fn dpr_one_and_a_quarter_uses_one_division() {
     );
     assert_grey_near(&frame, 4, 40);
     assert_grey_near(&frame, 0, 10);
+}
+
+#[test]
+fn linear_texel_centres_match_the_nearest_texel() {
+    let mut raster = require_raster(2.0, 2.0, 1.0);
+    let view = View::new();
+    let presentation = passthrough();
+    let samples = stored(&[0.0, 100.0, 200.0, 255.0]);
+    let source = [2, 2];
+    let target = [2, 2];
+    let near_origin = raster.display_at(&view, &presentation, &samples, source, target, [0, 0]);
+    let near_last = raster.display_at(&view, &presentation, &samples, source, target, [1, 1]);
+    let nearest = draw(&mut raster, &view, &presentation, &samples, source);
+    assert!(raster.set_interpolation(1).is_ok());
+    assert_eq!(raster.interpolation(), Interpolation::Linear);
+    assert!(raster.reserve_source(2, 2).is_ok());
+    let reserved = raster.allocations();
+    let linear_origin = raster.display_at(&view, &presentation, &samples, source, target, [0, 0]);
+    let linear_last = raster.display_at(&view, &presentation, &samples, source, target, [1, 1]);
+    assert_same_display(near_origin, linear_origin);
+    assert_same_display(near_last, linear_last);
+    let linear = draw(&mut raster, &view, &presentation, &samples, source);
+    assert_eq!(rgba_at(&linear, 0), rgba_at(&nearest, 0));
+    assert_eq!(rgba_at(&linear, 3), rgba_at(&nearest, 3));
+    assert_eq!(raster.allocations(), reserved);
+    let mut idle = [9_u8; 16];
+    let refused = raster.set_interpolation(2);
+    assert!(matches!(refused, Err(RasterError::Unavailable)));
+    assert_eq!(raster.interpolation(), Interpolation::Linear);
+    let again = raster.raster_into(
+        &view,
+        &presentation,
+        &samples,
+        RasterGrid { source, target },
+        RasterQuality::Settled {
+            generation: raster.generation(),
+        },
+        &mut idle,
+    );
+    assert!(matches!(again, Ok(result) if !result.wrote));
+    assert_eq!(idle, [9_u8; 16]);
+}
+
+#[test]
+fn linear_without_a_reserve_refuses_and_does_not_allocate() {
+    let mut raster = require_raster(1.0, 1.0, 1.0);
+    assert!(raster.set_interpolation(1).is_ok());
+    let before = raster.allocations();
+    let mut out = [4_u8; 4];
+    let drawn = raster.raster_into(
+        &View::new(),
+        &passthrough(),
+        &stored(&[50.0]),
+        RasterGrid {
+            source: [1, 1],
+            target: [1, 1],
+        },
+        RasterQuality::Settled {
+            generation: raster.generation(),
+        },
+        &mut out,
+    );
+    assert!(matches!(drawn, Err(RasterError::Extent)));
+    assert_eq!(out, [4, 4, 4, 4]);
+    assert_eq!(raster.allocations(), before);
+}
+
+#[test]
+fn nearest_colour_reserve_leaves_the_display_plane_empty() {
+    let mut raster = require_raster(1.0, 1.0, 1.0);
+    assert!(raster.reserve_source(2, 2).is_ok());
+    assert_eq!(raster.allocations(), 1);
+    assert!(raster.set_interpolation(1).is_ok());
+    assert_eq!(raster.interpolation(), Interpolation::Linear);
+    assert_eq!(raster.allocations(), 1);
+    let rgb = require_color(PhotometricInterpretation::Rgb, None);
+    let mut out = [8_u8; 4];
+    let drawn = raster.raster_color_into(
+        &View::new(),
+        accepted(&rgb),
+        &stored(&[1.0, 2.0, 3.0]),
+        RasterGrid {
+            source: [1, 1],
+            target: [1, 1],
+        },
+        RasterQuality::Settled {
+            generation: raster.generation(),
+        },
+        &mut out,
+    );
+    assert!(matches!(drawn, Err(RasterError::Extent)));
+    assert_eq!(out, [8, 8, 8, 8]);
+    assert_eq!(raster.allocations(), 1);
+    assert!(raster.reserve_source(1, 1).is_ok());
+    assert_eq!(raster.allocations(), 2);
+}
+
+fn assert_same_display(
+    nearest: Result<Option<f32>, RasterError>,
+    linear: Result<Option<f32>, RasterError>,
+) {
+    match (nearest, linear) {
+        (Ok(Some(left)), Ok(Some(right))) => assert_eq!(left.to_bits(), right.to_bits()),
+        _ => unreachable!("both centres are inside the image"),
+    }
 }
 
 #[test]

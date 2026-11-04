@@ -540,15 +540,31 @@ impl<'a> Resolved<'a> {
     }
 }
 
-fn cosines_agree(left: glam::DVec3, right: glam::DVec3) -> bool {
+/// Row or column direction cosines agree within [`DIRECTION_COSINE_TOLERANCE`].
+pub(crate) fn cosines_agree(left: glam::DVec3, right: glam::DVec3) -> bool {
     (left.x - right.x).abs() <= DIRECTION_COSINE_TOLERANCE
         && (left.y - right.y).abs() <= DIRECTION_COSINE_TOLERANCE
         && (left.z - right.z).abs() <= DIRECTION_COSINE_TOLERANCE
 }
 
-fn spacing_agrees(left: PixelSpacing, right: PixelSpacing) -> bool {
+/// In-plane spacing agrees within the one spacing equality used by stack derivation.
+pub(crate) fn spacing_agrees(left: PixelSpacing, right: PixelSpacing) -> bool {
     (left.row_mm() - right.row_mm()).abs() <= SPACING_EQUALITY_MM
         && (left.column_mm() - right.column_mm()).abs() <= SPACING_EQUALITY_MM
+}
+
+/// Two projected positions name one spatial slot.
+///
+/// The comparison is the private geometry tolerance. Callers that report shear
+/// or a non-uniform step use [`exceeds_geometry_tolerance`] so the number stays
+/// defined once.
+pub(crate) fn positions_coincide(left_mm: f64, right_mm: f64) -> bool {
+    (left_mm - right_mm).abs() <= GEOMETRY_TOLERANCE_MM
+}
+
+/// Whether a millimetre length is outside the private geometry tolerance.
+pub(crate) fn exceeds_geometry_tolerance(distance_mm: f64) -> bool {
+    distance_mm > GEOMETRY_TOLERANCE_MM
 }
 
 fn resolve<'a>(

@@ -4,7 +4,8 @@
 //! Tier C presents the same samples through [`present_cpu_plane`] and
 //! [`crate::cpu::CpuRaster`]. [`present_plane`] still returns
 //! [`OrthoError::TierCUnavailable`] before it reads the image. An absent
-//! sample publishes nothing, so the last complete frame stays.
+//! sample publishes nothing, so the last complete frame stays. A linear
+//! stack mode is refused before the plane is read and is not drawn as nearest.
 
 use ocelli_core::Stored;
 use ocelli_viewport::presentation::Presentation;
@@ -14,6 +15,7 @@ use ocelli_volume::{OrthoImage, PlaneSample};
 use crate::caps::Tier;
 use crate::cpu::{CpuRaster, RasterError, RasterGrid, RasterQuality, RasterResult};
 use crate::graph::UploadError;
+use crate::interpolation::Interpolation;
 
 /// Why an orthographic plane was not uploaded.
 #[derive(Debug, thiserror::Error)]
@@ -30,6 +32,9 @@ pub enum OrthoError {
     /// The CPU raster refused the frame. The output slice is left untouched.
     #[error(transparent)]
     Raster(#[from] RasterError),
+    /// The viewport is sampling linearly. The reslice is not blended again.
+    #[error("orthographic presentation refuses a second interpolant")]
+    SecondInterpolant,
 }
 
 /// Upload a fully present plane, or refuse before the upload runs.
@@ -91,10 +96,13 @@ pub fn copy_plane_stored(image: &OrthoImage, stored: &mut [Stored]) -> Result<()
 ///
 /// The samples are the plane's existing values. This function does not call
 /// `Volume::reslice`. Tier A and tier B stay on [`present_plane`]. The target
-/// is the raster's device extent. A refusal writes nothing to `out`.
+/// is the raster's device extent. A refusal writes nothing to `out`. A linear
+/// raster returns [`OrthoError::SecondInterpolant`] before the image is read
+/// and does not change the selected mode.
 ///
 /// # Errors
 ///
+/// [`OrthoError::SecondInterpolant`] when the raster mode is linear.
 /// [`OrthoError::PlaneIncomplete`] when any sample is absent.
 /// [`OrthoError::Raster`] when the raster refuses the frame.
 pub fn present_cpu_plane(
@@ -105,6 +113,9 @@ pub fn present_cpu_plane(
     quality: RasterQuality,
     out: &mut [u8],
 ) -> Result<RasterResult, OrthoError> {
+    if raster.interpolation() == Interpolation::Linear {
+        return Err(OrthoError::SecondInterpolant);
+    }
     let mut stored = vec![Stored(0.0); image.samples.len()];
     copy_plane_stored(image, &mut stored)?;
     let source = [image.width, image.height];

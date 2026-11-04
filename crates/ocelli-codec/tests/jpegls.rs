@@ -397,7 +397,12 @@ fn sample_interleaved_rgb_reproduces_the_uncompressed_ramp() -> TestResult {
     Ok(())
 }
 
-fn decode_constructed_rgb(rows: u16, columns: u16, source: &[u8], pixels: &[[u8; 3]]) -> TestResult {
+fn decode_constructed_rgb(
+    rows: u16,
+    columns: u16,
+    source: &[u8],
+    pixels: &[[u8; 3]],
+) -> TestResult {
     assert_eq!(pixels.len(), usize::from(rows) * usize::from(columns));
     let desc = FrameDesc::new(FrameDescInput {
         rows,
@@ -432,7 +437,9 @@ fn a_flat_rgb_run_interruption_keeps_the_constructed_sample() -> TestResult {
     // encoding. The expected pixels are the arrays built here.
     let columns = 8usize;
     let mut flat = solid(4 * columns, [10, 20, 30]);
-    let slot = flat.get_mut(columns + 3).ok_or("interruption outside the frame")?;
+    let slot = flat
+        .get_mut(columns + 3)
+        .ok_or("interruption outside the frame")?;
     *slot = [10, 20, 29];
     let lowered: &[u8] = &[
         0xff, 0xd8, 0xff, 0xf7, 0x00, 0x11, 0x08, 0x00, 0x04, 0x00, 0x08, 0x03, 0x01, 0x11, 0x00,

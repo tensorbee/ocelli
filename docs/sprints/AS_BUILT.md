@@ -4763,3 +4763,99 @@ this branch had not touched since the base.
 **LLD updated.** `docs/lld/public-api.md` and the row in `docs/lld/README.md`.
 **Deviations from the design plan.** none
 **Notes for future sessions.** Pass 1 reported 1 defect, 0 smells and 0 nitpicks. Reviewer `01a1a1ad-4759-7051-9d73-63172272a1e2`. A verify field glued to the colon was forged. Pass 2 reported 0 defects, 0 smells and 0 nitpicks. Reviewer `01a1a1ba-79c5-78b3-90e7-67b075efbd03`. Treating a colon as a blocking character made the glued assertion fail and the file was restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. Closing S41 completes M13 and does not publish. This story does not publish.
+
+## F-191, frame open from a Part 10 object, completed 2026-11-04
+
+**What was built.** `open_frame` reads one Part 10 object and returns the modality transform, the window input, the photometric interpretation, the presentation evidence, the colour selection, the padding range, the lossy and burned-in flags, and the private creators. It does not map samples. `fill_padding` writes the black end of the caller's `LutChain` after that chain has mapped. The example helper maps the synthetic fixture, and the example page shows the display value and the padding count.
+
+**HLD sections implemented.** Section 18. The chain stays in `ocelli-pixel`. This story only chooses the inputs that chain already accepts.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-dicom`, `examples/example-server`, `examples/viewer-react`, and the root package scripts.
+**Tests added.** Twenty-three tests in `crates/ocelli-dicom/tests/frame_open.rs`. Five tests in `examples/example-server`.
+**Fixture provenance.** Stored 50, slope 1, intercept 0, LINEAR_EXACT centre 100, width 200 and output 0 to 255 is 63.75 from PS3.3 C.11.2.1.3.2. Padding order is PS3.3 C.7.5.1.1.2. Descriptor signedness is PS3.3 C.11.1.1.1 and C.11.2.1.1. A 16-bit VOI LUT fill is 65535 from C.11.2.1.1, and the inverse reflection is C.11.6.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+**Tier coverage.** Tiers A, B and C are not applicable. The story does not draw.
+**LLD updated.** `docs/lld/frame-open.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** The plan said MONOCHROME1 black is ymax. After the chain's default inverse, black is ymin. `fill_padding` takes the chain and reads `LutChain::inverts` and the chain output range. An absent rescale pair is slope 1 and intercept 0. Frame open skips pixel-data tags instead of calling `MetadataSet::from_object`. `PrivateCreator` fields are private.
+**Notes for future sessions.** Pass 4 reported 0 defects, 0 smells and 2 nitpicks. Reviewer Claude Code, read only. Replacing the chain output range with the 0 to 255 literals made the 16-bit test fail and the file was restored. `cargo fmt` also wrapped two lines in the committed JPEG-LS test so the fmt gate can pass. That wrap is not a behaviour change. `bin/example-dev.sh` refuses to start Vite when the helper prints no URL, and that refusal is catalogued. The census site counts for the staged-reader and cine refusals are recorded here. Those refusals already have standing tests. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-192, series assembly and cine timing, completed 2026-11-04
+
+**What was built.** `assemble_display` orders a bag of already parsed frames into display groups. The group key is the series UID, the frame of reference UID, orientation and in-plane spacing. Positioned frames sort by the projection of Image Position Patient onto the slice normal. Shear and a non-uniform step are reports. The function does not build a volume. Cine timing and playback come from the first frame in display order. The example page shows the groups, the order, the timing and Loop or Bounce.
+
+**HLD sections implemented.** Section 19 remains the volume. It does not define display order or cine timing. This story adds that display path beside `Volume::assemble` and does not change the volume refusals.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-dicom`, `examples/example-server`, `examples/viewer-react`.
+**Tests added.** Thirty-four tests in `crates/ocelli-dicom/tests/series_open.rs`. The example server adds the series route tests beside the existing frame-open tests.
+**Fixture provenance.** Positions, orientation and spacing cite PS3.3 C.7.6.2.1.1. Cine cites PS3.3 C.7.6.5 and C.7.6.5.1.2. Playback cites PS3.3 C.7.6.5 and PS3.6 for US values 0 and 1. The fixtures are synthetic explicit little endian. No patient data. No pixel samples are mapped.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+**Tier coverage.** Tiers A, B and C are not applicable. The story does not draw.
+**LLD updated.** `docs/lld/series-open.md` and the row in `docs/lld/README.md`. `docs/lld/volumes.md` stays the volume refusal path.
+**Deviations from the design plan.** Preferred Playback Sequencing is US 0 or 1. The plan named the strings LOOP and SWEEP. PS3.6 gives US, and the reader follows the dictionary. The first Frame Time Vector component may be 0, which is PS3.3 C.7.6.5.1.2. A later component that is zero, negative or non-finite is still an error and does not fall through. A missing UID is shared by every frame of one parsed object and is not shared across two objects. A present orientation or spacing that cannot be read is still an error on an unpositioned frame. The synthetic series is three objects, because two groups and an axial pair do not fit in two objects. `declared_frame_count` and `SeriesOpenError::new` are public. The error JSON uses `part` for a parse failure and `frame` for an assembly failure.
+**Notes for future sessions.** Pass 4 reported 0 defects, 0 smells and 1 nitpick. Reviewer Claude, read only. Projection sort was mutated to instance number, the axial test failed, and the projection comparison was restored. Removing the unpositioned spacing check and renaming the assembly error field each went red and were restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-193, overlay planes and display shutters, completed 2026-11-04
+
+**What was built.** `read_overlays` reads top-level even overlay groups and the display shutter for one frame. A 1-bit overlay may be OB or OW, and OW words unpack little-endian. Shutters combine by intersection. The example page shows the synthetic hit, the shutter hide, and an absent neutral value. The reader does not draw and does not change `ocelli-seg`.
+
+**HLD sections implemented.** Section 19 remains segmentation overlays. This story reads graphic overlay planes and display shutters and does not draw them.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-dicom`, `examples/example-server`, `examples/viewer-react`.
+**Tests added.** Twenty-five tests in `crates/ocelli-dicom/tests/overlay.rs`. The example server adds the overlay route tests.
+**Fixture provenance.** Origin cites PS3.3 C.9.2. Rectangular and polygonal shutters cite PS3.3 C.7.6.11. Bitmap shutters cite PS3.3 C.7.6.15. Overlay data VR cites PS3.6. The fixtures are synthetic explicit little endian. No patient data. No pixel samples are mapped through the LUT chain.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+**Tier coverage.** Tiers A, B and C are not applicable. The story does not draw.
+**LLD updated.** `docs/lld/overlays.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** The design text named `(0018,1614)` as a circle attribute. PS3.6 does not define that tag, so the reader uses `(0018,1610)` with value multiplicity 2 and `(0018,1612)` for the radius. Polygon vertices come from `(0018,1620)`. The design text said the preview uses the shutter presentation value when it is present. The page prints that value as its own sentence and does not paint it into the mask digits. A 16-bit Overlay Data whose VR is not OW is still labelled `BitsAllocated`. A vertex list that is not IS is labelled `Polygon`. The zero-length edge check is also reached through the adjacent-overlap guard.
+**Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 3 nitpicks. Reviewer Claude Code, read only, with no shell. Endian, folded-edge, polygon orientation and frame-stride mutations went red and were restored. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-194, stack display interpolation, completed 2026-11-04
+
+**What was built.** Stack display sampling selects nearest or linear. Nearest stays the existing texel rule. Linear is a 2 by 2 blend of display samples, and the stack shader uses those same weights. The example page shows 138.75 for the linear centre and the nearest corner for nearest. An unknown mode and a refused tier do not fall back to nearest.
+
+**HLD sections implemented.** Section 18 remains one LUT formula. Section 7 and D-07 require a tier answer. This story declares nearest and linear available on tiers A, B and C.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-render`, `examples/example-server`, `examples/viewer-react`.
+**Tests added.** Nine tests in `crates/ocelli-render/tests/interpolation.rs`. The CPU raster tests check that linear centres match the nearest texels and that an unreserved linear draw returns Extent.
+**Fixture provenance.** The 2 by 2 display image is `[[0, 100], [200, 255]]`. At centre-origin `(0.5, 0.5)` each weight is one quarter, and `0.25 * (0 + 100 + 200 + 255)` is `138.75`, compared as f32 before `display_index`. No DICOM pixel module section defines this blend. The HLD does not name nearest or linear. No patient data.
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+**Tier coverage.** Tiers A, B and C declare both modes available. The test double can mark tier B linear unavailable, and that blend is refused rather than drawn as nearest. The stack shader is the same branch on A and B. No GPU ULP comparison was run. A skip is not a pass of that extra row. Required evidence is the fixture and the shader source.
+**LLD updated.** `docs/lld/render-graph.md` and the row in `docs/lld/README.md`.
+**Deviations from the design plan.** The design text calls `(0.5, 0.5)` one image coordinate after the centre shift. The landed pair keeps nearest on the corner origin of `texel_of`, so nearest at `(0.5, 0.5)` is 0, and linear on the centre origin, so linear at `(0.5, 0.5)` is 138.75. Those are not one geometric point. The raster passes an index to linear and `index + 0.5` to `texel_of`. A zero fraction, including `-0.0`, does not read the next texel.
+**Notes for future sessions.** Pass 5 reported 0 defects, 0 smells and 0 nitpicks. Reviewer Claude Code, read only, with no shell. A weight swap, a nearest index mutation, an in-draw allocation and a negative-zero fraction check each went red and were restored. Colour reserve grows the RGB scratch and the display plane, and the wasm session tests expect that count of 2. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-194, follow-up after the S42 review, completed 2026-11-04
+
+**What was built.** Nearest colour reserve no longer grows the linear display plane. Orthographic presentation refuses a linear stack mode and leaves that mode selected. Series assembly projects one object's metadata once and shares it across that object's frames.
+
+**HLD sections implemented.** Section 18 remains one LUT formula. Section 7 and D-07 still refuse a result the caller did not ask for. MPR does not add a second interpolant.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-dicom`, `ocelli-render`, `ocelli-wasm`.
+**Tests added.** One series-open projection count. One nearest colour reserve. One CPU plane refusal. One ignored GPU plane refusal.
+**Fixture provenance.** No new pixel arithmetic. The 138.75 centre is unchanged.
+**Verification.** The sprint profile on this tree is recorded after the consolidated gate.
+**Corpus.** The sprint record names the corpus result. This note adds no corpus row.
+**Tier coverage.** Tiers A and B refuse a linear orthographic upload. Tier C refuses a linear CPU plane. Nearest presentation is unchanged.
+**LLD updated.** `docs/lld/feature-availability.md` and one sentence in `docs/lld/render-graph.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** The F-194 entry above records the colour reserve count of 2. That count was the contract at that commit. Nearest colour reserve now increments allocations once. Do not push until the sprint review is clean. This note does not publish.
+
+## F-194, follow-up after the S42 review pass 2, completed 2026-11-04
+
+**What was built.** A nearest orthographic upload records that the stored texture is a host reslice. Selecting linear while that record is set is refused, the mode stays nearest, and the camera lane is not written. The next stack upload clears the record.
+
+**HLD sections implemented.** Section 7 and D-07 still refuse a result the caller did not ask for.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-render`.
+**Tests added.** One ignored GPU test for a nearest upload followed by a linear selection.
+**Fixture provenance.** No new pixel arithmetic.
+**Verification.** The sprint profile on this tree is recorded after the consolidated gate.
+**Corpus.** The sprint record names the corpus result. This note adds no corpus row.
+**Tier coverage.** Tiers A and B refuse linear after a nearest orthographic upload. Tier C still checks the mode on every CPU plane.
+**LLD updated.** One sentence in `docs/lld/render-graph.md` and the CPU MPR cell in `docs/lld/feature-availability.md`.
+**Deviations from the design plan.** none
+**Notes for future sessions.** The earlier follow-up covers a linear mode that was already selected. This note covers the other order. The refusal is `GraphError::SecondInterpolant` because `set_stack_interpolation` returns `GraphError`. This note does not publish.

@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --build",
     "test": "vitest run",
-    "dev": "npm run dev -w @ocelli/example-viewer",
+    "dev": "bin/example-dev.sh",
     "bench": "node tools/bench/run.mjs",
     "oracle": "node tools/oracle/run.mjs"
   },

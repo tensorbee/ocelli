@@ -77,6 +77,7 @@ pub mod extent;
 pub mod fusion;
 pub mod gpu;
 pub mod graph;
+pub mod interpolation;
 mod labelmap;
 pub mod opacity;
 pub mod ortho;
@@ -112,6 +113,10 @@ pub use graph::{
     PipelineKey, RayAxis, RenderGraph, STORED_FORMAT, SegPass, SlabPass, StackPass, Upload,
     UploadError, ViewportId, VolumeBrick, VolumePass, VolumeRaySource, device_camera_words,
     sampled_texture_limit, tier_b_fragment_module, volume_ray_admission, volume_ray_module,
+};
+pub use interpolation::{
+    Interpolation, InterpolationError, TierSample, available, available_when, blend_display,
+    blend_on_tier, write_sample,
 };
 pub use opacity::{OpacityError, OpacityPreset, OpacityTable};
 pub use ortho::{OrthoError, copy_plane_stored, present_cpu_plane, present_plane};

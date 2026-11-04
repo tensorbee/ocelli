@@ -6,15 +6,20 @@
 //! F-017 adds lossless metadata projection and ordered providers.
 //! F-022 adds direct NIfTI-1.1 header, affine, and payload validation.
 //! F-020 derives per-frame geometry, stack shear and calibrated spacing.
+//! F-192 orders a bag of frames into display groups and reads cine timing.
+//! F-193 reads overlay planes and display shutters.
 
 mod dicomweb;
 mod frame_geometry;
 mod frame_index;
+mod frame_open;
 mod metadata;
 mod multiframe;
 mod nifti;
+mod overlay;
 mod parse;
 mod provider;
+mod series_open;
 
 pub use dicom_core::VR;
 pub use dicom_object::{DefaultDicomObject, Tag};
@@ -27,6 +32,10 @@ pub use frame_geometry::{
     StackGeometry, StackShear, parse_decimal_string,
 };
 pub use frame_index::{EncapsulatedFrameIndex, FrameIndexError};
+pub use frame_open::{
+    BurnedInFlag, ColourSelection, FrameOpenError, LossyFlag, OpenedFrame, PaddingRange,
+    PrivateCreator, WindowInput, fill_padding, open_frame,
+};
 pub use metadata::{
     BulkDataUri, InlineBinary, MetadataElement, MetadataError, MetadataSet, MetadataValue,
     NullSlots, PersonName,
@@ -39,10 +48,18 @@ pub use nifti::{
     NiftiAffineSource, NiftiByteOrder, NiftiDataType, NiftiError, NiftiHeader, NiftiQForm,
     NiftiSForm, NiftiScaling, NiftiSpatialUnits, ParsedNifti, parse_nifti,
 };
+pub use overlay::{
+    OverlayError, OverlayPlane, OverlayReason, OverlaySet, OverlayType, Shutter, ShutterShape,
+    read_overlays,
+};
 pub use parse::{DispatchPath, ParseError, ParsedDicom, TransferSyntaxInfo, parse_part10};
 pub use provider::{
     MetadataRequest, ProviderAnswer, ProviderFn, ProviderId, ProviderRegistry,
     ProviderRegistryError, data_set_provider, file_meta_provider,
+};
+pub use series_open::{
+    CineTiming, DisplaySeries, FramePlace, ParsedFrame, Playback, SeriesOpenError,
+    SeriesOpenReason, SpatialOrder, assemble_display, declared_frame_count,
 };
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which

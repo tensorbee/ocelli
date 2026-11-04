@@ -111,6 +111,14 @@
       "goal": "Binary size and cold start inside budget, the browser matrix certified, semver and provenance policy in force."
     },
     {
+      "key": "M19",
+      "title": "Series open in the core and the viewer",
+      "epics": [
+        "E38"
+      ],
+      "goal": "The series-open gaps that Phase 1 left in the core, then the example viewer calling that core."
+    },
+    {
       "key": "M14",
       "title": "Out-of-core volume streaming",
       "epics": [
@@ -2386,6 +2394,245 @@
       ]
     },
     {
+      "fid": "F-191",
+      "eid": "E38.1",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Frame open from a Part 10 object: chain inputs including Modality and VOI LUT Sequences, colour selection, pixel padding PS3.3 C.7.5.1.1.2, Lossy Image Compression and Burned In Annotation flags, private creators",
+      "layer": "Rust",
+      "weeks": 5,
+      "depends_eids": [
+        "E4.8",
+        "E3.5"
+      ],
+      "notes": "",
+      "milestone": "M19",
+      "sprint": "S42",
+      "depends_fids": [
+        "F-030",
+        "F-020"
+      ]
+    },
+    {
+      "fid": "F-192",
+      "eid": "E38.2",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Series assembly: order by projected position, split mixed series, temporal axis, cine timing with loop and bounce",
+      "layer": "Rust",
+      "weeks": 5,
+      "depends_eids": [
+        "E8.1",
+        "E7.3"
+      ],
+      "notes": "",
+      "milestone": "M19",
+      "sprint": "S42",
+      "depends_fids": [
+        "F-051",
+        "F-047"
+      ]
+    },
+    {
+      "fid": "F-193",
+      "eid": "E38.3",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Overlay planes PS3.3 C.9.2 and display shutters PS3.3 C.7.6.11 and C.7.6.15",
+      "layer": "Rust",
+      "weeks": 3,
+      "depends_eids": [
+        "E3.4",
+        "E4.7"
+      ],
+      "notes": "",
+      "milestone": "M19",
+      "sprint": "S42",
+      "depends_fids": [
+        "F-019",
+        "F-029"
+      ]
+    },
+    {
+      "fid": "F-194",
+      "eid": "E38.4",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Stack display interpolation, nearest and linear, declared on tiers A, B and C",
+      "layer": "Rust",
+      "weeks": 3,
+      "depends_eids": [
+        "E6.6",
+        "E7.1"
+      ],
+      "notes": "",
+      "milestone": "M19",
+      "sprint": "S42",
+      "depends_fids": [
+        "F-042",
+        "F-045"
+      ]
+    },
+    {
+      "fid": "F-195",
+      "eid": "E38.5",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours",
+      "layer": "Rust",
+      "weeks": 4,
+      "depends_eids": [
+        "E7.5",
+        "E12.3"
+      ],
+      "notes": "",
+      "milestone": "M19",
+      "sprint": "S43",
+      "depends_fids": [
+        "F-049",
+        "F-075"
+      ]
+    },
+    {
+      "fid": "F-196",
+      "eid": "E38.6",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Key Object Selection read and write (TID 2010) and Secondary Capture write",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E15.4"
+      ],
+      "notes": "",
+      "milestone": "M19",
+      "sprint": "S43",
+      "depends_fids": [
+        "F-097"
+      ]
+    },
+    {
+      "fid": "F-197",
+      "eid": "E38.7",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Volume from a gantry-tilted stack",
+      "layer": "Rust",
+      "weeks": 3,
+      "depends_eids": [
+        "E8.1",
+        "E7.5"
+      ],
+      "notes": "",
+      "milestone": "M19",
+      "sprint": "S43",
+      "depends_fids": [
+        "F-051",
+        "F-049"
+      ]
+    },
+    {
+      "fid": "F-198",
+      "eid": "E38.8",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.1",
+        "E38.2",
+        "E38.4",
+        "E18.3"
+      ],
+      "notes": "",
+      "milestone": "M19",
+      "sprint": "S43",
+      "depends_fids": [
+        "F-191",
+        "F-192",
+        "F-194",
+        "F-112"
+      ]
+    },
+    {
+      "fid": "F-199",
+      "eid": "E38.9",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.8",
+        "E38.7",
+        "E14.2"
+      ],
+      "notes": "",
+      "milestone": "M19",
+      "sprint": "S44",
+      "depends_fids": [
+        "F-198",
+        "F-197",
+        "F-088"
+      ]
+    },
+    {
+      "fid": "F-200",
+      "eid": "E38.10",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.8",
+        "E38.3",
+        "E14.5"
+      ],
+      "notes": "",
+      "milestone": "M19",
+      "sprint": "S44",
+      "depends_fids": [
+        "F-198",
+        "F-193",
+        "F-091"
+      ]
+    },
+    {
+      "fid": "F-201",
+      "eid": "E38.11",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.8",
+        "E38.5",
+        "E38.6"
+      ],
+      "notes": "",
+      "milestone": "M19",
+      "sprint": "S44",
+      "depends_fids": [
+        "F-198",
+        "F-195",
+        "F-196"
+      ]
+    },
+    {
       "fid": "F-119",
       "eid": "E30.1",
       "phase": "P1.5",
@@ -2399,7 +2646,7 @@
       ],
       "notes": "Neuroglancer's design; nothing in DICOM does this",
       "milestone": "M14",
-      "sprint": "S42",
+      "sprint": "S45",
       "depends_fids": [
         "F-058"
       ]
@@ -2418,7 +2665,7 @@
       ],
       "notes": "",
       "milestone": "M14",
-      "sprint": "S43",
+      "sprint": "S46",
       "depends_fids": [
         "F-119"
       ]
@@ -2437,7 +2684,7 @@
       ],
       "notes": "The subtle part most implementations get wrong",
       "milestone": "M14",
-      "sprint": "S44",
+      "sprint": "S47",
       "depends_fids": [
         "F-120"
       ]
@@ -2456,7 +2703,7 @@
       ],
       "notes": "GPU memory becomes a configured number, not a function of series size",
       "milestone": "M14",
-      "sprint": "S44",
+      "sprint": "S47",
       "depends_fids": [
         "F-120"
       ]
@@ -2475,7 +2722,7 @@
       ],
       "notes": "Show the cost before the user commits to a resolution",
       "milestone": "M14",
-      "sprint": "S45",
+      "sprint": "S48",
       "depends_fids": [
         "F-122"
       ]
@@ -2494,7 +2741,7 @@
       ],
       "notes": "Stops being a special case of the memory problem",
       "milestone": "M14",
-      "sprint": "S45",
+      "sprint": "S48",
       "depends_fids": [
         "F-122"
       ]
@@ -2513,7 +2760,7 @@
       ],
       "notes": "",
       "milestone": "M15",
-      "sprint": "S46",
+      "sprint": "S49",
       "depends_fids": [
         "F-008"
       ]
@@ -2532,7 +2779,7 @@
       ],
       "notes": "NiiVue proves the value fighting WebGL2; ordinary code in WGSL",
       "milestone": "M15",
-      "sprint": "S47",
+      "sprint": "S50",
       "depends_fids": [
         "F-125"
       ]
@@ -2551,7 +2798,7 @@
       ],
       "notes": "",
       "milestone": "M15",
-      "sprint": "S48",
+      "sprint": "S51",
       "depends_fids": [
         "F-125"
       ]
@@ -2570,7 +2817,7 @@
       ],
       "notes": "",
       "milestone": "M15",
-      "sprint": "S49",
+      "sprint": "S52",
       "depends_fids": [
         "F-125"
       ]
@@ -2589,7 +2836,7 @@
       ],
       "notes": "",
       "milestone": "M15",
-      "sprint": "S50",
+      "sprint": "S53",
       "depends_fids": [
         "F-125"
       ]
@@ -2608,7 +2855,7 @@
       ],
       "notes": "",
       "milestone": "M15",
-      "sprint": "S51",
+      "sprint": "S54",
       "depends_fids": [
         "F-127"
       ]
@@ -2627,7 +2874,7 @@
       ],
       "notes": "WebGL2 has no compute; degrade, never fail",
       "milestone": "M15",
-      "sprint": "S49",
+      "sprint": "S52",
       "depends_fids": [
         "F-126"
       ]
@@ -2646,7 +2893,7 @@
       ],
       "notes": "",
       "milestone": "M16",
-      "sprint": "S52",
+      "sprint": "S55",
       "depends_fids": [
         "F-125"
       ]
@@ -2665,7 +2912,7 @@
       ],
       "notes": "The reason to do this in-engine rather than beside it",
       "milestone": "M16",
-      "sprint": "S53",
+      "sprint": "S56",
       "depends_fids": [
         "F-132"
       ]
@@ -2684,7 +2931,7 @@
       ],
       "notes": "",
       "milestone": "M16",
-      "sprint": "S54",
+      "sprint": "S57",
       "depends_fids": [
         "F-133"
       ]
@@ -2703,7 +2950,7 @@
       ],
       "notes": "No PHI leaves the browser - a compliance story, not just a feature",
       "milestone": "M16",
-      "sprint": "S56",
+      "sprint": "S59",
       "depends_fids": [
         "F-142"
       ]
@@ -2722,7 +2969,7 @@
       ],
       "notes": "One commercial viewer needs a browser extension with matched resolutions",
       "milestone": "M17",
-      "sprint": "S57",
+      "sprint": "S60",
       "depends_fids": [
         "F-102"
       ]
@@ -2741,7 +2988,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S58",
+      "sprint": "S61",
       "depends_fids": [
         "F-136"
       ]
@@ -2760,7 +3007,7 @@
       ],
       "notes": "A browser cannot fully calibrate; report honestly what it can measure",
       "milestone": "M17",
-      "sprint": "S58",
+      "sprint": "S61",
       "depends_fids": [
         "F-136"
       ]
@@ -2779,7 +3026,7 @@
       ],
       "notes": "BlueLight has it; cornerstone3D does not",
       "milestone": "M16",
-      "sprint": "S52",
+      "sprint": "S55",
       "depends_fids": [
         "F-094"
       ]
@@ -2798,7 +3045,7 @@
       ],
       "notes": "Makes every measurement training-data-grade by construction",
       "milestone": "M16",
-      "sprint": "S53",
+      "sprint": "S56",
       "depends_fids": [
         "F-095"
       ]
@@ -2817,7 +3064,7 @@
       ],
       "notes": "SLIM's second tier; needed the moment AI generates annotations",
       "milestone": "M16",
-      "sprint": "S54",
+      "sprint": "S57",
       "depends_fids": [
         "F-140"
       ]
@@ -2836,7 +3083,7 @@
       ],
       "notes": "",
       "milestone": "M16",
-      "sprint": "S55",
+      "sprint": "S58",
       "depends_fids": [
         "F-094"
       ]
@@ -2855,7 +3102,7 @@
       ],
       "notes": "Pyramids are discovered, not assumed - variable factors, missing frames",
       "milestone": "M18",
-      "sprint": "S66",
+      "sprint": "S69",
       "depends_fids": [
         "F-119"
       ]
@@ -2874,7 +3121,7 @@
       ],
       "notes": "",
       "milestone": "M18",
-      "sprint": "S67",
+      "sprint": "S70",
       "depends_fids": [
         "F-143"
       ]
@@ -2893,7 +3140,7 @@
       ],
       "notes": "Radiology ignores this; pathology cannot",
       "milestone": "M18",
-      "sprint": "S68",
+      "sprint": "S71",
       "depends_fids": [
         "E4.9 (UNRESOLVED)"
       ]
@@ -2912,7 +3159,7 @@
       ],
       "notes": "",
       "milestone": "M18",
-      "sprint": "S69",
+      "sprint": "S72",
       "depends_fids": [
         "F-145"
       ]
@@ -2931,7 +3178,7 @@
       ],
       "notes": "The open niche - IDC runs two separate viewer forks",
       "milestone": "M18",
-      "sprint": "S70",
+      "sprint": "S73",
       "depends_fids": [
         "F-144"
       ]
@@ -2950,7 +3197,7 @@
       ],
       "notes": "A lesion on CT to its biopsy; a real workflow with no good tool",
       "milestone": "M18",
-      "sprint": "S71",
+      "sprint": "S74",
       "depends_fids": [
         "F-147"
       ]
@@ -2969,7 +3216,7 @@
       ],
       "notes": "Images, annotations and AI results on three DICOMweb servers",
       "milestone": "M18",
-      "sprint": "S72",
+      "sprint": "S75",
       "depends_fids": [
         "F-144"
       ]
@@ -2988,7 +3235,7 @@
       ],
       "notes": "Measure divergence rather than assume it away",
       "milestone": "M17",
-      "sprint": "S59",
+      "sprint": "S62",
       "depends_fids": [
         "F-037"
       ]
@@ -3007,7 +3254,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S57",
+      "sprint": "S60",
       "depends_fids": [
         "F-015"
       ]
@@ -3026,7 +3273,7 @@
       ],
       "notes": "Only possible because one core serves all three targets",
       "milestone": "M17",
-      "sprint": "S60",
+      "sprint": "S63",
       "depends_fids": [
         "F-169"
       ]
@@ -3045,7 +3292,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S61",
+      "sprint": "S64",
       "depends_fids": [
         "F-152"
       ]
@@ -3064,7 +3311,7 @@
       ],
       "notes": "The state is already a serialisable struct",
       "milestone": "M17",
-      "sprint": "S62",
+      "sprint": "S65",
       "depends_fids": [
         "F-050"
       ]
@@ -3083,7 +3330,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S63",
+      "sprint": "S66",
       "depends_fids": [
         "F-154"
       ]
@@ -3102,7 +3349,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S64",
+      "sprint": "S67",
       "depends_fids": [
         "F-154"
       ]
@@ -3121,7 +3368,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S65",
+      "sprint": "S68",
       "depends_fids": [
         "F-154"
       ]
