@@ -197,9 +197,10 @@ pub enum VolumeError {
         /// The distance between two lateral steps, in millimetres.
         millimetres: f64,
     },
-    /// The lateral step is at or under 1e-6 mm.
+    /// The largest lateral step is at or under 1e-6 mm.
     ///
-    /// An orthogonal stack belongs to [`Volume::assemble`].
+    /// That stack belongs to [`Volume::assemble`]. A later step above the
+    /// bound is kept by [`TiltedVolume`] when the steps agree.
     #[error("the stack has no lateral step above 1e-6 mm")]
     OrthogonalStack,
     /// Mixed orientations reached assembly. Frames of reference are
@@ -483,10 +484,11 @@ pub struct TiltedVolume {
     pub origin: Pt<World>,
     /// The direction matrix from `ImageOrientationPatient` and the normal.
     pub direction: DMat3,
-    /// The first inter-slice lateral step, in patient millimetres.
+    /// The longest inter-slice lateral step, in patient millimetres.
     ///
-    /// The step runs from sorted position `n` to `n + 1`. [`Self::order`]
-    /// is that sort, so a descending arrival order does not reverse it.
+    /// Equal lengths keep the earlier step. The step runs from sorted
+    /// position `n` to `n + 1`. [`Self::order`] is that sort, so a
+    /// descending arrival order does not reverse it.
     pub lateral: [f64; 3],
     /// The arrival index of each slice in sorted order.
     pub order: Vec<usize>,
@@ -502,9 +504,10 @@ impl TiltedVolume {
     /// Assemble a tilted candidate, or refuse it.
     ///
     /// The duplicate bound, the sort and the 0.5 percent spacing rule are
-    /// shared with [`Volume::assemble`]. A lateral step at or under 1e-6 mm
-    /// is [`VolumeError::OrthogonalStack`]. A later lateral step more than
-    /// 1e-6 mm from the first is [`VolumeError::InconsistentShear`].
+    /// shared with [`Volume::assemble`]. The largest lateral step at or
+    /// under 1e-6 mm is [`VolumeError::OrthogonalStack`]. A later lateral
+    /// step more than 1e-6 mm from the first is
+    /// [`VolumeError::InconsistentShear`].
     ///
     /// # Errors
     ///
@@ -912,6 +915,7 @@ fn prepare(candidate: &VolumeCandidate, shear: Shear) -> Result<Prepared, Volume
             .unwrap_or(core::cmp::Ordering::Equal)
     });
     let mut first_lateral: Option<DVec3> = None;
+    let mut peak_lateral: Option<DVec3> = None;
     let mut disagreement = 0.0_f64;
     for pair in projected.windows(2) {
         if let [lower, upper] = pair {
@@ -935,15 +939,24 @@ fn prepare(candidate: &VolumeCandidate, shear: Shear) -> Result<Prepared, Volume
                         });
                     }
                 }
-                Shear::Keep => match first_lateral {
-                    None => first_lateral = Some(lateral),
-                    Some(held) => {
-                        let step = (lateral - held).length();
-                        if step > disagreement {
-                            disagreement = step;
+                Shear::Keep => {
+                    let longer = match peak_lateral {
+                        Some(held) => lateral.length() > held.length(),
+                        None => true,
+                    };
+                    if longer {
+                        peak_lateral = Some(lateral);
+                    }
+                    match first_lateral {
+                        None => first_lateral = Some(lateral),
+                        Some(held) => {
+                            let step = (lateral - held).length();
+                            if step > disagreement {
+                                disagreement = step;
+                            }
                         }
                     }
-                },
+                }
             }
         }
     }
@@ -982,7 +995,7 @@ fn prepare(candidate: &VolumeCandidate, shear: Shear) -> Result<Prepared, Volume
                     millimetres: disagreement,
                 });
             }
-            let Some(lateral) = first_lateral else {
+            let Some(lateral) = peak_lateral else {
                 return Err(VolumeError::OrthogonalStack);
             };
             if lateral.length() <= LATERAL_BOUND_MM {

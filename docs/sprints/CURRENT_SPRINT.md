@@ -3,14 +3,14 @@
 **Milestone**: M19, series open in the core and the viewer.
 **Branch**: `sprint/s43`
 **Opened**: 2026-11-04
-**Goal**: Calibration provenance and the extra SUV methods, Key Object Selection and Secondary Capture, a volume from a gantry-tilted stack, and the example viewer rendering through the wasm core.
+**Goal**: Calibration provenance and the extra SUV methods, Key Object Selection and Secondary Capture, a volume from a gantry-tilted stack, and the example viewer loading one wasm worker that publishes one stored sample, reports the resolved tier, and posts one WADO-RS envelope.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-195 | E38.5 | Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours | Rust | 4w | done |
 | F-196 | E38.6 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w | done |
 | F-197 | E38.7 | Volume from a gantry-tilted stack | Rust | 3w | done |
-| F-198 | E38.8 | Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source | TS | 4w | done |
+| F-198 | E38.8 | Example viewer loads one wasm worker, publishes one stored sample, reports the resolved tier, and posts one WADO-RS envelope | TS | 4w | done |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -62,6 +62,8 @@ from the SUV already shipped. Length ratio and volume from contours cite
 their inputs. Key Object Selection reads and writes TID 2010. Secondary
 Capture writes a display image. A gantry-tilted stack either builds the
 volume the geometry supports or refuses with that geometry's reason. The
-example viewer renders a frame through `@ocelli/core` and `ocelli-wasm`,
-including worker decode, the cache, the resolved tier, and a DICOMweb
-source. `coreAvailable()` is true only on that path.
+example viewer loads one wasm worker through `@ocelli/core`. That worker
+publishes one stored sample with `publishCpuCanvas` and reports the tier
+`resolve` kept. A form posts one WADO-RS instance envelope into the worker
+bulk slot. The envelope is not decoded and the cache is not used.
+`coreAvailable()` is true only after `loadCore` resolves true.

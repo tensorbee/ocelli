@@ -20,18 +20,22 @@ export function loadCore(initialise: () => Promise<unknown>): Promise<boolean> {
   if (pending !== null) {
     return pending;
   }
-  pending = run(initialise);
-  return pending;
-}
-
-async function run(initialise: () => Promise<unknown>): Promise<boolean> {
-  try {
-    await initialise();
-    ready = true;
-    return true;
-  } catch {
-    return false;
-  } finally {
-    pending = null;
-  }
+  // `Promise.resolve().then` keeps a synchronous throw off the caller.
+  // An async function would run that throw, clear `pending` in `finally`,
+  // and only then return, so the assignment would store the failed promise
+  // with nothing left to clear it.
+  const running = Promise.resolve()
+    .then(() => initialise())
+    .then(() => {
+      ready = true;
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => {
+      if (pending === running) {
+        pending = null;
+      }
+    });
+  pending = running;
+  return running;
 }

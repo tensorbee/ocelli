@@ -189,12 +189,14 @@ async fn ensure_device() -> Result<(), String> {
                 table.opening = false;
                 match opened {
                     Ok(Some((adapter, context))) => {
+                        table.unavailable = false;
                         table.adapter = Some(adapter);
                         table.context = Some(context);
                         Ok(())
                     }
                     Ok(None) => {
                         table.unavailable = true;
+                        table.tier = Some("C");
                         Err("tier C opens no device, so no surface was attached".to_owned())
                     }
                     Err(message) => Err(message),
@@ -623,7 +625,7 @@ fn stored_tier(table: &Table) -> Option<&'static str> {
         .adapter
         .as_ref()
         .map(|adapter| adapter.resolution().caps.tier);
-    crate::tier_label::stored_tier_label(adapter, table.tier)
+    crate::tier_label::stored_tier_label(adapter, table.tier, table.unavailable)
 }
 
 /// The tier `resolve` kept for this worker. A retained adapter wins, so the

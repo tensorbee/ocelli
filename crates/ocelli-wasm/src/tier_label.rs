@@ -14,13 +14,19 @@ pub(crate) fn tier_name(tier: Tier) -> &'static str {
 }
 
 /// `adapter` is the tier of an opened adapter. `cached` is the label stored
-/// when no adapter is open.
+/// when no adapter is open. `unavailable` means a session already resolved
+/// tier C and kept no device, which wins over a cached label and loses to
+/// an open adapter.
 pub(crate) fn stored_tier_label(
     adapter: Option<Tier>,
     cached: Option<&'static str>,
+    unavailable: bool,
 ) -> Option<&'static str> {
     if let Some(tier) = adapter {
         return Some(tier_name(tier));
+    }
+    if unavailable {
+        return Some("C");
     }
     cached
 }
@@ -32,16 +38,21 @@ mod tests {
 
     #[test]
     fn an_open_adapter_wins_over_a_cached_label() {
-        let label = stored_tier_label(Some(Tier::A), Some("C"));
+        let label = stored_tier_label(Some(Tier::A), Some("C"), false);
         assert_eq!(label, Some("A"));
-        assert_eq!(stored_tier_label(Some(Tier::B), Some("A")), Some("B"));
-        assert_eq!(stored_tier_label(Some(Tier::Cpu), None), Some("C"));
+        assert_eq!(
+            stored_tier_label(Some(Tier::B), Some("A"), false),
+            Some("B")
+        );
+        assert_eq!(stored_tier_label(Some(Tier::Cpu), None, false), Some("C"));
+        assert_eq!(stored_tier_label(Some(Tier::A), Some("C"), true), Some("A"));
     }
 
     #[test]
     fn a_cached_label_is_used_only_when_no_adapter_is_open() {
-        assert_eq!(stored_tier_label(None, Some("B")), Some("B"));
-        assert!(stored_tier_label(None, None).is_none());
+        assert_eq!(stored_tier_label(None, Some("B"), false), Some("B"));
+        assert!(stored_tier_label(None, None, false).is_none());
+        assert_eq!(stored_tier_label(None, Some("A"), true), Some("C"));
         assert_eq!(tier_name(Tier::Cpu), "C");
     }
 }

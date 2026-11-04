@@ -74,10 +74,11 @@ refuses it rather than storing it as a box.
 
 `TiltedVolume::assemble` keeps that same stack. The voxel store has the
 source slice dimensions and is cleared, so the samples are not copied onto
-another grid. Projected spacing is the same median gap. The lateral step is
-the first inter-slice lateral component, in millimetres, and a later step
-must agree with it within 1e-6 mm. A lateral step at or under 1e-6 mm is
-`OrthogonalStack`, so an orthogonal stack stays on `Volume::assemble`.
+another grid. Projected spacing is the same median gap. The stored lateral
+step is the longest inter-slice lateral component, in millimetres. Equal
+lengths keep the earlier step. A later step must agree with the first
+within 1e-6 mm. The longest step at or under 1e-6 mm is `OrthogonalStack`,
+so an orthogonal stack stays on `Volume::assemble`.
 `order`, `origin` and `direction` are the projected sort, the lowest slice
 position and the row, column and normal matrix. The 1e-9 mm duplicate bound
 and the 0.5 percent spacing rule are the same checks. The gantry tilt tag

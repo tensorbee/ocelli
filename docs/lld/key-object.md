@@ -7,4 +7,6 @@
 
 `writeSecondaryCapture` and `readSecondaryCapture` write one 8-bit `MONOCHROME2` Secondary Capture image. The SOP class is `1.2.840.10008.5.1.4.1.1.7`. PS3.3 C.7.6.3 stores the caller bytes when their length is columns times rows. Columns and rows are at most 65535. An odd count is padded to an even length on write, and the reader returns the caller bytes without that pad. C.8.6.2 conversion type is `WSD`. The file has no window and no patient module. A short buffer returns nothing. The same inputs produce the same bytes.
 
+These writers are a TID 2010 content-tree round trip and an 8-bit secondary-capture pixel round trip. They are not complete Key Object Selection or Secondary Capture information objects. The key-object writer omits Current Requested Procedure Evidence Sequence, Content Date, Content Time, Instance Number and Series Number. The secondary-capture writer stores Instance Number 1 and omits Series Number. Both omit the Type 2 Patient Name and Patient ID. A conformant receiver may refuse the files.
+
 The example page shows the title Key image, the referenced CT SOP, and pixels 0, 1, 2, 3.

@@ -191,6 +191,42 @@ fn a_two_micrometre_step_belongs_only_to_the_tilted_constructor()
 }
 
 #[test]
+fn the_longest_agreeing_step_decides_the_tilted_constructor() -> Result<(), ocelli_pixel::PixelError>
+{
+    // Positions (0, 0, 0), (6e-7, 0, 3) and (2.1e-6, 0, 6). The lateral
+    // steps are (6e-7, 0, 0) and (2.1e-6 - 6e-7, 0, 0). They differ by
+    // about 9e-7 mm, inside the 1e-6 mm agreement bound. The longer step
+    // is above that bound, so Volume refuses the shear and TiltedVolume
+    // stores that longer step. The decimal 1.5e-6 is one ULP away from
+    // the subtraction, so the pin is the subtraction.
+    let first_step = 6.0e-7_f64;
+    let longer = 2.1e-6_f64 - first_step;
+    let frames = vec![
+        frame([0.0, 0.0, 0.0], vec![0_u8; 24])?,
+        frame([first_step, 0.0, 3.0], vec![0_u8; 24])?,
+        frame([2.1e-6, 0.0, 6.0], vec![0_u8; 24])?,
+    ];
+    let held = candidate(frames);
+    assert!(matches!(
+        Volume::assemble(held.clone()),
+        Err(VolumeError::ShearedVolume { .. })
+    ));
+    let tilted = TiltedVolume::assemble(held);
+    assert!(tilted.is_ok());
+    let Ok(tilted) = tilted else {
+        unreachable!("asserted immediately above")
+    };
+    assert!(
+        tilted
+            .lateral
+            .iter()
+            .zip([longer, 0.0, 0.0])
+            .all(|(held, want)| held.to_bits() == want.to_bits())
+    );
+    Ok(())
+}
+
+#[test]
 fn a_gap_just_over_half_a_percent_is_refused_and_one_just_under_is_kept()
 -> Result<(), ocelli_pixel::PixelError> {
     // Two projected gaps. The median is their mean, so the departure is

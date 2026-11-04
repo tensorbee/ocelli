@@ -625,14 +625,14 @@ _S42 to S44, 11 stories, 43 engineer-weeks._
 
 #### Sprint S43
 
-**Goal**: Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours, Key Object Selection read and write (TID 2010) and Secondary Capture write, Volume from a gantry-tilted stack, Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source.
+**Goal**: Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours, Key Object Selection read and write (TID 2010) and Secondary Capture write, Volume from a gantry-tilted stack, Example viewer loads one wasm worker, publishes one stored sample, reports the resolved tier, and posts one WADO-RS envelope.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
 | F-195 | E38.5 | Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours | Rust | 4w |
 | F-196 | E38.6 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w |
 | F-197 | E38.7 | Volume from a gantry-tilted stack | Rust | 3w |
-| F-198 | E38.8 | Example viewer renders through @ocelli/core and ocelli-wasm, with worker decode, cache, tiers and a DICOMweb source | TS | 4w |
+| F-198 | E38.8 | Example viewer loads one wasm worker, publishes one stored sample, reports the resolved tier, and posts one WADO-RS envelope | TS | 4w |
 
 #### Sprint S44
 
