@@ -1,30 +1,29 @@
-# Current sprint, S43
+# Current sprint, S44
 
 **Milestone**: M19, series open in the core and the viewer.
-**Branch**: `sprint/s43`
+**Branch**: `sprint/s44`
 **Opened**: 2026-11-04
-**Goal**: Calibration provenance and the extra SUV methods, Key Object Selection and Secondary Capture, a volume from a gantry-tilted stack, and the example viewer loading one wasm worker that publishes one stored sample, reports the resolved tier, and posts one WADO-RS envelope.
+**Goal**: The example viewer gains layout, manipulation and measurement controls for the behaviours the core already has.
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-195 | E38.5 | Calibration provenance: spacing, imager spacing with ERMF, ultrasound regions, then manual. SUV by lean body mass and body surface area, length ratio, volume from contours | Rust | 4w | done |
-| F-196 | E38.6 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w | done |
-| F-197 | E38.7 | Volume from a gantry-tilted stack | Rust | 3w | done |
-| F-198 | E38.8 | Example viewer loads one wasm worker, publishes one stored sample, reports the resolved tier, and posts one WADO-RS envelope | TS | 4w | done |
+| F-199 | E38.9 | Viewer layout grid, series panel and drag, full screen, prior studies, linked scroll, synced window and zoom, reference lines, 3D cursor, MPR, slab, volume rendering, fusion | TS | 4w | pending |
+| F-200 | E38.10 | Viewer manipulation and overlays: presets and file windows, one to one, rotate, flip, markers, magnifier, histogram, colour maps, four corners, scale bar, overlays and shutters, banner and warnings | TS | 4w | pending |
+| F-201 | E38.11 | Viewer measurement, annotation list, undo, TID 1500 save, key images, export, metadata browser with compare and copy, shortcuts, touch, preferences | TS | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
 
 ```bash
 grep -c '^| F-[0-9]' docs/sprints/CURRENT_SPRINT.md
-grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S43 / {print $2, $9}'
+grep '^| F-' docs/sprints/BACKLOG.md | awk -F'|' '$4 ~ / S44 / {print $2, $9}'
 ```
 
 ## What this sprint is
 
-S42 is closed at tag `s42`. This sprint is the second of the three series-open
+S43 is closed at tag `s43`. This sprint is the third of the three series-open
 sprints inserted before the brick work. The brick story F-119 is S45. It is
-not opened here.
+not opened here. Closing this sprint completes M19. It does not publish.
 
 The showcase is `examples/viewer-react`, which `npm run dev` serves. It
 must display every behaviour this programme adds. A core function with no
@@ -33,37 +32,30 @@ local folder page and is not a second product.
 
 ## What is carried in
 
-- **D-22 still blocks publication.** Nothing in this sprint publishes.
+- **D-22 still blocks publication.** Nothing in this sprint publishes. The
+  version stays 0.1.0.
 - **The LUT chain already exists.** `ocelli-pixel::LutChain` is the only
-  pixel formula. Calibration and SUV read geometry and tags. They do not
-  map samples.
+  pixel formula. Viewer controls call it. They do not add a second one.
 - **`coreAvailable()` is true only after `loadCore` succeeds.** A clean import
-  stays false. The example worker is the caller. The page still shows the
-  S42 sections beside that gate.
-- **A gantry tilt is measured from geometry.** F-020 and F-049 already
-  refuse a sheared stack. F-197 decides whether a tilted stack can become
-  a volume. It does not read the gantry tilt tag as the shear.
+  stays false. The example worker is the caller.
+- **F-198 does not decode a posted WADO-RS envelope.** The worker publishes
+  one stored sample and holds the envelope. Decode, the cache and a render
+  of that envelope are unscheduled F-202. This sprint does not build F-202.
+- **The S42 and S43 page sections stay.** Frame open, series assembly,
+  overlays, interpolation, calibration, key object, secondary capture, tilt
+  and the wasm core panel are already on the page.
 
 ## The defect class this sprint is exposed to
 
-A quietly wrong measurement. Spacing taken from the wrong source, an SUV
-computed from the wrong body-size inputs, and a tilted stack assembled as
-an untilted box are the same class. The hand fixtures cite the DICOM
-sections for pixel spacing, imager pixel spacing, ultrasound regions, SUV,
-and image-plane geometry. A tolerance is not widened to make one of them
-pass.
+A control that does a different thing from the one it names. Linked scroll
+on the wrong series, a window preset that changes zoom, a measurement that
+ignores the named calibration source, and a prior study shown as the current
+study are the same class. A control for a core function this sprint does not
+have reports unavailable. It does not invent a result.
 
 ## What done means
 
-Calibration names its source in the order spacing, imager spacing with the
-estimated radiographic magnification factor, ultrasound regions, then a
-manual value. SUV by lean body mass and by body surface area are separate
-from the SUV already shipped. Length ratio and volume from contours cite
-their inputs. Key Object Selection reads and writes TID 2010. Secondary
-Capture writes a display image. A gantry-tilted stack either builds the
-volume the geometry supports or refuses with that geometry's reason. The
-example viewer loads one wasm worker through `@ocelli/core`. That worker
-publishes one stored sample with `publishCpuCanvas` and reports the tier
-`resolve` kept. A form posts one WADO-RS instance envelope into the worker
-bulk slot. The envelope is not decoded and the cache is not used.
-`coreAvailable()` is true only after `loadCore` resolves true.
+Each story's design names the example-page controls and the core functions
+they call. A backlog row is not marked done while it claims a control the
+page does not have. Layout, manipulation and measurement use the functions
+S42 and S43 already shipped. F-202 stays unscheduled.
