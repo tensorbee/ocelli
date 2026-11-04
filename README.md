@@ -102,6 +102,7 @@ packages/
 
 examples/
   viewer-react/     the example viewer, and the manual smoke test
+  folder-viewer/    local series page for a folder on this machine
 
 tools/
   oracle/           the differential harness against cornerstone3D
@@ -125,7 +126,158 @@ npm ci
 bin/ocelli.sh gate --floor
 ```
 
-`docs/DEVELOPER_SETUP.md` has the rest.
+`docs/DEVELOPER_SETUP.md` has the toolchain, the hooks and the gates.
+
+## Start the example viewer
+
+The showcase is `examples/viewer-react`, package `@ocelli/example-viewer`.
+From the repository root:
+
+```bash
+npm ci
+bin/ocelli.sh wasm
+npm run dev
+```
+
+Open <http://localhost:5173>. Vite prints that address when the server is ready.
+
+`bin/ocelli.sh wasm` writes the module to `crates/ocelli-wasm/pkg`. That
+directory is a build artefact and is not committed, so a clean clone still
+opens. The header then reads `core not built`, and the page tells you to build
+the module. `coreAvailable()` in `@ocelli/core` stays false until the page
+loads that module, so the header does not change to ready from the build alone.
+
+The page mounts one stack viewport. It is the showcase, so a library behaviour
+is finished only when this page has a control for it. To open a folder of
+DICOM files on this machine, use the local series page below.
+
+## Start the local series viewer
+
+`examples/folder-viewer` lists series from a folder you choose and shows one
+image at a time. It listens on this machine only.
+
+```bash
+cargo run -p ocelli-folder-viewer
+```
+
+The process prints one line, the page URL, and nothing else. It has the form
+`http://127.0.0.1:12345/`. The port is chosen at startup. Open that exact URL
+in Chrome or Edge. The Folder control is a directory picker.
+
+1. Choose Folder and pick a directory. The browser reads the files. Leave them
+   where they are. Do not copy them into this repository.
+2. The left column has one row per Series Instance UID. A row shows the series
+   number, the modality, the description and the image count. A file with no
+   Series Instance UID keeps its own row.
+3. Select a row. The viewport shows the first image and keeps it. The arrow
+   keys and the mouse wheel move one image. The scrubber reads `n / total`.
+   Coming back to a series restores the image you left.
+4. Space plays and pauses. Playback loops. The FPS control runs from 1 to 30
+   and starts at 10.
+5. The toolbar is Scroll, Pan, Zoom, W/L, Contour, Text, Reset, Fit, Invert,
+   Headers and Play. Scroll starts active.
+6. The left button uses the active tool. The right button pans. The middle
+   button zooms. The wheel always changes the image. Zoom keeps the image
+   aspect ratio. The viewport clips an image that is larger than the pane.
+7. Headers shows the data set as stored. The corners show the stored labels
+   for the current image.
+8. Contour draws a freehand outline and closes it at three or more points.
+   Text places a note. Click, type, and press Enter to keep it. Escape drops
+   the draft. Leaving the field keeps the note. Click a mark to select it,
+   drag to move it, and press Delete or Backspace to remove it. Marks last
+   until you reload the page. They are drawings on that image. They are not
+   written back into the file and they are not lengths in millimetres.
+
+A file that is not a Part 10 DICOM object is skipped and counted. A colour
+frame, a Modality LUT Sequence, or a VOI LUT Sequence without both a window
+center and a window width stays on a fixed error sentence.
+
+The page HTML is compiled into the binary. After a change under
+`examples/folder-viewer`, build again and start that new process.
+
+```bash
+cargo build -p ocelli-folder-viewer
+```
+
+## Use the library
+
+Rust crates do the parse, the decode and the pixel arithmetic. The TypeScript
+packages are the shell a page embeds. Nothing here is published yet. Depend on
+the crates by path inside this workspace.
+
+```toml
+[dependencies]
+ocelli-core = { path = "crates/ocelli-core" }
+ocelli-dicom = { path = "crates/ocelli-dicom" }
+ocelli-codec = { path = "crates/ocelli-codec" }
+ocelli-pixel = { path = "crates/ocelli-pixel" }
+```
+
+`ocelli_dicom::parse_part10` reads one Part 10 byte string. Encapsulated frame
+bytes go to the decoder registry in `ocelli-codec`. Stored samples go through
+`ocelli_pixel::LutChain` only. That type runs the modality stage, the VOI
+stage and the presentation stage, in DICOM PS3.3 C.11 order. A second window
+formula is a defect.
+
+The `?` below belongs in a function whose error type accepts both
+`ocelli_dicom::ParseError` and `ocelli_pixel::PixelError`.
+
+```rust
+use ocelli_core::{Display, Stored};
+use ocelli_dicom::parse_part10;
+use ocelli_pixel::{
+    LutChain, ModalityTransform, PhotometricInterpretation, PresentationLutEvidence,
+    VoiFunction, VoiTransform,
+};
+
+let parsed = parse_part10(bytes)?;
+let chain = LutChain::new(
+    ModalityTransform::new(None, Some(1.0), Some(0.0))?,
+    VoiTransform::new(
+        None,
+        &[100.0],
+        &[200.0],
+        0,
+        VoiFunction::LinearExact,
+        0.0,
+        255.0,
+    )?,
+    PhotometricInterpretation::Monochrome2,
+    PresentationLutEvidence::Absent,
+)?;
+let mut grey = [Display(0.0)];
+chain.map_into(&[Stored(50.0)], &mut grey)?;
+let _keep = parsed;
+```
+
+`wasm-bindgen` appears only in `ocelli-wasm`. Pixels stay on the worker side of
+that boundary. The shell sends typed commands down and drains one event ring
+per animation frame.
+
+In a browser, use the workspace packages `@ocelli/core` and `@ocelli/react`.
+`OcelliViewport` renders a host `div`. Pass `session={null}` when you have no
+wasm session. The frame pump starts only after the session's `memory` is the
+built module. `examples/viewer-react/src/App.tsx` is the mount this repository
+runs.
+
+```tsx
+import { viewportId } from "@ocelli/core";
+import { OcelliViewport } from "@ocelli/react";
+import type { OcelliSession } from "@ocelli/react";
+
+const session: OcelliSession | null = null;
+
+export function Viewer() {
+  return (
+    <OcelliViewport id="stack-1" viewport={viewportId(1)} session={session} />
+  );
+}
+```
+
+`DicomwebClient` in `@ocelli/core` is the QIDO-RS, WADO-RS and WADO-URI client.
+Construct it with a studies service URL, a WADO-URI URL, `fetch`, wasm memory
+and a response sink. A transport failure keeps a status code. It does not keep
+the URL, the headers or the body.
 
 ## The one thing to know before contributing
 

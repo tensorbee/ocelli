@@ -27,9 +27,10 @@ S41 is closed at tag `s41`. The review fixes that followed that close are
 inserted before the brick work. The brick story F-119 is S45. It is not
 opened here.
 
-The showcase is `examples/viewer-react`. A behaviour this sprint adds is
-visible there. `examples/folder-viewer` stays the local folder page and is
-not a second product.
+The showcase is `examples/viewer-react`, which `npm run dev` serves. It
+must display every behaviour this programme adds. A core function with no
+control on that page is not done. `examples/folder-viewer` stays the
+local folder page and is not a second product.
 
 ## What is carried in
 
@@ -55,5 +56,7 @@ Frame open returns the chain inputs, the colour selection, the padding mask,
 and the lossy and burned-in flags for one Part 10 object. Private creators
 are resolved for the tags that carry them. Series order uses the projected
 image position. Cine timing, overlay planes, display shutters, and nearest
-versus linear sampling each have a core answer and a control in the example
-viewer. A tier that cannot do the requested sampling reports unavailable.
+versus linear sampling each have a core answer. The example viewer shows
+each of those controls on the page a person opens with `npm run dev`. A
+tier that cannot do the requested sampling reports unavailable on that
+same page.
