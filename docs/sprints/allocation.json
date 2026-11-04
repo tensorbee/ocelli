@@ -2569,7 +2569,7 @@
       "phase": "P1",
       "epic": "E38 Series open",
       "epic_key": "E38",
-      "story": "Example layout grid, series drag, full screen, reference lines and reference cursor",
+      "story": "Example layout grid, stack drag, full screen, reference lines and reference cursor",
       "layer": "TS",
       "weeks": 4,
       "depends_eids": [

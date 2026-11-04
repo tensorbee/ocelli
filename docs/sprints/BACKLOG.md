@@ -335,7 +335,7 @@ The series-open gaps that Phase 1 left in the core, then the example viewer call
 | F-196 | E38.6 | S43 | Key Object Selection read and write (TID 2010) and Secondary Capture write | TS | 4w | F-097 | done |
 | F-197 | E38.7 | S43 | Volume from a gantry-tilted stack | Rust | 3w | F-051, F-049 | done |
 | F-198 | E38.8 | S43 | Example viewer loads one wasm worker, publishes one stored sample, reports the resolved tier, and posts one WADO-RS envelope | TS | 4w | F-191, F-192, F-194, F-112 | done |
-| F-199 | E38.9 | S44 | Example layout grid, series drag, full screen, reference lines and reference cursor | TS | 4w | F-198, F-197, F-088 | pending |
+| F-199 | E38.9 | S44 | Example layout grid, stack drag, full screen, reference lines and reference cursor | TS | 4w | F-198, F-197, F-088 | done |
 | F-200 | E38.10 | S44 | Example presets, window drag, region window, rotate, flip, marker, magnifier, colour map, scale length, crop planes and error sentence | TS | 4w | F-198, F-193, F-091 | pending |
 | F-201 | E38.11 | S44 | Example measurement document, annotation list, undo, TID 1500, key image mark, shortcut and touch | TS | 4w | F-198, F-195, F-196 | pending |
 

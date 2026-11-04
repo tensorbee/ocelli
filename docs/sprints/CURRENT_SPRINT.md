@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-199 | E38.9 | Example layout grid, series drag, full screen, reference lines and reference cursor | TS | 4w | pending |
+| F-199 | E38.9 | Example layout grid, stack drag, full screen, reference lines and reference cursor | TS | 4w | done |
 | F-200 | E38.10 | Example presets, window drag, region window, rotate, flip, marker, magnifier, colour map, scale length, crop planes and error sentence | TS | 4w | pending |
 | F-201 | E38.11 | Example measurement document, annotation list, undo, TID 1500, key image mark, shortcut and touch | TS | 4w | pending |
 

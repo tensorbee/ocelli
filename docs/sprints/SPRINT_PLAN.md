@@ -636,11 +636,11 @@ _S42 to S44, 11 stories, 43 engineer-weeks._
 
 #### Sprint S44
 
-**Goal**: Example layout grid, series drag, full screen, reference lines and reference cursor, Example presets, window drag, region window, rotate, flip, marker, magnifier, colour map, scale length, crop planes and error sentence, Example measurement document, annotation list, undo, TID 1500, key image mark, shortcut and touch.
+**Goal**: Example layout grid, stack drag, full screen, reference lines and reference cursor, Example presets, window drag, region window, rotate, flip, marker, magnifier, colour map, scale length, crop planes and error sentence, Example measurement document, annotation list, undo, TID 1500, key image mark, shortcut and touch.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
-| F-199 | E38.9 | Example layout grid, series drag, full screen, reference lines and reference cursor | TS | 4w |
+| F-199 | E38.9 | Example layout grid, stack drag, full screen, reference lines and reference cursor | TS | 4w |
 | F-200 | E38.10 | Example presets, window drag, region window, rotate, flip, marker, magnifier, colour map, scale length, crop planes and error sentence | TS | 4w |
 | F-201 | E38.11 | Example measurement document, annotation list, undo, TID 1500, key image mark, shortcut and touch | TS | 4w |
 

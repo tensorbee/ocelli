@@ -1,4 +1,4 @@
-# F-199, example layout grid, series drag, full screen, reference lines and reference cursor
+# F-199, example layout grid, stack drag, full screen, reference lines and reference cursor
 
 **Status**: approved
 **Epic ref**: E38.9
@@ -60,7 +60,7 @@ The page owns the section element. There is no wasm session in this story. A ref
 | AC3 | A drag of 256 px upward reports step 1, and a drag of 0 reports refused | same | Using the first lateral step of a volume | implementation |
 | AC4 | The cursor and both reference segments are the caller point on the caller viewport | same | Reading a frame of reference | implementation |
 | AC5 | Full screen is unavailable when the browser flag is not true | `fullscreenWord` test | Showing on when the API is absent | implementation |
-| AC6 | The page shows the report and the unavailable lines | `s44-panels.test.tsx` | A control whose label is a different function | integrated |
+| AC6 | The page shows the report and the unavailable lines | `layout-panel.test.tsx` | A control whose label is a different function | integrated |
 
 ## Approach
 
@@ -89,7 +89,7 @@ Example vitest files. Feature profile at story close. No wasm size change.
 | Category | What it proves | Where |
 |----------|----------------|-------|
 | contract | grid, drag, lines and cursor follow the caller | `examples/viewer-react/src/layout-report.test.ts` |
-| contract | the page shows those words and the unavailable lines | `examples/viewer-react/src/s44-panels.test.tsx` |
+| contract | the page shows those words and the unavailable lines | `examples/viewer-react/src/layout-panel.test.tsx` |
 
 No new pixel arithmetic. The called functions keep the fixtures they already have.
 

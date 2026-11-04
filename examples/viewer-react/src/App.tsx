@@ -11,6 +11,7 @@ import type { OcelliSession } from "@ocelli/react";
 import { useState } from "react";
 
 import { CorePanel } from "./core-panel.js";
+import { LayoutPanel } from "./layout-panel.js";
 
 /**
  * The example viewer.
@@ -1109,6 +1110,7 @@ export function App() {
       <CalibrationPanel />
       <DocumentPanel />
       <TiltPanel />
+      <LayoutPanel />
       <CorePanel onAvailable={setReady} />
 
       <section>
