@@ -21,7 +21,7 @@
       "tunable": false
     },
     "deny.toml:allow": {
-      "digest": "e6e47945ed27b5c0",
+      "digest": "a551a55922d0c6f9",
       "guard": "licences",
       "tunable": false
     },
@@ -92,6 +92,11 @@
     },
     "scripts/licence_check.py:EXCEPTION_FIELDS": {
       "digest": "acd4a12671a822d6",
+      "guard": "licences",
+      "tunable": false
+    },
+    "scripts/licence_check.py:PLACEHOLDER_LICENCE": {
+      "digest": "30cb77a6c643247f",
       "guard": "licences",
       "tunable": false
     },
@@ -221,7 +226,7 @@
       "tunable": false
     }
   },
-  "constants_count": 44,
+  "constants_count": 45,
   "entry_sites": {
     "backlog": 10,
     "bench": 33,
@@ -258,7 +263,7 @@
     "hooks.commit-msg": 3,
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
-    "licences": 65,
+    "licences": 73,
     "lint-policy": 28,
     "nostd": 8,
     "oracle.faults": 22,

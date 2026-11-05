@@ -5,7 +5,7 @@
 [[python]]
 package = "et-xmlfile"
 version = "2.0.0"
-spdx = "MIT"
+spdx = "MIT AND Python-2.0"
 metadata = "MIT"
 
 [[python]]
@@ -67,8 +67,8 @@ ecosystem = "npm"
 package = "caniuse-lite"
 version = "1.0.30001810"
 licence = "CC-BY-4.0"
-reason = "CC-BY-4.0 browser-support data. An attribution licence for data is not on the allowlist."
-scope = "dev-only"
+reason = "CC-BY-4.0 browser-support data. An attribution licence for data is not on the allowlist. The root lock marks it dev-only. The copy under tools/oracle is tooling and is never published."
+scope = "dev-only, tool"
 decided = "2026-11-05"
 decided_by = "operator"
 
@@ -118,26 +118,50 @@ decided_by = "operator"
 platform = "linux-x86_64"
 file = "imagecodecs.libs/libgomp-6a29c32d.so.1.0.0"
 
+# A row with markers or empty = true waives a refusal, so it carries the same
+# fields as an exception. The version is the package version in uv.lock.
+# licence = "no-licence-text" means the file states no licence. It is accepted
+# only together with empty = true. A waiver of text that grants a copyleft
+# licence records decided_by = "operator". A waiver of an allowlisted text
+# that grants nothing copyleft, or of an empty placeholder, records
+# decided_by = "lead" and the reason says what the file is. The three runtime
+# library exceptions above stay the operator's decision.
+
 [[licence_file]]
 package = "imagecodecs"
 version = "2026.10.10"
 path = "imagecodecs/licenses/LICENSE-heif"
 empty = true
-note = "The codec reports unavailable in this wheel and ships an empty licence file."
+licence = "no-licence-text"
+reason = "The file is an empty placeholder for HEIF, a codec not compiled into this wheel. imagecodecs reports HEIF unavailable and the file grants nothing."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "lead"
+note = "The file is an empty placeholder for HEIF, a codec not compiled into this wheel. imagecodecs reports HEIF unavailable and the file grants nothing."
 
 [[licence_file]]
 package = "imagecodecs"
 version = "2026.10.10"
 path = "imagecodecs/licenses/LICENSE-jetraw"
 empty = true
-note = "The codec reports unavailable in this wheel and ships an empty licence file."
+licence = "no-licence-text"
+reason = "The file is an empty placeholder for JETRAW, a codec not compiled into this wheel. imagecodecs reports JETRAW unavailable and the file grants nothing."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "lead"
+note = "The file is an empty placeholder for JETRAW, a codec not compiled into this wheel. imagecodecs reports JETRAW unavailable and the file grants nothing."
 
 [[licence_file]]
 package = "imagecodecs"
 version = "2026.10.10"
 path = "imagecodecs/licenses/LICENSE-libjxs"
 empty = true
-note = "The codec reports unavailable in this wheel and ships an empty licence file."
+licence = "no-licence-text"
+reason = "The file is an empty placeholder for JPEG XS, a codec not compiled into this wheel. imagecodecs reports JPEGXS unavailable and the file grants nothing."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "lead"
+note = "The file is an empty placeholder for JPEG XS, a codec not compiled into this wheel. imagecodecs reports JPEGXS unavailable and the file grants nothing."
 
 [[licence_file]]
 package = "imagecodecs"
@@ -145,6 +169,11 @@ version = "2026.10.10"
 path = "imagecodecs/licenses/LICENSE-lzf"
 spdx = "BSD-2-Clause"
 markers = ["GPLv2"]
+licence = "BSD-2-Clause"
+reason = "BSD-2-Clause is the licence in use. The GPLv2 relicensing alternative is not taken."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "operator"
 note = "BSD-2-Clause is the licence in use. The GPLv2 relicensing alternative is not taken."
 
 [[licence_file]]
@@ -152,7 +181,24 @@ package = "numpy"
 version = "2.5.2"
 path = "numpy-2.5.2.dist-info/licenses/LICENSE.txt"
 markers = ["GNU General Public License", "GNU Affero General Public License", "GPL-3.0", "LGPL-2.1", "GPLv3"]
+licence = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+reason = "The file embeds the notices for the GCC runtimes the Linux wheel bundles, libquadmath under LGPL-2.1 and libgfortran under GPL-3.0 with the GCC runtime library exception, which the operator approved as tool exceptions in the S46 design round. The file is present on every platform."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "operator"
 note = "The file embeds the notices for the operator-approved GCC runtimes and is present on every platform."
+
+[[licence_file]]
+package = "et-xmlfile"
+version = "2.0.0"
+path = "et_xmlfile-2.0.0.dist-info/LICENCE.python"
+markers = ["GNU General Public License"]
+spdx = "Python-2.0"
+licence = "Python-2.0"
+reason = "The file is the CPython licence stack: PSF, BeOpen, CNRI, CWI and a 0BSD docs grant. The GPL marker that matches is in the CNRI governing-law clause and grants nothing. et_xmlfile/incremental_tree.py is PSF-licensed CPython code."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "lead"
 
 [bundle.darwin-arm64.imagecodecs]
 libs = [

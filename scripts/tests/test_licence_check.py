@@ -184,6 +184,40 @@ class Tables(unittest.TestCase):
         problems = L.stale_problems()
         self.assertTrue(any("caniuse-lite@1.0.0" in p for p in problems))
 
+    def _waiver(self, version: str) -> None:
+        path = self.root / "ci" / "licences.toml"
+        path.write_text(path.read_text() + textwrap.dedent(f"""
+            [[licence_file]]
+            package = "pyyaml"
+            version = "{version}"
+            path = "pyyaml/licenses/LICENSE"
+            licence = "MIT"
+            reason = "probe"
+            scope = "tool"
+            decided = "2026-11-05"
+            decided_by = "lead"
+            markers = ["GPLv2"]
+            """))
+
+    def test_a_waiver_version_absent_from_the_lock_is_stale(self) -> None:
+        self._waiver("1999.0.0")
+        problems = L.stale_problems()
+        self.assertTrue(any(
+            "stale licence file pyyaml@1999.0.0" in problem
+            for problem in problems), problems)
+
+    def test_a_lock_upgrade_makes_the_waiver_stale(self) -> None:
+        self._waiver("6.0.3")
+        self.assertFalse(any(
+            "stale licence file" in problem for problem in L.stale_problems()))
+        lock = self.root / "uv.lock"
+        lock.write_text(lock.read_text().replace(
+            'version = "6.0.3"', 'version = "6.0.4"', 1))
+        problems = L.stale_problems()
+        self.assertTrue(any(
+            "stale licence file pyyaml@6.0.3" in problem
+            for problem in problems), problems)
+
     def test_a_shipped_exception_is_refused(self) -> None:
         (self.root / "packages" / "core" / "package.json").write_text(
             '{"name": "@ocelli/core", "dependencies": {"dcmjs": "0.52.2"}}')
@@ -217,6 +251,72 @@ class Tables(unittest.TestCase):
         problems = L.npm_problems(L.allowlist())
         self.assertTrue(any("published runtime closure" in p for p in problems))
 
+    def _plant_caniuse(self, root_dev: bool, oracle: bool) -> None:
+        root_lock = self.root / "package-lock.json"
+        data = json.loads(root_lock.read_text())
+        entry: dict = {"version": "1.0.0", "license": "CC-BY-4.0"}
+        if root_dev:
+            entry["dev"] = True
+        data["packages"]["node_modules/caniuse-lite"] = entry
+        root_lock.write_text(json.dumps(data))
+        if oracle:
+            path = self.root / "tools/oracle/package-lock.json"
+            data = json.loads(path.read_text())
+            data["packages"]["node_modules/caniuse-lite"] = {
+                "version": "1.0.0", "license": "CC-BY-4.0"}
+            path.write_text(json.dumps(data))
+
+    def test_a_false_scope_is_refused(self) -> None:
+        self._plant_caniuse(root_dev=True, oracle=True)
+        problems = L.scope_problems()
+        self.assertTrue(any(
+            "tools/oracle/package-lock.json" in problem and "false" in problem
+            for problem in problems), problems)
+        text = (self.root / "ci" / "licences.toml").read_text().replace(
+            'scope = "dev-only"', 'scope = "dev-only, tool"', 1)
+        (self.root / "ci" / "licences.toml").write_text(text)
+        self.assertEqual(L.scope_problems(), [])
+
+    def test_root_dev_only_must_match_the_dev_flag(self) -> None:
+        self._plant_caniuse(root_dev=False, oracle=False)
+        problems = L.scope_problems()
+        self.assertTrue(any(
+            problem.endswith("is false for package-lock.json")
+            for problem in problems), problems)
+        self.assertFalse(any("tools/" in problem for problem in problems))
+
+    def test_a_tools_lock_is_tooling_scope(self) -> None:
+        (self.root / "ci" / "licences.toml").write_text(textwrap.dedent("""\
+            [[python]]
+            package = "pyyaml"
+            version = "6.0.3"
+            spdx = "MIT"
+            metadata = "MIT"
+
+            [[exception]]
+            ecosystem = "npm"
+            package = "rechoir"
+            version = "0.6.2"
+            licence = "MIT"
+            reason = "legacy"
+            scope = "dev-only"
+            decided = "2026-11-05"
+            decided_by = "operator"
+            """))
+        path = self.root / "tools/oracle/package-lock.json"
+        data = json.loads(path.read_text())
+        data["packages"]["node_modules/rechoir"] = {
+            "version": "0.6.2", "license": "MIT"}
+        path.write_text(json.dumps(data))
+        problems = L.scope_problems()
+        self.assertTrue(any(
+            "rechoir" in problem and "false" in problem for problem in problems),
+            problems)
+        text = (self.root / "ci" / "licences.toml").read_text().replace(
+            'scope = "dev-only"', 'scope = "tool"')
+        (self.root / "ci" / "licences.toml").write_text(text)
+        self.assertEqual(L.scope_problems(), [])
+
     def test_python_rows_must_cover_the_lock_and_be_allowed(self) -> None:
         problems = L.python_problems(L.allowlist())
         self.assertEqual(problems, [])
@@ -231,23 +331,75 @@ class Tables(unittest.TestCase):
         self.assertFalse(any("ocelli-tooling" in p for p in problems))
 
 
+def _authorised(**extra: object) -> dict:
+    row = {
+        "licence": "MIT",
+        "reason": "recorded",
+        "scope": "tool",
+        "decided": "2026-11-05",
+        "decided_by": "lead",
+    }
+    row.update(extra)
+    return row
+
+
 class WheelBytes(unittest.TestCase):
     def test_empty_marker_and_library_rules(self) -> None:
         self.assertTrue(L.licence_bytes_problems("a/LICENSE", b"", None))
         self.assertEqual(
-            L.licence_bytes_problems("a/LICENSE", b"", {"empty": True}), [])
+            L.licence_bytes_problems(
+                "a/LICENSE", b"", _authorised(empty=True)), [])
         marked = L.licence_bytes_problems(
             "a/LICENSE", b"see GPLv2\n", None)
         self.assertTrue(any("copyleft marker" in p for p in marked))
         recorded = L.licence_bytes_problems(
             "a/LICENSE-lzf", b"see GPLv2\n",
-            {"markers": ["GPLv2"], "spdx": "BSD-2-Clause",
-             "note": "the alternative is not taken"})
+            _authorised(markers=["GPLv2"], spdx="BSD-2-Clause",
+                        licence="BSD-2-Clause",
+                        note="the alternative is not taken"))
         self.assertEqual(recorded, [])
         refused = L.licence_bytes_problems(
             "a/LICENSE-lzf", b"see GPLv2\n",
-            {"markers": ["GPLv2"], "spdx": "MIT", "note": "not taken"})
+            _authorised(markers=["GPLv2"], spdx="MIT", licence="MIT",
+                        note="not taken"))
         self.assertTrue(refused)
+
+    def test_the_placeholder_licence_pairs_only_with_an_empty_file(self) -> None:
+        empty = _authorised(
+            package="imagecodecs", version="2026.10.10",
+            path="imagecodecs/licenses/LICENSE-heif",
+            empty=True, licence=L.PLACEHOLDER_LICENCE)
+        self.assertEqual(L.licence_file_waiver_problems([empty]), [])
+        claimed = dict(empty, licence="BSD-3-Clause")
+        problems = L.licence_file_waiver_problems([claimed])
+        self.assertTrue(any(
+            "is valid only on an empty file" in problem for problem in problems),
+            problems)
+        marker = _authorised(
+            package="imagecodecs", version="2026.10.10",
+            path="imagecodecs/licenses/LICENSE-lzf",
+            markers=["GPLv2"], licence=L.PLACEHOLDER_LICENCE)
+        problems = L.licence_file_waiver_problems([marker])
+        self.assertTrue(any(
+            "is valid only on an empty file" in problem for problem in problems),
+            problems)
+
+    def test_a_bare_waiver_is_refused(self) -> None:
+        row = {
+            "package": "pydicom",
+            "version": "3.0.2",
+            "path": "pydicom-3.0.2.dist-info/licenses/LICENSE",
+            "markers": ["GNU General Public License"],
+        }
+        problems = L.licence_file_waiver_problems([row])
+        for field in L.EXCEPTION_FIELDS:
+            self.assertTrue(
+                any(f"missing {field}" in problem for problem in problems),
+                problems)
+        scanned = L.licence_bytes_problems(
+            row["path"], b"GNU General Public License\n", row)
+        self.assertTrue(any("copyleft marker" in problem for problem in scanned),
+                        scanned)
         extra = L.bundle_list_problems(
             ["pkg/.dylibs/extra.dylib"], "darwin-arm64", set())
         self.assertTrue(any("not on the recorded list" in p for p in extra))
@@ -260,7 +412,113 @@ class WheelBytes(unittest.TestCase):
         self.assertTrue(any("no recorded bundled-library list" in p for p in missing))
 
 
+class SyntheticWheel(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self._patch = patch.object(L, "ROOT", self.root)
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+        (self.root / "uv.lock").write_text(textwrap.dedent("""\
+            version = 1
+            [[package]]
+            name = "pyyaml"
+            version = "6.0.3"
+            """))
+        (self.root / "ci").mkdir()
+        (self.root / "ci" / "licences.toml").write_text(textwrap.dedent("""\
+            [[python]]
+            package = "pyyaml"
+            version = "6.0.3"
+            spdx = "MIT"
+            metadata = "MIT"
+
+            [bundle.darwin-arm64.pyyaml]
+            libs = []
+            """))
+        self.site = self.root / "site-packages"
+        self.dist = self.site / "pyyaml-6.0.3.dist-info"
+        folder = self.dist / "licenses"
+        folder.mkdir(parents=True)
+        (self.dist / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: pyyaml\nVersion: 6.0.3\nLicense: MIT\n")
+        (folder / "LICENSE").write_text("MIT License\n")
+
+    def test_a_clean_tree_is_quiet(self) -> None:
+        self.assertEqual(L.installed_problems(self.site, "darwin", "arm64"), [])
+
+    def test_a_marker_and_a_bundled_library_are_refused(self) -> None:
+        (self.dist / "licenses" / "LICENSE").write_text(
+            "GNU General Public License\n")
+        libs = self.site / "pyyaml.libs"
+        libs.mkdir()
+        (libs / "libextra.so").write_bytes(b"x")
+        problems = L.installed_problems(self.site, "darwin", "arm64")
+        self.assertTrue(any("copyleft marker" in p for p in problems), problems)
+        self.assertTrue(
+            any("not on the recorded list" in p for p in problems), problems)
+
+    def test_a_waiver_applies_only_at_its_own_version(self) -> None:
+        (self.dist / "licenses" / "LICENSE").write_text("see GPLv2\n")
+        (self.root / "ci" / "licences.toml").write_text(textwrap.dedent("""\
+            [[python]]
+            package = "pyyaml"
+            version = "6.0.3"
+            spdx = "MIT"
+            metadata = "MIT"
+
+            [[licence_file]]
+            package = "pyyaml"
+            version = "6.0.3"
+            path = "pyyaml-6.0.3.dist-info/licenses/LICENSE"
+            markers = ["GPLv2"]
+            spdx = "BSD-2-Clause"
+            licence = "BSD-2-Clause"
+            reason = "probe"
+            scope = "tool"
+            decided = "2026-11-05"
+            decided_by = "lead"
+            note = "the alternative is not taken"
+
+            [bundle.darwin-arm64.pyyaml]
+            libs = []
+            """))
+        self.assertEqual(L.installed_problems(self.site, "darwin", "arm64"), [])
+        text = (self.root / "ci" / "licences.toml").read_text().replace(
+            'version = "6.0.3"\npath =', 'version = "1999.0.0"\npath =', 1)
+        (self.root / "ci" / "licences.toml").write_text(text)
+        problems = L.installed_problems(self.site, "darwin", "arm64")
+        self.assertTrue(any("copyleft marker" in problem for problem in problems),
+                        problems)
+
+    def test_a_dist_info_root_licence_is_scanned(self) -> None:
+        (self.dist / "LICENCE.rst").write_text(
+            "GNU General Public License version 3\n")
+        problems = L.installed_problems(self.site, "darwin", "arm64")
+        self.assertTrue(any(
+            "LICENCE.rst" in problem and "copyleft marker" in problem
+            for problem in problems), problems)
+
+
+class WorkspaceLicence(unittest.TestCase):
+    def test_a_comment_does_not_inherit_the_workspace_licence(self) -> None:
+        self.assertFalse(L.inherits_workspace_licence(
+            '[package]\nlicense = "MIT" # was license.workspace = true\n'))
+        self.assertTrue(L.inherits_workspace_licence(
+            "[package]\nlicense.workspace = true\n"))
+
+
 class RealTree(unittest.TestCase):
     def test_notices_and_holder_match_the_tree(self) -> None:
         self.assertEqual(L.notices_problems(), [])
         self.assertEqual(L.holder_problems(), [])
+        self.assertEqual(L.scope_problems(), [])
+        self.assertEqual(L.licence_file_waiver_problems(), [])
+        self.assertEqual(L.stale_problems(), [])
+        self.assertEqual(L.python_problems(L.allowlist()), [])
+        locked = dict(L.uv_packages())
+        for row in L.licence_file_rows():
+            self.assertEqual(
+                locked.get(str(row.get("package"))), str(row.get("version")),
+                row)

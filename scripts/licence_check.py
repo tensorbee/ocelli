@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 from email import policy
 from pathlib import Path
@@ -50,6 +51,14 @@ COPYLEFT_MARKERS = (
 
 EXCEPTION_FIELDS = ("licence", "reason", "scope", "decided", "decided_by")
 EXCEPTION_SCOPES = ("dev-only", "tool", "build-only")
+# An empty bundled file states no licence. This value records that fact and
+# is accepted only together with empty = true.
+PLACEHOLDER_LICENCE = "no-licence-text"
+
+# Pre-PEP 639 wheels keep the text at the dist-info root. "licen" matches
+# licence and license, so a second prefix is not part of the rule.
+_DIST_INFO_LICENCE_PREFIXES = ("licen", "copying", "notice")
+_TOOLING_LOCK_PREFIXES = ("tools/", "examples/")
 
 SPDX_EXPRESSION = "MIT OR Apache-2.0"
 # Content hash of LICENSE-APACHE. The git blob is d645695673349e3947e8e5ae42332d0ac3164cd7.
@@ -273,6 +282,25 @@ def required_libraries() -> list[dict]:
     return rows if isinstance(rows, list) else []
 
 
+def _scope_tokens(scope: str) -> list[str] | None:
+    """One scope, or several separated by commas. None when any token is unknown."""
+    tokens = [part.strip() for part in scope.split(",")]
+    if not tokens or any(not part for part in tokens):
+        return None
+    if any(part not in EXCEPTION_SCOPES for part in tokens):
+        return None
+    return tokens
+
+
+def _waiver_authorised(record: dict | None) -> bool:
+    """A marker or empty-file waiver counts only with a recorded decision."""
+    if not isinstance(record, dict):
+        return False
+    if any(not str(record.get(field, "")).strip() for field in EXCEPTION_FIELDS):
+        return False
+    return _scope_tokens(str(record.get("scope", ""))) is not None
+
+
 def exception_problems(rows: list[dict] | None = None) -> list[str]:
     """Missing fields and unknown scopes. Stale and shipped are separate."""
     problems: list[str] = []
@@ -285,13 +313,45 @@ def exception_problems(rows: list[dict] | None = None) -> list[str]:
             if not str(row.get(field, "")).strip():
                 problems.append(f"exception {label} is missing {field}")
         scope = str(row.get("scope", ""))
-        if scope and scope not in EXCEPTION_SCOPES:
+        if scope and _scope_tokens(scope) is None:
             problems.append(
                 f"exception {package} scope {scope!r} is not dev-only, tool "
                 f"or build-only")
         if not ecosystem or not package or not version:
             problems.append(
                 f"exception {label} is missing ecosystem, package or version")
+    return problems
+
+
+def licence_file_waiver_problems(rows: list[dict] | None = None) -> list[str]:
+    """A row that waives a refusal needs the same fields as an exception."""
+    problems: list[str] = []
+    source = licence_file_rows() if rows is None else rows
+    for row in source:
+        waives = row.get("empty") is True or bool(row.get("markers"))
+        if not waives:
+            continue
+        package = str(row.get("package", ""))
+        version = str(row.get("version", ""))
+        path = str(row.get("path", ""))
+        label = f"{package}@{version} {path}".strip()
+        for field in EXCEPTION_FIELDS:
+            if not str(row.get(field, "")).strip():
+                problems.append(f"licence file {label} is missing {field}")
+        scope = str(row.get("scope", ""))
+        if scope and _scope_tokens(scope) is None:
+            problems.append(
+                f"licence file {package} scope {scope!r} is not dev-only, tool "
+                f"or build-only")
+        licence = str(row.get("licence", "")).strip()
+        empty = row.get("empty") is True
+        # The placeholder is not a grant. It pairs with an empty file and
+        # with nothing else, so a row cannot claim a licence the file does
+        # not state.
+        if (licence == PLACEHOLDER_LICENCE) != empty:
+            problems.append(
+                f"licence file {label} licence {licence!r} is valid only "
+                f"on an empty file together with {PLACEHOLDER_LICENCE}")
     return problems
 
 
@@ -332,6 +392,76 @@ def _lock_versions(kind: str) -> set[tuple[str, str]]:
     return found
 
 
+def _is_tooling_lock(rel: str) -> bool:
+    return rel.startswith(_TOOLING_LOCK_PREFIXES)
+
+
+def _scope_holds_for_lock(token: str, rel: str, entry: dict) -> bool:
+    """Whether one scope token is true for one lockfile entry.
+
+    A lockfile under tools/ or examples/ is tooling scope, because those
+    trees are never published. In the root lockfile, dev-only holds only
+    when the entry's dev flag is true.
+    """
+    if token == "tool":
+        return _is_tooling_lock(rel)
+    if token == "dev-only":
+        if _is_tooling_lock(rel) or rel != "package-lock.json":
+            return False
+        return entry.get("dev") is True
+    return False
+
+
+def _npm_occurrences() -> dict[tuple[str, str], list[tuple[str, dict]]]:
+    found: dict[tuple[str, str], list[tuple[str, dict]]] = {}
+    for path in _tracked("*package-lock.json"):
+        try:
+            packages = json.loads(path.read_text(encoding="utf-8")).get("packages", {})
+        except json.JSONDecodeError:
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        for key, entry in packages.items():
+            if key == "" or not isinstance(entry, dict):
+                continue
+            name, version = _npm_identity(path, key, entry)
+            if name and version:
+                found.setdefault((name, version), []).append((rel, entry))
+    return found
+
+
+def scope_problems() -> list[str]:
+    """Refuse an npm exception whose scope is false for a lockfile it covers."""
+    problems: list[str] = []
+    occurrences = _npm_occurrences()
+    for row in exception_rows():
+        if str(row.get("ecosystem", "")) != "npm":
+            continue
+        scope = str(row.get("scope", ""))
+        tokens = _scope_tokens(scope)
+        if not tokens:
+            continue
+        package = str(row.get("package", ""))
+        version = str(row.get("version", ""))
+        covered = occurrences.get((package, version), [])
+        if not covered:
+            continue
+        held = {token: False for token in tokens}
+        for rel, entry in covered:
+            if not any(_scope_holds_for_lock(token, rel, entry) for token in tokens):
+                problems.append(
+                    f"exception npm {package}@{version} scope {scope!r} "
+                    f"is false for {rel}")
+            for token in tokens:
+                if _scope_holds_for_lock(token, rel, entry):
+                    held[token] = True
+        for token, ok in held.items():
+            if not ok:
+                problems.append(
+                    f"exception npm {package}@{version} scope {token!r} "
+                    f"holds for no lockfile it covers")
+    return problems
+
+
 def stale_problems() -> list[str]:
     problems: list[str] = []
     cached: dict[str, set[tuple[str, str]]] = {}
@@ -344,6 +474,19 @@ def stale_problems() -> list[str]:
         if (package, version) not in cached[ecosystem]:
             problems.append(
                 f"stale exception {ecosystem} {package}@{version} is not in "
+                f"the lock")
+    # A file waiver names one package version. The dist-info path embeds
+    # that version for some rows and the imagecodecs/licenses paths do not,
+    # so the row's own version is what goes stale when uv.lock moves.
+    if "python" not in cached:
+        cached["python"] = _lock_versions("python")
+    for row in licence_file_rows():
+        package = str(row.get("package", ""))
+        version = str(row.get("version", ""))
+        path = str(row.get("path", ""))
+        if (package, version) not in cached["python"]:
+            problems.append(
+                f"stale licence file {package}@{version} {path} is not in "
                 f"the lock")
     return problems
 
@@ -524,16 +667,17 @@ def metadata_string(message: email.message.Message) -> str:
 
 
 def licence_bytes_problems(relpath: str, data: bytes, record: dict | None) -> list[str]:
-    """Empty files and copyleft markers. A recorded file may name either."""
+    """Empty files and copyleft markers. A waiver counts only when authorised."""
     problems: list[str] = []
+    authorised = _waiver_authorised(record)
     if len(data) == 0:
-        if not (record and record.get("empty") is True):
+        if not (authorised and record is not None and record.get("empty") is True):
             problems.append(f"empty licence file {relpath}")
         return problems
     found = [marker for marker in COPYLEFT_MARKERS if marker.encode("utf-8") in data]
     if not found:
         return problems
-    allowed = set(record.get("markers", [])) if record else set()
+    allowed = set(record.get("markers", [])) if authorised and record else set()
     extra = [marker for marker in found if marker not in allowed]
     if extra:
         problems.append(
@@ -589,10 +733,18 @@ def _shared_libraries(site: Path) -> list[str]:
 
 def _licence_files(site: Path) -> list[Path]:
     found: list[Path] = []
+    if not site.is_dir():
+        return found
     for dist in site.glob("*.dist-info"):
         folder = dist / "licenses"
         if folder.is_dir():
             found.extend(path for path in folder.rglob("*") if path.is_file())
+        # Pre-PEP 639 wheels leave the text beside METADATA. licenses/ is
+        # already walked above, so only the dist-info root is added here.
+        for path in dist.iterdir():
+            if path.is_file() and path.name.casefold().startswith(
+                    _DIST_INFO_LICENCE_PREFIXES):
+                found.append(path)
     for child in site.iterdir():
         if not child.is_dir() or child.name.endswith(".dist-info"):
             continue
@@ -600,6 +752,31 @@ def _licence_files(site: Path) -> list[Path]:
         if folder.is_dir():
             found.extend(path for path in folder.rglob("*") if path.is_file())
     return found
+
+
+def _matching_waiver(files: dict[tuple[str, str, str], dict], relpath: str,
+                     installed_version: dict[str, str]) -> dict | None:
+    """The waiver for this file at the installed package version.
+
+    A row for any other version does not apply. An upgrade would otherwise
+    carry a waiver onto text nobody has re-read.
+    """
+    owner = Path(relpath).parts[0]
+    if owner.endswith(".dist-info"):
+        owner_name = re.sub(r"-\d.*$", "", owner)
+    else:
+        owner_name = owner
+    version = installed_version.get(_norm(owner_name), "")
+    fallback = None
+    for (norm_name, row_version, recorded_path), row in files.items():
+        if recorded_path != relpath or row_version != version:
+            continue
+        if norm_name == _norm(owner_name):
+            return row
+        # The dist-info directory can spell the name with an underscore.
+        if fallback is None:
+            fallback = row
+    return fallback
 
 
 def installed_problems(site: Path, platform: str, machine: str) -> list[str]:
@@ -616,6 +793,7 @@ def installed_problems(site: Path, platform: str, machine: str) -> list[str]:
         for row in licence_file_rows()
     }
     seen: set[str] = set()
+    installed_version: dict[str, str] = {}
     for dist in sorted(site.glob("*.dist-info")):
         if not (dist / "METADATA").is_file():
             problems.append(f"{dist.name} has no METADATA")
@@ -623,6 +801,8 @@ def installed_problems(site: Path, platform: str, machine: str) -> list[str]:
         message = _dist_message(dist)
         name = str(message.get("Name") or "")
         version = str(message.get("Version") or "")
+        if name and version:
+            installed_version[_norm(name)] = version
         key = (_norm(name), version)
         seen.add(_norm(name))
         if _norm(name) not in locked:
@@ -645,26 +825,7 @@ def installed_problems(site: Path, platform: str, machine: str) -> list[str]:
 
     for path in _licence_files(site):
         relpath = path.relative_to(site).as_posix()
-        # The owning package is the dist-info name or the top directory.
-        parts = Path(relpath).parts
-        owner = parts[0]
-        if owner.endswith(".dist-info"):
-            owner_name = owner.split("-")[0]
-            # numpy-2.5.2.dist-info -> numpy. imagecodecs-2026.10.10 -> imagecodecs.
-            owner_name = re.sub(r"-\d.*$", "", owner)
-        else:
-            owner_name = owner
-        record = None
-        for (norm_name, version, recorded_path), row in files.items():
-            if recorded_path == relpath and norm_name == _norm(owner_name):
-                record = row
-                break
-        # Also match when the dist-info directory uses an underscore.
-        if record is None:
-            for (norm_name, version, recorded_path), row in files.items():
-                if recorded_path == relpath:
-                    record = row
-                    break
+        record = _matching_waiver(files, relpath, installed_version)
         problems.extend(licence_bytes_problems(relpath, path.read_bytes(), record))
 
     libraries = _shared_libraries(site)
@@ -735,6 +896,55 @@ def installed_from_interpreter(explicit: str | None) -> list[str]:
         return [f"site-packages {site} is not a directory"]
     return installed_problems(site, str(info.get("platform", "")),
                               str(info.get("machine", "")))
+
+
+def synthetic_installed_problems(kind: str) -> list[str]:
+    """One planted wheel problem, from installed_problems on a temporary tree.
+
+    kind is marker, library, platform or clean. The tree holds one package so
+    the real lockfile cannot report every other package as missing.
+    """
+    global ROOT
+    previous = ROOT
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ROOT = root
+            (root / "uv.lock").write_text(
+                'version = 1\n[[package]]\nname = "pyyaml"\nversion = "6.0.3"\n',
+                encoding="utf-8")
+            licences = (
+                '[[python]]\n'
+                'package = "pyyaml"\n'
+                'version = "6.0.3"\n'
+                'spdx = "MIT"\n'
+                'metadata = "MIT"\n'
+            )
+            if kind != "platform":
+                licences += "\n[bundle.darwin-arm64.pyyaml]\nlibs = []\n"
+            ci = root / "ci"
+            ci.mkdir()
+            (ci / "licences.toml").write_text(licences, encoding="utf-8")
+            site = root / "site-packages"
+            dist = site / "pyyaml-6.0.3.dist-info"
+            folder = dist / "licenses"
+            folder.mkdir(parents=True)
+            (dist / "METADATA").write_text(
+                "Metadata-Version: 2.1\nName: pyyaml\nVersion: 6.0.3\n"
+                "License: MIT\n",
+                encoding="utf-8")
+            licence = ("GNU General Public License\n" if kind == "marker"
+                       else "MIT License\n")
+            (folder / "LICENSE").write_text(licence, encoding="utf-8")
+            if kind == "library":
+                libs = site / "pyyaml.libs"
+                libs.mkdir()
+                (libs / "libextra.so").write_bytes(b"\0")
+            if kind == "platform":
+                return installed_problems(site, "freebsd", "x86_64")
+            return installed_problems(site, "darwin", "arm64")
+    finally:
+        ROOT = previous
 
 
 # ---------------------------------------------------------------------------
@@ -946,6 +1156,19 @@ def _member_manifests() -> list[Path]:
     return found
 
 
+def inherits_workspace_licence(text: str) -> bool:
+    """True when [package].license is the workspace key, not a string or a comment."""
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return False
+    package = data.get("package")
+    if not isinstance(package, dict):
+        return False
+    licence = package.get("license")
+    return isinstance(licence, dict) and licence.get("workspace") is True
+
+
 def holder_problems() -> list[str]:
     problems: list[str] = []
     for path in _tracked("*LICENSE-MIT"):
@@ -979,7 +1202,7 @@ def holder_problems() -> list[str]:
             f"Cargo.toml licence is {value!r}, expected {SPDX_EXPRESSION}")
     for manifest in _member_manifests():
         text = manifest.read_text(encoding="utf-8")
-        if "license.workspace = true" not in text:
+        if not inherits_workspace_licence(text):
             problems.append(
                 f"{manifest.relative_to(ROOT).as_posix()} licence is not "
                 f"{SPDX_EXPRESSION}")
@@ -1033,6 +1256,8 @@ def main(argv: list[str] | None = None) -> int:
     if any(name in selected for name in ("rust", "npm", "python", "installed")):
         problems.extend(exception_problems())
         problems.extend(stale_problems())
+        problems.extend(licence_file_waiver_problems())
+        problems.extend(scope_problems())
 
     allow = allowlist()
     for name in selected:

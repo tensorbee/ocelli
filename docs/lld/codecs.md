@@ -278,19 +278,21 @@ lossless, and refuses anything outside that union. `i32 as f32` would round
 silently on exactly the values the function exists to catch, and a unit test
 sweeps all 98,304 values of the union rather than sampling them.
 
-### The redistribution condition, which is open
+### The redistribution condition
 
 `openjph-core` 0.1.0's published archive carries no `LICENSE`, `LICENCE`,
 `COPYING` or `NOTICE`, and crates.io reports no repository URL to obtain one
-from. Its metadata declares BSD-2-Clause, which permits redistribution **with
-its notice conditions retained**.
+from. Its metadata declares BSD-2-Clause, which permits redistribution with
+its notice conditions retained.
 
-`python3 scripts/pin_and_size_check.py --require-redistribution` refuses while
-that material is absent and `/release` step 5 runs it. **No development profile
-does**, because `--floor`, `--sprint` and `--all` gate development and this
-gates publication. The refusal names the file that would close it. Probe
-`pins.openjph-notice` proves both directions: it fires today, and it stops
-firing once a notice is placed.
+F-217 placed the upstream OpenJPH LICENSE from tag 0.26.3 at
+`vendor/openjph-core-0.1.0/LICENSE` and copied those bytes into
+`THIRD_PARTY_NOTICES`. `python3 scripts/pin_and_size_check.py
+--require-redistribution` passes. No development profile runs that flag,
+because `--floor`, `--sprint` and `--all` gate development and this gates
+publication. Probe `pins.openjph-notice` deletes the vendor LICENSE and must
+refuse. Probe `pins.openjph-notice-hash` appends a newline and must refuse on
+the recorded hash.
 
 The package's 104 `unsafe` constructs are a recorded number rather than an
 invisible one. `scripts/unsafe_allowlist_check.py` refuses a vendored package

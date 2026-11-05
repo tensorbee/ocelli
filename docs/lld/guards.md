@@ -602,7 +602,7 @@ Recorded constants added with this gate are the `deny.toml` allow list,
 
 `pins.openjph-notice` deletes `vendor/openjph-core-0.1.0/LICENSE` and must
 refuse with the missing-notice text. The unmodified tree accepts.
-`pins.openjph-notice-hash` changes one byte and must refuse on the hash.
+`pins.openjph-notice-hash` appends a newline and must refuse on the hash.
 
 ## The two gates
 

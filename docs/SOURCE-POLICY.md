@@ -169,8 +169,8 @@ which matches the crates.io API. Packaged VCS metadata names commit
    modification and redistribution with its notice conditions retained.
 
 Question 2 is present, so the policy's rule for two absent provenance sources
-does not refuse the package. The missing packaged licence and copyright notice
-are still a production distribution risk.
+does not refuse the package. F-217 placed the upstream notice at
+`vendor/openjph-core-0.1.0/LICENSE`. The redistribution check passes.
 
 **F-027 took this package into production use and the risk is now held by a
 gate rather than by this paragraph.** The three answers above were re-verified
@@ -188,7 +188,7 @@ and shipping it. The refusal names the file that closes it. F-217 placed the ups
 LICENSE from tag 0.26.3 at `vendor/openjph-core-0.1.0/LICENSE` and copied those
 bytes into `THIRD_PARTY_NOTICES`. `python3 scripts/pin_and_size_check.py
 --require-redistribution` now passes. Probe `pins.openjph-notice` deletes that
-file and must refuse. Probe `pins.openjph-notice-hash` changes one byte and
+file and must refuse. Probe `pins.openjph-notice-hash` appends a newline and
 must refuse on the recorded hash. The text referring this condition to "E2.6"
 was a misnumbering in
 F-X013's answer file: E2.6 is F-014, the quirk-capture workflow, and the HTJ2K

@@ -390,6 +390,68 @@ def _plant_stale_exception(box: Sandbox) -> None:
         'decided_by = "probe"\n')
 
 
+def _dev_only_caniuse(box: Sandbox) -> None:
+    # The oracle lock still carries the package. dev-only does not hold there.
+    box.substitute("ci/licences.toml", 'scope = "dev-only, tool"',
+                   'scope = "dev-only"')
+
+
+def _tool_scope_holds_nowhere(box: Sandbox) -> None:
+    # Drop the tooling copy. dev-only still holds for the root dev entry,
+    # and tool then holds for no lockfile the exception covers.
+    lock = json.loads(box.read("tools/oracle/package-lock.json"))
+    packages = lock.get("packages", {})
+    key = "node_modules/caniuse-lite"
+    if key not in packages:
+        # substitute raises in the sandbox when the plant matches nothing.
+        box.substitute("tools/oracle/package-lock.json",
+                       '"node_modules/caniuse-lite"', "missing")
+        return
+    del packages[key]
+    box.write("tools/oracle/package-lock.json", json.dumps(lock) + "\n")
+
+
+def _waiver_missing_decided_by(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'decided = "2026-11-05"\n'
+        'decided_by = "lead"\n'
+        'note = "The file is an empty placeholder for HEIF,',
+        'decided = "2026-11-05"\n'
+        'note = "The file is an empty placeholder for HEIF,')
+
+
+def _waiver_scope_prod(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'imagecodecs reports JETRAW unavailable and the file grants nothing."\n'
+        'scope = "tool"',
+        'imagecodecs reports JETRAW unavailable and the file grants nothing."\n'
+        'scope = "prod"')
+
+
+def _stale_lzf_waiver(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'package = "imagecodecs"\n'
+        'version = "2026.10.10"\n'
+        'path = "imagecodecs/licenses/LICENSE-lzf"',
+        'package = "imagecodecs"\n'
+        'version = "1999.0.0"\n'
+        'path = "imagecodecs/licenses/LICENSE-lzf"')
+
+
+def _claim_licence_on_empty_file(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'path = "imagecodecs/licenses/LICENSE-libjxs"\n'
+        'empty = true\n'
+        'licence = "no-licence-text"',
+        'path = "imagecodecs/licenses/LICENSE-libjxs"\n'
+        'empty = true\n'
+        'licence = "BSD-3-Clause"')
+
+
 def _plant_shipped_exception(box: Sandbox) -> None:
     lock = json.loads(box.read("package-lock.json"))
     version = ""
@@ -6993,11 +7055,12 @@ GUARDS: tuple[Guard, ...] = (
         gate="licences licences-wheels",
         spec="F-217 and SPDX 2.3 Annex D",
         refuses="A dependency whose licence is not on the one allowlist, "
-                "an exception that is stale or sits in a published runtime "
-                "closure, a Python package with no recorded row, a bundled "
-                "wheel file that carries a copyleft marker or an unrecorded "
-                "library, a third-party notice that drifts, and a holder or "
-                "manifest SPDX line that drifts.",
+                "an exception or a file waiver that is stale, incomplete, "
+                "out of scope or in a published runtime closure, a Python "
+                "package with no recorded row, a bundled wheel file that "
+                "carries a copyleft marker or an unrecorded library, a "
+                "third-party notice that drifts, and a holder or manifest "
+                "SPDX line that drifts.",
         claims=("*",),
         probes=(
             Probe("licences.npm-copyleft", _plant_npm_copyleft,
@@ -7016,6 +7079,30 @@ GUARDS: tuple[Guard, ...] = (
                   "published runtime closure",
                   note="dcmjs is in the published runtime closure. Scope "
                        "dev-only does not waive that."),
+            Probe("licences.scope-dev-only", _dev_only_caniuse,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "is false for tools/oracle/package-lock.json",
+                  note="caniuse-lite stays in the oracle lock. dev-only "
+                       "does not hold for that copy."),
+            Probe("licences.scope-nowhere", _tool_scope_holds_nowhere,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "holds for no lockfile",
+                  note="The oracle copy is removed, so tool holds nowhere. "
+                       "dev-only still holds for the root dev entry, and "
+                       "that is why this plant does not also say the scope "
+                       "is false."),
+            Probe("licences.waiver-decided-by", _waiver_missing_decided_by,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is missing decided_by"),
+            Probe("licences.waiver-scope", _waiver_scope_prod,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "scope 'prod'"),
+            Probe("licences.waiver-stale", _stale_lzf_waiver,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "stale licence file"),
+            Probe("licences.waiver-placeholder", _claim_licence_on_empty_file,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is valid only on an empty file"),
             Probe("licences.python-unrecorded", _rename_python_row,
                   script("python3", "scripts/licence_check.py", "python"),
                   "has no licence row"),
@@ -7046,68 +7133,61 @@ GUARDS: tuple[Guard, ...] = (
             Probe(
                 "licences.wheel-marker", None,
                 python_snippet(
-                    "licence_bytes_problems, marker",
+                    "installed_problems, marker",
                     "import sys\n"
                     "sys.path.insert(0, 'scripts')\n"
                     "import licence_check as l\n"
-                    "bad = l.licence_bytes_problems(\n"
-                    "    'pkg/licenses/LICENSE',\n"
-                    "    b'GNU General Public License\\n', None)\n"
+                    "bad = l.synthetic_installed_problems('marker')\n"
                     "print('\\n'.join(bad))\n"
                     "sys.exit(1 if bad else 0)\n"),
                 "copyleft marker",
                 level=1,
                 control=python_snippet(
-                    "licence_bytes_problems, healthy",
+                    "installed_problems, clean marker",
                     "import sys\n"
                     "sys.path.insert(0, 'scripts')\n"
                     "import licence_check as l\n"
-                    "bad = l.licence_bytes_problems(\n"
-                    "    'pkg/licenses/LICENSE', b'MIT License\\n', None)\n"
+                    "bad = l.synthetic_installed_problems('clean')\n"
                     "print('\\n'.join(bad))\n"
                     "sys.exit(1 if bad else 0)\n")),
             Probe(
                 "licences.wheel-library", None,
                 python_snippet(
-                    "bundle_list_problems, extra",
+                    "installed_problems, library",
                     "import sys\n"
                     "sys.path.insert(0, 'scripts')\n"
                     "import licence_check as l\n"
-                    "bad = l.bundle_list_problems(\n"
-                    "    ['pkg/.dylibs/libextra.dylib'], 'darwin-arm64', set())\n"
+                    "bad = l.synthetic_installed_problems('library')\n"
                     "print('\\n'.join(bad))\n"
                     "sys.exit(1 if bad else 0)\n"),
                 "is not on the recorded list",
                 level=1,
                 control=python_snippet(
-                    "bundle_list_problems, healthy",
+                    "installed_problems, clean library",
                     "import sys\n"
                     "sys.path.insert(0, 'scripts')\n"
                     "import licence_check as l\n"
-                    "bad = l.bundle_list_problems(\n"
-                    "    ['pkg/.dylibs/libz.dylib'], 'darwin-arm64',\n"
-                    "    {'pkg/.dylibs/libz.dylib'})\n"
+                    "bad = l.synthetic_installed_problems('clean')\n"
                     "print('\\n'.join(bad))\n"
                     "sys.exit(1 if bad else 0)\n")),
             Probe(
                 "licences.wheel-platform", None,
                 python_snippet(
-                    "bundle_list_problems, platform",
+                    "installed_problems, platform",
                     "import sys\n"
                     "sys.path.insert(0, 'scripts')\n"
                     "import licence_check as l\n"
-                    "bad = l.bundle_list_problems(\n"
-                    "    ['pkg.libs/libz.so'], 'freebsd-x86_64', None)\n"
+                    "bad = l.synthetic_installed_problems('platform')\n"
                     "print('\\n'.join(bad))\n"
                     "sys.exit(1 if bad else 0)\n"),
                 "no recorded bundled-library list",
                 level=1,
                 control=python_snippet(
-                    "bundle_list_problems, known platform",
+                    "installed_problems, clean platform",
                     "import sys\n"
                     "sys.path.insert(0, 'scripts')\n"
                     "import licence_check as l\n"
-                    "bad = l.bundle_list_problems([], 'darwin-arm64', set())\n"
+                    "bad = l.synthetic_installed_problems('clean')\n"
                     "print('\\n'.join(bad))\n"
                     "sys.exit(1 if bad else 0)\n")),
         ),
@@ -12055,6 +12135,10 @@ CONSTANTS: tuple[Constant, ...] = (
              r"^EXCEPTION_FIELDS = (\(.*?\))$",
              why="The fields an exception must carry. Dropping one lets an "
                  "approval through with no reason."),
+    Constant("licences", "scripts/licence_check.py", "PLACEHOLDER_LICENCE",
+             r'^PLACEHOLDER_LICENCE = "(.*?)"$',
+             why="The only licence value an empty file may record. Any other "
+                 "value claims a grant the file does not state."),
     Constant("pins", "scripts/pin_and_size_check.py", "EXACT_PINNED",
              r"^EXACT_PINNED = \{(.*?)^\}"),
     Constant("pins", "scripts/pin_and_size_check.py", "PACKAGE_LICENCES",

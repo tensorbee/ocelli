@@ -195,7 +195,7 @@ Compatibility: no product API, wire format, pixel path or wasm export changes. T
 | `bin/ocelli.sh gate guards`, census | catalogue entries, recorded constants, budget | floor | pass |
 | `examples/viewer-react` `vite build`, `npm run test`, lint, typecheck | vite 7.3.7, plugin-react 5.2.0 (Q2) | frontend CI job | pass |
 
-Owner of selection: the route table in the test module owns which decoder reads which syntax. Owner of colour conversion for `.50`: libjpeg-turbo inside `jpeg8_decode`, and the helper applies no second conversion. Owner of the allowlist: `deny.toml`. Owner of exceptions: `ci/licences.toml`, written only with an operator decision recorded in the row.
+Owner of selection: the route table in the test module owns which decoder reads which syntax. Owner of colour conversion for `.50`: libjpeg-turbo inside `jpeg8_decode`, and the helper applies no second conversion. Owner of the allowlist: `deny.toml`. Owner of exceptions: `ci/licences.toml`, written only with an operator decision recorded in the row. One amendment, made by the lead on 2026-11-05 under the operator's instruction that night to make the quality call: a `[[licence_file]]` waiver of a file whose text is an allowlisted licence and grants nothing under a copyleft licence may be decided by the lead, with `decided_by = "lead"` and a reason that says what the file actually is. Any waiver of text that grants a copyleft licence still needs `decided_by = "operator"`. Every lead waiver is listed for the operator to confirm under "Questions for the operator" in `docs/sprints/CURRENT_SPRINT.md`.
 
 ## State transitions and invariants
 
