@@ -238,6 +238,7 @@
         <tr><td><code>ocelli-wasm</code> output</td><td><code>crates/ocelli-wasm/pkg</code></td><td>Built by <code>wasm-pack</code>. A build artefact, not committed.</td></tr>
       </tbody>
     </table></div>
+    <p><code>dcmjs</code> 0.52.2 declares <code>adm-zip</code> 0.5.17 as a runtime dependency that nothing in <code>@ocelli/core</code> or in the published <code>dcmjs</code> files loads, and a consumer's own npm audit still reports it because npm reports what is installed.</p>
     <p>Inside the workspace, the root <code>package.json</code> lists <code>packages/*</code> and <code>examples/*</code> as npm workspaces, so an example imports <code>@ocelli/core</code> by name and npm links the local package.</p>
     <p>For Rust, depend on the crates by path.</p>
 <pre><span class="file">Cargo.toml</span><code>[dependencies]

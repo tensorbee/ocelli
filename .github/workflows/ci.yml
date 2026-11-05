@@ -307,6 +307,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: npm ci
+      # F-218. High and critical advisories in the published npm runtime.
+      # The audit asks the registry, so a new advisory can turn this red
+      # without a tree change. A missing report fails closed.
+      - run: bin/ocelli.sh gate advisories
       # Includes the cached-wasm-view ban of HLD 17.2, which is a silent
       # failure mode and therefore a lint rather than a convention.
       - run: bin/ocelli.sh gate lint

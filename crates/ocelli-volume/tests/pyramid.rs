@@ -130,6 +130,13 @@ fn read_f32(bytes: &[u8]) -> Result<f32, VolumeError> {
     Ok(f32::from_le_bytes(quad))
 }
 
+fn f32_bits_at(bytes: &[u8], index: usize) -> Result<u32, VolumeError> {
+    let start = index.checked_mul(4).ok_or(VolumeError::LevelShape)?;
+    let end = start.checked_add(4).ok_or(VolumeError::LevelShape)?;
+    let word = bytes.get(start..end).ok_or(VolumeError::LevelShape)?;
+    Ok(read_f32(word)?.to_bits())
+}
+
 fn assert_u16_constant(bytes: &[u8], value: u16) -> Result<(), VolumeError> {
     if !bytes.len().is_multiple_of(2) {
         return Err(VolumeError::LevelShape);
@@ -1098,73 +1105,222 @@ fn an_empty_level_axis_returns_level_absent() -> Result<(), VolumeError> {
     Ok(())
 }
 
-/// Decision 5 narrows a finite mean through `narrow_f32`.
-/// It does not say what a non-finite stored sample becomes, and decision 12
-/// does not say what a non-finite centre input becomes.
-/// This test pins the current behaviour only.
-/// The decision is open.
-/// It is recorded in `docs/sprints/CURRENT_SPRINT.md` under
-/// "Questions for the operator" and is to be answered before F-120.
+/// AC1. One NaN is left out and the finite samples are re-weighted.
 ///
-/// `[2, 1, 1]` with a payload NaN and `1.0` has a NaN mean. `narrow_f32`
-/// writes the canonical quiet NaN `0x7fc0_0000`.
-/// `+inf` with `1.0` stays `+inf`. Two `-inf` samples stay `-inf`.
-/// `+inf` with `-inf` is a NaN mean, so the same canonical NaN.
+/// Samples are IEEE 754 binary32 words, DICOM PS3.5 section 6.2 VR OF,
+/// in the Float Pixel Data layout of PS3.3 C.7.6.24.
+/// The operator's answer of 2026-11-05 leaves non-finite samples out of
+/// the mean.
 ///
-/// Level 0 returns a non-finite centre unchanged, payload included.
-/// A coarser axis stays NaN or the same-signed infinity. The formula's NaN
-/// payload is not pinned.
+/// `[2, 2, 2]`, x fastest, holds `1, 2, 3, 4, 5, 6, 7` and `0x7fc0_0001`.
+/// Every overlap weight is 1. The finite sum is `1+2+3+4+5+6+7 = 28`.
+/// The finite weight is 7. `28 / 7 = 4.0`, bits `0x4080_0000`.
+/// Dividing by the full weight 8 would give 3.5. Propagating the NaN
+/// would write `0x7fc0_0000`.
 #[test]
-fn non_finite_floats_keep_the_current_bits() -> Result<(), VolumeError> {
-    let canon = f32::from_bits(0x7fc0_0000);
-    let mut nan_pair = filled(
-        [2, 1, 1],
+fn fixture_one_nan_is_left_out_and_reweighted() -> Result<(), VolumeError> {
+    let mut volume = filled(
+        [2, 2, 2],
         [1.0, 1.0, 1.0],
         VoxelKind::F32,
-        &le_f32(&[f32::from_bits(0x7fc0_0001), 1.0]),
+        &le_f32(&[
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.0,
+            7.0,
+            f32::from_bits(0x7fc0_0001),
+        ]),
     )?;
-    nan_pair.downsample_level([1, 1, 1])?;
-    assert_eq!(
-        read_f32(nan_pair.level_bytes(1)?)?.to_bits(),
-        canon.to_bits()
-    );
+    volume.downsample_level([1, 1, 1])?;
+    assert_eq!(read_f32(volume.level_bytes(1)?)?.to_bits(), 0x4080_0000);
+    Ok(())
+}
 
-    let mut pos_inf = filled(
+/// AC2. Infinity is non-finite and is left out of the mean.
+///
+/// Samples are IEEE 754 binary32 words, DICOM PS3.5 section 6.2 VR OF,
+/// in the Float Pixel Data layout of PS3.3 C.7.6.24.
+/// The operator's answer of 2026-11-05 skips every non-finite sample,
+/// and infinity is non-finite.
+///
+/// `[2, 1, 1]` of `+inf, 1.0` has finite weight 1. The mean is `1.0`,
+/// bits `0x3f80_0000`.
+/// `[4, 1, 1]` of `-inf, -3.0, 6.0, +inf` has finite sum `-3 + 6 = 3`
+/// and finite weight 2. `3 / 2 = 1.5`, bits `0x3fc0_0000`.
+/// Keeping either infinity would yield infinity or a NaN.
+#[test]
+fn fixture_infinity_is_left_out_and_reweighted() -> Result<(), VolumeError> {
+    let mut pair = filled(
         [2, 1, 1],
         [1.0, 1.0, 1.0],
         VoxelKind::F32,
         &le_f32(&[f32::INFINITY, 1.0]),
     )?;
-    pos_inf.downsample_level([1, 1, 1])?;
-    assert_eq!(
-        read_f32(pos_inf.level_bytes(1)?)?.to_bits(),
-        f32::INFINITY.to_bits()
-    );
+    pair.downsample_level([1, 1, 1])?;
+    assert_eq!(read_f32(pair.level_bytes(1)?)?.to_bits(), 0x3f80_0000);
 
-    let mut neg_inf = filled(
+    let mut wide = filled(
+        [4, 1, 1],
+        [1.0, 1.0, 1.0],
+        VoxelKind::F32,
+        &le_f32(&[f32::NEG_INFINITY, -3.0, 6.0, f32::INFINITY]),
+    )?;
+    wide.downsample_level([1, 1, 1])?;
+    assert_eq!(read_f32(wide.level_bytes(1)?)?.to_bits(), 0x3fc0_0000);
+    Ok(())
+}
+
+/// AC3. A box with no finite sample is the canonical quiet NaN.
+///
+/// Samples are IEEE 754 binary32 words, DICOM PS3.5 section 6.2 VR OF,
+/// in the Float Pixel Data layout of PS3.3 C.7.6.24.
+/// The operator's answer of 2026-11-05 keeps that box as NaN.
+/// The written pattern is `0x7fc0_0000`, positive and quiet, with no
+/// extra payload. It is not copied from an input word.
+///
+/// `[2, 2, 1]` holds `0x7fc0_0001`, `0xffc0_0000`, signalling `0x7f80_0001`
+/// and `0x7fff_ffff`. `[2, 1, 1]` of `+inf, +inf`, of `-inf, -inf`, and of
+/// `+inf, -inf` are the same empty box. Each child is `0x7fc0_0000`.
+#[test]
+fn fixture_a_box_with_no_finite_sample_is_canonical_nan() -> Result<(), VolumeError> {
+    let mut payloads = filled(
+        [2, 2, 1],
+        [1.0, 1.0, 1.0],
+        VoxelKind::F32,
+        &le_f32(&[
+            f32::from_bits(0x7fc0_0001),
+            f32::from_bits(0xffc0_0000),
+            f32::from_bits(0x7f80_0001),
+            f32::from_bits(0x7fff_ffff),
+        ]),
+    )?;
+    payloads.downsample_level([1, 1, 1])?;
+    assert_eq!(read_f32(payloads.level_bytes(1)?)?.to_bits(), 0x7fc0_0000);
+
+    let pairs = [
+        [f32::INFINITY, f32::INFINITY],
+        [f32::NEG_INFINITY, f32::NEG_INFINITY],
+        [f32::INFINITY, f32::NEG_INFINITY],
+    ];
+    for pair in pairs {
+        let mut volume = filled([2, 1, 1], [1.0, 1.0, 1.0], VoxelKind::F32, &le_f32(&pair))?;
+        volume.downsample_level([1, 1, 1])?;
+        assert_eq!(read_f32(volume.level_bytes(1)?)?.to_bits(), 0x7fc0_0000);
+    }
+    Ok(())
+}
+
+/// AC4. Negative zero is written as positive zero after narrowing.
+///
+/// Samples are IEEE 754 binary32 words, DICOM PS3.5 section 6.2 VR OF,
+/// in the Float Pixel Data layout of PS3.3 C.7.6.24.
+/// The operator's answer of 2026-11-05 writes negative zero as positive zero.
+///
+/// `[2, 1, 1]` of `-0.0, -0.0`, of `-0.0, +0.0`, and of `3.0, -3.0` each
+/// has exact mean `+0.0`, bits `0x0000_0000`.
+/// `0x8000_0001` is `-2^-149`. Beside `+0.0` the finite weight is 2, so
+/// the mean is `-2^-149 / 2 = -2^-150`. Ties-to-even narrowing lands on
+/// `0x8000_0000`, and the zero-sign rule then writes `0x0000_0000`.
+/// Two copies of `0x8000_0001` have mean `-2^-149`, bits `0x8000_0001`.
+#[test]
+fn fixture_negative_zero_is_written_as_positive_zero() -> Result<(), VolumeError> {
+    let zeros = [
+        [f32::from_bits(0x8000_0000), f32::from_bits(0x8000_0000)],
+        [f32::from_bits(0x8000_0000), 0.0],
+        [3.0, -3.0],
+        [f32::from_bits(0x8000_0001), 0.0],
+    ];
+    for pair in zeros {
+        let mut volume = filled([2, 1, 1], [1.0, 1.0, 1.0], VoxelKind::F32, &le_f32(&pair))?;
+        volume.downsample_level([1, 1, 1])?;
+        assert_eq!(read_f32(volume.level_bytes(1)?)?.to_bits(), 0x0000_0000);
+    }
+
+    let mut control = filled(
         [2, 1, 1],
         [1.0, 1.0, 1.0],
         VoxelKind::F32,
-        &le_f32(&[f32::NEG_INFINITY, f32::NEG_INFINITY]),
+        &le_f32(&[f32::from_bits(0x8000_0001), f32::from_bits(0x8000_0001)]),
     )?;
-    neg_inf.downsample_level([1, 1, 1])?;
-    assert_eq!(
-        read_f32(neg_inf.level_bytes(1)?)?.to_bits(),
-        f32::NEG_INFINITY.to_bits()
-    );
+    control.downsample_level([1, 1, 1])?;
+    assert_eq!(read_f32(control.level_bytes(1)?)?.to_bits(), 0x8000_0001);
+    Ok(())
+}
 
-    let mut opposite = filled(
-        [2, 1, 1],
+/// AC5. An odd axis re-weights by the finite overlap only.
+///
+/// Samples are IEEE 754 binary32 words, DICOM PS3.5 section 6.2 VR OF,
+/// in the Float Pixel Data layout of PS3.3 C.7.6.24.
+/// The operator's answer of 2026-11-05 divides by the finite weight.
+/// F-119 decision 1 gives the overlap `w(c, p)`.
+///
+/// `[5, 1, 1]` of `10, NaN, 30, 40, +inf` down to `[3, 1, 1]`. `D = 5`.
+/// Child 0 meets parents 0 and 1 at weights 3 and 2. The NaN drops out,
+/// so `3 * 10 / 3 = 10.0`, bits `0x4120_0000`.
+/// Child 1 meets parents 1, 2 and 3 at weights 1, 3 and 1. The NaN drops
+/// out, so `(3 * 30 + 1 * 40) / 4 = 32.5`, bits `0x4202_0000`.
+/// Child 2 meets parents 3 and 4 at weights 2 and 3. The infinity drops
+/// out, so `2 * 40 / 2 = 40.0`, bits `0x4220_0000`.
+/// Dividing by the full weight 5 would give 6, 26 and 16.
+#[test]
+fn fixture_odd_axis_reweights_by_finite_overlap() -> Result<(), VolumeError> {
+    let mut volume = filled(
+        [5, 1, 1],
         [1.0, 1.0, 1.0],
         VoxelKind::F32,
-        &le_f32(&[f32::INFINITY, f32::NEG_INFINITY]),
+        &le_f32(&[10.0, f32::from_bits(0x7fc0_0001), 30.0, 40.0, f32::INFINITY]),
     )?;
-    opposite.downsample_level([1, 1, 1])?;
-    assert_eq!(
-        read_f32(opposite.level_bytes(1)?)?.to_bits(),
-        canon.to_bits()
-    );
+    volume.downsample_level([3, 1, 1])?;
+    let level = volume.level_bytes(1)?;
+    assert_eq!(f32_bits_at(level, 0)?, 0x4120_0000);
+    assert_eq!(f32_bits_at(level, 1)?, 0x4202_0000);
+    assert_eq!(f32_bits_at(level, 2)?, 0x4220_0000);
+    Ok(())
+}
 
+/// AC6. A coarser level is still a mean of level 0 under re-weighting.
+///
+/// Samples are IEEE 754 binary32 words, DICOM PS3.5 section 6.2 VR OF,
+/// in the Float Pixel Data layout of PS3.3 C.7.6.24.
+/// F-119 decision 2, kept by F-222 decision 9, computes every level from
+/// level 0.
+///
+/// `[4, 1, 1]` of `NaN, 1.0, 3.0, 5.0`.
+/// Level `[2, 1, 1]` gives child 0 `2 * 1.0 / 2 = 1.0` and child 1
+/// `(2 * 3.0 + 2 * 5.0) / 4 = 4.0`.
+/// Level `[1, 1, 1]` reads level 0 again. The finite sum is `1 + 3 + 5 = 9`
+/// and the finite weight is 3. `9 / 3 = 3.0`, bits `0x4040_0000`.
+/// Averaging the level 1 pair `(1.0, 4.0)` would give 2.5.
+#[test]
+fn fixture_reweighting_reads_level_zero() -> Result<(), VolumeError> {
+    let mut volume = filled(
+        [4, 1, 1],
+        [1.0, 1.0, 1.0],
+        VoxelKind::F32,
+        &le_f32(&[f32::from_bits(0x7fc0_0001), 1.0, 3.0, 5.0]),
+    )?;
+    volume.downsample_level([2, 1, 1])?;
+    let middle = volume.level_bytes(1)?;
+    assert_eq!(f32_bits_at(middle, 0)?, 1.0_f32.to_bits());
+    assert_eq!(f32_bits_at(middle, 1)?, 4.0_f32.to_bits());
+    volume.downsample_level([1, 1, 1])?;
+    assert_eq!(read_f32(volume.level_bytes(2)?)?.to_bits(), 0x4040_0000);
+    Ok(())
+}
+
+/// AC9. `level_voxel_to_level0` follows IEEE arithmetic on a non-finite centre.
+///
+/// The inputs are `f64` coordinates under F-119 decision 12, not samples.
+/// The operator's answer of 2026-11-05 settles the sample mean.
+/// The centre mapping has no box, so a non-finite centre stays on the
+/// IEEE path. Level 0 returns the input unchanged, payload included.
+/// A coarser axis returns NaN or the same-signed infinity. The NaN payload
+/// on that coarser axis is not pinned.
+#[test]
+fn non_finite_centres_follow_ieee_arithmetic() -> Result<(), VolumeError> {
     let payload = f64::from_bits(0x7ff8_0000_0000_0001);
     let level0 = bare([4, 1, 1], [1.0, 1.0, 1.0], VoxelKind::U8);
     let same = level0.level_voxel_to_level0(0, [payload, f64::INFINITY, f64::NEG_INFINITY])?;

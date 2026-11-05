@@ -7018,6 +7018,339 @@ def _example_dev_reaches_a_url(
     return box.run(["bin/example-dev.sh"])
 
 
+# F-218. The snippets call the pure functions on synthetic reports. The GHSA
+# ids are fixtures, not the live advisory list, so a moving database cannot
+# move a probe. `left-pad` stands in for a closure package that has no row.
+_ADVISORY_HEALTHY = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {}}
+bad, warned = a.audit_problems(report, {"left-pad"}, {}, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_UNEXCEPTED_HIGH = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "left-pad": {"nodes": ["node_modules/left-pad"], "via": [{
+        "source": 1,
+        "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+        "severity": "high", "range": "<1.0.0"}]}}}
+versions = {"node_modules/left-pad": "0.0.1"}
+bad, warned = a.audit_problems(report, {"left-pad"}, versions, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_UNEXCEPTED_CRITICAL = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "left-pad": {"nodes": ["node_modules/left-pad"], "via": [{
+        "source": 1,
+        "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+        "severity": "critical", "range": "<1.0.0"}]}}}
+versions = {"node_modules/left-pad": "0.0.1"}
+bad, warned = a.audit_problems(report, {"left-pad"}, versions, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_NEW = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "adm-zip": {"nodes": ["node_modules/adm-zip"], "via": [
+        {"source": 1,
+         "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+         "severity": "high", "range": "<0.6.1"},
+        {"source": 2,
+         "url": "https://github.com/advisories/GHSA-9999-8888-7777",
+         "severity": "high", "range": "<0.6.1"}]}}}
+versions = {"node_modules/adm-zip": "0.5.17"}
+rows = [{"package": "adm-zip", "version": "0.5.17",
+         "advisories": ["GHSA-1111-2222-3333"]}]
+bad, warned = a.audit_problems(report, {"adm-zip"}, versions, rows)
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_STALE = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "adm-zip": {"nodes": ["node_modules/adm-zip"], "via": []}}}
+versions = {"node_modules/adm-zip": "0.5.17"}
+rows = [{"package": "adm-zip", "version": "0.5.17",
+         "advisories": ["GHSA-1111-2222-3333"]}]
+bad, warned = a.audit_problems(report, {"adm-zip"}, versions, rows)
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_OUTSIDE = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "vite": {"nodes": ["node_modules/vite"], "via": [{
+        "source": 1,
+        "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+        "severity": "high", "range": "<1.0.0"}]}}}
+versions = {"node_modules/vite": "7.0.0"}
+bad, warned = a.audit_problems(report, {"left-pad"}, versions, [])
+if bad or warned:
+    print("\\n".join(bad + warned))
+    sys.exit(1)
+print("OK")
+sys.exit(0)
+"""
+
+_ADVISORY_MODERATE = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "left-pad": {"nodes": ["node_modules/left-pad"], "via": [{
+        "source": 1,
+        "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+        "severity": "moderate", "range": "<1.0.0"}]}}}
+versions = {"node_modules/left-pad": "0.0.1"}
+bad, warned = a.audit_problems(report, {"left-pad"}, versions, [])
+if bad:
+    print("\\n".join(bad))
+    sys.exit(1)
+for warning in warned:
+    print("WARN: " + warning)
+sys.exit(0)
+"""
+
+_ADVISORY_NO_REPORT = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+bad, warned = a.audit_problems({}, {"left-pad"}, {}, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_VERSION = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 1, "vulnerabilities": {}}
+bad, warned = a.audit_problems(report, {"left-pad"}, {}, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_UNKNOWN = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "left-pad": {"nodes": ["node_modules/left-pad"], "via": [{
+        "source": 1,
+        "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+        "severity": "severe", "range": "<1.0.0"}]}}}
+versions = {"node_modules/left-pad": "0.0.1"}
+bad, warned = a.audit_problems(report, {"left-pad"}, versions, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+
+def _advisory_blank_decided_by(box: Sandbox) -> None:
+    """An exception with an empty decider is not a decision."""
+    box.substitute(
+        "ci/advisories.toml",
+        'decided_by = "lead, under the operator\'s delegation of 2026-11-05"',
+        'decided_by = ""')
+
+
+def _advisory_scope_dev_only(box: Sandbox) -> None:
+    """dev-only is a licence scope. An advisory row may not use it."""
+    box.substitute(
+        "ci/advisories.toml",
+        'scope = "unreachable"',
+        'scope = "dev-only"')
+
+
+def _advisory_scope_padded(box: Sandbox) -> None:
+    """A trailing space is a different spelling and is not the scope."""
+    box.substitute(
+        "ci/advisories.toml",
+        'scope = "unreachable"',
+        'scope = "unreachable "')
+
+
+def _unreachable_trace_snippet(record_entry: bool) -> str:
+    """`check_consumer` over a synthetic directory, installer and tsc stubbed.
+
+    The refused run writes a trace that records neither dcmjs build. The
+    control writes one that records both. Both are otherwise a healthy
+    consumer, so the only refusal is a missing URL. Deleting the
+    `unreachable_problems` call inside `check_consumer` leaves the refused
+    run with nothing to print.
+    """
+    line = (
+        "file:///tmp/consumer/node_modules/dcmjs/build/dcmjs.es.js\n"
+        "file:///tmp/consumer/node_modules/dcmjs/build/dcmjs.js\n"
+        if record_entry else
+        "file:///tmp/other.js\n")
+    return (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "from subprocess import CompletedProcess\n"
+        "sys.path.insert(0, 'scripts')\n"
+        "import package_check as p\n"
+        "tsc = p.ROOT / 'node_modules' / 'typescript' / 'bin' / 'tsc'\n"
+        "tsc.parent.mkdir(parents=True, exist_ok=True)\n"
+        "tsc.write_text('process.exit(0)\\n')\n"
+        "def fake_run(cmd, cwd):\n"
+        "    cwd = Path(cwd)\n"
+        "    if cmd[:2] == ['npm', 'install']:\n"
+        "        lock = {'packages': {'node_modules/adm-zip':\n"
+        "                {'version': '0.5.17'}}}\n"
+        "        (cwd / 'package-lock.json').write_text(json.dumps(lock))\n"
+        "        script = cwd / 'node_modules' / 'dcmjs' / 'build' / 'dcmjs.es.js'\n"
+        "        script.parent.mkdir(parents=True, exist_ok=True)\n"
+        "        script.write_text('export {}\\n')\n"
+        "        return CompletedProcess(cmd, 0, '', '')\n"
+        "    if cmd[:3] == ['node', '--import', './trace.mjs']:\n"
+        f"        (cwd / 'trace-urls.txt').write_text({line!r})\n"
+        "        return CompletedProcess(cmd, 0, 'ok\\n', '')\n"
+        "    if cmd and cmd[0] == 'node':\n"
+        "        return CompletedProcess(cmd, 0, '', '')\n"
+        "    return CompletedProcess(cmd, 1, '', 'unexpected command')\n"
+        "p.run = fake_run\n"
+        "work = p.ROOT / 'probe-unreachable-work'\n"
+        "work.mkdir(parents=True, exist_ok=True)\n"
+        "bad = p.check_consumer(work, [Path('dummy.tgz')])\n"
+        "print('\\n'.join(bad))\n"
+        "sys.exit(1 if bad else 0)\n"
+    )
+
+
+_SMOKE_REQUIRES_DCMJS = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+bad = p.smoke_wiring_problems(
+    'import { VERSION } from "@ocelli/core";\\n', p.TRACE_REGISTER)
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_SMOKE_REGISTER_HOOKS = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+bad = p.smoke_wiring_problems(
+    p.SMOKE_SCRIPT,
+    'import { register } from "node:module";\\nregister("x", "y");\\n')
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_SMOKE_WIRING_HEALTHY = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+bad = p.smoke_wiring_problems(p.SMOKE_SCRIPT, p.TRACE_REGISTER)
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+# AC4. Four packed names, two packages. A suffix rule on `.test.js` only, or
+# a rule that runs for core only, leaves a path unnamed and this exits 0.
+_TEST_FILE_TARBALL = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+m = {'name': '@ocelli/core', 'version': '0.1.0',
+     'exports': {'.': {'import': './dist/index.js'}}}
+names = ['package.json', 'README.md', 'LICENSE-MIT',
+         'LICENSE-APACHE', 'NOTICE', 'dist/index.js',
+         'dist/index.test.js', 'dist/index.test.d.ts',
+         'dist/x.spec.js', 'dist/__tests__/a.js']
+wanted = ['dist/index.test.js', 'dist/index.test.d.ts',
+          'dist/x.spec.js', 'dist/__tests__/a.js']
+bad = []
+for package in ('core', 'react'):
+    bad.extend(p.check_tarball(package, m, names))
+print('\\n'.join(bad))
+named = all(
+    any(path in line and ('@ocelli/' + package) in line for line in bad)
+    for package in ('core', 'react')
+    for path in wanted)
+sys.exit(1 if named else 0)
+"""
+
+_TEST_FILE_TARBALL_HEALTHY = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+m = {'name': '@ocelli/core', 'version': '0.1.0',
+     'exports': {'.': {'import': './dist/index.js'}}}
+names = ['package.json', 'README.md', 'LICENSE-MIT',
+         'LICENSE-APACHE', 'NOTICE', 'dist/index.js',
+         'dist/latest.js', 'dist/contest.d.ts']
+bad = p.check_tarball('core', m, names)
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+
+def _advisory_unknown_proof(box: Sandbox) -> None:
+    """A proof name the packages gate does not run."""
+    box.substitute(
+        "ci/advisories.toml",
+        'proof = "packages-consumer-trace"',
+        'proof = "not-a-proof"')
+
+
+def _advisory_stale_version(box: Sandbox) -> None:
+    """A row for a version the published closure no longer installs."""
+    box.substitute(
+        "ci/advisories.toml",
+        'version = "0.5.17"',
+        'version = "0.5.16"')
+
+
+def _advisory_install_script(box: Sandbox) -> None:
+    """An install script runs before any import trace can see it."""
+    box.substitute(
+        "package-lock.json",
+        '"node_modules/adm-zip": {\n      "version": "0.5.17",',
+        '"node_modules/adm-zip": {\n      "version": "0.5.17",\n'
+        '      "hasInstallScript": true,')
+
+
+def _advisory_shipped_override(box: Sandbox) -> None:
+    """A root override of a closure package never reaches a consumer."""
+    box.substitute(
+        "package.json",
+        '"overrides": {\n    "react": "19.2.8",',
+        '"overrides": {\n    "adm-zip": "0.6.1",\n    "react": "19.2.8",')
+
+
+def _advisory_nested_override(box: Sandbox) -> None:
+    """The same refusal one object deeper, under the parent package name."""
+    box.substitute(
+        "package.json",
+        '"overrides": {\n    "react": "19.2.8",',
+        '"overrides": {\n    "dcmjs": {"adm-zip": "0.6.1"},\n'
+        '    "react": "19.2.8",')
+
+
 # ---------------------------------------------------------------------------
 # The catalogue
 # ---------------------------------------------------------------------------
@@ -10240,8 +10573,12 @@ GUARDS: tuple[Guard, ...] = (
         spec="story E1.3 and `docs/RELEASE.md`",
         refuses="A published package whose version skews from the workspace, "
                 "an advertised exports path absent from the tarball, a "
-                "tarball carrying sources or build state, and a consumer that "
-                "cannot import or type-check what was published.",
+                "tarball carrying sources, build state or a test file, a "
+                "consumer that cannot import or type-check what was "
+                "published, and an unreachable package the consumer resolves "
+                "at another version, loads during the smoke import, or names "
+                "from another package's file. A resolve trace that does not "
+                "record the dcmjs ES entry is refused as well.",
         claims=("*",),
         probes=(
             Probe(
@@ -10279,6 +10616,22 @@ GUARDS: tuple[Guard, ...] = (
                      "does not carry, which is story E1.3's sentence and not "
                      "the function's code."),
             Probe(
+                "packages.test-file-in-tarball", None,
+                python_snippet(
+                    "package_check.check_tarball, test file",
+                    _TEST_FILE_TARBALL),
+                "which is a test file",
+                level=1,
+                control=python_snippet(
+                    "package_check.check_tarball, no test file",
+                    _TEST_FILE_TARBALL_HEALTHY),
+                note="Level 1. The name list carries dist/index.test.js, "
+                     "dist/index.test.d.ts, dist/x.spec.js and "
+                     "dist/__tests__/a.js, for both packages. The control "
+                     "carries dist/latest.js and dist/contest.d.ts and must "
+                     "return none. A suffix rule on .test.js only, or a rule "
+                     "that matches the substring test, fails one of the two."),
+            Probe(
                 "packages.version-skew", None,
                 python_snippet(
                     "package_check.check_manifest",
@@ -10298,12 +10651,278 @@ GUARDS: tuple[Guard, ...] = (
                     "bad = p.check_manifest('core', m, '0.1.0');\n"
                     "print('\\n'.join(bad));\n"
                     "sys.exit(1 if bad else 0)\n")),
+            Probe(
+                "packages.unreachable-version", None,
+                python_snippet(
+                    "package_check.consumer_version_problems",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "rows = [{'package': 'adm-zip', 'version': '0.5.17',\n"
+                    "         'scope': 'unreachable'}]\n"
+                    "lock = {'packages': {'node_modules/adm-zip':\n"
+                    "         {'version': '0.5.16'}}}\n"
+                    "bad = p.consumer_version_problems(rows, lock)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "the consumer resolves",
+                level=1,
+                control=python_snippet(
+                    "package_check.consumer_version_problems, healthy",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "rows = [{'package': 'adm-zip', 'version': '0.5.17',\n"
+                    "         'scope': 'unreachable'}]\n"
+                    "lock = {'packages': {'node_modules/adm-zip':\n"
+                    "         {'version': '0.5.17'}}}\n"
+                    "bad = p.consumer_version_problems(rows, lock)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="The consumer lock is the proof. A row that describes "
+                     "this repository's lock and not the consumer's is "
+                     "refused."),
+            Probe(
+                "packages.unreachable-loaded", None,
+                python_snippet(
+                    "package_check.resolved_package_problems",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "urls = ['file:///tmp/consumer/node_modules/adm-zip/"
+                    "index.js']\n"
+                    "bad = p.resolved_package_problems(urls, {'adm-zip'})\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "loads an unreachable package",
+                level=1,
+                control=python_snippet(
+                    "package_check.resolved_package_problems, healthy",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "urls = ['file:///tmp/consumer/node_modules/dcmjs/build/"
+                    "dcmjs.es.js']\n"
+                    "bad = p.resolved_package_problems(urls, {'adm-zip'})\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="One resolved URL under the excepted package. The "
+                     "control resolves only dcmjs."),
+            Probe(
+                "packages.unreachable-named", None,
+                python_snippet(
+                    "package_check.specifier_problems",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "files = {'node_modules/dcmjs/build/dcmjs.es.js':\n"
+                    "         'import \"adm-zip\";\\n'}\n"
+                    "bad = p.specifier_problems(files, {'adm-zip'})\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "names an unreachable package",
+                level=1,
+                control=python_snippet(
+                    "package_check.specifier_problems, healthy",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "files = {'node_modules/dcmjs/build/dcmjs.es.js':\n"
+                    "         'export const ok = 1;\\n'}\n"
+                    "bad = p.specifier_problems(files, {'adm-zip'})\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="A quoted package name in another package's file. The "
+                     "package's own files are not the scan."),
+            Probe(
+                "packages.unreachable-trace", None,
+                python_snippet(
+                    "package_check.check_consumer, trace misses dcmjs",
+                    _unreachable_trace_snippet(False)),
+                "does not record dcmjs/build/dcmjs.es.js",
+                level=1,
+                control=python_snippet(
+                    "package_check.check_consumer, trace records dcmjs",
+                    _unreachable_trace_snippet(True)),
+                note="A synthetic consumer whose trace does not record the "
+                     "dcmjs ES entry or the CommonJS build the smoke run "
+                     "must load. The installer and the typecheck are stubbed. "
+                     "The call is check_consumer, so deleting "
+                     "unreachable_problems from it turns this probe red."),
+            Probe(
+                "packages.smoke-requires-dcmjs", None,
+                python_snippet(
+                    "package_check.smoke_wiring_problems, no require",
+                    _SMOKE_REQUIRES_DCMJS),
+                "does not require dcmjs",
+                level=1,
+                control=python_snippet(
+                    "package_check.smoke_wiring_problems, healthy",
+                    _SMOKE_WIRING_HEALTHY),
+                note="The control reads the real smoke text. Removing "
+                     "createRequire(import.meta.url)(\"dcmjs\") from it "
+                     "leaves this control failing."),
+            Probe(
+                "packages.hook-register-hooks", None,
+                python_snippet(
+                    "package_check.smoke_wiring_problems, module.register",
+                    _SMOKE_REGISTER_HOOKS),
+                "does not use registerHooks",
+                level=1,
+                control=python_snippet(
+                    "package_check.smoke_wiring_problems, hook healthy",
+                    _SMOKE_WIRING_HEALTHY),
+                note="module.register does not record a require from "
+                     "createRequire. The control reads the real hook text."),
         ),
         limit="The consumer install, node import, two tsc resolutions and "
               "publish dry run need an npm install. `node_modules` is ignored "
-              "and therefore absent from the `git ls-files` sandbox, so these "
-              "level-3 refusals have no catalogue probe. The `packages` gate "
-              "runs them against the real install on every push.",
+              "and therefore absent from the `git ls-files` sandbox, so those "
+              "steps have no level-3 probe. The `packages` gate runs them "
+              "against the real install on every push. The unreachability "
+              "checks are pure functions and have level-1 probes. "
+              "`packages.unreachable-trace` calls `check_consumer` on a "
+              "synthetic directory with the installer and the typecheck "
+              "stubbed, so removing that call turns the probe red. "
+              "`packages.smoke-requires-dcmjs` and "
+              "`packages.hook-register-hooks` read the real smoke text and "
+              "the real hook, so removing the dcmjs require or registerHooks "
+              "turns those probes red. `packages.test-file-in-tarball` calls "
+              "check_tarball for core and for react on the four test paths, "
+              "and its control is the healthy list.",
+    ),
+    Guard(
+        id="advisories",
+        file="scripts/advisory_check.py",
+        gate="advisories",
+        spec="`.claude/plans/F-218-design.md`",
+        refuses="A high or critical advisory in the published npm runtime "
+                "with no covering exception, a stale or misshapen exception, "
+                "an override of a closure package, and an audit report that "
+                "is missing, unreadable or the wrong version.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "advisories.unexcepted-high", None,
+                python_snippet("advisory_check unexcepted high",
+                               _ADVISORY_UNEXCEPTED_HIGH),
+                "has no exception",
+                level=1,
+                control=python_snippet("advisory healthy, unexcepted high",
+                                       _ADVISORY_HEALTHY)),
+            Probe(
+                "advisories.unexcepted-critical", None,
+                python_snippet("advisory_check unexcepted critical",
+                               _ADVISORY_UNEXCEPTED_CRITICAL),
+                "has no exception",
+                level=1,
+                control=python_snippet(
+                    "advisory healthy, unexcepted critical",
+                    _ADVISORY_HEALTHY),
+                note="critical sorts before high. Membership is the test."),
+            Probe(
+                "advisories.new-advisory", None,
+                python_snippet("advisory_check new advisory", _ADVISORY_NEW),
+                "has no exception",
+                level=1,
+                control=python_snippet("advisory healthy, new advisory",
+                                       _ADVISORY_HEALTHY),
+                note="The row lists one high id and the report carries a "
+                     "second. A package-level waiver would accept both."),
+            Probe(
+                "advisories.stale-advisory", None,
+                python_snippet("advisory_check stale advisory",
+                               _ADVISORY_STALE),
+                "no longer reports",
+                level=1,
+                control=python_snippet("advisory healthy, stale advisory",
+                                       _ADVISORY_HEALTHY)),
+            Probe(
+                "advisories.outside-closure", None,
+                python_snippet("advisory_check outside closure",
+                               _ADVISORY_OUTSIDE),
+                "OK",
+                level=1, polarity="accept",
+                note="vite is outside the published closure. A high advisory "
+                     "on it needs no row."),
+            Probe(
+                "advisories.moderate-warns", None,
+                python_snippet("advisory_check moderate",
+                               _ADVISORY_MODERATE),
+                "WARN",
+                level=1, polarity="accept",
+                note="An unexcepted moderate exits 0 and names itself."),
+            Probe(
+                "advisories.no-report", None,
+                python_snippet("advisory_check no report",
+                               _ADVISORY_NO_REPORT),
+                "did not produce a report",
+                level=1,
+                control=python_snippet("advisory healthy, no report",
+                                       _ADVISORY_HEALTHY)),
+            Probe(
+                "advisories.report-version", None,
+                python_snippet("advisory_check report version",
+                               _ADVISORY_VERSION),
+                "report version",
+                level=1,
+                control=python_snippet("advisory healthy, report version",
+                                       _ADVISORY_HEALTHY)),
+            Probe(
+                "advisories.unknown-severity", None,
+                python_snippet("advisory_check unknown severity",
+                               _ADVISORY_UNKNOWN),
+                "unknown severity",
+                level=1,
+                control=python_snippet("advisory healthy, unknown severity",
+                                       _ADVISORY_HEALTHY),
+                note="severe is not one of the five severities npm uses."),
+            Probe(
+                "advisories.exception-incomplete",
+                _advisory_blank_decided_by,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "is missing"),
+            Probe(
+                "advisories.exception-scope",
+                _advisory_scope_dev_only,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "is not unreachable"),
+            Probe(
+                "advisories.exception-scope-padded",
+                _advisory_scope_padded,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "is not unreachable",
+                note="scope = \"unreachable \" is a different spelling. "
+                     "Stripping it would accept the row and drop it from "
+                     "the consumer proof."),
+            Probe(
+                "advisories.exception-proof",
+                _advisory_unknown_proof,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "names no proof the packages gate runs"),
+            Probe(
+                "advisories.exception-stale",
+                _advisory_stale_version,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "stale advisory exception"),
+            Probe(
+                "advisories.install-script",
+                _advisory_install_script,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "has an install script"),
+            Probe(
+                "advisories.shipped-override",
+                _advisory_shipped_override,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "overrides do not reach a consumer"),
+            Probe(
+                "advisories.nested-override",
+                _advisory_nested_override,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "overrides do not reach a consumer",
+                note="The override sits under dcmjs. A top-level key scan "
+                     "would miss it."),
+        ),
+        limit="The live audit needs the registry, so the npm section has no "
+              "level-3 probe in the sandbox. Level-1 probes call "
+              "`audit_problems` on synthetic reports. The exceptions section "
+              "is level 3 over the sandbox copy of the tracked lock and "
+              "manifests. This gate's verdict follows the advisory database "
+              "and can change without a tree change.",
     ),
 
     # -- the example viewer launcher --------------------------------------
@@ -12576,6 +13195,28 @@ CONSTANTS: tuple[Constant, ...] = (
              why="Deviation D-09's explicit crate set. Direct comparison "
                  "catches a source attribute entering or leaving it, and this "
                  "digest makes a deliberate posture change visible."),
+    # F-218. Widening PROOFS would accept a proof name the packages gate
+    # does not run.
+    Constant("advisories", "scripts/advisory_check.py", "REFUSED",
+             r"^REFUSED = (\(.*?\))$",
+             why="High and critical fail. Membership, not alphabetical "
+                 "order, because critical sorts before high."),
+    Constant("advisories", "scripts/advisory_check.py", "KNOWN",
+             r"^KNOWN = (\(.*?\))$",
+             why="The five severities npm uses. A severity outside this "
+                 "tuple fails closed."),
+    Constant("advisories", "scripts/advisory_check.py", "FIELDS",
+             r"^FIELDS = (\(.*?\))\n",
+             why="The fields an advisory exception must carry. Dropping one "
+                 "lets an approval through with no reason."),
+    Constant("advisories", "scripts/advisory_check.py", "SCOPES",
+             r"^SCOPES = (\(.*?\))$",
+             why="The only scope an advisory exception may name. dev-only "
+                 "would accept a package the published runtime installs."),
+    Constant("advisories", "scripts/advisory_check.py", "PROOFS",
+             r"^PROOFS = (\(.*?\))$",
+             why="The proof names the packages gate runs. Widening this "
+                 "tuple would accept a proof that gate does not run."),
 )
 
 

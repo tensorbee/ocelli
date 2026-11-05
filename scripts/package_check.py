@@ -17,9 +17,9 @@ So the tarballs are built, installed OUTSIDE the workspace, and imported.
 
 ## Why there is no bundler
 
-`@ocelli/core` has no runtime dependency and emits ESM with declarations
-through `tsc --build`. A bundler over a dependency-free ESM package produces
-the same modules with an extra tool in the path. `AGENTS.md` asks whether a
+`@ocelli/core` emits ESM with declarations through `tsc --build`. Its one
+runtime dependency is `dcmjs`, which a consumer resolves. A bundler would add
+a tool in the path and change what the tarball is. `AGENTS.md` asks whether a
 construct reduces the cases a reader must consider or increases the places
 they must look, and it increases them.
 
@@ -36,12 +36,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 from pathlib import Path
+
+import advisory_check
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGES = ["core", "react"]
@@ -57,6 +61,21 @@ REQUIRED = ["package.json", "README.md", "LICENSE-MIT", "LICENSE-APACHE",
 # machine that built it.
 FORBIDDEN_PREFIXES = ["src/", "node_modules/"]
 FORBIDDEN_SUFFIXES = [".tsbuildinfo"]
+
+
+def _is_test_artifact(path: str) -> bool:
+    """True when a packed path is a compiled test.
+
+    The marker sits in the basename as `.test.` or `.spec.`, so `.js`,
+    `.js.map`, `.d.ts` and `.d.ts.map` match alike. A `__tests__` path
+    segment matches too. The substring `test` does not, so `latest.js`
+    and `contest.d.ts` are library names.
+    """
+    segments = path.split("/")
+    if "__tests__" in segments:
+        return True
+    base = segments[-1]
+    return ".test." in base or ".spec." in base
 
 
 def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -128,6 +147,10 @@ def check_tarball(name: str, manifest: dict, names: list[str]) -> list[str]:
                     f"@ocelli/{name} tarball carries {path}. It is build "
                     f"state, and it embeds absolute paths from the machine "
                     f"that produced it")
+        if _is_test_artifact(path):
+            problems.append(
+                f"@ocelli/{name} tarball carries {path}, which is a "
+                f"test file")
 
     # THE CHECK THIS FILE EXISTS FOR. Every path the manifest advertises has to
     # be in the tarball. npm does not verify this and a consumer finds out at
@@ -154,6 +177,232 @@ def check_tarball(name: str, manifest: dict, names: list[str]) -> list[str]:
                 f"tarball has no {relative}. This installs cleanly and fails "
                 f"at the consumer's first import.")
     return problems
+
+
+def _inside_package(path: str, name: str) -> bool:
+    """True when `path` is a file of the named installed package."""
+    normalised = path.replace("\\", "/")
+    marker = f"node_modules/{name}/"
+    return marker in normalised or normalised.endswith(f"node_modules/{name}")
+
+
+def _unreachable_rows() -> list[dict]:
+    path = ROOT / "ci" / "advisories.toml"
+    if not path.is_file():
+        return []
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    rows = data.get("exception", [])
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)
+            and advisory_check.scope_is_unreachable(row.get("scope"))]
+
+
+def consumer_version_problems(rows: list[dict], consumer_lock: dict) -> list[str]:
+    """The consumer lock must resolve each unreachable row's version."""
+    problems: list[str] = []
+    packages = consumer_lock.get("packages", {})
+    if not isinstance(packages, dict):
+        packages = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if not advisory_check.scope_is_unreachable(row.get("scope")):
+            continue
+        name = str(row.get("package", "")).strip()
+        wanted = str(row.get("version", "")).strip()
+        if not name or not wanted:
+            continue
+        found: set[str] = set()
+        for key, entry in packages.items():
+            if not isinstance(entry, dict):
+                continue
+            path_name = ""
+            if isinstance(key, str) and "node_modules/" in key:
+                path_name = key.rsplit("node_modules/", 1)[1]
+            if path_name == name or entry.get("name") == name:
+                version = entry.get("version")
+                if isinstance(version, str) and version:
+                    found.add(version)
+        if found != {wanted}:
+            got = ", ".join(sorted(found)) if found else "nothing"
+            problems.append(f"the consumer resolves {name} at {got} and the exception records {wanted}")
+    return problems
+
+
+def resolved_package_problems(resolved: list[str], names: set[str]) -> list[str]:
+    """A resolved URL under an unreachable package means the import loaded it."""
+    problems: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for url in resolved:
+        for name in sorted(names):
+            marker = f"/node_modules/{name}/"
+            if marker in url or url.endswith(f"/node_modules/{name}"):
+                key = (url, name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                problems.append(f"{url} loads an unreachable package {name}")
+    return problems
+
+
+def _specifier_pattern(name: str) -> re.Pattern[str]:
+    """A module specifier for `name`, in any quote, with or without a subpath.
+
+    The three quote styles are `"`, `'` and backticks. The body is the bare
+    package name, that name plus a subpath, a relative path into
+    `node_modules/<name>`, or one or more `../` segments followed by the
+    package name (`../<name>` and `../../<name>`). A mention that is not a
+    specifier does not match.
+    """
+    escaped = re.escape(name)
+    return re.compile(
+        r"""(?P<q>["'`])"""
+        r"""(?:(?:\./|\.\./)+node_modules/|(?:\.\./)+)?"""
+        rf"""{escaped}(?:/[^"'`]*)?"""
+        r"""(?P=q)"""
+    )
+
+
+def specifier_problems(files: dict[str, str], names: set[str]) -> list[str]:
+    """A module specifier for an unreachable package in another package's script.
+
+    The package's own files are skipped. A bundler reaches a dependency by
+    naming it as a specifier, which is the check a resolve hook cannot make
+    because the bundler never runs the module.
+    """
+    problems: list[str] = []
+    patterns = {name: _specifier_pattern(name) for name in sorted(names)}
+    for path, text in files.items():
+        for name, pattern in patterns.items():
+            if _inside_package(path, name):
+                continue
+            if pattern.search(text):
+                problems.append(f"{path} names an unreachable package {name}")
+    return problems
+
+
+def _script_texts(consumer: Path, names: set[str]) -> dict[str, str]:
+    root = consumer / "node_modules"
+    files: dict[str, str] = {}
+    if not root.is_dir():
+        return files
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix not in {".js", ".mjs", ".cjs"}:
+            continue
+        relative = path.relative_to(consumer).as_posix()
+        if any(_inside_package(relative, name) for name in names):
+            continue
+        files[relative] = path.read_text(encoding="utf-8", errors="replace")
+    return files
+
+
+# The smoke import of @ocelli/core resolves dcmjs through its `import`
+# condition. createRequire resolves the `require` condition. A trace that
+# misses either URL did not see that load.
+DCMJS_ES_ENTRY = "node_modules/dcmjs/build/dcmjs.es.js"
+DCMJS_CJS_ENTRY = "node_modules/dcmjs/build/dcmjs.js"
+DCMJS_TRACE_ENTRIES = (DCMJS_ES_ENTRY, DCMJS_CJS_ENTRY)
+
+# Node 24's `module.registerHooks` records both ESM and CommonJS resolution.
+# `module.register` installs an asynchronous ESM loader hook and does not see
+# a `require` made through `createRequire`. The root package.json has no
+# `engines` field. CI pins node 24.
+TRACE_REGISTER = """\
+import { registerHooks } from "node:module";
+import { appendFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const trace = fileURLToPath(new URL("./trace-urls.txt", import.meta.url));
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    const resolved = nextResolve(specifier, context);
+    appendFileSync(trace, resolved.url + "\\n");
+    return resolved;
+  },
+});
+"""
+
+
+def trace_entry_problems(resolved: list[str]) -> list[str]:
+    """The smoke run must resolve both dcmjs builds.
+
+    An empty or absent trace used to pass, which made the unreachability
+    check green when the hook recorded nothing. The CommonJS URL is the
+    one `createRequire` loads. A hook that only records the ESM import
+    leaves it absent.
+    """
+    problems: list[str] = []
+    for entry in DCMJS_TRACE_ENTRIES:
+        if any(entry in url for url in resolved):
+            continue
+        shown = entry.removeprefix("node_modules/")
+        problems.append(f"the resolve trace does not record {shown}")
+    return problems
+
+
+def smoke_wiring_problems(smoke: str, hook: str) -> list[str]:
+    """The smoke text must require dcmjs and the hook must call registerHooks.
+
+    A trace a test writes can name both dcmjs builds without either line
+    being present. `module.register` does not record a `require` from
+    `createRequire`, and a smoke script that never calls `createRequire`
+    never loads the CommonJS build.
+    """
+    problems: list[str] = []
+    if 'createRequire(import.meta.url)("dcmjs")' not in smoke:
+        problems.append("the smoke script does not require dcmjs")
+    if "registerHooks(" not in hook:
+        problems.append("the resolve hook does not use registerHooks")
+    return problems
+
+
+# createRequire loads the CommonJS build before the package import. A
+# static import is hoisted, so a throw while the ESM build evaluates would
+# skip the require and the trace would miss dcmjs.js. The dynamic import
+# runs after that require. registerHooks records both. A string built
+# inside either file is on this trace only when that file runs.
+SMOKE_SCRIPT = (
+    'import { createRequire } from "node:module";\n'
+    'createRequire(import.meta.url)("dcmjs");\n'
+    'const { VERSION, coreAvailable, writeFrame, readEvent } = '
+    'await import("@ocelli/core");\n'
+    'if (typeof VERSION !== "string") { throw new Error("VERSION"); }\n'
+    'if (coreAvailable() !== false) { throw new Error("coreAvailable"); }\n'
+    'if (typeof writeFrame !== "function") { throw new Error("writeFrame"); }\n'
+    'if (typeof readEvent !== "function") { throw new Error("readEvent"); }\n'
+    'console.log("ok", VERSION);\n'
+)
+
+
+def unreachable_problems(consumer: Path, rows: list[dict]) -> list[str]:
+    """Lock version, resolve trace and static specifiers for one consumer.
+
+    `check_consumer` calls this once. The three checks and the trace's own
+    presence are one function, so a synthetic consumer directory exercises
+    the read of the lock, the trace and the installed scripts together.
+    """
+    lock_path = consumer / "package-lock.json"
+    try:
+        consumer_lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        consumer_lock = {}
+    trace_path = consumer / "trace-urls.txt"
+    resolved: list[str] = []
+    if trace_path.is_file():
+        resolved = [line for line in
+                    trace_path.read_text(encoding="utf-8").splitlines()
+                    if line]
+    names = {str(row.get("package", "")).strip() for row in rows
+             if advisory_check.scope_is_unreachable(row.get("scope"))
+             and str(row.get("package", "")).strip()}
+    return [
+        *consumer_version_problems(rows, consumer_lock),
+        *trace_entry_problems(resolved),
+        *resolved_package_problems(resolved, names),
+        *specifier_problems(_script_texts(consumer, names), names),
+    ]
 
 
 def check_consumer(work: Path, tarballs: list[Path]) -> list[str]:
@@ -187,19 +436,23 @@ def check_consumer(work: Path, tarballs: list[Path]) -> list[str]:
     # asserted the published tarball does. Deleting either export left eslint,
     # tsc and vitest all at 0 and this consumer green, because it exercised
     # only `VERSION`, `coreAvailable` and the React component.
-    (consumer / "smoke.mjs").write_text(
-        'import { VERSION, coreAvailable, writeFrame, readEvent } '
-        'from "@ocelli/core";\n'
-        'if (typeof VERSION !== "string") { throw new Error("VERSION"); }\n'
-        'if (coreAvailable() !== false) { throw new Error("coreAvailable"); }\n'
-        'if (typeof writeFrame !== "function") { throw new Error("writeFrame"); }\n'
-        'if (typeof readEvent !== "function") { throw new Error("readEvent"); }\n'
-        'console.log("ok", VERSION);\n')
-    smoke = run(["node", "smoke.mjs"], consumer)
+    # SMOKE_SCRIPT requires the CommonJS build first, then dynamically
+    # imports @ocelli/core so the ESM build loads second. registerHooks
+    # records both. A string built inside either file is on this trace only
+    # when that file runs.
+    (consumer / "smoke.mjs").write_text(SMOKE_SCRIPT)
+    (consumer / "trace.mjs").write_text(TRACE_REGISTER)
+    smoke = run(
+        ["node", "--import", "./trace.mjs", "smoke.mjs"], consumer)
     if smoke.returncode != 0:
         problems.append(
             f"the published @ocelli/core does not import under node:\n"
             f"{smoke.stderr.strip()}")
+
+    # The unreachable-package check. The smoke run above is the traced run,
+    # so the resolve hook and both dcmjs entry points are one execution.
+    problems += smoke_wiring_problems(SMOKE_SCRIPT, TRACE_REGISTER)
+    problems += unreachable_problems(consumer, _unreachable_rows())
 
     # 2. It type-checks under BOTH resolution modes. `bundler` is what a Vite
     #    or webpack consumer uses and `node16` is what a plain tsc consumer

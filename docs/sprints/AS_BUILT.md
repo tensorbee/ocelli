@@ -5151,3 +5151,87 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The plan's consumer map said `guard_census.py --record` re-measures wall clock. `guard_probe.py --record-budget` does, and wall clock was left as recorded because the gate stays inside it. The plan line is corrected. Implemented by an external coding agent, reviewed clean on the first pass.
 
 **Notes for future sessions.** The census counts per entry, not per refusal, so a refusal added to `gen_sprint_plan.py` later needs its own probe by review. Uniqueness of every probe fragment across all fourteen messages is a recorded hand check, not an automated test.
+
+## F-222, Pyramid means skip non-finite F32 samples, completed 2026-11-05
+
+**What was built.** An F32 coarser pyramid level now leaves NaN and both infinities out of each mean and divides by the overlap weight of the finite samples only, accumulated in f64. A box with no finite sample is written as the NaN `0x7fc0_0000`, decided by a flag rather than a float compare, and a mean that narrows to negative zero is written as positive zero. Integer means, `narrow_f32` and `level_voxel_to_level0` are unchanged. This is the operator's answer of 2026-11-05 to F-119's open question.
+
+**HLD sections implemented.** Section 26's multiscale pyramid, the F32 half of F-119's mean.
+
+**Deviations.** none
+
+**Crates / packages modified.** `ocelli-volume`.
+
+**Tests added.** Six new pyramid fixtures, AC1 to AC6, with expected bits hand-computed from IEEE 754 in their comments, and `non_finite_floats_keep_the_current_bits` replaced by `non_finite_centres_follow_ieee_arithmetic`. The implementer saw each new fixture fail on the old mean. The reviewer ran eleven mutations and ten went red. The survivor removes the empty-box early return, which `narrow_f32` makes equivalent today.
+
+**Fixture provenance.** Hand-computed from IEEE 754 binary32 and the Float Pixel Data layout of PS3.3 C.7.6.24, values cited by bit pattern in each fixture.
+
+**Verification.** Feature profile on the merged worker tree, 27 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 2a7e79a.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** CPU generation, so the same bytes on tiers A, B and C. Identity on wasm32 is argued from the arithmetic, not observed, because this crate has no wasm test runner.
+
+**LLD updated.** `docs/lld/volumes.md` and its `docs/lld/README.md` index row.
+
+**User-facing documentation.** no change. Nothing in production calls `generate_pyramid` and a volume refuses 32-bit frames, so no page reaches an F32 coarse level. F-120 updates the pages when one becomes reachable.
+
+**Deviations from the design plan.** none. Implemented by an external coding agent. Two review passes, the first finding two false test comments that the sprint lead corrected.
+
+**Notes for future sessions.** The empty-box flag is defence in depth that no test can tell apart from `narrow_f32`'s own NaN today. Keep it if `narrow_f32` changes.
+
+## F-218, Dependency advisories in shipped packages, completed 2026-11-05
+
+**What was built.** `scripts/advisory_check.py` and a floor gate `advisories` audit the dependency closure `@ocelli/core` ships against `npm audit`, refusing any high or critical advisory without a row in `ci/advisories.toml`. The one row is adm-zip 0.5.17, reached through dcmjs 0.52.2, with scope `unreachable`. That scope is accepted only while `gate packages` installs the packed tarball into a consumer, traces every module the smoke run loads through a `registerHooks` hook, and finds no adm-zip load, with an injection test that plants a load and watches the check go red. npm aliases are resolved through the lock nodes. An override of a closure package is refused, because a root override never reaches a consumer.
+
+**HLD sections implemented.** Section 27.2, the guard harness, and the packaging rules of the TypeScript shell.
+
+**Deviations.** none
+
+**Crates / packages modified.** `scripts/advisory_check.py`, `scripts/package_check.py`, `scripts/guards/catalogue.py`, `ci/advisories.toml`, `ci/guard-probe-budget.json`, `bin/ocelli.sh`, `.github/workflows/ci.yml`.
+
+**Tests added.** 48 unit tests in `scripts/tests/test_advisory_check.py`, the injection test `scripts/tests/test_unreachable_injections.py` run inside `gate packages`, and the new advisory and wiring probes in the guard catalogue.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the merged worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 79f3f63.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes packaging and guard tooling only.
+
+**LLD updated.** `docs/lld/guards.md`, `docs/lld/typescript-packaging.md` and their `docs/lld/README.md` index rows.
+
+**User-facing documentation.** `README.md`, `packages/core/README.md` and the Use book state the advisory, what the packages gate checks and its limit, and the consumer override recipe for adm-zip 0.6.1.
+
+**Deviations from the design plan.** none. The CI half of AC3 is confirmed by the CI run on the pushed head. Implemented by an external coding agent. Five review passes, the last three on wording that said the gate proves unreachability where it checks the paths it runs.
+
+**Notes for future sessions.** Removing the injection test from `gate packages` is noticed by no guard today, a pass 3 nitpick. The exception row goes stale when dcmjs stops declaring adm-zip, and the gate then refuses it.
+
+## F-221, Published package contents, completed 2026-11-05
+
+**What was built.** Each package's `tsconfig.json` stays the library project and now excludes tests. A sibling `tsconfig.test.json` per package references the library and typechecks the tests into an ignored cache under `node_modules/.cache/ocelli-tsc/`, with its own `tsBuildInfoFile`, and the root solution references both test projects. `build` removes `dist` and `tsconfig.tsbuildinfo` before `tsc --build`, because `tsc --build` does not re-emit a deleted `dist` while its build info survives. `scripts/package_check.py` refuses any tarball entry whose basename contains `.test.` or `.spec.` or whose path has a `__tests__` segment.
+
+**HLD sections implemented.** The packaging rules of the TypeScript shell.
+
+**Deviations.** none
+
+**Crates / packages modified.** `@ocelli/core` and `@ocelli/react` build configuration, root `tsconfig.json`, `scripts/package_check.py`, `scripts/guards/catalogue.py`, `ci/guard-probe-budget.json`.
+
+**Tests added.** A level-1 probe for the test-file refusal with `latest.js` and `contest.d.ts` controls. Pass 1 applied seven mutations to the rule and each went red. Vitest stays at 57 files and 468 tests.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the merged worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree f98e8e7.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes packaging only.
+
+**LLD updated.** `docs/lld/typescript-packaging.md` and its `docs/lld/README.md` index row.
+
+**User-facing documentation.** no change. README.md, the Use book and the More page do not list tarball contents.
+
+**Deviations from the design plan.** The plan measured 281 core entries and 141 test paths. A fresh build gives 278 and 138, because a stale `dist/cursor.probe.test.*` with no source is not recreated. The non-test count, 140, is what AC1 requires. Each test project also names its own `tsBuildInfoFile`, which the plan did not, after pass 1 found the two shared one path and never settled. Implemented by an external coding agent. Three review passes.
+
+**Notes for future sessions.** The plan's decision 1 still lists a three-entry exclude for react, which is now two globs. The tree is the authority.

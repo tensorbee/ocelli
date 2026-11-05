@@ -50,6 +50,31 @@
       "guard": "lint-policy",
       "tunable": false
     },
+    "scripts/advisory_check.py:FIELDS": {
+      "digest": "9cd893b7f92f0af8",
+      "guard": "advisories",
+      "tunable": false
+    },
+    "scripts/advisory_check.py:KNOWN": {
+      "digest": "cb1c533b80da51a1",
+      "guard": "advisories",
+      "tunable": false
+    },
+    "scripts/advisory_check.py:PROOFS": {
+      "digest": "21b24b74a7051e48",
+      "guard": "advisories",
+      "tunable": false
+    },
+    "scripts/advisory_check.py:REFUSED": {
+      "digest": "8867f64d52a59653",
+      "guard": "advisories",
+      "tunable": false
+    },
+    "scripts/advisory_check.py:SCOPES": {
+      "digest": "66ae600307d59fed",
+      "guard": "advisories",
+      "tunable": false
+    },
     "scripts/backlog_check.py:DECLARED_DEFECTS": {
       "digest": "0b1922c66a6e5d83",
       "guard": "backlog",
@@ -226,8 +251,9 @@
       "tunable": false
     }
   },
-  "constants_count": 45,
+  "constants_count": 50,
   "entry_sites": {
+    "advisories": 13,
     "backlog": 10,
     "bench": 33,
     "bench.cold-start": 7,
@@ -281,7 +307,7 @@
     "oracle.unsupported": 3,
     "oracle.voi": 5,
     "oracle.volume": 31,
-    "packages": 21,
+    "packages": 28,
     "panic-probe": 1,
     "pins": 58,
     "populate-corpus": 10,
@@ -304,7 +330,7 @@
     "target-features": 6,
     "unsafe": 7
   },
-  "gates_declared": 33,
+  "gates_declared": 34,
   "note": "Recorded measurements, not guesses. `wall_clock_seconds` is what the harness took on the machine that recorded it. `constants` is the declared-constant ratchet, `constants_count` and `gates_declared` are the counts that catch one of those being removed rather than changed, `entry_sites` is the per-entry refusal count for the catalogue entries claiming their file with `\"*\"`, so a refusal added to an already claimed file moves a number when it takes one of the shapes scripts/guards/discover.py scans, `oracle_faults` is the fault-count ratchet and `uncovered` is the uncovered-refusal ratchet, all written by scripts/guard_census.py --record.",
   "oracle_faults": 23,
   "uncovered": {

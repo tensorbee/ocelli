@@ -1,6 +1,6 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218, F-221
 **Last updated:** 2026-11-05
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
@@ -23,7 +23,10 @@ ring drain. `coreAvailable()` stays false until a built module is loaded.
 
 ### What is in the `@ocelli/core` tarball today
 
-Everything under `packages/core/src` compiles into `dist`. Public modules are
+`packages/core/tsconfig.json` is the library project. It compiles the modules
+under `packages/core/src` into `dist` and excludes `src/**/*.test.ts`,
+`src/**/*.test.tsx` and `src/node-test-modules.d.ts`. `@ocelli/react`
+excludes the two test globs. A compiled test is not a library output. Public modules are
 re-exported from `index.ts`, including F-021's DICOMweb client, request
 options, errors, response kinds, sink contract, and one-write helper, and
 F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
@@ -43,6 +46,34 @@ F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
 | `fatal.ts` | `CoreStatus` and the never-returns-to-ok latch |
 | `capabilities.ts` | The shell-side probes `wasmSimd128Supported` and `sharedMemoryAvailable`, and the committed SIMD module they validate |
 | `viewport.ts` | F-100's viewport, scene and tool types. No wasm call and no pixels |
+
+`packages/core/tsconfig.test.json` and `packages/react/tsconfig.test.json`
+include only the test sources. The core test project also includes
+`src/node-test-modules.d.ts` and `src/dcmjs.d.ts`. Test files import `dcmjs`
+directly, and that ambient module declaration does not cross a project
+reference. Each references its library project, and the
+react test project also references `packages/core`. The react test project
+sets `jsx` to `react-jsx`, because it extends the base config and the base
+does not set it. The root `tsconfig.json` references both test projects, so
+`npm run typecheck` still sees every test file, including
+`boundary.wasm.test.ts`. Vitest discovers tests by its own globs and does not
+read these projects.
+
+The test projects emit under `node_modules/.cache/ocelli-tsc/`. That directory
+is ignored, never packed and never linted. Each test project names its own
+`tsBuildInfoFile` there, so the two never write one build info file. `dist` stays the library output
+whether `build` or `typecheck` ran last.
+
+`build` and `clean` both remove `dist` and `tsconfig.tsbuildinfo`.
+`tsc --build` treats a surviving `.tsbuildinfo` as proof that `dist` is
+current, so deleting `dist` alone leaves the directory absent and the next
+build writes nothing. The two go together. A file planted in `dist` cannot
+survive `build`.
+
+`scripts/package_check.py` refuses a packed path whose basename contains
+`.test.` or `.spec.`, and a path with a `__tests__` segment. The message
+names the package and the path. `latest.js` and `contest.d.ts` are not test
+files. The probe is `packages.test-file-in-tarball`.
 
 `docs/lld/errors.md` specifies `errors.ts`, `panic.ts` and `fatal.ts`, and
 `docs/lld/tier-resolution.md` specifies `capabilities.ts`. What belongs to
@@ -152,9 +183,11 @@ consumer receives, and every check here is about the second thing.
 | Every path `main`, `types` and each `exports` condition names is inside the tarball | The package installs cleanly and fails at the consumer's first import. npm does not check this |
 | `README.md`, `LICENSE-MIT`, `LICENSE-APACHE` and `NOTICE` are inside the tarball | A manifest saying `MIT OR Apache-2.0` with no licence text is a claim rather than a grant. `NOTICE` names the holder |
 | No `src/`, no `node_modules/`, no `.tsbuildinfo` | Bytes a consumer downloads and never uses. `.tsbuildinfo` additionally embeds absolute paths from the build machine |
+| No packed path whose basename contains `.test.` or `.spec.`, and no `__tests__` segment | A published tarball that ships a compiled test. The library projects exclude tests, and this refusal is the backstop |
 | The npm version equals the Rust workspace version | `docs/RELEASE.md` says the crates and the packages version together and that a skew is not supported |
 | `@ocelli/react` depends on the exact version `@ocelli/core` publishes | A range resolves to whatever the registry happens to have |
 | A project **outside the workspace** installs the real tarballs, imports under `node`, and type-checks under both `bundler` and `node16` | The one that matters. See below |
+| The consumer resolves each unreachable exception at its recorded version. The smoke run imports `@ocelli/core` and requires `dcmjs` under `module.registerHooks`, so both the ESM build and the CommonJS build are resolved. The trace must record `node_modules/dcmjs/build/dcmjs.es.js` and `node_modules/dcmjs/build/dcmjs.js` and must not record a URL under the excepted package. Every other installed `.js`, `.mjs` or `.cjs` file is scanned for the package name as a module specifier in single quotes, double quotes or backticks, including a subpath, a relative `./node_modules/<name>` path, and a relative `../` or `../../` path whose next segment is the package name | An exception that describes this repository's lock rather than the consumer's, a hook that records nothing, or a published file that names the package as a specifier |
 
 ### Why the consumer install is outside the workspace
 
@@ -169,6 +202,36 @@ outside the tree, and imported from there.
 **Both resolution modes are checked because an `exports` map can satisfy one
 and not the other.** `bundler` is what a Vite or webpack consumer uses.
 `node16` is what a plain `tsc` consumer uses and it is the stricter of the two.
+
+### Why no override is used
+
+npm's documentation says "Overrides are only considered in the root
+`package.json` file for a project." An override written in this repository
+changes only this repository's lockfile. A consumer of `@ocelli/core` resolves
+dependencies from their own root `package.json`. The recorded answer is a
+check that no shipped file loads `adm-zip` on the paths this gate runs.
+`gate packages` checks that on every run.
+
+The check has three parts. The consumer lock must resolve the excepted
+package at the recorded version. The smoke script imports `@ocelli/core` and
+calls `createRequire(import.meta.url)("dcmjs")` under node's
+`module.registerHooks` resolve hook, which records ESM and CommonJS
+resolutions on the main thread. `module.register` does not see a `require`
+from `createRequire`, which is why the hook is `registerHooks`. The trace
+must contain the resolved `dcmjs/build/dcmjs.es.js` URL and the resolved
+`dcmjs/build/dcmjs.js` URL and must not contain a URL under the excepted
+package. An empty or absent trace is a refusal. Every other installed script
+is scanned for that package name as a quoted module specifier, in any of the
+three quote styles, with or without a subpath, including a relative `../` or
+`../../` path. A load whose specifier is built at run time in code the smoke
+run does not execute on its main thread (for example a Worker or a child
+process, or a function the import never calls) is outside the check. The
+root `package.json` has no `engines` field. CI pins node 24, and
+`registerHooks` is the node 24 API this check uses. The packages gate also
+runs `scripts/tests/test_unreachable_injections.py` after that check.
+
+A consumer's own npm audit also lists `@ocelli/core` and `@ocelli/react` as
+high, because they depend on dcmjs.
 
 ## `npm publish --dry-run`
 

@@ -530,3 +530,11 @@ Repository bootstrap. Nothing is published.
   stops before product implementation, verification receipts or publication.
   The unsafe gate audits the complete staged index and the verify ledger
   reports whether a receipt existed before invalidation.
+- An advisory gate audits the dependencies `@ocelli/core` ships. dcmjs
+  0.52.2 declares adm-zip 0.5.17, which has a published advisory, and the one
+  recorded exception holds only while the packages gate finds no shipped file
+  that loads adm-zip. The README gives the override a consumer can add to
+  install adm-zip 0.6.1.
+- The `@ocelli/core` and `@ocelli/react` tarballs no longer ship compiled
+  test files. Core packs 140 entries and react 17. The packages check
+  refuses any test file in a published tarball.
