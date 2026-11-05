@@ -2717,6 +2717,238 @@
       ]
     },
     {
+      "fid": "F-208",
+      "eid": "E38.18",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer viewports: layouts from 1 by 1 to 3 by 3, per-viewport series and view state, an active viewport, a series dragged from its thumbnail onto a cell, and the four-image view kept as a tile mode",
+      "layer": "TS",
+      "weeks": 6,
+      "depends_eids": [
+        "E38.17",
+        "E38.9"
+      ],
+      "notes": "Professional viewers load a series by dragging its thumbnail onto a viewport cell, and every cell holds its own series.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-207",
+        "F-199"
+      ]
+    },
+    {
+      "fid": "F-209",
+      "eid": "E38.19",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer linked viewports: scroll by position in a shared frame of reference, synced window and zoom, and reference lines from the library",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.18",
+        "E38.9"
+      ],
+      "notes": "Uses the library reference line of F-199. The page computes no geometry of its own.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-208",
+        "F-199"
+      ]
+    },
+    {
+      "fid": "F-210",
+      "eid": "E38.20",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer value at the pointer: the modality value and its unit from the modality stage of the LUT chain, HU on CT, returned by the local process",
+      "layer": "Rust",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.17",
+        "E38.1"
+      ],
+      "notes": "The pointer cross shows column and row today. The value comes from ocelli-pixel, never from page arithmetic, with a hand-computed fixture citing PS3.3 C.11.1.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-207",
+        "F-191"
+      ]
+    },
+    {
+      "fid": "F-211",
+      "eid": "E38.21",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer measurements: angle, Cobb angle, bidirectional, arrow and probe, region area with mean, SD, minimum and maximum in modality units, editable handles and a measurement list",
+      "layer": "All",
+      "weeks": 6,
+      "depends_eids": [
+        "E38.20",
+        "E38.5"
+      ],
+      "notes": "Calibration provenance comes from F-195. Statistics are computed once in Rust and reported with their units.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-210",
+        "F-195"
+      ]
+    },
+    {
+      "fid": "F-212",
+      "eid": "E38.22",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer four corners at parity: birth date, sex, age, study time, institution, slice location and thickness, kVp and mAs, TR and TE, a scale bar, and edge letters from Patient Orientation on projection images",
+      "layer": "All",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.16"
+      ],
+      "notes": "Projection images carry Patient Orientation (0020,0020) and no Image Orientation (Patient), so they show no edge letters today.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-206"
+      ]
+    },
+    {
+      "fid": "F-213",
+      "eid": "E38.23",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer window presets by modality on number keys, every VOI window in the file listed by its explanation, and a region window from the library",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.10",
+        "E38.17"
+      ],
+      "notes": "The three CT presets are offered on CT only. Number keys currently choose the layout, so the binding needs one decision.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-200",
+        "F-207"
+      ]
+    },
+    {
+      "fid": "F-214",
+      "eid": "E38.24",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer mouse profiles and preferences: the current binding, a scroll-on-left profile and a window-on-left profile, saved in the browser, and cine at Frame Time (0018,1063)",
+      "layer": "TS",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.17"
+      ],
+      "notes": "Button bindings differ between viewers that radiologists use, so the binding is a preference rather than one fixed choice.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-207"
+      ]
+    },
+    {
+      "fid": "F-215",
+      "eid": "E38.25",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer marks written as a TID 1500 document and key images as a Key Object Selection through @ocelli/core, saved to a download and loaded back from a folder",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.11",
+        "E38.6",
+        "E38.17"
+      ],
+      "notes": "This deliberately retires the sentences that say marks are not saved. Nothing is written back into the opened folder.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-201",
+        "F-196",
+        "F-207"
+      ]
+    },
+    {
+      "fid": "F-216",
+      "eid": "E38.26",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer performance: each file posted once and held in a bounded cache, decode reused across window changes, measured budgets for open, first image, scroll rate and resident memory, and a release build",
+      "layer": "All",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.17"
+      ],
+      "depends_fids": [
+        "F-207"
+      ],
+      "milestone": "M20",
+      "sprint": "S46",
+      "notes": "Every window drag step, and every slice not in the page cache, posts the whole file again today, so a 17 MB radiograph is uploaded on each window step. Budgets are measured on a named host and recorded, never claimed from a feeling."
+    },
+    {
+      "fid": "F-217",
+      "eid": "E38.27",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Licence hygiene: no copyleft dependency in any tracked manifest, a permissive JPEG reference decoder for the corpus, licence allowlist gates for Rust, npm and Python, and a third-party notices file",
+      "layer": "All",
+      "weeks": 2,
+      "depends_eids": [],
+      "depends_fids": [],
+      "milestone": "M20",
+      "sprint": "S46",
+      "notes": "A sweep on 2026-11-05 found pylibjpeg-libjpeg 2.4.0 under GPL-3 pinned in pyproject.toml for corpus JPEG decoding, lightningcss 1.33.0 under MPL-2.0 through vite 8 in dev tooling, and vendor/openjph-core with no BSD-2 notice. No transitive licence check exists in any ecosystem."
+    },
+    {
+      "fid": "F-218",
+      "eid": "E38.28",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Dependency advisories in shipped packages: adm-zip below 0.6.1 reaches the published @ocelli/core runtime through dcmjs, resolved by a patched override or a proof that no shipped path reaches it, with an audit gate over shipped dependencies",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids": [
+        "F-217"
+      ],
+      "notes": "npm audit on 2026-11-05 reports GHSA-xcpc-8h2w-3j85 and GHSA-7q85-xj36-vmfc (high, memory exhaustion from a crafted ZIP) and GHSA-vwc7-r8mq-g2x9 (moderate) for adm-zip 0.5.17 under dcmjs 0.52.2. The audit's suggested fix downgrades dcmjs a major version.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-219",
+      "eid": "E38.29",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red",
+      "layer": "Test",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids": [],
+      "notes": "Found by the S46 guard probe review, pass 1 nitpick N1. The census counts per entry, so these four read as watched without any probe triggering them.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
       "fid": "F-206",
       "eid": "E38.16",
       "phase": "P1",

@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/ocelli-slice-svg/ocelli-slice-logo-light.svg">
+    <img alt="Ocelli" src="docs/ocelli-slice-svg/ocelli-slice-logo-dark.svg" width="320">
+  </picture>
+</p>
+
 # Ocelli
 
 A Rust and WebAssembly medical imaging core for the browser. Named after the
@@ -176,8 +183,16 @@ cargo run -p ocelli-folder-viewer
 ```
 
 The process prints one line, the page URL, and nothing else. It has the form
-`http://127.0.0.1:12345/`. The port is chosen at startup. Open that exact URL
-in Chrome or Edge. The Folder control is a directory picker.
+`http://127.0.0.1:12345/`. The port is chosen at startup unless
+`OCELLI_PORT` names a fixed one. `0` also means chosen at startup. A fixed
+port keeps one bookmarkable address, and a second copy then fails to bind
+instead of starting beside the first. A value that is not a port number,
+including an empty one, stops the process with an error. Open that exact URL in
+Chrome or Edge. The Folder control is a directory picker.
+
+```bash
+OCELLI_PORT=8742 cargo run -p ocelli-folder-viewer
+```
 
 1. Choose Folder and pick a directory. The browser reads the files. Leave them
    where they are. Do not copy them into this repository.
@@ -190,16 +205,23 @@ in Chrome or Edge. The Folder control is a directory picker.
    restores the image you left.
 4. Space plays and pauses. Playback loops. The FPS control runs from 1 to 30
    and starts at 10.
-5. The toolbar is Scroll, Pan, Zoom, W/L, Freeform, Rectangle, Ellipse, Text,
-   Length, Fit, Reset and Full screen. Scroll starts active. Invert, window
-   presets, flips and the other image controls are in the right column.
+5. The toolbar is a row of icons. Point at one to see its name, its key and
+   what it does. The groups are the navigation tools (Scroll, Pan, Zoom,
+   W/L), the drawing tools (Length, Rectangle, Ellipse, Freeform, Text), the
+   view (Invert, Rotate 90, Flip horizontal, Flip vertical), the display
+   (Pointer cross, Magnifier, Corners, Orientation letters), the layout
+   (1 by 1, 2 by 2), and Key image, Headers, Fit, Reset and Full screen.
+   Scroll starts active. The right column holds the window presets, the marks
+   and the mouse and key lists. The icons at either end of the top bar, or
+   the `[` and `]` keys, hide and show the two side columns.
 6. The left button uses the active tool. The right button pans. Control with
    the left button also pans. The middle button zooms from the place you
    pressed. A pinch, or Ctrl with the wheel, zooms at the pointer. A sideways
    swipe does not change the image. Zoom keeps the image aspect ratio. The
    viewport clips an image that is larger than the pane.
-7. Headers shows the data set as stored. The corners show the stored labels
-   for the current image. Edge letters show the patient direction and hide
+7. Headers shows the data set as stored. The corners show the current image's
+   labels, with a person name in family, given order and a date as
+   year-month-day. Edge letters show the patient direction and hide
    while the picture is flipped or rotated.
 8. Freeform draws a freehand outline and keeps it at three or more points.
    Rectangle and ellipse draw a region and do not fill it. Text places a note.

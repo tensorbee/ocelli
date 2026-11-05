@@ -185,6 +185,19 @@ implementation status. Never leave an old "fix not implemented" handoff as
 the only current account after implementing the repair. Preserve the earlier
 attempt as history and add the current disposition.
 
+## 7. User-facing documentation
+
+Before review, bring `README.md`, `examples/folder-viewer/src/use.html` (the
+Use book) and `examples/folder-viewer/src/more.html` (the More page) up to
+date with the change. Update every place the plan's `## User-facing
+documentation impact` section lists. Then search all three documents for every
+name the story added, renamed, removed or changed in behaviour, and fix each
+stale sentence, including ones the plan did not list. A plan with no such
+section is a defect in the plan, so add the section to the plan as well.
+
+These edits are part of the diff `/microscope` reviews. Doing them after the
+clearing pass would ship prose nobody reviewed.
+
 ## Finish
 
 Hand to `/microscope F-XXX --working`, and repeat that loop until a pass

@@ -5,7 +5,7 @@ Append-only record of every completed F-ID. New entries land at the **bottom**.
 references the original, because the value of this file is that it records what
 was believed at the time.
 
-Written by `/complete-feature` step 2.
+Written by `/complete-feature` step 1.
 
 ## Entry format
 
@@ -25,6 +25,8 @@ Written by `/complete-feature` step 2.
 **Tier coverage.** {per tier: A (WebGPU), B (WebGL2 downlevel), C (CPU).
                     full, degraded (how), unavailable, or n/a. All three.}
 **LLD updated.** {docs/lld/*.md files updated}
+**User-facing documentation.** {places changed in README.md, use.html and more.html,
+                                or "no change" and the reason}
 **Deviations from the design plan.** {list with reasons, or "none"}
 **Notes for future sessions.** {non-obvious details, limitations, follow-up F-IDs}
 ```

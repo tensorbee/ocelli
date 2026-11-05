@@ -214,6 +214,51 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     if !page.contains("Series shortened") {
         return Err("a shortened series is not labelled".to_owned());
     }
+    // PS3.3 10.7.1.3: the first Pixel Spacing value is the row spacing, the
+    // vertical distance between rows, and the second is the column spacing.
+    // The display stretches x by the column spacing and y by the row spacing.
+    if !page.contains("return { x: facts.column / least, y: facts.row / least };") {
+        return Err("the display aspect does not follow row and column spacing".to_owned());
+    }
+    for used in [
+        "const pictureW = Math.max(1, imageWidth * scale * aspectX);",
+        "const pictureH = Math.max(1, imageHeight * scale * aspectY);",
+        "node.dataset.aspect = String(aspect.y / aspect.x);",
+    ] {
+        if !page.contains(used) {
+            return Err(format!(
+                "the display aspect is not applied where it is used: {used}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn every_page_carries_a_well_formed_icon() -> Result<(), String> {
+    for path in ["/", "/more", "/use"] {
+        let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        let response = one_exchange(request.as_bytes())?;
+        let (_, body) = split_http(&response)?;
+        let page = std::str::from_utf8(body).map_err(|_| format!("{path} is not utf-8"))?;
+        let start = "<link rel=\"icon\" type=\"image/svg+xml\" href=\"data:image/svg+xml,";
+        let at = page
+            .find(start)
+            .ok_or_else(|| format!("{path} has no icon"))?;
+        let rest = page
+            .get(at + start.len()..)
+            .ok_or_else(|| format!("{path} icon is cut short"))?;
+        let end = rest
+            .find('"')
+            .ok_or_else(|| format!("{path} icon href never closes"))?;
+        let href = rest.get(..end).unwrap_or_default();
+        // A raw double quote inside the data URI ends the attribute early and
+        // the browser reads a truncated href, so the whole mark must arrive
+        // inside the attribute, closing tag included.
+        if !href.ends_with("%3C/svg%3E") || rest.get(end..end + 2) != Some("\">") {
+            return Err(format!("{path} icon href is truncated by a raw quote"));
+        }
+    }
     Ok(())
 }
 

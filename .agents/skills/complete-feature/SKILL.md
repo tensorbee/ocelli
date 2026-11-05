@@ -7,7 +7,7 @@ description: "Close one F-ID. Updates every ledger, the LLD, and commits with th
 
 Canonical source: `.claude/commands/complete-feature.md`.
 
-Source SHA-256: `0b053993923a91f329f2860df6962f9509e9d2cc2fa363e00601d1f41fe13e36`.
+Source SHA-256: `74e025dec39e3767cca168673dd0a9e304f503c4acf823f000043dd422f5b6a1`.
 
 Before acting, read the canonical source completely and follow it using this
 host's available tools. Treat invocation arguments as arguments to that

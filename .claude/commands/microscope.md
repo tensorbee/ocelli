@@ -78,6 +78,13 @@ it compounds: a remediation that corrects one sentence and adds three
 explaining it ships three new claims for the next pass to falsify. Prefer
 deleting a wrong sentence to explaining it.
 
+Three documents are always in scope when the diff touches anything they
+describe: `README.md`, `examples/folder-viewer/src/use.html` and
+`examples/folder-viewer/src/more.html`. Check every API, command, status mark
+and behaviour sentence in them against the tree, and check that a change in
+the diff did not leave one of them stale. A false or stale sentence there is a
+defect.
+
 ### 4. Things that exist and that nothing executes
 
 A guard, a test, an assertion or a branch that is present, looks authoritative,

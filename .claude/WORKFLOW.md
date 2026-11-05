@@ -120,7 +120,7 @@ run-state reconciliation that keeps existing feature progress and history.
 ```text
 1. /design F-XXX             Write the design plan against docs/hld/
 2. /start-feature F-XXX      Mark in-progress, create test stubs
-3. /implement-feature F-XXX  Code + tests
+3. /implement-feature F-XXX  Code, tests and the user-facing documents
 4. /microscope F-XXX         REPEAT until zero defects and zero smells
 5. /verify                   The gate
 6. /complete-feature F-XXX   Ledgers, LLD, commit with the provenance trailer
