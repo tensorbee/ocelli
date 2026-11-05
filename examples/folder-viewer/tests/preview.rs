@@ -2025,6 +2025,15 @@ fn held_census_counts_files_and_frames() -> Result<(), String> {
     if json_number(&empty, "budget")? != 8 * 1024 * 1024 || json_number(&empty, "used")? != 0 {
         return Err(format!("the empty census was {empty}"));
     }
+    if json_number(&empty, "inflight")? != 0
+        || json_number(&empty, "workspace")? != 0
+        || json_number(&empty, "free")? != 0
+    {
+        return Err(format!("an idle viewer reported live bytes: {empty}"));
+    }
+    if empty.contains("\"pool\":") {
+        return Err(format!("the census named a pool: {empty}"));
+    }
     let build = if cfg!(debug_assertions) {
         "debug"
     } else {
@@ -2047,6 +2056,9 @@ fn held_census_counts_files_and_frames() -> Result<(), String> {
     if json_number(&frames, "files")? != 0 || json_number(&frames, "frames")? != 1 {
         return Err(format!("the frame census was {frames}"));
     }
+    if json_number(&frames, "inflight")? != 0 || json_number(&frames, "workspace")? == 0 {
+        return Err(format!("the preview census was {frames}"));
+    }
     let used = json_number(&frames, "used")?;
     let again = exchange(addr, &preview_id(id, ""))?;
     let _ = split_http(&again)?;
@@ -2062,7 +2074,11 @@ fn held_census_counts_files_and_frames() -> Result<(), String> {
         return Err("a file larger than the budget was held".to_owned());
     }
     let census = held_census(tiny)?;
-    if json_number(&census, "used")? != 0 || json_number(&census, "files")? != 0 {
+    if json_number(&census, "used")? != 0
+        || json_number(&census, "files")? != 0
+        || json_number(&census, "inflight")? != 0
+        || json_number(&census, "workspace")? != 0
+    {
         return Err(format!("a refused file changed the census: {census}"));
     }
     Ok(())
@@ -2299,7 +2315,11 @@ fn a_file_larger_than_the_budget_is_not_held() -> Result<(), String> {
         return Err("a file larger than the budget was held".to_owned());
     }
     let census = held_census(addr)?;
-    if json_number(&census, "used")? != 0 || json_number(&census, "files")? != 0 {
+    if json_number(&census, "used")? != 0
+        || json_number(&census, "files")? != 0
+        || json_number(&census, "inflight")? != 0
+        || json_number(&census, "workspace")? != 0
+    {
         return Err(format!("a refused file changed the census: {census}"));
     }
     Ok(())
@@ -2365,10 +2385,11 @@ fn a_connection_over_the_cap_is_busy() -> Result<(), String> {
 }
 
 fn span_frame() -> Result<Vec<u8>, String> {
-    // 1 by 3, stored 0, 20 and 200. No Window Center, Window Width or function.
+    // 1 by 4, stored 0, 27, 34 and 200. No Window Center, Window Width or function.
     let mut pixels = Vec::new();
     pixels.extend_from_slice(&0_u16.to_le_bytes());
-    pixels.extend_from_slice(&20_u16.to_le_bytes());
+    pixels.extend_from_slice(&27_u16.to_le_bytes());
+    pixels.extend_from_slice(&34_u16.to_le_bytes());
     pixels.extend_from_slice(&200_u16.to_le_bytes());
     let mut data = Vec::new();
     data.extend(short_le(
@@ -2383,7 +2404,7 @@ fn span_frame() -> Result<Vec<u8>, String> {
         &text_pad("MONOCHROME2"),
     )?);
     data.extend(short_le((0x0028, 0x0010), *b"US", &1_u16.to_le_bytes())?);
-    data.extend(short_le((0x0028, 0x0011), *b"US", &3_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &4_u16.to_le_bytes())?);
     data.extend(short_le((0x0028, 0x0100), *b"US", &16_u16.to_le_bytes())?);
     data.extend(short_le((0x0028, 0x0101), *b"US", &16_u16.to_le_bytes())?);
     data.extend(short_le((0x0028, 0x0102), *b"US", &15_u16.to_le_bytes())?);
@@ -2400,15 +2421,25 @@ fn span_frame() -> Result<Vec<u8>, String> {
 
 #[test]
 fn a_function_sent_alone_selects_the_full_range_window() -> Result<(), String> {
-    // Stored 0, 20 and 200. Rescale slope 1, intercept 0. The full range is
-    // center 100 and width 200.
-    // PS3.3 C.11.2.1.2 LINEAR uses center 99.5 and width 199.
-    // Stored 20: ((20 - 99.5) / 199 + 0.5) * 255 = 25.628143310546875.
-    // display_index of that value is grey 26.
+    // Stored 0, 27, 34 and 200. Rescale slope 1, intercept 0. The full range
+    // is center 100 and width 200.
+    // PS3.3 C.11.2.1.2 LINEAR uses adjusted center 99.5 and adjusted width 199.
+    // Stored 27: ((27 - 99.5) / 199 + 0.5) * 255 = 34.59799 in f32.
+    // display_index adds 0.5, getting 35.09799, and keeps the greatest
+    // integer at or below that sum, which is grey 35.
     // PS3.3 C.11.2.1.3.2 LINEAR_EXACT uses center 100 and width 200.
-    // Stored 20: ((20 - 100) / 200 + 0.5) * 255 = 25.499998092651367.
-    // display_index of that value is grey 25.
-    // Stored 0 is grey 0 for both. Stored 200 is grey 255 for both.
+    // Stored 27: ((27 - 100) / 200 + 0.5) * 255 = 34.425 in f32.
+    // display_index adds 0.5, getting 34.925, and the greatest integer at or
+    // below that sum is grey 34.
+    // Stored 34, LINEAR: ((34 - 99.5) / 199 + 0.5) * 255 = 43.56784 in f32.
+    // display_index adds 0.5, getting 44.06784, and the grey is 44.
+    // Stored 34, LINEAR_EXACT: ((34 - 100) / 200 + 0.5) * 255 = 43.35 in f32.
+    // display_index adds 0.5, getting 43.85, and the grey is 43.
+    // Stored 0 is on the lower edge, so both functions give grey 0.
+    // LINEAR's upper edge is 199, so stored 200 is grey 255.
+    // LINEAR_EXACT's upper edge is 200. Stored 200 is not above it.
+    // ((200 - 100) / 200 + 0.5) * 255 = 255, so grey 255.
+    // Stored 50 at this same window is grey 64 for both functions.
     let file = span_frame()?;
     let addr = viewer_on(8 * 1024 * 1024)?;
     let posted = exchange(addr, &http_post_to("/file", "", &file))?;
@@ -2424,20 +2455,27 @@ fn a_function_sent_alone_selects_the_full_range_window() -> Result<(), String> {
         || !linear_header.contains("X-Ocelli-Full-Range: 1")
         || !linear_header.contains("X-Ocelli-Window-Center: 100")
         || !linear_header.contains("X-Ocelli-Window-Width: 200")
-        || linear_body != [0, 26, 255]
+        || linear_body != [0, 35, 44, 255]
     {
         return Err(format!(
-            "LINEAR alone was not grey 26: {linear_header} body {linear_body:?}"
+            "LINEAR alone was not grey 0, 35, 44, 255: {linear_header} body {linear_body:?}"
         ));
     }
     let exact = exchange(addr, &preview_id(id, ""))?;
     let (exact_header, exact_body) = split_http(&exact)?;
     if !exact_header.contains("X-Ocelli-Window-Function: LINEAR_EXACT")
         || !exact_header.contains("X-Ocelli-Full-Range: 1")
-        || exact_body != [0, 25, 255]
+        || !exact_header.contains("X-Ocelli-Window-Center: 100")
+        || !exact_header.contains("X-Ocelli-Window-Width: 200")
+        || exact_body != [0, 34, 43, 255]
     {
         return Err(format!(
-            "the default full range was not grey 25: {exact_header} body {exact_body:?}"
+            "the default full range was not grey 0, 34, 43, 255: {exact_header} body {exact_body:?}"
+        ));
+    }
+    if linear_body == exact_body {
+        return Err(format!(
+            "LINEAR and LINEAR_EXACT returned the same body: {linear_body:?}"
         ));
     }
     Ok(())
@@ -2476,9 +2514,70 @@ fn a_busy_post_is_refused_before_its_body() -> Result<(), String> {
     let (header, body) = split_http(&response)?;
     if !header.contains("503")
         || !header.contains("X-Ocelli-Error: busy")
+        || !header.contains("Connection: close")
         || body != b"this process is already serving its connection limit"
     {
         return Err("a header-only post over the cap was not busy".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_busy_post_with_a_body_is_still_readable() -> Result<(), String> {
+    // requestGrey retries only when the status is 503, X-Ocelli-Error is
+    // busy, and the body can be read. A reset never reaches that branch.
+    let addr = viewer_capped(1024, 1)?;
+    let mut first = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+    first
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    first
+        .write_all(b"GET /synthetic HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        .map_err(|error| error.to_string())?;
+    let opened = read_one(&mut first)?;
+    let (opened_header, _) = split_http(&opened)?;
+    if !opened_header.contains("200") {
+        return Err("the first connection was not served".to_owned());
+    }
+    let mut second = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+    second
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    second
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    let payload = vec![0xA5_u8; 32 * 1024];
+    let mut request = format!(
+        "POST /file HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        payload.len()
+    )
+    .into_bytes();
+    request.extend_from_slice(&payload);
+    let started = std::time::Instant::now();
+    second
+        .write_all(&request)
+        .map_err(|error| error.to_string())?;
+    let response = read_one(&mut second)?;
+    if started.elapsed() > Duration::from_secs(2) {
+        return Err("the busy reply waited on the whole declared body".to_owned());
+    }
+    let (header, body) = split_http(&response)?;
+    if !header.contains("503")
+        || !header.contains("X-Ocelli-Error: busy")
+        || !header.contains("Connection: close")
+        || body != b"this process is already serving its connection limit"
+    {
+        return Err(format!(
+            "a posted body over the cap was not a readable 503: {header} body {body:?}"
+        ));
+    }
+    // The payload is 32 KiB, under BUSY_DRAIN_CAP. The 503 must be followed by a clean close.
+    // A body above the cap is outside this assertion.
+    let mut extra = [0_u8; 1];
+    match second.read(&mut extra) {
+        Ok(0) => {}
+        Ok(n) => return Err(format!("bytes followed the 503: {n}")),
+        Err(error) => return Err(format!("the 503 was reset: {error}")),
     }
     Ok(())
 }

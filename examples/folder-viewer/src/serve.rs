@@ -11,10 +11,13 @@ use std::time::{Duration, Instant};
 
 use ocelli_pixel::VoiFunction;
 
-use crate::held::{FileId, PreviewSource, Viewer, ViewerConfig};
+use crate::held::{
+    BodyPermit, CacheHandle, DecodePermit, FileId, PreviewSource, Viewer, ViewerConfig,
+    set_detached, with_decode_workspace,
+};
 use crate::preview::{
-    OwnedDecode, decode_held, decode_owned, decode_ticks, note_lookup, note_write, phases,
-    profiling, render_held, reset_phases, validate_frame_request,
+    decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, phases, profiling,
+    render_held, reset_phases, validate_frame_request,
 };
 use crate::{
     FrameRequest, Preview, PreviewError, SLICES, headers_json, inspect_json, preview_frame, slice,
@@ -30,6 +33,12 @@ const MORE: &str = include_str!("more.html");
 const USE_PAGE: &str = include_str!("use.html");
 const READ_TIMEOUT: Duration = Duration::from_secs(15);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Bytes read and discarded after a 503 so a raw client can finish the response.
+///
+/// A body above this cap may see a reset after the 503 on a raw client.
+/// The page's fetch reads the 503.
+const BUSY_DRAIN_CAP: usize = 64 * 1024;
+const BUSY_DRAIN_WAIT: Duration = Duration::from_millis(200);
 
 struct Request {
     method: String,
@@ -38,6 +47,45 @@ struct Request {
     frame: FrameRequest,
     file_id: Option<FileId>,
     close: bool,
+    /// Capacity charged to inflight for this body.
+    body_charge: usize,
+    /// `enter_body` ran for this request.
+    body_counted: bool,
+    /// Set when a worker allocated the body.
+    body_slot: Option<BodyPermit>,
+}
+
+/// Inflight charge for one request body.
+///
+/// Drop releases whatever is still charged. `release_for_cache` releases it
+/// before the bytes become visible in the LRU.
+struct BodyCharge<'a> {
+    viewer: &'a Viewer,
+    bytes: usize,
+    /// `enter_body` ran for this request.
+    counted: bool,
+    /// Worker slot for a pooled body. Drop releases it.
+    slot: Option<BodyPermit>,
+}
+
+impl BodyCharge<'_> {
+    fn release_for_cache(&mut self) {
+        if self.bytes == 0 {
+            return;
+        }
+        self.viewer.leave_inflight(self.bytes);
+        self.bytes = 0;
+    }
+}
+
+impl Drop for BodyCharge<'_> {
+    fn drop(&mut self) {
+        self.release_for_cache();
+        if self.counted {
+            self.viewer.leave_body();
+            self.counted = false;
+        }
+    }
 }
 
 struct Grey {
@@ -92,9 +140,60 @@ pub fn serve() -> std::io::Result<()> {
     let config = ViewerConfig::from_env()?;
     let listener = TcpListener::bind(("127.0.0.1", chosen_port()?))?;
     let addr = listener.local_addr()?;
+    let viewer = Arc::new(Viewer::server(config));
+    start_census_log(&viewer);
     println!("http://{addr}/");
     std::io::stdout().flush()?;
-    serve_on(listener, Arc::new(Viewer::new(config)))
+    serve_on(listener, viewer)
+}
+
+/// Append a schedule line every 20 ms when `OCELLI_CENSUS_LOG` names a file.
+///
+/// Diagnostic only. Unset leaves the process unchanged.
+fn start_census_log(viewer: &Arc<Viewer>) {
+    let Ok(path) = std::env::var("OCELLI_CENSUS_LOG") else {
+        return;
+    };
+    if path.is_empty() {
+        return;
+    }
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path)
+    else {
+        return;
+    };
+    let viewer = Arc::clone(viewer);
+    std::thread::spawn(move || {
+        let started = Instant::now();
+        let _ = file.write_all(
+            b"ms decode_threads peak_decodes decodes_now body_threads peak_bodies bodies_now used inflight workspace free files frames peak_used peak_inflight peak_workspace peak_files peak_frames\n",
+        );
+        loop {
+            let memory = viewer.memory_census();
+            let (decode_threads, peak_decodes, decodes_now) = crate::preview::decode_schedule();
+            let (body_threads, peak_bodies, bodies_now) = viewer.body_schedule();
+            let (peak_used, peak_inflight, peak_workspace, peak_files, peak_frames) =
+                viewer.census_peaks();
+            let line = format!(
+                "{ms} {decode_threads} {peak_decodes} {decodes_now} {body_threads} {peak_bodies} {bodies_now} {used} {inflight} {workspace} {free} {files} {frames} {peak_used} {peak_inflight} {peak_workspace} {peak_files} {peak_frames}\n",
+                ms = started.elapsed().as_millis(),
+                used = memory.pressure.used,
+                inflight = memory.inflight,
+                workspace = memory.workspace,
+                free = memory.free,
+                files = memory.files,
+                frames = memory.frames,
+            );
+            if file.write_all(line.as_bytes()).is_err() {
+                return;
+            }
+            let _ = file.flush();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    });
 }
 
 /// Accept connections on an existing listener. Does not print.
@@ -155,18 +254,28 @@ pub fn handle_connection(stream: TcpStream) -> std::io::Result<()> {
 /// A clean end of stream after a response is success.
 pub fn handle_connection_with(mut stream: TcpStream, viewer: &Viewer) -> std::io::Result<()> {
     if !viewer.acquire_connection() {
+        let _ = stream.set_nodelay(true);
         let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
         let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
         let mut pending = Vec::new();
-        // Headers only. Reading a declared body here would reserve it on a
-        // connection that is already over the cap.
+        // Headers only. The declared body is discarded after the 503 is
+        // written, and it is never copied into a buffer of its own.
+        let mut header_end = None;
         let got_headers = match read_header_bytes(&mut stream, &mut pending) {
-            Ok(_) | Err(ReadStop::Reply(_)) => true,
+            Ok(end) => {
+                header_end = Some(end);
+                true
+            }
+            Err(ReadStop::Reply(_)) => true,
             Err(ReadStop::CleanClose) | Err(ReadStop::Io(_)) => false,
         };
         if got_headers {
             let reply = busy_reply();
             let _ = write_reply(&mut stream, &reply, false);
+            let _ = stream.flush();
+            if let Some(end) = header_end {
+                discard_busy_body(&mut stream, &pending, end);
+            }
         }
         return Ok(());
     }
@@ -208,12 +317,21 @@ fn connection_session(
         if profiling() {
             reset_phases();
         }
-        let reply = route(viewer, request, Some(&stream));
+        let mut request = request;
+        let mut charge = BodyCharge {
+            viewer,
+            bytes: request.body_charge,
+            counted: request.body_counted,
+            slot: request.body_slot.take(),
+        };
+        let (mut reply, restore) = route(viewer, request, Some(&stream), &mut charge);
+        drop(charge);
         let write_started = profiling().then(Instant::now);
-        let recycle = reply.grey.is_some();
         let written = write_reply(&mut stream, &reply, !close);
-        if recycle {
-            viewer.recycle_grey(reply.body);
+        if let Some(permit) = restore {
+            let _ = permit.restore_grey(std::mem::take(&mut reply.body));
+        } else if reply.grey.is_some() {
+            viewer.recycle_grey(std::mem::take(&mut reply.body));
         }
         written?;
         if let Some(started) = write_started {
@@ -227,17 +345,28 @@ fn connection_session(
     }
 }
 
-fn route(viewer: &Viewer, request: Request, stream: Option<&TcpStream>) -> Reply {
+fn route(
+    viewer: &Viewer,
+    request: Request,
+    stream: Option<&TcpStream>,
+    charge: &mut BodyCharge<'_>,
+) -> (Reply, Option<DecodePermit>) {
     if request.method == "POST" && request.body.len() > BODY_CAP {
-        return text_reply(400, Some("body"), "the preview request is too large");
+        return (
+            text_reply(400, Some("body"), "the preview request is too large"),
+            None,
+        );
     }
     match (request.method.as_str(), request.path.as_str()) {
-        ("GET", _) => get_reply(viewer, &request),
+        ("GET", _) => (get_reply(viewer, &request), None),
         ("POST", "/preview") => preview_route(viewer, &request, stream),
-        ("POST", "/file") => file_route(viewer, request),
-        ("POST", "/inspect") => json_or_error(inspect_json(&request.body, request.frame.frame)),
-        ("POST", "/headers") => headers_route(viewer, &request),
-        _ => text_reply(404, None, "not found"),
+        ("POST", "/file") => (file_route(viewer, request, charge), None),
+        ("POST", "/inspect") => (
+            json_or_error(inspect_json(&request.body, request.frame.frame)),
+            None,
+        ),
+        ("POST", "/headers") => (headers_route(viewer, &request), None),
+        _ => (text_reply(404, None, "not found"), None),
     }
 }
 
@@ -268,16 +397,21 @@ fn get_reply(viewer: &Viewer, request: &Request) -> Reply {
 }
 
 fn held_reply(viewer: &Viewer) -> Reply {
-    let (pressure, files, frames) = viewer.census();
+    let memory = viewer.memory_census();
     let build = if cfg!(debug_assertions) {
         "debug"
     } else {
         "release"
     };
     let body = format!(
-        "{{\"build\":\"{build}\",\"budget\":{budget},\"used\":{used},\"files\":{files},\"frames\":{frames}}}",
-        budget = pressure.budget,
-        used = pressure.used,
+        "{{\"build\":\"{build}\",\"budget\":{budget},\"used\":{used},\"files\":{files},\"frames\":{frames},\"inflight\":{inflight},\"workspace\":{workspace},\"free\":{free}}}",
+        budget = memory.pressure.budget,
+        used = memory.pressure.used,
+        files = memory.files,
+        frames = memory.frames,
+        inflight = memory.inflight,
+        workspace = memory.workspace,
+        free = memory.free,
     );
     bare(200, "application/json", body.into_bytes())
 }
@@ -290,12 +424,19 @@ fn html_page(page: &str) -> Reply {
     bare(200, "text/html; charset=utf-8", page.as_bytes().to_vec())
 }
 
-fn preview_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>) -> Reply {
+fn preview_route(
+    viewer: &Viewer,
+    request: &Request,
+    stream: Option<&TcpStream>,
+) -> (Reply, Option<DecodePermit>) {
     if request.file_id.is_some() && !request.body.is_empty() {
-        return text_reply(
-            400,
-            Some("header"),
-            "a file id and a body cannot be sent together",
+        return (
+            text_reply(
+                400,
+                Some("header"),
+                "a file id and a body cannot be sent together",
+            ),
+            None,
         );
     }
     if let Some(id) = request.file_id {
@@ -305,7 +446,7 @@ fn preview_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>)
     if reply.status == 200 {
         reply.source = Some("body");
     }
-    reply
+    (reply, None)
 }
 
 fn busy_reply() -> Reply {
@@ -314,6 +455,47 @@ fn busy_reply() -> Reply {
         Some("busy"),
         "this process is already serving its connection limit",
     )
+}
+
+/// Discard an over-cap body so close does not reset the socket.
+///
+/// The 503 is already written. This reads into an 8 KiB stack array and
+/// drops every byte. It stops at the declared length, at [`BUSY_DRAIN_CAP`],
+/// or after [`BUSY_DRAIN_WAIT`] with no further bytes.
+fn discard_busy_body(stream: &mut TcpStream, pending: &[u8], header_end: usize) {
+    let declared = declared_length(pending, header_end);
+    let already = pending.len().saturating_sub(header_end);
+    let limit = declared.min(BUSY_DRAIN_CAP);
+    let mut left = limit.saturating_sub(already.min(limit));
+    if declared == 0 {
+        left = BUSY_DRAIN_CAP.saturating_sub(already.min(BUSY_DRAIN_CAP));
+    }
+    let _ = stream.set_read_timeout(Some(BUSY_DRAIN_WAIT));
+    let mut chunk = [0_u8; 8192];
+    while left > 0 {
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => left = left.saturating_sub(n),
+        }
+    }
+}
+
+fn declared_length(pending: &[u8], header_end: usize) -> usize {
+    let Some(header) = pending.get(..header_end) else {
+        return 0;
+    };
+    let Ok(text) = std::str::from_utf8(header) else {
+        return 0;
+    };
+    for line in text.split("\r\n") {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case("content-length") {
+            return value.trim().parse::<usize>().unwrap_or(0);
+        }
+    }
+    0
 }
 
 fn peer_closed(error: &std::io::Error) -> bool {
@@ -352,14 +534,170 @@ fn peer_open(stream: &TcpStream) -> bool {
     open
 }
 
+struct PooledWork {
+    gone: bool,
+    preview: Result<Preview, PreviewError>,
+    fresh: bool,
+    phase: crate::preview::PhaseRecord,
+    decoded: Option<DecodedWork>,
+}
+
+struct DecodedWork {
+    held: crate::preview::HeldFrame,
+    sample_charge: usize,
+}
+
+fn preview_held_on_worker(
+    viewer: &Viewer,
+    id: FileId,
+    request: FrameRequest,
+    stream: Option<&TcpStream>,
+) -> (Reply, Option<DecodePermit>) {
+    if let Err(error) = validate_frame_request(request) {
+        return (error_reply(error), None);
+    }
+    let lookup_started = profiling().then(Instant::now);
+    let found = viewer.preview_source(id, request.frame);
+    if let Some(started) = lookup_started {
+        note_lookup(started.elapsed().as_micros());
+    }
+    let home = match &found {
+        PreviewSource::Hit(frame) => frame.worker(),
+        PreviewSource::Shared(bytes) => bytes.worker(),
+        PreviewSource::Gone => return (gone(), None),
+    };
+    let mut live = || stream.is_none_or(peer_open);
+    let Some(permit) = viewer.acquire_decode(home, &mut live) else {
+        return (busy_reply(), None);
+    };
+    let inflight = viewer.inflight_counter();
+    let worker = permit.worker();
+    let retire = permit.retire();
+    let cache = viewer.cache_handle();
+    let Some(work) = permit.call(move || pooled_preview(found, request, &inflight, &cache)) else {
+        return (busy_reply(), None);
+    };
+    if work.gone {
+        return (gone(), None);
+    }
+    merge_worker_phases(work.phase);
+    if let Some(decoded) = work.decoded {
+        let _kept =
+            viewer.store_frame_with(id, request.frame, decoded.held, Some(worker), Some(retire));
+        if decoded.sample_charge > 0 {
+            viewer.leave_inflight(decoded.sample_charge);
+        }
+        #[cfg(test)]
+        viewer.trace_inflight("frame");
+    }
+    let mut reply = from_preview(work.preview);
+    if reply.status == 200 {
+        reply.source = Some(if work.fresh { "decoded" } else { "held" });
+        // The permit stays held until the grey bytes are back on this worker.
+        return (reply, Some(permit));
+    }
+    (reply, None)
+}
+
+fn pooled_preview(
+    found: PreviewSource,
+    request: FrameRequest,
+    inflight: &std::sync::atomic::AtomicUsize,
+    cache: &CacheHandle,
+) -> PooledWork {
+    let before = decode_ticks();
+    match found {
+        PreviewSource::Gone => PooledWork {
+            gone: true,
+            preview: Err(PreviewError::Frame),
+            fresh: false,
+            phase: phases(),
+            decoded: None,
+        },
+        PreviewSource::Hit(held) => {
+            let preview = with_decode_workspace(|workspace| {
+                render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
+            });
+            set_detached(grey_capacity(&preview));
+            PooledWork {
+                gone: false,
+                preview,
+                fresh: false,
+                phase: phases(),
+                decoded: None,
+            }
+        }
+        PreviewSource::Shared(bytes) => {
+            let mut samples = Vec::new();
+            let mut sample_charge = 0_usize;
+            let decoded = with_decode_workspace(|workspace| {
+                decode_held(
+                    bytes.as_slice(),
+                    request.frame,
+                    &mut workspace.native,
+                    &mut samples,
+                    &mut |capacity| {
+                        sample_charge = capacity;
+                        inflight.fetch_add(capacity, std::sync::atomic::Ordering::Relaxed);
+                    },
+                    &mut |len| cache.claim_sample_buffer(len),
+                )
+            });
+            drop(bytes);
+            match decoded {
+                Ok(held) => {
+                    let preview = with_decode_workspace(|workspace| {
+                        render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
+                    });
+                    set_detached(grey_capacity(&preview));
+                    PooledWork {
+                        gone: false,
+                        fresh: decode_ticks() != before,
+                        phase: phases(),
+                        decoded: Some(DecodedWork {
+                            held,
+                            sample_charge,
+                        }),
+                        preview,
+                    }
+                }
+                Err(error) => {
+                    cache.recycle_sample_buffer(std::mem::take(&mut samples));
+                    if sample_charge > 0 {
+                        Viewer::release_counter(inflight, sample_charge);
+                    }
+                    set_detached(0);
+                    PooledWork {
+                        gone: false,
+                        preview: Err(error),
+                        fresh: false,
+                        phase: phases(),
+                        decoded: None,
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn grey_capacity(preview: &Result<Preview, PreviewError>) -> usize {
+    match preview {
+        Ok(preview) => preview.grey.capacity(),
+        Err(_) => 0,
+    }
+}
+
 fn preview_held(
     viewer: &Viewer,
     id: FileId,
     request: FrameRequest,
     stream: Option<&TcpStream>,
-) -> Reply {
+) -> (Reply, Option<DecodePermit>) {
+    if viewer.schedules() {
+        return preview_held_on_worker(viewer, id, request, stream);
+    }
     if let Err(error) = validate_frame_request(request) {
-        return error_reply(error);
+        return (error_reply(error), None);
     }
     let before = decode_ticks();
     let lookup_started = profiling().then(Instant::now);
@@ -372,50 +710,55 @@ fn preview_held(
     // is still there, so a closed peer does not keep the connection slot.
     let mut live = || stream.is_none_or(peer_open);
     let Some(mut loan) = viewer.loan_workspace(&mut live) else {
-        if let PreviewSource::Owned(bytes) = found {
-            viewer.restore_file(id, bytes);
-        }
-        return busy_reply();
+        return (busy_reply(), None);
     };
     let workspace = &mut loan.workspace;
     let preview = match found {
-        PreviewSource::Gone => return gone(),
+        PreviewSource::Gone => return (gone(), None),
         PreviewSource::Hit(held) => {
             render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
         }
         PreviewSource::Shared(bytes) => {
-            match decode_held(&bytes, request.frame, &mut workspace.native) {
+            // The posted file stays in the cache for the whole decode.
+            // The sample buffer is inflight only until it is stored.
+            let mut samples = Vec::new();
+            let mut sample_charge = 0_usize;
+            let cache = viewer.cache_handle();
+            let decoded = decode_held(
+                &bytes,
+                request.frame,
+                &mut workspace.native,
+                &mut samples,
+                &mut |capacity| {
+                    sample_charge = capacity;
+                    viewer.enter_inflight(capacity);
+                    #[cfg(test)]
+                    viewer.trace_inflight("decoding");
+                },
+                &mut |len| cache.claim_sample_buffer(len),
+            );
+            drop(bytes);
+            match decoded {
                 Ok(held) => {
                     let held = viewer.store_frame(id, request.frame, held);
+                    if sample_charge > 0 {
+                        viewer.leave_inflight(sample_charge);
+                    }
+                    #[cfg(test)]
+                    viewer.trace_inflight("frame");
                     render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
                 }
-                Err(error) => Err(error),
-            }
-        }
-        PreviewSource::Owned(bytes) => match decode_owned(bytes, request.frame) {
-            OwnedDecode::Frame(held) => {
-                let held = viewer.store_frame(id, request.frame, *held);
-                render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
-            }
-            OwnedDecode::Keep(bytes) => {
-                match decode_held(&bytes, request.frame, &mut workspace.native) {
-                    Ok(held) => {
-                        if held.frames > 1 {
-                            viewer.restore_file(id, bytes);
-                        } else {
-                            viewer.recycle_buffer(bytes);
-                        }
-                        let held = viewer.store_frame(id, request.frame, held);
-                        render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
+                Err(error) => {
+                    viewer.recycle_sample_buffer(std::mem::take(&mut samples));
+                    if sample_charge > 0 {
+                        viewer.leave_inflight(sample_charge);
                     }
-                    Err(error) => {
-                        viewer.restore_file(id, bytes);
-                        Err(error)
-                    }
+                    Err(error)
                 }
             }
-        },
+        }
     };
+    loan.note_growth();
     let mut reply = from_preview(preview);
     if reply.status == 200 {
         reply.source = Some(if decode_ticks() == before {
@@ -424,23 +767,48 @@ fn preview_held(
             "decoded"
         });
     }
-    reply
+    (reply, None)
 }
 
-fn file_route(viewer: &Viewer, request: Request) -> Reply {
-    match inspect_json(&request.body, request.frame.frame) {
+fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) -> Reply {
+    let frame = request.frame.frame;
+    let body = request.body;
+    let inspected = if let Some(slot) = charge.slot.as_ref() {
+        let worker = slot.worker();
+        let retire = slot.retire();
+        slot.call(move || {
+            let result = inspect_json(&body, frame);
+            (result, body, Some(worker), Some(retire))
+        })
+    } else {
+        let result = inspect_json(&body, frame);
+        Some((result, body, None, None))
+    };
+    let Some((result, body, worker, retire)) = inspected else {
+        return busy_reply();
+    };
+    match result {
         Ok(json) => {
+            // Leave inflight before the bytes are visible in the LRU.
+            charge.release_for_cache();
             let mut reply = bare(200, "application/json; charset=utf-8", json.into_bytes());
-            match viewer.insert_file(request.body) {
+            match viewer.insert_posted(body, worker, retire) {
                 Some(id) => {
                     reply.file_id = Some(id.header_value());
                     reply.held_flag = Some(1);
                 }
                 None => reply.held_flag = Some(0),
             }
+            #[cfg(test)]
+            viewer.trace_inflight("cached");
             reply
         }
-        Err(error) => error_reply(error),
+        Err(error) => {
+            if let Some(slot) = charge.slot.as_ref() {
+                let _ = slot.call(move || drop(body));
+            }
+            error_reply(error)
+        }
     }
 }
 
@@ -454,7 +822,7 @@ fn headers_route(viewer: &Viewer, request: &Request) -> Reply {
     }
     if let Some(id) = request.file_id {
         return match viewer.file_bytes(id) {
-            Some(bytes) => json_or_error(headers_json(bytes.as_ref())),
+            Some(bytes) => json_or_error(headers_json(bytes.as_slice())),
             None => gone(),
         };
     }
@@ -735,9 +1103,43 @@ fn read_request(
         }
         None => 0,
     };
-    let body = fill_body(stream, pending, header_end, declared, |need| {
-        viewer.take_buffer(need)
-    })?;
+    let mut entered = 0_usize;
+    let mut counted = false;
+    let mut body_slot = None;
+    let filled = if viewer.schedules() && declared > 0 {
+        read_pooled_body(stream, pending, header_end, declared, viewer)
+    } else {
+        fill_body(stream, pending, header_end, declared, |need| {
+            let body = begin_body(viewer, need);
+            entered = body.capacity();
+            if need > 0 {
+                viewer.enter_body();
+                counted = true;
+            }
+            body
+        })
+        .map(|body| (body, None))
+    };
+    let (body, pooled) = match filled {
+        Ok(pair) => pair,
+        Err(stop) => {
+            viewer.leave_inflight(entered);
+            if counted {
+                viewer.leave_body();
+            }
+            return Err(stop);
+        }
+    };
+    if pooled.is_some() {
+        entered = body.capacity();
+        body_slot = pooled;
+    }
+    let final_charge = body.capacity();
+    if final_charge > entered {
+        viewer.enter_inflight(final_charge - entered);
+    } else if final_charge < entered {
+        viewer.leave_inflight(entered - final_charge);
+    }
     Ok(Request {
         method: parsed.method,
         path: parsed.path,
@@ -745,7 +1147,150 @@ fn read_request(
         frame: parsed.frame,
         file_id: parsed.file_id,
         close: parsed.close,
+        body_charge: final_charge,
+        body_counted: counted,
+        body_slot,
     })
+}
+
+fn read_pooled_body(
+    stream: &mut TcpStream,
+    pending: &mut Vec<u8>,
+    header_end: usize,
+    declared: usize,
+    viewer: &Viewer,
+) -> Result<(Vec<u8>, Option<BodyPermit>), ReadStop> {
+    let mut live = || peer_open(stream);
+    let Some(permit) = viewer.acquire_body(&mut live) else {
+        return Err(ReadStop::Reply(busy_reply()));
+    };
+    let Some(mut body) = permit.call(move || exact_body(declared)) else {
+        return Err(ReadStop::Reply(busy_reply()));
+    };
+    let capacity = body.capacity();
+    viewer.enter_inflight(capacity);
+    #[cfg(test)]
+    viewer.trace_inflight("reading");
+    if let Err(stop) = fill_prepared(stream, pending, header_end, declared, &mut body) {
+        viewer.leave_inflight(capacity);
+        let _ = permit.call(move || drop(body));
+        return Err(stop);
+    }
+    Ok((body, Some(permit)))
+}
+
+fn fill_prepared<R: Read>(
+    stream: &mut R,
+    pending: &mut Vec<u8>,
+    header_end: usize,
+    declared: usize,
+    body: &mut Vec<u8>,
+) -> Result<(), ReadStop> {
+    if body.capacity() < declared {
+        return Err(ReadStop::Reply(text_reply(
+            400,
+            Some("body"),
+            "the preview request could not be stored",
+        )));
+    }
+    let tail = if pending.len() > header_end {
+        pending.split_off(header_end)
+    } else {
+        Vec::new()
+    };
+    release_read_buffer(pending);
+    if tail.len() >= declared {
+        let mut incoming = tail;
+        let surplus = incoming.split_off(declared);
+        if !push_within(body, &incoming) {
+            return Err(ReadStop::Reply(text_reply(
+                400,
+                Some("body"),
+                "the preview request could not be stored",
+            )));
+        }
+        if !surplus.is_empty() {
+            *pending = surplus;
+        }
+        return Ok(());
+    }
+    if !push_within(body, &tail) {
+        return Err(ReadStop::Reply(text_reply(
+            400,
+            Some("body"),
+            "the preview request could not be stored",
+        )));
+    }
+    let mut chunk = [0_u8; 8192];
+    while body.len() < declared {
+        let n = stream.read(&mut chunk).map_err(ReadStop::Io)?;
+        if n == 0 {
+            return Err(ReadStop::Reply(text_reply(
+                400,
+                Some("length"),
+                "the preview request ended early",
+            )));
+        }
+        let Some(got) = chunk.get(..n) else {
+            return Err(ReadStop::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "read",
+            )));
+        };
+        let need = declared - body.len();
+        if got.len() <= need {
+            if !push_within(body, got) {
+                return Err(ReadStop::Reply(text_reply(
+                    400,
+                    Some("body"),
+                    "the preview request could not be stored",
+                )));
+            }
+        } else {
+            let Some(take) = got.get(..need) else {
+                return Err(ReadStop::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "read",
+                )));
+            };
+            let Some(extra) = got.get(need..) else {
+                return Err(ReadStop::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "read",
+                )));
+            };
+            if !push_within(body, take) {
+                return Err(ReadStop::Reply(text_reply(
+                    400,
+                    Some("body"),
+                    "the preview request could not be stored",
+                )));
+            }
+            *pending = extra.to_vec();
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn push_within(body: &mut Vec<u8>, bytes: &[u8]) -> bool {
+    let Some(new_len) = body.len().checked_add(bytes.len()) else {
+        return false;
+    };
+    if new_len > body.capacity() {
+        return false;
+    }
+    body.extend_from_slice(bytes);
+    true
+}
+
+/// Allocate a body and count it while the following read fills it.
+fn begin_body(viewer: &Viewer, declared: usize) -> Vec<u8> {
+    let body = exact_body(declared);
+    viewer.enter_inflight(body.capacity());
+    #[cfg(test)]
+    viewer.trace_inflight("reading");
+    body
 }
 
 fn fill_body<R: Read>(
@@ -813,9 +1358,7 @@ fn fill_body<R: Read>(
     Ok(body)
 }
 
-/// One allocation of `declared` bytes. A doubled growth trail stays resident
-/// after the body is freed, because this host does not return large pages.
-#[cfg(test)]
+/// One buffer of exactly `declared` bytes.
 fn exact_body(declared: usize) -> Vec<u8> {
     let mut body = Vec::new();
     body.reserve_exact(declared);
@@ -1033,6 +1576,168 @@ mod tests {
     }
 
     #[test]
+    fn a_body_is_inflight_while_read_and_not_twice_once_cached() -> Result<(), String> {
+        // Slice 0 is one 96 by 128 16-bit frame. 96 * 128 * 2 = 24576 sample bytes.
+        let file = slice(0).ok_or_else(|| "synthetic slice 0 was absent".to_owned())?;
+        let declared = file.len();
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        });
+        let during_inflight = std::sync::atomic::AtomicUsize::new(usize::MAX);
+        let during_files = std::sync::atomic::AtomicUsize::new(usize::MAX);
+        let during_used = std::sync::atomic::AtomicUsize::new(usize::MAX);
+        let mut stream = WatchRead {
+            inner: std::io::Cursor::new(file),
+            on_first: Some(|| {
+                let census = viewer.memory_census();
+                during_inflight.store(census.inflight, std::sync::atomic::Ordering::Relaxed);
+                during_files.store(census.files, std::sync::atomic::Ordering::Relaxed);
+                during_used.store(census.pressure.used, std::sync::atomic::Ordering::Relaxed);
+            }),
+        };
+        let mut pending = Vec::new();
+        let body = fill_body(&mut stream, &mut pending, 0, declared, |need| {
+            begin_body(&viewer, need)
+        })
+        .map_err(|_| "the declared body could not be read".to_owned())?;
+        let capacity = body.capacity();
+        if capacity != declared {
+            return Err(format!(
+                "the body capacity was {capacity} for {declared} declared bytes"
+            ));
+        }
+        let seen_inflight = during_inflight.load(std::sync::atomic::Ordering::Relaxed);
+        let seen_files = during_files.load(std::sync::atomic::Ordering::Relaxed);
+        let seen_used = during_used.load(std::sync::atomic::Ordering::Relaxed);
+        if seen_inflight != capacity || seen_files != 0 || seen_used != 0 {
+            return Err(format!(
+                "during the read inflight was {seen_inflight}, files {seen_files}, used {seen_used}"
+            ));
+        }
+        let filled = viewer.memory_census();
+        if filled.inflight != capacity || filled.files != 0 || filled.frames != 0 {
+            return Err(format!(
+                "after the read inflight was {}, files {}, frames {}",
+                filled.inflight, filled.files, filled.frames
+            ));
+        }
+        let mut charge = BodyCharge {
+            viewer: &viewer,
+            bytes: capacity,
+            counted: false,
+            slot: None,
+        };
+        let reply = file_route(
+            &viewer,
+            Request {
+                method: "POST".to_owned(),
+                path: "/file".to_owned(),
+                body,
+                frame: FrameRequest::default(),
+                file_id: None,
+                close: true,
+                body_charge: capacity,
+                body_counted: false,
+                body_slot: None,
+            },
+            &mut charge,
+        );
+        if reply.status != 200 || reply.held_flag != Some(1) {
+            return Err(format!("the file was not cached: status {}", reply.status));
+        }
+        if charge.bytes != 0 {
+            return Err("the cached file stayed inflight".to_owned());
+        }
+        let id_text = reply
+            .file_id
+            .clone()
+            .ok_or_else(|| "the file id was missing".to_owned())?;
+        let id = FileId::parse(&id_text).ok_or_else(|| "the file id did not parse".to_owned())?;
+        let cached = viewer.memory_census();
+        if cached.inflight != 0 || cached.files != 1 || cached.pressure.used < capacity {
+            return Err(format!(
+                "after cache inflight was {}, files {}, used {}",
+                cached.inflight, cached.files, cached.pressure.used
+            ));
+        }
+        let (preview, _permit) = preview_held(&viewer, id, FrameRequest::default(), None);
+        if preview.status != 200 {
+            return Err(format!("the preview status was {}", preview.status));
+        }
+        let done = viewer.memory_census();
+        if done.inflight != 0 || done.files != 0 || done.frames != 1 {
+            return Err(format!(
+                "after the frame inflight was {}, files {}, frames {}",
+                done.inflight, done.files, done.frames
+            ));
+        }
+        let steps = viewer.inflight_steps();
+        let reading = step_named(&steps, "reading")?;
+        let cached_step = step_named(&steps, "cached")?;
+        let decoding = step_named(&steps, "decoding")?;
+        let frame = step_named(&steps, "frame")?;
+        if reading.inflight != capacity || reading.files != 0 || reading.used != 0 {
+            return Err(format!(
+                "the reading step was inflight {} files {} used {}",
+                reading.inflight, reading.files, reading.used
+            ));
+        }
+        if cached_step.inflight != 0 || cached_step.files != 1 || cached_step.used < capacity {
+            return Err(format!(
+                "the cached step was inflight {} files {} used {}",
+                cached_step.inflight, cached_step.files, cached_step.used
+            ));
+        }
+        let sample_floor = 96_usize * 128 * 2;
+        if decoding.files != 1
+            || decoding.frames != 0
+            || decoding.inflight < sample_floor
+            || decoding.inflight >= capacity
+            || decoding.used < capacity
+        {
+            return Err(format!(
+                "the decoding step was inflight {} files {} frames {} used {}",
+                decoding.inflight, decoding.files, decoding.frames, decoding.used
+            ));
+        }
+        if frame.inflight != 0
+            || frame.files != 0
+            || frame.frames != 1
+            || frame.used >= cached_step.used
+        {
+            return Err(format!(
+                "the frame step was inflight {} files {} frames {} used {}, cached used {}",
+                frame.inflight, frame.files, frame.frames, frame.used, cached_step.used
+            ));
+        }
+        Ok(())
+    }
+
+    fn step_named<'a>(
+        steps: &'a [crate::held::InflightStep],
+        label: &str,
+    ) -> Result<&'a crate::held::InflightStep, String> {
+        steps
+            .iter()
+            .find(|step| step.label == label)
+            .ok_or_else(|| format!("the {label} step was missing"))
+    }
+
+    struct WatchRead<R, F> {
+        inner: R,
+        on_first: Option<F>,
+    }
+
+    impl<R: std::io::Read, F: FnOnce()> std::io::Read for WatchRead<R, F> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if let Some(hook) = self.on_first.take() {
+                hook();
+            }
+            self.inner.read(buf)
+        }
+    }
+
+    #[test]
     fn a_second_preview_does_not_keep_a_second_byte_buffer() -> Result<(), String> {
         let bytes = slice(0).ok_or("synthetic slice 0 was absent")?;
         let viewer = Viewer::new(ViewerConfig {
@@ -1041,7 +1746,7 @@ mod tests {
         let id = viewer
             .insert_file(bytes)
             .ok_or("the synthetic slice was not held")?;
-        let first = preview_held(&viewer, id, FrameRequest::default(), None);
+        let (first, _permit) = preview_held(&viewer, id, FrameRequest::default(), None);
         if first.status != 200 {
             return Err(format!("the first preview status was {}", first.status));
         }
@@ -1067,7 +1772,7 @@ mod tests {
                 "the grey buffer capacity was {grey} for {pixels} pixels"
             ));
         }
-        let second = preview_held(&viewer, id, FrameRequest::default(), None);
+        let (second, _permit) = preview_held(&viewer, id, FrameRequest::default(), None);
         if second.status != 200 {
             return Err(format!("the second preview status was {}", second.status));
         }
@@ -1090,5 +1795,434 @@ mod tests {
             ));
         }
         Ok(())
+    }
+
+    #[test]
+    fn concurrent_previews_and_headers_keep_the_posted_file() -> Result<(), String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let viewer = Arc::new(Viewer::with_connection_cap(
+            ViewerConfig {
+                cache_bytes: 8 * 1024 * 1024,
+            },
+            8,
+        ));
+        let serving = Arc::clone(&viewer);
+        std::thread::spawn(move || {
+            let _ = serve_on(listener, serving);
+        });
+        let bytes = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let posted = post_bytes(addr, &bytes)?;
+        if !status_is(&posted, 200) {
+            return Err(format!("the only post was not accepted: {posted}"));
+        }
+        let id = header_value(&posted, "X-Ocelli-File").ok_or("the file id was missing")?;
+        let parsed = FileId::parse(&id).ok_or("the file id did not parse")?;
+        let first_permit = viewer
+            .loan_workspace(&mut || true)
+            .ok_or("the first permit was missing")?;
+        let second_permit = viewer
+            .loan_workspace(&mut || true)
+            .ok_or("the second permit was missing")?;
+        let before = viewer.preview_calls();
+        let first_addr = addr;
+        let first_id = id.clone();
+        let first = std::thread::spawn(move || request_preview(first_addr, &first_id));
+        wait_for_preview(&viewer, before)?;
+        if viewer.file_bytes(parsed).is_none() {
+            return Err("the held file was removed while a decode waited".to_owned());
+        }
+        let headers = request_headers(addr, &id)?;
+        if !status_is(&headers, 200) {
+            return Err(format!("headers during a decode were not 200: {headers}"));
+        }
+        let mid = viewer.preview_calls();
+        let second_addr = addr;
+        let second_id = id.clone();
+        let second = std::thread::spawn(move || request_preview(second_addr, &second_id));
+        wait_for_preview(&viewer, mid)?;
+        if viewer.file_bytes(parsed).is_none() {
+            return Err("the held file was removed for a second preview".to_owned());
+        }
+        drop(first_permit);
+        drop(second_permit);
+        let first_reply = first
+            .join()
+            .map_err(|_| "the first preview thread panicked".to_owned())??;
+        let second_reply = second
+            .join()
+            .map_err(|_| "the second preview thread panicked".to_owned())??;
+        if !status_is(&first_reply, 200) || !status_is(&second_reply, 200) {
+            return Err(format!(
+                "concurrent previews were not both 200\n{first_reply}\n{second_reply}"
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_pooled_server_posts_and_previews_on_two_workers() -> Result<(), String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let viewer = Arc::new(Viewer::server(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        }));
+        let serving = Arc::clone(&viewer);
+        std::thread::spawn(move || {
+            let _ = serve_on(listener, serving);
+        });
+        let bytes = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let posted = post_bytes(addr, &bytes)?;
+        if !status_is(&posted, 200) {
+            return Err(format!("the pooled post was not accepted: {posted}"));
+        }
+        let id = header_value(&posted, "X-Ocelli-File").ok_or("the file id was missing")?;
+        let (threads, peak, now) = viewer.body_schedule();
+        if threads != 2 || peak != 1 || now != 0 {
+            return Err(format!(
+                "bodies were threads {threads} peak {peak} now {now}"
+            ));
+        }
+        let preview = request_preview(addr, &id)?;
+        if !status_is(&preview, 200) {
+            return Err(format!("the pooled preview was not 200: {preview}"));
+        }
+        let source = header_value(&preview, "X-Ocelli-Source").unwrap_or_default();
+        if source != "decoded" {
+            return Err(format!("the pooled preview source was {source}"));
+        }
+        let census = viewer.memory_census();
+        if census.inflight != 0 || census.frames != 1 || census.workspace == 0 {
+            return Err(format!(
+                "after preview inflight {} frames {} workspace {}",
+                census.inflight, census.frames, census.workspace
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn an_evicted_frame_buffer_is_reused_for_the_next_decode() -> Result<(), String> {
+        let mut file_a = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let mut file_b = slice(1).ok_or("synthetic slice 1 was absent")?;
+        file_a.shrink_to_fit();
+        file_b.shrink_to_fit();
+        let probe = Viewer::new(ViewerConfig {
+            cache_bytes: 64 * 1024 * 1024,
+        });
+        let probe_id = probe
+            .insert_file(file_a.clone())
+            .ok_or("the probe file was refused")?;
+        let (probe_reply, _) = preview_held(&probe, probe_id, FrameRequest::default(), None);
+        if probe_reply.status != 200 {
+            return Err(format!(
+                "the probe preview status was {}",
+                probe_reply.status
+            ));
+        }
+        let (_, sample_len) = probe
+            .cached_sample(probe_id, 0)
+            .ok_or("the probe frame was not cached")?;
+        let frame_used = probe.pressure().used;
+        if sample_len == 0 || frame_used <= sample_len {
+            return Err(format!(
+                "frame used {frame_used} sample length {sample_len}"
+            ));
+        }
+        // The budget holds the file or the frame, not both. The spare byte
+        // under that sum is enough for the evicted sample buffer.
+        let file_cap = file_a.capacity().max(file_b.capacity());
+        let budget = file_cap + frame_used - 1;
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let id_a = viewer.insert_file(file_a).ok_or("file A was refused")?;
+        let (reply_a, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
+        if reply_a.status != 200 {
+            return Err(format!("preview A status was {}", reply_a.status));
+        }
+        let (reused_before, _) = viewer.buffer_claims();
+        let id_b = viewer
+            .insert_file(file_b.clone())
+            .ok_or("file B was refused")?;
+        let parked = viewer
+            .free_sample_ptr(sample_len)
+            .ok_or("the evicted buffer was not parked")?;
+        let fresh = preview_frame(&file_b, FrameRequest::default())
+            .map_err(|error| format!("a fresh decode of B failed: {error}"))?;
+        let (reply_b, _) = preview_held(&viewer, id_b, FrameRequest::default(), None);
+        if reply_b.status != 200 {
+            return Err(format!("preview B status was {}", reply_b.status));
+        }
+        if reply_b.body != fresh.grey {
+            return Err("recycled grey differed from a fresh decode".to_owned());
+        }
+        let (addr, len) = viewer
+            .cached_sample(id_b, 0)
+            .ok_or("frame B was not cached")?;
+        if addr != parked || len != sample_len {
+            return Err(format!(
+                "recycled pointer {addr} length {len}, parked {parked}, sample {sample_len}"
+            ));
+        }
+        let (reused, _) = viewer.buffer_claims();
+        if reused <= reused_before {
+            return Err("the decode allocated instead of taking the free buffer".to_owned());
+        }
+        let census = viewer.memory_census();
+        if census.pressure.used.saturating_add(census.free) > budget {
+            return Err(format!(
+                "used {} free {} budget {budget}",
+                census.pressure.used, census.free
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn recycled_grey_matches_a_fresh_decode_for_every_accepted_corpus_file() -> Result<(), String> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let data = root.join("corpus/data");
+        if !data.is_dir() {
+            return Ok(());
+        }
+        let manifest = std::fs::read_to_string(root.join("corpus/manifest.tsv"))
+            .map_err(|_| "tracked corpus manifest is unreadable".to_owned())?;
+        let mut files = 0_usize;
+        let mut accepted = 0_usize;
+        let mut reused = 0_usize;
+        for (row_index, line) in manifest.lines().skip(1).enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let row = row_index + 2;
+            let relative = line
+                .split('\t')
+                .next()
+                .ok_or_else(|| format!("manifest row {row} has no path"))?;
+            let mut bytes = std::fs::read(data.join(relative))
+                .map_err(|_| format!("corpus file for manifest row {row} is unreadable"))?;
+            bytes.shrink_to_fit();
+            let first = match preview_frame(&bytes, FrameRequest::default()) {
+                Ok(preview) => preview,
+                Err(_) => continue,
+            };
+            let total = first.frames;
+            let budget = bytes
+                .len()
+                .saturating_mul(4)
+                .saturating_add(8 * 1024 * 1024);
+            let viewer = Viewer::new(ViewerConfig {
+                cache_bytes: budget,
+            });
+            prove_recycled_frame(&viewer, &bytes, 0, &first.grey, row)?;
+            files = files.saturating_add(1);
+            accepted = accepted.saturating_add(1);
+            reused = reused.saturating_add(viewer.buffer_claims().0);
+            for index in 1..total {
+                let request = FrameRequest {
+                    frame: index,
+                    ..FrameRequest::default()
+                };
+                let fresh = match preview_frame(&bytes, request) {
+                    Ok(preview) => preview,
+                    Err(_) => continue,
+                };
+                let before = viewer.buffer_claims().0;
+                prove_recycled_frame(&viewer, &bytes, index, &fresh.grey, row)?;
+                accepted = accepted.saturating_add(1);
+                reused = reused.saturating_add(viewer.buffer_claims().0.saturating_sub(before));
+            }
+        }
+        if accepted == 0 {
+            return Err("the corpus had no file the viewer accepts".to_owned());
+        }
+        if reused == 0 {
+            return Err("no accepted frame reused a sample buffer".to_owned());
+        }
+        let out_dir = root.join("target/f216-runs");
+        std::fs::create_dir_all(&out_dir).map_err(|error| error.to_string())?;
+        std::fs::write(
+            out_dir.join("corpus-identity.txt"),
+            format!(
+                "files {files}\nframes {accepted}\ndifferences 0\nreused {reused}\npoison 0xa5\n"
+            ),
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn prove_recycled_frame(
+        viewer: &Viewer,
+        bytes: &[u8],
+        index: u32,
+        fresh_grey: &[u8],
+        row: usize,
+    ) -> Result<(), String> {
+        let request = FrameRequest {
+            frame: index,
+            ..FrameRequest::default()
+        };
+        let id = viewer
+            .insert_file(bytes.to_vec())
+            .ok_or_else(|| format!("manifest row {row} frame {index} was refused"))?;
+        let (first, _) = preview_held(viewer, id, request, None);
+        if first.status != 200 {
+            return Err(format!(
+                "manifest row {row} frame {index} preview status was {}",
+                first.status
+            ));
+        }
+        if let Some(diff) = first_grey_diff(&first.body, fresh_grey) {
+            return Err(format!(
+                "manifest row {row} frame {index} first grey differed at {diff}"
+            ));
+        }
+        let sample_len = viewer
+            .cached_sample(id, index)
+            .ok_or_else(|| format!("manifest row {row} frame {index} was not cached"))?
+            .1;
+        if !viewer.evict_frame_to_free_list(id, index) {
+            return Err(format!(
+                "manifest row {row} frame {index} could not be evicted"
+            ));
+        }
+        let parked = viewer
+            .free_sample_ptr(sample_len)
+            .ok_or_else(|| format!("manifest row {row} frame {index} buffer was not parked"))?;
+        // The parked buffer still holds this frame's samples, so a decode that
+        // skipped a byte would reproduce it by accident. 0xA5 is not that.
+        if viewer.poison_free_samples(sample_len, 0xA5) == 0 {
+            return Err(format!(
+                "manifest row {row} frame {index} had no free buffer to poison"
+            ));
+        }
+        let again_id = if viewer.file_bytes(id).is_some() {
+            id
+        } else {
+            viewer.insert_file(bytes.to_vec()).ok_or_else(|| {
+                format!("manifest row {row} frame {index} could not be posted again")
+            })?
+        };
+        let reused_before = viewer.buffer_claims().0;
+        let (second, _) = preview_held(viewer, again_id, request, None);
+        if second.status != 200 {
+            return Err(format!(
+                "manifest row {row} frame {index} recycled preview status was {}",
+                second.status
+            ));
+        }
+        if let Some(diff) = first_grey_diff(&second.body, fresh_grey) {
+            return Err(format!(
+                "manifest row {row} frame {index} recycled grey differed at {diff}"
+            ));
+        }
+        let (addr, len) = viewer.cached_sample(again_id, index).ok_or_else(|| {
+            format!("manifest row {row} frame {index} was not cached after reuse")
+        })?;
+        if addr != parked || len != sample_len {
+            return Err(format!(
+                "manifest row {row} frame {index} recycled pointer {addr} length {len}"
+            ));
+        }
+        if viewer.buffer_claims().0 <= reused_before {
+            return Err(format!(
+                "manifest row {row} frame {index} allocated a new sample buffer"
+            ));
+        }
+        let _ = viewer.evict_frame_to_free_list(again_id, index);
+        Ok(())
+    }
+
+    fn first_grey_diff(got: &[u8], fresh: &[u8]) -> Option<usize> {
+        if got.len() != fresh.len() {
+            return Some(got.len().min(fresh.len()));
+        }
+        got.iter()
+            .zip(fresh.iter())
+            .position(|(left, right)| left != right)
+    }
+
+    fn wait_for_preview(viewer: &Viewer, before: u64) -> Result<(), String> {
+        let started = std::time::Instant::now();
+        while viewer.preview_calls() == before {
+            if started.elapsed() > Duration::from_secs(2) {
+                return Err("a preview did not reach the held file".to_owned());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Ok(())
+    }
+
+    fn post_bytes(addr: std::net::SocketAddr, bytes: &[u8]) -> Result<String, String> {
+        let mut request = format!(
+            "POST /file HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            bytes.len()
+        )
+        .into_bytes();
+        request.extend_from_slice(bytes);
+        read_http(addr, &request)
+    }
+
+    fn request_preview(addr: std::net::SocketAddr, id: &str) -> Result<String, String> {
+        let request = format!(
+            "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        read_http(addr, request.as_bytes())
+    }
+
+    fn request_headers(addr: std::net::SocketAddr, id: &str) -> Result<String, String> {
+        let request = format!(
+            "POST /headers HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        read_http(addr, request.as_bytes())
+    }
+
+    fn read_http(addr: std::net::SocketAddr, request: &[u8]) -> Result<String, String> {
+        let mut stream = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .map_err(|error| error.to_string())?;
+        stream
+            .write_all(request)
+            .map_err(|error| error.to_string())?;
+        let mut buf = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        loop {
+            match stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let Some(got) = chunk.get(..n) else {
+                        return Err("the response read was short".to_owned());
+                    };
+                    buf.extend_from_slice(got);
+                }
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        || error.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    break;
+                }
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        Ok(String::from_utf8_lossy(&buf).into_owned())
+    }
+
+    fn status_is(response: &str, status: u16) -> bool {
+        response.starts_with(&format!("HTTP/1.1 {status} "))
+    }
+
+    fn header_value(response: &str, name: &str) -> Option<String> {
+        let header = response.split("\r\n\r\n").next().unwrap_or(response);
+        for line in header.split("\r\n") {
+            let Some((key, value)) = line.split_once(':') else {
+                continue;
+            };
+            if key.eq_ignore_ascii_case(name) {
+                return Some(value.trim().to_owned());
+            }
+        }
+        None
     }
 }

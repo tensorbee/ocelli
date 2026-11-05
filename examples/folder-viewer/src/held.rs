@@ -2,16 +2,27 @@
 //!
 //! One `Lru` accounts both. Encoded bytes leave by `Lru::remove` once every
 //! frame of that file is held. The tier is `CacheTier::Decoded` because the
-//! frames are what the budget is for.
+//! frames are what the budget is for. A decoded frame's sample buffer that
+//! leaves the cache waits on a free list keyed by its exact byte length.
+//! Cached frames and free buffers share one budget. The next decode of that
+//! length takes the buffer instead of allocating.
 
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::thread::ThreadId;
 use std::time::Duration;
 
 use ocelli_cache::{Admission, Budgeted, CacheTier, Lru, Pressure};
 use ocelli_core::Stored;
 
 use crate::preview::HeldFrame;
+
+#[path = "schedule.rs"]
+mod schedule;
+
+pub(crate) use schedule::{BodyPermit, DecodePermit, set_detached, with_decode_workspace};
 
 const DEFAULT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 const CONNECTION_CAP: usize = 32;
@@ -125,22 +136,20 @@ pub(crate) enum Lookup {
     /// The id is unknown, or the bytes and this frame are both gone.
     Gone,
     /// The decoded frame.
-    Hit(Arc<HeldFrame>),
+    Hit(Arc<CachedFrame>),
     /// The posted bytes, shared with the cache so a decode does not copy them.
-    Miss(Arc<Vec<u8>>),
+    Miss(Arc<PostedBytes>),
 }
 
-/// A preview's view of one id. `Owned` is the posted buffer with no other
-/// owner, so a single native frame can become the held samples in place.
+/// A preview's view of one id. The posted bytes stay in the cache for the
+/// whole decode, so a second preview or `/headers` still finds them.
 pub(crate) enum PreviewSource {
     /// The id is unknown, or the bytes and this frame are both gone.
     Gone,
     /// The decoded frame.
-    Hit(Arc<HeldFrame>),
-    /// Posted bytes another caller still holds.
-    Shared(Arc<Vec<u8>>),
-    /// Posted bytes this caller now owns. The cache no longer has them.
-    Owned(Vec<u8>),
+    Hit(Arc<CachedFrame>),
+    /// Posted bytes. The cache keeps this `Arc` until the frame is stored.
+    Shared(Arc<PostedBytes>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -151,8 +160,104 @@ enum HeldKey {
 
 enum Held {
     /// Posted bytes. Shared, so a lookup does not copy the buffer.
-    File(Arc<Vec<u8>>),
-    Frame(Arc<HeldFrame>),
+    File(Arc<PostedBytes>),
+    Frame(Arc<CachedFrame>),
+}
+
+/// Posted bytes, and the worker that should free them.
+pub(crate) struct PostedBytes {
+    bytes: Vec<u8>,
+    worker: Option<u8>,
+    retire: Option<Sender<Vec<u8>>>,
+}
+
+impl PostedBytes {
+    #[cfg(test)]
+    fn plain(bytes: Vec<u8>) -> Self {
+        Self {
+            bytes,
+            worker: None,
+            retire: None,
+        }
+    }
+
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub(crate) fn worker(&self) -> Option<u8> {
+        self.worker
+    }
+
+    fn capacity(&self) -> usize {
+        self.bytes.capacity()
+    }
+}
+
+impl Drop for PostedBytes {
+    fn drop(&mut self) {
+        let bytes = std::mem::take(&mut self.bytes);
+        if let Some(tx) = self.retire.take() {
+            schedule::retire_bytes(&tx, bytes);
+        }
+    }
+}
+
+impl std::ops::Deref for PostedBytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.bytes
+    }
+}
+
+/// A cached frame. When it leaves the cache its sample buffer waits on the
+/// free list, keyed by exact length, instead of being freed.
+pub(crate) struct CachedFrame {
+    inner: HeldFrame,
+    worker: Option<u8>,
+    retire: Option<Sender<Vec<u8>>>,
+    recycle: Option<Sender<Vec<u8>>>,
+}
+
+impl CachedFrame {
+    #[cfg(test)]
+    fn plain(inner: HeldFrame) -> Self {
+        Self {
+            inner,
+            worker: None,
+            retire: None,
+            recycle: None,
+        }
+    }
+
+    pub(crate) fn worker(&self) -> Option<u8> {
+        self.worker
+    }
+}
+
+impl std::ops::Deref for CachedFrame {
+    type Target = HeldFrame;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl Drop for CachedFrame {
+    fn drop(&mut self) {
+        let samples = std::mem::take(&mut self.inner.samples);
+        if samples.capacity() == 0 {
+            return;
+        }
+        if let Some(tx) = self.recycle.take() {
+            let _ = tx.send(samples);
+            return;
+        }
+        if let Some(tx) = self.retire.take() {
+            schedule::retire_bytes(&tx, samples);
+        }
+    }
 }
 
 impl Budgeted for Held {
@@ -164,10 +269,32 @@ impl Budgeted for Held {
     }
 }
 
+struct TrackedFrame {
+    key: HeldKey,
+    len: usize,
+}
+
 struct CacheState {
     lru: Lru<HeldKey, Held>,
     files: usize,
     frames: usize,
+    /// Sample buffers keyed by exact byte length.
+    free: HashMap<usize, Vec<Vec<u8>>>,
+    free_bytes: usize,
+    limit: usize,
+    /// Oldest frame at the front. A hit moves its key to the back.
+    frame_order: VecDeque<TrackedFrame>,
+    recycle_rx: Receiver<Vec<u8>>,
+    #[cfg(test)]
+    reused: usize,
+    #[cfg(test)]
+    fresh: usize,
+}
+
+/// Cloneable handle so a decode worker can take a free buffer.
+#[derive(Clone)]
+pub(crate) struct CacheHandle {
+    inner: Arc<Mutex<CacheState>>,
 }
 
 /// One decode permit. The scratch, the native byte copy and the grey reply
@@ -189,36 +316,33 @@ struct PoolState {
 struct PermitPool {
     idle: Mutex<PoolState>,
     ready: Condvar,
+    /// Scratch, native and grey bytes on permits that are not idle.
+    out: AtomicUsize,
 }
 
 pub(crate) struct WorkspaceGuard<'a> {
     pool: &'a PermitPool,
     pub(crate) workspace: Workspace,
+    charged: usize,
 }
 
-/// Spare posted buffers. A dropped file and the next body of the same size
-/// share one allocation, so the resident set does not keep both size classes.
-struct RecyclePool {
-    buffers: Vec<Vec<u8>>,
-    held: usize,
-}
-
-const RECYCLE_BUFFERS: usize = 4;
-const RECYCLE_BYTES: usize = 64 * 1024 * 1024;
-const RECYCLE_MIN: usize = 4096;
-const BODY_QUANTUM: usize = 16 * 1024;
-
-/// Round a posted body up to a 16 KiB multiple.
-///
-/// Files in one series differ by the width of a UID and an instance number.
-/// This host keeps a freed allocation class resident, so those lengths have
-/// to share one class or the resident set keeps every class.
-fn body_class(need: usize) -> usize {
-    need.saturating_add(BODY_QUANTUM - 1) / BODY_QUANTUM * BODY_QUANTUM
+impl WorkspaceGuard<'_> {
+    pub(crate) fn note_growth(&mut self) {
+        let now = workspace_bytes(&self.workspace);
+        if now > self.charged {
+            self.pool
+                .out
+                .fetch_add(now - self.charged, Ordering::Relaxed);
+            self.charged = now;
+        }
+    }
 }
 
 impl Drop for WorkspaceGuard<'_> {
     fn drop(&mut self) {
+        self.note_growth();
+        self.pool.out.fetch_sub(self.charged, Ordering::Relaxed);
+        self.charged = 0;
         let workspace = std::mem::take(&mut self.workspace);
         let mut state = lock_mutex(&self.pool.idle);
         state.idle.push(workspace);
@@ -226,26 +350,109 @@ impl Drop for WorkspaceGuard<'_> {
     }
 }
 
+fn workspace_bytes(workspace: &Workspace) -> usize {
+    workspace
+        .scratch
+        .capacity()
+        .saturating_mul(size_of::<Stored>())
+        .saturating_add(workspace.native.capacity())
+        .saturating_add(workspace.grey.capacity())
+}
+
 fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+fn bump_peak(slot: &AtomicUsize, value: usize) {
+    let mut current = slot.load(Ordering::Relaxed);
+    while value > current {
+        match slot.compare_exchange_weak(current, value, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return,
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+/// One reading of the viewer's pixel bytes.
+pub(crate) struct MemoryCensus {
+    /// Configured cache size and bytes the LRU holds.
+    pub(crate) pressure: Pressure,
+    /// Posted files in the cache.
+    pub(crate) files: usize,
+    /// Decoded frames in the cache.
+    pub(crate) frames: usize,
+    /// Body bytes being read and decode sample bytes not yet in the cache.
+    pub(crate) inflight: usize,
+    /// Permit scratch, native copies, grey replies and returned grey buffers.
+    pub(crate) workspace: usize,
+    /// Decoded sample bytes on the free list.
+    pub(crate) free: usize,
+}
+
+/// One inflight snapshot taken on the request path.
+#[cfg(test)]
+#[derive(Clone, Debug)]
+pub(crate) struct InflightStep {
+    /// The point in the request.
+    pub(crate) label: &'static str,
+    /// `MemoryCensus::inflight` at that point.
+    pub(crate) inflight: usize,
+    /// LRU bytes at that point.
+    pub(crate) used: usize,
+    /// Posted files at that point.
+    pub(crate) files: usize,
+    /// Decoded frames at that point.
+    pub(crate) frames: usize,
 }
 
 /// One process-local cache of posted files and decoded frames.
 pub struct Viewer {
     generation: u64,
     serial: AtomicU64,
-    cache: Mutex<CacheState>,
+    cache_bytes: usize,
+    cache: CacheHandle,
+    recycle_tx: Sender<Vec<u8>>,
     permits: PermitPool,
-    recycled: Mutex<RecyclePool>,
+    /// Bytes of a body being read, or of a decode sample buffer not yet cached.
+    inflight: Arc<AtomicUsize>,
     connections: AtomicUsize,
     connection_cap: usize,
+    /// Request bodies being read or still held by the request that read them.
+    bodies_now: AtomicUsize,
+    bodies_peak: AtomicUsize,
+    /// Threads that have read a request body.
+    body_threads: Mutex<HashSet<ThreadId>>,
+    peak_used: AtomicUsize,
+    peak_inflight: AtomicUsize,
+    peak_workspace: AtomicUsize,
+    peak_files: AtomicUsize,
+    peak_frames: AtomicUsize,
+    /// Set for the long-lived server. Tests keep the direct permit path.
+    scheduler: Option<schedule::Scheduler>,
+    #[cfg(test)]
+    steps: Mutex<Vec<InflightStep>>,
+    #[cfg(test)]
+    preview_calls: AtomicU64,
 }
 
 impl Viewer {
     /// A viewer with the default connection cap of 32.
+    ///
+    /// Decodes and request bodies run on the caller. The process server uses
+    /// [`Self::server`] so those allocations stay on two workers.
     #[must_use]
     pub fn new(config: ViewerConfig) -> Self {
         Self::with_connection_cap(config, CONNECTION_CAP)
+    }
+
+    /// The process server. Bodies and decodes run on `P` workers, and `P` is 2.
+    ///
+    /// At most four request bodies are live. That is the coefficient of `S_max`.
+    #[must_use]
+    pub fn server(config: ViewerConfig) -> Self {
+        let mut viewer = Self::with_connection_cap(config, CONNECTION_CAP);
+        viewer.scheduler = Some(schedule::Scheduler::start());
+        viewer
     }
 
     /// A viewer with an explicit connection cap. Zero refuses every connection.
@@ -255,27 +462,52 @@ impl Viewer {
         for _ in 0..PERMITS {
             idle.push(Workspace::default());
         }
+        let (recycle_tx, recycle_rx) = std::sync::mpsc::channel();
         Self {
             generation: mix_generation(),
             serial: AtomicU64::new(0),
-            cache: Mutex::new(CacheState {
-                lru: Lru::new(CacheTier::Decoded, config.cache_bytes),
-                files: 0,
-                frames: 0,
-            }),
+            cache_bytes: config.cache_bytes,
+            cache: CacheHandle {
+                inner: Arc::new(Mutex::new(CacheState {
+                    lru: Lru::new(CacheTier::Decoded, config.cache_bytes),
+                    files: 0,
+                    frames: 0,
+                    free: HashMap::new(),
+                    free_bytes: 0,
+                    limit: config.cache_bytes,
+                    frame_order: VecDeque::new(),
+                    recycle_rx,
+                    #[cfg(test)]
+                    reused: 0,
+                    #[cfg(test)]
+                    fresh: 0,
+                })),
+            },
+            recycle_tx,
             permits: PermitPool {
                 idle: Mutex::new(PoolState {
                     idle,
                     spare_grey: Vec::new(),
                 }),
                 ready: Condvar::new(),
+                out: AtomicUsize::new(0),
             },
-            recycled: Mutex::new(RecyclePool {
-                buffers: Vec::new(),
-                held: 0,
-            }),
+            inflight: Arc::new(AtomicUsize::new(0)),
             connections: AtomicUsize::new(0),
             connection_cap: cap,
+            bodies_now: AtomicUsize::new(0),
+            bodies_peak: AtomicUsize::new(0),
+            body_threads: Mutex::new(HashSet::new()),
+            peak_used: AtomicUsize::new(0),
+            peak_inflight: AtomicUsize::new(0),
+            peak_workspace: AtomicUsize::new(0),
+            peak_files: AtomicUsize::new(0),
+            peak_frames: AtomicUsize::new(0),
+            scheduler: None,
+            #[cfg(test)]
+            steps: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            preview_calls: AtomicU64::new(0),
         }
     }
 
@@ -286,20 +518,191 @@ impl Viewer {
     }
 
     pub(crate) fn census(&self) -> (Pressure, usize, usize) {
-        let state = self.lock_cache();
-        (state.lru.pressure(), state.files, state.frames)
+        let memory = self.memory_census();
+        (memory.pressure, memory.files, memory.frames)
     }
 
+    /// Cache bytes, in-flight body bytes and permit buffers.
+    pub(crate) fn memory_census(&self) -> MemoryCensus {
+        let mut state = self.lock_cache();
+        state.drain_recycled();
+        let mut pressure = state.lru.pressure();
+        pressure.budget = self.cache_bytes;
+        debug_assert!(
+            state.charged() <= state.limit,
+            "cached frames plus free buffers exceed the budget"
+        );
+        let files = state.files;
+        let frames = state.frames;
+        let free = state.free_bytes;
+        drop(state);
+        let permits = lock_mutex(&self.permits.idle);
+        let mut workspace = self.permits.out.load(Ordering::Relaxed);
+        for item in &permits.idle {
+            workspace = workspace.saturating_add(workspace_bytes(item));
+        }
+        for grey in &permits.spare_grey {
+            workspace = workspace.saturating_add(grey.capacity());
+        }
+        drop(permits);
+        if let Some(scheduler) = &self.scheduler {
+            workspace = workspace.saturating_add(scheduler.workspace_bytes());
+        }
+        let census = MemoryCensus {
+            pressure,
+            files,
+            frames,
+            inflight: self.inflight.load(Ordering::Relaxed),
+            workspace,
+            free,
+        };
+        bump_peak(&self.peak_used, census.pressure.used);
+        bump_peak(&self.peak_inflight, census.inflight);
+        bump_peak(&self.peak_workspace, census.workspace);
+        bump_peak(&self.peak_files, census.files);
+        bump_peak(&self.peak_frames, census.frames);
+        census
+    }
+
+    /// Bodies in flight, threads that have read one, and the census peaks.
+    pub(crate) fn body_schedule(&self) -> (usize, usize, usize) {
+        if let Some(scheduler) = &self.scheduler {
+            return scheduler.body_schedule();
+        }
+        let threads = lock_mutex(&self.body_threads).len();
+        (
+            threads,
+            self.bodies_peak.load(Ordering::Relaxed),
+            self.bodies_now.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Peak cache, inflight and workspace bytes, then peak file and frame counts.
+    pub(crate) fn census_peaks(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.peak_used.load(Ordering::Relaxed),
+            self.peak_inflight.load(Ordering::Relaxed),
+            self.peak_workspace.load(Ordering::Relaxed),
+            self.peak_files.load(Ordering::Relaxed),
+            self.peak_frames.load(Ordering::Relaxed),
+        )
+    }
+
+    pub(crate) fn enter_body(&self) {
+        let now = self
+            .bodies_now
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        bump_peak(&self.bodies_peak, now);
+        lock_mutex(&self.body_threads).insert(std::thread::current().id());
+    }
+
+    pub(crate) fn leave_body(&self) {
+        let mut current = self.bodies_now.load(Ordering::Relaxed);
+        loop {
+            let next = current.saturating_sub(1);
+            match self.bodies_now.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return,
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    /// Record inflight, LRU bytes, files and frames.
+    #[cfg(test)]
+    pub(crate) fn trace_inflight(&self, label: &'static str) {
+        let census = self.memory_census();
+        lock_mutex(&self.steps).push(InflightStep {
+            label,
+            inflight: census.inflight,
+            used: census.pressure.used,
+            files: census.files,
+            frames: census.frames,
+        });
+    }
+
+    /// Snapshots from [`Self::trace_inflight`], in call order.
+    #[cfg(test)]
+    pub(crate) fn inflight_steps(&self) -> Vec<InflightStep> {
+        lock_mutex(&self.steps).clone()
+    }
+
+    pub(crate) fn inflight_counter(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.inflight)
+    }
+
+    pub(crate) fn enter_inflight(&self, bytes: usize) {
+        self.inflight.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub(crate) fn release_counter(counter: &AtomicUsize, bytes: usize) {
+        let mut current = counter.load(Ordering::Relaxed);
+        loop {
+            let next = current.saturating_sub(bytes);
+            match counter.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed)
+            {
+                Ok(_) => return,
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    pub(crate) fn leave_inflight(&self, bytes: usize) {
+        Self::release_counter(&self.inflight, bytes);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn preview_calls(&self) -> u64 {
+        self.preview_calls.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn schedules(&self) -> bool {
+        self.scheduler.is_some()
+    }
+
+    pub(crate) fn acquire_body(&self, live: &mut dyn FnMut() -> bool) -> Option<BodyPermit> {
+        self.scheduler.as_ref()?.acquire_body(live)
+    }
+
+    pub(crate) fn acquire_decode(
+        &self,
+        home: Option<u8>,
+        live: &mut dyn FnMut() -> bool,
+    ) -> Option<DecodePermit> {
+        self.scheduler.as_ref()?.acquire_decode(home, live)
+    }
+
+    #[cfg(test)]
     pub(crate) fn insert_file(&self, bytes: Vec<u8>) -> Option<FileId> {
+        self.insert_posted(bytes, None, None)
+    }
+
+    pub(crate) fn insert_posted(
+        &self,
+        bytes: Vec<u8>,
+        worker: Option<u8>,
+        retire: Option<Sender<Vec<u8>>>,
+    ) -> Option<FileId> {
         let id = self.allocate_id();
         let key = HeldKey::File(id);
+        let posted = Arc::new(PostedBytes {
+            bytes,
+            worker,
+            retire,
+        });
+        let cost = posted.capacity();
         let mut state = self.lock_cache();
-        let admission = state.lru.insert(key, Held::File(Arc::new(bytes)));
+        state.drain_recycled();
+        state.reserve_for_insert(cost);
+        let admission = state.lru.insert(key, Held::File(posted));
         let kept = admission.refused.is_none();
-        account_insert(&mut state, key, &admission);
-        let spare = spare_buffers(admission);
+        state.absorb(key, 0, admission);
         drop(state);
-        self.keep_buffers(spare);
         if kept { Some(id) } else { None }
     }
 
@@ -315,87 +718,130 @@ impl Viewer {
         Lookup::Gone
     }
 
-    /// Frame, shared bytes, or the unique posted buffer removed from the cache.
+    /// Frame or shared posted bytes. The file stays in the cache.
     pub(crate) fn preview_source(&self, id: FileId, frame: u32) -> PreviewSource {
         let mut state = self.lock_cache();
-        if let Some(Held::Frame(held)) = state.lru.get(&HeldKey::Frame(id, frame)) {
-            return PreviewSource::Hit(Arc::clone(held));
-        }
-        let key = HeldKey::File(id);
-        let unique = matches!(
-            state.lru.get(&key),
-            Some(Held::File(bytes)) if Arc::strong_count(bytes) == 1
-        );
-        if unique && let Some(Held::File(bytes)) = state.lru.remove(&key) {
-            state.files = state.files.saturating_sub(1);
-            match Arc::try_unwrap(bytes) {
-                Ok(owned) => return PreviewSource::Owned(owned),
-                Err(shared) => {
-                    let admission = state.lru.insert(key, Held::File(shared));
-                    let kept = admission.refused.is_none();
-                    account_insert(&mut state, key, &admission);
-                    let returned = if kept {
-                        match state.lru.get(&key) {
-                            Some(Held::File(bytes)) => PreviewSource::Shared(Arc::clone(bytes)),
-                            Some(Held::Frame(_)) | None => PreviewSource::Gone,
-                        }
-                    } else {
-                        PreviewSource::Gone
-                    };
-                    let spare = spare_buffers(admission);
-                    drop(state);
-                    self.keep_buffers(spare);
-                    return returned;
-                }
+        let frame_key = HeldKey::Frame(id, frame);
+        let found = if let Some(Held::Frame(held)) = state.lru.get(&frame_key) {
+            let held = Arc::clone(held);
+            state.touch_frame(frame_key);
+            PreviewSource::Hit(held)
+        } else {
+            match state.lru.get(&HeldKey::File(id)) {
+                Some(Held::File(bytes)) => PreviewSource::Shared(Arc::clone(bytes)),
+                Some(Held::Frame(_)) | None => PreviewSource::Gone,
             }
-        }
-        match state.lru.get(&key) {
-            Some(Held::File(bytes)) => PreviewSource::Shared(Arc::clone(bytes)),
-            Some(Held::Frame(_)) | None => PreviewSource::Gone,
-        }
-    }
-
-    /// Put posted bytes back under `id` after a decode that still needs them.
-    pub(crate) fn restore_file(&self, id: FileId, bytes: Vec<u8>) {
-        let key = HeldKey::File(id);
-        let mut state = self.lock_cache();
-        if state.lru.contains_key(&key) {
-            drop(state);
-            self.keep_buffers(vec![bytes]);
-            return;
-        }
-        let admission = state.lru.insert(key, Held::File(Arc::new(bytes)));
-        account_insert(&mut state, key, &admission);
-        let spare = spare_buffers(admission);
+        };
         drop(state);
-        self.keep_buffers(spare);
+        #[cfg(test)]
+        self.preview_calls.fetch_add(1, Ordering::Relaxed);
+        found
     }
 
-    pub(crate) fn store_frame(&self, id: FileId, index: u32, held: HeldFrame) -> Arc<HeldFrame> {
+    pub(crate) fn store_frame(&self, id: FileId, index: u32, held: HeldFrame) -> Arc<CachedFrame> {
+        self.store_frame_with(id, index, held, None, None)
+    }
+
+    pub(crate) fn store_frame_with(
+        &self,
+        id: FileId,
+        index: u32,
+        held: HeldFrame,
+        worker: Option<u8>,
+        retire: Option<Sender<Vec<u8>>>,
+    ) -> Arc<CachedFrame> {
         let frames = held.frames;
-        let value = Arc::new(held);
+        let sample_len = held.samples.len();
+        let sample_cap = held.samples.capacity();
+        let value = Arc::new(CachedFrame {
+            inner: held,
+            worker,
+            retire,
+            recycle: Some(self.recycle_tx.clone()),
+        });
         let key = HeldKey::Frame(id, index);
         let mut state = self.lock_cache();
+        state.drain_recycled();
+        state.reserve_for_insert(sample_cap.saturating_add(size_of::<HeldFrame>()));
         let admission = state.lru.insert(key, Held::Frame(Arc::clone(&value)));
         let kept = admission.refused.is_none();
-        account_insert(&mut state, key, &admission);
+        state.absorb(key, sample_len, admission);
         let removed = if kept {
             take_encoded_if_ready(&mut state, id, frames)
         } else {
             None
         };
-        let mut spare = spare_buffers(admission);
-        if let Some(held) = removed
-            && let Some(buffer) = unique_bytes(held)
-        {
-            spare.push(buffer);
-        }
         drop(state);
-        self.keep_buffers(spare);
+        drop(removed);
         value
     }
 
-    pub(crate) fn file_bytes(&self, id: FileId) -> Option<Arc<Vec<u8>>> {
+    /// Put a sample buffer back on the free list when a decode does not store it.
+    pub(crate) fn recycle_sample_buffer(&self, buffer: Vec<u8>) {
+        self.cache.recycle_sample_buffer(buffer);
+    }
+
+    pub(crate) fn cache_handle(&self) -> CacheHandle {
+        self.cache.clone()
+    }
+
+    /// Decodes that took a free buffer, then decodes that allocated.
+    #[cfg(test)]
+    pub(crate) fn buffer_claims(&self) -> (usize, usize) {
+        let state = self.lock_cache();
+        (state.reused, state.fresh)
+    }
+
+    /// Address of one free buffer of this exact length.
+    #[cfg(test)]
+    pub(crate) fn free_sample_ptr(&self, len: usize) -> Option<usize> {
+        let mut state = self.lock_cache();
+        state.drain_recycled();
+        state.free.get(&len)?.last().map(|buf| buf.as_ptr().addr())
+    }
+
+    /// Overwrite every free buffer of this exact length with `byte`.
+    ///
+    /// A decode that read a recycled buffer before writing it would then
+    /// show `byte` in its output.
+    #[cfg(test)]
+    pub(crate) fn poison_free_samples(&self, len: usize, byte: u8) -> usize {
+        let mut state = self.lock_cache();
+        state.drain_recycled();
+        let Some(pile) = state.free.get_mut(&len) else {
+            return 0;
+        };
+        for buffer in pile.iter_mut() {
+            buffer.fill(byte);
+        }
+        pile.len()
+    }
+
+    /// Address and length of one cached frame's samples.
+    #[cfg(test)]
+    pub(crate) fn cached_sample(&self, id: FileId, frame: u32) -> Option<(usize, usize)> {
+        let mut state = self.lock_cache();
+        match state.lru.get(&HeldKey::Frame(id, frame))? {
+            Held::Frame(arc) => Some((arc.samples.as_ptr().addr(), arc.samples.len())),
+            Held::File(_) => None,
+        }
+    }
+
+    /// Move one cached frame's samples onto the free list.
+    #[cfg(test)]
+    pub(crate) fn evict_frame_to_free_list(&self, id: FileId, index: u32) -> bool {
+        let mut state = self.lock_cache();
+        let key = HeldKey::Frame(id, index);
+        let Some(held) = state.lru.remove(&key) else {
+            return false;
+        };
+        state.forget_frame(&key);
+        state.frames = state.frames.saturating_sub(1);
+        state.reclaim_held(held);
+        true
+    }
+
+    pub(crate) fn file_bytes(&self, id: FileId) -> Option<Arc<PostedBytes>> {
         let mut state = self.lock_cache();
         match state.lru.get(&HeldKey::File(id))? {
             Held::File(bytes) => Some(Arc::clone(bytes)),
@@ -422,40 +868,6 @@ impl Viewer {
         live: &mut dyn FnMut() -> bool,
     ) -> Option<WorkspaceGuard<'_>> {
         self.poll_workspace(live)
-    }
-
-    /// A body buffer of at least `need` bytes. A recycled buffer is used only
-    /// when its capacity is the same size class, so a radiograph is not reused
-    /// as a CT file.
-    pub(crate) fn take_buffer(&self, need: usize) -> Vec<u8> {
-        if need < RECYCLE_MIN {
-            let mut body = Vec::new();
-            body.reserve_exact(need);
-            return body;
-        }
-        let class = body_class(need);
-        let mut pool = lock_mutex(&self.recycled);
-        let found = pool.buffers.iter().enumerate().find_map(|(index, buf)| {
-            let cap = buf.capacity();
-            // A class may come back a quantum above the request. A radiograph
-            // is many quanta above a CT file, so the two do not meet.
-            let limit = class.saturating_add(BODY_QUANTUM);
-            (cap >= need && cap <= limit).then_some(index)
-        });
-        if let Some(index) = found {
-            let mut buffer = pool.buffers.swap_remove(index);
-            pool.held = pool.held.saturating_sub(buffer.capacity());
-            buffer.clear();
-            return buffer;
-        }
-        drop(pool);
-        let mut body = Vec::new();
-        body.reserve_exact(class);
-        body
-    }
-
-    pub(crate) fn recycle_buffer(&self, buffer: Vec<u8>) {
-        self.keep_buffers(vec![buffer]);
     }
 
     /// Put a grey reply buffer back on a permit. More than two are dropped.
@@ -514,7 +926,7 @@ impl Viewer {
     }
 
     fn lock_cache(&self) -> MutexGuard<'_, CacheState> {
-        lock_mutex(&self.cache)
+        lock_mutex(&self.cache.inner)
     }
 
     fn poll_workspace(&self, live: &mut dyn FnMut() -> bool) -> Option<WorkspaceGuard<'_>> {
@@ -540,47 +952,330 @@ impl Viewer {
         {
             workspace.grey = grey;
         }
+        let charged = workspace_bytes(&workspace);
+        self.permits.out.fetch_add(charged, Ordering::Relaxed);
         Some(WorkspaceGuard {
             pool: &self.permits,
             workspace,
+            charged,
         })
     }
+}
 
-    fn keep_buffers(&self, buffers: Vec<Vec<u8>>) {
-        let mut pool = lock_mutex(&self.recycled);
-        for mut buffer in buffers {
-            buffer.clear();
-            let cap = buffer.capacity();
-            if cap < RECYCLE_MIN {
+impl CacheHandle {
+    /// A sample buffer of `len` bytes, from the free list or from an evicted frame.
+    ///
+    /// An empty buffer means the caller allocates. A returned buffer is owned
+    /// by this decode and is not shared with the cache.
+    pub(crate) fn claim_sample_buffer(&self, len: usize) -> Vec<u8> {
+        lock_mutex(&self.inner).claim_buffer(len)
+    }
+
+    pub(crate) fn recycle_sample_buffer(&self, buffer: Vec<u8>) {
+        if buffer.capacity() == 0 {
+            return;
+        }
+        let mut state = lock_mutex(&self.inner);
+        state.drain_recycled();
+        state.park_if_fits(buffer);
+    }
+}
+
+fn frame_sample_cost(len: usize) -> usize {
+    len.saturating_add(size_of::<HeldFrame>())
+}
+
+impl CacheState {
+    fn drain_recycled(&mut self) {
+        while let Ok(buffer) = self.recycle_rx.try_recv() {
+            self.park_if_fits(buffer);
+        }
+    }
+
+    fn charged(&self) -> usize {
+        self.lru.pressure().used.saturating_add(self.free_bytes)
+    }
+
+    fn claim_buffer(&mut self, len: usize) -> Vec<u8> {
+        self.drain_recycled();
+        if let Some(buffer) = self.pop_free(len) {
+            self.note_reused();
+            let cost = buffer.capacity().saturating_add(size_of::<HeldFrame>());
+            self.make_room_dropping(cost);
+            return buffer;
+        }
+        let cost = frame_sample_cost(len);
+        if self.charged().saturating_add(cost) <= self.limit {
+            self.note_fresh();
+            return Vec::new();
+        }
+        if let Some(buffer) = self.take_oldest_frame_buffer(len) {
+            self.park_if_fits(buffer);
+            if let Some(buffer) = self.pop_free(len) {
+                self.note_reused();
+                return buffer;
+            }
+        }
+        self.make_room_dropping(cost);
+        self.note_fresh();
+        Vec::new()
+    }
+
+    fn note_reused(&mut self) {
+        #[cfg(test)]
+        {
+            self.reused = self.reused.saturating_add(1);
+        }
+    }
+
+    fn note_fresh(&mut self) {
+        #[cfg(test)]
+        {
+            self.fresh = self.fresh.saturating_add(1);
+        }
+    }
+
+    fn pop_free(&mut self, len: usize) -> Option<Vec<u8>> {
+        let pile = self.free.get_mut(&len)?;
+        let buffer = pile.pop()?;
+        if pile.is_empty() {
+            self.free.remove(&len);
+        }
+        self.free_bytes = self.free_bytes.saturating_sub(buffer.capacity());
+        Some(buffer)
+    }
+
+    fn push_free(&mut self, buffer: Vec<u8>) {
+        let len = buffer.len();
+        let cost = buffer.capacity();
+        if len == 0 || cost == 0 {
+            return;
+        }
+        self.free_bytes = self.free_bytes.saturating_add(cost);
+        self.free.entry(len).or_default().push(buffer);
+    }
+
+    /// Keep the buffer only when cached bytes plus free bytes still fit.
+    fn park_if_fits(&mut self, buffer: Vec<u8>) {
+        let cost = buffer.capacity();
+        if buffer.is_empty() || cost == 0 {
+            return;
+        }
+        if self.charged().saturating_add(cost) > self.limit {
+            return;
+        }
+        self.push_free(buffer);
+    }
+
+    /// Drop free buffers, then cached entries, until `cost` more bytes fit.
+    ///
+    /// A cached frame is discarded here. Its sample buffer is not parked,
+    /// because this room is for a buffer the caller already holds.
+    fn make_room_dropping(&mut self, cost: usize) {
+        loop {
+            if self.charged().saturating_add(cost) <= self.limit {
+                return;
+            }
+            if self.drop_one_free() {
                 continue;
             }
-            if pool.buffers.len() >= RECYCLE_BUFFERS
-                || pool.held.saturating_add(cap) > RECYCLE_BYTES
-            {
+            let evicted = self.evict_oldest();
+            if evicted.is_empty() {
+                return;
+            }
+            for held in evicted {
+                self.discard_held(held);
+            }
+        }
+    }
+
+    /// Make room for a new cache entry.
+    ///
+    /// An entry larger than the whole budget is left for `Lru` to refuse, so
+    /// a refusal does not empty the cache. A frame that leaves is parked when
+    /// the incoming entry and that buffer both fit, and dropped when they do not.
+    fn reserve_for_insert(&mut self, cost: usize) {
+        if cost > self.limit {
+            return;
+        }
+        loop {
+            if self.charged().saturating_add(cost) <= self.limit {
+                return;
+            }
+            if self.drop_one_free() {
                 continue;
             }
-            pool.held = pool.held.saturating_add(cap);
-            pool.buffers.push(buffer);
+            let evicted = self.evict_oldest();
+            if evicted.is_empty() {
+                return;
+            }
+            for held in evicted {
+                self.keep_buffer_if_room(held, cost);
+            }
+        }
+    }
+
+    fn drop_one_free(&mut self) -> bool {
+        let Some(&len) = self.free.keys().next() else {
+            return false;
+        };
+        let Some(buffer) = self.free.get_mut(&len).and_then(Vec::pop) else {
+            self.free.remove(&len);
+            return false;
+        };
+        if self.free.get(&len).is_some_and(Vec::is_empty) {
+            self.free.remove(&len);
+        }
+        self.free_bytes = self.free_bytes.saturating_sub(buffer.capacity());
+        true
+    }
+
+    fn keep_buffer_if_room(&mut self, held: Held, incoming: usize) {
+        let Held::Frame(arc) = held else {
+            self.discard_held(held);
+            return;
+        };
+        let cap = arc.samples.capacity();
+        if Arc::strong_count(&arc) == 1
+            && self.charged().saturating_add(cap).saturating_add(incoming) <= self.limit
+        {
+            self.reclaim_held(Held::Frame(arc));
+            return;
+        }
+        self.discard_held(Held::Frame(arc));
+    }
+
+    /// Evict one least recently used entry. The caller parks or drops it.
+    fn evict_oldest(&mut self) -> Vec<Held> {
+        if self.lru.is_empty() {
+            return Vec::new();
+        }
+        let budget = self.lru.budget();
+        let used = self.lru.pressure().used;
+        let before_len = self.lru.len();
+        let target = used.saturating_sub(1);
+        let admission = self.lru.set_budget(target);
+        let _ = self.lru.set_budget(budget);
+        if self.lru.len() == before_len {
+            return Vec::new();
+        }
+        let mut evicted = Vec::new();
+        for (key, held) in admission.evicted {
+            self.forget_frame(&key);
+            match key {
+                HeldKey::File(_) => self.files = self.files.saturating_sub(1),
+                HeldKey::Frame(_, _) => self.frames = self.frames.saturating_sub(1),
+            }
+            evicted.push(held);
+        }
+        evicted
+    }
+
+    fn take_oldest_frame_buffer(&mut self, len: usize) -> Option<Vec<u8>> {
+        let position = self.frame_order.iter().position(|frame| frame.len == len)?;
+        let tracked = self.frame_order.remove(position)?;
+        let key = tracked.key;
+        let held = self.lru.remove(&key)?;
+        let Held::Frame(arc) = held else {
+            let _ = self.lru.insert(key, held);
+            self.frame_order.push_back(tracked);
+            return None;
+        };
+        if Arc::strong_count(&arc) > 1 {
+            self.frame_order.push_back(tracked);
+            let admission = self.lru.insert(key, Held::Frame(arc));
+            for (evicted_key, evicted) in admission.evicted {
+                self.forget_frame(&evicted_key);
+                match evicted_key {
+                    HeldKey::File(_) => self.files = self.files.saturating_sub(1),
+                    HeldKey::Frame(_, _) => self.frames = self.frames.saturating_sub(1),
+                }
+                self.discard_held(evicted);
+            }
+            if let Some((_, refused)) = admission.refused {
+                self.frames = self.frames.saturating_sub(1);
+                self.forget_frame(&key);
+                self.discard_held(refused);
+            }
+            return None;
+        }
+        self.frames = self.frames.saturating_sub(1);
+        reclaim_owned(arc)
+    }
+
+    fn absorb(&mut self, key: HeldKey, sample_len: usize, admission: Admission<HeldKey, Held>) {
+        if admission.refused.is_some() {
+            if let Some((_, held)) = admission.refused {
+                self.reclaim_held(held);
+            }
+            return;
+        }
+        let displaced = admission.displaced.is_some();
+        for (evicted_key, held) in admission.evicted {
+            self.forget_frame(&evicted_key);
+            match evicted_key {
+                HeldKey::File(_) => self.files = self.files.saturating_sub(1),
+                HeldKey::Frame(_, _) => self.frames = self.frames.saturating_sub(1),
+            }
+            self.reclaim_held(held);
+        }
+        if let Some(held) = admission.displaced {
+            self.reclaim_held(held);
+        }
+        if !displaced {
+            match key {
+                HeldKey::File(_) => self.files = self.files.saturating_add(1),
+                HeldKey::Frame(_, _) => self.frames = self.frames.saturating_add(1),
+            }
+        }
+        if matches!(key, HeldKey::Frame(_, _)) {
+            self.remember_frame(key, sample_len);
+        }
+    }
+
+    fn reclaim_held(&mut self, held: Held) {
+        if let Held::Frame(arc) = held
+            && let Some(buffer) = reclaim_owned(arc)
+        {
+            self.park_if_fits(buffer);
+        }
+    }
+
+    fn discard_held(&mut self, held: Held) {
+        if let Held::Frame(arc) = held
+            && let Ok(mut frame) = Arc::try_unwrap(arc)
+        {
+            frame.recycle.take();
+            frame.retire.take();
+        }
+    }
+
+    fn remember_frame(&mut self, key: HeldKey, len: usize) {
+        self.forget_frame(&key);
+        self.frame_order.push_back(TrackedFrame { key, len });
+    }
+
+    fn touch_frame(&mut self, key: HeldKey) {
+        if let Some(position) = self.frame_order.iter().position(|frame| frame.key == key)
+            && let Some(frame) = self.frame_order.remove(position)
+        {
+            self.frame_order.push_back(frame);
+        }
+    }
+
+    fn forget_frame(&mut self, key: &HeldKey) {
+        if let Some(position) = self.frame_order.iter().position(|frame| frame.key == *key) {
+            self.frame_order.remove(position);
         }
     }
 }
 
-fn account_insert(state: &mut CacheState, key: HeldKey, admission: &Admission<HeldKey, Held>) {
-    if admission.refused.is_some() {
-        return;
-    }
-    for (evicted, _) in &admission.evicted {
-        match evicted {
-            HeldKey::File(_) => state.files = state.files.saturating_sub(1),
-            HeldKey::Frame(_, _) => state.frames = state.frames.saturating_sub(1),
-        }
-    }
-    if admission.displaced.is_none() {
-        match key {
-            HeldKey::File(_) => state.files = state.files.saturating_add(1),
-            HeldKey::Frame(_, _) => state.frames = state.frames.saturating_add(1),
-        }
-    }
+fn reclaim_owned(arc: Arc<CachedFrame>) -> Option<Vec<u8>> {
+    let mut frame = Arc::try_unwrap(arc).ok()?;
+    let samples = std::mem::take(&mut frame.inner.samples);
+    frame.recycle.take();
+    frame.retire.take();
+    Some(samples)
 }
 
 fn take_encoded_if_ready(state: &mut CacheState, id: FileId, frames: u32) -> Option<Held> {
@@ -591,33 +1286,6 @@ fn take_encoded_if_ready(state: &mut CacheState, id: FileId, frames: u32) -> Opt
     let removed = state.lru.remove(&HeldKey::File(id))?;
     state.files = state.files.saturating_sub(1);
     Some(removed)
-}
-
-fn unique_bytes(held: Held) -> Option<Vec<u8>> {
-    match held {
-        Held::File(bytes) => Arc::try_unwrap(bytes).ok(),
-        Held::Frame(frame) => Arc::try_unwrap(frame).ok().map(|frame| frame.samples),
-    }
-}
-
-fn spare_buffers(admission: Admission<HeldKey, Held>) -> Vec<Vec<u8>> {
-    let mut spare = Vec::new();
-    for (_, held) in admission.evicted {
-        if let Some(buffer) = unique_bytes(held) {
-            spare.push(buffer);
-        }
-    }
-    if let Some(held) = admission.displaced
-        && let Some(buffer) = unique_bytes(held)
-    {
-        spare.push(buffer);
-    }
-    if let Some((_, held)) = admission.refused
-        && let Some(buffer) = unique_bytes(held)
-    {
-        spare.push(buffer);
-    }
-    spare
 }
 
 fn mix_generation() -> u64 {
@@ -674,27 +1342,6 @@ mod tests {
     }
 
     #[test]
-    fn a_few_header_bytes_do_not_open_a_second_body_class() {
-        let viewer = Viewer::new(ViewerConfig { cache_bytes: 1024 });
-        // The bench CT files are 524822 and 524832 bytes. The gap is the UID
-        // and the instance number. 17400538 is the bench radiograph.
-        let short_len = 524_822_usize;
-        let long_len = 524_832_usize;
-        let radiograph = 17_400_538_usize;
-        let short = viewer.take_buffer(short_len);
-        let long = viewer.take_buffer(long_len);
-        assert!(short.capacity() >= long_len);
-        assert_eq!(short.capacity(), long.capacity());
-        assert_eq!(short.capacity() % (16 * 1024), 0);
-        let dx = viewer.take_buffer(radiograph);
-        assert!(dx.capacity() >= radiograph);
-        assert_ne!(dx.capacity(), short.capacity());
-        viewer.recycle_buffer(short);
-        let reused = viewer.take_buffer(long_len);
-        assert_eq!(reused.capacity(), long.capacity());
-    }
-
-    #[test]
     fn a_gone_caller_does_not_wait_for_a_permit() {
         let viewer = Viewer::new(ViewerConfig { cache_bytes: 1024 });
         let first = viewer.loan_workspace(&mut || true);
@@ -720,7 +1367,9 @@ mod tests {
             ));
         }
         let capacity = samples.capacity();
-        let held = Held::Frame(Arc::new(minimal_frame(samples, 512, 512)?));
+        let held = Held::Frame(Arc::new(CachedFrame::plain(minimal_frame(
+            samples, 512, 512,
+        )?)));
         let expected = capacity + size_of::<HeldFrame>();
         if held.bytes() != expected {
             return Err(format!(
@@ -735,7 +1384,7 @@ mod tests {
     fn a_file_is_accounted_by_capacity() {
         let mut spare = Vec::with_capacity(64);
         spare.push(1_u8);
-        let held = Held::File(Arc::new(spare));
+        let held = Held::File(Arc::new(PostedBytes::plain(spare)));
         assert!(held.bytes() >= 64);
         assert_ne!(held.bytes(), 1);
     }
@@ -837,7 +1486,12 @@ mod tests {
     fn the_held_bytes_never_exceed_the_budget() -> Result<(), String> {
         let samples = vec![0_u8; 32];
         let frame = minimal_frame(samples, 1, 1)?;
-        let cost = Held::Frame(Arc::new(minimal_frame(vec![0_u8; 32], 1, 1)?)).bytes();
+        let cost = Held::Frame(Arc::new(CachedFrame::plain(minimal_frame(
+            vec![0_u8; 32],
+            1,
+            1,
+        )?)))
+        .bytes();
         if cost == 0 {
             return Err("a held frame cost nothing".to_owned());
         }
@@ -859,11 +1513,16 @@ mod tests {
             ));
         }
         viewer.store_frame(second, 0, minimal_frame(vec![0_u8; 32], 1, 1)?);
-        let (pressure, _, frames) = viewer.census();
-        if pressure.used != cost || pressure.used > pressure.budget || frames != 1 {
+        let census = viewer.memory_census();
+        if census.pressure.used != cost
+            || census.pressure.used > census.pressure.budget
+            || census.frames != 1
+            || census.free != 0
+            || census.pressure.used.saturating_add(census.free) > census.pressure.budget
+        {
             return Err(format!(
-                "after eviction used {} budget {} frames {frames}",
-                pressure.used, pressure.budget
+                "after eviction used {} free {} budget {} frames {}",
+                census.pressure.used, census.free, census.pressure.budget, census.frames
             ));
         }
         let mut too_big = Vec::with_capacity(cost + 1);
@@ -877,6 +1536,70 @@ mod tests {
                 "a refused file changed used to {} and files to {files}",
                 pressure.used
             ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn cached_frames_and_free_buffers_share_one_budget() -> Result<(), String> {
+        // Three frames of 64 bytes and three of 32 fit, with a little spare.
+        let small = Held::Frame(Arc::new(CachedFrame::plain(minimal_frame(
+            vec![0_u8; 32],
+            1,
+            1,
+        )?)))
+        .bytes();
+        let large = small + 32;
+        let budget = 3 * large + 3 * small + 8;
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let cache = viewer.cache_handle();
+        let mut held = Vec::new();
+        for step in 0_u64..200 {
+            let len = if step % 3 == 0 { 64 } else { 32 };
+            let mut samples = cache.claim_sample_buffer(len);
+            if samples.capacity() < len {
+                samples = Vec::with_capacity(len);
+            }
+            samples.clear();
+            samples.resize(len, 0);
+            let id = FileId {
+                generation: viewer.generation,
+                serial: step,
+            };
+            if step % 7 == 0 {
+                // A decode that fails hands its buffer back.
+                viewer.recycle_sample_buffer(samples);
+            } else {
+                let kept = viewer.store_frame(id, 0, minimal_frame(samples, 1, 1)?);
+                // A reply still reading a frame keeps it past its eviction.
+                if step % 5 == 0 {
+                    held.push(kept);
+                }
+                if held.len() > 2 {
+                    held.remove(0);
+                }
+            }
+            let census = viewer.memory_census();
+            if census.pressure.used.saturating_add(census.free) > budget {
+                return Err(format!(
+                    "step {step} used {} free {} budget {budget}",
+                    census.pressure.used, census.free
+                ));
+            }
+        }
+        drop(held);
+        let census = viewer.memory_census();
+        if census.pressure.used.saturating_add(census.free) > budget {
+            return Err(format!(
+                "after the last reply used {} free {} budget {budget}",
+                census.pressure.used, census.free
+            ));
+        }
+        let (reused, fresh) = viewer.buffer_claims();
+        if reused == 0 || reused < fresh {
+            return Err(format!("reused {reused} fresh {fresh}"));
         }
         Ok(())
     }

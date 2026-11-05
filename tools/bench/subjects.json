@@ -170,7 +170,7 @@
       "tiers": ["C"],
       "subject_story": "F-216",
       "feeds": ["F-216"],
-      "note": "F-216 delivers this measurement. The backlog row is still pending, so the bench gate refuses the runner until that row is measurable. An increase is worse."
+      "note": "An increase is worse."
     },
     {
       "id": "viewer.first_image",
@@ -182,7 +182,7 @@
       "tiers": ["C"],
       "subject_story": "F-216",
       "feeds": ["F-216"],
-      "note": "F-216 delivers this measurement. The backlog row is still pending, so the bench gate refuses the runner until that row is measurable. An increase is worse."
+      "note": "An increase is worse."
     },
     {
       "id": "viewer.scroll_rate",
@@ -194,7 +194,7 @@
       "tiers": ["C"],
       "subject_story": "F-216",
       "feeds": ["F-216"],
-      "note": "F-216 delivers this measurement. The backlog row is still pending, so the bench gate refuses the runner until that row is measurable. An increase is better."
+      "note": "An increase is better."
     },
     {
       "id": "viewer.window_step",
@@ -206,7 +206,7 @@
       "tiers": ["C"],
       "subject_story": "F-216",
       "feeds": ["F-216"],
-      "note": "F-216 delivers this measurement. The backlog row is still pending, so the bench gate refuses the runner until that row is measurable. An increase is worse."
+      "note": "An increase is worse."
     },
     {
       "id": "viewer.resident_memory",
@@ -218,7 +218,7 @@
       "tiers": ["C"],
       "subject_story": "F-216",
       "feeds": ["F-216"],
-      "note": "F-216 delivers this measurement. The backlog row is still pending, so the bench gate refuses the runner until that row is measurable. An increase is worse. The bound is the formula in the F-216 design, not a second budget invented here."
+      "note": "An increase is worse. The bound is the formula in the F-216 design, not a second budget invented here."
     }
   ]
 }

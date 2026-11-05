@@ -10,7 +10,10 @@
 //! Invert flips the display byte after the chain.
 
 use std::cell::Cell;
-use std::sync::OnceLock;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{LazyLock, Mutex, OnceLock};
+use std::thread::ThreadId;
 use std::time::Instant;
 
 use dicom_core::dictionary::{DataDictionary, DataDictionaryEntry};
@@ -214,7 +217,15 @@ pub fn preview_first_frame(bytes: &[u8]) -> Result<Preview, PreviewError> {
 pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, PreviewError> {
     validate_frame_request(request)?;
     let mut native = Vec::new();
-    let held = decode_held(bytes, request.frame, &mut native)?;
+    let mut samples = Vec::new();
+    let held = decode_held(
+        bytes,
+        request.frame,
+        &mut native,
+        &mut samples,
+        &mut |_| {},
+        &mut |_| Vec::new(),
+    )?;
     let mut scratch = Vec::new();
     let mut grey = Vec::new();
     render_held(&held, request, &mut scratch, &mut grey)
@@ -258,6 +269,72 @@ pub(crate) fn decode_ticks() -> u64 {
 thread_local! {
     static DECODE_TICKS: Cell<u64> = const { Cell::new(0) };
     static PHASE: Cell<PhaseRecord> = const { Cell::new(PhaseRecord::ZERO) };
+}
+
+/// Threads inside `decode_held` right now.
+static DECODES_NOW: AtomicUsize = AtomicUsize::new(0);
+/// Highest `DECODES_NOW` this process has seen.
+static DECODES_PEAK: AtomicUsize = AtomicUsize::new(0);
+/// Distinct threads that have entered `decode_held`.
+static DECODE_THREADS: LazyLock<Mutex<HashSet<ThreadId>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn bump_peak(slot: &AtomicUsize, value: usize) {
+    let mut current = slot.load(Ordering::Relaxed);
+    while value > current {
+        match slot.compare_exchange_weak(current, value, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return,
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn lock_threads() -> std::sync::MutexGuard<'static, HashSet<ThreadId>> {
+    DECODE_THREADS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
+
+/// Threads that have decoded, the peak overlapping decodes, and how many are in one now.
+pub(crate) fn decode_schedule() -> (usize, usize, usize) {
+    let threads = lock_threads().len();
+    (
+        threads,
+        DECODES_PEAK.load(Ordering::Relaxed),
+        DECODES_NOW.load(Ordering::Relaxed),
+    )
+}
+
+/// Counts one `decode_held` until it returns.
+struct DecodeInFlight;
+
+impl DecodeInFlight {
+    fn enter() -> Self {
+        let now = DECODES_NOW
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        bump_peak(&DECODES_PEAK, now);
+        lock_threads().insert(std::thread::current().id());
+        Self
+    }
+}
+
+impl Drop for DecodeInFlight {
+    fn drop(&mut self) {
+        let mut current = DECODES_NOW.load(Ordering::Relaxed);
+        loop {
+            let next = current.saturating_sub(1);
+            match DECODES_NOW.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return,
+                Err(observed) => current = observed,
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -319,6 +396,20 @@ pub(crate) fn note_write(micros: u128) {
 
 pub(crate) fn phases() -> PhaseRecord {
     PHASE.with(Cell::get)
+}
+
+/// Copy a worker's phase times onto this thread. Lookup and write stay put.
+pub(crate) fn merge_worker_phases(from: PhaseRecord) {
+    PHASE.with(|cell| {
+        let mut phase = cell.get();
+        phase.unpack_us = from.unpack_us;
+        phase.chain_us = from.chain_us;
+        phase.voi_us = from.voi_us;
+        phase.grey_us = from.grey_us;
+        phase.fused_us = from.fused_us;
+        phase.pixels = from.pixels;
+        cell.set(phase);
+    });
 }
 
 fn note_render(update: impl FnOnce(&mut PhaseRecord)) {
@@ -399,15 +490,27 @@ pub(crate) enum FileWindow {
 
 /// Decode one frame into samples and a window recipe.
 ///
+/// `on_samples` runs once the sample buffer has its capacity and before
+/// those bytes are decoded. The caller can count that buffer while it is
+/// still outside the cache.
+///
 /// # Errors
 ///
 /// Returns the refusals that happen before a sample can be held: Part 10,
 /// image attributes, size, photometric interpretation, frame index, and decode.
-pub(crate) fn decode_held(
+pub(crate) fn decode_held<F, A>(
     bytes: &[u8],
     frame: u32,
     native: &mut Vec<u8>,
-) -> Result<HeldFrame, PreviewError> {
+    samples: &mut Vec<u8>,
+    on_samples: &mut F,
+    acquire: &mut A,
+) -> Result<HeldFrame, PreviewError>
+where
+    F: FnMut(usize),
+    A: FnMut(usize) -> Vec<u8>,
+{
+    let _in_flight = DecodeInFlight::enter();
     note_decode();
     if let Some((header, range)) = split_pixel_payload(bytes)
         && let Some(pixels) = bytes.get(range)
@@ -415,67 +518,18 @@ pub(crate) fn decode_held(
         && native_dispatch(parsed.transfer_syntax().dispatch_path())
         && borrowed_pixels_fit(parsed.object(), pixels)
     {
-        return finish_decode(&parsed, Some(pixels), frame, native);
+        return finish_decode(
+            &parsed,
+            Some(pixels),
+            frame,
+            native,
+            samples,
+            on_samples,
+            acquire,
+        );
     }
     let parsed = parse_part10(bytes).map_err(part10_error)?;
-    finish_decode(&parsed, None, frame, native)
-}
-
-/// A single native frame recycled into its own posted allocation, or the
-/// original bytes when that recycle does not apply.
-pub(crate) enum OwnedDecode {
-    /// Samples occupy the posted buffer. The caller does not put it back.
-    Frame(Box<HeldFrame>),
-    /// Decode from these bytes and decide afterwards whether to restore them.
-    Keep(Vec<u8>),
-}
-
-/// Turn a uniquely owned posted file into frame 0 when the pixels are one
-/// native frame in host byte order. Every other file is returned unchanged.
-pub(crate) fn decode_owned(bytes: Vec<u8>, frame: u32) -> OwnedDecode {
-    let Some((header, range)) = split_pixel_payload(&bytes) else {
-        return OwnedDecode::Keep(bytes);
-    };
-    let Ok(parsed) = parse_part10(&header) else {
-        return OwnedDecode::Keep(bytes);
-    };
-    let path = parsed.transfer_syntax().dispatch_path();
-    if !native_dispatch(path) || !native_order_matches(path) {
-        return OwnedDecode::Keep(bytes);
-    }
-    let Some(pixels) = bytes.get(range.clone()) else {
-        return OwnedDecode::Keep(bytes);
-    };
-    if !borrowed_pixels_fit(parsed.object(), pixels) {
-        return OwnedDecode::Keep(bytes);
-    }
-    let Ok((parts, desc)) = frame_parts(parsed.object(), frame) else {
-        return OwnedDecode::Keep(bytes);
-    };
-    if parts.frames != 1
-        || frame != 0
-        || parts.expected != range.len()
-        || desc.output_len() != range.len()
-    {
-        return OwnedDecode::Keep(bytes);
-    }
-    let mut samples = bytes;
-    samples.copy_within(range, 0);
-    samples.truncate(parts.expected);
-    // A tiny fixture keeps a header-sized allocation after two samples. A CT
-    // or radiograph file is already in the sample size class, and shrinking
-    // it would allocate a second buffer this host does not return.
-    if samples.capacity() > samples.len().saturating_mul(2) {
-        samples.shrink_to_fit();
-    }
-    note_decode();
-    note_borrowed_decode();
-    OwnedDecode::Frame(Box::new(held_from_samples(
-        parsed.object(),
-        parts,
-        samples,
-        0,
-    )))
+    finish_decode(&parsed, None, frame, native, samples, on_samples, acquire)
 }
 
 struct FrameParts {
@@ -577,30 +631,65 @@ fn held_from_samples(
     }
 }
 
-fn finish_decode(
+fn finish_decode<F, A>(
     parsed: &ocelli_dicom::ParsedDicom,
     source: Option<&[u8]>,
     frame: u32,
     native: &mut Vec<u8>,
-) -> Result<HeldFrame, PreviewError> {
+    samples: &mut Vec<u8>,
+    on_samples: &mut F,
+    acquire: &mut A,
+) -> Result<HeldFrame, PreviewError>
+where
+    F: FnMut(usize),
+    A: FnMut(usize) -> Vec<u8>,
+{
     let object = parsed.object();
     let (parts, desc) = frame_parts(object, frame)?;
+    if desc.output_len() != parts.expected {
+        return Err(PreviewError::Decode);
+    }
     let frame_index = usize::try_from(frame).map_err(|_| PreviewError::Frame)?;
-    let decoded = decode_frame(
+    prepare_samples(samples, parts.expected, acquire)?;
+    on_samples(samples.capacity());
+    decode_frame(
         parsed,
-        object,
         &desc,
         parts.frames,
         frame_index,
         source,
         native,
+        samples,
     )?;
-    if decoded.len() != parts.expected {
+    let taken = std::mem::take(samples);
+    Ok(held_from_samples(object, parts, taken, frame_index))
+}
+
+/// Size the sample buffer to the decoded frame.
+///
+/// A buffer from `acquire` is used when it already has room for the frame.
+/// `resize` then writes every byte, so a recycled buffer does not keep its
+/// previous contents.
+fn prepare_samples<A>(
+    samples: &mut Vec<u8>,
+    output_len: usize,
+    acquire: &mut A,
+) -> Result<(), PreviewError>
+where
+    A: FnMut(usize) -> Vec<u8>,
+{
+    if samples.capacity() < output_len {
+        let got = acquire(output_len);
+        if got.capacity() >= output_len {
+            *samples = got;
+        }
+    }
+    samples.clear();
+    samples.resize(output_len, 0);
+    if samples.len() != output_len {
         return Err(PreviewError::Decode);
     }
-    let mut samples = decoded;
-    samples.shrink_to_fit();
-    Ok(held_from_samples(object, parts, samples, frame_index))
+    Ok(())
 }
 
 struct Prepared {
@@ -1097,40 +1186,35 @@ fn borrowed_pixels_fit(object: &DefaultDicomObject, pixels: &[u8]) -> bool {
 
 fn decode_frame(
     parsed: &ocelli_dicom::ParsedDicom,
-    object: &DefaultDicomObject,
     desc: &FrameDesc,
     frames: u32,
     frame_index: usize,
     pixels: Option<&[u8]>,
     native: &mut Vec<u8>,
-) -> Result<Vec<u8>, PreviewError> {
+    decoded: &mut [u8],
+) -> Result<(), PreviewError> {
+    if decoded.len() != desc.output_len() {
+        return Err(PreviewError::Decode);
+    }
+    let object = parsed.object();
     let frame_count = usize::try_from(frames).map_err(|_| PreviewError::Attribute)?;
     if let Some(pixels) = pixels {
-        let mut decoded = vec![0_u8; desc.output_len()];
         let decoder = native_decoder(parsed.transfer_syntax().dispatch_path())?;
         let index = decoder
             .index_native_value(pixels, frame_count, desc)
             .map_err(|_| PreviewError::Decode)?;
         index
-            .decode_frame(frame_index, &mut decoded)
+            .decode_frame(frame_index, decoded)
             .map_err(|_| PreviewError::Decode)?;
         note_borrowed_decode();
-        return Ok(decoded);
+        return Ok(());
     }
     let element = object
         .element(PIXEL_DATA)
         .map_err(|_| PreviewError::Attribute)?;
-    let mut decoded = vec![0_u8; desc.output_len()];
     match parsed.transfer_syntax().dispatch_path() {
         DispatchPath::Encapsulated => {
-            decode_encapsulated(
-                parsed,
-                element,
-                desc,
-                frame_count,
-                frame_index,
-                &mut decoded,
-            )?;
+            decode_encapsulated(parsed, element, desc, frame_count, frame_index, decoded)?;
         }
         path => {
             let borrowed = native_byte_slice(element, path, native)?;
@@ -1139,11 +1223,11 @@ fn decode_frame(
                 .index_native_value(borrowed, frame_count, desc)
                 .map_err(|_| PreviewError::Decode)?;
             index
-                .decode_frame(frame_index, &mut decoded)
+                .decode_frame(frame_index, decoded)
                 .map_err(|_| PreviewError::Decode)?;
         }
     }
-    Ok(decoded)
+    Ok(())
 }
 
 fn native_order_matches(path: DispatchPath) -> bool {

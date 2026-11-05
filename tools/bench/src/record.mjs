@@ -319,6 +319,9 @@ export function acceptRecord(baseline, record, { subjectId = null, story,
     );
   }
   for (const entry of chosen) {
+    if (String(entry.id).startsWith("viewer.") && entry.detail?.profile === "debug") {
+      throw new Error("refusing to record a release subject from a debug binary");
+    }
     const previous = forHost.subjects?.[entry.id] ?? null;
     next.host_classes[key].subjects[entry.id] = {
       value: entry.value,

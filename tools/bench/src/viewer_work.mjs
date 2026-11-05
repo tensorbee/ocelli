@@ -41,7 +41,9 @@ export function greyWord(value) {
 }
 
 export function assertPageHooks(requestGreyFn, drawGreyFn) {
-  if (typeof requestGreyFn !== "function" || typeof drawGreyFn !== "function") {
+  const request = requestGreyFn === undefined ? globalThis.requestGrey : requestGreyFn;
+  const draw = drawGreyFn === undefined ? globalThis.drawGrey : drawGreyFn;
+  if (typeof request !== "function" || typeof draw !== "function") {
     throw new Error("the page did not expose requestGrey and drawGrey");
   }
 }
@@ -99,9 +101,36 @@ export function assertNoPreviewBody(count) {
 /**
  * RSS_peak <= B + 4 * S_max + P * (2 * S_max + 5 * N_max) + 32 MiB.
  * The terms are the design's, stated before the measurement.
+ * An upload is held only while it is read and decoded, and those bytes
+ * are the upload term 4 * S_max. A decode copy is in flight until the
+ * frame is in the cache.
  */
 export function serverRssBound(budget, sMax, nMax, permits = 2) {
   return budget + 4 * sMax + permits * (2 * sMax + 5 * nMax) + 32 * MIB;
+}
+
+/** Two retained-heap readings within this gap count as the same reading. */
+export const HEAP_AGREE_BYTES = 64 * 1024;
+
+/** Collections after which a heap reading that still moves is an invalid run. */
+export const HEAP_READ_CAP = 8;
+
+/**
+ * First retained-heap pair whose absolute gap is within `tolerance`.
+ * `collections` is the 1-based index of the later reading.
+ * When no pair inside `cap` agrees, the run is invalid.
+ */
+export function foldHeapReadings(samples, tolerance, cap) {
+  const limit = Math.min(Array.isArray(samples) ? samples.length : 0, cap);
+  for (let index = 1; index < limit; index += 1) {
+    const previous = samples[index - 1];
+    const current = samples[index];
+    const gap = previous > current ? previous - current : current - previous;
+    if (gap <= tolerance) {
+      return { ok: true, retained: current, collections: index + 1 };
+    }
+  }
+  return { ok: false, retained: null, collections: limit };
 }
 
 /** JS heap <= 64 MiB grey cache + 4 * W * H per canvas + 16 MiB. */
@@ -222,17 +251,60 @@ export function mono16Part10({
   ]);
 }
 
+/** Cargo args for a release viewer. `build: false` stays on release and adds `--offline`. */
+export function ensureReleaseBinaryArgs(build) {
+  const args = ["build", "--release", "-p", "ocelli-folder-viewer", "--message-format=json"];
+  if (build === false) args.push("--offline");
+  return args;
+}
+
+/** Cargo args for `release` or `debug`. The profile is not implied by `build`. */
+export function ensureViewerBinaryArgs(profile, build) {
+  if (profile === "debug") {
+    const args = ["build", "-p", "ocelli-folder-viewer", "--message-format=json"];
+    if (build === false) args.push("--offline");
+    return args;
+  }
+  return ensureReleaseBinaryArgs(build);
+}
+
+function chosenProfile(profile) {
+  return profile === "debug" ? "debug" : "release";
+}
+
 export function ensureReleaseBinary(build) {
-  const release = build !== false;
-  const key = release ? "release" : "debug";
-  if (!binaryPromises.has(key)) binaryPromises.set(key, locateBinary(release));
+  return ensureViewerBinary("release", build);
+}
+
+export function ensureViewerBinary(profile, build, runCargo) {
+  const chosen = chosenProfile(profile);
+  const args = ensureViewerBinaryArgs(chosen, build);
+  if (typeof runCargo === "function") return Promise.resolve(runCargo(args));
+  const key = `${chosen}:${build === false ? "offline" : "build"}`;
+  if (!binaryPromises.has(key)) {
+    binaryPromises.set(key, locateBinary(args));
+  }
   return binaryPromises.get(key);
 }
 
-function locateBinary(release) {
+/** Build name from a `/held` report. Only `release` and `debug` are accepted. */
+export function profileFromHeld(report) {
+  const build = report && report.build;
+  if (build !== "release" && build !== "debug") {
+    throw new Error("the viewer did not report its build");
+  }
+  return build;
+}
+
+/** Fetch `/held` and return the build the process reports. */
+export async function reportedBuild(url) {
+  const response = await fetch(`${url}held`);
+  if (!response.ok) throw new Error("the viewer did not report its build");
+  return profileFromHeld(await response.json());
+}
+
+function locateBinary(args) {
   return new Promise((resolve, reject) => {
-    const args = ["build", "-p", "ocelli-folder-viewer", "--message-format=json"];
-    if (release) args.splice(1, 0, "--release");
     const child = spawn("cargo", args, {
       cwd: repoPath(),
       stdio: ["ignore", "pipe", "pipe"],
@@ -422,6 +494,7 @@ async function openPage(browser, url) {
     };
   });
   await page.goto(url);
+  await page.evaluate(assertPageHooks);
   await page.evaluate(() => {
     const original = window.fetch.bind(window);
     window.__previewBodySizes = [];
@@ -438,9 +511,6 @@ async function openPage(browser, url) {
       if (url.endsWith("/file")) window.__fileBodySizes.push(size);
       return original(input, init);
     };
-    if (typeof requestGrey !== "function" || typeof drawGrey !== "function") {
-      throw new Error("the page did not expose requestGrey and drawGrey");
-    }
     const status = document.getElementById("status");
     const observer = new MutationObserver(() => {
       if (window.__listAt == null && /\d+ series\./.test(status.textContent || "")) {
@@ -685,10 +755,12 @@ function instrumentOf(chromium) {
   return { chromium };
 }
 
-export async function measureOpen({ outDir, build }) {
-  const binary = await ensureReleaseBinary(build);
+export async function measureOpen({ outDir, build, profile }) {
+  const chosen = chosenProfile(profile);
+  const binary = await ensureViewerBinary(chosen, build);
   const { ctDir } = await ensureWorkloads(outDir);
   const server = await startViewer(binary);
+  const reported = await reportedBuild(server.url);
   const { browser, chromium } = await launchBrowser();
   const samples = [];
   try {
@@ -707,15 +779,22 @@ export async function measureOpen({ outDir, build }) {
   const value = median(samples);
   return {
     value,
-    detail: { samples_ms: samples, threshold_ms: 1100, thresholds_met: value <= 1100 },
+    detail: {
+      profile: reported,
+      samples_ms: samples,
+      threshold_ms: 1100,
+      thresholds_met: value <= 1100,
+    },
     instrument: instrumentOf(chromium),
   };
 }
 
-export async function measureFirstImage({ outDir, build }) {
-  const binary = await ensureReleaseBinary(build);
+export async function measureFirstImage({ outDir, build, profile }) {
+  const chosen = chosenProfile(profile);
+  const binary = await ensureViewerBinary(chosen, build);
   const dirs = await ensureWorkloads(outDir);
   const server = await startViewer(binary);
+  const reported = await reportedBuild(server.url);
   const { browser, chromium } = await launchBrowser();
   const ct = [];
   const dx = [];
@@ -743,6 +822,7 @@ export async function measureFirstImage({ outDir, build }) {
   return {
     value,
     detail: {
+      profile: reported,
       ct_ms: ct,
       dx_ms: dx,
       dx_median_ms: dxValue,
@@ -770,11 +850,13 @@ async function oneScroll(binary, ctDir) {
   }
 }
 
-export async function measureScroll({ outDir, build }) {
-  const releaseRun = build !== false;
-  const binary = await ensureReleaseBinary(build);
+export async function measureScroll({ outDir, build, profile }) {
+  const chosen = chosenProfile(profile);
+  const releaseRun = chosen !== "debug";
+  const binary = await ensureViewerBinary(chosen, build);
   const { ctDir } = await ensureWorkloads(outDir);
   const server = await startViewer(binary);
+  const reported = await reportedBuild(server.url);
   const { browser, chromium } = await launchBrowser();
   const rates = [];
   let blanks = 0;
@@ -800,16 +882,17 @@ export async function measureScroll({ outDir, build }) {
   }
   let debugBlanks = null;
   if (releaseRun) {
-    const debugBinary = await ensureReleaseBinary(false);
+    const debugBinary = await ensureViewerBinary("debug", true);
     const debug = await oneScroll(debugBinary, ctDir);
     debugBlanks = debug.sample.blanks;
   }
   const value = median(rates);
-  const fpsMet = !releaseRun || value >= 55;
+  const fpsMet = value >= 55;
   const debugMet = debugBlanks == null || debugBlanks === 0;
   return {
     value,
     detail: {
+      profile: reported,
       rates,
       keys,
       blank_samples: blanks,
@@ -824,10 +907,12 @@ export async function measureScroll({ outDir, build }) {
   };
 }
 
-export async function measureWindow({ outDir, build }) {
-  const binary = await ensureReleaseBinary(build);
+export async function measureWindow({ outDir, build, profile }) {
+  const chosen = chosenProfile(profile);
+  const binary = await ensureViewerBinary(chosen, build);
   const dirs = await ensureWorkloads(outDir);
   const server = await startViewer(binary);
+  const reported = await reportedBuild(server.url);
   const { browser, chromium } = await launchBrowser();
   let ct = [];
   let dx = [];
@@ -861,6 +946,7 @@ export async function measureWindow({ outDir, build }) {
   return {
     value,
     detail: {
+      profile: reported,
       ct_ms: ct,
       dx_ms: dx,
       dx_median_ms: dxValue,
@@ -897,16 +983,71 @@ async function sizedCanvases(page) {
   });
 }
 
-export async function measureResident({ outDir, build }) {
-  const binary = await ensureReleaseBinary(build);
+export async function readRetainedHeap(page) {
+  const before = await page.evaluate(() => (
+    performance.memory ? performance.memory.usedJSHeapSize : null
+  ));
+  if (before == null) throw new Error("the page did not expose performance.memory");
+  const samples = [];
+  while (samples.length < HEAP_READ_CAP) {
+    const reading = await page.evaluate(() => {
+      if (typeof globalThis.gc !== "function") return null;
+      globalThis.gc();
+      if (!performance.memory) return null;
+      return performance.memory.usedJSHeapSize;
+    });
+    if (reading == null) throw new Error("the page did not expose gc or performance.memory");
+    samples.push(reading);
+    const folded = foldHeapReadings(samples, HEAP_AGREE_BYTES, HEAP_READ_CAP);
+    if (folded.ok) {
+      return { before, retained: folded.retained, collections: folded.collections };
+    }
+  }
+  throw new Error("retained heap readings did not agree");
+}
+
+export async function measureResident({ outDir, build, profile }) {
+  const chosen = chosenProfile(profile);
+  const binary = await ensureViewerBinary(chosen, build);
   const dirs = await ensureWorkloads(outDir);
   const server = await startViewer(binary);
+  const reported = await reportedBuild(server.url);
   const samples = [];
+  const heldPeaks = { used: 0, free: 0, inflight: 0, workspace: 0 };
+  let heldAtPeak = null;
+  let peakKbSeen = 0;
   let stop = false;
+  let ticks = 0;
   const sampler = (async () => {
     while (!stop) {
       const kb = await rssKb(server.pid);
-      if (kb != null) samples.push(kb);
+      if (kb != null) {
+        samples.push(kb);
+        if (kb > peakKbSeen) {
+          peakKbSeen = kb;
+          try {
+            const response = await fetch(`${server.url}held`);
+            if (response.ok) heldAtPeak = await response.json();
+          } catch {
+            // The process may already be gone. The RSS samples still stand.
+          }
+        }
+      }
+      ticks += 1;
+      if (ticks % 10 === 0) {
+        try {
+          const response = await fetch(`${server.url}held`);
+          if (response.ok) {
+            const body = await response.json();
+            heldPeaks.used = Math.max(heldPeaks.used, Number(body.used) || 0);
+            heldPeaks.free = Math.max(heldPeaks.free, Number(body.free) || 0);
+            heldPeaks.inflight = Math.max(heldPeaks.inflight, Number(body.inflight) || 0);
+            heldPeaks.workspace = Math.max(heldPeaks.workspace, Number(body.workspace) || 0);
+          }
+        } catch {
+          // The process may already be gone. The RSS samples still stand.
+        }
+      }
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   })();
@@ -931,10 +1072,6 @@ export async function measureResident({ outDir, build }) {
       await openFolder(page, dirs.dxDir);
       await page.close();
     }
-    const restartPage = await openPage(browser, server.url);
-    await openFolder(restartPage, dirs.ctDir);
-    await restartAndDraw(restartPage, binary, server);
-    await restartPage.close();
     for (let index = 0; index < 5; index += 1) {
       const page = await openPage(browser, server.url);
       await openFolder(page, dirs.ctDir);
@@ -948,14 +1085,10 @@ export async function measureResident({ outDir, build }) {
     const dxPage = await openPage(browser, server.url);
     await openFolder(dxPage, dirs.dxDir);
     await windowSteps(dxPage, 9);
-    heap = await dxPage.evaluate(() => {
-      // One collection leaves the greys evicted a moment ago. A second
-      // collection reports the cache that is still referenced.
-      if (globalThis.gc) {
-        for (let pass = 0; pass < 4; pass += 1) globalThis.gc();
-      }
-      return performance.memory && performance.memory.usedJSHeapSize;
-    });
+    // Retained heap is read after forced collection until two readings agree
+    // within HEAP_AGREE_BYTES. The reading before any collection is reported
+    // beside it and has no threshold. A run that does not agree is invalid.
+    heap = await readRetainedHeap(dxPage);
     canvases = await sizedCanvases(dxPage);
     held = await dxPage.evaluate(async () => {
       const response = await fetch("/held");
@@ -975,17 +1108,24 @@ export async function measureResident({ outDir, build }) {
   const nMax = DX_ROWS * DX_COLUMNS;
   const rssBound = serverRssBound(budget, sMax, nMax);
   const heapBound = pageHeapBound(canvases);
+  const retained = heap == null ? null : heap.retained;
+  const before = heap == null ? null : heap.before;
   return {
     value,
     detail: {
+      profile: reported,
       peak_rss_bytes: value,
       samples: samples.length,
       held,
-      js_heap_bytes: heap,
+      held_at_peak: heldAtPeak,
+      held_peaks: heldPeaks,
+      js_heap_bytes: retained,
+      js_heap_collections: heap == null ? null : heap.collections,
+      js_heap_before_gc: before,
       canvases,
       rss_bound_bytes: rssBound,
       heap_bound_bytes: heapBound,
-      thresholds_met: value <= rssBound && (heap == null || heap <= heapBound),
+      thresholds_met: value <= rssBound && (retained == null || retained <= heapBound),
     },
     instrument: instrumentOf(chromium),
   };

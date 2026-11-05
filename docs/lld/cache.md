@@ -166,6 +166,27 @@ budget limits. The posted bytes share that budget until the viewer removes
 them with `Lru::remove`. They are not a second cache and they are not
 `CacheTier::Encoded`. No production cache in this crate uses that tier.
 
+An upload is held only while it is read and decoded. The folder viewer keeps
+at most four request bodies at once. That four is the coefficient of `S_max`
+in the resident set formula. Decode runs on two threads. That two is `P` in
+the same formula. Both limits are those constants on every host. A request
+body is freed on the thread that allocated it. A decoded frame's sample
+buffer that leaves the cache waits on a free list keyed by its exact byte
+length. The free list is inside the 256 MiB budget, with the cached files
+and frames, and the cache evicts to make room for either. The next decode
+of that length takes the buffer instead of allocating. A buffer handed out
+is owned by that decode. Its old bytes are overwritten before they are read.
+When the cache is full and no free buffer has the length, the decode takes
+the samples of the least recently used cached frame of that length that no
+reply is still reading, so the free list is often empty under a steady
+scroll. `GET /held` reports `free`,
+the bytes of sample buffers on the free list, beside `used`.
+A decode copy is in flight until the frame is in the cache.
+
+The folder viewer binary uses mimalloc as its global allocator. The pin is
+exact in the workspace manifest and the crate keeps its default features.
+No other crate names it.
+
 ## The decoded tier and its events, F-032
 
 `ImageCache::insert` converts the `Admission` into `CacheEvents`, displaced

@@ -182,7 +182,7 @@ image at a time. It listens on this machine only.
 cargo run --release -p ocelli-folder-viewer
 ```
 
-The debug build is about ten times slower on a window step. Each file is posted once while the process holds it, and posted again after eviction or a restart. `OCELLI_CACHE_MIB` sets that cache in mebibytes and the default is 256.
+The debug build is about ten times slower on a window step. Each file is posted once while the process holds it, and posted again after eviction or a restart. `OCELLI_CACHE_MIB` sets that cache in mebibytes and the default is 256. The folder viewer keeps at most four request bodies at once, which is the coefficient of `S_max` in the resident set bound, and decodes on two threads, which is `P` in that bound. A request body is freed on the thread that allocated it. A decoded frame's sample buffer that leaves the cache waits on a free list keyed by its exact byte length. That list is inside the same 256 MiB budget, and the cache evicts to make room for a frame or for a free buffer. The next decode of that length takes the buffer instead of allocating. The folder viewer binary uses mimalloc as its global allocator. The pin is exact in the workspace manifest. No other crate does.
 
 The process prints one line, the page URL, and nothing else. It has the form
 `http://127.0.0.1:12345/`. The port is chosen at startup unless

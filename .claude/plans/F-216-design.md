@@ -437,3 +437,41 @@ Made by the sprint lead on 2026-11-05 under the operator's delegation of the qua
 - **`ocelli-pixel` gains an additive API.** The non-goal above excluded any change to `ocelli-pixel`. The window path needs a table of display values for every stored sample, and building that table in the viewer would be a second copy of the LUT chain, which HLD section 18 forbids. So `LutChain::stored_sample_table`, `StoredSampleTable`, `StoredBits::meaningful_bits` and `StoredBits::stored_sample` are allowed in `ocelli-pixel`, each evaluating the existing chain and adding no arithmetic of its own. Every other change to `ocelli-pixel` is still out of scope. `docs/lld/pixel-pipeline.md` joins the LLD impact list.
 - **The page heap bound counts only canvases the workload sizes.** The four tile canvases are counted only when the run sizes them. The `viewer.resident_memory` workload sizes the main view alone, so its bound is `64 MiB + 4 * W * H + 16 MiB` for the main view.
 - **Debug blank samples are measured.** The scroll budget's debug half is taken by running `viewer.scroll_rate` once on the debug build, with the stage sampled on every animation frame, not only after a draw.
+
+### Lead amendments after review pass 2
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-2.md`.
+
+- **The page heap bound is a bound on retained heap.** It is read after forced collection until two readings agree, because a heap read before collection counts greys the page has already discarded. The reading before any collection is reported beside it as information, and has no threshold.
+- **The resident memory subject measures one process.** `viewer.resident_memory` runs the open, first image, scroll and window workloads against one server process with no restart, and the server's peak is that process's peak. The restart recovery check in `viewer.first_image` stays, outside this measurement.
+- **Every byte the process holds for pixels counts.** Bytes waiting for a decode permit and any recycle pool are inside the 256 MiB budget or inside the formula's named terms. The bound and its formula do not change.
+
+### Operator answer after review pass 2
+
+Given by the operator on 2026-11-05, after the third remediation measured the folder viewer's live heap at about 330 MB while macOS libmalloc kept freed small and large magazines resident, so one process read 703 to 736 MB against the 528,194,192 byte bound.
+
+- **The folder viewer binary uses mimalloc.** `examples/folder-viewer` declares `mimalloc` as its global allocator, pinned exactly in the workspace manifest, default features only, and no other crate uses it. It is MIT licensed, within `deny.toml` and `ci/licences.toml`. Declaring a global allocator needs no `unsafe` block of ours. The resident bound and its formula do not change, and the one-process run is measured again against them.
+
+### Lead amendments after review pass 3
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-3.md`.
+
+- **`GET /held` also reports `inflight`, `workspace` and `free`.** The `/held` row in the scope table above is extended by this line, and corrected after review pass 4, because the upload pool this section removes no longer exists and the free list added later reports `free`. Each is a byte count the runner reads, and each doc comment says only what the counter counts.
+- **The recycle pool and the sample-class reservation are removed.** Under mimalloc a build without them measured 492.2 and 500.2 MB, the same spread as with them, so they no longer pay for their code. An upload is held only while it is read and decoded, and its bytes are the formula's upload term.
+- **Prose names the allocator, not its version.** The pin in the manifest is the one place the version is written.
+
+### Operator answer after review pass 3
+
+Given by the operator on 2026-11-05, after two long-lived decode threads bounded the thread count but a quiet one-process run still peaked at 566,018,048 bytes, with about 268 MB live and the rest held by the allocator for frames the cache had evicted.
+
+- **An evicted frame's buffer is reused, not freed.** A decoded frame's sample buffer that leaves the cache goes to a free list keyed by its exact byte length, and the next decode of that length takes it instead of allocating. The free list is counted inside the 256 MiB cache budget, so cached frames plus free buffers never exceed it, and the cache evicts to make room for either. The bound and its formula do not change.
+- **Fallback.** If ten one-process runs, five quiet and five beside a CPU load above 10, do not all stay under the bound with the free list in place, the story records allocator retention as a term of the formula and sets the bound to the measured worst case plus a stated margin.
+- **User-facing documentation for the free list.** `README.md`, `examples/folder-viewer/src/use.html` and `docs/lld/cache.md` say that a decoded frame's sample buffer waits on a free list inside the 256 MiB budget. A request body is still freed on the thread that allocated it. The folder viewer binary is the one that uses mimalloc.
+
+### Lead amendments after review pass 4
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-4.md`.
+
+- **Every decode runs on the two decode threads.** A preview that carries the file's bytes is decoded by the same scheduler as one that names a held id, under a decode permit and charged as in flight. No connection thread decodes.
+- **A decode permit ends with the decode.** The permit is released when the grey bytes are ready, before the reply is written, so a client that stops reading holds no decode permit. Either decode thread takes the next job.
+- **A buffer leaving the cache waits on the free list only when it fits.** When cached bytes plus free bytes would exceed the budget, the buffer is freed instead. The steal takes the oldest cached frame of that length only when no reply holds it, and otherwise allocates.

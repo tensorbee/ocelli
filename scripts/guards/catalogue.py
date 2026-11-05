@@ -12751,13 +12751,19 @@ GUARDS: tuple[Guard, ...] = (
                 "or moved the counter backwards or blanked or faulted the "
                 "stage, a window step that never drew, a canvas that does not "
                 "match the server grey, a restart that leaves the gone "
-                "sentence or does not re-post, and a held preview that still "
-                "carries a body.",
+                "sentence or does not re-post, a held preview that still "
+                "carries a body, a held report that does not name its build, "
+                "and a retained heap with no memory counter, no forced "
+                "collection, or two readings that do not agree.",
         claims=(
             "median needs at least one value",
             "a short element has a bad length",
             "a long element has a bad length",
             "the page did not expose requestGrey and drawGrey",
+            "the viewer did not report its build",
+            "the page did not expose performance.memory",
+            "the page did not expose gc or performance.memory",
+            "retained heap readings did not agree",
             r"scroll delivered \$ keys, which is fewer than 120",
             "the counter went backwards during a forward scroll",
             "the stage showed a fault during the scroll",
