@@ -20,6 +20,11 @@
       "guard": "device",
       "tunable": false
     },
+    "deny.toml:allow": {
+      "digest": "a551a55922d0c6f9",
+      "guard": "licences",
+      "tunable": false
+    },
     "eslint.config.js:LINEAR_MEMORY_ALLOWANCE": {
       "digest": "0f511cb2956fefc1",
       "guard": "lint-policy",
@@ -61,7 +66,7 @@
       "tunable": false
     },
     "scripts/ci_floor_check.py:NOT_IN_FLOOR": {
-      "digest": "6736ec0552b7f46b",
+      "digest": "0c3bd9dbaf33b7c1",
       "guard": "ci-floor",
       "tunable": false
     },
@@ -78,6 +83,21 @@
     "scripts/decode_graph_check.py:WASM_FEATURES": {
       "digest": "ae2b1cf627a64a04",
       "guard": "decode-graph",
+      "tunable": false
+    },
+    "scripts/licence_check.py:COPYLEFT_MARKERS": {
+      "digest": "b7e4736e5dfd32ac",
+      "guard": "licences",
+      "tunable": false
+    },
+    "scripts/licence_check.py:EXCEPTION_FIELDS": {
+      "digest": "acd4a12671a822d6",
+      "guard": "licences",
+      "tunable": false
+    },
+    "scripts/licence_check.py:PLACEHOLDER_LICENCE": {
+      "digest": "30cb77a6c643247f",
+      "guard": "licences",
       "tunable": false
     },
     "scripts/lint_policy_check.py:ALLOWING_FLAGS": {
@@ -110,6 +130,11 @@
       "guard": "pins",
       "tunable": false
     },
+    "scripts/pin_and_size_check.py:OPENJPH_LICENCE_SHA256": {
+      "digest": "b99f5f2bc38f1b12",
+      "guard": "pins",
+      "tunable": false
+    },
     "scripts/pin_and_size_check.py:PACKAGE_LICENCES": {
       "digest": "bdb887fe9cd6c708",
       "guard": "pins",
@@ -137,6 +162,11 @@
     },
     "scripts/source_provenance_check.py:BLOCKED_URLS": {
       "digest": "a3416b5d533503f0",
+      "guard": "provenance",
+      "tunable": false
+    },
+    "scripts/source_provenance_check.py:MANIFESTS": {
+      "digest": "1e43dd2c73fc4cec",
       "guard": "provenance",
       "tunable": false
     },
@@ -196,7 +226,7 @@
       "tunable": false
     }
   },
-  "constants_count": 39,
+  "constants_count": 45,
   "entry_sites": {
     "backlog": 10,
     "bench": 33,
@@ -215,13 +245,13 @@
     "bench.tier-startup": 1,
     "bindgen": 3,
     "bootstrap-importer": 5,
-    "catalogue": 77,
+    "catalogue": 82,
     "census": 35,
     "census-runbook": 3,
     "ci-floor": 25,
     "codec.wasm-runner": 2,
     "content": 9,
-    "corpus": 28,
+    "corpus": 43,
     "corpus-synth": 6,
     "corpus-tests": 2,
     "decode-graph": 26,
@@ -233,6 +263,7 @@
     "hooks.commit-msg": 3,
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
+    "licences": 75,
     "lint-policy": 28,
     "nostd": 8,
     "oracle.faults": 22,
@@ -252,7 +283,7 @@
     "oracle.volume": 31,
     "packages": 21,
     "panic-probe": 1,
-    "pins": 57,
+    "pins": 58,
     "populate-corpus": 10,
     "probe-runner": 20,
     "prose": 5,
@@ -273,7 +304,7 @@
     "target-features": 6,
     "unsafe": 7
   },
-  "gates_declared": 31,
+  "gates_declared": 33,
   "note": "Recorded measurements, not guesses. `wall_clock_seconds` is what the harness took on the machine that recorded it. `constants` is the declared-constant ratchet, `constants_count` and `gates_declared` are the counts that catch one of those being removed rather than changed, `entry_sites` is the per-entry refusal count for the catalogue entries claiming their file with `\"*\"`, so a refusal added to an already claimed file moves a number when it takes one of the shapes scripts/guards/discover.py scans, `oracle_faults` is the fault-count ratchet and `uncovered` is the uncovered-refusal ratchet, all written by scripts/guard_census.py --record.",
   "oracle_faults": 23,
   "uncovered": {
@@ -281,7 +312,7 @@
     "sweep_complete": true
   },
   "wall_clock_seconds": {
-    "deep": 42.0,
-    "floor": 33.0
+    "deep": 120.9,
+    "floor": 103.5
   }
 }

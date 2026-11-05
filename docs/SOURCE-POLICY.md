@@ -87,6 +87,13 @@ things and record the answer:
 
 If 1 and 2 are both absent, the answer is no.
 
+## What a dependency is
+
+The rule covers dependencies declared in tracked manifests and lockfiles, plus
+libraries those dependencies bundle. It does not cover tools that are
+downloaded or installed on a developer or CI host and never redistributed.
+Playwright browsers, ffmpeg, git, bash and CI images are in that second group.
+
 ## Extensions to the table
 
 A source assessed after this policy was written gets a row here, in the same
@@ -105,6 +112,8 @@ form as the table above, with the date it was decided.
 | oxideav-core 0.1.35 | MIT, packaged licence and repository metadata | yes | yes | 2026-09-10 |
 | ritk-codecs 0.6.0 | MIT OR Apache-2.0 in registry metadata | yes | yes | 2026-09-10 |
 | openjph-core 0.1.0, production use | BSD-2-Clause in registry metadata, no packaged notice | yes | yes, not shippable | 2026-09-13 |
+| openjph-core 0.1.0, notice obtained | BSD-2-Clause, upstream LICENSE at tag 0.26.3 | yes | yes | 2026-11-05 |
+| imagecodecs 2026.10.10 | BSD-3-Clause | yes | yes, tooling only | 2026-11-05 |
 
 ### S08 codec dependencies
 
@@ -160,8 +169,8 @@ which matches the crates.io API. Packaged VCS metadata names commit
    modification and redistribution with its notice conditions retained.
 
 Question 2 is present, so the policy's rule for two absent provenance sources
-does not refuse the package. The missing packaged licence and copyright notice
-are still a production distribution risk.
+does not refuse the package. F-217 placed the upstream notice at
+`vendor/openjph-core-0.1.0/LICENSE`. The redistribution check passes.
 
 **F-027 took this package into production use and the risk is now held by a
 gate rather than by this paragraph.** The three answers above were re-verified
@@ -175,9 +184,13 @@ no `LICENSE`, `LICENCE`, `COPYING`, `NOTICE` or `README`.
 that material is absent, and `/release` step 5 runs it. **No development
 profile does**, because `--floor`, `--sprint` and `--all` gate development and
 this gates publication, which is the difference between depending on a package
-and shipping it. The refusal names the file that would close it, and probe
-`pins.openjph-notice` proves it fires today and stops firing once a notice is
-placed. The text referring this condition to "E2.6" was a misnumbering in
+and shipping it. The refusal names the file that closes it. F-217 placed the upstream OpenJPH
+LICENSE from tag 0.26.3 at `vendor/openjph-core-0.1.0/LICENSE` and copied those
+bytes into `THIRD_PARTY_NOTICES`. `python3 scripts/pin_and_size_check.py
+--require-redistribution` now passes. Probe `pins.openjph-notice` deletes that
+file and must refuse. Probe `pins.openjph-notice-hash` appends a newline and
+must refuse on the recorded hash. The text referring this condition to "E2.6"
+was a misnumbering in
 F-X013's answer file: E2.6 is F-014, the quirk-capture workflow, and the HTJ2K
 production story is E4.5, F-027.
 

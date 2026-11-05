@@ -2717,6 +2717,57 @@
       ]
     },
     {
+      "fid": "F-220",
+      "eid": "E38.30",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Shipped binary notices: the full licence text of every crate compiled into the wasm module and the native binaries, generated from the lockfile and checked by a gate",
+      "layer": "Build",
+      "weeks": 2,
+      "depends_eids": [],
+      "depends_fids": [
+        "F-217"
+      ],
+      "notes": "F-217's plan question 6 recommended a follow-up. THIRD_PARTY_NOTICES covers the vendored sources only, while MIT and BSD grants in every compiled crate also require their notice on redistribution.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-221",
+      "eid": "E38.31",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Published package contents: the @ocelli/core tarball stops shipping compiled test files, with a packages gate refusal for any test file in a published tarball",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids": [],
+      "notes": "Found while designing F-218 on 2026-11-05. npm pack lists 47 compiled *.test.js files under dist/ among 280 entries.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-222",
+      "eid": "E30.7",
+      "phase": "P1.5",
+      "epic": "E30 Out-of-core volume streaming",
+      "epic_key": "E30",
+      "story": "Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero",
+      "layer": "Rust",
+      "weeks": 1,
+      "depends_eids": [
+        "E30.1"
+      ],
+      "depends_fids": [
+        "F-119"
+      ],
+      "notes": "The operator answered F-119's open question on 2026-11-05. Due before F-120 makes the pyramid reachable.",
+      "milestone": "M14",
+      "sprint": "S46"
+    },
+    {
       "fid": "F-208",
       "eid": "E38.18",
       "phase": "P1",
@@ -2915,6 +2966,38 @@
       "milestone": "M20",
       "sprint": "S46",
       "notes": "A sweep on 2026-11-05 found pylibjpeg-libjpeg 2.4.0 under GPL-3 pinned in pyproject.toml for corpus JPEG decoding, lightningcss 1.33.0 under MPL-2.0 through vite 8 in dev tooling, and vendor/openjph-core with no BSD-2 notice. No transitive licence check exists in any ecosystem."
+    },
+    {
+      "fid": "F-218",
+      "eid": "E38.28",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Dependency advisories in shipped packages: adm-zip below 0.6.1 reaches the published @ocelli/core runtime through dcmjs, resolved by a patched override or a proof that no shipped path reaches it, with an audit gate over shipped dependencies",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids": [
+        "F-217"
+      ],
+      "notes": "npm audit on 2026-11-05 reports GHSA-xcpc-8h2w-3j85 and GHSA-7q85-xj36-vmfc (high, memory exhaustion from a crafted ZIP) and GHSA-vwc7-r8mq-g2x9 (moderate) for adm-zip 0.5.17 under dcmjs 0.52.2. The audit's suggested fix downgrades dcmjs a major version.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-219",
+      "eid": "E38.29",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red",
+      "layer": "Test",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids": [],
+      "notes": "Found by the S46 guard probe review, pass 1 nitpick N1. The census counts per entry, so these four read as watched without any probe triggering them.",
+      "milestone": "M20",
+      "sprint": "S46"
     },
     {
       "fid": "F-206",

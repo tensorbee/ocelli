@@ -1,6 +1,6 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-216
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-216
 **Last updated:** 2026-11-05
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
@@ -249,6 +249,9 @@ No ring is built and nothing reaches JavaScript, which remains F-101.
 is still not a use.
 
 ## Brick addressing and residency, F-036
+
+A brick of a level above 0 is the same `BrickKey` with its `level` set, in the
+same `BrickCache`. There is no second cache per level.
 
 `BrickGrid::new` is the only place the edge is chosen. Eight-bit samples take
 128. Sixteen-bit samples and four-byte floats take 64. The grid is a ceiling

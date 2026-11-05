@@ -30,12 +30,10 @@ Refuse before any tag or push if one fails:
 5. **`python3 scripts/pin_and_size_check.py --require-redistribution` passes.**
    No development profile runs this flag, deliberately. `--floor`, `--sprint`
    and `--all` gate development and this gates publication, which is the
-   difference between depending on a package and shipping it. **It fails today**
-   on `openjph-core` 0.1.0, whose published archive carries no licence text and
-   whose registry entry names no repository to obtain one from, and whose
-   BSD-2-Clause terms permit redistribution only with its notice conditions
-   retained. See D-22 in `docs/hld/DEVIATIONS.md`. The refusal names the file
-   that would close it.
+   difference between depending on a package and shipping it. F-217 placed the
+   upstream OpenJPH notice at `vendor/openjph-core-0.1.0/LICENSE`. The check
+   passes while that file matches the recorded hash. See D-22 in
+   `docs/hld/DEVIATIONS.md`.
 6. `python3 scripts/sprint_workflow.py release-notes vX.Y.Z --check` passes,
    and the rendered body is inspected. Its source is the `CHANGELOG.md`
    section headed by the exact tag at this HEAD.

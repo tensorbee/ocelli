@@ -360,7 +360,11 @@ beside F-119.
 | F-214 | E38.24 | S46 | Folder viewer mouse profiles and preferences: the current binding, a scroll-on-left profile and a window-on-left profile, saved in the browser, and cine at Frame Time (0018,1063) | TS | 2w | F-207 | pending |
 | F-215 | E38.25 | S46 | Folder viewer marks written as a TID 1500 document and key images as a Key Object Selection through @ocelli/core, saved to a download and loaded back from a folder | TS | 4w | F-201, F-196, F-207 | pending |
 | F-216 | E38.26 | S46 | Folder viewer performance: each file posted once and held in a bounded cache, decode reused across window changes, measured budgets for open, first image, scroll rate and resident memory, and a release build | All | 4w | F-207 | pending |
-| F-217 | E38.27 | S46 | Licence hygiene: no copyleft dependency in any tracked manifest, a permissive JPEG reference decoder for the corpus, licence allowlist gates for Rust, npm and Python, and a third-party notices file | All | 2w | - | pending |
+| F-217 | E38.27 | S46 | Licence hygiene: no copyleft dependency in any tracked manifest, a permissive JPEG reference decoder for the corpus, licence allowlist gates for Rust, npm and Python, and a third-party notices file | All | 2w | - | done |
+| F-218 | E38.28 | S46 | Dependency advisories in shipped packages: adm-zip below 0.6.1 reaches the published @ocelli/core runtime through dcmjs, resolved by a patched override or a proof that no shipped path reaches it, with an audit gate over shipped dependencies | TS | 1w | F-217 | pending |
+| F-219 | E38.29 | S46 | Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red | Test | 1w | - | done |
+| F-220 | E38.30 | S46 | Shipped binary notices: the full licence text of every crate compiled into the wasm module and the native binaries, generated from the lockfile and checked by a gate | Build | 2w | F-217 | pending |
+| F-221 | E38.31 | S46 | Published package contents: the @ocelli/core tarball stops shipping compiled test files, with a packages gate refusal for any test file in a published tarball | TS | 1w | - | pending |
 
 ### M14, Out-of-core volume streaming
 
@@ -368,12 +372,13 @@ Bounded GPU residency on unbounded data. The first of the three checkable claims
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-119 | E30.1 | S46 | Brick decomposition and multiscale pyramid generation | Rust | 10w | F-058 | pending |
+| F-119 | E30.1 | S46 | Brick decomposition and multiscale pyramid generation | Rust | 10w | F-058 | done |
 | F-120 | E30.2 | S47 | Frustum and LOD chunk selection | Rust | 8w | F-119 | pending |
 | F-121 | E30.3 | S48 | Adaptive per-LOD sample count with opacity correction | Rust | 8w | F-120 | pending |
 | F-122 | E30.4 | S48 | Residency budget, prefetch and eviction policy | Rust | 8w | F-120 | pending |
 | F-123 | E30.5 | S49 | Chunk-cost indicator surface | Rust | 3w | F-122 | pending |
 | F-124 | E30.6 | S49 | 4D and time-series as a first-class chunked axis | Rust | 12w | F-122 | pending |
+| F-222 | E30.7 | S46 | Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero | Rust | 1w | F-119 | pending |
 
 ### M15, The WebGPU compute subsystem
 

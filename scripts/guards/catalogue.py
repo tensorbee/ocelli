@@ -54,7 +54,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from .sandbox import Sandbox
+from .sandbox import Sandbox, SandboxError
 
 Runner = Callable[[Sandbox], "subprocess.CompletedProcess[str]"]
 
@@ -350,11 +350,226 @@ def _change_openjph_vcs_revision(box: Sandbox) -> None:
     )
 
 
-def _plant_openjph_notice(box: Sandbox) -> None:
-    box.write(
-        "vendor/openjph-core-0.1.0/LICENSE",
-        "Copyright (c) placeholder\nBSD-2-Clause notice text\n",
-    )
+def _delete_openjph_notice(box: Sandbox) -> None:
+    box.delete("vendor/openjph-core-0.1.0/LICENSE")
+
+
+def _alter_openjph_notice(box: Sandbox) -> None:
+    box.append("vendor/openjph-core-0.1.0/LICENSE", "\n")
+
+
+def _plant_npm_licence(box: Sandbox, name: str, body: str) -> None:
+    needle = '"packages": {'
+    plant = '"packages": {\n    "node_modules/' + name + '": ' + body + ","
+    for rel in ("package-lock.json", "tools/oracle/package-lock.json",
+                "tools/bench/package-lock.json"):
+        box.substitute(rel, needle, plant)
+
+
+def _plant_npm_copyleft(box: Sandbox) -> None:
+    _plant_npm_licence(
+        box, "probe-copyleft",
+        '{"version": "0.0.1", "license": "GPL-3.0-only"}')
+
+
+def _plant_npm_undeclared(box: Sandbox) -> None:
+    _plant_npm_licence(box, "probe-undeclared", '{"version": "0.0.2"}')
+
+
+def _plant_stale_exception(box: Sandbox) -> None:
+    box.append(
+        "ci/licences.toml",
+        "\n[[exception]]\n"
+        'ecosystem = "npm"\n'
+        'package = "not-a-real-package"\n'
+        'version = "9.9.9"\n'
+        'licence = "MIT"\n'
+        'reason = "probe"\n'
+        'scope = "dev-only"\n'
+        'decided = "2026-11-05"\n'
+        'decided_by = "probe"\n')
+
+
+def _dev_only_caniuse(box: Sandbox) -> None:
+    # The oracle lock still carries the package. dev-only does not hold there.
+    box.substitute("ci/licences.toml", 'scope = "dev-only, tool"',
+                   'scope = "dev-only"')
+
+
+def _tool_scope_holds_nowhere(box: Sandbox) -> None:
+    # Drop the tooling copy. dev-only still holds for the root dev entry,
+    # and tool then holds for no lockfile the exception covers.
+    lock = json.loads(box.read("tools/oracle/package-lock.json"))
+    packages = lock.get("packages", {})
+    key = "node_modules/caniuse-lite"
+    if key not in packages:
+        # substitute raises in the sandbox when the plant matches nothing.
+        box.substitute("tools/oracle/package-lock.json",
+                       '"node_modules/caniuse-lite"', "missing")
+        return
+    del packages[key]
+    box.write("tools/oracle/package-lock.json", json.dumps(lock) + "\n")
+
+
+def _waiver_missing_decided_by(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'decided = "2026-11-05"\n'
+        'decided_by = "lead"\n'
+        'note = "The file is an empty placeholder for HEIF,',
+        'decided = "2026-11-05"\n'
+        'note = "The file is an empty placeholder for HEIF,')
+
+
+def _waiver_scope_prod(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'imagecodecs reports JETRAW unavailable and the file grants nothing."\n'
+        'scope = "tool"',
+        'imagecodecs reports JETRAW unavailable and the file grants nothing."\n'
+        'scope = "prod"')
+
+
+def _stale_lzf_waiver(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'package = "imagecodecs"\n'
+        'version = "2026.10.10"\n'
+        'path = "imagecodecs/licenses/LICENSE-lzf"',
+        'package = "imagecodecs"\n'
+        'version = "1999.0.0"\n'
+        'path = "imagecodecs/licenses/LICENSE-lzf"')
+
+
+def _claim_licence_on_empty_file(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'path = "imagecodecs/licenses/LICENSE-libjxs"\n'
+        'empty = true\n'
+        'licence = "no-licence-text"',
+        'path = "imagecodecs/licenses/LICENSE-libjxs"\n'
+        'empty = true\n'
+        'licence = "BSD-3-Clause"')
+
+
+def _lead_waiver_names_copyleft(box: Sandbox) -> None:
+    # et-xmlfile is a lead waiver of an allowlisted text. A copyleft
+    # identifier is a decision only the operator may record.
+    box.substitute(
+        "ci/licences.toml",
+        'path = "et_xmlfile-2.0.0.dist-info/LICENCE.python"\n'
+        'markers = ["GNU General Public License"]\n'
+        'spdx = "Python-2.0"\n'
+        'licence = "Python-2.0"',
+        'path = "et_xmlfile-2.0.0.dist-info/LICENCE.python"\n'
+        'markers = ["GNU General Public License"]\n'
+        'spdx = "Python-2.0"\n'
+        'licence = "GPL-3.0-only"')
+
+
+def _operator_waiver_unparseable(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'path = "imagecodecs/licenses/LICENSE-lzf"\n'
+        'spdx = "BSD-2-Clause"\n'
+        'markers = ["GPLv2"]\n'
+        'licence = "BSD-2-Clause"',
+        'path = "imagecodecs/licenses/LICENSE-lzf"\n'
+        'spdx = "BSD-2-Clause"\n'
+        'markers = ["GPLv2"]\n'
+        'licence = "SEE LICENSE IN FILE"')
+
+
+def _plant_shipped_exception(box: Sandbox) -> None:
+    lock = json.loads(box.read("package-lock.json"))
+    version = ""
+    for key, entry in lock.get("packages", {}).items():
+        if key == "node_modules/dcmjs" or key.endswith("/node_modules/dcmjs"):
+            version = str(entry.get("version", ""))
+            break
+    if not version:
+        raise SandboxError("dcmjs is not in the root lock")
+    box.append(
+        "ci/licences.toml",
+        "\n[[exception]]\n"
+        'ecosystem = "npm"\n'
+        'package = "dcmjs"\n'
+        f'version = "{version}"\n'
+        'licence = "MIT"\n'
+        'reason = "probe"\n'
+        'scope = "dev-only"\n'
+        'decided = "2026-11-05"\n'
+        'decided_by = "probe"\n')
+
+
+def _rename_python_row(box: Sandbox) -> None:
+    box.substitute("ci/licences.toml", 'package = "pyyaml"',
+                   'package = "pyyaml-renamed"')
+
+
+def _copyleft_python_row(box: Sandbox) -> None:
+    box.substitute("ci/licences.toml", 'spdx = "BSD-3-Clause"',
+                   'spdx = "GPL-3.0-only"')
+
+
+def _copyleft_openjph(box: Sandbox) -> None:
+    box.substitute("vendor/openjph-core-0.1.0/Cargo.toml",
+                   'license = "BSD-2-Clause"', 'license = "GPL-3.0-only"')
+
+
+def _disjoin_openjph(box: Sandbox) -> None:
+    box.substitute("vendor/openjph-core-0.1.0/Cargo.toml",
+                   'license = "BSD-2-Clause"',
+                   'license = "MIT OR GPL-3.0-only"')
+
+
+def _drift_notice(box: Sandbox) -> None:
+    box.append("vendor/openjph-core-0.1.0/LICENSE", "\n")
+
+
+def _drift_holder(box: Sandbox) -> None:
+    box.substitute("LICENSE-MIT", "Tensorbee Limited", "Tensorbee")
+
+
+def _narrow_manifest_spdx(box: Sandbox) -> None:
+    box.substitute("package.json", '"license": "MIT OR Apache-2.0"',
+                   '"license": "MIT"')
+
+
+def _plant_python_dependency(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    box.substitute(
+        "pyproject.toml",
+        "dependencies = [",
+        'dependencies = [\n  "' + blocked + 'j2k>=1",')
+
+
+def _plant_lock_entry(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    box.append("uv.lock", f'\nname = "lib{blocked}"\n')
+
+
+def _plant_prefixed_lock_name(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    box.substitute(
+        "package-lock.json",
+        '"packages": {',
+        '"packages": {\n    "node_modules/lib' + blocked + 'j2k": '
+        '{"version": "0.0.1", "license": "MIT"},')
+
+
+def _plant_agent_trailer(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    target = None
+    for path in sorted((box.path / ".claude" / "reviews").glob("*.md")):
+        target = path.relative_to(box.path).as_posix()
+        break
+    if target is None:
+        raise SandboxError("no tracked review to append")
+    box.append(
+        target,
+        f"\nOcelli-Generated-By: {blocked}\n"
+        "This names the agent. It is not a read-blocked project.\n")
 
 
 def _remove_ritk_published_source(box: Sandbox) -> None:
@@ -999,6 +1214,141 @@ def _sprint_plan_two_goal_lines(box: Sandbox) -> None:
     box.substitute("docs/sprints/SPRINT_PLAN.md", goal.group(0),
                    "**Goal**: something a previous edit left behind.\n\n"
                    + goal.group(0))
+
+
+def _sprint_plan_row_absent(box: Sandbox) -> None:
+    """Delete the first story row of the first sprint table.
+
+    The allocation still plans that story, so `--check` reports that it
+    appears in no sprint table. The goal line stays and still carries the
+    title, so the missing-title refusal does not fire. A check that walked
+    only the plan's own rows would stay green.
+    """
+    head = re.compile(r"^####\s+Sprint\s+S\d+\s*$")
+    story = re.compile(r"^\|\s*F-X?\d{3}[a-z]?\s*\|")
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    heads = [i for i, line in enumerate(lines) if head.match(line.rstrip("\n"))]
+    if not heads:
+        raise AssertionError("SPRINT_PLAN.md carries no sprint table")
+    end = heads[1] if len(heads) > 1 else len(lines)
+    rows = [i for i in range(heads[0], end) if story.match(lines[i])]
+    if not rows:
+        raise AssertionError("the first sprint table carries no story row")
+    del lines[rows[0]]
+    box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+
+
+def _sprint_plan_row_unplanned(box: Sandbox) -> None:
+    """Insert a row for F-999 after the first sprint table's last row.
+
+    The allocation does not plan F-999, so the unplanned-row refusal is
+    the one that fires. The goal line is untouched. F-999 is fixed. If a
+    later allocation plans that id into a sprint, the same row would hit
+    the wrong-sprint refusal, so the fixture stops instead.
+    """
+    allocation = json.loads(box.read("docs/sprints/allocation.json"))
+    if any(story["fid"] == "F-999" and story["sprint"]
+           for story in allocation["stories"]):
+        raise SandboxError(
+            "the allocation plans F-999 into a sprint, so this fixture "
+            "would reach the wrong-sprint refusal")
+    head = re.compile(r"^####\s+Sprint\s+S\d+\s*$")
+    story = re.compile(r"^\|\s*F-X?\d{3}[a-z]?\s*\|")
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    heads = [i for i, line in enumerate(lines) if head.match(line.rstrip("\n"))]
+    if not heads:
+        raise AssertionError("SPRINT_PLAN.md carries no sprint table")
+    end = heads[1] if len(heads) > 1 else len(lines)
+    rows = [i for i in range(heads[0], end) if story.match(lines[i])]
+    if not rows:
+        raise AssertionError("the first sprint table carries no story row")
+    last = rows[-1]
+    ending = "\n" if lines[last].endswith("\n") else ""
+    lines.insert(last + 1,
+                 "| F-999 | E0.0 | A row the allocation plans nowhere "
+                 "| Test | 1w |" + ending)
+    box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+
+
+def _sprint_plan_goal_line_absent(box: Sandbox) -> None:
+    """Delete the first `**Goal**:` line and the blank line under it.
+
+    The sprint heading remains, so the parser still knows which sprint
+    lost its goal. The table rows stay, so the row refusals stay quiet.
+    The fragment is the absent line. A comparison over only the sprints
+    whose goal line the parser found would stay green.
+    """
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    goal = re.compile(r"^\*\*Goal\*\*: .+$")
+    for index, line in enumerate(lines):
+        if not goal.match(line.rstrip("\n")):
+            continue
+        remove = 1
+        if index + 1 < len(lines) and lines[index + 1].strip() == "":
+            remove = 2
+        del lines[index:index + remove]
+        box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+        return
+    raise AssertionError("SPRINT_PLAN.md carries no **Goal** line")
+
+
+def _sprint_plan_goal_order_drift(box: Sandbox) -> None:
+    """Swap two adjacent distinct titles on one sprint's goal line.
+
+    Titles come from the sandbox allocation in the generator's order,
+    with the same semicolon-to-comma substitution the goal line uses.
+    The first sprint whose single goal line contains an adjacent pair
+    as `a, b` has those two titles exchanged on that line only. Both
+    titles remain, so the missing-title refusal stays quiet and the
+    order refusal is the one that fires. A sprint with two goal lines
+    is skipped, because that state is the duplicate-line refusal. A
+    plan with no such pair cannot express the drift, and the fixture
+    stops rather than passing.
+    """
+    allocation = json.loads(box.read("docs/sprints/allocation.json"))
+    planned = [story for story in allocation["stories"] if story["sprint"]]
+    planned.sort(key=lambda story: (int(story["sprint"][1:]), story["fid"]))
+    titles_by_sprint: dict[str, list[str]] = {}
+    sprint_order: list[str] = []
+    for story in planned:
+        sprint = story["sprint"]
+        if sprint not in titles_by_sprint:
+            sprint_order.append(sprint)
+            titles_by_sprint[sprint] = []
+        titles_by_sprint[sprint].append(story["story"].replace(";", ","))
+
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    head = re.compile(r"^####\s+Sprint\s+(S\d+)\s*$")
+    goal = re.compile(r"^\*\*Goal\*\*: (.+)$")
+    current = ""
+    goals: dict[str, list[int]] = {}
+    for index, line in enumerate(lines):
+        found = head.match(line.rstrip("\n"))
+        if found:
+            current = found.group(1)
+            continue
+        if current and goal.match(line.rstrip("\n")):
+            goals.setdefault(current, []).append(index)
+
+    for sprint in sprint_order:
+        indexes = goals.get(sprint, [])
+        if len(indexes) != 1:
+            continue
+        titles = titles_by_sprint[sprint]
+        for left, right in zip(titles, titles[1:]):
+            if left == right:
+                continue
+            pair = f"{left}, {right}"
+            raw = lines[indexes[0]]
+            body = raw.rstrip("\r\n")
+            if pair not in body:
+                continue
+            lines[indexes[0]] = (
+                body.replace(pair, f"{right}, {left}", 1) + raw[len(body):])
+            box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+            return
+    raise SandboxError(
+        "no sprint goal line contains two adjacent distinct story titles")
 
 
 def _stale_codex_adapter(box: Sandbox) -> None:
@@ -6861,6 +7211,166 @@ GUARDS: tuple[Guard, ...] = (
         ),
     ),
 
+    # -- licences ------------------------------------------------------------
+    Guard(
+        id="licences",
+        file="scripts/licence_check.py",
+        gate="licences licences-wheels",
+        spec="F-217 and SPDX 2.3 Annex D",
+        refuses="A dependency whose licence is not on the one allowlist, "
+                "an exception or a file waiver that is stale, incomplete, "
+                "out of scope or in a published runtime closure, a lead "
+                "file waiver whose licence is not an allowlisted expression, "
+                "an operator file waiver whose licence is not a parseable "
+                "expression, a Python package with no recorded row, a bundled "
+                "wheel file that carries a copyleft marker or an unrecorded "
+                "library, a third-party notice that drifts, and a holder or "
+                "manifest SPDX line that drifts.",
+        claims=("*",),
+        probes=(
+            Probe("licences.npm-copyleft", _plant_npm_copyleft,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "GPL-3.0-only",
+                  note="The same entry is planted in each of the three "
+                       "lockfiles."),
+            Probe("licences.npm-undeclared", _plant_npm_undeclared,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "has no licence and no exception"),
+            Probe("licences.exception-stale", _plant_stale_exception,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "stale exception"),
+            Probe("licences.exception-shipped", _plant_shipped_exception,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "published runtime closure",
+                  note="dcmjs is in the published runtime closure. Scope "
+                       "dev-only does not waive that."),
+            Probe("licences.scope-dev-only", _dev_only_caniuse,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "is false for tools/oracle/package-lock.json",
+                  note="caniuse-lite stays in the oracle lock. dev-only "
+                       "does not hold for that copy."),
+            Probe("licences.scope-nowhere", _tool_scope_holds_nowhere,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "holds for no lockfile",
+                  note="The oracle copy is removed, so tool holds nowhere. "
+                       "dev-only still holds for the root dev entry, and "
+                       "that is why this plant does not also say the scope "
+                       "is false."),
+            Probe("licences.waiver-decided-by", _waiver_missing_decided_by,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is missing decided_by"),
+            Probe("licences.waiver-scope", _waiver_scope_prod,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "scope 'prod'"),
+            Probe("licences.waiver-stale", _stale_lzf_waiver,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "stale licence file"),
+            Probe("licences.waiver-placeholder", _claim_licence_on_empty_file,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is valid only on an empty file"),
+            Probe("licences.waiver-lead-copyleft", _lead_waiver_names_copyleft,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "allowlisted expression a lead may waive",
+                  note="et-xmlfile is a lead waiver of an allowlisted text. "
+                       "GPL-3.0-only is on no allowlist, so the lead may not "
+                       "record it. An operator row may."),
+            Probe("licences.waiver-operator-expression",
+                  _operator_waiver_unparseable,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is not a parseable SPDX expression",
+                  note="The operator may name a copyleft licence. The value "
+                       "still has to parse as an SPDX expression, or be the "
+                       "placeholder."),
+            Probe("licences.python-unrecorded", _rename_python_row,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "has no licence row"),
+            Probe("licences.python-copyleft", _copyleft_python_row,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is not allowed"),
+            Probe("licences.notice-drift", _drift_notice,
+                  script("python3", "scripts/licence_check.py", "notices"),
+                  "sha256"),
+            Probe("licences.holder-drift", _drift_holder,
+                  script("python3", "scripts/licence_check.py", "holder"),
+                  "does not name Tensorbee Limited"),
+            Probe("licences.manifest-spdx", _narrow_manifest_spdx,
+                  script("python3", "scripts/licence_check.py", "holder"),
+                  "expected MIT OR Apache-2.0"),
+            Probe("licences.rust-copyleft", _copyleft_openjph,
+                  script("python3", "scripts/licence_check.py", "rust"),
+                  "openjph-core",
+                  needs="cargo", profile="deep",
+                  note="The vendor manifest is part of the graph. A "
+                       "registry-only reader would stay green."),
+            Probe("licences.rust-disjunction", _disjoin_openjph,
+                  script("python3", "scripts/licence_check.py", "rust"),
+                  "OK: licence check",
+                  needs="cargo", profile="deep", polarity="accept",
+                  note="MIT OR a copyleft identifier is satisfied by MIT. "
+                       "A token scan would refuse it."),
+            Probe(
+                "licences.wheel-marker", None,
+                python_snippet(
+                    "installed_problems, marker",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('marker')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "copyleft marker",
+                level=1,
+                control=python_snippet(
+                    "installed_problems, clean marker",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('clean')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n")),
+            Probe(
+                "licences.wheel-library", None,
+                python_snippet(
+                    "installed_problems, library",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('library')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "is not on the recorded list",
+                level=1,
+                control=python_snippet(
+                    "installed_problems, clean library",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('clean')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n")),
+            Probe(
+                "licences.wheel-platform", None,
+                python_snippet(
+                    "installed_problems, platform",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('platform')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "no recorded bundled-library list",
+                level=1,
+                control=python_snippet(
+                    "installed_problems, clean platform",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('clean')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n")),
+        ),
+    ),
+
     # -- source policy ------------------------------------------------------
     Guard(
         id="provenance",
@@ -6880,6 +7390,21 @@ GUARDS: tuple[Guard, ...] = (
             Probe("provenance.unqualified-mention", _blocked_mention,
                   script("python3", "scripts/source_provenance_check.py"),
                   "with no statement that it is out of bounds"),
+            Probe("provenance.python-dependency", _plant_python_dependency,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "depends on"),
+            Probe("provenance.lock-entry", _plant_lock_entry,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "depends on"),
+            Probe("provenance.prefixed-name", _plant_prefixed_lock_name,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "depends on"),
+            Probe("provenance.agent-trailer", _plant_agent_trailer,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "OK: source-provenance policy clean",
+                  polarity="accept",
+                  note="The trailer names the agent. Prose matching is "
+                       "unchanged, and the planted sentence negates a read."),
         ),
         limit="The URL clause has no probe, deliberately. "
               "`docs/SOURCE-POLICY.md` names the projects and does not name "
@@ -6921,9 +7446,8 @@ GUARDS: tuple[Guard, ...] = (
                 "inventory or its immutable digest, a wrong packaged VCS "
                 "revision, workspace wiring that is not the exact path and "
                 "version, and, at `--require-redistribution` only, a vendored "
-                "package carrying no licence notice. That last refusal fires "
-                "on the unmodified tree today and no development profile runs "
-                "the flag.",
+                "package carrying no licence notice or a notice whose bytes "
+                "differ from the recorded hash.",
         claims=("*",),
         probes=(
             Probe("pins.range", _relax_wgpu_pin,
@@ -7008,26 +7532,20 @@ GUARDS: tuple[Guard, ...] = (
                   note="D-22. The packaged VCS revision is half of this "
                        "package's provenance and the archive digest is the "
                        "other half. It has one release and one owner."),
-            Probe("pins.openjph-notice", _plant_openjph_notice,
+            Probe("pins.openjph-notice", _delete_openjph_notice,
                   script("python3", "scripts/pin_and_size_check.py",
                          "--require-redistribution"),
-                  "pinned exactly",
-                  polarity="accept",
-                  control=script("python3", "scripts/pin_and_size_check.py",
-                                 "--require-redistribution"),
-                  control_status=1,
-                  control_expect="carries no BSD notice or copyright material",
-                  note="D-22, and this probe runs in BOTH directions because "
-                       "the refusal fires on the unmodified tree. The control "
-                       "is the unmutated repository, where the check must "
-                       "REFUSE and name the missing notice. The mutation "
-                       "plants a licence file, where it must ACCEPT. Without "
-                       "the second half this would be a hard-coded failure "
-                       "rather than a gate on a condition, and without the "
-                       "first half nothing would record that the condition is "
-                       "open today. No development profile runs this flag: "
-                       "`--floor`, `--sprint` and `--all` gate development and "
-                       "this gates publication. `/release` step 5 runs it."),
+                  "carries no BSD notice",
+                  note="D-22. The unmodified tree carries the upstream notice "
+                       "and the control accepts. Deleting the vendor LICENSE "
+                       "must refuse. No development profile runs this flag. "
+                       "`/release` step 5 runs it."),
+            Probe("pins.openjph-notice-hash", _alter_openjph_notice,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--require-redistribution"),
+                  "LICENSE sha256",
+                  note="D-22. One extra byte in the vendor LICENSE must "
+                       "refuse on the recorded hash."),
             Probe("pins.ritk-inventory", _remove_ritk_published_source,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "published file is absent: src/lib.rs",
@@ -9132,11 +9650,13 @@ GUARDS: tuple[Guard, ...] = (
              "bootstrap",
         refuses="A sprint plan that disagrees with the backlog about which "
                 "sprint a story is in or how large it is, a story planned "
-                "into two sprint tables at once, a generated milestone "
-                "summary or goal line that has drifted from the allocation it "
-                "is written from or that is absent, duplicated or spurious, "
-                "an absent plan, and a bare write that would replace an "
-                "existing hand-curated plan.",
+                "into two sprint tables at once, a planned story absent from "
+                "every sprint table, a table row for a story the allocation "
+                "does not plan, a generated milestone summary or goal line "
+                "that has drifted from the allocation it is written from or "
+                "that is absent, duplicated or spurious, an absent plan, and "
+                "a bare write that would replace an existing hand-curated "
+                "plan.",
         claims=("*",),
         probes=(
             Probe("sprint-plan.existing-refuses-write",
@@ -9208,7 +9728,39 @@ GUARDS: tuple[Guard, ...] = (
                   "the summary line for"),
             Probe("sprint-plan.stale-goal-line", _sprint_plan_stale_goal_line,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
-                  "**Goal** line"),
+                  "does not carry the story title it is built from",
+                  note="The fragment used to be `**Goal** line`, which the "
+                       "absent goal line, the order drift and the duplicate "
+                       "goal lines also print. This fragment is the "
+                       "missing-title refusal alone. The fixture is "
+                       "unchanged."),
+            Probe("sprint-plan.row-absent", _sprint_plan_row_absent,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "appears in no SPRINT_PLAN.md sprint table",
+                  note="Deletes the first sprint table's first story row. "
+                       "The allocation still plans that story and the goal "
+                       "line still names it, so the absent row is the only "
+                       "refusal."),
+            Probe("sprint-plan.row-unplanned", _sprint_plan_row_unplanned,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "carries no sprint in BACKLOG.md",
+                  note="Inserts a row for F-999, which the allocation does "
+                       "not plan. The goal line is left alone, so the "
+                       "unplanned row is the only refusal."),
+            Probe("sprint-plan.goal-line-absent",
+                  _sprint_plan_goal_line_absent,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "carries no **Goal** line",
+                  note="Deletes the first goal line. The sprint heading and "
+                       "its table stay, so the refusal is the absent line "
+                       "and not a missing title."),
+            Probe("sprint-plan.goal-order-drift",
+                  _sprint_plan_goal_order_drift,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "its order or its punctuation has drifted",
+                  note="Swaps the first adjacent pair of distinct story "
+                       "titles on one goal line. Both titles remain, so a "
+                       "comparison that ignores order would stay green."),
         ),
     ),
     Guard(
@@ -9702,7 +10254,7 @@ GUARDS: tuple[Guard, ...] = (
                     "     'exports': {'.': {'import': './dist/index.js'}},\n"
                     "     'files': ['dist']};\n"
                     "names = ['package.json', 'README.md', 'LICENSE-MIT',\n"
-                    "         'LICENSE-APACHE'];\n"
+                    "         'LICENSE-APACHE', 'NOTICE'];\n"
                     "bad = p.check_tarball('core', m, names);\n"
                     "print('\\n'.join(bad));\n"
                     "sys.exit(1 if bad else 0)\n"),
@@ -9716,7 +10268,7 @@ GUARDS: tuple[Guard, ...] = (
                     "     'exports': {'.': {'import': './dist/index.js'}},\n"
                     "     'files': ['dist']};\n"
                     "names = ['package.json', 'README.md', 'LICENSE-MIT',\n"
-                    "         'LICENSE-APACHE', 'dist/index.js'];\n"
+                    "         'LICENSE-APACHE', 'NOTICE', 'dist/index.js'];\n"
                     "bad = p.check_tarball('core', m, names);\n"
                     "print('\\n'.join(bad));\n"
                     "sys.exit(1 if bad else 0)\n"),
@@ -11771,11 +12323,34 @@ CONSTANTS: tuple[Constant, ...] = (
              why="HLD Appendix C.2.1's Read column set to NO."),
     Constant("provenance", "scripts/source_provenance_check.py",
              "BLOCKED_URLS", r"^BLOCKED_URLS = \[(.*?)^\]"),
+    Constant("provenance", "scripts/source_provenance_check.py", "MANIFESTS",
+             r"^MANIFESTS = \{(.*?)^\}",
+             why="The manifests whose dependency names are extracted. "
+                 "Narrowing this set reopens the lockfile hole."),
     Constant("provenance", "scripts/source_provenance_check.py",
              "POLICY_FILES", r"^POLICY_FILES = \{(.*?)^\}",
              why="Files permitted to name a read-blocked project. Widening "
                  "this list to make a build green is the exact shape this "
                  "repository distrusts."),
+    Constant("pins", "scripts/pin_and_size_check.py", "OPENJPH_LICENCE_SHA256",
+             r'^OPENJPH_LICENCE_SHA256 = "(.*?)"$',
+             why="The upstream OpenJPH notice. A changed hash is a changed "
+                 "grant."),
+    Constant("licences", "deny.toml", "allow",
+             r"^allow = \[(.*?)^\]",
+             why="The one allowlist. Widening it admits a licence in every "
+                 "ecosystem at once."),
+    Constant("licences", "scripts/licence_check.py", "COPYLEFT_MARKERS",
+             r"^COPYLEFT_MARKERS = \((.*?)^\)",
+             why="The markers that refuse a bundled licence text."),
+    Constant("licences", "scripts/licence_check.py", "EXCEPTION_FIELDS",
+             r"^EXCEPTION_FIELDS = (\(.*?\))$",
+             why="The fields an exception must carry. Dropping one lets an "
+                 "approval through with no reason."),
+    Constant("licences", "scripts/licence_check.py", "PLACEHOLDER_LICENCE",
+             r'^PLACEHOLDER_LICENCE = "(.*?)"$',
+             why="The only licence value an empty file may record. Any other "
+                 "value claims a grant the file does not state."),
     Constant("pins", "scripts/pin_and_size_check.py", "EXACT_PINNED",
              r"^EXACT_PINNED = \{(.*?)^\}"),
     Constant("pins", "scripts/pin_and_size_check.py", "PACKAGE_LICENCES",

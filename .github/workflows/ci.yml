@@ -132,8 +132,11 @@ jobs:
       # deliberately not here, because a duration on a shared runner is noise
       # and a skipped gate is not a pass.
       - run: bin/ocelli.sh gate bench
+      - name: cargo-deny 0.19.0
+        run: cargo install cargo-deny --version 0.19.0 --locked
+      - run: bin/ocelli.sh gate licences
       # docs/SOURCE-POLICY.md and HLD gate A6. No allowlist.
-      - run: python3 scripts/source_provenance_check.py
+      - run: bin/ocelli.sh gate provenance
       - run: python3 scripts/staged_content_check.py --tracked
       # F-014. A field-quirk record is complete only when its synthetic
       # recipe, independent expectation, manifest row and mutation boundary
@@ -234,6 +237,7 @@ jobs:
         run: |
           python3 -m pip install "uv==0.11.19"
           uv sync --locked
+      - run: bin/ocelli.sh gate licences-wheels
 
       # DCMTK comes from the distribution and is therefore NOT pinned. On
       # ubuntu-latest (24.04) that is 3.6.7, against the 3.7.0 that

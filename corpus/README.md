@@ -97,9 +97,10 @@ Prerequisites, all native:
 |--------------|------------------|
 | `pydicom` | writes every file, and encodes RLE, JPEG-LS and JPEG 2000 |
 | `numpy` | the pixel arrays |
-| `pylibjpeg`, `pylibjpeg-libjpeg`, `pylibjpeg-rle` | decoder plugins, so the conformance tests can read back what was written |
-| `pylibjpeg-openjpeg` | JPEG 2000 and HTJ2K |
-| `pyjpegls` | JPEG-LS |
+| `pylibjpeg`, `pylibjpeg-rle` | RLE read-back |
+| `pylibjpeg-openjpeg` | JPEG 2000 and HTJ2K read-back |
+| `pyjpegls` | JPEG-LS read-back |
+| `imagecodecs` | JPEG lossless and the two DCT rows |
 | **DCMTK** (`dcmcjpeg` on `PATH`) | the four JPEG syntaxes pydicom has no encoder for |
 | **OpenJPH** (`ojph_compress` on `PATH`) | the HTJ2K codestream, which the generator then encapsulates |
 

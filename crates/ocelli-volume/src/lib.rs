@@ -259,7 +259,7 @@ pub enum VolumeError {
         /// The slice index that was refused.
         index: u32,
     },
-    /// [`ocelli_cache::Brick::cut`] refused the level 0 prefix.
+    /// [`ocelli_cache::Brick::cut`] refused a brick outside a stored level's grid.
     #[error("the brick cut failed on axis {axis} at {value}")]
     BrickCut {
         /// The axis the cut named.
@@ -289,7 +289,11 @@ pub enum VolumeError {
     },
 }
 
-/// One multiscale level. Level 0 is full resolution, and E8.8 adds entries.
+/// One multiscale level. Level 0 is full resolution.
+///
+/// E8.8 is this axis. A later entry is caller bytes or a downsample of
+/// level 0, and its spacing is the dimension ratio. A successful
+/// [`Volume::place`] drops every level above 0.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Level {
     /// Dimensions at this level.
@@ -368,11 +372,8 @@ pub struct VoxelStore {
 impl VoxelStore {
     /// A cleared store sized from dimensions and voxel kind.
     pub fn new(dims: [u32; 3], kind: VoxelKind) -> Self {
-        let voxels = dims.iter().fold(1_usize, |total, dim| {
-            total.saturating_mul(usize::try_from(*dim).unwrap_or(0))
-        });
         Self {
-            data: alloc::vec![0; voxels.saturating_mul(kind.bytes_per_voxel())],
+            data: alloc::vec![0; base_len(dims, kind)],
             dims,
             kind,
         }
@@ -391,6 +392,14 @@ impl VoxelStore {
     /// Append bytes after the existing levels. Callers check the length first.
     pub(crate) fn extend_bytes(&mut self, extra: &[u8]) {
         self.data.extend_from_slice(extra);
+    }
+
+    /// Drop bytes past level 0.
+    ///
+    /// Level 0 is the span [`Self::new`] allocated. Appended levels sit
+    /// after that span.
+    pub(crate) fn truncate(&mut self) {
+        self.data.truncate(base_len(self.dims, self.kind));
     }
 
     /// Whether the allocation is empty.
@@ -454,7 +463,7 @@ pub struct Volume {
     pub voxel: VoxelKind,
     /// The one contiguous allocation.
     pub data: VoxelStore,
-    /// Level 0 at full resolution, with later caller-supplied levels appended.
+    /// Level 0 at full resolution. Later entries are coarser levels in this store.
     pub levels: Vec<Level>,
     /// Per-slice presence, for progressive assembly.
     pub present: SlicePresence,
@@ -617,6 +626,10 @@ impl Volume {
     /// Write one slice and mark it present. Idempotent: writing a slice
     /// twice replaces its contents and counts it once.
     ///
+    /// A successful write drops every level above 0. Those bytes are a
+    /// function of level 0, so a write makes them stale. A refused write
+    /// leaves them in place.
+    ///
     /// # Errors
     ///
     /// [`VolumeError::SliceOutOfRange`] outside the volume, and
@@ -631,6 +644,10 @@ impl Volume {
         }
         self.data.slice_mut(n)?.copy_from_slice(samples);
         self.present.set(n);
+        if self.levels.len() > 1 {
+            self.data.truncate();
+            self.levels.truncate(1);
+        }
         Ok(())
     }
 
@@ -722,6 +739,13 @@ impl Volume {
         })?;
         decode_container(bytes, self.voxel)
     }
+}
+
+fn base_len(dims: [u32; 3], kind: VoxelKind) -> usize {
+    let voxels = dims.iter().fold(1_usize, |total, dim| {
+        total.saturating_mul(usize::try_from(*dim).unwrap_or(0))
+    });
+    voxels.saturating_mul(kind.bytes_per_voxel())
 }
 
 fn level0_prefix(volume: &Volume) -> Result<&[u8], VolumeError> {

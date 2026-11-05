@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-119 | E30.1 | Brick decomposition and multiscale pyramid generation | Rust | 10w | pending |
+| F-119 | E30.1 | Brick decomposition and multiscale pyramid generation | Rust | 10w | done |
 | F-208 | E38.18 | Folder viewer viewports: layouts from 1 by 1 to 3 by 3, per-viewport series and view state, an active viewport, a series dragged from its thumbnail onto a cell, and the four-image view kept as a tile mode | TS | 6w | pending |
 | F-209 | E38.19 | Folder viewer linked viewports: scroll by position in a shared frame of reference, synced window and zoom, and reference lines from the library | TS | 4w | pending |
 | F-210 | E38.20 | Folder viewer value at the pointer: the modality value and its unit from the modality stage of the LUT chain, HU on CT, returned by the local process | Rust | 3w | pending |
@@ -17,7 +17,12 @@
 | F-214 | E38.24 | Folder viewer mouse profiles and preferences: the current binding, a scroll-on-left profile and a window-on-left profile, saved in the browser, and cine at Frame Time (0018,1063) | TS | 2w | pending |
 | F-215 | E38.25 | Folder viewer marks written as a TID 1500 document and key images as a Key Object Selection through @ocelli/core, saved to a download and loaded back from a folder | TS | 4w | pending |
 | F-216 | E38.26 | Folder viewer performance: each file posted once and held in a bounded cache, decode reused across window changes, measured budgets for open, first image, scroll rate and resident memory, and a release build | All | 4w | pending |
-| F-217 | E38.27 | Licence hygiene: no copyleft dependency in any tracked manifest, a permissive JPEG reference decoder for the corpus, licence allowlist gates for Rust, npm and Python, and a third-party notices file | All | 2w | pending |
+| F-217 | E38.27 | Licence hygiene: no copyleft dependency in any tracked manifest, a permissive JPEG reference decoder for the corpus, licence allowlist gates for Rust, npm and Python, and a third-party notices file | All | 2w | done |
+| F-218 | E38.28 | Dependency advisories in shipped packages: adm-zip below 0.6.1 reaches the published @ocelli/core runtime through dcmjs, resolved by a patched override or a proof that no shipped path reaches it, with an audit gate over shipped dependencies | TS | 1w | pending |
+| F-219 | E38.29 | Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red | Test | 1w | done |
+| F-220 | E38.30 | Shipped binary notices: the full licence text of every crate compiled into the wasm module and the native binaries, generated from the lockfile and checked by a gate | Build | 2w | pending |
+| F-221 | E38.31 | Published package contents: the @ocelli/core tarball stops shipping compiled test files, with a packages gate refusal for any test file in a published tarball | TS | 1w | pending |
+| F-222 | E30.7 | Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero | Rust | 1w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -51,6 +56,35 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   acceptance row: the single view and the first tile of the synthetic study
   measure 64 to 67.2 within 1e-3, and the assignment swap must turn that row
   red. F-208 does not complete while that row is open.
+
+## Questions for the operator
+
+- **Non-finite F32 samples in the pyramid, before F-120.** F-119's plan does
+  not say what a NaN, an infinity or a negative zero does to a coarser level.
+  Today the mean passes NaN and infinity through unchanged, so one NaN voxel
+  spreads to eight times its volume at each coarser level, and an all `-0.0`
+  box is written as `+0.0`. No render reaches this yet, because a volume
+  refuses 32-bit samples and nothing calls `generate_pyramid` until F-120.
+  The choices are to let NaN through and have every tier draw it as no
+  value, to leave non-finite samples out of the mean and re-weight, or to
+  refuse to generate. The same answer covers non-finite input to
+  `level_voxel_to_level0`. F-119 pins the current behaviour in
+  `non_finite_floats_keep_the_current_bits` so a change is visible.
+  **Answered by the operator on 2026-11-05:** leave non-finite samples out of
+  each mean and divide by the finite weight only, keep a box with no finite
+  sample as NaN, and write negative zero as positive zero. F-222 implements it.
+
+- **Licence file waivers the lead decided, for the operator to confirm.**
+  F-217's plan lets the lead waive a licence file only when its text is an
+  allowlisted licence that grants nothing copyleft, or when it is an empty
+  file that states no licence. Four rows in
+  `ci/licences.toml` use that rule: the empty `LICENSE-heif`,
+  `LICENSE-jetraw` and `LICENSE-libjxs` placeholders in imagecodecs
+  2026.10.10, for codecs not compiled into the wheel, and et-xmlfile 2.0.0's
+  `LICENCE.python`, which is the CPython licence stack and names the GPL only
+  in a governing-law clause. Changing any of them to `operator`, or refusing
+  it, is a one-row edit.
+  **Confirmed by the operator on 2026-11-05.** All four stay as recorded.
 
 ## What is carried in
 

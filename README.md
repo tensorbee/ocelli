@@ -376,7 +376,8 @@ Security issues, including a wrong pixel value or wrong geometry, go through
 ## Licence
 
 Dual-licensed under **MIT** or **Apache-2.0** at your option, texts in
-`LICENSE-MIT` and `LICENSE-APACHE`.
+`LICENSE-MIT` and `LICENSE-APACHE`. The copyright holder is Tensorbee Limited.
+`NOTICE` carries that line. Third-party notices are in `THIRD_PARTY_NOTICES`.
 
 Permissive on purpose: integrators embed an engine like this inside closed
 products, and a disclosure obligation ends that conversation before it starts.

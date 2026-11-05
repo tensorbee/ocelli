@@ -5067,3 +5067,87 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The recovery sentence was corrected. A failed preview hides the previous grey image and shows the fault, so the viewport does not keep the previous slice under the fault text. The state table says a drawing-tool drag moves the mark and a navigation drag does not.
 
 **Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 3 nitpicks. A drawing-tool move does not latch after 5 pixels. A colour frame can still take a drawing from the previous image size. Leaving 2 by 2 because a neighbour is over 32 MiB does not re-enable the drawing buttons. None of those block. Reviewer Claude Code, read only, with no shell. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-119, Brick decomposition and multiscale pyramid generation, completed 2026-11-05
+
+**What was built.** `Volume::downsample_level` builds one coarser level and `Volume::generate_pyramid` builds all of them, each straight from level 0 with an exact-overlap box filter over stored container values. `Volume::cut_level_brick` cuts a brick from any stored level against that level's grid, and `Volume::level_voxel_to_level0` maps a level voxel centre back to level 0. A successful `place` drops every level above 0.
+
+**HLD sections implemented.** `docs/hld/` section 19 (the level axis and bricks), section 30 and 30.1 (out-of-core volume streaming), and decision D11. The filter, value domain, rounding, child dimensions, stop rule and level origin are local decisions recorded in `.claude/plans/F-119-design.md`, because the HLD and DICOM do not specify a pyramid.
+
+**Deviations.** none
+
+**Crates / packages modified.** `crates/ocelli-volume`.
+
+**Tests added.** `crates/ocelli-volume/tests/pyramid.rs`, 28 integration cases with hand-computed fixtures, and unit tests in `crates/ocelli-volume/src/levels.rs`.
+
+**Fixture provenance.** Pixel arithmetic over stored values. No DICOM section defines a pyramid, so each fixture's expected value is hand-computed from the plan's filter definition and shown in a comment, and rescale commutes with the mean per PS3.3 C.11.1 before rounding. Review passes 1 to 5 recomputed every fixture independently.
+
+**Verification.** Feature profile on the staged worker tree, `bin/ocelli.sh gate --floor` plus the corpus gate, in the worker's own build directory. The verify ledger entry is in the commit trailer of 3987833.
+
+**Corpus.** pass, 95 verified, 0 missing, 0 mismatched. This story adds no corpus row.
+
+**Tier coverage.** Generation runs on the CPU and gives the same bytes on tier A (WebGPU), tier B (WebGL2 downlevel) and tier C (CPU). F-120 selects levels, F-121 corrects opacity per level and F-122 budgets level bricks.
+
+**LLD updated.** `docs/lld/volumes.md`, `docs/lld/cache.md` and the `docs/lld/README.md` index rows.
+
+**User-facing documentation.** no change. README.md, the Use book and the More page do not describe pyramids, and nothing outside the crate calls the new methods until F-120.
+
+**Deviations from the design plan.** None in behaviour. The plan sentence promising a test for a valid prefix after a failure mid-pyramid was removed, because that path is unreachable without fault injection. Implemented by an external coding agent over five independent review passes.
+
+**Notes for future sessions.** What a non-finite F32 sample does to a coarser level is an open operator question in `docs/sprints/CURRENT_SPRINT.md`, pinned by `non_finite_floats_keep_the_current_bits`, to be answered before F-120. `VoxelStore::slice_mut` is public and can write level 0 without dropping coarser levels, which predates this story.
+
+## F-217, Licence hygiene, completed 2026-11-05
+
+**What was built.** No copyleft dependency remains in any tracked manifest. The corpus JPEG read-back moves from the GPL-3 `pylibjpeg-libjpeg` to `imagecodecs` (BSD-3-Clause, libjpeg-turbo), and Vite moves to 7.3.7 so the MPL-2.0 `lightningcss` is no longer installed. One allowlist in `deny.toml` is read by cargo-deny and by `scripts/licence_check.py` for npm, the Python lock and installed wheels. Exceptions and licence file waivers live in `ci/licences.toml` with reason, scope, date and decider, matched to their version and refused when stale. `THIRD_PARTY_NOTICES` carries the OpenJPH and ritk notices and `NOTICE` names Tensorbee Limited.
+
+**HLD sections implemented.** Section 27.2 R7, `docs/SOURCE-POLICY.md`.
+
+**Deviations.** D-22 amended to record the OpenJPH notice as present.
+
+**Crates / packages modified.** `deny.toml`, `ci/licences.toml`, `scripts/licence_check.py`, `scripts/source_provenance_check.py`, `scripts/guards/catalogue.py`, `pyproject.toml` and `uv.lock`, the npm manifests and lockfiles, `examples/viewer-react/vite.config.ts`, `.github/workflows/ci.yml`, `bin/ocelli.sh`, the licence and notice files, and `corpus/decode-digests.tsv`.
+
+**Tests added.** `scripts/tests/test_licence_check.py` (31 cases), provenance unit tests, and floor and deep guard probes for every new refusal. The census records 1032 refusals with none watched by nothing.
+
+**Fixture provenance.** The lossless JPEG and JPEG-LS rows read back byte-identical to the previous decoder, measured against an outside-the-repository venv built from the old lock. `.50` and `.51` were re-baselined, with maximum differences of 3 and 1 against the old decoder, within `YBR_EIGHT_BIT_MAX` and `TRANSFORM_MAX` against the uncompressed original.
+
+**Verification.** Feature profile on the staged worker tree, the floor's 27 gates plus the corpus gate, in the worker's own build directory. The verify ledger entry is in the commit trailer of e3fc29a.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes tooling, manifests and notices, not rendering.
+
+**LLD updated.** `docs/lld/guards.md`, `docs/lld/corpus.md`, `docs/lld/codecs.md`, `docs/lld/release-policy.md` and `docs/lld/typescript-packaging.md`.
+
+**User-facing documentation.** `README.md` names the licence and notice files. The Use book and the More page have no licence, decoder or dependency sentence this story changes.
+
+**Deviations from the design plan.** The plan's exception owner rule was amended by the lead under the operator's delegation: a lead may waive licence file text that is an allowlisted licence granting nothing copyleft, or an empty file, and every such waiver is listed for the operator in `docs/sprints/CURRENT_SPRINT.md`. `examples/viewer-react/vite.config.ts` sets `worker.format` to `es`, which Vite 7 requires. Implemented by an external coding agent over five independent review passes.
+
+**Notes for future sessions.** AC17's Linux half is the corpus-tooling CI job on the pushed head and is confirmed at sprint close. F-220 follows up with full notices for every crate in shipped binaries. A lead waiver over text that really grants a copyleft licence while naming an allowlisted licence cannot be refused mechanically and stays a human rule.
+
+## F-219, Sprint plan checker refusals that no guard probe triggers, completed 2026-11-05
+
+**What was built.** The four refusals in `scripts/gen_sprint_plan.py` that no guard probe triggered now each have a floor probe and a unit test, keyed by a fragment only that refusal prints: a row absent from every sprint table, a row for a story the backlog does not schedule, a sprint with no goal line, and goal titles out of order. The stale goal line probe's fragment is narrowed so it names one refusal.
+
+**HLD sections implemented.** Section 27.2 and the F-X009 guard harness.
+
+**Deviations.** none
+
+**Crates / packages modified.** `scripts/guards/catalogue.py`, `scripts/tests/test_gen_sprint_plan.py`, `ci/guard-probe-budget.json`, `docs/runbooks/guard-verification.md`.
+
+**Tests added.** Five unit tests and four floor probes. Deleting each refusal turns only its own probe and test green, measured by the implementer and again by the reviewer.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the staged worker tree, 27 floor gates plus the corpus gate, in the worker's own build directory. The verify ledger entry is in the commit trailer of 7a43b4b.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes guard tooling only.
+
+**LLD updated.** `docs/lld/guards.md`. The `docs/lld/README.md` index and `docs/lld/codecs.md` header also gain F-217, which F-217's integration missed.
+
+**User-facing documentation.** no change. README.md, the Use book and the More page do not describe the sprint plan checker.
+
+**Deviations from the design plan.** The plan's consumer map said `guard_census.py --record` re-measures wall clock. `guard_probe.py --record-budget` does, and wall clock was left as recorded because the gate stays inside it. The plan line is corrected. Implemented by an external coding agent, reviewed clean on the first pass.
+
+**Notes for future sessions.** The census counts per entry, not per refusal, so a refusal added to `gen_sprint_plan.py` later needs its own probe by review. Uniqueness of every probe fragment across all fourteen messages is a recorded hand check, not an automated test.

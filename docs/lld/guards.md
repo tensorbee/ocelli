@@ -1,7 +1,7 @@
 # The guard harness
 
-**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217, F-219
+**Last updated:** 2026-11-05
 
 A guard is any refusal this repository can produce: a script that exits 1, a
 hook that rejects a commit, a gate that fails.
@@ -433,6 +433,12 @@ probe inserts a hand-curated paragraph, runs the bare command and requires the
 overwrite refusal. The control runs `--force` and requires success, so a writer
 that refuses every mode cannot satisfy the probe.
 
+Each of the fourteen `--check` refusals has a probe of its own, keyed by a
+fragment only that refusal prints. The census counts per entry, not per
+refusal, so it cannot tell a refusal that a probe drives from one that only
+sits in a watched file. A refusal added later needs its own probe by review,
+not by the census.
+
 ### Sprint-close evidence names one tree
 
 `scripts/sprint_workflow.py` records each whole-sprint review and each new
@@ -577,6 +583,32 @@ markers is hand-written and is not generated. A green census also verifies the
 table has not drifted, so a guard added without re-rendering fails the gate. A
 table of probes drifts the moment a guard is added, which is the defect this
 harness exists to fix.
+
+## The licence allowlist
+
+`bin/ocelli.sh gate licences` is in the floor. `deny.toml` holds the one
+allowlist. cargo-deny 0.19.0 reads it for Rust. `scripts/licence_check.py`
+reads the same list for npm and Python, and it checks `THIRD_PARTY_NOTICES`
+and the copyright holder. Exceptions live in `ci/licences.toml` with a reason,
+a scope, a date and who decided. A stale exception is refused. An exception on
+a package in a published runtime closure is refused.
+
+`bin/ocelli.sh gate licences-wheels` is outside the floor. It scans installed
+wheels for copyleft markers, empty licence files and bundled libraries. The
+corpus-tooling job runs it after `uv sync --locked`.
+
+The catalogue entry `licences` claims `scripts/licence_check.py`. Floor probes
+cover the npm lockfiles, the Python table, notices and the holder. The Rust
+probes need cargo and sit in the deep profile. Three level-1 probes call the
+wheel checks on a synthetic tree.
+
+Recorded constants added with this gate are the `deny.toml` allow list,
+`COPYLEFT_MARKERS`, `EXCEPTION_FIELDS`, `PLACEHOLDER_LICENCE`, the provenance
+`MANIFESTS` set and `OPENJPH_LICENCE_SHA256`.
+
+`pins.openjph-notice` deletes `vendor/openjph-core-0.1.0/LICENSE` and must
+refuse with the missing-notice text. The unmodified tree accepts.
+`pins.openjph-notice-hash` appends a newline and must refuse on the hash.
 
 ## The two gates
 
