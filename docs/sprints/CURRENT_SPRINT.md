@@ -27,10 +27,11 @@
 | F-224 | E5.7 | Frame identity: the decoded tier answers a lookup only when the frame's content id, from SOP Instance UID, transfer syntax and encoded bytes, and its description and plane match, DicomwebClient takes a documented cache mode defaulting to no-cache, and the folder viewer keys page caches by the picked File, lets the same folder be chosen again, and refuses to show a file that changed on disk | All | 3w | pending |
 | F-225 | E3.8 | DICOM conformance report: ocelli-dicom checks each value against the VR rules of PS3.5 section 6.2 and Type 1, 1C and 2 presence for seven PS3.3 modules on CR, CT, MR and PET, a finding never carries a value or stops display, @ocelli/core reads the report, and the folder viewer shows a Checks badge and list | All | 4w | pending |
 | F-226 | E5.8 | Release by series and study: ImageCache::release_series and BrickCache::release_volume over one Lru range removal, a cache.released ring event decoded by @ocelli/core, and the folder viewer forgetting the previous folder's held files and frames on the local process when another folder or the synthetic study is opened or the page is left | All | 3w | pending |
-| F-227 | E38.33 | Automatic window when the file has none: the 1st to 99th percentile of modality values by nearest rank, leaving out stored zero and the Pixel Padding Value range, computed once in ocelli-pixel, labelled Auto window in the folder viewer, and every window in the file still used as it is | All | 2w | pending |
+| F-227 | E38.33 | Automatic window per series when the file has none: one window from the 1st to 99th nearest-rank percentile of modality values pooled over up to 16 frames spread through the series, each frame through its own rescale, leaving out stored zero and the Pixel Padding Value range, computed once in ocelli-pixel, labelled Auto window in the folder viewer, and every window in the file still used as it is | All | 3w | pending |
 | F-228 | E38.34 | Content Security Policy: the minimal policy an embedding page needs for the Ocelli worker and wasm path, documented and proven by a browser probe of the built example viewer with minimality probes, and the folder viewer served under a strict hash policy with compressed frames decoded and drawn | All | 2w | pending |
 | F-229 | E4.10 | JPEG XL decoding: the three JPEG XL transfer syntaxes through jxl-oxide, lossless decoded exactly, JPEG recompression rebuilt and decoded by the existing JPEG path, unsupported features refused as unavailable, with synthetic corpus rows and declared oracle rows | Rust | 3w | pending |
 | F-230 | E16.6 | Public options refuse unknown keys: every options and request object in @ocelli/core refuses an unknown key at run time with a coded OcelliError naming it, DicomwebError and the bulk, command and instance errors share that class, and loadCore rejects with the initialiser's cause instead of resolving false | TS | 2w | in-progress |
+| F-231 | E5.9 | Session frame cache: the wasm session keeps committed stack frames in a caller-budgeted ImageCache checked by ContentId, reports eviction, pressure and release through the ring, and exports a residency query, a show-from-cache call, and releaseSeries and releaseStudy in @ocelli/core | Rust+TS | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -102,6 +103,20 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   outside its scope. Not blocking S46, because S46 publishes nothing. The
   choice is a story that packs the module, or a release rule that says where
   the module ships instead.
+
+- **The objc2 crates in the native binaries may carry an Apple SDK
+  redistribution question.** F-220's first review read the upstream objc2
+  `LICENSE.md`, which flags that redistributing these crates, generated from
+  Apple SDK headers, under the Xcode licence is unclear. They reach the
+  native binaries through wgpu's Metal backend. Not blocking S46, because
+  S46 publishes nothing. The choice is legal advice before a native release,
+  or a native build that leaves them out.
+
+- **`acceptTransferredFrame` ignores a correctly spelt `stackIndex` and
+  `stackEpoch`.** Found by F-230's first review and older than F-230. Now
+  that both keys are on F-230's accepted list, a caller who sets them gets
+  neither a refusal nor the effect. The choice is a story that honours them,
+  or removing them from that entry point's accepted keys.
 
 ## What is carried in
 
