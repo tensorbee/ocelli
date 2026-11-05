@@ -30,6 +30,7 @@ use ocelli_pixel::{
     StoredPixelDescription, VoiFunction, VoiTransform,
 };
 use ocelli_render::display_index;
+use ocelli_viewport::presentation::WindowPreset;
 use ocelli_viewport::view::f32_from_f64;
 
 const ROWS: Tag = Tag(0x0028, 0x0010);
@@ -53,6 +54,11 @@ const PIXEL_VALUE_TRANSFORMATION: Tag = Tag(0x0028, 0x9145);
 const PRESENTATION_SHAPE: Tag = Tag(0x2050, 0x0020);
 const PRESENTATION_SEQUENCE: Tag = Tag(0x2050, 0x0010);
 const PIXEL_DATA: Tag = Tag(0x7FE0, 0x0010);
+const PIXEL_SPACING: Tag = Tag(0x0028, 0x0030);
+const IMAGER_PIXEL_SPACING: Tag = Tag(0x0018, 0x1164);
+const IMAGE_ORIENTATION: Tag = Tag(0x0020, 0x0037);
+const PIXEL_MEASURES_SEQUENCE: Tag = Tag(0x0028, 0x9110);
+const PLANE_ORIENTATION_SEQUENCE: Tag = Tag(0x0020, 0x9116);
 const SERIES_UID: Tag = Tag(0x0020, 0x000E);
 const SERIES_NUMBER: Tag = Tag(0x0020, 0x0011);
 const MODALITY: Tag = Tag(0x0008, 0x0060);
@@ -92,6 +98,31 @@ pub struct Preview {
     pub window_function: &'static str,
     /// The display bytes were flipped after the LUT chain.
     pub inverted: bool,
+    /// Spacing and edge letters for the shown frame.
+    pub facts: FrameFacts,
+}
+
+/// Spacing and patient-direction letters for one frame.
+///
+/// Spacing tokens are row then column. A token that is already a JSON
+/// number is kept. Any other finite DS is the parsed value. Letters are
+/// empty when Image Orientation (Patient) is absent or not a unit vector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrameFacts {
+    /// Adjacent row spacing, when the file has a usable pair.
+    pub row_spacing: Option<String>,
+    /// Adjacent column spacing.
+    pub column_spacing: Option<String>,
+    /// `PixelSpacing`, `ImagerPixelSpacing`, or empty.
+    pub spacing_source: &'static str,
+    /// Patient direction at the left edge.
+    pub edge_left: String,
+    /// Patient direction at the right edge.
+    pub edge_right: String,
+    /// Patient direction at the top edge.
+    pub edge_top: String,
+    /// Patient direction at the bottom edge.
+    pub edge_bottom: String,
 }
 
 /// Which frame to decode, and an optional replacement window.
@@ -110,6 +141,9 @@ pub struct FrameRequest {
     pub window_width: Option<f32>,
     /// Replacement VOI LUT Function. Absent keeps the file function.
     pub window_function: Option<VoiFunction>,
+    /// Named window from `WindowPreset`. It refuses a VOI LUT Sequence
+    /// and it is not combined with a numeric window.
+    pub window_preset: Option<WindowPreset>,
 }
 
 impl PreviewError {
@@ -175,6 +209,13 @@ pub fn preview_first_frame(bytes: &[u8]) -> Result<Preview, PreviewError> {
 /// the frame, or the window cannot be shown.
 pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, PreviewError> {
     if request.window_center.is_some() != request.window_width.is_some() {
+        return Err(PreviewError::Window);
+    }
+    if request.window_preset.is_some()
+        && (request.window_center.is_some()
+            || request.window_width.is_some()
+            || request.window_function.is_some())
+    {
         return Err(PreviewError::Window);
     }
     if request
@@ -243,7 +284,10 @@ pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, Pre
     description
         .unpack(&decoded, ByteOrder::LittleEndian, &mut stored)
         .map_err(|_| PreviewError::Decode)?;
-    let mapped = lut_chain(object, photometric, &stored, request, frame_index)?;
+    let metadata = project_metadata(object)?;
+    let multi = MultiframeMetadata::new(&metadata).map_err(|_| PreviewError::Attribute)?;
+    let mapped = lut_chain(object, &multi, photometric, &stored, request, frame_index)?;
+    let facts = frame_facts(&metadata, &multi, frame_index)?;
     let mut display = vec![Display(0.0); stored.len()];
     mapped
         .chain
@@ -270,6 +314,7 @@ pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, Pre
         window_width: mapped.width,
         window_function: function_label(mapped.function),
         inverted: request.invert,
+        facts,
     })
 }
 
@@ -483,31 +528,40 @@ struct Mapped {
 
 fn lut_chain(
     object: &DefaultDicomObject,
+    multi: &MultiframeMetadata<'_>,
     photometric: PhotometricInterpretation,
     stored: &[Stored],
     request: FrameRequest,
     frame: usize,
 ) -> Result<Mapped, PreviewError> {
-    let metadata = project_metadata(object)?;
-    let multi = MultiframeMetadata::new(&metadata).map_err(|_| PreviewError::Attribute)?;
     // PS3.3 C.11.1: a Modality LUT Sequence replaces rescale. Passing `None`
     // into `ModalityTransform` would draw the identity slope instead.
     if group_has(
-        &multi,
+        multi,
         frame,
         PIXEL_VALUE_TRANSFORMATION,
         MODALITY_LUT_SEQUENCE,
     )? {
         return Err(PreviewError::Window);
     }
-    let (slope, intercept) = rescale(&multi, frame)?;
+    let (slope, intercept) = rescale(multi, frame)?;
     let modality = ModalityTransform::new(None, Some(slope), Some(intercept))
         .map_err(|_| PreviewError::Window)?;
     // A request that names both center and width replaces the file window
     // and a VOI LUT Sequence. The file window is not read in that case.
-    let (centers, widths, function, full_range) = if request.window_center.is_some()
-        && request.window_width.is_some()
-    {
+    let (centers, widths, function, full_range) = if let Some(preset) = request.window_preset {
+        // A named preset is the library's centre and width, LINEAR. It does
+        // not replace a VOI LUT Sequence the way a numeric override does.
+        if group_has(multi, frame, FRAME_VOI_LUT_SEQUENCE, VOI_LUT_SEQUENCE)? {
+            return Err(PreviewError::Window);
+        }
+        (
+            vec![preset.center()],
+            vec![preset.width()],
+            VoiFunction::Linear,
+            false,
+        )
+    } else if request.window_center.is_some() && request.window_width.is_some() {
         let center = request.window_center.ok_or(PreviewError::Window)?;
         let width = request.window_width.ok_or(PreviewError::Window)?;
         if !center.is_finite() || !width.is_finite() {
@@ -517,10 +571,10 @@ fn lut_chain(
         (vec![center], vec![width], function, false)
     } else {
         // PS3.3 C.11.2: a VOI LUT Sequence takes precedence over the file window.
-        if group_has(&multi, frame, FRAME_VOI_LUT_SEQUENCE, VOI_LUT_SEQUENCE)? {
+        if group_has(multi, frame, FRAME_VOI_LUT_SEQUENCE, VOI_LUT_SEQUENCE)? {
             return Err(PreviewError::Window);
         }
-        let (centers, widths, mut function, full_range) = window(&multi, frame, &modality, stored)?;
+        let (centers, widths, mut function, full_range) = window(multi, frame, &modality, stored)?;
         if let Some(choice) = request.window_function {
             function = choice;
         }
@@ -795,6 +849,296 @@ pub fn window_function_from_token(text: &str) -> Result<VoiFunction, PreviewErro
     }
 }
 
+/// Read the preset token used by the page.
+///
+/// The names are the same three strings as `PRESET_BYTES` in
+/// `ocelli-viewport`. The centre and width come from [`WindowPreset`].
+///
+/// # Errors
+///
+/// Returns [`PreviewError::Window`] when the token is not one of the three.
+pub fn window_preset_from_token(text: &str) -> Result<WindowPreset, PreviewError> {
+    match text {
+        "soft_tissue" => Ok(WindowPreset::SoftTissue),
+        "lung" => Ok(WindowPreset::Lung),
+        "bone" => Ok(WindowPreset::Bone),
+        _ => Err(PreviewError::Window),
+    }
+}
+
+impl FrameFacts {
+    fn empty() -> Self {
+        Self {
+            row_spacing: None,
+            column_spacing: None,
+            spacing_source: "",
+            edge_left: String::new(),
+            edge_right: String::new(),
+            edge_top: String::new(),
+            edge_bottom: String::new(),
+        }
+    }
+}
+
+fn frame_facts(
+    metadata: &MetadataSet,
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+) -> Result<FrameFacts, PreviewError> {
+    if frame >= multi.frame_count() {
+        return Ok(FrameFacts::empty());
+    }
+    let pixel = spacing_pair(multi, frame, PIXEL_MEASURES_SEQUENCE, PIXEL_SPACING)?;
+    let imager = top_level_pair(metadata, IMAGER_PIXEL_SPACING);
+    // A Pixel Spacing that is present but not a pair stays empty. It does not
+    // fall through to Imager Pixel Spacing.
+    let (row_spacing, column_spacing, spacing_source) = match pixel {
+        SpacingRead::Pair(row, column) => (Some(row), Some(column), "PixelSpacing"),
+        SpacingRead::Unusable => (None, None, ""),
+        SpacingRead::Absent => {
+            if let Some((row, column)) = imager {
+                (Some(row), Some(column), "ImagerPixelSpacing")
+            } else {
+                (None, None, "")
+            }
+        }
+    };
+    let letters = orientation_letters(multi, frame)?;
+    Ok(FrameFacts {
+        row_spacing,
+        column_spacing,
+        spacing_source,
+        edge_left: letters.0,
+        edge_right: letters.1,
+        edge_top: letters.2,
+        edge_bottom: letters.3,
+    })
+}
+
+enum SpacingRead {
+    Absent,
+    Unusable,
+    Pair(String, String),
+}
+
+fn spacing_pair(
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+    group: Tag,
+    attribute: Tag,
+) -> Result<SpacingRead, PreviewError> {
+    let found = multi
+        .resolve(frame, group, attribute, TopLevelFallback::Allowed)
+        .map_err(|_| PreviewError::Attribute)?;
+    let Some(found) = found else {
+        return Ok(SpacingRead::Absent);
+    };
+    if matches!(found.element().value(), MetadataValue::Empty) {
+        return Ok(SpacingRead::Unusable);
+    }
+    let Some(parts) = found.element().semantic_text() else {
+        return Ok(SpacingRead::Unusable);
+    };
+    let parts: Vec<&str> = parts.into_iter().filter(|part| !part.is_empty()).collect();
+    let Some(row) = parts.first() else {
+        return Ok(SpacingRead::Unusable);
+    };
+    let Some(column) = parts.get(1) else {
+        return Ok(SpacingRead::Unusable);
+    };
+    if parts.len() != 2 {
+        return Ok(SpacingRead::Unusable);
+    }
+    match (clean_decimal(row), clean_decimal(column)) {
+        (Some(row), Some(column)) => Ok(SpacingRead::Pair(row, column)),
+        _ => Ok(SpacingRead::Unusable),
+    }
+}
+
+fn top_level_pair(metadata: &MetadataSet, tag: Tag) -> Option<(String, String)> {
+    let element = metadata.get(tag)?;
+    let parts = element.semantic_text()?;
+    let row = parts.first()?;
+    let column = parts.get(1)?;
+    if parts.len() != 2 {
+        return None;
+    }
+    Some((clean_decimal(row)?, clean_decimal(column)?))
+}
+
+fn token_list(
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+    group: Tag,
+    attribute: Tag,
+) -> Result<Option<Vec<String>>, PreviewError> {
+    let found = multi
+        .resolve(frame, group, attribute, TopLevelFallback::Allowed)
+        .map_err(|_| PreviewError::Attribute)?;
+    let Some(found) = found else {
+        return Ok(None);
+    };
+    if matches!(found.element().value(), MetadataValue::Empty) {
+        return Ok(None);
+    }
+    let Some(parts) = found.element().semantic_text() else {
+        return Ok(None);
+    };
+    Ok(Some(
+        parts
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .map(str::to_owned)
+            .collect(),
+    ))
+}
+
+fn orientation_letters(
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+) -> Result<(String, String, String, String), PreviewError> {
+    let Some(parts) = token_list(multi, frame, PLANE_ORIENTATION_SEQUENCE, IMAGE_ORIENTATION)?
+    else {
+        return Ok((String::new(), String::new(), String::new(), String::new()));
+    };
+    if parts.len() != 6 {
+        return Ok((String::new(), String::new(), String::new(), String::new()));
+    }
+    let mut values = Vec::new();
+    for part in &parts {
+        let Some(parsed) = clean_decimal(part).and_then(|text| parse_decimal_string(&text)) else {
+            return Ok((String::new(), String::new(), String::new(), String::new()));
+        };
+        values.push(parsed);
+    }
+    let component = |index: usize| values.get(index).copied().unwrap_or(0.0);
+    let right_x = component(0);
+    let right_y = component(1);
+    let right_z = component(2);
+    let bottom_x = component(3);
+    let bottom_y = component(4);
+    let bottom_z = component(5);
+    // A cosine that is not a unit vector has no patient edge.
+    // 1e-4 covers a DS that is not written to full precision.
+    if !unit_cosine(right_x, right_y, right_z) || !unit_cosine(bottom_x, bottom_y, bottom_z) {
+        return Ok((String::new(), String::new(), String::new(), String::new()));
+    }
+    let right = direction_letter(right_x, right_y, right_z);
+    let bottom = direction_letter(bottom_x, bottom_y, bottom_z);
+    Ok((opposite(&right), right, opposite(&bottom), bottom))
+}
+
+fn unit_cosine(x: f64, y: f64, z: f64) -> bool {
+    let length_sq = x * x + y * y + z * z;
+    (length_sq - 1.0).abs() <= 1.0e-4
+}
+
+fn direction_letter(x: f64, y: f64, z: f64) -> String {
+    let ax = x.abs();
+    let ay = y.abs();
+    let az = z.abs();
+    let letter = if ax >= ay && ax >= az {
+        if x.is_sign_negative() { "R" } else { "L" }
+    } else if ay >= az {
+        if y.is_sign_negative() { "A" } else { "P" }
+    } else if z.is_sign_negative() {
+        "F"
+    } else {
+        "H"
+    };
+    letter.to_owned()
+}
+
+fn opposite(letter: &str) -> String {
+    letter
+        .chars()
+        .map(|ch| match ch {
+            'L' => 'R',
+            'R' => 'L',
+            'A' => 'P',
+            'P' => 'A',
+            'H' => 'F',
+            'F' => 'H',
+            other => other,
+        })
+        .collect()
+}
+
+fn clean_decimal(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    let parsed = parse_decimal_string(trimmed)?;
+    if json_number_token(trimmed) {
+        return Some(trimmed.to_owned());
+    }
+    let rendered = format!("{parsed}");
+    json_number_token(&rendered).then_some(rendered)
+}
+
+fn json_number_token(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    if bytes.first() == Some(&b'-') {
+        index = 1;
+    }
+    let Some(first) = bytes.get(index) else {
+        return false;
+    };
+    if *first == b'0' {
+        index += 1;
+    } else if first.is_ascii_digit() {
+        index += 1;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+    } else {
+        return false;
+    }
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        let start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == start {
+            return false;
+        }
+    }
+    if matches!(bytes.get(index), Some(b'e' | b'E')) {
+        index += 1;
+        if matches!(bytes.get(index), Some(b'+' | b'-')) {
+            index += 1;
+        }
+        let start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == start {
+            return false;
+        }
+    }
+    index == bytes.len()
+}
+
+fn inspect_facts(object: &DefaultDicomObject, frame: usize) -> FrameFacts {
+    let Ok(metadata) = project_metadata(object) else {
+        return FrameFacts::empty();
+    };
+    let Ok(multi) = MultiframeMetadata::new(&metadata) else {
+        return FrameFacts::empty();
+    };
+    frame_facts(&metadata, &multi, frame).unwrap_or_else(|_| FrameFacts::empty())
+}
+
+fn push_json_token(out: &mut String, name: &str, token: Option<&str>) {
+    out.push_str(",\"");
+    out.push_str(name);
+    out.push_str("\":");
+    match token {
+        Some(text) => out.push_str(text),
+        None => out.push_str("null"),
+    }
+}
+
 /// Series and image attributes for the left-hand list and the corner text.
 ///
 /// The JSON holds the values stored in the file. The caller must not write it
@@ -803,7 +1147,7 @@ pub fn window_function_from_token(text: &str) -> Result<VoiFunction, PreviewErro
 /// # Errors
 ///
 /// Returns [`PreviewError::NotPart10`] when the bytes are not a Part 10 object.
-pub fn inspect_json(bytes: &[u8]) -> Result<String, PreviewError> {
+pub fn inspect_json(bytes: &[u8], frame: u32) -> Result<String, PreviewError> {
     let parsed = parse_part10(bytes).map_err(part10_error)?;
     let object = parsed.object();
     let mut sop = text_or_empty(object, SOP_INSTANCE)?;
@@ -819,6 +1163,11 @@ pub fn inspect_json(bytes: &[u8]) -> Result<String, PreviewError> {
     let rows = optional_u32(object, ROWS)?;
     let columns = optional_u32(object, COLUMNS)?;
     let frames = frame_count(object).unwrap_or(0);
+    let frame_index = usize::try_from(frame).map_err(|_| PreviewError::Frame)?;
+    if frames > 0 && frame_index >= usize::try_from(frames).unwrap_or(usize::MAX) {
+        return Err(PreviewError::Frame);
+    }
+    let facts = inspect_facts(object, frame_index);
     let monochrome = (photometric_text == "MONOCHROME1" || photometric_text == "MONOCHROME2")
         && samples == 1
         && rows > 0
@@ -911,6 +1260,13 @@ pub fn inspect_json(bytes: &[u8]) -> Result<String, PreviewError> {
     );
     out.push_str(",\"monochrome\":");
     out.push_str(if monochrome { "true" } else { "false" });
+    push_json_token(&mut out, "rowSpacing", facts.row_spacing.as_deref());
+    push_json_token(&mut out, "columnSpacing", facts.column_spacing.as_deref());
+    push_field(&mut out, "spacingSource", facts.spacing_source, false);
+    push_field(&mut out, "edgeLeft", &facts.edge_left, false);
+    push_field(&mut out, "edgeRight", &facts.edge_right, false);
+    push_field(&mut out, "edgeTop", &facts.edge_top, false);
+    push_field(&mut out, "edgeBottom", &facts.edge_bottom, false);
     out.push('}');
     Ok(out)
 }

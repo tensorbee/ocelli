@@ -24,7 +24,12 @@ pub enum WindowPreset {
 }
 
 impl WindowPreset {
-    const fn center(self) -> f32 {
+    /// Centre in modality units.
+    ///
+    /// Soft tissue is 40, from HLD section 18.3. Lung and bone are the
+    /// plan numbers on this enum. The page must not keep a second copy.
+    #[must_use]
+    pub const fn center(self) -> f32 {
         match self {
             Self::SoftTissue => 40.0,
             Self::Lung => -600.0,
@@ -32,7 +37,12 @@ impl WindowPreset {
         }
     }
 
-    const fn width(self) -> f32 {
+    /// Width in modality units.
+    ///
+    /// Soft tissue is 400, from HLD section 18.3. Lung and bone are the
+    /// plan numbers on this enum.
+    #[must_use]
+    pub const fn width(self) -> f32 {
         match self {
             Self::SoftTissue => 400.0,
             Self::Lung => 1500.0,

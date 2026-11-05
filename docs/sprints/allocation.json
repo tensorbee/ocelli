@@ -119,6 +119,14 @@
       "goal": "The series-open gaps that Phase 1 left in the core, then the example viewer calling that core."
     },
     {
+      "key": "M20",
+      "title": "Local folder viewer",
+      "epics": [
+        "E38"
+      ],
+      "goal": "The local folder viewer opens a synthetic study or a folder, and the page shows the image tools, the marks, and how to call the library."
+    },
+    {
       "key": "M14",
       "title": "Out-of-core volume streaming",
       "epics": [
@@ -173,7 +181,7 @@
       "layer": "Build",
       "weeks": 2,
       "depends_eids": [],
-      "notes": "Core crates must not depend on wasm-bindgen — see HLD §4",
+      "notes": "Core crates must not depend on wasm-bindgen \u2014 see HLD \u00a74",
       "milestone": "M1",
       "sprint": "S01",
       "depends_fids": []
@@ -642,7 +650,7 @@
       "depends_eids": [
         "E4.1"
       ],
-      "notes": "openjp2 is a machine-translated port — validate hard",
+      "notes": "openjp2 is a machine-translated port \u2014 validate hard",
       "milestone": "M2",
       "sprint": "S08",
       "depends_fids": [
@@ -661,7 +669,7 @@
       "depends_eids": [
         "E4.4"
       ],
-      "notes": "P0 KILL CRITERION — unverified in Rust today",
+      "notes": "P0 KILL CRITERION \u2014 unverified in Rust today",
       "milestone": "M2",
       "sprint": "S09",
       "depends_fids": [
@@ -680,7 +688,7 @@
       "depends_eids": [
         "E4.1"
       ],
-      "notes": "P0 KILL CRITERION — no credible pure-Rust path",
+      "notes": "P0 KILL CRITERION \u2014 no credible pure-Rust path",
       "milestone": "M2",
       "sprint": "S09",
       "depends_fids": [
@@ -813,7 +821,7 @@
       "depends_eids": [
         "E5.3"
       ],
-      "notes": "Uint8Array views detach on memory growth — see HLD §5",
+      "notes": "Uint8Array views detach on memory growth \u2014 see HLD \u00a75",
       "milestone": "M3",
       "sprint": "S13",
       "depends_fids": [
@@ -889,7 +897,7 @@
       "depends_eids": [
         "E6.1"
       ],
-      "notes": "One GPUDevice serves N viewports — no context pool",
+      "notes": "One GPUDevice serves N viewports \u2014 no context pool",
       "milestone": "M3",
       "sprint": "S13",
       "depends_fids": [
@@ -908,7 +916,7 @@
       "depends_eids": [
         "E6.1"
       ],
-      "notes": "The architectural win — pixels never become JS objects",
+      "notes": "The architectural win \u2014 pixels never become JS objects",
       "milestone": "M3",
       "sprint": "S13",
       "depends_fids": [
@@ -1440,7 +1448,7 @@
       "depends_eids": [
         "E16.1"
       ],
-      "notes": "TS — this is interaction state, not pixels",
+      "notes": "TS \u2014 this is interaction state, not pixels",
       "milestone": "M7",
       "sprint": "S25",
       "depends_fids": [
@@ -1459,7 +1467,7 @@
       "depends_eids": [
         "E11.1"
       ],
-      "notes": "TS — 531 listener sites in cornerstone live here",
+      "notes": "TS \u2014 531 listener sites in cornerstone live here",
       "milestone": "M7",
       "sprint": "S26",
       "depends_fids": [
@@ -1478,7 +1486,7 @@
       "depends_eids": [
         "E7.4"
       ],
-      "notes": "Rust — the part worth moving",
+      "notes": "Rust \u2014 the part worth moving",
       "milestone": "M7",
       "sprint": "S25",
       "depends_fids": [
@@ -1497,7 +1505,7 @@
       "depends_eids": [
         "E11.2"
       ],
-      "notes": "TS — DOM-native, stays out of wasm",
+      "notes": "TS \u2014 DOM-native, stays out of wasm",
       "milestone": "M7",
       "sprint": "S27",
       "depends_fids": [
@@ -1991,7 +1999,7 @@
       "depends_eids": [
         "E15.2"
       ],
-      "notes": "Keep the dcmjs bridge — rewriting buys nothing",
+      "notes": "Keep the dcmjs bridge \u2014 rewriting buys nothing",
       "milestone": "M11",
       "sprint": "S36",
       "depends_fids": [
@@ -2046,7 +2054,7 @@
       "layer": "TS",
       "weeks": 4,
       "depends_eids": [],
-      "notes": "New API by decision — see HLD §2",
+      "notes": "New API by decision \u2014 see HLD \u00a72",
       "milestone": "M4",
       "sprint": "S15",
       "depends_fids": []
@@ -2234,7 +2242,7 @@
       "depends_eids": [
         "E6.6"
       ],
-      "notes": "Naga dominates the profile — biggest single lever",
+      "notes": "Naga dominates the profile \u2014 biggest single lever",
       "milestone": "M13",
       "sprint": "S40",
       "depends_fids": [
@@ -2709,6 +2717,44 @@
       ]
     },
     {
+      "fid": "F-206",
+      "eid": "E38.16",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer synthetic study, spacing, edge letters and preset window",
+      "layer": "Rust",
+      "weeks": 5,
+      "depends_eids": [
+        "E38.11"
+      ],
+      "notes": "Local folder viewer only. Not the wasm path and not a second LUT.",
+      "milestone": "M20",
+      "sprint": "S45",
+      "depends_fids": [
+        "F-201"
+      ]
+    },
+    {
+      "fid": "F-207",
+      "eid": "E38.17",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer layout, gestures, marks and image controls",
+      "layer": "TS",
+      "weeks": 8,
+      "depends_eids": [
+        "E38.16"
+      ],
+      "notes": "Marks stay in the browser. Chrome is pure gray. Rectangle and ellipse are drawings.",
+      "milestone": "M20",
+      "sprint": "S45",
+      "depends_fids": [
+        "F-206"
+      ]
+    },
+    {
       "fid": "F-119",
       "eid": "E30.1",
       "phase": "P1.5",
@@ -2722,7 +2768,7 @@
       ],
       "notes": "Neuroglancer's design; nothing in DICOM does this",
       "milestone": "M14",
-      "sprint": "S45",
+      "sprint": "S46",
       "depends_fids": [
         "F-058"
       ]
@@ -2741,7 +2787,7 @@
       ],
       "notes": "",
       "milestone": "M14",
-      "sprint": "S46",
+      "sprint": "S47",
       "depends_fids": [
         "F-119"
       ]
@@ -2760,7 +2806,7 @@
       ],
       "notes": "The subtle part most implementations get wrong",
       "milestone": "M14",
-      "sprint": "S47",
+      "sprint": "S48",
       "depends_fids": [
         "F-120"
       ]
@@ -2779,7 +2825,7 @@
       ],
       "notes": "GPU memory becomes a configured number, not a function of series size",
       "milestone": "M14",
-      "sprint": "S47",
+      "sprint": "S48",
       "depends_fids": [
         "F-120"
       ]
@@ -2798,7 +2844,7 @@
       ],
       "notes": "Show the cost before the user commits to a resolution",
       "milestone": "M14",
-      "sprint": "S48",
+      "sprint": "S49",
       "depends_fids": [
         "F-122"
       ]
@@ -2817,7 +2863,7 @@
       ],
       "notes": "Stops being a special case of the memory problem",
       "milestone": "M14",
-      "sprint": "S48",
+      "sprint": "S49",
       "depends_fids": [
         "F-122"
       ]
@@ -2836,7 +2882,7 @@
       ],
       "notes": "",
       "milestone": "M15",
-      "sprint": "S49",
+      "sprint": "S50",
       "depends_fids": [
         "F-008"
       ]
@@ -2855,7 +2901,7 @@
       ],
       "notes": "NiiVue proves the value fighting WebGL2; ordinary code in WGSL",
       "milestone": "M15",
-      "sprint": "S50",
+      "sprint": "S51",
       "depends_fids": [
         "F-125"
       ]
@@ -2874,7 +2920,7 @@
       ],
       "notes": "",
       "milestone": "M15",
-      "sprint": "S51",
+      "sprint": "S52",
       "depends_fids": [
         "F-125"
       ]
@@ -2893,7 +2939,7 @@
       ],
       "notes": "",
       "milestone": "M15",
-      "sprint": "S52",
+      "sprint": "S53",
       "depends_fids": [
         "F-125"
       ]
@@ -2912,7 +2958,7 @@
       ],
       "notes": "",
       "milestone": "M15",
-      "sprint": "S53",
+      "sprint": "S54",
       "depends_fids": [
         "F-125"
       ]
@@ -2931,7 +2977,7 @@
       ],
       "notes": "",
       "milestone": "M15",
-      "sprint": "S54",
+      "sprint": "S55",
       "depends_fids": [
         "F-127"
       ]
@@ -2950,7 +2996,7 @@
       ],
       "notes": "WebGL2 has no compute; degrade, never fail",
       "milestone": "M15",
-      "sprint": "S52",
+      "sprint": "S53",
       "depends_fids": [
         "F-126"
       ]
@@ -2969,7 +3015,7 @@
       ],
       "notes": "",
       "milestone": "M16",
-      "sprint": "S55",
+      "sprint": "S56",
       "depends_fids": [
         "F-125"
       ]
@@ -2988,7 +3034,7 @@
       ],
       "notes": "The reason to do this in-engine rather than beside it",
       "milestone": "M16",
-      "sprint": "S56",
+      "sprint": "S57",
       "depends_fids": [
         "F-132"
       ]
@@ -3007,7 +3053,7 @@
       ],
       "notes": "",
       "milestone": "M16",
-      "sprint": "S57",
+      "sprint": "S58",
       "depends_fids": [
         "F-133"
       ]
@@ -3026,7 +3072,7 @@
       ],
       "notes": "No PHI leaves the browser - a compliance story, not just a feature",
       "milestone": "M16",
-      "sprint": "S59",
+      "sprint": "S60",
       "depends_fids": [
         "F-142"
       ]
@@ -3045,7 +3091,7 @@
       ],
       "notes": "One commercial viewer needs a browser extension with matched resolutions",
       "milestone": "M17",
-      "sprint": "S60",
+      "sprint": "S61",
       "depends_fids": [
         "F-102"
       ]
@@ -3064,7 +3110,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S61",
+      "sprint": "S62",
       "depends_fids": [
         "F-136"
       ]
@@ -3083,7 +3129,7 @@
       ],
       "notes": "A browser cannot fully calibrate; report honestly what it can measure",
       "milestone": "M17",
-      "sprint": "S61",
+      "sprint": "S62",
       "depends_fids": [
         "F-136"
       ]
@@ -3102,7 +3148,7 @@
       ],
       "notes": "BlueLight has it; cornerstone3D does not",
       "milestone": "M16",
-      "sprint": "S55",
+      "sprint": "S56",
       "depends_fids": [
         "F-094"
       ]
@@ -3121,7 +3167,7 @@
       ],
       "notes": "Makes every measurement training-data-grade by construction",
       "milestone": "M16",
-      "sprint": "S56",
+      "sprint": "S57",
       "depends_fids": [
         "F-095"
       ]
@@ -3140,7 +3186,7 @@
       ],
       "notes": "SLIM's second tier; needed the moment AI generates annotations",
       "milestone": "M16",
-      "sprint": "S57",
+      "sprint": "S58",
       "depends_fids": [
         "F-140"
       ]
@@ -3159,7 +3205,7 @@
       ],
       "notes": "",
       "milestone": "M16",
-      "sprint": "S58",
+      "sprint": "S59",
       "depends_fids": [
         "F-094"
       ]
@@ -3178,7 +3224,7 @@
       ],
       "notes": "Pyramids are discovered, not assumed - variable factors, missing frames",
       "milestone": "M18",
-      "sprint": "S69",
+      "sprint": "S70",
       "depends_fids": [
         "F-119"
       ]
@@ -3197,7 +3243,7 @@
       ],
       "notes": "",
       "milestone": "M18",
-      "sprint": "S70",
+      "sprint": "S71",
       "depends_fids": [
         "F-143"
       ]
@@ -3216,7 +3262,7 @@
       ],
       "notes": "Radiology ignores this; pathology cannot",
       "milestone": "M18",
-      "sprint": "S71",
+      "sprint": "S72",
       "depends_fids": [
         "E4.9 (UNRESOLVED)"
       ]
@@ -3235,7 +3281,7 @@
       ],
       "notes": "",
       "milestone": "M18",
-      "sprint": "S72",
+      "sprint": "S73",
       "depends_fids": [
         "F-145"
       ]
@@ -3254,7 +3300,7 @@
       ],
       "notes": "The open niche - IDC runs two separate viewer forks",
       "milestone": "M18",
-      "sprint": "S73",
+      "sprint": "S74",
       "depends_fids": [
         "F-144"
       ]
@@ -3273,7 +3319,7 @@
       ],
       "notes": "A lesion on CT to its biopsy; a real workflow with no good tool",
       "milestone": "M18",
-      "sprint": "S74",
+      "sprint": "S75",
       "depends_fids": [
         "F-147"
       ]
@@ -3292,7 +3338,7 @@
       ],
       "notes": "Images, annotations and AI results on three DICOMweb servers",
       "milestone": "M18",
-      "sprint": "S75",
+      "sprint": "S76",
       "depends_fids": [
         "F-144"
       ]
@@ -3311,7 +3357,7 @@
       ],
       "notes": "Measure divergence rather than assume it away",
       "milestone": "M17",
-      "sprint": "S62",
+      "sprint": "S63",
       "depends_fids": [
         "F-037"
       ]
@@ -3330,7 +3376,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S60",
+      "sprint": "S61",
       "depends_fids": [
         "F-015"
       ]
@@ -3349,7 +3395,7 @@
       ],
       "notes": "Only possible because one core serves all three targets",
       "milestone": "M17",
-      "sprint": "S63",
+      "sprint": "S64",
       "depends_fids": [
         "F-169"
       ]
@@ -3368,7 +3414,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S64",
+      "sprint": "S65",
       "depends_fids": [
         "F-152"
       ]
@@ -3387,7 +3433,7 @@
       ],
       "notes": "The state is already a serialisable struct",
       "milestone": "M17",
-      "sprint": "S65",
+      "sprint": "S66",
       "depends_fids": [
         "F-050"
       ]
@@ -3406,7 +3452,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S66",
+      "sprint": "S67",
       "depends_fids": [
         "F-154"
       ]
@@ -3425,7 +3471,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S67",
+      "sprint": "S68",
       "depends_fids": [
         "F-154"
       ]
@@ -3444,7 +3490,7 @@
       ],
       "notes": "",
       "milestone": "M17",
-      "sprint": "S68",
+      "sprint": "S69",
       "depends_fids": [
         "F-154"
       ]

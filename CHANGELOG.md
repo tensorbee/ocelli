@@ -22,6 +22,8 @@ Repository bootstrap. Nothing is published.
 - The example page shows presets, a window drag, a region window, rotation, flips, an orientation marker, a magnifier scale, a colour map, a scale length, crop planes and an error sentence. The rotation drag, the magnify scale and the crop count can be changed. One to one, histogram and four corners read unavailable.
 - The example page shows a measurement document, an annotation list, undo, a TID 1500 number, a key image mark, a shortcut and a touch start. A metadata browser and preferences read unavailable.
 - A local page opens a chosen folder, lists each series, and shows one image at a time with contours and text notes.
+- The local folder viewer serves a synthetic CT of 12 slices and reports spacing, edge letters and a named window preset.
+- The local series page uses a gray sans layout. A wheel changes the slice after accumulated travel, and a pinch zooms at the pointer. Rectangle, ellipse, text and length sit beside freeform, and a mark can be removed. More and Use are static pages.
 - A volume ray drops its binding when its brick texture is uploaded again.
 - A fusion slice that arrives with unchanged bytes is drawn as present.
 - A surface axis longer than the device texture limit is refused before configure.
