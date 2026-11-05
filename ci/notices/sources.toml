@@ -1,0 +1,273 @@
+# Pinned inputs for THIRD_PARTY_LICENSES.
+# python3 scripts/licence_check.py binaries checks every sha256 in this file.
+# Gate time reads these files. It does not fetch.
+# python3 scripts/licence_check.py verify-upstream re-fetches every crate pin
+# and every earlier pin from its recorded URL at its recorded commit. It does
+# not re-fetch the MIT, Apache-2.0, Zlib or rust-std rows. It is not a gate.
+#
+# SPDX license-list-data was assessed on 2026-11-05 at tag v3.29.0 and not
+# used. The tag root has no LICENSE, LICENCE, COPYING or NOTICE file. GitHub
+# reports no licence. docs/SOURCE-POLICY.md records that refusal.
+#
+# MIT template. The terms follow _licenses/mit.txt in
+# github/choosealicense.com on the gh-pages branch. That file is project
+# content. The content is licensed under Creative Commons Attribution 3.0
+# Unported. https://creativecommons.org/licenses/by/3.0/
+# Attribution: GitHub, title choosealicense.com, file _licenses/mit.txt,
+# https://github.com/github/choosealicense.com/blob/gh-pages/_licenses/mit.txt.
+# The change from that file is the copyright line, which is one marker.
+# The generator fills the marker per crate. The sha256 is of this template.
+# The source code of that repository is MIT and is not what was copied.
+#
+# Apache-2.0. The Apache Software Foundation publishes
+# https://www.apache.org/licenses/LICENSE-2.0.txt
+# This file is that text. The generator never fills its appendix line.
+#
+# Zlib template. The terms follow madler/zlib tag v1.3.1 file LICENSE.
+# That file is the zlib library's grant. This template keeps the terms,
+# omits that project's copyright line and sign-off, and carries one marker.
+# The sha256 is of this template.
+#
+# Rust standard library. The rust-docs component for the recorded toolchain
+# installs share/doc/rust/COPYRIGHT-library.html.
+#
+# Crate rows. Each row is a crate whose package ships no licence file.
+# The path is a file from that crate's repository at the package's
+# published commit. The url is that file at that commit. The sha256 is
+# of the pinned bytes. A url commit that differs from the package's
+# published commit is a refusal. The published commit is the sha1 in
+# .cargo_vcs_info.json in the registry cache. The check reads that file
+# and does not use the network.
+#
+# madsmtm/objc2. At the published commit of each locked crate the
+# repository holds LICENSE.md and no licence text. LICENSE.md states the
+# licence expressions and names no holder. Each crate row pins LICENSE.md
+# from that commit. The notice reproduces LICENSE.md, then the elected
+# template. The fallback rows record that reason for each crate.
+# The four MIT-only crates also reproduce the repository root LICENSE.txt
+# from the parent of commit cfb19922. That file names Copyright (c)
+# Steven Sheldon. Those rows are the earlier table. They are not the
+# published-commit pin.
+
+[[file]]
+identifier = "MIT"
+path = "ci/notices/spdx/MIT.txt"
+url = "https://github.com/github/choosealicense.com/blob/gh-pages/_licenses/mit.txt"
+sha256 = "a8ee56b352898ec5fd74a25128c9fc230fa68055784f1f5846532f1ec7c248d6"
+
+[[file]]
+identifier = "Apache-2.0"
+path = "ci/notices/spdx/Apache-2.0.txt"
+url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
+sha256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+
+[[file]]
+identifier = "Zlib"
+path = "ci/notices/spdx/Zlib.txt"
+url = "https://raw.githubusercontent.com/madler/zlib/v1.3.1/LICENSE"
+sha256 = "bedef11e360220d2185862255ec946883362da75bb093168a30524165483bb1e"
+
+[[file]]
+identifier = "rust-std"
+path = "ci/notices/rust-std/COPYRIGHT-library.html"
+url = "rust-docs share/doc/rust/COPYRIGHT-library.html"
+toolchain = "1.97.1"
+sha256 = "0a65bb747c49c7bb816cbc7188319bd6e4e8d08091c1190b8a3c0971c47968ed"
+
+[[crate]]
+name = "block2"
+version = "0.6.2"
+path = "ci/notices/crates/block2-0.6.2/LICENSE.md"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[[crate]]
+name = "dispatch2"
+version = "0.3.1"
+path = "ci/notices/crates/dispatch2-0.3.1/LICENSE.md"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[[crate]]
+name = "gl_generator"
+version = "0.14.0"
+path = "ci/notices/crates/gl_generator-0.14.0/LICENSE"
+url = "https://raw.githubusercontent.com/brendanzab/gl-rs/ea503e8d5fb6d73c6030e6191ce738cd3bf3433e/LICENSE"
+sha256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+
+[[crate]]
+name = "jni-sys-macros"
+version = "0.4.1"
+path = "ci/notices/crates/jni-sys-macros-0.4.1/LICENSE-MIT"
+url = "https://raw.githubusercontent.com/jni-rs/jni-sys/64d77b7a5f119d7b55b4e2c169a4668067ff59e6/LICENSE-MIT"
+sha256 = "1d85bd754b04ceec93e98e890edd1fa3c6a22e81bcb32135806beeccefa51cd1"
+
+[[crate]]
+name = "khronos_api"
+version = "3.1.0"
+path = "ci/notices/crates/khronos_api-3.1.0/LICENSE"
+url = "https://raw.githubusercontent.com/brendanzab/gl-rs/f150967b1c44ae888e6676f93f639ebc82771bdc/LICENSE"
+sha256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+
+[[crate]]
+name = "ndk-sys"
+version = "0.6.0+11769913"
+path = "ci/notices/crates/ndk-sys-0.6.0+11769913/LICENSE-MIT"
+url = "https://raw.githubusercontent.com/rust-mobile/ndk/49bbbba16c58ff63cb8a0ad0eca5a9fb7ecaec25/LICENSE-MIT"
+sha256 = "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1"
+
+[[crate]]
+name = "objc2"
+version = "0.6.4"
+path = "ci/notices/crates/objc2-0.6.4/LICENSE.md"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[[crate]]
+name = "objc2-core-foundation"
+version = "0.3.2"
+path = "ci/notices/crates/objc2-core-foundation-0.3.2/LICENSE.md"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[[crate]]
+name = "objc2-core-graphics"
+version = "0.3.2"
+path = "ci/notices/crates/objc2-core-graphics-0.3.2/LICENSE.md"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[[crate]]
+name = "objc2-encode"
+version = "4.1.0"
+path = "ci/notices/crates/objc2-encode-4.1.0/LICENSE.md"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[[crate]]
+name = "objc2-foundation"
+version = "0.3.2"
+path = "ci/notices/crates/objc2-foundation-0.3.2/LICENSE.md"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[[crate]]
+name = "objc2-io-surface"
+version = "0.3.2"
+path = "ci/notices/crates/objc2-io-surface-0.3.2/LICENSE.md"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[[crate]]
+name = "objc2-metal"
+version = "0.3.2"
+path = "ci/notices/crates/objc2-metal-0.3.2/LICENSE.md"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[[crate]]
+name = "objc2-quartz-core"
+version = "0.3.2"
+path = "ci/notices/crates/objc2-quartz-core-0.3.2/LICENSE.md"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md"
+sha256 = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[[crate]]
+name = "profiling"
+version = "1.0.18"
+path = "ci/notices/crates/profiling-1.0.18/LICENSE-MIT"
+url = "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT"
+sha256 = "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333"
+
+[[crate]]
+name = "spirv"
+version = "0.4.0+sdk-1.4.341.0"
+path = "ci/notices/crates/spirv-0.4.0+sdk-1.4.341.0/LICENSE"
+url = "https://raw.githubusercontent.com/gfx-rs/rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE"
+sha256 = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+
+[[fallback]]
+name = "block2"
+version = "0.6.2"
+reason = "The published package carries no licence file. The repository at the published commit carries LICENSE.md and no licence text."
+
+[[fallback]]
+name = "dispatch2"
+version = "0.3.1"
+reason = "The published package carries no licence file. The repository at the published commit carries LICENSE.md and no licence text."
+
+[[fallback]]
+name = "objc2"
+version = "0.6.4"
+reason = "The published package carries no licence file. The repository at the published commit carries LICENSE.md and no licence text."
+
+[[fallback]]
+name = "objc2-core-foundation"
+version = "0.3.2"
+reason = "The published package carries no licence file. The repository at the published commit carries LICENSE.md and no licence text."
+
+[[fallback]]
+name = "objc2-core-graphics"
+version = "0.3.2"
+reason = "The published package carries no licence file. The repository at the published commit carries LICENSE.md and no licence text."
+
+[[fallback]]
+name = "objc2-encode"
+version = "4.1.0"
+reason = "The published package carries no licence file. The repository at the published commit carries LICENSE.md and no licence text."
+
+[[fallback]]
+name = "objc2-foundation"
+version = "0.3.2"
+reason = "The published package carries no licence file. The repository at the published commit carries LICENSE.md and no licence text."
+
+[[fallback]]
+name = "objc2-io-surface"
+version = "0.3.2"
+reason = "The published package carries no licence file. The repository at the published commit carries LICENSE.md and no licence text."
+
+[[fallback]]
+name = "objc2-metal"
+version = "0.3.2"
+reason = "The published package carries no licence file. The repository at the published commit carries LICENSE.md and no licence text."
+
+[[fallback]]
+name = "objc2-quartz-core"
+version = "0.3.2"
+reason = "The published package carries no licence file. The repository at the published commit carries LICENSE.md and no licence text."
+
+[[earlier]]
+name = "block2"
+version = "0.6.2"
+path = "ci/notices/crates/objc2-earlier/LICENSE.txt"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/757cd841d0293341dbefd9b99d7548dec244ffde/LICENSE.txt"
+sha256 = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+commit = "757cd841d0293341dbefd9b99d7548dec244ffde"
+reason = "The repository root LICENSE.txt named Copyright (c) Steven Sheldon until commit cfb19922. This file is the parent of that commit."
+
+[[earlier]]
+name = "objc2"
+version = "0.6.4"
+path = "ci/notices/crates/objc2-earlier/LICENSE.txt"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/757cd841d0293341dbefd9b99d7548dec244ffde/LICENSE.txt"
+sha256 = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+commit = "757cd841d0293341dbefd9b99d7548dec244ffde"
+reason = "The repository root LICENSE.txt named Copyright (c) Steven Sheldon until commit cfb19922. This file is the parent of that commit."
+
+[[earlier]]
+name = "objc2-encode"
+version = "4.1.0"
+path = "ci/notices/crates/objc2-earlier/LICENSE.txt"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/757cd841d0293341dbefd9b99d7548dec244ffde/LICENSE.txt"
+sha256 = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+commit = "757cd841d0293341dbefd9b99d7548dec244ffde"
+reason = "The repository root LICENSE.txt named Copyright (c) Steven Sheldon until commit cfb19922. This file is the parent of that commit."
+
+[[earlier]]
+name = "objc2-foundation"
+version = "0.3.2"
+path = "ci/notices/crates/objc2-earlier/LICENSE.txt"
+url = "https://raw.githubusercontent.com/madsmtm/objc2/757cd841d0293341dbefd9b99d7548dec244ffde/LICENSE.txt"
+sha256 = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+commit = "757cd841d0293341dbefd9b99d7548dec244ffde"
+reason = "The repository root LICENSE.txt named Copyright (c) Steven Sheldon until commit cfb19922. This file is the parent of that commit."

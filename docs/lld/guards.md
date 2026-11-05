@@ -1,6 +1,6 @@
 # The guard harness
 
-**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217, F-218, F-219
+**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217, F-218, F-219, F-220
 **Last updated:** 2026-11-05
 
 A guard is any refusal this repository can produce: a script that exits 1, a
@@ -609,6 +609,24 @@ Recorded constants added with this gate are the `deny.toml` allow list,
 `pins.openjph-notice` deletes `vendor/openjph-core-0.1.0/LICENSE` and must
 refuse with the missing-notice text. The unmodified tree accepts.
 `pins.openjph-notice-hash` appends a newline and must refuse on the hash.
+
+The `binaries` section of `scripts/licence_check.py` regenerates
+`THIRD_PARTY_LICENSES` from the lockfile and compares bytes.
+`licences.binaries-no-text` is a level-1 probe.
+`licences.binaries-pin`, `licences.binaries-toolchain` and
+`licences.binaries-drift` need cargo and sit in the deep profile.
+`licences.binaries-pin` appends one byte to the MIT template and runs
+`licence_check.py binaries`, so the digest check has to live in that entry
+point. Level-1 probes also cover an expression with no allowlisted licence,
+a licence path that leaves the crate root, an absent licence file, a crate
+with no file and no expression, a `--write` section other than binaries, a
+template that names another holder, an unfilled placeholder, and a no-file
+crate with no pin and no recorded fallback. `packages.wasm-without-notices`
+is a level-1 probe
+on `scripts/package_check.py`. It refuses a tarball name list that carries a
+`.wasm` file and lacks `THIRD_PARTY_LICENSES` or `THIRD_PARTY_NOTICES`. The
+CI guards job runs `cargo fetch --locked` before `gate licences`, because the
+binaries section reads the registry cache offline.
 
 ## The advisory gate
 

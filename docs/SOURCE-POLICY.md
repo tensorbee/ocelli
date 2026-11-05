@@ -114,6 +114,74 @@ form as the table above, with the date it was decided.
 | openjph-core 0.1.0, production use | BSD-2-Clause in registry metadata, no packaged notice | yes | yes, not shippable | 2026-09-13 |
 | openjph-core 0.1.0, notice obtained | BSD-2-Clause, upstream LICENSE at tag 0.26.3 | yes | yes | 2026-11-05 |
 | imagecodecs 2026.10.10 | BSD-3-Clause | yes | yes, tooling only | 2026-11-05 |
+| github/choosealicense.com | CC BY 3.0 for the copied content | yes | yes, terms template | 2026-11-05 |
+| apache.org | Apache-2.0 | yes | yes, published licence text | 2026-11-05 |
+| madler/zlib | zlib terms, GitHub reports no SPDX id | yes | yes, terms template | 2026-11-05 |
+| rust-docs | Apache-2.0 or MIT, toolchain notice | yes | yes, pinned HTML | 2026-11-05 |
+| madsmtm/objc2 | MIT or Zlib OR Apache-2.0 OR MIT, GitHub reports no SPDX id | yes | yes, pinned LICENSE.md and templates | 2026-11-05 |
+| brendanzab/gl-rs | Apache-2.0 | yes | yes, pinned licence files | 2026-11-05 |
+| jni-rs/jni-sys | Apache-2.0 on GitHub, MIT file pinned | yes | yes, pinned licence file | 2026-11-05 |
+| rust-mobile/ndk | Apache-2.0 on GitHub, MIT file pinned | yes | yes, pinned licence file | 2026-11-05 |
+| aclysma/profiling | Apache-2.0 on GitHub, MIT file pinned | yes | yes, pinned licence file | 2026-11-05 |
+| gfx-rs/rspirv | Apache-2.0 | yes | yes, pinned licence file | 2026-11-05 |
+| spdx/license-list-data | not stated | yes | **NO** | 2026-11-05 |
+
+### Shipped binary notice sources
+
+F-220 copies licence texts into `ci/notices/` and names each source in
+`ci/notices/sources.toml`. The rows above use those names. The date is
+2026-11-05.
+
+1. **Is there a licence file?** github/choosealicense.com has `LICENSE.md` at
+   the repository root for its source code and `_licenses/mit.txt` on the
+   gh-pages branch. The copied content is `_licenses/mit.txt`. The MIT
+   template follows the terms in that file and replaces the copyright line
+   with one marker. The content of the project is Creative Commons
+   Attribution 3.0 Unported. The source code is MIT. Attribution names
+   GitHub, the title choosealicense.com, the file `_licenses/mit.txt`, the
+   URI https://github.com/github/choosealicense.com/blob/gh-pages/_licenses/mit.txt
+   and the licence URI https://creativecommons.org/licenses/by/3.0/. The
+   change is the replacement of the copyright line. apache.org publishes
+   `https://www.apache.org/licenses/LICENSE-2.0.txt`. The Apache-2.0 pin is
+   that text. madler/zlib tag v1.3.1 has `LICENSE`. The Zlib template follows
+   its terms and omits that project's copyright line and sign-off. It carries
+   one marker. rust-docs installs `share/doc/rust/COPYRIGHT-library.html` for
+   the recorded toolchain. The pin is that file. madsmtm/objc2 at each locked
+   crate's published commit has `LICENSE.md` and no licence text. The pin for
+   each crate is `LICENSE.md` at that commit. The notice then uses the
+   elected template because `LICENSE.md` names no holder and holds no terms.
+   The four MIT-only crates also reproduce the repository root `LICENSE.txt`
+   from the parent of commit `cfb19922`, which names Copyright (c) Steven
+   Sheldon. brendanzab/gl-rs has `LICENSE` at the commits recorded for
+   gl_generator and khronos_api. jni-rs/jni-sys has `LICENSE-MIT` at the
+   commit recorded for jni-sys-macros. rust-mobile/ndk has `LICENSE-MIT` at
+   the commit recorded for ndk-sys. aclysma/profiling has `LICENSE-MIT` at
+   the commit recorded for profiling. gfx-rs/rspirv has `LICENSE` at the
+   commit recorded for spirv. spdx/license-list-data tag v3.29.0 has no
+   `LICENSE`, `LICENCE`, `COPYING` or `NOTICE` at the repository root.
+2. **Does the hosting platform's metadata report a licence?** GitHub reports
+   MIT for the source code of github/choosealicense.com. The README of that
+   project states that its content, including `_licenses/mit.txt`, is
+   Creative Commons Attribution 3.0 Unported. GitHub reports Apache-2.0 for
+   brendanzab/gl-rs, jni-rs/jni-sys, rust-mobile/ndk, aclysma/profiling and
+   gfx-rs/rspirv. It reports no SPDX id for madsmtm/objc2 and madler/zlib.
+   apache.org is the Apache Software Foundation's published text and is not a
+   GitHub repository. rust-docs is a rustup component. The HTML it installs
+   says the standard library is dual-licensed under Apache 2.0 and MIT terms.
+   GitHub reports no licence for spdx/license-list-data.
+3. **Does the licence permit the use?** The use is copying a licence text
+   into the shipped notice. For the choosealicense content the use is copying
+   `_licenses/mit.txt` and replacing the copyright line with one marker.
+   Creative Commons Attribution 3.0 Unported permits that adaptation when the
+   attribution in the answer above is kept, including the licence URI and a
+   note of the change. For the MIT and Zlib templates the use is copying the
+   terms and filling one copyright line. Apache-2.0 is copied as published
+   and its appendix line is not filled. MIT, Apache-2.0 and the zlib terms
+   permit that copying with the notice kept. The crate pins named above are
+   the notices for those crates. `LICENSE.md` from madsmtm/objc2 is the
+   repository's statement at the published commit and is reproduced with the
+   elected template. spdx/license-list-data has no licence file and GitHub
+   reports no licence, so nothing from it was copied.
 
 ### S08 codec dependencies
 

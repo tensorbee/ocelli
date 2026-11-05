@@ -3,13 +3,17 @@
 
 deny.toml is the allowlist. cargo-deny 0.19.0 reads it for Rust. This script
 reads the same list for npm and Python, checks the third-party notices and
-the copyright holder, and scans installed wheels when asked.
+the copyright holder, generates the shipped-binary licence file, and scans
+installed wheels when asked.
 
-    python3 scripts/licence_check.py [rust|npm|python|notices|holder]...
+    python3 scripts/licence_check.py [rust|npm|python|notices|holder|binaries]...
+    python3 scripts/licence_check.py --write binaries
+    python3 scripts/licence_check.py verify-upstream
     python3 scripts/licence_check.py installed [--python PATH]
 
-With no section, the five floor checks run. installed is the wheel scan and
-is not part of that default.
+With no section, the floor checks run. installed is the wheel scan and
+verify-upstream re-fetches pins. Neither is part of that default. The
+binaries gate reads the pinned files and does not fetch.
 """
 
 from __future__ import annotations
@@ -25,6 +29,9 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
 from email import policy
 from pathlib import Path
 
@@ -74,7 +81,79 @@ RITK_BEGIN = b"-----BEGIN RITK-CODECS LICENSE-MIT-----\n"
 RITK_END = b"-----END RITK-CODECS LICENSE-MIT-----\n"
 
 VIRTUAL_PYTHON = "ocelli-tooling"
-FLOOR_SECTIONS = ("rust", "npm", "python", "notices", "holder")
+FLOOR_SECTIONS = ("rust", "npm", "python", "notices", "holder", "binaries")
+
+# A file in a crate root counts when its name begins with one of these.
+# The match is case-insensitive. LICENSES/ is a directory, matched the same way.
+_LICENCE_NAME_PREFIXES = (
+    "license", "licence", "copying", "notice", "unlicense", "copyright",
+)
+_NO_FILE_SENTENCE = (
+    "The published crate carries no licence file. "
+    "The text below is the standard text of the licence it declares."
+)
+_UPSTREAM_SENTENCE = (
+    "The published crate carries no licence file. "
+    "The text below is the licence file from its repository."
+)
+# A repository statement that names no holder and holds no terms. The
+# notice reproduces that statement, then the elected template.
+# Apache-2.0 stays the published text, so the template sentence above
+# stays true for it. fill_copyright never rewrites that file.
+# The sentence names the repository and the commit from the pin row.
+# It is not a fixed string, because two crates can share one text and
+# still refer to different commits.
+#
+# One attribution paragraph in the header. The adapted MIT text appears
+# in more than one text group, and CC BY 3.0 section 4(b) asks for
+# attribution reasonable to the medium on every copy of the file.
+# The Zlib template follows madler/zlib tag v1.3.1 file LICENSE. That
+# file is the zlib grant. Its terms keep the two spaces after
+# "warranty." that choosealicense.com file _licenses/zlib.txt does not,
+# so the Zlib template is not CC BY content and this paragraph does not
+# credit it.
+_CC_BY_ATTRIBUTION = (
+    "Attribution. choosealicense.com file _licenses/mit.txt "
+    "(https://github.com/github/choosealicense.com/blob/gh-pages/"
+    "_licenses/mit.txt), published by GitHub, is licensed under the "
+    "Creative Commons Attribution 3.0 Unported licence "
+    "(https://creativecommons.org/licenses/by/3.0/). "
+    "The text was adapted into a template whose copyright line is "
+    "filled per crate."
+)
+_CC_BY_REQUIRED = (
+    "choosealicense.com",
+    "_licenses/mit.txt",
+    "Creative Commons Attribution 3.0 Unported",
+    "https://creativecommons.org/licenses/by/3.0/",
+    "adapted into a template whose copyright line is filled per crate",
+)
+# The only copyright line a MIT or Zlib template may carry. The generator
+# replaces the marker. Apache-2.0 stays exactly as published. Its appendix
+# line is instructions to a licensor, and the generator never fills it.
+_COPYRIGHT_MARKER = "Copyright (c) <copyright-holder>"
+_APACHE_BOILERPLATE = "Copyright [yyyy] [name of copyright owner]"
+_RAW_COMMIT = re.compile(
+    r"^https://raw\.githubusercontent\.com/[^/]+/[^/]+/"
+    r"([0-9a-fA-F]{7,40})(?:/|$)")
+_RAW_PIN = re.compile(
+    r"^https://raw\.githubusercontent\.com/"
+    r"(?P<owner>[^/]+)/(?P<repo>[^/]+)/"
+    r"(?P<commit>[0-9a-fA-F]{7,40})/(?P<path>.+)$")
+_COPYRIGHT_LINE = re.compile(r"(?i)^\s*(?:copyright\b|\(c\)\b|©)")
+_EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
+# Placeholders this generator must not leave in its own output. The Apache
+# appendix line is not one of them. Third-party Apache texts and the standard
+# library notice ship that line as published.
+_UNFILLED = ("<copyright-holder>", "[year]", "[fullname]")
+_STD_BEGIN = b"-----BEGIN RUST STANDARD LIBRARY NOTICE-----\n"
+_STD_END = b"-----END RUST STANDARD LIBRARY NOTICE-----"
+_SOURCES = ROOT / "ci" / "notices" / "sources.toml"
+_LICENCES = ROOT / "THIRD_PARTY_LICENSES"
+# Bytes already read for a pin URL, or None when the path was absent.
+# verify-upstream fills this. The binaries gate does not.
+_RAW_PIN_CACHE: dict[str, bytes | None] = {}
+_SPDX_OPERATOR = re.compile(r"\b(?:OR|AND|WITH)\b")
 
 
 # ---------------------------------------------------------------------------
@@ -1072,45 +1151,83 @@ def rust_problems() -> list[str]:
     return problems
 
 
-def _rust_shipped() -> set[str]:
-    """Crate names reachable from the two entry points on normal and build edges."""
-    names: set[str] = set()
+class ShippedClosureError(RuntimeError):
+    """cargo metadata could not produce the shipped closure."""
+
+
+def _cargo_metadata(extra: list[str]) -> dict:
+    """One locked offline metadata document.
+
+    A missing registry cache is a failure. This call does not reach the network
+    and it does not skip the closure.
+    """
+    completed = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--locked", "--offline",
+         *extra],
+        cwd=ROOT, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        detail = ""
+        for line in (completed.stderr or completed.stdout or "").splitlines():
+            if line.strip():
+                detail = line.strip()
+                break
+        raise ShippedClosureError(
+            "cargo metadata --locked --offline failed. "
+            "Run `cargo fetch --locked` and retry. "
+            f"{detail}")
+    return json.loads(completed.stdout)
+
+
+def _walk_closure(data: dict, root_name: str) -> dict[str, dict]:
+    """Package id to package record, following normal and build edges."""
+    packages = {item["id"]: item for item in data.get("packages", [])}
+    nodes = {item["id"]: item for item in data.get("resolve", {}).get("nodes", [])}
+    roots = [item["id"] for item in data.get("packages", [])
+             if item.get("name") == root_name]
+    found: dict[str, dict] = {}
+    stack = list(roots)
+    seen: set[str] = set()
+    while stack:
+        ident = stack.pop()
+        if ident in seen:
+            continue
+        seen.add(ident)
+        package = packages.get(ident)
+        if package and package.get("name"):
+            found[ident] = package
+        node = nodes.get(ident) or {}
+        for dep in node.get("deps", []):
+            kinds = dep.get("dep_kinds") or []
+            keep = False
+            for kind in kinds:
+                value = kind.get("kind") if isinstance(kind, dict) else None
+                if value in (None, "build"):
+                    keep = True
+            if keep and dep.get("pkg"):
+                stack.append(dep["pkg"])
+    return found
+
+
+def _rust_shipped() -> tuple[dict[str, dict], set[str]]:
+    """Records reachable from the two entry points, and the workspace ids.
+
+    The wasm entry point is filtered to wasm32-unknown-unknown. The native
+    entry point has no platform filter, so the result is the same on every
+    host. Workspace members stay in the record map. Callers that want the
+    third-party set drop those ids. Dev edges are not followed.
+    """
     queries = (
         ("ocelli-wasm", ["--filter-platform", "wasm32-unknown-unknown"]),
         ("ocelli-native", []),
     )
+    found: dict[str, dict] = {}
+    members: set[str] = set()
     for root_name, extra in queries:
-        completed = subprocess.run(
-            ["cargo", "metadata", "--format-version", "1", "--locked", *extra],
-            cwd=ROOT, capture_output=True, text=True, check=False)
-        if completed.returncode != 0:
-            raise RuntimeError(root_name)
-        data = json.loads(completed.stdout)
-        packages = {item["id"]: item for item in data.get("packages", [])}
-        nodes = {item["id"]: item for item in data.get("resolve", {}).get("nodes", [])}
-        roots = [item["id"] for item in data.get("packages", [])
-                 if item.get("name") == root_name]
-        stack = list(roots)
-        seen: set[str] = set()
-        while stack:
-            ident = stack.pop()
-            if ident in seen:
-                continue
-            seen.add(ident)
-            package = packages.get(ident)
-            if package and package.get("name"):
-                names.add(str(package["name"]))
-            node = nodes.get(ident) or {}
-            for dep in node.get("deps", []):
-                kinds = dep.get("dep_kinds") or []
-                keep = False
-                for kind in kinds:
-                    value = kind.get("kind") if isinstance(kind, dict) else None
-                    if value in (None, "build"):
-                        keep = True
-                if keep and dep.get("pkg"):
-                    stack.append(dep["pkg"])
-    return names
+        data = _cargo_metadata(extra)
+        found.update(_walk_closure(data, root_name))
+        for ident in data.get("workspace_members", []):
+            members.add(str(ident))
+    return found, members
 
 
 def _rust_exception_problems() -> list[str]:
@@ -1119,14 +1236,15 @@ def _rust_exception_problems() -> list[str]:
     if not rows:
         return []
     try:
-        shipped = _rust_shipped()
-    except (RuntimeError, json.JSONDecodeError, OSError):
-        return ["rust shipped-closure walk failed"]
+        shipped, _members = _rust_shipped()
+    except (ShippedClosureError, RuntimeError, json.JSONDecodeError, OSError) as exc:
+        return [f"rust shipped-closure walk failed: {exc}"]
+    names = {str(package.get("name")) for package in shipped.values()}
     problems = []
     for row in rows:
         package = str(row.get("package", ""))
         version = str(row.get("version", ""))
-        if package in shipped:
+        if package in names:
             problems.append(
                 f"exception rust {package}@{version} is in the published "
                 f"runtime closure")
@@ -1220,9 +1338,9 @@ def holder_problems() -> list[str]:
     problems: list[str] = []
     for path in _tracked("*LICENSE-MIT"):
         relative = path.relative_to(ROOT).as_posix()
-        # vendor/ritk-codecs-0.6.0/LICENSE-MIT is Ryan Clanton's grant. Its
-        # bytes are pinned separately and are not this project's copyright.
-        if relative.startswith("vendor/"):
+        # vendor/ and ci/notices/ hold other projects' grants. Their bytes
+        # are pinned separately and are not this project's copyright.
+        if relative.startswith(("vendor/", "ci/notices/")):
             continue
         text = path.read_text(encoding="utf-8")
         if HOLDER_LINE not in text:
@@ -1271,6 +1389,1079 @@ def holder_problems() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Shipped binary notices
+# ---------------------------------------------------------------------------
+
+class BinariesError(Exception):
+    """The notice file cannot be generated from the inputs."""
+
+
+@dataclass(frozen=True)
+class CrateNotice:
+    """One third-party crate, already reduced to the fields the file carries."""
+
+    name: str
+    version: str
+    source: str
+    expression: str
+    authors: tuple[str, ...]
+    files: tuple[tuple[str, bytes], ...]
+    repository: str = ""
+    # packaged, upstream, template, or statement. Empty files are a template.
+    # statement reproduces a repository statement, then the elected template.
+    notice: str = "packaged"
+    earlier: tuple[tuple[str, bytes], ...] = ()
+    # The pin URL's repository and commit. The shipped sentence uses these,
+    # not the package repository, which is the copyright holder line.
+    pin_repository: str = ""
+    commit: str = ""
+    earlier_repository: str = ""
+    earlier_commit: str = ""
+
+
+def normalise_newlines(data: bytes) -> bytes:
+    """CRLF and a lone CR become LF. No other byte changes."""
+    return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
+def legacy_or(expression: str) -> str:
+    """Cargo's deprecated `/` separator, read as OR when no operator is present."""
+    if "/" in expression and _SPDX_OPERATOR.search(expression) is None:
+        return expression.replace("/", " OR ")
+    return expression
+
+
+def _disjuncts(node) -> list:
+    if node[0] == "or":
+        return _disjuncts(node[1]) + _disjuncts(node[2])
+    return [node]
+
+
+def _terms(node) -> list[str]:
+    if node[0] == "and":
+        return _terms(node[1]) + _terms(node[2])
+    return [_compound(node)]
+
+
+def elect_terms(expression: str, allow: set[str]) -> list[str]:
+    """The left-most disjunct whose every term is allowlisted."""
+    prepared = legacy_or(expression)
+    try:
+        node = parse_expression(prepared)
+    except ExpressionError as exc:
+        raise BinariesError(
+            f"licence expression is not SPDX: {exc}") from exc
+    for disjunct in _disjuncts(node):
+        terms = _terms(disjunct)
+        if terms and all(term.casefold() in allow for term in terms):
+            return terms
+    raise BinariesError(f"has no allowlisted licence in {expression}")
+
+
+def collect_licence_files(
+        crate_root: Path, license_file: str | None) -> list[tuple[str, bytes]]:
+    """Licence files in one crate root.
+
+    Root files whose names begin with a licence prefix, every file under a
+    LICENSES directory, and the manifest licence-file when it names one more.
+    """
+    found: dict[str, Path] = {}
+    if crate_root.is_dir():
+        for path in crate_root.iterdir():
+            if path.is_file() and path.name.casefold().startswith(
+                    _LICENCE_NAME_PREFIXES):
+                found[path.name] = path
+            elif path.is_dir() and path.name.casefold() == "licenses":
+                for child in path.rglob("*"):
+                    if child.is_file():
+                        found[child.relative_to(crate_root).as_posix()] = child
+    if license_file:
+        relative = Path(license_file)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise BinariesError(
+                f"licence file {license_file} escapes the crate root")
+        key = relative.as_posix()
+        if key not in found:
+            candidate = crate_root / relative
+            if not candidate.is_file():
+                raise BinariesError(f"licence file {key} is absent")
+            found[key] = candidate
+    return [(name, found[name].read_bytes()) for name in sorted(found)]
+
+
+def source_label(package: dict) -> str:
+    """`crates.io`, or a path relative to this repository. Never a local path."""
+    name = str(package.get("name") or "unknown")
+    source = package.get("source")
+    manifest = str(package.get("manifest_path") or "")
+    if isinstance(source, str) and "crates.io" in source:
+        return "crates.io"
+    if manifest:
+        try:
+            relative = Path(manifest).resolve().parent.relative_to(ROOT.resolve())
+        except ValueError:
+            relative = None
+        if relative is not None:
+            text = relative.as_posix()
+            return text or "."
+    if isinstance(source, str) and source.startswith("git+"):
+        base = source.split("#", 1)[0]
+        if "/Users/" in base or "/home/" in base or ".cargo" in base:
+            raise BinariesError(f"{name} source would embed a local path")
+        return base
+    if isinstance(source, str) and source.startswith("registry+"):
+        if "/Users/" in source or "/home/" in source or ".cargo/registry" in source:
+            raise BinariesError(f"{name} source would embed a local path")
+        return source
+    raise BinariesError(f"{name} manifest is outside the repository")
+
+
+def _load_sources() -> dict:
+    if not _SOURCES.is_file():
+        raise BinariesError("ci/notices/sources.toml is absent")
+    return tomllib.loads(_SOURCES.read_text(encoding="utf-8"))
+
+
+def _table_rows(data: dict, key: str, required: bool) -> list[dict]:
+    rows = data.get(key, [])
+    if not rows:
+        if required:
+            raise BinariesError(f"ci/notices/sources.toml has no {key} rows")
+        return []
+    if not isinstance(rows, list):
+        raise BinariesError(f"ci/notices/sources.toml {key} rows are not a list")
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def notice_source_rows() -> list[dict]:
+    return _table_rows(_load_sources(), "file", required=True)
+
+
+def crate_pin_rows() -> list[dict]:
+    return _table_rows(_load_sources(), "crate", required=False)
+
+
+def fallback_reasons() -> dict[tuple[str, str], str]:
+    found: dict[tuple[str, str], str] = {}
+    for row in _table_rows(_load_sources(), "fallback", required=False):
+        name = str(row.get("name") or "")
+        version = str(row.get("version") or "")
+        reason = str(row.get("reason") or "")
+        if name and version and reason:
+            found[(name, version)] = reason
+    return found
+
+
+def digest_rows(data: dict | None = None) -> list[dict]:
+    """File rows and crate pins. Both are checked by sha256."""
+    if data is None:
+        loaded = _load_sources()
+    else:
+        loaded = data
+    rows = _table_rows(loaded, "file", required=True)
+    rows.extend(_table_rows(loaded, "crate", required=False))
+    rows.extend(_table_rows(loaded, "earlier", required=False))
+    return rows
+
+
+def rust_std_row() -> dict:
+    for row in notice_source_rows():
+        if row.get("identifier") == "rust-std":
+            return row
+    raise BinariesError("ci/notices/sources.toml has no rust-std row")
+
+
+def pinned_digest_problems(
+        overrides: dict[str, bytes] | None = None,
+        rows: list[dict] | None = None) -> list[str]:
+    """Every pinned notice file, checked against the digest in sources.toml."""
+    problems: list[str] = []
+    overrides = overrides or {}
+    for row in (rows if rows is not None else digest_rows()):
+        relative = str(row.get("path") or "")
+        expected = str(row.get("sha256") or "")
+        if not relative or not expected:
+            problems.append("ci/notices/sources.toml has a row with no path or sha256")
+            continue
+        if relative in overrides:
+            blob = overrides[relative]
+        else:
+            path = ROOT / relative
+            if not path.is_file():
+                problems.append(f"{relative} is absent")
+                continue
+            blob = path.read_bytes()
+        found = hashlib.sha256(blob).hexdigest()
+        if found != expected:
+            problems.append(
+                f"{relative} sha256 is {found}, expected {expected}")
+    return problems
+
+
+def toolchain_channel() -> str:
+    data = tomllib.loads((ROOT / "rust-toolchain.toml").read_text(encoding="utf-8"))
+    channel = data.get("toolchain", {}).get("channel")
+    if not isinstance(channel, str) or channel == "":
+        raise BinariesError("rust-toolchain.toml has no channel")
+    return channel
+
+
+def toolchain_mismatch_message(channel: str, recorded: str) -> str:
+    return (
+        f"rust-toolchain.toml channel is {channel} and the pinned standard "
+        f"library notice records {recorded}. Install rust-docs with "
+        f"`rustup component add rust-docs` and regenerate with "
+        f"`python3 scripts/licence_check.py --write binaries`."
+    )
+
+
+def toolchain_problems() -> list[str]:
+    recorded = str(rust_std_row().get("toolchain") or "")
+    channel = toolchain_channel()
+    if recorded == channel:
+        return []
+    return [toolchain_mismatch_message(channel, recorded)]
+
+
+def _authors_line(authors: tuple[str, ...]) -> str:
+    cleaned = [
+        author.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+        for author in authors
+    ]
+    return "authors: " + ", ".join(cleaned)
+
+
+def copyright_holder(name: str, authors: tuple[str, ...], repository: str) -> str:
+    """The copyright line for a template. No year is invented."""
+    cleaned = [
+        author.replace("\r\n", " ").replace("\r", " ").replace("\n", " ").strip()
+        for author in authors
+    ]
+    cleaned = [author for author in cleaned if author]
+    if cleaned:
+        return ", ".join(cleaned)
+    repo = repository.strip()
+    if repo:
+        return f"the {name} authors ({repo})"
+    return f"the {name} authors"
+
+
+def fill_copyright(blob: bytes, holder: str) -> bytes:
+    """Fill a MIT or Zlib marker.
+
+    Apache-2.0 stays exactly as published. The appendix line is
+    instructions to a licensor, and this function returns those bytes
+    unchanged.
+    """
+    if _APACHE_BOILERPLATE.encode() in blob:
+        return blob
+    text = blob.decode("utf-8")
+    text = text.replace("<copyright-holder>", holder)
+    return text.encode("utf-8")
+
+
+def template_holder_problem(identifier: str, blob: bytes) -> str | None:
+    """A MIT or Zlib template may carry the marker and nothing else.
+
+    Apache-2.0 is the published text and is not checked here.
+    """
+    if identifier.casefold() not in {"mit", "zlib"}:
+        return None
+    try:
+        text = blob.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise BinariesError(
+            f"pinned text {identifier} is not valid UTF-8") from exc
+    lines = [line.strip() for line in text.splitlines()
+             if _COPYRIGHT_LINE.match(line)]
+    if lines != [_COPYRIGHT_MARKER] or _EMAIL.search(text):
+        return f"pinned template {identifier} names another project's holder"
+    return None
+
+
+def unfilled_placeholder_problem(blob: bytes) -> str | None:
+    try:
+        text = blob.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if any(marker in text for marker in _UNFILLED):
+        return "unfilled placeholder in the output"
+    return None
+
+
+def _pinned_files(rows: list[dict], name: str, version: str) -> list[tuple[str, bytes]]:
+    found: list[tuple[str, bytes]] = []
+    for row in rows:
+        if str(row.get("name") or "") != name:
+            continue
+        if str(row.get("version") or "") != version:
+            continue
+        relative = str(row.get("path") or "")
+        if not relative:
+            raise BinariesError(f"{name} {version} pin has no path")
+        path = ROOT / relative
+        if not path.is_file():
+            raise BinariesError(f"{relative} is absent")
+        found.append((Path(relative).name, path.read_bytes()))
+    found.sort(key=lambda item: item[0])
+    return found
+
+
+def _row_for(rows: list[dict], name: str, version: str) -> dict | None:
+    for row in rows:
+        if str(row.get("name") or "") != name:
+            continue
+        if str(row.get("version") or "") != version:
+            continue
+        return row
+    return None
+
+
+def upstream_files(name: str, version: str) -> list[tuple[str, bytes]]:
+    return _pinned_files(crate_pin_rows(), name, version)
+
+
+def earlier_files(name: str, version: str) -> list[tuple[str, bytes]]:
+    rows = _table_rows(_load_sources(), "earlier", required=False)
+    return _pinned_files(rows, name, version)
+
+
+def url_commit(url: str) -> str | None:
+    """The commit named by a raw.githubusercontent.com URL, or None."""
+    match = _RAW_COMMIT.match(url.strip())
+    if match is None:
+        return None
+    return match.group(1).lower()
+
+
+def _registry_roots() -> list[Path]:
+    cargo_home = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo"))
+    src = cargo_home / "registry" / "src"
+    if not src.is_dir():
+        return []
+    return sorted(path for path in src.iterdir() if path.is_dir())
+
+
+def published_sha1(name: str, version: str) -> str | None:
+    """The git sha1 in the package's .cargo_vcs_info.json, read offline."""
+    folder = f"{name}-{version}"
+    for root in _registry_roots():
+        path = root / folder / ".cargo_vcs_info.json"
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        git = data.get("git")
+        if not isinstance(git, dict):
+            return None
+        sha = git.get("sha1")
+        if isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{40}", sha):
+            return sha.lower()
+        return None
+    return None
+
+
+def _same_commit(url_sha: str, published: str) -> bool:
+    if url_sha == published:
+        return True
+    return len(url_sha) >= 7 and published.startswith(url_sha)
+
+
+def published_commit_problems(
+        rows: list[dict] | None = None,
+        sha1_of=None) -> list[str]:
+    """Refuse a crate pin whose URL names a commit other than the published one.
+
+    The published commit is read from .cargo_vcs_info.json in the registry
+    cache. sha1_of, when given, maps a name and version to that sha1 and
+    the cache is not read. The check does not use the network.
+    """
+    problems: list[str] = []
+    chosen = crate_pin_rows() if rows is None else rows
+    lookup = published_sha1 if sha1_of is None else sha1_of
+    for row in chosen:
+        name = str(row.get("name") or "")
+        version = str(row.get("version") or "")
+        url = str(row.get("url") or "")
+        label = f"{name} {version}".strip() or "crate pin"
+        found = url_commit(url)
+        published = lookup(name, version) if found is not None else None
+        shown_url = found if found is not None else "none"
+        shown_published = published if published else "absent"
+        if (found is None or not published
+                or not _same_commit(found, published)):
+            problems.append(
+                f"{label} pin URL commit {shown_url} differs from the "
+                f"published commit {shown_published}")
+    return problems
+
+
+def raw_pin(url: str) -> tuple[str, str, str] | None:
+    """`(https://github.com/owner/repo, commit, path)` from a raw pin URL."""
+    match = _RAW_PIN.match(url.strip())
+    if match is None:
+        return None
+    owner = match.group("owner")
+    repo = match.group("repo")
+    commit = match.group("commit").lower()
+    path = match.group("path")
+    return (f"https://github.com/{owner}/{repo}", commit, path)
+
+
+def pin_repository_and_commit(row: dict) -> tuple[str, str]:
+    """The repository and commit a shipped sentence names, taken from the row."""
+    name = str(row.get("name") or "")
+    version = str(row.get("version") or "")
+    label = f"{name} {version}".strip() or "pin"
+    parsed = raw_pin(str(row.get("url") or ""))
+    if parsed is None:
+        raise BinariesError(f"{label} pin URL names no commit")
+    repository, url_commit, _path = parsed
+    claimed = str(row.get("commit") or "").strip().lower()
+    if claimed != "":
+        return repository, claimed
+    return repository, url_commit
+
+
+def statement_sentence(
+        repository: str, commit: str, filename: str,
+        earlier_repository: str = "", earlier_commit: str = "",
+        earlier_filename: str = "") -> str:
+    """The no-licence-text sentence. The commit and repository come from the row."""
+    sentence = (
+        "Neither the published package nor its repository "
+        f"{repository} at commit {commit} carries licence text. "
+        f"The text below is {filename} from commit {commit} of "
+        f"{repository}, then the standard text of the licence the "
+        "crate declares"
+    )
+    if earlier_filename:
+        sentence += (
+            f", then the repository root {earlier_filename} from "
+            f"commit {earlier_commit} of {earlier_repository}"
+        )
+    return sentence + "."
+
+
+def attribution_problems(blob: bytes) -> list[str]:
+    """The shipped file must carry the CC BY credit for the MIT template."""
+    try:
+        text = blob.decode("utf-8")
+    except UnicodeDecodeError:
+        return ["CC BY attribution paragraph is absent"]
+    if all(phrase in text for phrase in _CC_BY_REQUIRED):
+        return []
+    return ["CC BY attribution paragraph is absent"]
+
+
+def fetch_raw_pin(url: str) -> bytes | None:
+    """Bytes at a raw pin URL, or None when that path is absent at the commit.
+
+    A transport failure raises BinariesError. Failing to read the commit
+    is a refusal, not a skip. The result is cached for this process.
+    verify-upstream is the caller. The binaries gate does not call this.
+    """
+    cached = _RAW_PIN_CACHE.get(url)
+    if cached is not None or url in _RAW_PIN_CACHE:
+        return cached
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "ocelli-licence-check"})
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            blob = response.read()
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            _RAW_PIN_CACHE[url] = None
+            return None
+        raise BinariesError(
+            f"pin URL {url} could not be read: HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise BinariesError(
+            f"pin URL {url} could not be read: {exc.reason}") from exc
+    except OSError as exc:
+        raise BinariesError(
+            f"pin URL {url} could not be read: {exc}") from exc
+    _RAW_PIN_CACHE[url] = blob
+    return blob
+
+
+def earlier_commit_problems(
+        rows: list[dict] | None = None,
+        blob_at=None) -> list[str]:
+    """Refuse an earlier pin whose URL is not the commit the row claims.
+
+    The pinned file must exist locally and its digest must be the row's
+    sha256. The gate calls this with no blob_at and does not fetch. The
+    recorded commit is what the shipped sentence names. blob_at, when
+    given, maps a URL to the bytes at that commit, or to None when the
+    path is absent. A missing path is a refusal, not a match.
+    verify-upstream passes the network read as blob_at.
+    """
+    problems: list[str] = []
+    if rows is None:
+        chosen = _table_rows(_load_sources(), "earlier", required=False)
+    else:
+        chosen = rows
+    seen: dict[str, bytes | None] = {}
+    for row in chosen:
+        name = str(row.get("name") or "")
+        version = str(row.get("version") or "")
+        url = str(row.get("url") or "")
+        relative = str(row.get("path") or "")
+        expected = str(row.get("sha256") or "").lower()
+        label = f"{name} {version}".strip() or "earlier pin"
+        if not relative or not expected:
+            problems.append(
+                "ci/notices/sources.toml has a row with no path or sha256")
+            continue
+        parsed = raw_pin(url)
+        found = parsed[1] if parsed is not None else None
+        claimed = str(row.get("commit") or "").strip().lower()
+        shown_url = found if found is not None else "none"
+        shown_claimed = claimed if claimed else "absent"
+        if (found is None or claimed == ""
+                or not _same_commit(found, claimed)):
+            problems.append(
+                f"{label} earlier pin URL commit {shown_url} differs from "
+                f"the commit the row claims {shown_claimed}")
+            continue
+        filename = parsed[2] if parsed is not None else Path(relative).name
+        if blob_at is not None:
+            if url not in seen:
+                seen[url] = blob_at(url)
+            blob = seen[url]
+            if blob is None:
+                problems.append(
+                    f"{label} {filename} is absent at commit {claimed}")
+                continue
+            found_digest = hashlib.sha256(blob).hexdigest()
+            if found_digest != expected:
+                problems.append(
+                    f"{label} {filename} at commit {claimed} sha256 is "
+                    f"{found_digest}, expected {expected}")
+                continue
+        path = ROOT / relative
+        if not path.is_file():
+            problems.append(f"{relative} is absent")
+            continue
+        local_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if local_digest != expected:
+            problems.append(
+                f"{relative} sha256 is {local_digest}, expected {expected}")
+    return problems
+
+
+def upstream_pin_rows() -> list[dict]:
+    """Crate pins and earlier pins, each carrying the commit its URL names.
+
+    A crate row records that commit in the URL. An earlier row records it
+    in the commit field. The copy is shallow, so the loaded table stays as
+    it was read.
+    """
+    rows: list[dict] = []
+    for row in crate_pin_rows():
+        copied = dict(row)
+        if str(copied.get("commit") or "").strip() == "":
+            parsed = raw_pin(str(copied.get("url") or ""))
+            if parsed is not None:
+                copied["commit"] = parsed[1]
+        rows.append(copied)
+    rows.extend(_table_rows(_load_sources(), "earlier", required=False))
+    return rows
+
+
+def verify_upstream_problems(blob_at=None) -> list[str]:
+    """Re-fetch every crate pin and every earlier pin, and compare bytes.
+
+    The comparison is against the pinned file's recorded sha256. blob_at,
+    when given, stands in for the network and returns None when the path
+    is absent at that commit. A difference is a refusal, and so is a
+    missing file. The floor gate does not call this.
+    """
+    fetch = fetch_raw_pin if blob_at is None else blob_at
+    try:
+        return earlier_commit_problems(upstream_pin_rows(), blob_at=fetch)
+    except BinariesError as exc:
+        return [str(exc)]
+
+
+def _text_chunk(raw: bytes) -> bytes:
+    text = normalise_newlines(raw)
+    if text.endswith(b"\n"):
+        text = text[:-1]
+    return text
+
+
+def render_notices(
+        crates: list[CrateNotice],
+        pins: dict[str, bytes],
+        standard_library: bytes,
+        toolchain: str,
+        allow: set[str],
+        skip_names: set[str] | None = None) -> bytes:
+    """The notice file. Crates are sorted by name, then version, then source."""
+    for ident, blob in pins.items():
+        problem = template_holder_problem(ident, blob)
+        if problem:
+            raise BinariesError(problem)
+    skipped = skip_names or set()
+    chosen = [crate for crate in crates if crate.name not in skipped]
+    chosen.sort(key=lambda crate: (crate.name, crate.version, crate.source))
+
+    # (name, version, file, authors, kind, sentence, normalised text).
+    # kind is packaged, upstream, template, statement, or statement-earlier.
+    # sentence is empty except for the two statement kinds.
+    carriers: list[tuple[str, str, str, tuple[str, ...], str, str, bytes]] = []
+    for crate in chosen:
+        if crate.files and crate.notice == "statement":
+            if crate.expression == "":
+                raise BinariesError(
+                    f"{crate.name} {crate.version} has no licence file and "
+                    f"no licence expression")
+            try:
+                terms = elect_terms(crate.expression, allow)
+            except BinariesError as exc:
+                raise BinariesError(
+                    f"{crate.name} {crate.version} has no allowlisted "
+                    f"licence in {crate.expression}") from exc
+            holder = copyright_holder(
+                crate.name, crate.authors, crate.repository)
+            chunks: list[bytes] = []
+            for relative, raw in crate.files:
+                try:
+                    raw.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise BinariesError(
+                        f"{crate.name} {crate.version} {relative} "
+                        f"is not valid UTF-8") from exc
+                chunks.append(_text_chunk(raw))
+            for term in terms:
+                blob = pins.get(term.casefold())
+                if blob is None:
+                    raise BinariesError(
+                        f"{crate.name} {crate.version} has no pinned text "
+                        f"for {term}")
+                try:
+                    filled = fill_copyright(blob, holder)
+                except UnicodeDecodeError as exc:
+                    raise BinariesError(
+                        f"pinned text {term} is not valid UTF-8") from exc
+                chunks.append(_text_chunk(filled))
+            if crate.pin_repository == "" or crate.commit == "":
+                raise BinariesError(
+                    f"{crate.name} {crate.version} statement names no "
+                    f"repository or commit")
+            filename = crate.files[0][0]
+            earlier_filename = ""
+            if crate.earlier:
+                if (crate.earlier_repository == ""
+                        or crate.earlier_commit == ""):
+                    raise BinariesError(
+                        f"{crate.name} {crate.version} earlier notice names "
+                        f"no repository or commit")
+                earlier_filename = crate.earlier[0][0]
+                for relative, raw in crate.earlier:
+                    try:
+                        raw.decode("utf-8")
+                    except UnicodeDecodeError as exc:
+                        raise BinariesError(
+                            f"{crate.name} {crate.version} {relative} "
+                            f"is not valid UTF-8") from exc
+                    chunks.append(_text_chunk(raw))
+            sentence = statement_sentence(
+                crate.pin_repository, crate.commit, filename,
+                crate.earlier_repository, crate.earlier_commit,
+                earlier_filename)
+            kind = "statement-earlier" if crate.earlier else "statement"
+            body = b"\n\n".join(chunks) + b"\n"
+            label = filename if len(crate.files) == 1 else "NOTICE"
+            carriers.append((
+                crate.name, crate.version, label, crate.authors,
+                kind, sentence, body))
+            continue
+        if crate.files:
+            kind = "upstream" if crate.notice == "upstream" else "packaged"
+            for relative, raw in crate.files:
+                try:
+                    raw.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise BinariesError(
+                        f"{crate.name} {crate.version} {relative} "
+                        f"is not valid UTF-8") from exc
+                carriers.append((
+                    crate.name, crate.version, relative, crate.authors,
+                    kind, "", normalise_newlines(raw)))
+            continue
+        if crate.expression == "":
+            raise BinariesError(
+                f"{crate.name} {crate.version} has no licence file and "
+                f"no licence expression")
+        try:
+            terms = elect_terms(crate.expression, allow)
+        except BinariesError as exc:
+            raise BinariesError(
+                f"{crate.name} {crate.version} {exc}") from exc
+        holder = copyright_holder(crate.name, crate.authors, crate.repository)
+        for term in terms:
+            blob = pins.get(term.casefold())
+            if blob is None:
+                raise BinariesError(
+                    f"{crate.name} {crate.version} has no pinned text for {term}")
+            try:
+                filled = fill_copyright(blob, holder)
+            except UnicodeDecodeError as exc:
+                raise BinariesError(
+                    f"pinned text {term} is not valid UTF-8") from exc
+            carriers.append((
+                crate.name, crate.version, term, crate.authors,
+                "template", "", normalise_newlines(filled)))
+
+    groups: dict[str, list[tuple[str, str, str, tuple[str, ...], str, str]]] = {}
+    texts: dict[str, bytes] = {}
+    order: list[str] = []
+    for name, version, file, authors, kind, sentence, text in carriers:
+        digest = hashlib.sha256(text).hexdigest()
+        if digest not in groups:
+            order.append(digest)
+            groups[digest] = []
+            texts[digest] = text
+        groups[digest].append((name, version, file, authors, kind, sentence))
+
+    parts: list[bytes] = []
+    parts.append((
+        f"THIRD_PARTY_LICENSES\n"
+        "\n"
+        "Generated by `python3 scripts/licence_check.py --write binaries`.\n"
+        "Do not edit.\n"
+        "Regenerate this file after a change to Cargo.lock or to the channel "
+        "in rust-toolchain.toml.\n"
+        f"{_CC_BY_ATTRIBUTION}\n"
+        "Closure: third-party crates reachable on a normal or build edge from "
+        "the wasm entry point for wasm32-unknown-unknown, and from the native "
+        "entry point with no platform filter.\n"
+        "Workspace members are excluded.\n"
+        "A build-dependency crate and a proc-macro crate stay in the list, "
+        "because this is the closure the licence gate checks.\n"
+        "\n"
+        "## Crate index\n"
+        "\n"
+    ).encode())
+    for crate in chosen:
+        expression = crate.expression if crate.expression else "unspecified"
+        parts.append((
+            f"name: {crate.name}\n"
+            f"version: {crate.version}\n"
+            f"source: {crate.source}\n"
+            f"expression: {expression}\n"
+            "\n"
+        ).encode())
+    parts.append(b"## Licence texts\n\n")
+    for digest in order:
+        parts.append(f"sha256: {digest}\n".encode())
+        for name, version, file, authors, kind, sentence in groups[digest]:
+            parts.append(f"carrier: {name} {version} {file}\n".encode())
+            if kind == "upstream":
+                parts.append((_authors_line(authors) + "\n").encode())
+                parts.append((_UPSTREAM_SENTENCE + "\n").encode())
+            elif kind == "template":
+                parts.append((_authors_line(authors) + "\n").encode())
+                parts.append((_NO_FILE_SENTENCE + "\n").encode())
+            elif kind in {"statement", "statement-earlier"}:
+                parts.append((_authors_line(authors) + "\n").encode())
+                parts.append((sentence + "\n").encode())
+        parts.append(b"\n")
+        parts.append(texts[digest])
+        if not texts[digest].endswith(b"\n"):
+            parts.append(b"\n")
+        parts.append(b"-----END LICENCE TEXT-----\n\n")
+    parts.append(b"## Rust standard library\n\n")
+    parts.append(f"Toolchain {toolchain}.\n".encode())
+    parts.append(
+        b"The bytes between the markers are the pinned toolchain notice.\n\n")
+    parts.append(_STD_BEGIN)
+    parts.append(standard_library)
+    parts.append(_STD_END)
+    parts.append(b"\n")
+    blob = b"".join(parts)
+    problem = unfilled_placeholder_problem(blob)
+    if problem:
+        raise BinariesError(problem)
+    return blob
+
+
+def _standard_texts() -> dict[str, bytes]:
+    found: dict[str, bytes] = {}
+    for row in notice_source_rows():
+        if row.get("identifier") == "rust-std":
+            continue
+        ident = str(row.get("identifier") or "")
+        relative = str(row.get("path") or "")
+        if not ident or not relative:
+            continue
+        found[ident.casefold()] = (ROOT / relative).read_bytes()
+    return found
+
+
+def crate_from_package(package: dict) -> CrateNotice:
+    name = str(package.get("name") or "")
+    version = str(package.get("version") or "")
+    expression = package.get("license")
+    if not isinstance(expression, str):
+        expression = ""
+    authors = package.get("authors") or []
+    if not isinstance(authors, list):
+        authors = []
+    repository = package.get("repository")
+    if not isinstance(repository, str):
+        repository = ""
+    license_file = package.get("license_file")
+    if not isinstance(license_file, str) or license_file == "":
+        license_file = None
+    manifest = str(package.get("manifest_path") or "")
+    files: tuple[tuple[str, bytes], ...] = ()
+    if manifest:
+        files = tuple(collect_licence_files(Path(manifest).parent, license_file))
+    notice = "packaged"
+    earlier: tuple[tuple[str, bytes], ...] = ()
+    pin_repository = ""
+    commit = ""
+    earlier_repository = ""
+    earlier_commit = ""
+    if not files:
+        pinned = tuple(upstream_files(name, version))
+        recorded = (name, version) in fallback_reasons()
+        if pinned and recorded:
+            files = pinned
+            notice = "statement"
+            earlier = tuple(earlier_files(name, version))
+            row = _row_for(crate_pin_rows(), name, version)
+            if row is None:
+                raise BinariesError(
+                    f"{name} {version} has no pinned upstream notice")
+            pin_repository, commit = pin_repository_and_commit(row)
+            if earlier:
+                earlier_row = _row_for(
+                    _table_rows(_load_sources(), "earlier", required=False),
+                    name, version)
+                if earlier_row is None:
+                    raise BinariesError(
+                        f"{name} {version} earlier notice has no row")
+                earlier_repository, earlier_commit = (
+                    pin_repository_and_commit(earlier_row))
+        elif pinned:
+            files = pinned
+            notice = "upstream"
+        elif recorded:
+            notice = "template"
+        else:
+            raise BinariesError(
+                f"{name} {version} has no pinned upstream notice "
+                f"and no recorded fallback")
+    return CrateNotice(
+        name=name,
+        version=version,
+        source=source_label(package),
+        expression=expression,
+        authors=tuple(str(item) for item in authors),
+        files=files,
+        repository=repository,
+        notice=notice,
+        earlier=earlier,
+        pin_repository=pin_repository,
+        commit=commit,
+        earlier_repository=earlier_repository,
+        earlier_commit=earlier_commit,
+    )
+
+
+def render_closure(
+        std_bytes: bytes | None = None,
+        toolchain: str | None = None) -> bytes:
+    records, members = _rust_shipped()
+    commit_problems = published_commit_problems()
+    if commit_problems:
+        detail = "\n".join(commit_problems)
+        raise BinariesError(
+            f"pin URL commit differs from the published commit\n{detail}")
+    # Offline. Local bytes and the recorded commit. verify-upstream fetches.
+    earlier_problems = earlier_commit_problems()
+    if earlier_problems:
+        detail = "\n".join(earlier_problems)
+        raise BinariesError(
+            f"earlier pin does not match the commit it names\n{detail}")
+    crates = [
+        crate_from_package(package)
+        for ident, package in records.items()
+        if ident not in members
+    ]
+    row = rust_std_row()
+    standard = (std_bytes if std_bytes is not None
+                else (ROOT / str(row["path"])).read_bytes())
+    channel = toolchain if toolchain is not None else toolchain_channel()
+    return render_notices(
+        crates, _standard_texts(), standard, channel, allowlist())
+
+
+def generate_third_party_licenses() -> bytes:
+    problems = pinned_digest_problems()
+    problems.extend(toolchain_problems())
+    if problems:
+        raise BinariesError("\n".join(problems))
+    return render_closure()
+
+
+def binaries_problems() -> list[str]:
+    problems = pinned_digest_problems()
+    problems.extend(toolchain_problems())
+    if problems:
+        return problems
+    try:
+        blob = render_closure()
+    except BinariesError as exc:
+        problems.append(f"shipped binary notices: {exc}")
+        return problems
+    except ShippedClosureError as exc:
+        problems.append(f"shipped binary notices: {exc}")
+        return problems
+    problems.extend(attribution_problems(blob))
+    if not _LICENCES.is_file():
+        problems.append("THIRD_PARTY_LICENSES is absent")
+        return problems
+    if _LICENCES.read_bytes() != blob:
+        problems.append("THIRD_PARTY_LICENSES does not match the lockfile")
+    return problems
+
+
+def _rust_docs_notice() -> Path | None:
+    completed = subprocess.run(
+        ["rustc", "--print", "sysroot"],
+        cwd=ROOT, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        return None
+    path = (Path(completed.stdout.strip()) / "share" / "doc" / "rust"
+            / "COPYRIGHT-library.html")
+    if path.is_file():
+        return path
+    return None
+
+
+def rewrite_rust_std_pin(text: str, toolchain: str, digest: str) -> str:
+    """Return sources.toml with the rust-std toolchain and digest replaced.
+
+    The first `[[file]]` header stays. Crate rows that follow the file rows
+    stay. Nothing is written.
+    """
+    parts = text.split("[[file]]")
+    if len(parts) < 2:
+        raise BinariesError("ci/notices/sources.toml has no file rows")
+    head, *blocks = parts
+    rewritten: list[str] = []
+    found = False
+    for block in blocks:
+        if 'identifier = "rust-std"' in block:
+            found = True
+            block, tool_count = re.subn(
+                r'toolchain = "[^"]*"',
+                f'toolchain = "{toolchain}"', block, count=1)
+            block, hash_count = re.subn(
+                r'sha256 = "[0-9a-fA-F]+"',
+                f'sha256 = "{digest}"', block, count=1)
+            if tool_count != 1 or hash_count != 1:
+                raise BinariesError(
+                    "ci/notices/sources.toml rust-std row has no toolchain "
+                    "or sha256")
+        rewritten.append(block)
+    if not found:
+        raise BinariesError("ci/notices/sources.toml has no rust-std row")
+    return "[[file]]".join([head, *rewritten])
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    """Replace path with data. A failed write leaves the previous file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def write_binaries() -> list[str]:
+    """Regenerate THIRD_PARTY_LICENSES. Write nothing if generation fails.
+
+    A channel change copies the installed rust-docs notice into memory, checks
+    the rewritten sources, and writes the notice, sources.toml and the
+    generated file only after that check succeeds.
+    """
+    try:
+        channel = toolchain_channel()
+        row = rust_std_row()
+        recorded = str(row.get("toolchain") or "")
+        std_path = ROOT / str(row["path"])
+        old_html = std_path.read_bytes()
+        old_sources = _SOURCES.read_text(encoding="utf-8")
+        pending_html: bytes | None = None
+        pending_sources: str | None = None
+        std_bytes = old_html
+        render_channel: str | None = None
+        if recorded != channel:
+            docs = _rust_docs_notice()
+            if docs is None:
+                return [toolchain_mismatch_message(channel, recorded)]
+            pending_html = docs.read_bytes()
+            std_bytes = pending_html
+            render_channel = channel
+            pending_sources = rewrite_rust_std_pin(
+                old_sources, channel, hashlib.sha256(pending_html).hexdigest())
+            loaded = tomllib.loads(pending_sources)
+            problems = pinned_digest_problems(
+                overrides={str(row["path"]): pending_html},
+                rows=digest_rows(loaded))
+            if problems:
+                return problems
+        else:
+            problems = pinned_digest_problems()
+            problems.extend(toolchain_problems())
+            if problems:
+                return problems
+        blob = render_closure(std_bytes=std_bytes, toolchain=render_channel)
+    except BinariesError as exc:
+        return [f"shipped binary notices: {exc}"]
+    except ShippedClosureError as exc:
+        return [f"shipped binary notices: {exc}"]
+    except tomllib.TOMLDecodeError as exc:
+        return [f"shipped binary notices: sources.toml {exc}"]
+
+    wrote_html = False
+    wrote_sources = False
+    try:
+        if pending_html is not None and pending_sources is not None:
+            _atomic_write(std_path, pending_html)
+            wrote_html = True
+            _atomic_write(_SOURCES, pending_sources.encode("utf-8"))
+            wrote_sources = True
+        _atomic_write(_LICENCES, blob)
+    except OSError as exc:
+        if wrote_sources:
+            _atomic_write(_SOURCES, old_sources.encode("utf-8"))
+        if wrote_html:
+            _atomic_write(std_path, old_html)
+        return [f"shipped binary notices: {exc}"]
+    return []
+
+
+# ---------------------------------------------------------------------------
 # Entry
 # ---------------------------------------------------------------------------
 
@@ -1285,16 +2476,46 @@ def section_problems(name: str, allow: set[str]) -> list[str]:
         return notices_problems()
     if name == "holder":
         return holder_problems()
+    if name == "binaries":
+        return binaries_problems()
     return [f"unknown section {name}"]
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("sections", nargs="*",
-                        choices=[*FLOOR_SECTIONS, "installed"])
+                        choices=[*FLOOR_SECTIONS, "installed",
+                                 "verify-upstream"])
     parser.add_argument("--python", default=None)
+    parser.add_argument("--write", action="store_true")
     args = parser.parse_args(argv)
     selected = list(args.sections) or list(FLOOR_SECTIONS)
+    if args.write:
+        if selected != ["binaries"]:
+            print("FAIL: licence check")
+            print("  --write regenerates the binaries section only")
+            return 1
+        problems = write_binaries()
+        if problems:
+            print("FAIL: licence check")
+            for problem in problems:
+                print(f"  {problem}")
+            return 1
+        print("OK: licence check (binaries)")
+        return 0
+    if selected == ["verify-upstream"]:
+        problems = verify_upstream_problems()
+        if problems:
+            print("FAIL: licence check")
+            for problem in problems:
+                print(f"  {problem}")
+            return 1
+        print("OK: licence check (verify-upstream)")
+        return 0
+    if "verify-upstream" in selected:
+        print("FAIL: licence check")
+        print("  verify-upstream runs alone")
+        return 1
 
     problems: list[str] = []
     # Exception shape is shared. A broken row fails every floor section and

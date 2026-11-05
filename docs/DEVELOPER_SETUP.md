@@ -62,6 +62,38 @@ uv run scripts/populate_corpus.py
 Until it exists, `/verify` records `corpus=absent` honestly. That is permitted
 during early development and refused at `/release`.
 
+## Shipped binary notices
+
+`THIRD_PARTY_LICENSES` is generated from `Cargo.lock` and the pinned texts in
+`ci/notices/`. After a lockfile change, or after the channel in
+`rust-toolchain.toml` changes, install the matching docs and regenerate.
+
+```bash
+rustup component add rust-docs
+python3 scripts/licence_check.py --write binaries
+```
+
+A crate whose package ships no licence file takes a pin. Copy the upstream
+file into `ci/notices/crates/<name>-<version>/` and record its path, URL and
+sha256 in `ci/notices/sources.toml`. The URL names the package's published
+commit. An earlier notice is a separate row, and its `commit` field is the
+commit the shipped sentence names. Gate time reads those files and checks
+each sha256. It does not fetch. A crate pin's commit is checked offline
+against `.cargo_vcs_info.json` in the registry cache.
+
+When a pin is added, re-fetch it and compare the bytes before relying on
+the copy.
+
+```bash
+python3 scripts/licence_check.py verify-upstream
+```
+
+That command reads every crate pin and every earlier pin from its recorded
+URL at its recorded commit and compares the bytes with the pinned file. It
+refuses a difference. It refuses a missing file, including an earlier row
+pointed at a commit that has no `LICENSE.txt`. It is not part of
+`gate licences` or any other floor gate.
+
 ## The gates
 
 ```bash
