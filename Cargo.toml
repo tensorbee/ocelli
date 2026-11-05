@@ -116,9 +116,9 @@ ritk-codecs = { version = "=0.6.0", path = "vendor/ritk-codecs-0.6.0" }
 # no repository or issue tracker in its metadata, so a yank would make the build
 # unreproducible. The vendored package is byte-identical to the published
 # archive with no patch, because its manifest already yields the no-Rayon graph
-# section 15.2 wants. The package carries NO LICENCE TEXT, which is a
-# redistribution condition the pins gate refuses at the `--all` and release
-# profiles and which is open today.
+# section 15.2 wants. F-217 placed the upstream BSD-2-Clause notice at
+# vendor/openjph-core-0.1.0/LICENSE. The pins gate checks that file and its
+# recorded hash when --require-redistribution is set, and that check passes.
 openjph-core = { version = "=0.1.0", path = "vendor/openjph-core-0.1.0" }
 # F-021 validates absolute and relative Content-Location URI references from
 # PS3.18 multipart resource headers without retaining their spelling.

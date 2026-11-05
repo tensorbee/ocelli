@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
+import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -129,6 +131,10 @@ def load() -> list[dict[str, str]]:
                          f"redistributed or cited, so it is not a fixture.")
         rows.append(row)
     return rows
+
+
+DECODE_DIGESTS = ROOT / "corpus" / "decode-digests.tsv"
+DECODE_HEADER = "path\tfile_sha256\tdecode_sha256"
 
 
 def digest(path: Path) -> str:
@@ -396,6 +402,125 @@ def verify(rows: list[dict[str, str]], fetch: bool) -> int:
     return 0
 
 
+def _route_module():
+    """The test module owns the read-back routes. Import it only here."""
+    path = ROOT / "scripts" / "tests" / "test_corpus_synth.py"
+    spec = importlib.util.spec_from_file_location(
+        "ocelli_decode_routes", path)
+    if spec is None or spec.loader is None:
+        sys.exit(f"FAIL: cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _reexec_for_decoders() -> int:
+    """Run this process again under the interpreter that has the decoders."""
+    import corpus_tests
+    interpreter, origin = corpus_tests.resolve()
+    if interpreter is None:
+        print("FAIL: no interpreter can import the corpus decoders")
+        print(origin)
+        return 1
+    if Path(sys.executable).resolve() == interpreter.resolve():
+        print("FAIL: the resolved interpreter cannot import numpy, pydicom "
+              "and imagecodecs")
+        return 1
+    os.execv(str(interpreter), [str(interpreter), *sys.argv])
+    return 1
+
+
+def verify_decode_digests(rows: list[dict[str, str]]) -> int:
+    """Compare recorded decode digests after each file matches the manifest.
+
+    A decode digest is not consulted for a file whose own sha256 disagrees
+    with the manifest. The route table lives in the test module so the gate
+    and the conformance tests cannot drift.
+    """
+    try:
+        import imagecodecs  # noqa: F401
+        import numpy  # noqa: F401
+        import pydicom  # noqa: F401
+    except ImportError:
+        return _reexec_for_decoders()
+
+    if not DECODE_DIGESTS.is_file():
+        print(f"FAIL: missing {DECODE_DIGESTS.relative_to(ROOT)}")
+        return 1
+    lines = DECODE_DIGESTS.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0] != DECODE_HEADER:
+        print(f"FAIL: decode digest header must be: {DECODE_HEADER}")
+        return 1
+
+    recorded: dict[str, tuple[str, str]] = {}
+    problems: list[str] = []
+    for number, line in enumerate(lines[1:], start=2):
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        if len(fields) != 3:
+            problems.append(f"decode digest line {number} has {len(fields)} "
+                            f"fields")
+            continue
+        path, file_sha, decode_sha = fields
+        if path in recorded:
+            problems.append(f"decode digest line {number}: duplicate {path}")
+            continue
+        recorded[path] = (file_sha, decode_sha)
+
+    manifest = {row["path"]: row["sha256"] for row in rows}
+    routes = _route_module()
+    import pydicom
+    base = corpus_dir()
+    checked = 0
+    for name in routes.READ_BACK:
+        relative = f"syntax/{name}"
+        if relative not in manifest:
+            problems.append(f"{relative} is not in the manifest")
+            continue
+        target = base / relative
+        if not target.is_file():
+            problems.append(f"{relative} is absent, so its decode digest is "
+                            f"not checked")
+            continue
+        actual = digest(target)
+        if actual != manifest[relative]:
+            problems.append(
+                f"{relative} file digest does not match the manifest, so "
+                f"its decode digest is not checked")
+            continue
+        row = recorded.get(relative)
+        if row is None:
+            problems.append(f"{relative} has no decode digest row")
+            continue
+        if row[0] != manifest[relative]:
+            problems.append(
+                f"{relative} decode-digest file sha256 does not match the "
+                f"manifest, so the decode digest is not checked")
+            continue
+        dataset = pydicom.dcmread(str(target))
+        decoded = routes.decode_array_sha256(routes.read_back(dataset, name))
+        if decoded != row[1]:
+            problems.append(
+                f"{relative} decode digest is {decoded} and the table has "
+                f"{row[1]}")
+            continue
+        checked += 1
+
+    extra = sorted(set(recorded) - {f"syntax/{name}" for name in routes.READ_BACK})
+    for path in extra:
+        problems.append(f"{path} is in the decode digest table and is not a "
+                        f"syntax case")
+
+    if problems:
+        print("FAIL: decode digests")
+        for problem in problems:
+            print(f"  {problem}")
+        return 1
+    print(f"OK: {checked} syntax decode digests match")
+    return 0
+
+
 def add(args: argparse.Namespace) -> int:
     source = Path(args.add).expanduser().resolve()
     if not source.is_file():
@@ -429,6 +554,7 @@ def main() -> int:
     parser.add_argument("--coverage", action="store_true")
     parser.add_argument("--metadata", action="store_true")
     parser.add_argument("--fetch", action="store_true")
+    parser.add_argument("--decode-digests", action="store_true")
     parser.add_argument("--add", metavar="FILE")
     parser.add_argument("--modality", default="")
     parser.add_argument("--transfer-syntax", dest="transfer_syntax", default="")
@@ -450,6 +576,8 @@ def main() -> int:
     if args.manifest_only:
         print(f"OK: manifest shape valid, {len(rows)} rows")
         return 0
+    if args.decode_digests:
+        return verify_decode_digests(rows)
     return verify(rows, args.fetch)
 
 

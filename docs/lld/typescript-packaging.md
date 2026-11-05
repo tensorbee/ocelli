@@ -1,7 +1,7 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217
+**Last updated:** 2026-11-05
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
@@ -120,6 +120,12 @@ importing the wasm asset into this package. The bundler decision stands.
 `wasm-pack --target web` still emits an ESM module plus a `.wasm` asset, and
 a bundler is added only with a named reason.
 
+`@ocelli/core` and `@ocelli/react` list `NOTICE` in `files`. The example
+viewer builds with Vite 7. The root devDependencies pin `vite` at `^7.3.7`
+and `@vitejs/plugin-react` at `^5.2.0`. The viewer worker is already
+constructed as a module, and `worker.format` is `es`, because Vite 7 will
+not emit an iife bundle for a worker that imports the wasm package.
+
 ## The `packages` gate
 
 ```bash
@@ -144,7 +150,7 @@ consumer receives, and every check here is about the second thing.
 | Assertion | The defect it catches |
 |-----------|----------------------|
 | Every path `main`, `types` and each `exports` condition names is inside the tarball | The package installs cleanly and fails at the consumer's first import. npm does not check this |
-| `README.md`, `LICENSE-MIT` and `LICENSE-APACHE` are inside the tarball | A manifest saying `MIT OR Apache-2.0` with no licence text is a claim rather than a grant |
+| `README.md`, `LICENSE-MIT`, `LICENSE-APACHE` and `NOTICE` are inside the tarball | A manifest saying `MIT OR Apache-2.0` with no licence text is a claim rather than a grant. `NOTICE` names the holder |
 | No `src/`, no `node_modules/`, no `.tsbuildinfo` | Bytes a consumer downloads and never uses. `.tsbuildinfo` additionally embeds absolute paths from the build machine |
 | The npm version equals the Rust workspace version | `docs/RELEASE.md` says the crates and the packages version together and that a skew is not supported |
 | `@ocelli/react` depends on the exact version `@ocelli/core` publishes | A range resolves to whatever the registry happens to have |

@@ -1,6 +1,7 @@
 {
   "name": "@ocelli/example-viewer",
   "version": "0.0.0",
+  "license": "MIT OR Apache-2.0",
   "private": true,
   "description": "The smallest thing that proves the boundary. Grows one panel per landed viewport or tool story.",
   "type": "module",

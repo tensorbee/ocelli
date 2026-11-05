@@ -1,7 +1,7 @@
 # Release policy
 
-**F-IDs that contributed:** F-117
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-117, F-217
+**Last updated:** 2026-11-05
 
 `/release` is the only command that publishes. This page does not publish
 and it does not create a `v` tag. The workspace version stays 0.1.0.
@@ -18,3 +18,9 @@ a published minor stays for one further minor. A major may remove a
 name, so the window is 0. Any other channel is null.
 
 Tiers A, B and C are not applicable. The functions do not render.
+
+`THIRD_PARTY_NOTICES` carries the upstream OpenJPH notice and the vendored
+ritk-codecs MIT grant. `NOTICE` names Tensorbee Limited and is published with
+both npm packages. `python3 scripts/pin_and_size_check.py
+--require-redistribution` passes. A stable claim stays false while D-22 is
+open. The notice being present does not by itself close that row.

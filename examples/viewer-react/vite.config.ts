@@ -40,4 +40,7 @@ export default defineConfig({
   // It is not committed, so a clean clone runs this app in its "core not
   // built" state rather than failing to start. That is deliberate.
   optimizeDeps: { exclude: ["@ocelli/core"] },
+  // The page already constructs this worker as a module. Vite 7's default
+  // iife worker bundle cannot emit the wasm import, which is its own chunk.
+  worker: { format: "es" },
 });

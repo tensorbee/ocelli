@@ -5095,3 +5095,31 @@ this branch had not touched since the base.
 **Deviations from the design plan.** None in behaviour. The plan sentence promising a test for a valid prefix after a failure mid-pyramid was removed, because that path is unreachable without fault injection. Implemented by an external coding agent over five independent review passes.
 
 **Notes for future sessions.** What a non-finite F32 sample does to a coarser level is an open operator question in `docs/sprints/CURRENT_SPRINT.md`, pinned by `non_finite_floats_keep_the_current_bits`, to be answered before F-120. `VoxelStore::slice_mut` is public and can write level 0 without dropping coarser levels, which predates this story.
+
+## F-217, Licence hygiene, completed 2026-11-05
+
+**What was built.** No copyleft dependency remains in any tracked manifest. The corpus JPEG read-back moves from the GPL-3 `pylibjpeg-libjpeg` to `imagecodecs` (BSD-3-Clause, libjpeg-turbo), and Vite moves to 7.3.7 so the MPL-2.0 `lightningcss` is no longer installed. One allowlist in `deny.toml` is read by cargo-deny and by `scripts/licence_check.py` for npm, the Python lock and installed wheels. Exceptions and licence file waivers live in `ci/licences.toml` with reason, scope, date and decider, matched to their version and refused when stale. `THIRD_PARTY_NOTICES` carries the OpenJPH and ritk notices and `NOTICE` names Tensorbee Limited.
+
+**HLD sections implemented.** Section 27.2 R7, `docs/SOURCE-POLICY.md`.
+
+**Deviations.** D-22 amended to record the OpenJPH notice as present.
+
+**Crates / packages modified.** `deny.toml`, `ci/licences.toml`, `scripts/licence_check.py`, `scripts/source_provenance_check.py`, `scripts/guards/catalogue.py`, `pyproject.toml` and `uv.lock`, the npm manifests and lockfiles, `examples/viewer-react/vite.config.ts`, `.github/workflows/ci.yml`, `bin/ocelli.sh`, the licence and notice files, and `corpus/decode-digests.tsv`.
+
+**Tests added.** `scripts/tests/test_licence_check.py` (31 cases), provenance unit tests, and floor and deep guard probes for every new refusal. The census records 1032 refusals with none watched by nothing.
+
+**Fixture provenance.** The lossless JPEG and JPEG-LS rows read back byte-identical to the previous decoder, measured against an outside-the-repository venv built from the old lock. `.50` and `.51` were re-baselined, with maximum differences of 3 and 1 against the old decoder, within `YBR_EIGHT_BIT_MAX` and `TRANSFORM_MAX` against the uncompressed original.
+
+**Verification.** Feature profile on the staged worker tree, the floor's 27 gates plus the corpus gate, in the worker's own build directory. The verify ledger entry is in the commit trailer of e3fc29a.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes tooling, manifests and notices, not rendering.
+
+**LLD updated.** `docs/lld/guards.md`, `docs/lld/corpus.md`, `docs/lld/codecs.md`, `docs/lld/release-policy.md` and `docs/lld/typescript-packaging.md`.
+
+**User-facing documentation.** `README.md` names the licence and notice files. The Use book and the More page have no licence, decoder or dependency sentence this story changes.
+
+**Deviations from the design plan.** The plan's exception owner rule was amended by the lead under the operator's delegation: a lead may waive licence file text that is an allowlisted licence granting nothing copyleft, or an empty file, and every such waiver is listed for the operator in `docs/sprints/CURRENT_SPRINT.md`. `examples/viewer-react/vite.config.ts` sets `worker.format` to `es`, which Vite 7 requires. Implemented by an external coding agent over five independent review passes.
+
+**Notes for future sessions.** AC17's Linux half is the corpus-tooling CI job on the pushed head and is confirmed at sprint close. F-220 follows up with full notices for every crate in shipped binaries. A lead waiver over text that really grants a copyleft licence while naming an allowlisted licence cannot be refused mechanically and stays a human rule.

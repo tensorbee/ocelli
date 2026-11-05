@@ -35,9 +35,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,7 +66,10 @@ NEGATIONS = re.compile(
     r"\b(not|never|no|refus|block|forbid|prohibit|must not|may not|avoid|"
     r"excluded|NO)\b", re.I)
 
-MANIFESTS = {"Cargo.toml", "package.json", "Cargo.lock", "package-lock.json"}
+MANIFESTS = {
+    "Cargo.toml", "package.json", "Cargo.lock", "package-lock.json",
+    "pyproject.toml", "uv.lock",
+}
 
 TEXT_SUFFIXES = {".md", ".rs", ".ts", ".tsx", ".js", ".mjs", ".json", ".toml",
                  ".yaml", ".yml", ".sh", ".py", ".html", ".wgsl", ".tsv"}
@@ -133,6 +138,129 @@ def texts(staged: bool) -> tuple[list[tuple[str, str]], list[str]]:
     return found, problems
 
 
+def _pep508_name(spec: str) -> str:
+    """The package name, which ends at the first requirement marker."""
+    match = re.match(r"\s*([^<>=!~\s;@\[]+)", spec)
+    return match.group(1) if match else ""
+
+
+def _cargo_dependency_names(text: str) -> list[str]:
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return []
+    names: list[str] = []
+
+    def take(table) -> None:
+        if isinstance(table, dict):
+            names.extend(str(key) for key in table)
+
+    for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+        take(data.get(key))
+    workspace = data.get("workspace")
+    if isinstance(workspace, dict):
+        take(workspace.get("dependencies"))
+    target = data.get("target")
+    if isinstance(target, dict):
+        for spec in target.values():
+            if isinstance(spec, dict):
+                for key in ("dependencies", "dev-dependencies",
+                            "build-dependencies"):
+                    take(spec.get(key))
+    return names
+
+
+def _json_dependency_names(text: str) -> list[str]:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    names: list[str] = []
+    for key in ("dependencies", "devDependencies", "optionalDependencies",
+                "peerDependencies"):
+        table = data.get(key)
+        if isinstance(table, dict):
+            names.extend(str(name) for name in table)
+    bundled = data.get("bundledDependencies")
+    if isinstance(bundled, list):
+        names.extend(str(name) for name in bundled)
+    return names
+
+
+def _lockfile_names(text: str) -> list[str]:
+    return re.findall(r'(?m)^[ \t]*name = "([^"]+)"', text)
+
+
+def _npm_lock_names(text: str) -> list[str]:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    packages = data.get("packages")
+    if not isinstance(packages, dict):
+        return []
+    names: list[str] = []
+    for key, entry in packages.items():
+        if key == "":
+            continue
+        parts = [part for part in key.split("/")
+                 if part and part != "node_modules"]
+        if parts:
+            names.append(parts[-1])
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+            names.append(entry["name"])
+    return names
+
+
+def _project_dependency_names(text: str) -> list[str]:
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return []
+    project = data.get("project")
+    if not isinstance(project, dict):
+        return []
+    specs = project.get("dependencies")
+    if not isinstance(specs, list):
+        return []
+    return [_pep508_name(spec) for spec in specs if isinstance(spec, str)]
+
+
+def dependency_names(rel: str, text: str) -> list[str]:
+    """Dependency names from one manifest grammar. Other text yields none."""
+    filename = Path(rel).name
+    if filename == "Cargo.toml":
+        return _cargo_dependency_names(text)
+    if filename in {"Cargo.lock", "uv.lock"}:
+        return _lockfile_names(text)
+    if filename == "pyproject.toml":
+        return _project_dependency_names(text)
+    if filename == "package.json":
+        return _json_dependency_names(text)
+    if filename == "package-lock.json":
+        return _npm_lock_names(text)
+    return []
+
+
+def blocked_in_name(name: str) -> str | None:
+    """A blocked project as a prefix of the final segment, with one lib prefix.
+
+    `liberty` and `agrok` do not match. A name that begins with a blocked
+    project does, and so does the same name after a single `lib`.
+    """
+    parts = [part for part in name.split("/") if part]
+    segment = (parts[-1] if parts else name).casefold()
+    for blocked in BLOCKED:
+        if segment.startswith(blocked):
+            return blocked
+    if segment.startswith("lib"):
+        rest = segment[3:]
+        for blocked in BLOCKED:
+            if rest.startswith(blocked):
+                return blocked
+    return None
+
+
 def check_text(rel: str, text: str) -> list[str]:
     path = Path(rel)
     problems = []
@@ -145,10 +273,13 @@ def check_text(rel: str, text: str) -> list[str]:
                 f"No one on this project, human or agent, may open it.")
 
     if path.name in MANIFESTS:
-        for name, why in BLOCKED.items():
-            if re.search(rf'"[^"]*\b{name}\b[^"]*"\s*:', text, re.I) or \
-               re.search(rf'^\s*{name}\s*=', text, re.I | re.M):
-                problems.append(f"{rel}: depends on {name}. {why}")
+        seen: set[str] = set()
+        for dep in dependency_names(rel, text):
+            blocked = blocked_in_name(dep)
+            if blocked is None or blocked in seen:
+                continue
+            seen.add(blocked)
+            problems.append(f"{rel}: depends on {blocked}. {BLOCKED[blocked]}")
 
     if rel in POLICY_FILES:
         return problems

@@ -2,14 +2,15 @@
 name = "ocelli-tooling"
 version = "0.0.0"
 description = "Repository-local Python tooling for Ocelli"
+license = "MIT OR Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
+    "imagecodecs==2026.10.10",
     "numpy==2.5.2",
     "openpyxl==3.1.5",
     "pydicom==3.0.2",
     "pyjpegls==1.5.1",
     "pylibjpeg==2.1.0",
-    "pylibjpeg-libjpeg==2.4.0",
     "pylibjpeg-openjpeg==2.5.0",
     "pylibjpeg-rle==2.2.0",
     # The one dependency the CI FLOOR takes, and deviation D-17 records it.
