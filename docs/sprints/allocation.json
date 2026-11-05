@@ -2768,6 +2768,25 @@
       "sprint": "S46"
     },
     {
+      "fid": "F-223",
+      "eid": "E38.32",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Comparative benchmark against cornerstone3D 5.8.2: the folder viewer and a bare cornerstone3D page on the same studies, browser and machine, with every process's memory counted, a pixel check before any timing, and a generated summary",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.26"
+      ],
+      "depends_fids": [
+        "F-216"
+      ],
+      "notes": "Asked by the operator on 2026-11-05 to measure the viewer against cornerstone3D. Runs after F-216 integrates, alone on the GPU.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
       "fid": "F-208",
       "eid": "E38.18",
       "phase": "P1",
