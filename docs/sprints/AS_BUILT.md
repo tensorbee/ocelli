@@ -5067,3 +5067,31 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The recovery sentence was corrected. A failed preview hides the previous grey image and shows the fault, so the viewport does not keep the previous slice under the fault text. The state table says a drawing-tool drag moves the mark and a navigation drag does not.
 
 **Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 3 nitpicks. A drawing-tool move does not latch after 5 pixels. A colour frame can still take a drawing from the previous image size. Leaving 2 by 2 because a neighbour is over 32 MiB does not re-enable the drawing buttons. None of those block. Reviewer Claude Code, read only, with no shell. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-119, Brick decomposition and multiscale pyramid generation, completed 2026-11-05
+
+**What was built.** `Volume::downsample_level` builds one coarser level and `Volume::generate_pyramid` builds all of them, each straight from level 0 with an exact-overlap box filter over stored container values. `Volume::cut_level_brick` cuts a brick from any stored level against that level's grid, and `Volume::level_voxel_to_level0` maps a level voxel centre back to level 0. A successful `place` drops every level above 0.
+
+**HLD sections implemented.** `docs/hld/` section 19 (the level axis and bricks), section 30 and 30.1 (out-of-core volume streaming), and decision D11. The filter, value domain, rounding, child dimensions, stop rule and level origin are local decisions recorded in `.claude/plans/F-119-design.md`, because the HLD and DICOM do not specify a pyramid.
+
+**Deviations.** none
+
+**Crates / packages modified.** `crates/ocelli-volume`.
+
+**Tests added.** `crates/ocelli-volume/tests/pyramid.rs`, 28 integration cases with hand-computed fixtures, and unit tests in `crates/ocelli-volume/src/levels.rs`.
+
+**Fixture provenance.** Pixel arithmetic over stored values. No DICOM section defines a pyramid, so each fixture's expected value is hand-computed from the plan's filter definition and shown in a comment, and rescale commutes with the mean per PS3.3 C.11.1 before rounding. Review passes 1 to 5 recomputed every fixture independently.
+
+**Verification.** Feature profile on the staged worker tree, `bin/ocelli.sh gate --floor` plus the corpus gate, in the worker's own build directory. The verify ledger entry is in the commit trailer of 3987833.
+
+**Corpus.** pass, 95 verified, 0 missing, 0 mismatched. This story adds no corpus row.
+
+**Tier coverage.** Generation runs on the CPU and gives the same bytes on tier A (WebGPU), tier B (WebGL2 downlevel) and tier C (CPU). F-120 selects levels, F-121 corrects opacity per level and F-122 budgets level bricks.
+
+**LLD updated.** `docs/lld/volumes.md`, `docs/lld/cache.md` and the `docs/lld/README.md` index rows.
+
+**User-facing documentation.** no change. README.md, the Use book and the More page do not describe pyramids, and nothing outside the crate calls the new methods until F-120.
+
+**Deviations from the design plan.** None in behaviour. The plan sentence promising a test for a valid prefix after a failure mid-pyramid was removed, because that path is unreachable without fault injection. Implemented by an external coding agent over five independent review passes.
+
+**Notes for future sessions.** What a non-finite F32 sample does to a coarser level is an open operator question in `docs/sprints/CURRENT_SPRINT.md`, pinned by `non_finite_floats_keep_the_current_bits`, to be answered before F-120. `VoxelStore::slice_mut` is public and can write level 0 without dropping coarser levels, which predates this story.

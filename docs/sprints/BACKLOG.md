@@ -370,7 +370,7 @@ Bounded GPU residency on unbounded data. The first of the three checkable claims
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-119 | E30.1 | S46 | Brick decomposition and multiscale pyramid generation | Rust | 10w | F-058 | pending |
+| F-119 | E30.1 | S46 | Brick decomposition and multiscale pyramid generation | Rust | 10w | F-058 | done |
 | F-120 | E30.2 | S47 | Frustum and LOD chunk selection | Rust | 8w | F-119 | pending |
 | F-121 | E30.3 | S48 | Adaptive per-LOD sample count with opacity correction | Rust | 8w | F-120 | pending |
 | F-122 | E30.4 | S48 | Residency budget, prefetch and eviction policy | Rust | 8w | F-120 | pending |
