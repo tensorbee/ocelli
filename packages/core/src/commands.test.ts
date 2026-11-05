@@ -6,6 +6,7 @@ import {
   packPointerFrame,
   submitCommands,
 } from "./commands.js";
+import { OcelliError } from "./ocelli-error.js";
 import type { PackedCommand } from "./commands.js";
 import {
   COLORMAP_BYTE,
@@ -207,10 +208,22 @@ describe("packed commands", () => {
   });
 
   it("refuses a viewport id that does not fit in u16", () => {
-    expect(() => packCommands(70_000, [])).toThrow(RangeError);
-    expect(() =>
-      packCommands(70_000, [{ kind: "Scroll", step: 1 }]),
-    ).toThrow(RangeError);
+    for (const run of [
+      () => packCommands(70_000, []),
+      () => packCommands(70_000, [{ kind: "Scroll", step: 1 }]),
+    ]) {
+      let caught: unknown;
+      try {
+        run();
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(OcelliError);
+      if (!(caught instanceof OcelliError)) {
+        throw new Error("expected OcelliError");
+      }
+      expect(caught.code).toBe("InvalidValue");
+    }
   });
 });
 

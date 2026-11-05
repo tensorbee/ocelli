@@ -346,7 +346,8 @@ export function Viewer() {
 `DicomwebClient` in `@ocelli/core` is the QIDO-RS, WADO-RS and WADO-URI client.
 Construct it with a studies service URL, a WADO-URI URL, `fetch`, wasm memory
 and a response sink. A transport failure keeps a status code. It does not keep
-the URL, the headers or the body.
+the URL, the headers or the body. An option the client does not know is refused
+with `OcelliError` code `UnknownOption`, which names it.
 
 ## The one thing to know before contributing
 

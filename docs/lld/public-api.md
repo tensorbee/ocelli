@@ -1,7 +1,7 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199, F-200, F-201
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199, F-200, F-201, F-230
+**Last updated:** 2026-11-05
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
 F-101 built the wire. F-104 moved every boundary number into one Rust table
@@ -59,6 +59,59 @@ _pad: [u32; 3]
 means refining. `readViewportState` reads a 96-byte copy into plain numbers.
 `drainRing` reads a copied event buffer. Neither function views wasm memory.
 `coreAvailable()` stays false until a built module is loaded.
+
+## Options and refusals
+
+An options object in `@ocelli/core` refuses a key it does not declare.
+`packages/core/src/options.ts` holds one key list per type and
+`refuseUnknownOptions`, and each entry point calls it before it reads a field.
+
+**The in-scope rule.** Every exported interface or type alias in
+`packages/core/src` whose name ends in `Options` or `Request`, plus
+`FrameCommitMeta`. `OPTION_KEY_LISTS` maps these eight names to their keys:
+
+| Type | Checked by |
+|------|------------|
+| `DicomwebClientOptions` | `new DicomwebClient` |
+| `QidoSearchOptions` | `searchStudies`, `searchSeries` and `searchInstances` |
+| `PointerDispatchOptions` | `createPointerDispatch` |
+| `CursorControllerOptions` | `createCursorController` |
+| `WadoInstanceRequest` | `postWadoInstance` |
+| `KeyObjectRequest` | `writeKeyObject` |
+| `SecondaryCaptureRequest` | `writeSecondaryCapture` |
+| `FrameCommitMeta` | `writeFrame` with a ticketed sink, and `acceptTransferredFrame` |
+
+Records such as `HandoffMeta`, `StackFrameKey` and `PackedCommand` are not
+checked.
+
+**What is refused.** An own key from `Reflect.ownKeys`, string or symbol, that
+the list does not name throws `OcelliError` code `UnknownOption`. The message
+is `` `${owner} has no option ${JSON.stringify(key)}` ``. The key is cut to 64
+UTF-16 units first, and a symbol is written as `String(symbol)`.
+`error.option` holds the same text. An inherited key is not checked. A
+declared key whose value is `undefined` is accepted. A value that is not a
+non-null, non-array object throws `InvalidOptions`, message
+`` `${owner} is not an options object` ``. `acceptTransferredFrame`, and
+`writeFrame` with a ticketed sink, throw `InvalidOptions` with `frame meta is
+not an object` for a meta that is not an object, which includes a function.
+An array gets the generic message. The keys of
+`CursorControllerOptions.cursors` are checked against `STACK_COMMANDS`, with
+that path as the owner.
+
+The refusal comes before any fetch, allocation or write. The three QIDO
+searches reject their promise rather than throw synchronously.
+`writeKeyObject` and `writeSecondaryCapture` return `null` for content they
+cannot write, and still throw `UnknownOption` for an unknown key.
+`docs/lld/errors.md`, "Shell errors are a second namespace", lists every
+shell code.
+
+**The census.** Each key list `satisfies` the type's keys, and
+`OPTION_LISTS_COMPLETE` is `true` only when every list names every field, so
+a new field fails `npm run typecheck` until its list names it.
+`options.test.ts`, "every options type has a key list", scans every non-test
+`.ts` file in `packages/core/src` for an exported `*Options` or `*Request`
+type, adds `FrameCommitMeta`, and expects exactly the names in
+`OPTION_KEY_LISTS`. A new such type with no key list fails that test.
 
 ## Scene and stack viewport
 

@@ -5235,3 +5235,31 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The plan measured 281 core entries and 141 test paths. A fresh build gives 278 and 138, because a stale `dist/cursor.probe.test.*` with no source is not recreated. The non-test count, 140, is what AC1 requires. Each test project also names its own `tsBuildInfoFile`, which the plan did not, after pass 1 found the two shared one path and never settled. Implemented by an external coding agent. Three review passes.
 
 **Notes for future sessions.** The plan's decision 1 still lists a three-entry exclude for react, which is now two globs. The tree is the authority.
+
+## F-230, Public options refuse unknown keys, one coded shell error, and loadCore keeps its cause, completed 2026-11-05
+
+**What was built.** `packages/core/src/options.ts` holds one key list per checked type, `OPTION_KEY_LISTS`, for the eight in scope: `DicomwebClientOptions`, `QidoSearchOptions`, `PointerDispatchOptions`, `CursorControllerOptions`, `WadoInstanceRequest`, `KeyObjectRequest`, `SecondaryCaptureRequest` and `FrameCommitMeta`. `refuseUnknownOptions` refuses an unknown own key with `OcelliError` code `UnknownOption` before any side effect, and a non-object with `InvalidOptions`. The lists use `satisfies` and a completeness check, so a type and its list cannot drift without a typecheck failure. `OcelliError` in `ocelli-error.ts` is the shell's one coded error, with a closed set of string codes separate from the numeric ring codes. `DicomwebError` extends it, and the bulk, command and instance errors use it. `loadCore` returns `Promise<true>` and rejects with `CoreLoadFailed` carrying the cause, with a shared pending load and a retry after failure.
+
+**HLD sections implemented.** The public API rules of the TypeScript shell.
+
+**Deviations.** none
+
+**Crates / packages modified.** `@ocelli/core` (`ocelli-error.ts` and `options.ts` new, `dicomweb.ts`, `bulk.ts`, `commands.ts`, `instance-bytes.ts`, `pointer.ts`, `cursor.ts`, `tid2010.ts`, `secondary-capture.ts`, `load.ts`, `index.ts`), `examples/viewer-react/src/core-worker.ts`.
+
+**Tests added.** Vitest grows from 57 files and 468 tests to 60 and 486, with `options.test.ts`, `errors-class.test.ts` and `load.types.test.ts`. Pass 1 applied 19 mutations and each went red. The compile-time drift check was confirmed by adding a field without listing it.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the merged worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 695abf3.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes the TypeScript shell's options and errors only.
+
+**LLD updated.** `docs/lld/public-api.md`, `docs/lld/errors.md`, `docs/lld/dicomweb.md`, `docs/lld/typescript-packaging.md` and their `docs/lld/README.md` index rows. The public-api row also gains F-199, F-200 and F-201, which that file's header already listed.
+
+**User-facing documentation.** `README.md` states that an unknown client option is refused. The Use book chapters 5.1, 5.6 and 15 describe `loadCore`'s rejection, the `OcelliError` branch in the DICOMweb sample, and the two error namespaces. The More page does not describe the shell's options or errors.
+
+**Deviations from the design plan.** AC6 no longer covers the engine `RangeError` from a view over an out-of-range sink pointer, which passes through by decision 6. AC2 allows one declared test change, a `dicomweb.test.ts` call that spread an object carrying an extra key. Both are recorded as lead amendments in the plan. Implemented by an external coding agent. Seven review passes, the last four on documentation sentences and one test.
+
+**Notes for future sessions.** `acceptTransferredFrame` accepts but ignores `stackIndex` and `stackEpoch`, which predates this story and is recorded for the operator in `CURRENT_SPRINT.md`.
