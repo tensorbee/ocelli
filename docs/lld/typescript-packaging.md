@@ -1,6 +1,6 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218
 **Last updated:** 2026-11-05
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
@@ -155,6 +155,7 @@ consumer receives, and every check here is about the second thing.
 | The npm version equals the Rust workspace version | `docs/RELEASE.md` says the crates and the packages version together and that a skew is not supported |
 | `@ocelli/react` depends on the exact version `@ocelli/core` publishes | A range resolves to whatever the registry happens to have |
 | A project **outside the workspace** installs the real tarballs, imports under `node`, and type-checks under both `bundler` and `node16` | The one that matters. See below |
+| The consumer resolves each unreachable exception at its recorded version. The smoke run imports `@ocelli/core` and requires `dcmjs` under `module.registerHooks`, so both the ESM build and the CommonJS build are resolved. The trace must record `node_modules/dcmjs/build/dcmjs.es.js` and `node_modules/dcmjs/build/dcmjs.js` and must not record a URL under the excepted package. Every other installed `.js`, `.mjs` or `.cjs` file is scanned for the package name as a module specifier in single quotes, double quotes or backticks, including a subpath, a relative `./node_modules/<name>` path, and a relative `../` or `../../` path whose next segment is the package name | An exception that describes this repository's lock rather than the consumer's, a hook that records nothing, or a published file that names the package as a specifier |
 
 ### Why the consumer install is outside the workspace
 
@@ -169,6 +170,36 @@ outside the tree, and imported from there.
 **Both resolution modes are checked because an `exports` map can satisfy one
 and not the other.** `bundler` is what a Vite or webpack consumer uses.
 `node16` is what a plain `tsc` consumer uses and it is the stricter of the two.
+
+### Why no override is used
+
+npm's documentation says "Overrides are only considered in the root
+`package.json` file for a project." An override written in this repository
+changes only this repository's lockfile. A consumer of `@ocelli/core` resolves
+dependencies from their own root `package.json`. The recorded answer is a
+check that no shipped file loads `adm-zip` on the paths this gate runs.
+`gate packages` checks that on every run.
+
+The check has three parts. The consumer lock must resolve the excepted
+package at the recorded version. The smoke script imports `@ocelli/core` and
+calls `createRequire(import.meta.url)("dcmjs")` under node's
+`module.registerHooks` resolve hook, which records ESM and CommonJS
+resolutions on the main thread. `module.register` does not see a `require`
+from `createRequire`, which is why the hook is `registerHooks`. The trace
+must contain the resolved `dcmjs/build/dcmjs.es.js` URL and the resolved
+`dcmjs/build/dcmjs.js` URL and must not contain a URL under the excepted
+package. An empty or absent trace is a refusal. Every other installed script
+is scanned for that package name as a quoted module specifier, in any of the
+three quote styles, with or without a subpath, including a relative `../` or
+`../../` path. A load whose specifier is built at run time in code the smoke
+run does not execute on its main thread (for example a Worker or a child
+process, or a function the import never calls) is outside the check. The
+root `package.json` has no `engines` field. CI pins node 24, and
+`registerHooks` is the node 24 API this check uses. The packages gate also
+runs `scripts/tests/test_unreachable_injections.py` after that check.
+
+A consumer's own npm audit also lists `@ocelli/core` and `@ocelli/react` as
+high, because they depend on dcmjs.
 
 ## `npm publish --dry-run`
 

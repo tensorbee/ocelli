@@ -1,6 +1,6 @@
 # The guard harness
 
-**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217, F-219
+**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217, F-218, F-219
 **Last updated:** 2026-11-05
 
 A guard is any refusal this repository can produce: a script that exits 1, a
@@ -609,6 +609,25 @@ Recorded constants added with this gate are the `deny.toml` allow list,
 `pins.openjph-notice` deletes `vendor/openjph-core-0.1.0/LICENSE` and must
 refuse with the missing-notice text. The unmodified tree accepts.
 `pins.openjph-notice-hash` appends a newline and must refuse on the hash.
+
+## The advisory gate
+
+`bin/ocelli.sh gate advisories` is in the floor. It audits the published npm
+runtime closure for high and critical advisories. `scripts/advisory_check.py`
+reads `ci/advisories.toml`, the root lock and every tracked `overrides`
+object. moderate, low and info print a warning and do not fail. A severity
+outside the five npm uses fails closed.
+
+This is the one floor gate whose verdict follows an external database. A new
+high advisory turns the gate red without a tree change. A missing or
+unreadable audit report is a failure and never a skip.
+
+The one recorded exception is adm-zip 0.5.17, scope unreachable, checked by
+`gate packages` on a real consumer install, on the paths that gate runs. An
+override of a closure package is refused, because a root override never
+reaches a consumer of the published package.
+
+Recorded constants are `REFUSED`, `KNOWN`, `FIELDS`, `SCOPES` and `PROOFS`.
 
 ## The two gates
 
