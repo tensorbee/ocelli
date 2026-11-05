@@ -404,6 +404,280 @@
           }
         }
       }
+    },
+    "darwin|27.0.0|arm64|Apple_M4_Max|16|51539607552": {
+      "host_class": {
+        "platform": "darwin",
+        "release": "27.0.0",
+        "arch": "arm64",
+        "cpu_model": "Apple M4 Max",
+        "cpu_count": 16,
+        "memory_bytes": 51539607552
+      },
+      "subjects": {
+        "viewer.open": {
+          "value": 1013,
+          "unit": "ms",
+          "tolerance": 0.25,
+          "tolerance_provenance": "first recording headroom, not a calibrated spread",
+          "provenance": "measured",
+          "recorded": "2026-11-05",
+          "story": "F-216",
+          "why": "F-216 first recording of the folder viewer subjects on this host. The figures are from the uncommitted working tree.",
+          "host_class": {
+            "platform": "darwin",
+            "release": "27.0.0",
+            "arch": "arm64",
+            "cpu_model": "Apple M4 Max",
+            "cpu_count": 16,
+            "memory_bytes": 51539607552
+          },
+          "instrument": {
+            "node": "v24.13.0",
+            "playwright": "1.62.1",
+            "chromium": "151.0.7922.34"
+          },
+          "conditions": {
+            "load_average": [
+              9.951171875,
+              6.17236328125,
+              5.369140625
+            ],
+            "free_memory_bytes": 3272998912,
+            "uptime_seconds": 412586
+          },
+          "detail": {
+            "samples_ms": [
+              1018,
+              954,
+              1021,
+              1031,
+              1013,
+              1015,
+              983,
+              960,
+              971
+            ],
+            "threshold_ms": 1100,
+            "thresholds_met": true
+          }
+        },
+        "viewer.first_image": {
+          "value": 16.400000035762787,
+          "unit": "ms",
+          "tolerance": 0.25,
+          "tolerance_provenance": "first recording headroom, not a calibrated spread",
+          "provenance": "measured",
+          "recorded": "2026-11-05",
+          "story": "F-216",
+          "why": "F-216 first recording of the folder viewer subjects on this host. The figures are from the uncommitted working tree.",
+          "host_class": {
+            "platform": "darwin",
+            "release": "27.0.0",
+            "arch": "arm64",
+            "cpu_model": "Apple M4 Max",
+            "cpu_count": 16,
+            "memory_bytes": 51539607552
+          },
+          "instrument": {
+            "node": "v24.13.0",
+            "playwright": "1.62.1",
+            "chromium": "151.0.7922.34"
+          },
+          "conditions": {
+            "load_average": [
+              9.951171875,
+              6.17236328125,
+              5.369140625
+            ],
+            "free_memory_bytes": 3272998912,
+            "uptime_seconds": 412586
+          },
+          "detail": {
+            "ct_ms": [
+              14.5,
+              17.5,
+              10.899999976158142,
+              16.600000023841858,
+              16.399999976158142,
+              16.400000035762787,
+              16.5,
+              19.5,
+              15.599999964237213
+            ],
+            "dx_ms": [
+              230.39999997615814,
+              221.79999995231628,
+              194.4000000357628,
+              225.39999997615814,
+              189.89999997615814,
+              191.5,
+              227.0999999642372,
+              193.19999998807907,
+              197
+            ],
+            "dx_median_ms": 197,
+            "ct_threshold_ms": 20,
+            "dx_threshold_ms": 250,
+            "restart_recovered": true,
+            "thresholds_met": true
+          }
+        },
+        "viewer.scroll_rate": {
+          "value": 51.282051282051285,
+          "unit": "frames_per_second",
+          "tolerance": 0.25,
+          "tolerance_provenance": "first recording headroom, not a calibrated spread",
+          "provenance": "measured",
+          "recorded": "2026-11-05",
+          "story": "F-216",
+          "why": "F-216 first recording of the folder viewer subjects on this host. The figures are from the uncommitted working tree.",
+          "host_class": {
+            "platform": "darwin",
+            "release": "27.0.0",
+            "arch": "arm64",
+            "cpu_model": "Apple M4 Max",
+            "cpu_count": 16,
+            "memory_bytes": 51539607552
+          },
+          "instrument": {
+            "node": "v24.13.0",
+            "playwright": "1.62.1",
+            "chromium": "151.0.7922.34"
+          },
+          "conditions": {
+            "load_average": [
+              9.951171875,
+              6.17236328125,
+              5.369140625
+            ],
+            "free_memory_bytes": 3272998912,
+            "uptime_seconds": 412586
+          },
+          "detail": {
+            "rates": [
+              51.15941151485451,
+              50.83361069963145,
+              51.45122726365426,
+              51.29288235808121,
+              51.282051282051285
+            ],
+            "keys": 847,
+            "blank_samples": 0,
+            "threshold_frames_per_second": 55,
+            "thresholds_met": false
+          }
+        },
+        "viewer.window_step": {
+          "value": 8.5,
+          "unit": "ms",
+          "tolerance": 0.25,
+          "tolerance_provenance": "first recording headroom, not a calibrated spread",
+          "provenance": "measured",
+          "recorded": "2026-11-05",
+          "story": "F-216",
+          "why": "F-216 first recording of the folder viewer subjects on this host. The figures are from the uncommitted working tree.",
+          "host_class": {
+            "platform": "darwin",
+            "release": "27.0.0",
+            "arch": "arm64",
+            "cpu_model": "Apple M4 Max",
+            "cpu_count": 16,
+            "memory_bytes": 51539607552
+          },
+          "instrument": {
+            "node": "v24.13.0",
+            "playwright": "1.62.1",
+            "chromium": "151.0.7922.34"
+          },
+          "conditions": {
+            "load_average": [
+              3.388671875,
+              5.51220703125,
+              5.3115234375
+            ],
+            "free_memory_bytes": 1598357504,
+            "uptime_seconds": 412800
+          },
+          "detail": {
+            "ct_ms": [
+              8.399999976158142,
+              8.600000023841858,
+              8.5,
+              8.599999964237213,
+              8.300000011920929,
+              8.099999964237213,
+              8.5,
+              8.400000035762787,
+              8.600000023841858
+            ],
+            "dx_ms": [
+              133.60000002384186,
+              132.80000001192093,
+              132.39999997615814,
+              131.29999995231628,
+              136.0999999642372,
+              131.60000002384186,
+              132.5,
+              127.69999998807907,
+              130.9000000357628
+            ],
+            "dx_median_ms": 132.39999997615814,
+            "preview_bodies": 0,
+            "ct_threshold_ms": 5,
+            "dx_threshold_ms": 70,
+            "thresholds_met": false
+          },
+          "replaced": 8.599999964237213
+        },
+        "viewer.resident_memory": {
+          "value": 566099968,
+          "unit": "bytes",
+          "tolerance": 0.25,
+          "tolerance_provenance": "first recording headroom, not a calibrated spread",
+          "provenance": "measured",
+          "recorded": "2026-11-05",
+          "story": "F-216",
+          "why": "F-216 first recording of the folder viewer subjects on this host. The figures are from the uncommitted working tree.",
+          "host_class": {
+            "platform": "darwin",
+            "release": "27.0.0",
+            "arch": "arm64",
+            "cpu_model": "Apple M4 Max",
+            "cpu_count": 16,
+            "memory_bytes": 51539607552
+          },
+          "instrument": {
+            "node": "v24.13.0",
+            "playwright": "1.62.1",
+            "chromium": "151.0.7922.34"
+          },
+          "conditions": {
+            "load_average": [
+              9.951171875,
+              6.17236328125,
+              5.369140625
+            ],
+            "free_memory_bytes": 3272998912,
+            "uptime_seconds": 412586
+          },
+          "detail": {
+            "peak_rss_bytes": 566099968,
+            "samples": 260,
+            "held": {
+              "build": "release",
+              "budget": 268435456,
+              "used": 236091456,
+              "files": 121,
+              "frames": 176
+            },
+            "js_heap_bytes": 168451423,
+            "rss_bound_bytes": 528194192,
+            "heap_bound_bytes": 257886080,
+            "thresholds_met": false
+          }
+        }
+      }
     }
   }
 }

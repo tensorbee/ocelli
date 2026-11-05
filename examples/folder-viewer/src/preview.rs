@@ -9,6 +9,10 @@
 //! groups, with the top-level attributes as the fallback.
 //! Invert flips the display byte after the chain.
 
+use std::cell::Cell;
+use std::sync::OnceLock;
+use std::time::Instant;
+
 use dicom_core::dictionary::{DataDictionary, DataDictionaryEntry};
 use dicom_core::header::{DataElement, EmptyObject, Header};
 use dicom_core::{DicomValue, PrimitiveValue, Tag, VR};
@@ -19,7 +23,7 @@ use ocelli_codec::{
     RawDecoder, Registry, register_htj2k_decoders, register_jpeg_decoders,
     register_jpeg2000_decoders, register_jpegls_decoders, register_native_and_rle_decoders,
 };
-use ocelli_core::{Display, Stored};
+use ocelli_core::Stored;
 use ocelli_dicom::{
     DispatchPath, EncapsulatedFrameIndex, MetadataElement, MetadataSet, MetadataValue,
     MultiframeMetadata, ParseError, TopLevelFallback, parse_decimal_string, parse_part10,
@@ -27,7 +31,7 @@ use ocelli_dicom::{
 use ocelli_pixel::{
     ByteOrder, ImageDimensions, LutChain, ModalityTransform, PhotometricInterpretation,
     PresentationLutEvidence, PresentationLutShape, SampleLayout, StoredBits,
-    StoredPixelDescription, VoiFunction, VoiTransform,
+    StoredPixelDescription, StoredSampleTable, VoiFunction, VoiTransform,
 };
 use ocelli_render::display_index;
 use ocelli_viewport::presentation::WindowPreset;
@@ -208,6 +212,22 @@ pub fn preview_first_frame(bytes: &[u8]) -> Result<Preview, PreviewError> {
 /// Returns [`PreviewError`] before a grey byte is written when the file,
 /// the frame, or the window cannot be shown.
 pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, PreviewError> {
+    validate_frame_request(request)?;
+    let mut native = Vec::new();
+    let held = decode_held(bytes, request.frame, &mut native)?;
+    let mut scratch = Vec::new();
+    let mut grey = Vec::new();
+    render_held(&held, request, &mut scratch, &mut grey)
+}
+
+/// Refuse a window header that cannot name one window.
+///
+/// # Errors
+///
+/// Returns [`PreviewError::Window`] when center and width are not paired,
+/// a preset is combined with a numeric window or a function, or a number
+/// is not finite.
+pub(crate) fn validate_frame_request(request: FrameRequest) -> Result<(), PreviewError> {
     if request.window_center.is_some() != request.window_width.is_some() {
         return Err(PreviewError::Window);
     }
@@ -225,14 +245,195 @@ pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, Pre
     {
         return Err(PreviewError::Window);
     }
+    Ok(())
+}
+
+/// How many times this thread has started a decode.
+///
+/// A render that calls [`decode_held`] again counts as a fresh decode.
+pub(crate) fn decode_ticks() -> u64 {
+    DECODE_TICKS.with(Cell::get)
+}
+
+thread_local! {
+    static DECODE_TICKS: Cell<u64> = const { Cell::new(0) };
+    static PHASE: Cell<PhaseRecord> = const { Cell::new(PhaseRecord::ZERO) };
+}
+
+#[cfg(test)]
+thread_local! {
+    static BORROWED_DECODES: Cell<u64> = const { Cell::new(0) };
+}
+
+/// One preview's phase times, in microseconds. Zero unless profiling.
+#[derive(Clone, Copy)]
+pub(crate) struct PhaseRecord {
+    pub lookup_us: u128,
+    pub unpack_us: u128,
+    pub chain_us: u128,
+    pub voi_us: u128,
+    pub grey_us: u128,
+    pub fused_us: u128,
+    pub write_us: u128,
+    pub pixels: usize,
+}
+
+impl PhaseRecord {
+    const ZERO: Self = Self {
+        lookup_us: 0,
+        unpack_us: 0,
+        chain_us: 0,
+        voi_us: 0,
+        grey_us: 0,
+        fused_us: 0,
+        write_us: 0,
+        pixels: 0,
+    };
+}
+
+/// `OCELLI_PROFILE` splits a held window step. Unset costs one flag read.
+pub(crate) fn profiling() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var_os("OCELLI_PROFILE").is_some())
+}
+
+pub(crate) fn reset_phases() {
+    PHASE.with(|cell| cell.set(PhaseRecord::ZERO));
+}
+
+pub(crate) fn note_lookup(micros: u128) {
+    PHASE.with(|cell| {
+        let mut phase = cell.get();
+        phase.lookup_us = micros;
+        cell.set(phase);
+    });
+}
+
+pub(crate) fn note_write(micros: u128) {
+    PHASE.with(|cell| {
+        let mut phase = cell.get();
+        phase.write_us = micros;
+        cell.set(phase);
+    });
+}
+
+pub(crate) fn phases() -> PhaseRecord {
+    PHASE.with(Cell::get)
+}
+
+fn note_render(update: impl FnOnce(&mut PhaseRecord)) {
+    PHASE.with(|cell| {
+        let mut phase = cell.get();
+        update(&mut phase);
+        cell.set(phase);
+    });
+}
+
+fn note_decode() {
+    DECODE_TICKS.with(|cell| cell.set(cell.get().wrapping_add(1)));
+}
+
+#[cfg(test)]
+fn borrowed_decode_ticks() -> u64 {
+    BORROWED_DECODES.with(Cell::get)
+}
+
+fn note_borrowed_decode() {
+    #[cfg(test)]
+    BORROWED_DECODES.with(|cell| cell.set(cell.get().wrapping_add(1)));
+}
+
+/// One decoded frame held so a later window does not decode it again.
+///
+/// The samples are decoder output. Grey bytes are not stored, because a
+/// window change has to run `LutChain` again.
+pub(crate) struct HeldFrame {
+    /// Decoder output for this frame. Capacity is the accounted size.
+    pub(crate) samples: Vec<u8>,
+    /// Image Pixel evidence for [`Self::samples`].
+    pub(crate) description: StoredPixelDescription,
+    /// Byte order of [`Self::samples`]. Native words are already little endian.
+    pub(crate) byte_order: ByteOrder,
+    /// Request-independent chain inputs, or the refusal that blocks every window.
+    pub(crate) recipe: Result<Recipe, PreviewError>,
+    /// Spacing and edge letters. Returned only after the chain is built.
+    pub(crate) facts: Result<FrameFacts, PreviewError>,
+    /// Full-range center and width when the file has no window. Otherwise an error.
+    pub(crate) full_range: Result<(f32, f32), PreviewError>,
+    /// Number of Frames, or 1 when that attribute is absent.
+    pub(crate) frames: u32,
+    /// Columns.
+    pub(crate) width: u32,
+    /// Rows.
+    pub(crate) height: u32,
+}
+
+/// Chain inputs that do not depend on the request.
+pub(crate) struct Recipe {
+    /// Modality stage. A Modality LUT Sequence never reaches this value.
+    pub(crate) modality: ModalityTransform,
+    /// Photometric Interpretation of the frame.
+    pub(crate) photometric: PhotometricInterpretation,
+    /// Presentation LUT evidence. Checked after the window branch.
+    pub(crate) evidence: Result<PresentationLutEvidence, PreviewError>,
+    /// Whether a VOI LUT Sequence is present. A numeric override does not read it.
+    pub(crate) voi_lut: Result<bool, PreviewError>,
+    /// The file window, or the refusal that applies only when the file window is used.
+    pub(crate) file_window: Result<FileWindow, PreviewError>,
+}
+
+/// The file window, computed once.
+pub(crate) enum FileWindow {
+    /// No Window Center or Window Width. LINEAR_EXACT over the modality range.
+    Full,
+    /// The file's centers, widths, and function.
+    Explicit {
+        /// Window Center values.
+        centers: Vec<f32>,
+        /// Window Width values.
+        widths: Vec<f32>,
+        /// VOI LUT Function from the file, or LINEAR when it is absent.
+        function: VoiFunction,
+    },
+}
+
+/// Decode one frame into samples and a window recipe.
+///
+/// # Errors
+///
+/// Returns the refusals that happen before a sample can be held: Part 10,
+/// image attributes, size, photometric interpretation, frame index, and decode.
+pub(crate) fn decode_held(
+    bytes: &[u8],
+    frame: u32,
+    native: &mut Vec<u8>,
+) -> Result<HeldFrame, PreviewError> {
+    note_decode();
+    if let Some((header, range)) = split_pixel_payload(bytes)
+        && let Some(pixels) = bytes.get(range)
+        && let Ok(parsed) = parse_part10(&header)
+        && native_dispatch(parsed.transfer_syntax().dispatch_path())
+        && borrowed_pixels_fit(parsed.object(), pixels)
+    {
+        return finish_decode(&parsed, Some(pixels), frame, native);
+    }
     let parsed = parse_part10(bytes).map_err(part10_error)?;
+    finish_decode(&parsed, None, frame, native)
+}
+
+fn finish_decode(
+    parsed: &ocelli_dicom::ParsedDicom,
+    source: Option<&[u8]>,
+    frame: u32,
+    native: &mut Vec<u8>,
+) -> Result<HeldFrame, PreviewError> {
     let object = parsed.object();
     let rows = required_u16(object, ROWS)?;
     let columns = required_u16(object, COLUMNS)?;
     let height = u32::from(rows);
     let width = u32::from(columns);
-    let pixels = height.checked_mul(width).ok_or(PreviewError::TooLarge)?;
-    if pixels == 0 || pixels > MAX_PIXELS {
+    let pixel_count = height.checked_mul(width).ok_or(PreviewError::TooLarge)?;
+    if pixel_count == 0 || pixel_count > MAX_PIXELS {
         return Err(PreviewError::TooLarge);
     }
     let photometric = photometric(object)?;
@@ -245,10 +446,10 @@ pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, Pre
     let high_bit = required_u16(object, HIGH_BIT)?;
     let representation = pixel_representation(object)?;
     let frames = frame_count(object)?;
-    if request.frame >= frames {
+    if frame >= frames {
         return Err(PreviewError::Frame);
     }
-    let frame_index = usize::try_from(request.frame).map_err(|_| PreviewError::Frame)?;
+    let frame_index = usize::try_from(frame).map_err(|_| PreviewError::Frame)?;
     let vr = pixel_vr(object)?;
     let desc = FrameDesc::new(FrameDescInput {
         rows,
@@ -265,7 +466,7 @@ pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, Pre
         pixel_data_vr: vr,
     })
     .map_err(|_| PreviewError::Attribute)?;
-    let decoded = decode_frame(&parsed, object, &desc, frames, frame_index)?;
+    let decoded = decode_frame(parsed, object, &desc, frames, frame_index, source, native)?;
     let stored_bits = StoredBits::new(
         u8::try_from(bits_allocated).map_err(|_| PreviewError::Attribute)?,
         u8::try_from(bits_stored).map_err(|_| PreviewError::Attribute)?,
@@ -280,42 +481,390 @@ pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, Pre
     let count = description
         .sample_count()
         .map_err(|_| PreviewError::Attribute)?;
-    let mut stored = vec![Stored(0.0); count];
-    description
-        .unpack(&decoded, ByteOrder::LittleEndian, &mut stored)
-        .map_err(|_| PreviewError::Decode)?;
-    let metadata = project_metadata(object)?;
-    let multi = MultiframeMetadata::new(&metadata).map_err(|_| PreviewError::Attribute)?;
-    let mapped = lut_chain(object, &multi, photometric, &stored, request, frame_index)?;
-    let facts = frame_facts(&metadata, &multi, frame_index)?;
-    let mut display = vec![Display(0.0); stored.len()];
-    mapped
-        .chain
-        .map_into(&stored, &mut display)
-        .map_err(|_| PreviewError::Window)?;
-    let mut grey = vec![0_u8; display.len()];
-    for (cell, sample) in grey.iter_mut().zip(display.iter()) {
-        let index = display_index(sample.0, 255);
-        *cell = u8::try_from(index).map_err(|_| PreviewError::Window)?;
+    let bytes_per_sample = usize::from(stored_bits.bits_allocated() / 8);
+    let expected = count
+        .checked_mul(bytes_per_sample)
+        .ok_or(PreviewError::Decode)?;
+    if decoded.len() != expected {
+        return Err(PreviewError::Decode);
     }
-    if request.invert {
-        for cell in &mut grey {
-            *cell = 255 - *cell;
-        }
-    }
-    Ok(Preview {
+    let mut samples = decoded;
+    samples.shrink_to_fit();
+    let prepared = prepare_held(object, &description, &samples, frame_index);
+    Ok(HeldFrame {
+        samples,
+        description,
+        byte_order: ByteOrder::LittleEndian,
+        recipe: prepared.recipe,
+        facts: prepared.facts,
+        full_range: prepared.full_range,
+        frames,
         width,
         height,
-        frames,
-        full_range: mapped.full_range,
+    })
+}
+
+struct Prepared {
+    recipe: Result<Recipe, PreviewError>,
+    facts: Result<FrameFacts, PreviewError>,
+    full_range: Result<(f32, f32), PreviewError>,
+}
+
+fn prepare_held(
+    object: &DefaultDicomObject,
+    description: &StoredPixelDescription,
+    samples: &[u8],
+    frame_index: usize,
+) -> Prepared {
+    let photometric = description.layout.photometric_interpretation();
+    let metadata = match project_metadata(object) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return Prepared {
+                recipe: Err(error),
+                facts: Err(error),
+                full_range: Err(error),
+            };
+        }
+    };
+    let multi = match MultiframeMetadata::new(&metadata) {
+        Ok(multi) => multi,
+        Err(_) => {
+            return Prepared {
+                recipe: Err(PreviewError::Attribute),
+                facts: Err(PreviewError::Attribute),
+                full_range: Err(PreviewError::Attribute),
+            };
+        }
+    };
+    let facts = frame_facts(&metadata, &multi, frame_index);
+    if let Err(error) = modality_blocked(&multi, frame_index) {
+        return Prepared {
+            recipe: Err(error),
+            facts,
+            full_range: Err(error),
+        };
+    }
+    let (slope, intercept) = match rescale(&multi, frame_index) {
+        Ok(pair) => pair,
+        Err(error) => {
+            return Prepared {
+                recipe: Err(error),
+                facts,
+                full_range: Err(error),
+            };
+        }
+    };
+    let modality = match ModalityTransform::new(None, Some(slope), Some(intercept)) {
+        Ok(modality) => modality,
+        Err(_) => {
+            return Prepared {
+                recipe: Err(PreviewError::Window),
+                facts,
+                full_range: Err(PreviewError::Window),
+            };
+        }
+    };
+    let voi_lut = group_has(
+        &multi,
+        frame_index,
+        FRAME_VOI_LUT_SEQUENCE,
+        VOI_LUT_SEQUENCE,
+    );
+    let evidence = presentation(object);
+    let (file_window, full_range) =
+        file_window_of(&multi, &modality, description, samples, frame_index);
+    Prepared {
+        recipe: Ok(Recipe {
+            modality,
+            photometric,
+            evidence,
+            voi_lut,
+            file_window,
+        }),
+        facts,
+        full_range,
+    }
+}
+
+/// PS3.3 C.11.1. A Modality LUT Sequence replaces rescale, so identity slope is wrong.
+fn modality_blocked(
+    multi: &MultiframeMetadata<'_>,
+    frame_index: usize,
+) -> Result<(), PreviewError> {
+    if group_has(
+        multi,
+        frame_index,
+        PIXEL_VALUE_TRANSFORMATION,
+        MODALITY_LUT_SEQUENCE,
+    )? {
+        return Err(PreviewError::Window);
+    }
+    Ok(())
+}
+
+fn file_window_of(
+    multi: &MultiframeMetadata<'_>,
+    modality: &ModalityTransform,
+    description: &StoredPixelDescription,
+    samples: &[u8],
+    frame_index: usize,
+) -> (
+    Result<FileWindow, PreviewError>,
+    Result<(f32, f32), PreviewError>,
+) {
+    let centers = match resolved_decimals(multi, frame_index, FRAME_VOI_LUT_SEQUENCE, WINDOW_CENTER)
+    {
+        Ok(centers) => centers,
+        Err(error) => return (Err(error), Err(error)),
+    };
+    let widths = match resolved_decimals(multi, frame_index, FRAME_VOI_LUT_SEQUENCE, WINDOW_WIDTH) {
+        Ok(widths) => widths,
+        Err(error) => return (Err(error), Err(error)),
+    };
+    if centers.is_empty() && widths.is_empty() {
+        let count = match description.sample_count() {
+            Ok(count) => count,
+            Err(_) => return (Err(PreviewError::Attribute), Err(PreviewError::Attribute)),
+        };
+        let mut stored = vec![Stored(0.0); count];
+        if description
+            .unpack(samples, ByteOrder::LittleEndian, &mut stored)
+            .is_err()
+        {
+            return (Err(PreviewError::Decode), Err(PreviewError::Decode));
+        }
+        return match full_range(modality, &stored) {
+            Ok(pair) => (Ok(FileWindow::Full), Ok(pair)),
+            Err(error) => (Err(error), Err(error)),
+        };
+    }
+    if centers.is_empty() || centers.len() != widths.len() {
+        return (Err(PreviewError::Window), Err(PreviewError::Window));
+    }
+    match voi_function(multi, frame_index) {
+        Ok(function) => (
+            Ok(FileWindow::Explicit {
+                centers,
+                widths,
+                function,
+            }),
+            Err(PreviewError::Window),
+        ),
+        Err(error) => (Err(error), Err(error)),
+    }
+}
+
+/// Map a held frame through one window.
+///
+/// `scratch` grows to the frame and keeps its spare capacity.
+///
+/// # Errors
+///
+/// Returns [`PreviewError`] when the held recipe or this window cannot be drawn.
+pub(crate) fn render_held(
+    held: &HeldFrame,
+    request: FrameRequest,
+    scratch: &mut Vec<Stored>,
+    grey: &mut Vec<u8>,
+) -> Result<Preview, PreviewError> {
+    let recipe = match &held.recipe {
+        Ok(recipe) => recipe,
+        Err(error) => return Err(*error),
+    };
+    let (centers, widths, function, is_full_range) = select_window(held, recipe, request)?;
+    let center = centers.first().copied().ok_or(PreviewError::Window)?;
+    let width = widths.first().copied().ok_or(PreviewError::Window)?;
+    let evidence = recipe.evidence?;
+    let chain_started = profiling().then(Instant::now);
+    let voi = VoiTransform::new(None, &centers, &widths, 0, function, 0.0, 255.0)
+        .map_err(|_| PreviewError::Window)?;
+    let chain = LutChain::new(recipe.modality.clone(), voi, recipe.photometric, evidence)
+        .map_err(|_| PreviewError::Window)?;
+    let chain_us = chain_started.map(|started| started.elapsed().as_micros());
+    let facts = held.facts.clone()?;
+    // PS3.3 C.11.2.1.2 and C.11.2.1.3. The table is `LutChain::apply` once per
+    // stored integer. `display_index` quantises those entries, then each
+    // sample selects one byte. Wider stored widths keep the per-sample loop.
+    let table_started = profiling().then(Instant::now);
+    let table = chain.stored_sample_table(held.description.bits);
+    let table_us = table_started.map(|started| started.elapsed().as_micros());
+    if let Some(table) = table {
+        grey_from_table(held, &table, request.invert, grey, chain_us, table_us)?;
+    } else {
+        grey_from_samples(held, &chain, request.invert, scratch, grey, chain_us)?;
+    }
+    let grey = std::mem::take(grey);
+    Ok(Preview {
+        width: held.width,
+        height: held.height,
+        frames: held.frames,
+        full_range: is_full_range,
         grey,
         frame: request.frame,
-        window_center: mapped.center,
-        window_width: mapped.width,
-        window_function: function_label(mapped.function),
+        window_center: center,
+        window_width: width,
+        window_function: function_label(function),
         inverted: request.invert,
         facts,
     })
+}
+
+/// Quantise the stored-sample table once, then select a byte per sample.
+fn grey_from_table(
+    held: &HeldFrame,
+    table: &StoredSampleTable,
+    invert: bool,
+    grey: &mut Vec<u8>,
+    chain_us: Option<u128>,
+    table_us: Option<u128>,
+) -> Result<(), PreviewError> {
+    let bake_started = profiling().then(Instant::now);
+    let mut indexed = Vec::with_capacity(table.len());
+    for display in table.entries() {
+        let mut byte = display_byte(display.0)?;
+        if invert {
+            byte = 255 - byte;
+        }
+        indexed.push(byte);
+    }
+    let bake_us = bake_started.map(|started| started.elapsed().as_micros());
+    let count = held
+        .description
+        .sample_count()
+        .map_err(|_| PreviewError::Attribute)?;
+    fit_exact(grey, count)?;
+    let map_started = profiling().then(Instant::now);
+    table
+        .map_containers(
+            held.byte_order,
+            &held.samples,
+            &indexed,
+            grey.as_mut_slice(),
+        )
+        .map_err(|_| PreviewError::Decode)?;
+    let map_us = map_started.map(|started| started.elapsed().as_micros());
+    if profiling() {
+        note_render(|phase| {
+            phase.unpack_us = 0;
+            phase.chain_us = chain_us.unwrap_or(0);
+            phase.voi_us = table_us.unwrap_or(0);
+            phase.grey_us = bake_us.unwrap_or(0);
+            phase.fused_us = map_us.unwrap_or(0);
+            phase.pixels = grey.len();
+        });
+    }
+    Ok(())
+}
+
+/// Per-sample chain for a stored width the table does not cover.
+fn grey_from_samples(
+    held: &HeldFrame,
+    chain: &LutChain,
+    invert: bool,
+    scratch: &mut Vec<Stored>,
+    grey: &mut Vec<u8>,
+    chain_us: Option<u128>,
+) -> Result<(), PreviewError> {
+    let count = held
+        .description
+        .sample_count()
+        .map_err(|_| PreviewError::Attribute)?;
+    if scratch.len() != count {
+        scratch.resize(count, Stored(0.0));
+    }
+    let unpack_started = profiling().then(Instant::now);
+    held.description
+        .unpack(&held.samples, held.byte_order, scratch)
+        .map_err(|_| PreviewError::Decode)?;
+    let unpack_us = unpack_started.map(|started| started.elapsed().as_micros());
+    let fused_started = profiling().then(Instant::now);
+    fit_exact(grey, scratch.len())?;
+    for (cell, sample) in grey.iter_mut().zip(scratch.iter().copied()) {
+        let mut byte = display_byte(chain.apply(sample).0)?;
+        if invert {
+            byte = 255 - byte;
+        }
+        *cell = byte;
+    }
+    let fused_us = fused_started.map(|started| started.elapsed().as_micros());
+    if profiling() {
+        note_render(|phase| {
+            phase.unpack_us = unpack_us.unwrap_or(0);
+            phase.chain_us = chain_us.unwrap_or(0);
+            phase.voi_us = 0;
+            phase.grey_us = 0;
+            phase.fused_us = fused_us.unwrap_or(0);
+            phase.pixels = scratch.len();
+        });
+    }
+    Ok(())
+}
+
+/// Grow `buf` to `len` bytes without a doubled spare capacity.
+fn fit_exact(buf: &mut Vec<u8>, len: usize) -> Result<(), PreviewError> {
+    if buf.capacity() < len {
+        let extra = len.checked_sub(buf.len()).ok_or(PreviewError::Decode)?;
+        buf.reserve_exact(extra);
+    }
+    buf.resize(len, 0);
+    Ok(())
+}
+
+/// `display_index` into the 8-bit preview. PS3.3 C.11.2.1.2's output byte.
+fn display_byte(display: f32) -> Result<u8, PreviewError> {
+    u8::try_from(display_index(display, 255)).map_err(|_| PreviewError::Window)
+}
+
+fn select_window(
+    held: &HeldFrame,
+    recipe: &Recipe,
+    request: FrameRequest,
+) -> Result<(Vec<f32>, Vec<f32>, VoiFunction, bool), PreviewError> {
+    if let Some(preset) = request.window_preset {
+        if voi_present(recipe)? {
+            return Err(PreviewError::Window);
+        }
+        return Ok((
+            vec![preset.center()],
+            vec![preset.width()],
+            VoiFunction::Linear,
+            false,
+        ));
+    }
+    if request.window_center.is_some() && request.window_width.is_some() {
+        let center = request.window_center.ok_or(PreviewError::Window)?;
+        let width = request.window_width.ok_or(PreviewError::Window)?;
+        if !center.is_finite() || !width.is_finite() {
+            return Err(PreviewError::Window);
+        }
+        let function = request.window_function.unwrap_or(VoiFunction::Linear);
+        return Ok((vec![center], vec![width], function, false));
+    }
+    if voi_present(recipe)? {
+        return Err(PreviewError::Window);
+    }
+    match recipe.file_window.as_ref().map_err(|error| *error)? {
+        FileWindow::Full => {
+            let (center, width) = held.full_range?;
+            Ok((vec![center], vec![width], VoiFunction::LinearExact, true))
+        }
+        FileWindow::Explicit {
+            centers,
+            widths,
+            function,
+        } => {
+            let mut function = *function;
+            if let Some(choice) = request.window_function {
+                function = choice;
+            }
+            Ok((centers.clone(), widths.clone(), function, false))
+        }
+    }
+}
+
+fn voi_present(recipe: &Recipe) -> Result<bool, PreviewError> {
+    recipe.voi_lut
 }
 
 fn part10_error(_error: ParseError) -> PreviewError {
@@ -401,17 +950,74 @@ fn pixel_vr(object: &DefaultDicomObject) -> Result<PixelDataVr, PreviewError> {
     }
 }
 
+fn native_dispatch(path: DispatchPath) -> bool {
+    !matches!(path, DispatchPath::Encapsulated)
+}
+
+/// The borrowed pixel value is the whole element, every frame, already in
+/// transfer-syntax byte order. A parsed copy of those bytes is not required.
+fn borrowed_pixels_fit(object: &DefaultDicomObject, pixels: &[u8]) -> bool {
+    let Ok(rows) = required_u16(object, ROWS) else {
+        return false;
+    };
+    let Ok(columns) = required_u16(object, COLUMNS) else {
+        return false;
+    };
+    let Ok(samples) = required_u16(object, SAMPLES_PER_PIXEL) else {
+        return false;
+    };
+    let Ok(bits) = required_u16(object, BITS_ALLOCATED) else {
+        return false;
+    };
+    let Ok(frames) = frame_count(object) else {
+        return false;
+    };
+    if bits == 0 || !bits.is_multiple_of(8) {
+        return false;
+    }
+    let Some(bytes_per) = usize::from(bits / 8).checked_mul(usize::from(samples)) else {
+        return false;
+    };
+    let Some(one) = usize::from(rows)
+        .checked_mul(usize::from(columns))
+        .and_then(|count| count.checked_mul(bytes_per))
+    else {
+        return false;
+    };
+    let Ok(frames) = usize::try_from(frames) else {
+        return false;
+    };
+    let Some(all) = one.checked_mul(frames) else {
+        return false;
+    };
+    all > 0 && pixels.len() == all
+}
+
 fn decode_frame(
     parsed: &ocelli_dicom::ParsedDicom,
     object: &DefaultDicomObject,
     desc: &FrameDesc,
     frames: u32,
     frame_index: usize,
+    pixels: Option<&[u8]>,
+    native: &mut Vec<u8>,
 ) -> Result<Vec<u8>, PreviewError> {
+    let frame_count = usize::try_from(frames).map_err(|_| PreviewError::Attribute)?;
+    if let Some(pixels) = pixels {
+        let mut decoded = vec![0_u8; desc.output_len()];
+        let decoder = native_decoder(parsed.transfer_syntax().dispatch_path())?;
+        let index = decoder
+            .index_native_value(pixels, frame_count, desc)
+            .map_err(|_| PreviewError::Decode)?;
+        index
+            .decode_frame(frame_index, &mut decoded)
+            .map_err(|_| PreviewError::Decode)?;
+        note_borrowed_decode();
+        return Ok(decoded);
+    }
     let element = object
         .element(PIXEL_DATA)
         .map_err(|_| PreviewError::Attribute)?;
-    let frame_count = usize::try_from(frames).map_err(|_| PreviewError::Attribute)?;
     let mut decoded = vec![0_u8; desc.output_len()];
     match parsed.transfer_syntax().dispatch_path() {
         DispatchPath::Encapsulated => {
@@ -425,10 +1031,10 @@ fn decode_frame(
             )?;
         }
         path => {
-            let native = native_bytes(element, path)?;
+            let borrowed = native_byte_slice(element, path, native)?;
             let decoder = native_decoder(path)?;
             let index = decoder
-                .index_native_value(&native, frame_count, desc)
+                .index_native_value(borrowed, frame_count, desc)
                 .map_err(|_| PreviewError::Decode)?;
             index
                 .decode_frame(frame_index, &mut decoded)
@@ -436,6 +1042,26 @@ fn decode_frame(
         }
     }
     Ok(decoded)
+}
+
+fn native_order_matches(path: DispatchPath) -> bool {
+    match path {
+        DispatchPath::ExplicitVrBigEndian => cfg!(target_endian = "big"),
+        DispatchPath::ImplicitVrLittleEndian
+        | DispatchPath::ExplicitVrLittleEndian
+        | DispatchPath::DeflatedExplicitVrLittleEndian => cfg!(target_endian = "little"),
+        DispatchPath::Encapsulated => false,
+    }
+}
+
+fn borrowed_native_bytes(element: &InMemElement<StandardDataDictionary>) -> Option<&[u8]> {
+    let DicomValue::Primitive(value) = element.value() else {
+        return None;
+    };
+    match value.to_bytes() {
+        std::borrow::Cow::Borrowed(bytes) => Some(bytes),
+        std::borrow::Cow::Owned(_) => None,
+    }
 }
 
 fn native_decoder(path: DispatchPath) -> Result<RawDecoder, PreviewError> {
@@ -482,30 +1108,56 @@ fn decode_encapsulated(
         .map_err(|_| PreviewError::Decode)
 }
 
-fn native_bytes(
-    element: &InMemElement<StandardDataDictionary>,
+fn native_byte_slice<'a>(
+    element: &'a InMemElement<StandardDataDictionary>,
     path: DispatchPath,
-) -> Result<Vec<u8>, PreviewError> {
+    native: &'a mut Vec<u8>,
+) -> Result<&'a [u8], PreviewError> {
     match element.value() {
-        DicomValue::Primitive(PrimitiveValue::U8(bytes)) => Ok(bytes.to_vec()),
+        DicomValue::Primitive(PrimitiveValue::U8(bytes)) => Ok(bytes.as_slice()),
         DicomValue::Primitive(PrimitiveValue::U16(words)) => {
-            let mut bytes = Vec::new();
-            for word in words {
-                let encoded = match path {
-                    DispatchPath::ExplicitVrBigEndian => word.to_be_bytes(),
-                    DispatchPath::ImplicitVrLittleEndian
-                    | DispatchPath::ExplicitVrLittleEndian
-                    | DispatchPath::DeflatedExplicitVrLittleEndian
-                    | DispatchPath::Encapsulated => word.to_le_bytes(),
-                };
-                bytes.extend_from_slice(&encoded);
+            // A second buffer of the frame stays resident after the copy is
+            // dropped. When the host endian matches the transfer syntax, the
+            // parsed words are already the bytes the decoder reads.
+            if native_order_matches(path)
+                && let Some(borrowed) = borrowed_native_bytes(element)
+            {
+                return Ok(borrowed);
             }
-            Ok(bytes)
+            fill_native_words(words, path, native)?;
+            Ok(native.as_slice())
         }
         DicomValue::Primitive(_) | DicomValue::Sequence(_) | DicomValue::PixelSequence(_) => {
             Err(PreviewError::Decode)
         }
     }
+}
+
+/// Copy `U16` pixels into `native` at exactly two bytes per word.
+///
+/// The buffer stays with the caller. Growing a fresh vector by doubling would
+/// leave the abandoned capacities resident after the copy is dropped.
+fn fill_native_words(
+    words: &[u16],
+    path: DispatchPath,
+    native: &mut Vec<u8>,
+) -> Result<(), PreviewError> {
+    let bytes_len = words.len().checked_mul(2).ok_or(PreviewError::Decode)?;
+    native.clear();
+    if native.capacity() < bytes_len {
+        native.reserve_exact(bytes_len);
+    }
+    for word in words {
+        let encoded = match path {
+            DispatchPath::ExplicitVrBigEndian => word.to_be_bytes(),
+            DispatchPath::ImplicitVrLittleEndian
+            | DispatchPath::ExplicitVrLittleEndian
+            | DispatchPath::DeflatedExplicitVrLittleEndian
+            | DispatchPath::Encapsulated => word.to_le_bytes(),
+        };
+        native.extend_from_slice(&encoded);
+    }
+    Ok(())
 }
 
 fn codecs() -> Result<Registry, PreviewError> {
@@ -516,84 +1168,6 @@ fn codecs() -> Result<Registry, PreviewError> {
     register_jpegls_decoders(&mut registry).map_err(|_| PreviewError::Decode)?;
     register_htj2k_decoders(&mut registry).map_err(|_| PreviewError::Decode)?;
     Ok(registry)
-}
-
-struct Mapped {
-    chain: LutChain,
-    full_range: bool,
-    center: f32,
-    width: f32,
-    function: VoiFunction,
-}
-
-fn lut_chain(
-    object: &DefaultDicomObject,
-    multi: &MultiframeMetadata<'_>,
-    photometric: PhotometricInterpretation,
-    stored: &[Stored],
-    request: FrameRequest,
-    frame: usize,
-) -> Result<Mapped, PreviewError> {
-    // PS3.3 C.11.1: a Modality LUT Sequence replaces rescale. Passing `None`
-    // into `ModalityTransform` would draw the identity slope instead.
-    if group_has(
-        multi,
-        frame,
-        PIXEL_VALUE_TRANSFORMATION,
-        MODALITY_LUT_SEQUENCE,
-    )? {
-        return Err(PreviewError::Window);
-    }
-    let (slope, intercept) = rescale(multi, frame)?;
-    let modality = ModalityTransform::new(None, Some(slope), Some(intercept))
-        .map_err(|_| PreviewError::Window)?;
-    // A request that names both center and width replaces the file window
-    // and a VOI LUT Sequence. The file window is not read in that case.
-    let (centers, widths, function, full_range) = if let Some(preset) = request.window_preset {
-        // A named preset is the library's centre and width, LINEAR. It does
-        // not replace a VOI LUT Sequence the way a numeric override does.
-        if group_has(multi, frame, FRAME_VOI_LUT_SEQUENCE, VOI_LUT_SEQUENCE)? {
-            return Err(PreviewError::Window);
-        }
-        (
-            vec![preset.center()],
-            vec![preset.width()],
-            VoiFunction::Linear,
-            false,
-        )
-    } else if request.window_center.is_some() && request.window_width.is_some() {
-        let center = request.window_center.ok_or(PreviewError::Window)?;
-        let width = request.window_width.ok_or(PreviewError::Window)?;
-        if !center.is_finite() || !width.is_finite() {
-            return Err(PreviewError::Window);
-        }
-        let function = request.window_function.unwrap_or(VoiFunction::Linear);
-        (vec![center], vec![width], function, false)
-    } else {
-        // PS3.3 C.11.2: a VOI LUT Sequence takes precedence over the file window.
-        if group_has(multi, frame, FRAME_VOI_LUT_SEQUENCE, VOI_LUT_SEQUENCE)? {
-            return Err(PreviewError::Window);
-        }
-        let (centers, widths, mut function, full_range) = window(multi, frame, &modality, stored)?;
-        if let Some(choice) = request.window_function {
-            function = choice;
-        }
-        (centers, widths, function, full_range)
-    };
-    let center = centers.first().copied().ok_or(PreviewError::Window)?;
-    let width = widths.first().copied().ok_or(PreviewError::Window)?;
-    let evidence = presentation(object)?;
-    let voi = VoiTransform::new(None, &centers, &widths, 0, function, 0.0, 255.0)
-        .map_err(|_| PreviewError::Window)?;
-    let chain =
-        LutChain::new(modality, voi, photometric, evidence).map_err(|_| PreviewError::Window)?;
-    Ok(Mapped {
-        chain,
-        full_range,
-        center,
-        width,
-        function,
-    })
 }
 
 fn project_metadata(object: &DefaultDicomObject) -> Result<MetadataSet, PreviewError> {
@@ -728,25 +1302,6 @@ fn rescale(multi: &MultiframeMetadata<'_>, frame: usize) -> Result<(f32, f32), P
         }
         _ => Err(PreviewError::Window),
     }
-}
-
-fn window(
-    multi: &MultiframeMetadata<'_>,
-    frame: usize,
-    modality: &ModalityTransform,
-    stored: &[Stored],
-) -> Result<(Vec<f32>, Vec<f32>, VoiFunction, bool), PreviewError> {
-    let centers = resolved_decimals(multi, frame, FRAME_VOI_LUT_SEQUENCE, WINDOW_CENTER)?;
-    let widths = resolved_decimals(multi, frame, FRAME_VOI_LUT_SEQUENCE, WINDOW_WIDTH)?;
-    if centers.is_empty() && widths.is_empty() {
-        let (center, width) = full_range(modality, stored)?;
-        return Ok((vec![center], vec![width], VoiFunction::LinearExact, true));
-    }
-    if centers.is_empty() || centers.len() != widths.len() {
-        return Err(PreviewError::Window);
-    }
-    let function = voi_function(multi, frame)?;
-    Ok((centers, widths, function, false))
 }
 
 fn full_range(modality: &ModalityTransform, stored: &[Stored]) -> Result<(f32, f32), PreviewError> {
@@ -1139,6 +1694,286 @@ fn push_json_token(out: &mut String, name: &str, token: Option<&str>) {
     }
 }
 
+/// Part 10 bytes with the top-level pixel value removed.
+///
+/// Folder open parses every file for the series list. Copying each pixel
+/// value and then dropping it leaves the region resident on this host, and a
+/// later frame of a different size does not reuse it. The list reads no pixel,
+/// so the value is replaced with an empty element. `None` means the encoding
+/// was not walked and the caller parses `bytes` unchanged.
+fn bytes_without_pixel_payload(bytes: &[u8]) -> Option<Vec<u8>> {
+    split_pixel_payload(bytes).map(|(header, _range)| header)
+}
+
+fn split_pixel_payload(bytes: &[u8]) -> Option<(Vec<u8>, std::ops::Range<usize>)> {
+    let (dataset_at, explicit, little) = dataset_origin(bytes)?;
+    let mut out = Vec::new();
+    out.extend_from_slice(bytes.get(..dataset_at)?);
+    let mut cursor = dataset_at;
+    let mut pixel_range = None;
+    while cursor < bytes.len() {
+        let tag = read_tag(bytes, cursor, little)?;
+        if tag.0 != 0xFFFE && tag.1 == 0 && tag.0 != 0x0002 {
+            return None;
+        }
+        if tag == (0x7FE0, 0x0010) {
+            if pixel_range.is_some() {
+                return None;
+            }
+            let (header_len, value_end) = pixel_value_span(bytes, cursor, explicit, little)?;
+            let value_at = cursor.checked_add(header_len)?;
+            if value_end < value_at {
+                return None;
+            }
+            let header = bytes.get(cursor..value_at)?;
+            out.extend_from_slice(header);
+            let length_at = out.len().checked_sub(4)?;
+            let tail = out.get_mut(length_at..)?;
+            tail.fill(0);
+            pixel_range = Some(value_at..value_end);
+            cursor = value_end;
+            continue;
+        }
+        let next = element_end(bytes, cursor, explicit, little, 0)?;
+        if next <= cursor {
+            return None;
+        }
+        out.extend_from_slice(bytes.get(cursor..next)?);
+        cursor = next;
+    }
+    let range = pixel_range?;
+    if range.is_empty() || out.len() >= bytes.len() {
+        return None;
+    }
+    Some((out, range))
+}
+
+fn dataset_origin(bytes: &[u8]) -> Option<(usize, bool, bool)> {
+    if bytes.get(128..132) != Some(b"DICM") {
+        return None;
+    }
+    let mut cursor = 132_usize;
+    let mut syntax = String::new();
+    while cursor < bytes.len() {
+        let tag = read_tag(bytes, cursor, true)?;
+        if tag.0 != 0x0002 {
+            break;
+        }
+        let (value_at, value_end) = explicit_value_span(bytes, cursor, true)?;
+        if tag == TRANSFER_SYNTAX {
+            let raw = bytes.get(value_at..value_end)?;
+            syntax = std::str::from_utf8(raw)
+                .ok()?
+                .trim_end_matches(['\0', ' '])
+                .to_owned();
+        }
+        cursor = value_end;
+    }
+    let (explicit, little) = match syntax.as_str() {
+        "1.2.840.10008.1.2" => (false, true),
+        "1.2.840.10008.1.2.2" => (true, false),
+        "1.2.840.10008.1.2.1.99" => return None,
+        "" => return None,
+        _ => (true, true),
+    };
+    Some((cursor, explicit, little))
+}
+
+fn pixel_value_span(
+    bytes: &[u8],
+    at: usize,
+    explicit: bool,
+    little: bool,
+) -> Option<(usize, usize)> {
+    if !explicit {
+        let length = read_u32(bytes, at.checked_add(4)?, little)?;
+        let value_at = at.checked_add(8)?;
+        if length == UNDEFINED_LENGTH {
+            return None;
+        }
+        let value_end = value_at.checked_add(usize::try_from(length).ok()?)?;
+        return Some((8, value_end));
+    }
+    let vr = bytes.get(at.checked_add(4)?..at.checked_add(6)?)?;
+    if !long_vr(vr) {
+        return None;
+    }
+    let length = read_u32(bytes, at.checked_add(8)?, little)?;
+    let value_at = at.checked_add(12)?;
+    if length == UNDEFINED_LENGTH {
+        return None;
+    }
+    let value_end = value_at.checked_add(usize::try_from(length).ok()?)?;
+    Some((12, value_end))
+}
+
+fn element_end(bytes: &[u8], at: usize, explicit: bool, little: bool, depth: u32) -> Option<usize> {
+    if depth > 8 {
+        return None;
+    }
+    let tag = read_tag(bytes, at, little)?;
+    if tag.0 == 0xFFFE {
+        let length = read_u32(bytes, at.checked_add(4)?, little)?;
+        if length == UNDEFINED_LENGTH {
+            return undefined_item_end(bytes, at.checked_add(8)?, explicit, little, depth);
+        }
+        return at
+            .checked_add(8)?
+            .checked_add(usize::try_from(length).ok()?);
+    }
+    if !explicit {
+        let length = read_u32(bytes, at.checked_add(4)?, little)?;
+        let value_at = at.checked_add(8)?;
+        if length == UNDEFINED_LENGTH {
+            return undefined_sequence_end(bytes, value_at, explicit, little, depth);
+        }
+        return value_at.checked_add(usize::try_from(length).ok()?);
+    }
+    let vr = bytes.get(at.checked_add(4)?..at.checked_add(6)?)?;
+    if long_vr(vr) {
+        let length = read_u32(bytes, at.checked_add(8)?, little)?;
+        let value_at = at.checked_add(12)?;
+        if length == UNDEFINED_LENGTH {
+            return undefined_sequence_end(bytes, value_at, explicit, little, depth);
+        }
+        return value_at.checked_add(usize::try_from(length).ok()?);
+    }
+    let length = usize::from(read_u16(bytes, at.checked_add(6)?, little)?);
+    at.checked_add(8)?.checked_add(length)
+}
+
+fn explicit_value_span(bytes: &[u8], at: usize, little: bool) -> Option<(usize, usize)> {
+    let vr = bytes.get(at.checked_add(4)?..at.checked_add(6)?)?;
+    if long_vr(vr) {
+        let length = read_u32(bytes, at.checked_add(8)?, little)?;
+        if length == UNDEFINED_LENGTH {
+            return None;
+        }
+        let value_at = at.checked_add(12)?;
+        let value_end = value_at.checked_add(usize::try_from(length).ok()?)?;
+        return Some((value_at, value_end));
+    }
+    let length = usize::from(read_u16(bytes, at.checked_add(6)?, little)?);
+    let value_at = at.checked_add(8)?;
+    Some((value_at, value_at.checked_add(length)?))
+}
+
+fn undefined_sequence_end(
+    bytes: &[u8],
+    mut cursor: usize,
+    explicit: bool,
+    little: bool,
+    depth: u32,
+) -> Option<usize> {
+    if depth > 8 {
+        return None;
+    }
+    while cursor < bytes.len() {
+        let tag = read_tag(bytes, cursor, little)?;
+        if tag == (0xFFFE, 0xE0DD) {
+            let length = read_u32(bytes, cursor.checked_add(4)?, little)?;
+            if length != 0 {
+                return None;
+            }
+            return cursor.checked_add(8);
+        }
+        if tag != (0xFFFE, 0xE000) {
+            return None;
+        }
+        let length = read_u32(bytes, cursor.checked_add(4)?, little)?;
+        if length == UNDEFINED_LENGTH {
+            cursor = undefined_item_end(bytes, cursor.checked_add(8)?, explicit, little, depth)?;
+        } else {
+            cursor = cursor
+                .checked_add(8)?
+                .checked_add(usize::try_from(length).ok()?)?;
+        }
+    }
+    None
+}
+
+fn undefined_item_end(
+    bytes: &[u8],
+    mut cursor: usize,
+    explicit: bool,
+    little: bool,
+    depth: u32,
+) -> Option<usize> {
+    if depth > 8 {
+        return None;
+    }
+    while cursor < bytes.len() {
+        let tag = read_tag(bytes, cursor, little)?;
+        if tag == (0xFFFE, 0xE00D) {
+            let length = read_u32(bytes, cursor.checked_add(4)?, little)?;
+            if length != 0 {
+                return None;
+            }
+            return cursor.checked_add(8);
+        }
+        let next = element_end(bytes, cursor, explicit, little, depth.checked_add(1)?)?;
+        if next <= cursor {
+            return None;
+        }
+        cursor = next;
+    }
+    None
+}
+
+fn long_vr(vr: &[u8]) -> bool {
+    matches!(
+        vr,
+        b"OB"
+            | b"OD"
+            | b"OF"
+            | b"OL"
+            | b"OV"
+            | b"OW"
+            | b"SQ"
+            | b"SV"
+            | b"UC"
+            | b"UN"
+            | b"UR"
+            | b"UT"
+            | b"UV"
+    )
+}
+
+fn read_tag(bytes: &[u8], at: usize, little: bool) -> Option<(u16, u16)> {
+    Some((
+        read_u16(bytes, at, little)?,
+        read_u16(bytes, at.checked_add(2)?, little)?,
+    ))
+}
+
+fn read_u16(bytes: &[u8], at: usize, little: bool) -> Option<u16> {
+    let raw = bytes.get(at..at.checked_add(2)?)?;
+    let bytes = [raw.first().copied()?, raw.get(1).copied()?];
+    Some(if little {
+        u16::from_le_bytes(bytes)
+    } else {
+        u16::from_be_bytes(bytes)
+    })
+}
+
+fn read_u32(bytes: &[u8], at: usize, little: bool) -> Option<u32> {
+    let raw = bytes.get(at..at.checked_add(4)?)?;
+    let bytes = [
+        raw.first().copied()?,
+        raw.get(1).copied()?,
+        raw.get(2).copied()?,
+        raw.get(3).copied()?,
+    ];
+    Some(if little {
+        u32::from_le_bytes(bytes)
+    } else {
+        u32::from_be_bytes(bytes)
+    })
+}
+
+const UNDEFINED_LENGTH: u32 = 0xFFFF_FFFF;
+const TRANSFER_SYNTAX: (u16, u16) = (0x0002, 0x0010);
+
 /// Series and image attributes for the left-hand list and the corner text.
 ///
 /// The JSON holds the values stored in the file. The caller must not write it
@@ -1148,6 +1983,8 @@ fn push_json_token(out: &mut String, name: &str, token: Option<&str>) {
 ///
 /// Returns [`PreviewError::NotPart10`] when the bytes are not a Part 10 object.
 pub fn inspect_json(bytes: &[u8], frame: u32) -> Result<String, PreviewError> {
+    let stripped = bytes_without_pixel_payload(bytes);
+    let bytes = stripped.as_deref().unwrap_or(bytes);
     let parsed = parse_part10(bytes).map_err(part10_error)?;
     let object = parsed.object();
     let mut sop = text_or_empty(object, SOP_INSTANCE)?;
@@ -1581,5 +2418,81 @@ fn primitive_len(value: &PrimitiveValue) -> Option<usize> {
         | PrimitiveValue::Date(_)
         | PrimitiveValue::DateTime(_)
         | PrimitiveValue::Time(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{borrowed_decode_ticks, preview_frame, split_pixel_payload};
+    use crate::{FrameRequest, inspect_json, slice};
+    use ocelli_viewport::presentation::WindowPreset;
+
+    #[test]
+    fn inspect_drops_the_pixel_payload() -> Result<(), String> {
+        let mut file = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let pixels = 96_usize.saturating_mul(128).saturating_mul(2);
+        file.extend_from_slice(&0xFFFC_u16.to_le_bytes());
+        file.extend_from_slice(&0xFFFC_u16.to_le_bytes());
+        file.extend_from_slice(b"OB");
+        file.extend_from_slice(&0_u16.to_le_bytes());
+        file.extend_from_slice(&2_u32.to_le_bytes());
+        file.extend_from_slice(&[0, 0]);
+        let (stripped, range) = split_pixel_payload(&file).ok_or("the pixel payload was kept")?;
+        if range.len() != pixels {
+            return Err(format!(
+                "the borrowed pixel span was {} for {pixels} bytes",
+                range.len()
+            ));
+        }
+        if stripped.len().saturating_add(pixels) > file.len() {
+            return Err(format!(
+                "stripped {} bytes of a {} byte file",
+                stripped.len(),
+                file.len()
+            ));
+        }
+        let marker = [0xFC_u8, 0xFF, 0xFC, 0xFF];
+        if !stripped
+            .windows(marker.len())
+            .any(|window| window == marker)
+        {
+            return Err("the element after the pixels was dropped".to_owned());
+        }
+        let json = inspect_json(&file, 0).map_err(|_| "inspect refused the file".to_owned())?;
+        if !json.contains("\"monochrome\":true") {
+            return Err(json);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_native_frame_is_read_from_the_file_slice() -> Result<(), String> {
+        // Body at column 64 row 48 on slice 0. Stored 1064, intercept -1024,
+        // so the modality value is 40. Soft tissue is LINEAR center 40 width
+        // 400. PS3.3 C.11.2.1.2 gives grey 128, the same figure the preset
+        // fixture pins. A decode of the emptied header would not.
+        let file = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let before = borrowed_decode_ticks();
+        let preview = preview_frame(
+            &file,
+            FrameRequest {
+                window_preset: Some(WindowPreset::SoftTissue),
+                ..FrameRequest::default()
+            },
+        )
+        .map_err(|_| "the synthetic slice was refused".to_owned())?;
+        let index = 48_usize.saturating_mul(128).saturating_add(64);
+        let grey = preview
+            .grey
+            .get(index)
+            .copied()
+            .ok_or("the body pixel was absent")?;
+        if grey != 128 {
+            return Err(format!("the body pixel was grey {grey}"));
+        }
+        if borrowed_decode_ticks() == before {
+            return Err("the frame was decoded from a parsed copy".to_owned());
+        }
+        Ok(())
     }
 }

@@ -29,6 +29,11 @@ const ARGUMENT_REFUSALS = [
     /--subject only means something with --accept/],
 ];
 
+test("parseArgs keeps subject ids to run", () => {
+  const options = command.parseArgs(["viewer.open", "viewer.scroll_rate"]);
+  assert.deepEqual(options.only, ["viewer.open", "viewer.scroll_rate"]);
+});
+
 for (const [argv, expected] of ARGUMENT_REFUSALS) {
   test(`parseArgs refuses ${argv.join(" ")}`, () => {
     assert.throws(() => command.parseArgs(argv), expected);

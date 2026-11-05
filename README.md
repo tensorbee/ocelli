@@ -179,8 +179,10 @@ DICOM files on this machine, use the local series page below.
 image at a time. It listens on this machine only.
 
 ```bash
-cargo run -p ocelli-folder-viewer
+cargo run --release -p ocelli-folder-viewer
 ```
+
+The debug build is about ten times slower on a window step. Each file is posted once and held by the process. `OCELLI_CACHE_MIB` sets that cache in mebibytes and the default is 256.
 
 The process prints one line, the page URL, and nothing else. It has the form
 `http://127.0.0.1:12345/`. The port is chosen at startup unless
@@ -191,7 +193,7 @@ including an empty one, stops the process with an error. Open that exact URL in
 Chrome or Edge. The Folder control is a directory picker.
 
 ```bash
-OCELLI_PORT=8742 cargo run -p ocelli-folder-viewer
+OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
 ```
 
 1. Choose Folder and pick a directory. The browser reads the files. Leave them
@@ -246,7 +248,7 @@ The page HTML is compiled into the binary. After a change under
 `examples/folder-viewer`, build again and start that new process.
 
 ```bash
-cargo build -p ocelli-folder-viewer
+cargo build --release -p ocelli-folder-viewer
 ```
 
 ## Use the library

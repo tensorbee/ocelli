@@ -3,11 +3,12 @@
 
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::sync::Arc;
 use std::time::Duration;
 
 use ocelli_folder_viewer::{
-    FrameRequest, Preview, PreviewError, SLICES, handle_connection, headers_json, inspect_json,
-    preview_first_frame, preview_frame, slice,
+    FrameRequest, Preview, PreviewError, SLICES, Viewer, ViewerConfig, handle_connection,
+    headers_json, inspect_json, preview_first_frame, preview_frame, serve_on, slice,
 };
 use ocelli_pixel::VoiFunction;
 use ocelli_viewport::presentation::WindowPreset;
@@ -1509,4 +1510,873 @@ fn tagged_frame(frames: u16, pixels: &[u8]) -> Result<Vec<u8>, String> {
     bytes.extend(file_meta("1.2.840.10008.1.2.1")?);
     bytes.extend(data);
     Ok(bytes)
+}
+
+fn viewer_on(bytes: usize) -> Result<SocketAddr, String> {
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+    let addr = listener.local_addr().map_err(|error| error.to_string())?;
+    let viewer = Arc::new(Viewer::new(ViewerConfig { cache_bytes: bytes }));
+    std::thread::spawn(move || {
+        let _ = serve_on(listener, viewer);
+    });
+    Ok(addr)
+}
+
+fn viewer_capped(bytes: usize, cap: usize) -> Result<SocketAddr, String> {
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+    let addr = listener.local_addr().map_err(|error| error.to_string())?;
+    let viewer = Arc::new(Viewer::with_connection_cap(
+        ViewerConfig { cache_bytes: bytes },
+        cap,
+    ));
+    std::thread::spawn(move || {
+        let _ = serve_on(listener, viewer);
+    });
+    Ok(addr)
+}
+
+fn header_line<'a>(header: &'a str, name: &str) -> Option<&'a str> {
+    header.split("\r\n").find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        if key.eq_ignore_ascii_case(name) {
+            Some(value.trim())
+        } else {
+            None
+        }
+    })
+}
+
+fn json_number(body: &str, key: &str) -> Result<usize, String> {
+    let needle = format!("\"{key}\":");
+    let rest = body
+        .split_once(&needle)
+        .ok_or_else(|| format!("the census omitted {key}"))?
+        .1;
+    let digits: String = rest.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+    digits
+        .parse::<usize>()
+        .map_err(|_| format!("the census {key} was not a number"))
+}
+
+fn held_census(addr: SocketAddr) -> Result<String, String> {
+    let response = exchange(addr, b"GET /held HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, body) = split_http(&response)?;
+    if !header.starts_with("HTTP/1.1 200 ") {
+        return Err(header.to_owned());
+    }
+    std::str::from_utf8(body)
+        .map(str::to_owned)
+        .map_err(|_| "the census was not text".to_owned())
+}
+
+fn preview_id(id: &str, extra: &str) -> Vec<u8> {
+    format!(
+        "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\n{extra}Content-Length: 0\r\n\r\n"
+    )
+    .into_bytes()
+}
+
+fn read_one(stream: &mut TcpStream) -> Result<Vec<u8>, String> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    let mut buf = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    let header_end = loop {
+        if let Some(end) = buf
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|start| start + 4)
+        {
+            break end;
+        }
+        let n = stream.read(&mut chunk).map_err(|error| error.to_string())?;
+        if n == 0 {
+            return Err("the response closed before the header".to_owned());
+        }
+        let Some(got) = chunk.get(..n) else {
+            return Err("the response read was short".to_owned());
+        };
+        buf.extend_from_slice(got);
+    };
+    let header = {
+        let bytes = buf
+            .get(..header_end)
+            .ok_or_else(|| "the response header is short".to_owned())?;
+        std::str::from_utf8(bytes).map_err(|_| "the response header is not text".to_owned())?
+    };
+    let length = header_line(header, "Content-Length")
+        .ok_or_else(|| "the response has no length".to_owned())?
+        .parse::<usize>()
+        .map_err(|_| "the response length is not a number".to_owned())?;
+    while buf.len() - header_end < length {
+        let n = stream.read(&mut chunk).map_err(|error| error.to_string())?;
+        if n == 0 {
+            return Err("the response ended early".to_owned());
+        }
+        let have = buf.len() - header_end;
+        let need = length - have;
+        let take = n.min(need);
+        let Some(got) = chunk.get(..take) else {
+            return Err("the response read was short".to_owned());
+        };
+        buf.extend_from_slice(got);
+    }
+    Ok(buf)
+}
+
+fn response_parts(bytes: &[u8]) -> Result<Vec<(&str, &[u8])>, String> {
+    let mut rest = bytes;
+    let mut found = Vec::new();
+    while !rest.is_empty() {
+        let (header, body) = split_http(rest)?;
+        let length = header_line(header, "Content-Length")
+            .ok_or_else(|| "a pipelined response has no length".to_owned())?
+            .parse::<usize>()
+            .map_err(|_| "a pipelined response length is not a number".to_owned())?;
+        let taken = body
+            .get(..length)
+            .ok_or_else(|| "a pipelined response body is short".to_owned())?;
+        found.push((header, taken));
+        let skip = header
+            .len()
+            .checked_add(length)
+            .ok_or_else(|| "a pipelined response is too long".to_owned())?;
+        rest = rest
+            .get(skip..)
+            .ok_or_else(|| "a pipelined response overran".to_owned())?;
+    }
+    Ok(found)
+}
+
+#[test]
+fn held_frames_keep_the_hand_computed_grey() -> Result<(), String> {
+    // Stored 50, slope 1, intercept 0, file LINEAR_EXACT center 100 width 200.
+    // ((50 - 100) / 200 + 0.5) * 255 = 63.75, which addresses grey 64.
+    // Override center 50 width 1: ((50 - 50) / 1 + 0.5) * 255 = 127.5, grey 128.
+    // Invert of 64 is 255 - 64 = 191.
+    // PS3.3 C.11.2.1.2 and C.11.2.1.3.2. Invert is after the chain.
+    let file = mono_frame(true)?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    if !header.contains("X-Ocelli-Held: 1") {
+        return Err("the file was not held".to_owned());
+    }
+    let id =
+        header_line(header, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())?;
+    let first = exchange(addr, &preview_id(id, ""))?;
+    let (first_header, first_body) = split_http(&first)?;
+    if !first_header.contains("X-Ocelli-Source: decoded") {
+        return Err("the first preview was not decoded".to_owned());
+    }
+    if first_body != [64] {
+        return Err(format!(
+            "the held file window was not grey 64: {first_body:?}"
+        ));
+    }
+    let second = exchange(addr, &preview_id(id, ""))?;
+    let (second_header, second_body) = split_http(&second)?;
+    if !second_header.contains("X-Ocelli-Source: held") || second_body != [64] {
+        return Err("the second preview did not reuse the held frame".to_owned());
+    }
+    let narrow = exchange(
+        addr,
+        &preview_id(
+            id,
+            "X-Ocelli-Window-Center: 50\r\nX-Ocelli-Window-Width: 1\r\nX-Ocelli-Window-Function: LINEAR_EXACT\r\n",
+        ),
+    )?;
+    let (narrow_header, narrow_body) = split_http(&narrow)?;
+    if !narrow_header.contains("X-Ocelli-Source: held") || narrow_body != [128] {
+        return Err("the held override was not grey 128".to_owned());
+    }
+    let flipped = exchange(addr, &preview_id(id, "X-Ocelli-Invert: 1\r\n"))?;
+    let (_, flipped_body) = split_http(&flipped)?;
+    if flipped_body != [191] {
+        return Err(format!(
+            "the held invert was not grey 191: {flipped_body:?}"
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_held_missing_window_stays_full_range() -> Result<(), String> {
+    // Stored 50. Absent rescale is slope 1 and intercept 0. Absent center
+    // and width are LINEAR_EXACT center 50 width 1.
+    // ((50 - 50) / 1 + 0.5) * 255 = 127.5, which addresses grey 128.
+    // A later request with no window must keep that range. The first
+    // request's center 100 width 200 must not stick.
+    // ((50 - 100) / 200 + 0.5) * 255 = 63.75, which addresses grey 64.
+    let file = mono_frame(false)?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id =
+        header_line(header, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())?;
+    let overridden = exchange(
+        addr,
+        &preview_id(
+            id,
+            "X-Ocelli-Window-Center: 100\r\nX-Ocelli-Window-Width: 200\r\nX-Ocelli-Window-Function: LINEAR_EXACT\r\n",
+        ),
+    )?;
+    let (over_header, over_body) = split_http(&overridden)?;
+    if over_header.contains("X-Ocelli-Full-Range: 1") || over_body != [64] {
+        return Err("the first held window was not grey 64".to_owned());
+    }
+    let plain = exchange(addr, &preview_id(id, ""))?;
+    let (plain_header, plain_body) = split_http(&plain)?;
+    if !plain_header.contains("X-Ocelli-Full-Range: 1") || plain_body != [128] {
+        return Err("the held file lost its full range".to_owned());
+    }
+    if !plain_header.contains("X-Ocelli-Source: held") {
+        return Err("the full range preview decoded again".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_file_post_matches_inspect_and_holds_once() -> Result<(), String> {
+    let file = mono_frame(true)?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let inspected = exchange(addr, &http_post_to("/inspect", "", &file))?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (inspect_header, inspect_body) = split_http(&inspected)?;
+    let (file_header, file_body) = split_http(&posted)?;
+    if inspect_body != file_body {
+        return Err("the file response body differed from inspect".to_owned());
+    }
+    if !file_header.contains("200") || !inspect_header.contains("200") {
+        return Err("inspect and file did not both succeed".to_owned());
+    }
+    let id = header_line(file_header, "X-Ocelli-File")
+        .ok_or_else(|| "the file id was missing".to_owned())?;
+    let again = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (again_header, _) = split_http(&again)?;
+    let other = header_line(again_header, "X-Ocelli-File")
+        .ok_or_else(|| "the second id was missing".to_owned())?;
+    if id == other {
+        return Err("a second post reused an id".to_owned());
+    }
+    let junk = b"not a dicom file";
+    let refused = exchange(addr, &http_post_to("/file", "", junk))?;
+    let direct = exchange(addr, &http_post_to("/inspect", "", junk))?;
+    let (refused_header, refused_body) = split_http(&refused)?;
+    let (direct_header, direct_body) = split_http(&direct)?;
+    if refused_body != direct_body
+        || !refused_header.contains("X-Ocelli-Error: not-part10")
+        || !direct_header.contains("X-Ocelli-Error: not-part10")
+    {
+        return Err("a non Part 10 file was not the same refusal".to_owned());
+    }
+    if refused_header.contains("X-Ocelli-File:") {
+        return Err("a non Part 10 file was given an id".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn an_unknown_id_is_gone_and_a_bad_id_is_a_header_error() -> Result<(), String> {
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let unknown = exchange(addr, &preview_id("1.1", ""))?;
+    let (header, body) = split_http(&unknown)?;
+    if !header.contains("410") || !header.contains("X-Ocelli-Error: file-gone") {
+        return Err("an unknown id was not gone".to_owned());
+    }
+    if body != b"the file is no longer held by this process" {
+        return Err("the gone sentence differed".to_owned());
+    }
+    let bad = exchange(addr, &preview_id("A.1", ""))?;
+    let (bad_header, _) = split_http(&bad)?;
+    if !bad_header.contains("400") || !bad_header.contains("X-Ocelli-Error: header") {
+        return Err("an uppercase id was not a header error".to_owned());
+    }
+    let mixed = "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: 1.1\r\nContent-Length: 4\r\n\r\nnope";
+    let both = exchange(addr, mixed.as_bytes())?;
+    let (both_header, both_body) = split_http(&both)?;
+    if !both_header.contains("400") || both_body != b"a file id and a body cannot be sent together"
+    {
+        return Err("an id with a body was accepted".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn two_viewers_do_not_serve_each_others_ids() -> Result<(), String> {
+    let left = viewer_on(8 * 1024 * 1024)?;
+    let right = viewer_on(8 * 1024 * 1024)?;
+    let file = mono_frame(true)?;
+    let left_post = exchange(left, &http_post_to("/file", "", &file))?;
+    let right_post = exchange(right, &http_post_to("/file", "", &file))?;
+    let (left_header, _) = split_http(&left_post)?;
+    let (right_header, _) = split_http(&right_post)?;
+    let left_id = header_line(left_header, "X-Ocelli-File")
+        .ok_or_else(|| "the left id was missing".to_owned())?;
+    let right_id = header_line(right_header, "X-Ocelli-File")
+        .ok_or_else(|| "the right id was missing".to_owned())?;
+    if left_id == right_id {
+        return Err("two viewers issued the same id".to_owned());
+    }
+    let crossed = exchange(right, &preview_id(left_id, ""))?;
+    let (crossed_header, _) = split_http(&crossed)?;
+    if !crossed_header.contains("410") {
+        return Err("another viewer served a foreign id".to_owned());
+    }
+    let kept = exchange(left, &preview_id(left_id, ""))?;
+    let (kept_header, kept_body) = split_http(&kept)?;
+    if !kept_header.contains("200") || kept_body != [64] {
+        return Err("the owning viewer lost its file".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_voi_lut_preset_still_holds_the_frame() -> Result<(), String> {
+    // The file has a VOI LUT Sequence. A preset does not replace it, so the
+    // first answer is 400 window. The frame is still held. A numeric override
+    // then draws grey 128 from the held frame.
+    // Stored 50, slope 1, intercept 0, LINEAR_EXACT center 50 width 1.
+    // ((50 - 50) / 1 + 0.5) * 255 = 127.5, which addresses grey 128.
+    let file = mono_with(true, &[(0x0028, 0x3010)])?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id =
+        header_line(header, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())?;
+    let preset = exchange(
+        addr,
+        &preview_id(id, "X-Ocelli-Window-Preset: soft_tissue\r\n"),
+    )?;
+    let (preset_header, _) = split_http(&preset)?;
+    if !preset_header.contains("400") || !preset_header.contains("X-Ocelli-Error: window") {
+        return Err("the preset did not refuse the VOI LUT".to_owned());
+    }
+    let drawn = exchange(
+        addr,
+        &preview_id(
+            id,
+            "X-Ocelli-Window-Center: 50\r\nX-Ocelli-Window-Width: 1\r\nX-Ocelli-Window-Function: LINEAR_EXACT\r\n",
+        ),
+    )?;
+    let (drawn_header, drawn_body) = split_http(&drawn)?;
+    if !drawn_header.contains("X-Ocelli-Source: held") || drawn_body != [128] {
+        return Err("the override after a preset did not reuse the held frame".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn single_frame_bytes_drop_and_preview_stays() -> Result<(), String> {
+    let file = mono_frame(true)?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id =
+        header_line(header, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())?;
+    let headers = exchange(
+        addr,
+        format!(
+            "POST /headers HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\nContent-Length: 0\r\n\r\n"
+        )
+        .as_bytes(),
+    )?;
+    let (headers_header, _) = split_http(&headers)?;
+    if !headers_header.contains("200") {
+        return Err("headers by id failed before the frame was held".to_owned());
+    }
+    let _ = exchange(addr, &preview_id(id, ""))?;
+    let after = exchange(
+        addr,
+        format!(
+            "POST /headers HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\nContent-Length: 0\r\n\r\n"
+        )
+        .as_bytes(),
+    )?;
+    let (after_header, _) = split_http(&after)?;
+    if !after_header.contains("410") {
+        return Err("single-frame bytes were still held".to_owned());
+    }
+    let census = held_census(addr)?;
+    let used = json_number(&census, "used")?;
+    if json_number(&census, "files")? != 0
+        || json_number(&census, "frames")? != 1
+        || used == 0
+        || used >= file.len()
+    {
+        return Err(format!(
+            "held bytes {used} were not the decoded frame alone, file {} census {census}",
+            file.len()
+        ));
+    }
+    let again = exchange(addr, &preview_id(id, ""))?;
+    let (again_header, again_body) = split_http(&again)?;
+    if !again_header.contains("X-Ocelli-Source: held") || again_body != [64] {
+        return Err("the held frame was dropped with the bytes".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn multi_frame_bytes_drop_only_after_every_frame() -> Result<(), String> {
+    let file = enhanced_frames()?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id =
+        header_line(header, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())?;
+    let first = exchange(addr, &preview_id(id, ""))?;
+    let (_, first_body) = split_http(&first)?;
+    if first_body != [64] {
+        return Err("held frame 0 was not grey 64".to_owned());
+    }
+    let mid = exchange(
+        addr,
+        format!(
+            "POST /headers HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\nContent-Length: 0\r\n\r\n"
+        )
+        .as_bytes(),
+    )?;
+    let (mid_header, _) = split_http(&mid)?;
+    if !mid_header.contains("200") {
+        return Err("multi-frame bytes dropped before every frame was held".to_owned());
+    }
+    let second = exchange(addr, &preview_id(id, "X-Ocelli-Frame: 1\r\n"))?;
+    let (second_header, second_body) = split_http(&second)?;
+    if !second_header.contains("X-Ocelli-Source: decoded") || second_body != [128] {
+        return Err("held frame 1 was not grey 128".to_owned());
+    }
+    let end = exchange(
+        addr,
+        format!(
+            "POST /headers HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\nContent-Length: 0\r\n\r\n"
+        )
+        .as_bytes(),
+    )?;
+    let (end_header, _) = split_http(&end)?;
+    if !end_header.contains("410") {
+        return Err("multi-frame bytes stayed after every frame was held".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn pipelined_bytes_are_the_next_request() -> Result<(), String> {
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let file = mono_frame(true)?;
+    let mut request = http_post_to("/inspect", "", &file);
+    request.extend_from_slice(b"GET /synthetic HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+    let response = exchange(addr, &request)?;
+    let parts = response_parts(&response)?;
+    let second = parts
+        .get(1)
+        .ok_or_else(|| "the second response was missing".to_owned())?;
+    if !second.0.contains("200") || !second.1.windows(8).any(|window| window == b"\"slices\"") {
+        return Err("the pipelined request was not served".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_full_connection_is_busy_without_taking_the_slot() -> Result<(), String> {
+    let addr = viewer_capped(1024, 1)?;
+    let mut first = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+    first
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    first
+        .write_all(b"GET /synthetic HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        .map_err(|error| error.to_string())?;
+    let opened = read_one(&mut first)?;
+    let (opened_header, _) = split_http(&opened)?;
+    if !opened_header.contains("200") || !opened_header.contains("Connection: keep-alive") {
+        return Err("the first connection was not kept".to_owned());
+    }
+    let busy = exchange(addr, b"GET /synthetic HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (busy_header, busy_body) = split_http(&busy)?;
+    if !busy_header.contains("503")
+        || !busy_header.contains("X-Ocelli-Error: busy")
+        || busy_body != b"this process is already serving its connection limit"
+    {
+        return Err("a second connection was not busy".to_owned());
+    }
+    drop(first);
+    let mut served = false;
+    for _ in 0..20 {
+        let again = exchange(addr, b"GET /synthetic HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+        let (again_header, _) = split_http(&again)?;
+        if again_header.contains("200") {
+            served = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if !served {
+        return Err("the slot was not released".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn held_census_counts_files_and_frames() -> Result<(), String> {
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let empty = held_census(addr)?;
+    if json_number(&empty, "budget")? != 8 * 1024 * 1024 || json_number(&empty, "used")? != 0 {
+        return Err(format!("the empty census was {empty}"));
+    }
+    let build = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    if !empty.contains(&format!("\"build\":\"{build}\"")) {
+        return Err(format!("the build name was not {build}: {empty}"));
+    }
+    let file = mono_frame(true)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id =
+        header_line(header, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())?;
+    let files = held_census(addr)?;
+    if json_number(&files, "files")? != 1 || json_number(&files, "frames")? != 0 {
+        return Err(format!("the file census was {files}"));
+    }
+    let _ = exchange(addr, &preview_id(id, ""))?;
+    let frames = held_census(addr)?;
+    if json_number(&frames, "files")? != 0 || json_number(&frames, "frames")? != 1 {
+        return Err(format!("the frame census was {frames}"));
+    }
+    let used = json_number(&frames, "used")?;
+    let again = exchange(addr, &preview_id(id, ""))?;
+    let _ = split_http(&again)?;
+    let census = held_census(addr)?;
+    let stable = json_number(&census, "used")?;
+    if used != stable || used > 8 * 1024 * 1024 {
+        return Err("a second window changed the held bytes".to_owned());
+    }
+    let tiny = viewer_on(1)?;
+    let refused = exchange(tiny, &http_post_to("/file", "", &file))?;
+    let (refused_header, _) = split_http(&refused)?;
+    if !refused_header.contains("X-Ocelli-Held: 0") || refused_header.contains("X-Ocelli-File:") {
+        return Err("a file larger than the budget was held".to_owned());
+    }
+    let census = held_census(tiny)?;
+    if json_number(&census, "used")? != 0 || json_number(&census, "files")? != 0 {
+        return Err(format!("a refused file changed the census: {census}"));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_bad_window_does_not_drop_a_held_file() -> Result<(), String> {
+    let file = mono_frame(true)?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id =
+        header_line(header, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())?;
+    let bad = exchange(
+        addr,
+        &preview_id(
+            id,
+            "X-Ocelli-Window-Preset: lung\r\nX-Ocelli-Window-Center: 40\r\n",
+        ),
+    )?;
+    let (bad_header, _) = split_http(&bad)?;
+    if !bad_header.contains("400") {
+        return Err("a mixed preset was accepted".to_owned());
+    }
+    let drawn = exchange(addr, &preview_id(id, ""))?;
+    let (drawn_header, drawn_body) = split_http(&drawn)?;
+    if !drawn_header.contains("200") || drawn_body != [64] {
+        return Err("a bad window dropped the file".to_owned());
+    }
+    Ok(())
+}
+
+fn file_id_form(id: &str) -> bool {
+    let Some((generation, serial)) = id.split_once('.') else {
+        return false;
+    };
+    let hex = |text: &str| {
+        !text.is_empty()
+            && text
+                .chars()
+                .all(|ch| ch.is_ascii_digit() || ('a'..='f').contains(&ch))
+    };
+    hex(generation) && hex(serial) && !id.contains('/')
+}
+
+fn status_token(header: &str) -> Result<&str, String> {
+    header
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| "the status line was short".to_owned())
+}
+
+fn ocelli_headers(header: &str) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    for line in header.split("\r\n") {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        if !key.to_ascii_lowercase().starts_with("x-ocelli-") {
+            continue;
+        }
+        if key.eq_ignore_ascii_case("X-Ocelli-Source") {
+            continue;
+        }
+        rows.push((key.to_ascii_lowercase(), value.trim().to_owned()));
+    }
+    rows.sort();
+    rows
+}
+
+fn same_preview(left: &[u8], right: &[u8]) -> Result<(), String> {
+    let (left_header, left_body) = split_http(left)?;
+    let (right_header, right_body) = split_http(right)?;
+    if status_token(left_header)? != status_token(right_header)? || left_body != right_body {
+        return Err(format!(
+            "status or body differed: {} and {}",
+            status_token(left_header)?,
+            status_token(right_header)?
+        ));
+    }
+    if ocelli_headers(left_header) != ocelli_headers(right_header) {
+        return Err("the X-Ocelli headers differed apart from source".to_owned());
+    }
+    Ok(())
+}
+
+fn same_held_and_body(addr: SocketAddr, file: &[u8], extra: &str) -> Result<(), String> {
+    let posted = exchange(addr, &http_post_to("/file", "", file))?;
+    let (header, _) = split_http(&posted)?;
+    let id =
+        header_line(header, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())?;
+    if !file_id_form(id) {
+        return Err(format!("the file id {id} is not generation.serial"));
+    }
+    let by_id = exchange(addr, &preview_id(id, extra))?;
+    let by_body = exchange(addr, &http_post_to("/preview", extra, file))?;
+    same_preview(&by_id, &by_body)
+}
+
+#[test]
+fn a_posted_file_returns_its_inspect_json_and_an_id() -> Result<(), String> {
+    a_file_post_matches_inspect_and_holds_once()?;
+    let file = mono_frame(true)?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id =
+        header_line(header, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())?;
+    if !file_id_form(id) {
+        return Err(format!("the file id {id} is not generation.serial"));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_held_frame_matches_the_posted_frame() -> Result<(), String> {
+    let addr = viewer_on(16 * 1024 * 1024)?;
+    let mono = mono_frame(true)?;
+    same_held_and_body(addr, &mono, "")?;
+    same_held_and_body(
+        addr,
+        &mono,
+        "X-Ocelli-Window-Center: 50\r\nX-Ocelli-Window-Width: 1\r\nX-Ocelli-Window-Function: LINEAR_EXACT\r\n",
+    )?;
+    same_held_and_body(addr, &mono, "X-Ocelli-Invert: 1\r\n")?;
+    let enhanced = enhanced_frames()?;
+    same_held_and_body(addr, &enhanced, "")?;
+    same_held_and_body(addr, &enhanced, "X-Ocelli-Frame: 1\r\n")?;
+    let study = slice(0).ok_or_else(|| "slice 0 was not built".to_owned())?;
+    same_held_and_body(addr, &study, "X-Ocelli-Window-Preset: lung\r\n")?;
+    let modality = mono_with(true, &[(0x0028, 0x3000)])?;
+    same_held_and_body(addr, &modality, "")?;
+    let voi = mono_with(true, &[(0x0028, 0x3010)])?;
+    same_held_and_body(addr, &voi, "")?;
+    same_held_and_body(addr, &enhanced, "X-Ocelli-Frame: 2\r\n")?;
+    // A file that is not Part 10 is not held, so it has no id form.
+    let junk = b"not a dicom file";
+    let posted = exchange(addr, &http_post_to("/file", "", junk))?;
+    let (posted_header, _) = split_http(&posted)?;
+    if posted_header.contains("X-Ocelli-File:") {
+        return Err("a non Part 10 file was given an id".to_owned());
+    }
+    let left = exchange(addr, &http_post_to("/preview", "", junk))?;
+    let right = exchange(addr, &http_post_to("/preview", "", junk))?;
+    same_preview(&left, &right)?;
+    Ok(())
+}
+
+#[test]
+fn a_window_change_on_a_held_frame_does_not_decode_again() -> Result<(), String> {
+    let file = mono_frame(true)?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id =
+        header_line(header, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())?;
+    let first = exchange(addr, &preview_id(id, ""))?;
+    let (first_header, first_body) = split_http(&first)?;
+    if !first_header.contains("X-Ocelli-Source: decoded") || first_body != [64] {
+        return Err("the first held preview did not decode".to_owned());
+    }
+    let second = exchange(
+        addr,
+        &preview_id(
+            id,
+            "X-Ocelli-Window-Center: 50\r\nX-Ocelli-Window-Width: 1\r\nX-Ocelli-Window-Function: LINEAR_EXACT\r\n",
+        ),
+    )?;
+    let (second_header, second_body) = split_http(&second)?;
+    if !second_header.contains("X-Ocelli-Source: held") || second_body != [128] {
+        return Err("the window change decoded again".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn an_evicted_file_answers_gone() -> Result<(), String> {
+    let file = mono_frame(true)?;
+    let addr = viewer_on(8 * 1024)?;
+    let first = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (first_header, _) = split_http(&first)?;
+    if !first_header.contains("X-Ocelli-Held: 1") {
+        return Err("the first file was not held".to_owned());
+    }
+    let id = header_line(first_header, "X-Ocelli-File")
+        .ok_or_else(|| "the file id was missing".to_owned())?;
+    let census = held_census(addr)?;
+    let used = json_number(&census, "used")?;
+    if used == 0 || used > 8 * 1024 {
+        return Err(format!("the first file used {used}"));
+    }
+    // One more file than the budget can hold. Asking early would refresh the
+    // first id and keep it.
+    let room = (8 * 1024) / used;
+    let mut survivor = String::new();
+    for _ in 0..room + 2 {
+        let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+        let (posted_header, _) = split_http(&posted)?;
+        if let Some(next) = header_line(posted_header, "X-Ocelli-File") {
+            survivor = next.to_owned();
+        }
+    }
+    let answer = exchange(addr, &preview_id(id, ""))?;
+    let (answer_header, answer_body) = split_http(&answer)?;
+    if !answer_header.contains("410")
+        || !answer_header.contains("X-Ocelli-Error: file-gone")
+        || answer_body != b"the file is no longer held by this process"
+    {
+        return Err("the first id was not evicted".to_owned());
+    }
+    if survivor.is_empty() {
+        return Err("no later file was held".to_owned());
+    }
+    let kept = exchange(addr, &preview_id(&survivor, ""))?;
+    let (kept_header, kept_body) = split_http(&kept)?;
+    if !kept_header.contains("200") || kept_body != [64] {
+        return Err("a later held id stopped answering".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn an_id_from_another_process_answers_gone() -> Result<(), String> {
+    two_viewers_do_not_serve_each_others_ids()
+}
+
+#[test]
+fn a_file_larger_than_the_budget_is_not_held() -> Result<(), String> {
+    let file = mono_frame(true)?;
+    let addr = viewer_on(1)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    if !header.contains("X-Ocelli-Held: 0") || header.contains("X-Ocelli-File:") {
+        return Err("a file larger than the budget was held".to_owned());
+    }
+    let census = held_census(addr)?;
+    if json_number(&census, "used")? != 0 || json_number(&census, "files")? != 0 {
+        return Err(format!("a refused file changed the census: {census}"));
+    }
+    Ok(())
+}
+
+#[test]
+fn an_id_with_a_body_is_refused() -> Result<(), String> {
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let mixed = "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: 1.1\r\nContent-Length: 4\r\n\r\nnope";
+    let both = exchange(addr, mixed.as_bytes())?;
+    let (header, body) = split_http(&both)?;
+    if !header.contains("400")
+        || !header.contains("X-Ocelli-Error: header")
+        || body != b"a file id and a body cannot be sent together"
+    {
+        return Err("an id with a body was accepted".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_window_refusal_keeps_the_held_frame() -> Result<(), String> {
+    a_voi_lut_preset_still_holds_the_frame()?;
+    a_bad_window_does_not_drop_a_held_file()
+}
+
+#[test]
+fn keep_alive_serves_two_requests() -> Result<(), String> {
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let mut stream = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    stream
+        .write_all(b"GET /held HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        .map_err(|error| error.to_string())?;
+    let first = read_one(&mut stream)?;
+    let (first_header, _) = split_http(&first)?;
+    if !first_header.contains("200") || !first_header.contains("Connection: keep-alive") {
+        return Err("the first request was not kept".to_owned());
+    }
+    stream
+        .write_all(b"GET /synthetic HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        .map_err(|error| error.to_string())?;
+    let second = read_one(&mut stream)?;
+    let (second_header, second_body) = split_http(&second)?;
+    if !second_header.contains("200")
+        || !second_body.windows(8).any(|window| window == b"\"slices\"")
+    {
+        return Err("the second request on the same connection was not served".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn pipelined_requests_get_two_replies() -> Result<(), String> {
+    pipelined_bytes_are_the_next_request()
+}
+
+#[test]
+fn a_connection_over_the_cap_is_busy() -> Result<(), String> {
+    a_full_connection_is_busy_without_taking_the_slot()
+}
+
+#[test]
+fn the_page_names_the_release_build() -> Result<(), String> {
+    let response = one_exchange(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200") {
+        return Err("the page response was not 200".to_owned());
+    }
+    let page = std::str::from_utf8(body).map_err(|_| "the page is not utf-8".to_owned())?;
+    if !page.contains("cargo run --release -p ocelli-folder-viewer") {
+        return Err("the page does not name the release build".to_owned());
+    }
+    if !page.contains("This is the slow debug build.") {
+        return Err("the page does not name the debug build".to_owned());
+    }
+    Ok(())
 }

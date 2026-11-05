@@ -56,10 +56,11 @@ export const WORSE = "worse";
  * the durations because it is not one and the words `slower` and `faster` were
  * never right for it either.
  *
- * **An unrecognised unit throws.** The registry is the authority on units and
- * it declares four. A fifth arriving with a new subject is a decision about
- * which way is better, and defaulting it to "an increase is worse" would make
- * that decision silently and in the wrong direction half the time.
+ * **An unrecognised unit throws.** The registry is the authority on units.
+ * A new unit arriving with a new subject is a decision about which way is
+ * better, and defaulting it to "an increase is worse" would make that
+ * decision silently and in the wrong direction half the time. `bytes` is
+ * worse on an increase. `frames_per_second` is better on an increase.
  *
  * **The throw is not the guard, though, and it was being counted as one.** It
  * fires inside `withinTolerance`, which `--compare` reaches only for a subject
@@ -76,6 +77,8 @@ export const INCREASE_MEANS = {
   fraction_of_one_vcpu: WORSE,
   changed_frames_per_second: BETTER,
   pixels_per_second: BETTER,
+  frames_per_second: BETTER,
+  bytes: WORSE,
 };
 
 /** An empty baseline, in the shape the tracked file uses. */

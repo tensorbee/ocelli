@@ -8,6 +8,8 @@ mod preview;
 mod synthetic;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod held;
+#[cfg(not(target_arch = "wasm32"))]
 mod serve;
 
 pub use preview::{
@@ -17,4 +19,6 @@ pub use preview::{
 pub use synthetic::{SLICES, slice};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use serve::{handle_connection, serve};
+pub use held::{Viewer, ViewerConfig};
+#[cfg(not(target_arch = "wasm32"))]
+pub use serve::{handle_connection, handle_connection_with, serve, serve_on};

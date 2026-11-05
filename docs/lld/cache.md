@@ -1,7 +1,7 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-216
+**Last updated:** 2026-11-05
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
 section 20's `Budgeted` trait and `Lru<K, V>`, made into `crates/ocelli-cache`.
@@ -153,6 +153,18 @@ the transient tier HLD section 8 drops when a frame decodes. F-031 left
 `CacheTier::Encoded` as a discriminant and no production cache uses it.
 GPU textures are F-040 and F-043. There is no `wgpu`
 dependency here: this crate never sees a texture, only its size.
+
+## The folder viewer, an external consumer
+
+The folder viewer (`examples/folder-viewer`) is a consumer of `Lru` outside
+this crate. One cache holds two kinds of value in an enum. One kind is the
+posted Part 10 bytes. The other is one decoded frame. `ImageCache` was not
+used, because a radiograph does not carry Image Position (Patient), Image
+Orientation (Patient) or Pixel Spacing, and `DecodedFrame` requires an image
+plane. The viewer uses `CacheTier::Decoded`, because the frames are what the
+budget limits. The posted bytes share that budget until the viewer removes
+them with `Lru::remove`. They are not a second cache and they are not
+`CacheTier::Encoded`. No production cache in this crate uses that tier.
 
 ## The decoded tier and its events, F-032
 

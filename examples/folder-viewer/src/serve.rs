@@ -1,16 +1,23 @@
 //! Loopback page. The browser chooses the folder and posts each file here.
 //!
 //! The listener binds `127.0.0.1` and prints only its URL. A request body is
-//! not written to a log, and a response does not repeat a path.
+//! not written to a log, and a response does not repeat a path. One connection
+//! may carry several requests. Bytes past one body stay available for the next.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use ocelli_pixel::VoiFunction;
 
+use crate::held::{FileId, Lookup, Viewer, ViewerConfig};
+use crate::preview::{
+    decode_held, decode_ticks, note_lookup, note_write, phases, profiling, render_held,
+    reset_phases, validate_frame_request,
+};
 use crate::{
-    FrameRequest, SLICES, headers_json, inspect_json, preview_frame, slice,
+    FrameRequest, Preview, PreviewError, SLICES, headers_json, inspect_json, preview_frame, slice,
     window_function_from_token, window_preset_from_token,
 };
 
@@ -21,12 +28,16 @@ const BODY_CAP: usize = 1024 * 1024 * 1024;
 const PAGE: &str = include_str!("page.html");
 const MORE: &str = include_str!("more.html");
 const USE_PAGE: &str = include_str!("use.html");
+const READ_TIMEOUT: Duration = Duration::from_secs(15);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 
 struct Request {
     method: String,
     path: String,
     body: Vec<u8>,
     frame: FrameRequest,
+    file_id: Option<FileId>,
+    close: bool,
 }
 
 struct Grey {
@@ -54,11 +65,15 @@ struct Reply {
     error: Option<&'static str>,
     grey: Option<Box<Grey>>,
     body: Vec<u8>,
+    source: Option<&'static str>,
+    file_id: Option<String>,
+    held_flag: Option<u8>,
 }
 
 enum ReadStop {
     Io(std::io::Error),
     Reply(Reply),
+    CleanClose,
 }
 
 /// Bind `127.0.0.1` and serve until the process stops.
@@ -66,23 +81,36 @@ enum ReadStop {
 /// The port is ephemeral unless `OCELLI_PORT` is set, so a fixed address can
 /// be bookmarked and a second copy fails to bind instead of starting beside
 /// the first. A set value that is not a port number, empty included, is
-/// refused rather than read as unset.
+/// refused rather than read as unset. The cache budget is `OCELLI_CACHE_MIB`,
+/// or 256 MiB when that variable is unset.
 ///
 /// # Errors
 ///
 /// Returns the listener error when the socket cannot be opened, and an
-/// `InvalidInput` error when `OCELLI_PORT` is not a port number.
+/// `InvalidInput` error when `OCELLI_PORT` or `OCELLI_CACHE_MIB` is not usable.
 pub fn serve() -> std::io::Result<()> {
+    let config = ViewerConfig::from_env()?;
     let listener = TcpListener::bind(("127.0.0.1", chosen_port()?))?;
     let addr = listener.local_addr()?;
     println!("http://{addr}/");
     std::io::stdout().flush()?;
+    serve_on(listener, Arc::new(Viewer::new(config)))
+}
+
+/// Accept connections on an existing listener. Does not print.
+///
+/// # Errors
+///
+/// Returns the listener error when accepting fails hard enough to end the loop.
+/// A single failed accept is skipped.
+pub fn serve_on(listener: TcpListener, viewer: Arc<Viewer>) -> std::io::Result<()> {
     for incoming in listener.incoming() {
         let Ok(stream) = incoming else {
             continue;
         };
+        let viewer = Arc::clone(&viewer);
         std::thread::spawn(move || {
-            let _ = handle_connection(stream);
+            let _ = handle_connection_with(stream, &viewer);
         });
     }
     Ok(())
@@ -104,36 +132,123 @@ fn chosen_port() -> std::io::Result<u16> {
     }
 }
 
-/// Read one request and write one response.
+/// Read one request and write one response, then close.
+///
+/// The cache budget is zero, so nothing is held. Callers that already shut
+/// the write half down still observe one response.
 ///
 /// # Errors
 ///
 /// Returns an I/O error when the socket fails before a response is written.
-pub fn handle_connection(mut stream: TcpStream) -> std::io::Result<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(60)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(60)))?;
-    let request = match read_request(&mut stream) {
-        Ok(request) => request,
-        Err(ReadStop::Io(error)) => return Err(error),
-        Err(ReadStop::Reply(reply)) => return write_reply(&mut stream, &reply),
-    };
-    write_reply(&mut stream, &route(&request))
+pub fn handle_connection(stream: TcpStream) -> std::io::Result<()> {
+    let viewer = Viewer::new(ViewerConfig { cache_bytes: 0 });
+    connection_session(stream, &viewer, Duration::from_secs(60), true)
 }
 
-fn route(request: &Request) -> Reply {
+/// Serve requests on one connection until it closes or sits idle.
+///
+/// A connection past the cap gets 503 and is closed without taking a slot.
+///
+/// # Errors
+///
+/// Returns an I/O error when the socket fails before a response is written.
+/// A clean end of stream after a response is success.
+pub fn handle_connection_with(mut stream: TcpStream, viewer: &Viewer) -> std::io::Result<()> {
+    if !viewer.acquire_connection() {
+        let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
+        let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
+        let mut pending = Vec::new();
+        // Read the request so the client is not still writing when this
+        // socket closes. The read does not take a connection slot.
+        let got_request = match read_request(&mut stream, &mut pending, 0) {
+            Ok(_) | Err(ReadStop::Reply(_)) => true,
+            Err(ReadStop::CleanClose) | Err(ReadStop::Io(_)) => false,
+        };
+        if got_request {
+            let reply = text_reply(
+                503,
+                Some("busy"),
+                "this process is already serving its connection limit",
+            );
+            let _ = write_reply(&mut stream, &reply, false);
+        }
+        return Ok(());
+    }
+    let _guard = ConnectionGuard { viewer };
+    connection_session(stream, viewer, READ_TIMEOUT, false)
+}
+
+struct ConnectionGuard<'a> {
+    viewer: &'a Viewer,
+}
+
+impl Drop for ConnectionGuard<'_> {
+    fn drop(&mut self) {
+        self.viewer.release_connection();
+    }
+}
+
+fn connection_session(
+    mut stream: TcpStream,
+    viewer: &Viewer,
+    read_timeout: Duration,
+    one_request: bool,
+) -> std::io::Result<()> {
+    stream.set_read_timeout(Some(read_timeout))?;
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+    let mut pending = Vec::new();
+    let mut handled = 0_usize;
+    loop {
+        let request = match read_request(&mut stream, &mut pending, handled) {
+            Ok(request) => request,
+            Err(ReadStop::CleanClose) => return Ok(()),
+            Err(ReadStop::Io(error)) => return Err(error),
+            Err(ReadStop::Reply(reply)) => {
+                write_reply(&mut stream, &reply, false)?;
+                return Ok(());
+            }
+        };
+        let close = one_request || request.close;
+        if profiling() {
+            reset_phases();
+        }
+        let reply = route(viewer, request);
+        let write_started = profiling().then(Instant::now);
+        let recycle = reply.grey.is_some();
+        let written = write_reply(&mut stream, &reply, !close);
+        if recycle {
+            viewer.recycle_grey(reply.body);
+        }
+        written?;
+        if let Some(started) = write_started {
+            note_write(started.elapsed().as_micros());
+            log_phases();
+        }
+        handled = handled.saturating_add(1);
+        if close {
+            return Ok(());
+        }
+    }
+}
+
+fn route(viewer: &Viewer, request: Request) -> Reply {
     if request.method == "POST" && request.body.len() > BODY_CAP {
         return text_reply(400, Some("body"), "the preview request is too large");
     }
     match (request.method.as_str(), request.path.as_str()) {
-        ("GET", _) => get_reply(request),
-        ("POST", "/preview") => preview_reply(&request.body, request.frame),
+        ("GET", _) => get_reply(viewer, &request),
+        ("POST", "/preview") => preview_route(viewer, &request),
+        ("POST", "/file") => file_route(viewer, request),
         ("POST", "/inspect") => json_or_error(inspect_json(&request.body, request.frame.frame)),
-        ("POST", "/headers") => json_or_error(headers_json(&request.body)),
+        ("POST", "/headers") => headers_route(viewer, &request),
         _ => text_reply(404, None, "not found"),
     }
 }
 
-fn get_reply(request: &Request) -> Reply {
+fn get_reply(viewer: &Viewer, request: &Request) -> Reply {
+    if request.path == "/held" {
+        return held_reply(viewer);
+    }
     if request.path == "/" || request.path == "/index.html" {
         return page_reply();
     }
@@ -156,6 +271,21 @@ fn get_reply(request: &Request) -> Reply {
     text_reply(404, None, "not found")
 }
 
+fn held_reply(viewer: &Viewer) -> Reply {
+    let (pressure, files, frames) = viewer.census();
+    let build = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    let body = format!(
+        "{{\"build\":\"{build}\",\"budget\":{budget},\"used\":{used},\"files\":{files},\"frames\":{frames}}}",
+        budget = pressure.budget,
+        used = pressure.used,
+    );
+    bare(200, "application/json", body.into_bytes())
+}
+
 fn page_reply() -> Reply {
     html_page(PAGE)
 }
@@ -164,8 +294,96 @@ fn html_page(page: &str) -> Reply {
     bare(200, "text/html; charset=utf-8", page.as_bytes().to_vec())
 }
 
-fn preview_reply(body: &[u8], frame: FrameRequest) -> Reply {
-    match preview_frame(body, frame) {
+fn preview_route(viewer: &Viewer, request: &Request) -> Reply {
+    if request.file_id.is_some() && !request.body.is_empty() {
+        return text_reply(
+            400,
+            Some("header"),
+            "a file id and a body cannot be sent together",
+        );
+    }
+    if let Some(id) = request.file_id {
+        return preview_held(viewer, id, request.frame);
+    }
+    let mut reply = from_preview(preview_frame(&request.body, request.frame));
+    if reply.status == 200 {
+        reply.source = Some("body");
+    }
+    reply
+}
+
+fn preview_held(viewer: &Viewer, id: FileId, request: FrameRequest) -> Reply {
+    if let Err(error) = validate_frame_request(request) {
+        return error_reply(error);
+    }
+    let before = decode_ticks();
+    let lookup_started = profiling().then(Instant::now);
+    let found = viewer.lookup_frame(id, request.frame);
+    if let Some(started) = lookup_started {
+        note_lookup(started.elapsed().as_micros());
+    }
+    let preview = match found {
+        Lookup::Gone => return gone(),
+        Lookup::Hit(held) => viewer.with_workspace(|workspace| {
+            render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
+        }),
+        Lookup::Miss(bytes) => viewer.with_workspace(|workspace| {
+            match decode_held(&bytes, request.frame, &mut workspace.native) {
+                Ok(held) => {
+                    let held = viewer.store_frame(id, request.frame, held);
+                    render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
+                }
+                Err(error) => Err(error),
+            }
+        }),
+    };
+    let mut reply = from_preview(preview);
+    if reply.status == 200 {
+        reply.source = Some(if decode_ticks() == before {
+            "held"
+        } else {
+            "decoded"
+        });
+    }
+    reply
+}
+
+fn file_route(viewer: &Viewer, request: Request) -> Reply {
+    match inspect_json(&request.body, request.frame.frame) {
+        Ok(json) => {
+            let mut reply = bare(200, "application/json; charset=utf-8", json.into_bytes());
+            match viewer.insert_file(request.body) {
+                Some(id) => {
+                    reply.file_id = Some(id.header_value());
+                    reply.held_flag = Some(1);
+                }
+                None => reply.held_flag = Some(0),
+            }
+            reply
+        }
+        Err(error) => error_reply(error),
+    }
+}
+
+fn headers_route(viewer: &Viewer, request: &Request) -> Reply {
+    if request.file_id.is_some() && !request.body.is_empty() {
+        return text_reply(
+            400,
+            Some("header"),
+            "a file id and a body cannot be sent together",
+        );
+    }
+    if let Some(id) = request.file_id {
+        return match viewer.file_bytes(id) {
+            Some(bytes) => json_or_error(headers_json(bytes.as_ref())),
+            None => gone(),
+        };
+    }
+    json_or_error(headers_json(&request.body))
+}
+
+fn from_preview(result: Result<Preview, PreviewError>) -> Reply {
+    match result {
         Ok(preview) => Reply {
             status: 200,
             content_type: "application/octet-stream",
@@ -189,21 +407,31 @@ fn preview_reply(body: &[u8], frame: FrameRequest) -> Reply {
                 edge_bottom: preview.facts.edge_bottom,
             })),
             body: preview.grey,
+            source: None,
+            file_id: None,
+            held_flag: None,
         },
-        Err(error) => {
-            let message = error.to_string();
-            text_reply(400, Some(error.code()), &message)
-        }
+        Err(error) => error_reply(error),
     }
 }
 
-fn json_or_error(result: Result<String, crate::PreviewError>) -> Reply {
+fn error_reply(error: PreviewError) -> Reply {
+    let message = error.to_string();
+    text_reply(400, Some(error.code()), &message)
+}
+
+fn gone() -> Reply {
+    text_reply(
+        410,
+        Some("file-gone"),
+        "the file is no longer held by this process",
+    )
+}
+
+fn json_or_error(result: Result<String, PreviewError>) -> Reply {
     match result {
         Ok(json) => bare(200, "application/json; charset=utf-8", json.into_bytes()),
-        Err(error) => {
-            let message = error.to_string();
-            text_reply(400, Some(error.code()), &message)
-        }
+        Err(error) => error_reply(error),
     }
 }
 
@@ -214,6 +442,9 @@ fn bare(status: u16, content_type: &'static str, body: Vec<u8>) -> Reply {
         error: None,
         grey: None,
         body,
+        source: None,
+        file_id: None,
+        held_flag: None,
     }
 }
 
@@ -232,6 +463,8 @@ fn reason(status: u16) -> &'static str {
         200 => "OK",
         400 => "Bad Request",
         404 => "Not Found",
+        410 => "Gone",
+        503 => "Service Unavailable",
         _ => "Error",
     }
 }
@@ -249,9 +482,28 @@ fn format_window(value: f32) -> String {
     }
 }
 
-fn write_reply(stream: &mut TcpStream, reply: &Reply) -> std::io::Result<()> {
+fn log_phases() {
+    let phase = phases();
+    if phase.pixels == 0 {
+        return;
+    }
+    eprintln!(
+        "profile lookup_us={} unpack_us={} chain_us={} voi_us={} grey_us={} fused_us={} write_us={} pixels={}",
+        phase.lookup_us,
+        phase.unpack_us,
+        phase.chain_us,
+        phase.voi_us,
+        phase.grey_us,
+        phase.fused_us,
+        phase.write_us,
+        phase.pixels,
+    );
+}
+
+fn write_reply(stream: &mut impl Write, reply: &Reply, keep_alive: bool) -> std::io::Result<()> {
+    let connection = if keep_alive { "keep-alive" } else { "close" };
     let mut head = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {len}\r\nCache-Control: no-store\r\nConnection: close\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {len}\r\nCache-Control: no-store\r\nConnection: {connection}\r\n",
         status = reply.status,
         reason = reason(reply.status),
         ctype = reply.content_type,
@@ -260,6 +512,21 @@ fn write_reply(stream: &mut TcpStream, reply: &Reply) -> std::io::Result<()> {
     if let Some(code) = reply.error {
         head.push_str("X-Ocelli-Error: ");
         head.push_str(code);
+        head.push_str("\r\n");
+    }
+    if let Some(source) = reply.source {
+        head.push_str("X-Ocelli-Source: ");
+        head.push_str(source);
+        head.push_str("\r\n");
+    }
+    if let Some(id) = &reply.file_id {
+        head.push_str("X-Ocelli-File: ");
+        head.push_str(id);
+        head.push_str("\r\n");
+    }
+    if let Some(flag) = reply.held_flag {
+        head.push_str("X-Ocelli-Held: ");
+        head.push_str(&flag.to_string());
         head.push_str("\r\n");
     }
     if let Some(grey) = reply.grey.as_deref() {
@@ -304,12 +571,29 @@ fn write_reply(stream: &mut TcpStream, reply: &Reply) -> std::io::Result<()> {
     Ok(())
 }
 
-fn read_request(stream: &mut TcpStream) -> Result<Request, ReadStop> {
-    let mut buf = Vec::new();
+fn read_request(
+    stream: &mut TcpStream,
+    pending: &mut Vec<u8>,
+    handled: usize,
+) -> Result<Request, ReadStop> {
     let mut chunk = [0_u8; 8192];
     let header_end = loop {
+        if let Some(end) = header_end_at(pending) {
+            break end;
+        }
+        if pending.len() > HEADER_CAP {
+            pending.clear();
+            return Err(ReadStop::Reply(text_reply(
+                400,
+                Some("header"),
+                "the preview request header is too large",
+            )));
+        }
         let n = stream.read(&mut chunk).map_err(ReadStop::Io)?;
         if n == 0 {
+            if pending.is_empty() && handled > 0 {
+                return Err(ReadStop::CleanClose);
+            }
             return Err(ReadStop::Io(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
                 "closed",
@@ -321,33 +605,27 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, ReadStop> {
                 "read",
             )));
         };
-        buf.extend_from_slice(got);
-        if let Some(end) = header_end_at(&buf) {
-            break end;
-        }
-        if buf.len() > HEADER_CAP {
-            return Err(ReadStop::Reply(text_reply(
-                400,
-                Some("header"),
-                "the preview request header is too large",
+        pending.extend_from_slice(got);
+    };
+    let header = {
+        let Some(header_bytes) = pending.get(..header_end) else {
+            return Err(ReadStop::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "header",
             )));
-        }
+        };
+        std::str::from_utf8(header_bytes)
+            .map_err(|_| {
+                ReadStop::Reply(text_reply(
+                    400,
+                    Some("header"),
+                    "the preview request header is not text",
+                ))
+            })?
+            .to_owned()
     };
-    let Some(header_bytes) = buf.get(..header_end) else {
-        return Err(ReadStop::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "header",
-        )));
-    };
-    let header = std::str::from_utf8(header_bytes).map_err(|_| {
-        ReadStop::Reply(text_reply(
-            400,
-            Some("header"),
-            "the preview request header is not text",
-        ))
-    })?;
-    let (method, path, length, frame) = parse_header(header).map_err(ReadStop::Reply)?;
-    let declared = match length {
+    let parsed = parse_header(&header).map_err(ReadStop::Reply)?;
+    let declared = match parsed.length {
         Some(value) if value > BODY_CAP => {
             return Err(ReadStop::Reply(text_reply(
                 400,
@@ -356,7 +634,7 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, ReadStop> {
             )));
         }
         Some(value) => value,
-        None if method == "POST" => {
+        None if parsed.method == "POST" => {
             return Err(ReadStop::Reply(text_reply(
                 400,
                 Some("length"),
@@ -365,13 +643,42 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, ReadStop> {
         }
         None => 0,
     };
-    let mut body = match buf.get(header_end..) {
-        Some(rest) => rest.to_vec(),
-        None => Vec::new(),
+    let body = fill_body(stream, pending, header_end, declared)?;
+    Ok(Request {
+        method: parsed.method,
+        path: parsed.path,
+        body,
+        frame: parsed.frame,
+        file_id: parsed.file_id,
+        close: parsed.close,
+    })
+}
+
+fn fill_body<R: Read>(
+    stream: &mut R,
+    pending: &mut Vec<u8>,
+    header_end: usize,
+    declared: usize,
+) -> Result<Vec<u8>, ReadStop> {
+    let tail = if pending.len() > header_end {
+        pending.split_off(header_end)
+    } else {
+        Vec::new()
     };
-    if body.len() > declared {
-        body.truncate(declared);
+    release_read_buffer(pending);
+    if tail.len() >= declared {
+        let mut incoming = tail;
+        let surplus = incoming.split_off(declared);
+        let mut body = exact_body(declared);
+        body.extend_from_slice(&incoming);
+        if !surplus.is_empty() {
+            *pending = surplus;
+        }
+        return Ok(body);
     }
+    let mut body = exact_body(declared);
+    body.extend_from_slice(&tail);
+    let mut chunk = [0_u8; 8192];
     while body.len() < declared {
         let n = stream.read(&mut chunk).map_err(ReadStop::Io)?;
         if n == 0 {
@@ -381,25 +688,63 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, ReadStop> {
                 "the preview request ended early",
             )));
         }
-        let need = declared - body.len();
-        let take = n.min(need);
-        let Some(got) = chunk.get(..take) else {
+        let Some(got) = chunk.get(..n) else {
             return Err(ReadStop::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "read",
             )));
         };
-        body.extend_from_slice(got);
+        let need = declared - body.len();
+        if got.len() <= need {
+            body.extend_from_slice(got);
+        } else {
+            let Some(take) = got.get(..need) else {
+                return Err(ReadStop::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "read",
+                )));
+            };
+            let Some(extra) = got.get(need..) else {
+                return Err(ReadStop::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "read",
+                )));
+            };
+            body.extend_from_slice(take);
+            *pending = extra.to_vec();
+            return Ok(body);
+        }
     }
-    Ok(Request {
-        method,
-        path,
-        body,
-        frame,
-    })
+    Ok(body)
 }
 
-fn parse_header(header: &str) -> Result<(String, String, Option<usize>, FrameRequest), Reply> {
+/// One allocation of `declared` bytes. A doubled growth trail stays resident
+/// after the body is freed, because this host does not return large pages.
+fn exact_body(declared: usize) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.reserve_exact(declared);
+    body
+}
+
+/// Drop a connection buffer that has kept a previous body.
+fn release_read_buffer(pending: &mut Vec<u8>) {
+    if pending.capacity() > HEADER_CAP {
+        *pending = Vec::new();
+    } else {
+        pending.clear();
+    }
+}
+
+struct HeaderParts {
+    method: String,
+    path: String,
+    length: Option<usize>,
+    frame: FrameRequest,
+    file_id: Option<FileId>,
+    close: bool,
+}
+
+fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
     let mut lines = header.split("\r\n");
     let Some(request) = lines.next() else {
         return Err(text_reply(
@@ -434,6 +779,8 @@ fn parse_header(header: &str) -> Result<(String, String, Option<usize>, FrameReq
         Some(bare) => bare,
         None => raw_path,
     };
+    let version = parts.next().unwrap_or("");
+    let mut close = version != "HTTP/1.1";
     let mut length = None;
     let mut seen_length = false;
     let mut seen_frame = false;
@@ -442,7 +789,9 @@ fn parse_header(header: &str) -> Result<(String, String, Option<usize>, FrameReq
     let mut seen_width = false;
     let mut seen_function = false;
     let mut seen_preset = false;
+    let mut seen_file = false;
     let mut frame = FrameRequest::default();
+    let mut file_id = None;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -472,6 +821,13 @@ fn parse_header(header: &str) -> Result<(String, String, Option<usize>, FrameReq
                 )
             })?;
             length = Some(parsed);
+        } else if name.eq_ignore_ascii_case("connection") {
+            if connection_closes(text) {
+                close = true;
+            }
+        } else if name.eq_ignore_ascii_case("x-ocelli-file") {
+            once(&mut seen_file)?;
+            file_id = Some(FileId::parse(text).ok_or_else(header_unusable)?);
         } else if name.eq_ignore_ascii_case("x-ocelli-frame") {
             once(&mut seen_frame)?;
             frame.frame = text.parse::<u32>().map_err(|_| header_unusable())?;
@@ -497,7 +853,20 @@ fn parse_header(header: &str) -> Result<(String, String, Option<usize>, FrameReq
                 Some(window_preset_from_token(text).map_err(|_| window_unusable())?);
         }
     }
-    Ok((method.to_owned(), path.to_owned(), length, frame))
+    Ok(HeaderParts {
+        method: method.to_owned(),
+        path: path.to_owned(),
+        length,
+        frame,
+        file_id,
+        close,
+    })
+}
+
+fn connection_closes(value: &str) -> bool {
+    value
+        .split(',')
+        .any(|part| part.trim().eq_ignore_ascii_case("close"))
 }
 
 fn once(seen: &mut bool) -> Result<(), Reply> {
@@ -540,4 +909,90 @@ fn header_end_at(buf: &[u8]) -> Option<usize> {
     buf.windows(4)
         .position(|window| window == b"\r\n\r\n")
         .map(|start| start + 4)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_request_body_is_held_at_its_declared_length() -> Result<(), &'static str> {
+        // 100003 is not a power of two. Doubling the read buffer would keep
+        // 131072 bytes, and that spare capacity would stay in a held file.
+        let declared = 100_003_usize;
+        let mut stream = std::io::Cursor::new(vec![9_u8; declared]);
+        let mut pending = Vec::new();
+        let body = fill_body(&mut stream, &mut pending, 0, declared)
+            .map_err(|_| "the declared body could not be read")?;
+        if body.len() != declared {
+            return Err("the request body length was not the declared length");
+        }
+        if body.capacity() != declared {
+            return Err("the request body kept spare capacity");
+        }
+        if pending.capacity() > HEADER_CAP {
+            return Err("the connection buffer kept the body");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_second_preview_does_not_keep_a_second_byte_buffer() -> Result<(), String> {
+        let bytes = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        });
+        let id = viewer
+            .insert_file(bytes)
+            .ok_or("the synthetic slice was not held")?;
+        let first = preview_held(&viewer, id, FrameRequest::default());
+        if first.status != 200 {
+            return Err(format!("the first preview status was {}", first.status));
+        }
+        let pixels = first.body.len();
+        let pixel_bytes = pixels
+            .checked_mul(2)
+            .ok_or("pixel byte length overflowed")?;
+        // Little-endian words are borrowed. A copy would keep a second frame.
+        let expected_native = if cfg!(target_endian = "little") {
+            0
+        } else {
+            pixel_bytes
+        };
+        viewer.recycle_grey(first.body);
+        let (native, grey) = viewer.byte_buffer_capacities();
+        if native != expected_native {
+            return Err(format!(
+                "the native buffer capacity was {native} for {pixel_bytes} pixel bytes"
+            ));
+        }
+        if grey != pixels {
+            return Err(format!(
+                "the grey buffer capacity was {grey} for {pixels} pixels"
+            ));
+        }
+        let second = preview_held(&viewer, id, FrameRequest::default());
+        if second.status != 200 {
+            return Err(format!("the second preview status was {}", second.status));
+        }
+        if second.body.len() != pixels {
+            return Err(format!(
+                "the second preview length was {} for {pixels} pixels",
+                second.body.len()
+            ));
+        }
+        viewer.recycle_grey(second.body);
+        let (native_again, grey_again) = viewer.byte_buffer_capacities();
+        if native_again != expected_native {
+            return Err(format!(
+                "the second preview left native capacity {native_again}"
+            ));
+        }
+        if grey_again != pixels {
+            return Err(format!(
+                "the second preview left grey capacity {grey_again}"
+            ));
+        }
+        Ok(())
+    }
 }

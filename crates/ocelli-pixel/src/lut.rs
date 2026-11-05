@@ -18,7 +18,10 @@ pub fn lut_descriptor_clones() -> usize {
     LUT_DESCRIPTOR_CLONES.load(Ordering::Relaxed)
 }
 
-use crate::{PixelError, stored_pixel::PhotometricInterpretation};
+use crate::{
+    PixelError,
+    stored_pixel::{ByteOrder, PhotometricInterpretation, StoredBits, read_container},
+};
 
 /// Validated LUT Descriptor and its setup-time-owned LUT Data.
 #[derive(Debug, PartialEq)]
@@ -623,6 +626,140 @@ impl LutChain {
         }
         Ok(())
     }
+
+    /// One display value for every integer stored sample `bits` allows.
+    ///
+    /// DICOM PS3.3 C.11.2.1.2 and C.11.2.1.3 define the window functions. Each
+    /// entry is [`Self::apply`] of that bit pattern, so the table adds no
+    /// arithmetic. Returns `None` when Bits Stored exceeds 16, which is more
+    /// than 65,536 entries.
+    #[must_use]
+    pub fn stored_sample_table(&self, bits: StoredBits) -> Option<StoredSampleTable> {
+        if bits.bits_stored() > 16 {
+            return None;
+        }
+        let count = 1_usize << usize::from(bits.bits_stored());
+        let mut entries = Vec::with_capacity(count);
+        for pattern in 0..count {
+            let raw = u32::try_from(pattern).ok()?;
+            let sample = bits.stored_sample(raw).ok()?;
+            entries.push(self.apply(Stored(sample)));
+        }
+        Some(StoredSampleTable { entries, bits })
+    }
+}
+
+/// Display values for every integer stored sample a frame can hold.
+///
+/// Built only by [`LutChain::stored_sample_table`]. The index is the masked
+/// stored bit pattern from PS3.3 C.7.6.3.
+#[derive(Clone, Debug)]
+pub struct StoredSampleTable {
+    entries: Vec<Display>,
+    bits: StoredBits,
+}
+
+impl StoredSampleTable {
+    /// Number of patterns, which is `2^BitsStored`.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the table has no patterns. A validated bit width never does.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Display value of each pattern, in pattern order.
+    #[must_use]
+    pub fn entries(&self) -> &[Display] {
+        &self.entries
+    }
+
+    /// Display value of one masked pattern.
+    #[must_use]
+    pub fn get(&self, pattern: u32) -> Option<Display> {
+        let index = usize::try_from(pattern).ok()?;
+        self.entries.get(index).copied()
+    }
+
+    /// Bit fields this table was built for.
+    #[must_use]
+    pub const fn bits(&self) -> StoredBits {
+        self.bits
+    }
+
+    /// Write one caller-supplied byte per stored sample.
+    ///
+    /// `indexed` has one byte per pattern in [`Self::entries`]. That byte is
+    /// the caller's quantisation of the display value. This function only
+    /// selects it from the container's masked bits.
+    ///
+    /// # Errors
+    ///
+    /// [`PixelError::DestinationLength`] when `indexed` is not one byte per
+    /// pattern.
+    /// [`PixelError::SourceLength`] when `source` is not one container per
+    /// destination sample.
+    /// [`PixelError::LengthOverflow`] when that product does not fit `usize`.
+    pub fn map_containers(
+        &self,
+        byte_order: ByteOrder,
+        source: &[u8],
+        indexed: &[u8],
+        destination: &mut [u8],
+    ) -> Result<(), PixelError> {
+        if indexed.len() != self.entries.len() {
+            return Err(PixelError::DestinationLength);
+        }
+        let bytes_per_sample = usize::from(self.bits.bits_allocated() / 8);
+        let expected = destination
+            .len()
+            .checked_mul(bytes_per_sample)
+            .ok_or(PixelError::LengthOverflow)?;
+        if source.len() != expected {
+            return Err(PixelError::SourceLength);
+        }
+        if self.bits.bits_stored() == 16
+            && self.bits.bits_allocated() == 16
+            && byte_order == ByteOrder::LittleEndian
+        {
+            return map_grey16_le(source, indexed, destination);
+        }
+        for (container, output) in source
+            .chunks_exact(bytes_per_sample)
+            .zip(destination.iter_mut())
+        {
+            let raw = read_container(container, byte_order)?;
+            let pattern = self.bits.meaningful_bits(raw);
+            let index = usize::try_from(pattern).map_err(|_| PixelError::DestinationLength)?;
+            *output = indexed
+                .get(index)
+                .copied()
+                .ok_or(PixelError::DestinationLength)?;
+        }
+        Ok(())
+    }
+}
+
+/// Little-endian 16-bit samples whose stored width is the whole container.
+fn map_grey16_le(source: &[u8], indexed: &[u8], destination: &mut [u8]) -> Result<(), PixelError> {
+    if indexed.len() != 65_536 {
+        return Err(PixelError::DestinationLength);
+    }
+    for (container, output) in source.chunks_exact(2).zip(destination.iter_mut()) {
+        let Some([low, high]) = container.first_chunk::<2>() else {
+            return Err(PixelError::SourceLength);
+        };
+        let index = usize::from(u16::from_le_bytes([*low, *high]));
+        *output = indexed
+            .get(index)
+            .copied()
+            .ok_or(PixelError::DestinationLength)?;
+    }
+    Ok(())
 }
 
 fn apply_window(

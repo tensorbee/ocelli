@@ -265,7 +265,7 @@ bin/ocelli.sh wasm --release
 npm run build                  # each workspace's build script, tsc for the packages and vite for viewer-react
 npm run dev                    # the example viewer on http://localhost:5173</code></pre>
     <p>The example viewer in <code>examples/viewer-react</code> is the showcase, and its header reads <code>core ready</code> only after its worker has loaded the built module. This folder viewer is separate.</p>
-<pre><code>cargo run -p ocelli-folder-viewer   # prints one URL on 127.0.0.1</code></pre>
+<pre><code>cargo run --release -p ocelli-folder-viewer   # prints one URL on 127.0.0.1</code></pre>
     <p>Two other gate profiles exist. <code>bin/ocelli.sh gate --sprint</code> runs every gate with no exception, and <code>bin/ocelli.sh gate --all</code> adds the GPU and corpus tiers. <code>bin/ocelli.sh gate --list</code> prints what each gate covers.</p>
   </section>
 

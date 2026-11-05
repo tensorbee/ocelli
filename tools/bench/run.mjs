@@ -55,6 +55,8 @@ export const USAGE = `bin/ocelli.sh bench [options]
                          on a machine that did not record the baseline
   --accept               re-baseline from this run. Needs --story and --why
   --subject <id>         restrict --accept to one subject
+  <subject-id>...        run only these subjects. The default is every subject
+                         that has a runner
   --story <F-ID>         the story a re-baseline belongs to
   --why <text>           what moved, and why. Required, and not decoration
   --tolerance <fraction> the tolerance to record with a new baseline entry
@@ -83,6 +85,7 @@ export function parseArgs(argv) {
     out: DEFAULT_OUT,
     build: true,
     help: false,
+    only: [],
   };
   const value = (index, flag) => {
     if (index >= argv.length || argv[index] === "" ||
@@ -117,7 +120,11 @@ export function parseArgs(argv) {
       case "--no-build": options.build = false; break;
       case "--help": case "-h": options.help = true; break;
       default:
-        throw new Error(`unknown argument ${arg}. Try --help.`);
+        if (arg.startsWith("-")) {
+          throw new Error(`unknown argument ${arg}. Try --help.`);
+        }
+        options.only.push(arg);
+        break;
     }
   }
   if (options.accept && (!options.story || !options.why)) {
@@ -246,7 +253,18 @@ export async function main(argv) {
     return 0;
   }
 
-  const resolved = loadRegistry();
+  const loaded = loadRegistry();
+  let resolved = loaded;
+  if (options.only.length > 0) {
+    const known = new Set(loaded.map((row) => row.subject.id));
+    const missing = options.only.filter((id) => !known.has(id));
+    if (missing.length > 0) {
+      process.stderr.write(`unknown subject ${missing.join(", ")}\n`);
+      return 2;
+    }
+    const wanted = new Set(options.only);
+    resolved = loaded.filter((row) => wanted.has(row.subject.id));
+  }
 
   if (options.list) {
     for (const row of resolved) {
