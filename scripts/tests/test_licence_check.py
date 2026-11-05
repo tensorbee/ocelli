@@ -414,8 +414,15 @@ class WheelBytes(unittest.TestCase):
         self.assertTrue(any(
             "allowlisted expression a lead may waive" in problem
             for problem in problems), problems)
+        # A lead may not record text that offers a copyleft licence even as
+        # an alternative. That is the operator's decision, as lzf is.
         disjunction = dict(base, licence="MIT OR GPL-3.0-only")
-        self.assertEqual(L.licence_file_waiver_problems([disjunction]), [])
+        problems = L.licence_file_waiver_problems([disjunction])
+        self.assertTrue(any(
+            "allowlisted expression a lead may waive" in problem
+            for problem in problems), problems)
+        permissive = dict(base, licence="MIT OR Apache-2.0")
+        self.assertEqual(L.licence_file_waiver_problems([permissive]), [])
         grouped = dict(base, licence="(MIT OR Apache-2.0) AND GPL-3.0-only")
         problems = L.licence_file_waiver_problems([grouped])
         self.assertTrue(any(

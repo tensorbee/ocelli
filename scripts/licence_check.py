@@ -213,6 +213,20 @@ def satisfiable(node, allow: set[str]) -> bool:
     return _compound(node).casefold() in allow
 
 
+def every_term_allowed(node, allow: set[str]) -> bool:
+    """True when every licence the expression names is on the allowlist.
+
+    Unlike `satisfiable`, an OR does not pass on one allowlisted side. A
+    waiver records what a file's text offers, and text that offers a
+    copyleft licence as an alternative is the operator's to waive.
+    """
+    kind = node[0]
+    if kind in ("or", "and"):
+        return every_term_allowed(node[1], allow) and every_term_allowed(
+            node[2], allow)
+    return _compound(node).casefold() in allow
+
+
 def expression_allowed(text: str, allow: set[str]) -> bool:
     try:
         node = parse_expression(text)
@@ -326,11 +340,11 @@ def exception_problems(rows: list[dict] | None = None) -> list[str]:
 def licence_file_waiver_problems(rows: list[dict] | None = None) -> list[str]:
     """A row that waives a refusal needs the same fields as an exception.
 
-    A lead decision may name an allowlisted expression, or the placeholder
-    on an empty file. AND needs every term on the allowlist and OR needs
-    one, which is what expression_allowed decides. An operator decision may
-    name any parseable expression, because the operator decided it, or the
-    same placeholder.
+    A lead decision may name an expression whose every term is on the
+    allowlist, under AND and under OR alike, or the placeholder on an empty
+    file. Text that offers a copyleft licence even as an alternative is the
+    operator's to waive. An operator decision may name any parseable
+    expression, because the operator decided it, or the same placeholder.
     """
     problems: list[str] = []
     source = licence_file_rows() if rows is None else rows
@@ -374,7 +388,11 @@ def licence_file_waiver_problems(rows: list[dict] | None = None) -> list[str]:
             else:
                 if allow is None:
                     allow = allowlist()
-                if not expression_allowed(licence, allow):
+                try:
+                    named = every_term_allowed(parse_expression(licence), allow)
+                except ExpressionError:
+                    named = False
+                if not named:
                     problems.append(
                         f"licence file {label} licence {licence!r} is not an "
                         f"allowlisted expression a lead may waive")
