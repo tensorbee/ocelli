@@ -31,6 +31,7 @@
 | F-228 | E38.34 | Content Security Policy: the minimal policy an embedding page needs for the Ocelli worker and wasm path, documented and proven by a browser probe of the built example viewer with minimality probes, and the folder viewer served under a strict hash policy with compressed frames decoded and drawn | All | 2w | pending |
 | F-229 | E4.10 | JPEG XL decoding: the three JPEG XL transfer syntaxes through jxl-oxide, lossless decoded exactly, JPEG recompression rebuilt and decoded by the existing JPEG path, unsupported features refused as unavailable, with synthetic corpus rows and declared oracle rows | Rust | 3w | pending |
 | F-230 | E16.6 | Public options refuse unknown keys: every options and request object in @ocelli/core refuses an unknown key at run time with a coded OcelliError naming it, DicomwebError and the bulk, command and instance errors share that class, and loadCore rejects with the initialiser's cause instead of resolving false | TS | 2w | in-progress |
+| F-231 | E5.9 | Session frame cache: the wasm session keeps committed stack frames in a caller-budgeted ImageCache checked by ContentId, reports eviction, pressure and release through the ring, and exports a residency query, a show-from-cache call, and releaseSeries and releaseStudy in @ocelli/core | Rust+TS | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.

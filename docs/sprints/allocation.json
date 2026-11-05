@@ -2928,6 +2928,29 @@
       "sprint": "S46"
     },
     {
+      "fid": "F-231",
+      "eid": "E5.9",
+      "phase": "P1",
+      "epic": "E5 Cache & memory",
+      "epic_key": "E5",
+      "story": "Session frame cache: the wasm session keeps committed stack frames in a caller-budgeted ImageCache checked by ContentId, reports eviction, pressure and release through the ring, and exports a residency query, a show-from-cache call, and releaseSeries and releaseStudy in @ocelli/core",
+      "layer": "Rust+TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E16.6",
+        "E5.8",
+        "E5.7"
+      ],
+      "depends_fids": [
+        "F-230",
+        "F-226",
+        "F-224"
+      ],
+      "notes": "The operator answered F-226's question on 2026-11-05 with a separate story giving the wasm session its own frame cache.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
       "fid": "F-208",
       "eid": "E38.18",
       "phase": "P1",
