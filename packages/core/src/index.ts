@@ -48,6 +48,7 @@ export type {
 } from "./bulk.js";
 
 export { DicomwebClient, DicomwebError } from "./dicomweb.js";
+export { OcelliError } from "./ocelli-error.js";
 export { postWadoInstance } from "./instance-bytes.js";
 export type { WadoInstanceRequest } from "./instance-bytes.js";
 export type {
@@ -55,6 +56,7 @@ export type {
   DicomwebErrorCode,
   QidoSearchOptions,
 } from "./dicomweb.js";
+export type { OcelliErrorCode } from "./ocelli-error.js";
 
 export { drainRing, readEvent, HEADER_BYTES } from "./ring.js";
 export type { DrainResult, OcelliEvent } from "./ring.js";

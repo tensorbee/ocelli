@@ -7,6 +7,7 @@
  */
 
 import {
+  OcelliError,
   coreAvailable,
   holdSessionBytes,
   loadCore,
@@ -66,10 +67,17 @@ self.onmessage = (event: MessageEvent<WorkerIn>) => {
 };
 
 async function start(canvas: OffscreenCanvas): Promise<void> {
-  const loaded = await loadCore(async () => {
-    glue = await openPackage();
-  });
-  if (!loaded || glue === null) {
+  try {
+    await loadCore(async () => {
+      glue = await openPackage();
+    });
+  } catch (error) {
+    console.error(error instanceof OcelliError ? error.code : error);
+    published = false;
+    postStatus("");
+    return;
+  }
+  if (glue === null) {
     published = false;
     postStatus("");
     return;

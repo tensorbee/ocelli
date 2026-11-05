@@ -320,3 +320,10 @@ None open. Every judgement call is a lead decision.
 - Q3, the `loadCore` signature. Answered: lead decision under the operator's delegation of 2026-11-05. `Promise<true>` that rejects `CoreLoadFailed` with the cause, decision 9.
 - Q4, compatibility. Answered: lead decision under the operator's delegation of 2026-11-05. In place under 0.x with a CHANGELOG entry, no version bump and no shim, decision 10.
 - Q5, order against F-224. Answered: lead decision under the operator's delegation of 2026-11-05. F-230 first, recorded under Dependencies.
+
+### Lead amendments after review pass 1
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-230-working-pass-1.md`.
+
+- **AC6 does not cover engine errors.** The `RangeError` at `bulk.test.ts` line 250 comes from `new Uint8Array` over a sink pointer past the end of memory, and the shell raises nothing there. Decision 6 passes collaborator failures through, so it stays an engine error. The coded class covers errors the shell raises, and the CHANGELOG line says so.
+- **AC2 allows one declared test change.** `dicomweb.test.ts` spread `responseSink()`, which carries an own key `commits`. Refusing it is the purpose of this story, so that call now passes `wasm` and `sink` only, and the file joins the write set. No shipped consumer passes an extra key.

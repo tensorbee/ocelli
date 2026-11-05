@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { createCursorController, createToolState } from "./cursor.js";
+import { STACK_COMMANDS } from "./generated.js";
 import { COMMAND_CURSORS } from "./index.js";
+import { OcelliError } from "./ocelli-error.js";
 import type {
   CursorController,
   CursorControllerOptions,
@@ -640,6 +642,52 @@ describe("cursor controller", () => {
       style,
     };
     publishedTypes(createToolState(tools, () => {}), cursor, phase, pair, style, options);
+  });
+
+  it("refuses an unknown cursor command and accepts every stack command", () => {
+    const tools = registry();
+    add(tools, "scroll", "Scroll");
+    expect(tools.setMode("g", "scroll", "active", [PRIMARY]).ok).toBe(true);
+    const style: CursorStyle = { cursor: "" };
+    const pair: CursorPair = { idle: "alias", dragging: "alias" };
+    let caught: unknown;
+    try {
+      createCursorController({
+        registry: tools,
+        groupId: "g",
+        style,
+        // scrol is not a stack command. The indexed cursors type also includes
+        // undefined because the field is optional. The cast keeps the own
+        // property the runtime check reads and drops that undefined.
+        cursors: { scrol: pair } as unknown as NonNullable<
+          CursorControllerOptions["cursors"]
+        >,
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(OcelliError);
+    if (!(caught instanceof OcelliError)) {
+      throw new Error("expected OcelliError");
+    }
+    expect(caught.code).toBe("UnknownOption");
+    expect(caught.option).toBe("scrol");
+    expect(caught.message).toBe('CursorControllerOptions.cursors has no option "scrol"');
+
+    // Object.fromEntries is a string record. Each key is a STACK_COMMANDS
+    // name and each value is a CursorPair. NonNullable drops the undefined
+    // that the optional field's indexed type adds.
+    const cursors = Object.fromEntries(
+      STACK_COMMANDS.map((command) => [command, pair]),
+    ) as NonNullable<CursorControllerOptions["cursors"]>;
+    const cursor = createCursorController({
+      registry: tools,
+      groupId: "g",
+      style,
+      cursors,
+    });
+    expect(cursor.cursor("idle")).toBe("alias");
+    expect(cursor.cursor("dragging")).toBe("alias");
   });
 
   it("the cursor module does not listen", () => {

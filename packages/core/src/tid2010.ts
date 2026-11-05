@@ -12,6 +12,8 @@
 
 import dcmjs from "dcmjs";
 
+import { KEY_OBJECT_REQUEST_KEYS, refuseUnknownOptions } from "./options.js";
+
 const SOP_CLASS = "1.2.840.10008.5.1.4.1.1.88.59";
 const TRANSFER_SYNTAX = "1.2.840.10008.1.2.1";
 const TEMPLATE = "2010";
@@ -180,6 +182,7 @@ function writeDocument(request: KeyObjectRequest): Uint8Array | null {
 
 /** Write one key-object document. An empty title or UID returns nothing. */
 export function writeKeyObject(request: KeyObjectRequest): Uint8Array | null {
+  refuseUnknownOptions("KeyObjectRequest", request, KEY_OBJECT_REQUEST_KEYS);
   try {
     return writeDocument(request);
   } catch {

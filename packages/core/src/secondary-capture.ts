@@ -10,6 +10,8 @@
 
 import dcmjs from "dcmjs";
 
+import { SECONDARY_CAPTURE_REQUEST_KEYS, refuseUnknownOptions } from "./options.js";
+
 const SOP_CLASS = "1.2.840.10008.5.1.4.1.1.7";
 const TRANSFER_SYNTAX = "1.2.840.10008.1.2.1";
 
@@ -181,6 +183,7 @@ function writeImage(request: SecondaryCaptureRequest): Uint8Array | null {
 
 /** Write one secondary capture. A short pixel buffer returns nothing. */
 export function writeSecondaryCapture(request: SecondaryCaptureRequest): Uint8Array | null {
+  refuseUnknownOptions("SecondaryCaptureRequest", request, SECONDARY_CAPTURE_REQUEST_KEYS);
   try {
     return writeImage(request);
   } catch {

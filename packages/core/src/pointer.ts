@@ -12,6 +12,7 @@
 import { packCommands } from "./commands.js";
 import type { PackedCommand } from "./commands.js";
 import type { StackCommand } from "./generated.js";
+import { POINTER_DISPATCH_OPTION_KEYS, refuseUnknownOptions } from "./options.js";
 import type {
   PointerBinding,
   PointerButton,
@@ -196,6 +197,7 @@ const LISTENER_TYPES = [
  * `takeFrame` packs at most one buffer. It does not call wasm.
  */
 export function createPointerDispatch(options: PointerDispatchOptions): PointerDispatch {
+  refuseUnknownOptions("PointerDispatchOptions", options, POINTER_DISPATCH_OPTION_KEYS);
   const viewport = options.viewport;
   const now = options.now ?? Date.now;
   const basisOf = options.basis ?? (() => null);
