@@ -1,6 +1,6 @@
 # The guard harness
 
-**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217
+**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217, F-219
 **Last updated:** 2026-11-05
 
 A guard is any refusal this repository can produce: a script that exits 1, a
@@ -432,6 +432,12 @@ The refusal protects prose the allocation cannot reconstruct. Its standing
 probe inserts a hand-curated paragraph, runs the bare command and requires the
 overwrite refusal. The control runs `--force` and requires success, so a writer
 that refuses every mode cannot satisfy the probe.
+
+Each of the fourteen `--check` refusals has a probe of its own, keyed by a
+fragment only that refusal prints. The census counts per entry, not per
+refusal, so it cannot tell a refusal that a probe drives from one that only
+sits in a watched file. A refusal added later needs its own probe by review,
+not by the census.
 
 ### Sprint-close evidence names one tree
 

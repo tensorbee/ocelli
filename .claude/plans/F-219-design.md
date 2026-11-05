@@ -118,7 +118,7 @@ Each invoke is `script("python3", "scripts/gen_sprint_plan.py", "--check")`, eac
 |------------------------|-------------------|-------------------------|-------------------|
 | `bin/ocelli.sh gate guards`, floor harness | the four new probes and the narrowed one | floor, git sandbox | each probe `red` as required, control green |
 | `bin/ocelli.sh gate guards`, `test_gen_sprint_plan.py` | the five new unit tests | floor | pass |
-| `python3 scripts/guard_census.py --record` | `ci/guard-probe-budget.json` | after the catalogue change | `wall_clock_seconds` re-measured, `entry_sites` `sprint-plan: 16` unchanged |
+| `python3 scripts/guard_census.py --record` | `ci/guard-probe-budget.json` | after the catalogue change | `entry_sites` `sprint-plan: 16` unchanged. `wall_clock_seconds` is re-measured by `guard_probe.py --record-budget`, not by this command, and is left as recorded because the gate stays inside it |
 | `python3 scripts/guard_census.py --render-runbook`, `--check-runbook` | `docs/runbooks/guard-verification.md` | after the catalogue change | four new rows, one changed fragment, later rows renumbered |
 | `bin/ocelli.sh gate backlog` | `gen_sprint_plan.py --check`, unchanged | floor | unchanged OK |
 
