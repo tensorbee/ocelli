@@ -704,6 +704,7 @@ impl StoredSampleTable {
     /// [`PixelError::SourceLength`] when `source` is not one container per
     /// destination sample.
     /// [`PixelError::LengthOverflow`] when that product does not fit `usize`.
+    #[must_use = "a map error the caller drops writes no display byte"]
     pub fn map_containers(
         &self,
         byte_order: ByteOrder,

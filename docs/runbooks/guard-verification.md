@@ -748,9 +748,10 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 534 | `tools/bench/src/runners/decode_frame.mjs` | `bench.decode-frame.range`, level 1 | must refuse, output carries `range guard accepted incomplete evidence` | floor | `bin/ocelli.sh gate guards` |
 | 535 | `tools/bench/src/runners/decode_frame.mjs` | `bench.decode-frame.checksum`, level 1 | must refuse, output carries `checksum guard accepted absent output evidence` | floor | `bin/ocelli.sh gate guards` |
 | 536 | `tools/bench/src/runners/decode_frame.mjs` | `bench.decode-frame.release-binary`, level 1 | must refuse, output carries `release guard accepted an absent executable` | floor | `bin/ocelli.sh gate guards` |
-| 537 | `tools/bench/src/runners/wasm_cold_start.mjs` | none in this harness | A cold-start measurement taken against a stub, an incomplete artefact copy, and a page that never reported. | - | tools/bench/tests/cold_start_test.mjs |
-| 538 | `tools/bench/page/app.mjs` | none in this harness | A page serving an incomplete copy of the wasm artefact, and a mark count that does not match the phase list. | - | tools/bench/tests/cold_start_test.mjs |
-| 539 | `scripts/panic_probe.mjs` | none in this harness | A run that measured the probe's stub rather than the module. | - | bin/ocelli.sh gate panic, which builds a second module carrying the panic-probe feature and runs this file on every floor gate |
+| 537 | `tools/bench/src/viewer_work.mjs` | none in this harness | A viewer measurement that has no samples, a Part 10 element whose length does not match its VR, a page that does not expose the timed hooks, a scroll that delivered too few keys or moved the counter backwards or blanked or faulted the stage, a window step that never drew, a canvas that does not match the server grey, a restart that leaves the gone sentence or does not re-post, and a held preview that still carries a body. | - | tools/bench/tests/viewer_work_test.mjs |
+| 538 | `tools/bench/src/runners/wasm_cold_start.mjs` | none in this harness | A cold-start measurement taken against a stub, an incomplete artefact copy, and a page that never reported. | - | tools/bench/tests/cold_start_test.mjs |
+| 539 | `tools/bench/page/app.mjs` | none in this harness | A page serving an incomplete copy of the wasm artefact, and a mark count that does not match the phase list. | - | tools/bench/tests/cold_start_test.mjs |
+| 540 | `scripts/panic_probe.mjs` | none in this harness | A run that measured the probe's stub rather than the module. | - | bin/ocelli.sh gate panic, which builds a second module carrying the panic-probe feature and runs this file on every floor gate |
 
 Known defects this table names, in full:
 

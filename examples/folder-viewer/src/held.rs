@@ -6,6 +6,7 @@
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
 use ocelli_cache::{Admission, Budgeted, CacheTier, Lru, Pressure};
 use ocelli_core::Stored;
@@ -84,12 +85,12 @@ pub(crate) struct FileId {
 
 impl FileId {
     /// Parse lowercase hex. Anything else is absent.
+    ///
+    /// A leading `+` and a leading zero are absent too. `from_str_radix`
+    /// accepts both, and either would make `+a.+b` or `0a.b` name `a.b`.
     pub(crate) fn parse(text: &str) -> Option<Self> {
         let (left, right) = text.split_once('.')?;
-        if left.is_empty() || right.is_empty() {
-            return None;
-        }
-        if has_upper_hex(left) || has_upper_hex(right) {
+        if !hex_id_part(left) || !hex_id_part(right) {
             return None;
         }
         let generation = u64::from_str_radix(left, 16).ok()?;
@@ -106,7 +107,20 @@ fn has_upper_hex(text: &str) -> bool {
     text.bytes().any(|byte| byte.is_ascii_uppercase())
 }
 
+fn hex_id_part(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    if bytes.is_empty() || has_upper_hex(text) {
+        return false;
+    }
+    // "0" is a value. "0a" and "00" are the same value written longer.
+    if bytes.len() > 1 && bytes.first() == Some(&b'0') {
+        return false;
+    }
+    bytes.iter().all(u8::is_ascii_hexdigit)
+}
+
 /// What one lookup found. The cache lock is not held afterwards.
+#[cfg(test)]
 pub(crate) enum Lookup {
     /// The id is unknown, or the bytes and this frame are both gone.
     Gone,
@@ -114,6 +128,19 @@ pub(crate) enum Lookup {
     Hit(Arc<HeldFrame>),
     /// The posted bytes, shared with the cache so a decode does not copy them.
     Miss(Arc<Vec<u8>>),
+}
+
+/// A preview's view of one id. `Owned` is the posted buffer with no other
+/// owner, so a single native frame can become the held samples in place.
+pub(crate) enum PreviewSource {
+    /// The id is unknown, or the bytes and this frame are both gone.
+    Gone,
+    /// The decoded frame.
+    Hit(Arc<HeldFrame>),
+    /// Posted bytes another caller still holds.
+    Shared(Arc<Vec<u8>>),
+    /// Posted bytes this caller now owns. The cache no longer has them.
+    Owned(Vec<u8>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -164,9 +191,30 @@ struct PermitPool {
     ready: Condvar,
 }
 
-struct WorkspaceGuard<'a> {
+pub(crate) struct WorkspaceGuard<'a> {
     pool: &'a PermitPool,
-    workspace: Workspace,
+    pub(crate) workspace: Workspace,
+}
+
+/// Spare posted buffers. A dropped file and the next body of the same size
+/// share one allocation, so the resident set does not keep both size classes.
+struct RecyclePool {
+    buffers: Vec<Vec<u8>>,
+    held: usize,
+}
+
+const RECYCLE_BUFFERS: usize = 4;
+const RECYCLE_BYTES: usize = 64 * 1024 * 1024;
+const RECYCLE_MIN: usize = 4096;
+const BODY_QUANTUM: usize = 16 * 1024;
+
+/// Round a posted body up to a 16 KiB multiple.
+///
+/// Files in one series differ by the width of a UID and an instance number.
+/// This host keeps a freed allocation class resident, so those lengths have
+/// to share one class or the resident set keeps every class.
+fn body_class(need: usize) -> usize {
+    need.saturating_add(BODY_QUANTUM - 1) / BODY_QUANTUM * BODY_QUANTUM
 }
 
 impl Drop for WorkspaceGuard<'_> {
@@ -188,6 +236,7 @@ pub struct Viewer {
     serial: AtomicU64,
     cache: Mutex<CacheState>,
     permits: PermitPool,
+    recycled: Mutex<RecyclePool>,
     connections: AtomicUsize,
     connection_cap: usize,
 }
@@ -221,6 +270,10 @@ impl Viewer {
                 }),
                 ready: Condvar::new(),
             },
+            recycled: Mutex::new(RecyclePool {
+                buffers: Vec::new(),
+                held: 0,
+            }),
             connections: AtomicUsize::new(0),
             connection_cap: cap,
         }
@@ -244,9 +297,13 @@ impl Viewer {
         let admission = state.lru.insert(key, Held::File(Arc::new(bytes)));
         let kept = admission.refused.is_none();
         account_insert(&mut state, key, &admission);
+        let spare = spare_buffers(admission);
+        drop(state);
+        self.keep_buffers(spare);
         if kept { Some(id) } else { None }
     }
 
+    #[cfg(test)]
     pub(crate) fn lookup_frame(&self, id: FileId, frame: u32) -> Lookup {
         let mut state = self.lock_cache();
         if let Some(Held::Frame(held)) = state.lru.get(&HeldKey::Frame(id, frame)) {
@@ -258,6 +315,62 @@ impl Viewer {
         Lookup::Gone
     }
 
+    /// Frame, shared bytes, or the unique posted buffer removed from the cache.
+    pub(crate) fn preview_source(&self, id: FileId, frame: u32) -> PreviewSource {
+        let mut state = self.lock_cache();
+        if let Some(Held::Frame(held)) = state.lru.get(&HeldKey::Frame(id, frame)) {
+            return PreviewSource::Hit(Arc::clone(held));
+        }
+        let key = HeldKey::File(id);
+        let unique = matches!(
+            state.lru.get(&key),
+            Some(Held::File(bytes)) if Arc::strong_count(bytes) == 1
+        );
+        if unique && let Some(Held::File(bytes)) = state.lru.remove(&key) {
+            state.files = state.files.saturating_sub(1);
+            match Arc::try_unwrap(bytes) {
+                Ok(owned) => return PreviewSource::Owned(owned),
+                Err(shared) => {
+                    let admission = state.lru.insert(key, Held::File(shared));
+                    let kept = admission.refused.is_none();
+                    account_insert(&mut state, key, &admission);
+                    let returned = if kept {
+                        match state.lru.get(&key) {
+                            Some(Held::File(bytes)) => PreviewSource::Shared(Arc::clone(bytes)),
+                            Some(Held::Frame(_)) | None => PreviewSource::Gone,
+                        }
+                    } else {
+                        PreviewSource::Gone
+                    };
+                    let spare = spare_buffers(admission);
+                    drop(state);
+                    self.keep_buffers(spare);
+                    return returned;
+                }
+            }
+        }
+        match state.lru.get(&key) {
+            Some(Held::File(bytes)) => PreviewSource::Shared(Arc::clone(bytes)),
+            Some(Held::Frame(_)) | None => PreviewSource::Gone,
+        }
+    }
+
+    /// Put posted bytes back under `id` after a decode that still needs them.
+    pub(crate) fn restore_file(&self, id: FileId, bytes: Vec<u8>) {
+        let key = HeldKey::File(id);
+        let mut state = self.lock_cache();
+        if state.lru.contains_key(&key) {
+            drop(state);
+            self.keep_buffers(vec![bytes]);
+            return;
+        }
+        let admission = state.lru.insert(key, Held::File(Arc::new(bytes)));
+        account_insert(&mut state, key, &admission);
+        let spare = spare_buffers(admission);
+        drop(state);
+        self.keep_buffers(spare);
+    }
+
     pub(crate) fn store_frame(&self, id: FileId, index: u32, held: HeldFrame) -> Arc<HeldFrame> {
         let frames = held.frames;
         let value = Arc::new(held);
@@ -266,9 +379,19 @@ impl Viewer {
         let admission = state.lru.insert(key, Held::Frame(Arc::clone(&value)));
         let kept = admission.refused.is_none();
         account_insert(&mut state, key, &admission);
-        if kept {
-            drop_encoded_if_ready(&mut state, id, frames);
+        let removed = if kept {
+            take_encoded_if_ready(&mut state, id, frames)
+        } else {
+            None
+        };
+        let mut spare = spare_buffers(admission);
+        if let Some(held) = removed
+            && let Some(buffer) = unique_bytes(held)
+        {
+            spare.push(buffer);
         }
+        drop(state);
+        self.keep_buffers(spare);
         value
     }
 
@@ -280,9 +403,59 @@ impl Viewer {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn with_workspace<T>(&self, body: impl FnOnce(&mut Workspace) -> T) -> T {
-        let mut guard = self.take_workspace();
+        let mut guard = loop {
+            if let Some(guard) = self.poll_workspace(&mut || true) {
+                break guard;
+            }
+        };
         body(&mut guard.workspace)
+    }
+
+    /// A permit, or `None` when `live` is false before one is free.
+    ///
+    /// The wait wakes every 50 ms so a caller whose client has gone does not
+    /// sit on the condvar, and does not keep the connection slot.
+    pub(crate) fn loan_workspace(
+        &self,
+        live: &mut dyn FnMut() -> bool,
+    ) -> Option<WorkspaceGuard<'_>> {
+        self.poll_workspace(live)
+    }
+
+    /// A body buffer of at least `need` bytes. A recycled buffer is used only
+    /// when its capacity is the same size class, so a radiograph is not reused
+    /// as a CT file.
+    pub(crate) fn take_buffer(&self, need: usize) -> Vec<u8> {
+        if need < RECYCLE_MIN {
+            let mut body = Vec::new();
+            body.reserve_exact(need);
+            return body;
+        }
+        let class = body_class(need);
+        let mut pool = lock_mutex(&self.recycled);
+        let found = pool.buffers.iter().enumerate().find_map(|(index, buf)| {
+            let cap = buf.capacity();
+            // A class may come back a quantum above the request. A radiograph
+            // is many quanta above a CT file, so the two do not meet.
+            let limit = class.saturating_add(BODY_QUANTUM);
+            (cap >= need && cap <= limit).then_some(index)
+        });
+        if let Some(index) = found {
+            let mut buffer = pool.buffers.swap_remove(index);
+            pool.held = pool.held.saturating_sub(buffer.capacity());
+            buffer.clear();
+            return buffer;
+        }
+        drop(pool);
+        let mut body = Vec::new();
+        body.reserve_exact(class);
+        body
+    }
+
+    pub(crate) fn recycle_buffer(&self, buffer: Vec<u8>) {
+        self.keep_buffers(vec![buffer]);
     }
 
     /// Put a grey reply buffer back on a permit. More than two are dropped.
@@ -344,14 +517,22 @@ impl Viewer {
         lock_mutex(&self.cache)
     }
 
-    fn take_workspace(&self) -> WorkspaceGuard<'_> {
+    fn poll_workspace(&self, live: &mut dyn FnMut() -> bool) -> Option<WorkspaceGuard<'_>> {
         let mut state = lock_mutex(&self.permits.idle);
+        let wait = Duration::from_millis(50);
         while state.idle.is_empty() {
-            state = self
+            if !live() {
+                return None;
+            }
+            let (guard, _) = self
                 .permits
                 .ready
-                .wait(state)
+                .wait_timeout(state, wait)
                 .unwrap_or_else(|poison| poison.into_inner());
+            state = guard;
+            if !live() {
+                return None;
+            }
         }
         let mut workspace = state.idle.pop().unwrap_or_default();
         if workspace.grey.capacity() == 0
@@ -359,9 +540,27 @@ impl Viewer {
         {
             workspace.grey = grey;
         }
-        WorkspaceGuard {
+        Some(WorkspaceGuard {
             pool: &self.permits,
             workspace,
+        })
+    }
+
+    fn keep_buffers(&self, buffers: Vec<Vec<u8>>) {
+        let mut pool = lock_mutex(&self.recycled);
+        for mut buffer in buffers {
+            buffer.clear();
+            let cap = buffer.capacity();
+            if cap < RECYCLE_MIN {
+                continue;
+            }
+            if pool.buffers.len() >= RECYCLE_BUFFERS
+                || pool.held.saturating_add(cap) > RECYCLE_BYTES
+            {
+                continue;
+            }
+            pool.held = pool.held.saturating_add(cap);
+            pool.buffers.push(buffer);
         }
     }
 }
@@ -384,11 +583,41 @@ fn account_insert(state: &mut CacheState, key: HeldKey, admission: &Admission<He
     }
 }
 
-fn drop_encoded_if_ready(state: &mut CacheState, id: FileId, frames: u32) {
+fn take_encoded_if_ready(state: &mut CacheState, id: FileId, frames: u32) -> Option<Held> {
     let complete = (0..frames).all(|index| state.lru.contains_key(&HeldKey::Frame(id, index)));
-    if complete && state.lru.remove(&HeldKey::File(id)).is_some() {
-        state.files = state.files.saturating_sub(1);
+    if !complete {
+        return None;
     }
+    let removed = state.lru.remove(&HeldKey::File(id))?;
+    state.files = state.files.saturating_sub(1);
+    Some(removed)
+}
+
+fn unique_bytes(held: Held) -> Option<Vec<u8>> {
+    match held {
+        Held::File(bytes) => Arc::try_unwrap(bytes).ok(),
+        Held::Frame(frame) => Arc::try_unwrap(frame).ok().map(|frame| frame.samples),
+    }
+}
+
+fn spare_buffers(admission: Admission<HeldKey, Held>) -> Vec<Vec<u8>> {
+    let mut spare = Vec::new();
+    for (_, held) in admission.evicted {
+        if let Some(buffer) = unique_bytes(held) {
+            spare.push(buffer);
+        }
+    }
+    if let Some(held) = admission.displaced
+        && let Some(buffer) = unique_bytes(held)
+    {
+        spare.push(buffer);
+    }
+    if let Some((_, held)) = admission.refused
+        && let Some(buffer) = unique_bytes(held)
+    {
+        spare.push(buffer);
+    }
+    spare
 }
 
 fn mix_generation() -> u64 {
@@ -431,6 +660,51 @@ mod tests {
             width: columns,
             height: rows,
         })
+    }
+
+    #[test]
+    fn file_id_rejects_a_sign_and_a_leading_zero() {
+        assert!(FileId::parse("a.b").is_some());
+        assert!(FileId::parse("0.0").is_some());
+        assert!(FileId::parse("+a.b").is_none());
+        assert!(FileId::parse("a.+b").is_none());
+        assert!(FileId::parse("0a.b").is_none());
+        assert!(FileId::parse("a.00").is_none());
+        assert!(FileId::parse("-1.2").is_none());
+    }
+
+    #[test]
+    fn a_few_header_bytes_do_not_open_a_second_body_class() {
+        let viewer = Viewer::new(ViewerConfig { cache_bytes: 1024 });
+        // The bench CT files are 524822 and 524832 bytes. The gap is the UID
+        // and the instance number. 17400538 is the bench radiograph.
+        let short_len = 524_822_usize;
+        let long_len = 524_832_usize;
+        let radiograph = 17_400_538_usize;
+        let short = viewer.take_buffer(short_len);
+        let long = viewer.take_buffer(long_len);
+        assert!(short.capacity() >= long_len);
+        assert_eq!(short.capacity(), long.capacity());
+        assert_eq!(short.capacity() % (16 * 1024), 0);
+        let dx = viewer.take_buffer(radiograph);
+        assert!(dx.capacity() >= radiograph);
+        assert_ne!(dx.capacity(), short.capacity());
+        viewer.recycle_buffer(short);
+        let reused = viewer.take_buffer(long_len);
+        assert_eq!(reused.capacity(), long.capacity());
+    }
+
+    #[test]
+    fn a_gone_caller_does_not_wait_for_a_permit() {
+        let viewer = Viewer::new(ViewerConfig { cache_bytes: 1024 });
+        let first = viewer.loan_workspace(&mut || true);
+        let second = viewer.loan_workspace(&mut || true);
+        assert!(first.is_some());
+        assert!(second.is_some());
+        let started = std::time::Instant::now();
+        let missed = viewer.loan_workspace(&mut || false);
+        assert!(missed.is_none());
+        assert!(started.elapsed() < Duration::from_millis(200));
     }
 
     #[test]
@@ -500,8 +774,20 @@ mod tests {
         if pressure.used == encoded_cost || viewer.file_bytes(id).is_some() {
             return Err("the encoded bytes were still held".to_owned());
         }
-        if !matches!(viewer.lookup_frame(id, 0), Lookup::Hit(_)) {
-            return Err("the decoded frame was not what lookup returned".to_owned());
+        match viewer.lookup_frame(id, 0) {
+            Lookup::Hit(frame) if frame.samples.len() == 2 => {}
+            Lookup::Hit(frame) => {
+                return Err(format!(
+                    "the decoded frame held {} bytes",
+                    frame.samples.len()
+                ));
+            }
+            Lookup::Miss(bytes) => {
+                return Err(format!("lookup returned the file, {} bytes", bytes.len()));
+            }
+            Lookup::Gone => {
+                return Err("the decoded frame was not what lookup returned".to_owned());
+            }
         }
         Ok(())
     }

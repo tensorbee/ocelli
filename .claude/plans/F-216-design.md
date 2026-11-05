@@ -384,7 +384,7 @@ none proposed. Open question C asks whether holding a multi-frame object's encod
 
 ## LLD impact
 
-`docs/lld/benchmarks.md` gains the five `viewer.*` subjects. `docs/lld/cache.md` gains the folder viewer as an `Lru` consumer whose value is an enum over two kinds and why `ImageCache` was not used.
+`docs/lld/benchmarks.md` gains the five `viewer.*` subjects. `docs/lld/pixel-pipeline.md` gains a paragraph on `stored_sample_table`, under the lead amendment below. `docs/lld/cache.md` gains the folder viewer as an `Lru` consumer whose value is an enum over two kinds and why `ImageCache` was not used.
 
 ## User-facing documentation impact
 
@@ -429,3 +429,11 @@ Given by the operator on 2026-11-05 in the S46 consolidated design round and rel
 - I. Answered: recommended, a header-only open is out of scope, and a new story is filed if `viewer.open` misses A.
 
 No question is left open.
+
+### Lead amendments after review pass 1
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-1.md`.
+
+- **`ocelli-pixel` gains an additive API.** The non-goal above excluded any change to `ocelli-pixel`. The window path needs a table of display values for every stored sample, and building that table in the viewer would be a second copy of the LUT chain, which HLD section 18 forbids. So `LutChain::stored_sample_table`, `StoredSampleTable`, `StoredBits::meaningful_bits` and `StoredBits::stored_sample` are allowed in `ocelli-pixel`, each evaluating the existing chain and adding no arithmetic of its own. Every other change to `ocelli-pixel` is still out of scope. `docs/lld/pixel-pipeline.md` joins the LLD impact list.
+- **The page heap bound counts only canvases the workload sizes.** The four tile canvases are counted only when the run sizes them. The `viewer.resident_memory` workload sizes the main view alone, so its bound is `64 MiB + 4 * W * H + 16 MiB` for the main view.
+- **Debug blank samples are measured.** The scroll budget's debug half is taken by running `viewer.scroll_rate` once on the debug build, with the stage sampled on every animation frame, not only after a draw.

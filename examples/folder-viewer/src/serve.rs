@@ -11,10 +11,10 @@ use std::time::{Duration, Instant};
 
 use ocelli_pixel::VoiFunction;
 
-use crate::held::{FileId, Lookup, Viewer, ViewerConfig};
+use crate::held::{FileId, PreviewSource, Viewer, ViewerConfig};
 use crate::preview::{
-    decode_held, decode_ticks, note_lookup, note_write, phases, profiling, render_held,
-    reset_phases, validate_frame_request,
+    OwnedDecode, decode_held, decode_owned, decode_ticks, note_lookup, note_write, phases,
+    profiling, render_held, reset_phases, validate_frame_request,
 };
 use crate::{
     FrameRequest, Preview, PreviewError, SLICES, headers_json, inspect_json, preview_frame, slice,
@@ -158,18 +158,14 @@ pub fn handle_connection_with(mut stream: TcpStream, viewer: &Viewer) -> std::io
         let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
         let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
         let mut pending = Vec::new();
-        // Read the request so the client is not still writing when this
-        // socket closes. The read does not take a connection slot.
-        let got_request = match read_request(&mut stream, &mut pending, 0) {
+        // Headers only. Reading a declared body here would reserve it on a
+        // connection that is already over the cap.
+        let got_headers = match read_header_bytes(&mut stream, &mut pending) {
             Ok(_) | Err(ReadStop::Reply(_)) => true,
             Err(ReadStop::CleanClose) | Err(ReadStop::Io(_)) => false,
         };
-        if got_request {
-            let reply = text_reply(
-                503,
-                Some("busy"),
-                "this process is already serving its connection limit",
-            );
+        if got_headers {
+            let reply = busy_reply();
             let _ = write_reply(&mut stream, &reply, false);
         }
         return Ok(());
@@ -199,7 +195,7 @@ fn connection_session(
     let mut pending = Vec::new();
     let mut handled = 0_usize;
     loop {
-        let request = match read_request(&mut stream, &mut pending, handled) {
+        let request = match read_request(&mut stream, &mut pending, handled, viewer) {
             Ok(request) => request,
             Err(ReadStop::CleanClose) => return Ok(()),
             Err(ReadStop::Io(error)) => return Err(error),
@@ -212,7 +208,7 @@ fn connection_session(
         if profiling() {
             reset_phases();
         }
-        let reply = route(viewer, request);
+        let reply = route(viewer, request, Some(&stream));
         let write_started = profiling().then(Instant::now);
         let recycle = reply.grey.is_some();
         let written = write_reply(&mut stream, &reply, !close);
@@ -231,13 +227,13 @@ fn connection_session(
     }
 }
 
-fn route(viewer: &Viewer, request: Request) -> Reply {
+fn route(viewer: &Viewer, request: Request, stream: Option<&TcpStream>) -> Reply {
     if request.method == "POST" && request.body.len() > BODY_CAP {
         return text_reply(400, Some("body"), "the preview request is too large");
     }
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", _) => get_reply(viewer, &request),
-        ("POST", "/preview") => preview_route(viewer, &request),
+        ("POST", "/preview") => preview_route(viewer, &request, stream),
         ("POST", "/file") => file_route(viewer, request),
         ("POST", "/inspect") => json_or_error(inspect_json(&request.body, request.frame.frame)),
         ("POST", "/headers") => headers_route(viewer, &request),
@@ -294,7 +290,7 @@ fn html_page(page: &str) -> Reply {
     bare(200, "text/html; charset=utf-8", page.as_bytes().to_vec())
 }
 
-fn preview_route(viewer: &Viewer, request: &Request) -> Reply {
+fn preview_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>) -> Reply {
     if request.file_id.is_some() && !request.body.is_empty() {
         return text_reply(
             400,
@@ -303,7 +299,7 @@ fn preview_route(viewer: &Viewer, request: &Request) -> Reply {
         );
     }
     if let Some(id) = request.file_id {
-        return preview_held(viewer, id, request.frame);
+        return preview_held(viewer, id, request.frame, stream);
     }
     let mut reply = from_preview(preview_frame(&request.body, request.frame));
     if reply.status == 200 {
@@ -312,22 +308,82 @@ fn preview_route(viewer: &Viewer, request: &Request) -> Reply {
     reply
 }
 
-fn preview_held(viewer: &Viewer, id: FileId, request: FrameRequest) -> Reply {
+fn busy_reply() -> Reply {
+    text_reply(
+        503,
+        Some("busy"),
+        "this process is already serving its connection limit",
+    )
+}
+
+fn peer_closed(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::BrokenPipe
+            | std::io::ErrorKind::ConnectionAborted
+    )
+}
+
+/// Whether a thread that does not yet hold a permit should keep waiting.
+///
+/// A reset, an abort, or a read of no bytes means the peer has gone. The
+/// caller asks only while the permit pool is empty. A request that already
+/// holds a permit is still answered, including after the client finished
+/// its write.
+fn peer_open(stream: &TcpStream) -> bool {
+    if matches!(stream.take_error(), Ok(Some(error)) if peer_closed(&error)) {
+        return false;
+    }
+    let timeout = stream.read_timeout().ok().flatten();
+    if stream.set_nonblocking(true).is_err() {
+        return true;
+    }
+    let mut probe = [0_u8; 1];
+    let open = match stream.peek(&mut probe) {
+        Ok(0) => false,
+        Err(error) if peer_closed(&error) => false,
+        Ok(_) | Err(_) => true,
+    };
+    let _ = stream.set_nonblocking(false);
+    if let Some(timeout) = timeout {
+        let _ = stream.set_read_timeout(Some(timeout));
+    }
+    open
+}
+
+fn preview_held(
+    viewer: &Viewer,
+    id: FileId,
+    request: FrameRequest,
+    stream: Option<&TcpStream>,
+) -> Reply {
     if let Err(error) = validate_frame_request(request) {
         return error_reply(error);
     }
     let before = decode_ticks();
     let lookup_started = profiling().then(Instant::now);
-    let found = viewer.lookup_frame(id, request.frame);
+    let found = viewer.preview_source(id, request.frame);
     if let Some(started) = lookup_started {
         note_lookup(started.elapsed().as_micros());
     }
+    // A free permit serves the request already read, including a client that
+    // has finished sending. A thread waits for a permit only while that client
+    // is still there, so a closed peer does not keep the connection slot.
+    let mut live = || stream.is_none_or(peer_open);
+    let Some(mut loan) = viewer.loan_workspace(&mut live) else {
+        if let PreviewSource::Owned(bytes) = found {
+            viewer.restore_file(id, bytes);
+        }
+        return busy_reply();
+    };
+    let workspace = &mut loan.workspace;
     let preview = match found {
-        Lookup::Gone => return gone(),
-        Lookup::Hit(held) => viewer.with_workspace(|workspace| {
+        PreviewSource::Gone => return gone(),
+        PreviewSource::Hit(held) => {
             render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
-        }),
-        Lookup::Miss(bytes) => viewer.with_workspace(|workspace| {
+        }
+        PreviewSource::Shared(bytes) => {
             match decode_held(&bytes, request.frame, &mut workspace.native) {
                 Ok(held) => {
                     let held = viewer.store_frame(id, request.frame, held);
@@ -335,7 +391,30 @@ fn preview_held(viewer: &Viewer, id: FileId, request: FrameRequest) -> Reply {
                 }
                 Err(error) => Err(error),
             }
-        }),
+        }
+        PreviewSource::Owned(bytes) => match decode_owned(bytes, request.frame) {
+            OwnedDecode::Frame(held) => {
+                let held = viewer.store_frame(id, request.frame, *held);
+                render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
+            }
+            OwnedDecode::Keep(bytes) => {
+                match decode_held(&bytes, request.frame, &mut workspace.native) {
+                    Ok(held) => {
+                        if held.frames > 1 {
+                            viewer.restore_file(id, bytes);
+                        } else {
+                            viewer.recycle_buffer(bytes);
+                        }
+                        let held = viewer.store_frame(id, request.frame, held);
+                        render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
+                    }
+                    Err(error) => {
+                        viewer.restore_file(id, bytes);
+                        Err(error)
+                    }
+                }
+            }
+        },
     };
     let mut reply = from_preview(preview);
     if reply.status == 200 {
@@ -571,15 +650,19 @@ fn write_reply(stream: &mut impl Write, reply: &Reply, keep_alive: bool) -> std:
     Ok(())
 }
 
-fn read_request(
+fn read_header_bytes(stream: &mut TcpStream, pending: &mut Vec<u8>) -> Result<usize, ReadStop> {
+    read_header_bytes_after(stream, pending, 0)
+}
+
+fn read_header_bytes_after(
     stream: &mut TcpStream,
     pending: &mut Vec<u8>,
     handled: usize,
-) -> Result<Request, ReadStop> {
+) -> Result<usize, ReadStop> {
     let mut chunk = [0_u8; 8192];
-    let header_end = loop {
+    loop {
         if let Some(end) = header_end_at(pending) {
-            break end;
+            return Ok(end);
         }
         if pending.len() > HEADER_CAP {
             pending.clear();
@@ -606,7 +689,16 @@ fn read_request(
             )));
         };
         pending.extend_from_slice(got);
-    };
+    }
+}
+
+fn read_request(
+    stream: &mut TcpStream,
+    pending: &mut Vec<u8>,
+    handled: usize,
+    viewer: &Viewer,
+) -> Result<Request, ReadStop> {
+    let header_end = read_header_bytes_after(stream, pending, handled)?;
     let header = {
         let Some(header_bytes) = pending.get(..header_end) else {
             return Err(ReadStop::Io(std::io::Error::new(
@@ -643,7 +735,9 @@ fn read_request(
         }
         None => 0,
     };
-    let body = fill_body(stream, pending, header_end, declared)?;
+    let body = fill_body(stream, pending, header_end, declared, |need| {
+        viewer.take_buffer(need)
+    })?;
     Ok(Request {
         method: parsed.method,
         path: parsed.path,
@@ -659,6 +753,7 @@ fn fill_body<R: Read>(
     pending: &mut Vec<u8>,
     header_end: usize,
     declared: usize,
+    allocate: impl FnOnce(usize) -> Vec<u8>,
 ) -> Result<Vec<u8>, ReadStop> {
     let tail = if pending.len() > header_end {
         pending.split_off(header_end)
@@ -669,14 +764,14 @@ fn fill_body<R: Read>(
     if tail.len() >= declared {
         let mut incoming = tail;
         let surplus = incoming.split_off(declared);
-        let mut body = exact_body(declared);
+        let mut body = allocate(declared);
         body.extend_from_slice(&incoming);
         if !surplus.is_empty() {
             *pending = surplus;
         }
         return Ok(body);
     }
-    let mut body = exact_body(declared);
+    let mut body = allocate(declared);
     body.extend_from_slice(&tail);
     let mut chunk = [0_u8; 8192];
     while body.len() < declared {
@@ -720,6 +815,7 @@ fn fill_body<R: Read>(
 
 /// One allocation of `declared` bytes. A doubled growth trail stays resident
 /// after the body is freed, because this host does not return large pages.
+#[cfg(test)]
 fn exact_body(declared: usize) -> Vec<u8> {
     let mut body = Vec::new();
     body.reserve_exact(declared);
@@ -922,7 +1018,7 @@ mod tests {
         let declared = 100_003_usize;
         let mut stream = std::io::Cursor::new(vec![9_u8; declared]);
         let mut pending = Vec::new();
-        let body = fill_body(&mut stream, &mut pending, 0, declared)
+        let body = fill_body(&mut stream, &mut pending, 0, declared, exact_body)
             .map_err(|_| "the declared body could not be read")?;
         if body.len() != declared {
             return Err("the request body length was not the declared length");
@@ -945,7 +1041,7 @@ mod tests {
         let id = viewer
             .insert_file(bytes)
             .ok_or("the synthetic slice was not held")?;
-        let first = preview_held(&viewer, id, FrameRequest::default());
+        let first = preview_held(&viewer, id, FrameRequest::default(), None);
         if first.status != 200 {
             return Err(format!("the first preview status was {}", first.status));
         }
@@ -971,7 +1067,7 @@ mod tests {
                 "the grey buffer capacity was {grey} for {pixels} pixels"
             ));
         }
-        let second = preview_held(&viewer, id, FrameRequest::default());
+        let second = preview_held(&viewer, id, FrameRequest::default(), None);
         if second.status != 200 {
             return Err(format!("the second preview status was {}", second.status));
         }

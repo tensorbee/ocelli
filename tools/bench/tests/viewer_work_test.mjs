@@ -5,13 +5,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assertCanvasCheck,
+  assertForwardCounters,
+  assertNoPreviewBody,
+  assertPageHooks,
+  assertRestartRecovery,
+  assertScrollDelivery,
+  assertScrollStage,
+  assertWindowSample,
   filledPixels,
   greyWord,
+  longEl,
   median,
   mono16Part10,
   pageHeapBound,
   serverRssBound,
+  shortEl,
 } from "../src/viewer_work.mjs";
+
+function refuses(fn, text) {
+  assert.throws(fn, (error) => error instanceof Error && String(error.message).includes(text));
+}
 
 test("median is the middle value", () => {
   // Sorted 1, 5, 9. The middle value is 5.
@@ -57,6 +71,27 @@ test("pageHeapBound counts five canvases plus the named allowances", () => {
   // 64 MiB + 16 MiB = 83886080
   // 5242880 + 83886080 = 89128960
   assert.equal(pageHeapBound(ct), 89128960);
+});
+
+test("viewer work refusals name the condition they reject", () => {
+  refuses(() => median([]), "median needs at least one value");
+  refuses(() => shortEl(0x0010, 0x0010, "PN", Buffer.from([1])), "a short element has a bad length");
+  refuses(() => longEl(0x7fe0, 0x0010, "OW", Buffer.from([1])), "a long element has a bad length");
+  refuses(() => assertPageHooks(null, null), "the page did not expose requestGrey and drawGrey");
+  refuses(() => assertScrollDelivery(10), "scroll delivered");
+  refuses(() => assertScrollStage(0, 1), "the stage showed a fault during the scroll");
+  refuses(() => assertScrollStage(2, 0), "the stage was blank during the scroll");
+  refuses(() => assertForwardCounters(["2 / 3", "1 / 3"]), "the counter went backwards");
+  refuses(() => assertWindowSample(null), "a window step did not reach drawGrey");
+  refuses(() => assertCanvasCheck({ error: "preview status 500" }), "the canvas check failed");
+  refuses(() => assertCanvasCheck({ points: 4, mismatches: [] }), "canvas check sampled");
+  refuses(
+    () => assertCanvasCheck({ points: 16, mismatches: [{ x: 1, y: 2 }] }),
+    "canvas pixel",
+  );
+  refuses(() => assertRestartRecovery("the file is no longer held", 1), "a restart left the gone sentence");
+  refuses(() => assertRestartRecovery("", 0), "the restart did not re-post the file");
+  refuses(() => assertNoPreviewBody(2), "/preview carried a body");
 });
 
 test("mono16Part10 is a Part 10 preamble and constant stored samples", () => {

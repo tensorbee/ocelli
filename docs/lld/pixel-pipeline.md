@@ -4,8 +4,8 @@
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1,
 `docs/hld/15-lut-chain.md` sections 18 through 18.3, DICOM PS3.3 C.7.6.2,
 C.7.6.3, C.7.9 and C.11
-**F-IDs that contributed:** F-018, F-029, F-030, F-041, F-044, F-046
-**Last updated:** 2026-10-18
+**F-IDs that contributed:** F-018, F-029, F-030, F-041, F-044, F-046, F-216
+**Last updated:** 2026-11-05
 
 Living current-state document. It describes what the code does today.
 
@@ -60,6 +60,16 @@ ownership of setup-time data and constructs its input keys. Scalar mapping,
 slice mapping, stored-value extraction and transform application allocate
 nothing. Slice mapping and stored-value extraction write into storage supplied
 by the caller and reject a length mismatch before the first write.
+
+`LutChain::stored_sample_table` builds one display value for every integer
+stored sample a `StoredBits` width of at most 16 allows. Each entry is
+`LutChain::apply` of that bit pattern, so the table adds no arithmetic.
+`StoredSampleTable::map_containers` selects the caller's already quantised
+byte for each container. `StoredBits::meaningful_bits` and
+`StoredBits::stored_sample` are the PS3.3 C.7.6.3 mask and signed reading
+that the table and the per-sample path already used. Bits Stored above 16
+returns no table. F-216 uses the table so a window change does not walk
+`display_index` once per pixel.
 
 ## Image-plane evidence
 

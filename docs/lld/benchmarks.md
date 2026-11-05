@@ -664,10 +664,9 @@ image index the page drew changed since the previous callback. An empty
 `setTimeout(16)` loop in the pinned headless Chromium stays below the 55
 frame budget, so the run also reports that plain timer ceiling.
 
-The registry rows name no story. F-216 is pending in the backlog, and a
-runner whose `subject_story` is pending is refused. The backlog was not
-edited by this story. `feeds` still names F-216. A null story means the
-subject exists today, so the gate requires the runner and allows a baseline.
+F-216 delivers `viewer.open`, `viewer.first_image`, `viewer.scroll_rate`,
+`viewer.window_step` and `viewer.resident_memory`. `subject_story` on each
+of those rows names F-216.
 
 The synthetic Part 10 files are written under `tools/bench/out/`, which is
 ignored. They are not staged.

@@ -19,7 +19,7 @@ const MIB = 1024 * 1024;
 const CT_SOP = "1.2.840.10008.5.1.4.1.1.2";
 const DX_SOP = "1.2.840.10008.5.1.4.1.1.1.1";
 
-let releaseBinary = null;
+const binaryPromises = new Map();
 
 /** Middle value. An even count uses the mean of the two middle values. */
 export function median(values) {
@@ -38,6 +38,62 @@ export function median(values) {
  */
 export function greyWord(value) {
   return (0xff000000 | (value << 16) | (value << 8) | value) >>> 0;
+}
+
+export function assertPageHooks(requestGreyFn, drawGreyFn) {
+  if (typeof requestGreyFn !== "function" || typeof drawGreyFn !== "function") {
+    throw new Error("the page did not expose requestGrey and drawGrey");
+  }
+}
+
+export function assertScrollStage(blanks, faults) {
+  if (faults > 0) throw new Error("the stage showed a fault during the scroll");
+  if (blanks > 0) throw new Error("the stage was blank during the scroll");
+}
+
+export function assertScrollDelivery(keys) {
+  if (keys < 120) {
+    throw new Error(`scroll delivered ${keys} keys, which is fewer than 120`);
+  }
+}
+
+export function assertForwardCounters(counters) {
+  let previous = -1;
+  for (const text of counters) {
+    const match = /^(\d+)/.exec(text || "");
+    const value = match ? Number(match[1]) : null;
+    if (value == null) continue;
+    if (value < previous) {
+      throw new Error("the counter went backwards during a forward scroll");
+    }
+    previous = value;
+  }
+}
+
+export function assertWindowSample(recorded) {
+  if (recorded == null) throw new Error("a window step did not reach drawGrey");
+}
+
+export function assertCanvasCheck(result) {
+  if (result.error) throw new Error(`the canvas check failed: ${result.error}`);
+  if (result.points !== 16) throw new Error(`canvas check sampled ${result.points} points`);
+  if (result.mismatches && result.mismatches.length > 0) {
+    const first = result.mismatches[0];
+    throw new Error(`canvas pixel ${first.x},${first.y} was not the server grey`);
+  }
+}
+
+export function assertRestartRecovery(fault, reposts) {
+  if (fault && fault.includes("no longer held")) {
+    throw new Error("a restart left the gone sentence on the page");
+  }
+  if (reposts < 1) throw new Error("the restart did not re-post the file");
+}
+
+export function assertNoPreviewBody(count) {
+  if (count !== 0) {
+    throw new Error(`/preview carried a body ${count} times while the file was held`);
+  }
 }
 
 /**
@@ -79,7 +135,7 @@ function ui(text) {
   return Buffer.concat([bytes, Buffer.from([0])]);
 }
 
-function shortEl(group, element, vr, value) {
+export function shortEl(group, element, vr, value) {
   if (value.length % 2 !== 0 || value.length > 0xffff) {
     throw new Error("a short element has a bad length");
   }
@@ -92,7 +148,7 @@ function shortEl(group, element, vr, value) {
   ]);
 }
 
-function longEl(group, element, vr, value) {
+export function longEl(group, element, vr, value) {
   if (value.length % 2 !== 0) throw new Error("a long element has a bad length");
   return Buffer.concat([
     u16(group),
@@ -167,14 +223,16 @@ export function mono16Part10({
 }
 
 export function ensureReleaseBinary(build) {
-  if (!releaseBinary) releaseBinary = locateReleaseBinary(build !== false);
-  return releaseBinary;
+  const release = build !== false;
+  const key = release ? "release" : "debug";
+  if (!binaryPromises.has(key)) binaryPromises.set(key, locateBinary(release));
+  return binaryPromises.get(key);
 }
 
-function locateReleaseBinary(build) {
+function locateBinary(release) {
   return new Promise((resolve, reject) => {
-    const args = ["build", "--release", "-p", "ocelli-folder-viewer", "--message-format=json"];
-    if (!build) args.push("--offline");
+    const args = ["build", "-p", "ocelli-folder-viewer", "--message-format=json"];
+    if (release) args.splice(1, 0, "--release");
     const child = spawn("cargo", args, {
       cwd: repoPath(),
       stdio: ["ignore", "pipe", "pipe"],
@@ -190,7 +248,7 @@ function locateReleaseBinary(build) {
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code !== 0) {
-        reject(new Error(`the release build failed (${code}): ${stderr.slice(-2000)}`));
+        reject(new Error(`the viewer build failed (${code}): ${stderr.slice(-2000)}`));
         return;
       }
       let executable = null;
@@ -202,7 +260,7 @@ function locateReleaseBinary(build) {
         }
       }
       if (!executable) {
-        reject(new Error("the release build did not name a binary"));
+        reject(new Error("the viewer build did not name a binary"));
         return;
       }
       resolve(executable);
@@ -334,7 +392,7 @@ async function launchBrowser() {
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({
     headless: true,
-    args: ["--enable-precise-memory-info"],
+    args: ["--enable-precise-memory-info", "--js-flags=--expose-gc"],
   });
   return { browser, chromium: browser.version() };
 }
@@ -448,6 +506,7 @@ async function scrollOnce(page) {
     let keys = 0;
     let presented = 0;
     let previous = null;
+    const samples = [];
     const indexOf = (text) => {
       const match = /^(\d+)/.exec(text || "");
       return match ? Number(match[1]) : null;
@@ -462,7 +521,13 @@ async function scrollOnce(page) {
     };
     // A presented frame is a drawn image index that changed since the
     // previous animation callback. The first callback only records the index.
+    // Visibility is sampled on this callback, including the frames between draws.
     const observe = () => {
+      const stage = document.getElementById("stage");
+      const fault = document.getElementById("fault");
+      const faultText = fault && !fault.hidden ? (fault.textContent || "").trim() : "";
+      const hidden = !stage || stage.hidden;
+      samples.push({ hidden, fault: faultText });
       const index = drawnIndex();
       if (index != null && previous != null && index !== previous) presented += 1;
       if (index != null) previous = index;
@@ -474,7 +539,8 @@ async function scrollOnce(page) {
         resolve({
           keys,
           presented,
-          blanks: draws.filter((draw) => draw.hidden).length,
+          blanks: samples.filter((sample) => sample.hidden || sample.fault).length,
+          faults: samples.filter((sample) => sample.fault).map((sample) => sample.fault),
           counters: draws.map((draw) => draw.counter),
           seconds: (performance.now() - started) / 1000,
         });
@@ -494,19 +560,9 @@ async function scrollOnce(page) {
     };
     window.requestAnimationFrame(frame);
   }));
-  if (result.keys < 120) {
-    throw new Error(`scroll delivered ${result.keys} keys, which is fewer than 120`);
-  }
-  let previous = -1;
-  let regressed = false;
-  for (const text of result.counters) {
-    const match = /^(\d+)/.exec(text || "");
-    const value = match ? Number(match[1]) : null;
-    if (value == null) continue;
-    if (value < previous) regressed = true;
-    previous = value;
-  }
-  if (regressed) throw new Error("the counter went backwards during a forward scroll");
+  assertScrollDelivery(result.keys);
+  assertForwardCounters(result.counters);
+  assertScrollStage(result.blanks, result.faults ? result.faults.length : 0);
   return {
     keys: result.keys,
     presented: result.presented,
@@ -553,7 +609,7 @@ async function windowSteps(page, count) {
       const steps = window.__windowSteps || [];
       return steps.length ? steps[steps.length - 1] : null;
     });
-    if (recorded == null) throw new Error("a window step did not reach drawGrey");
+    assertWindowSample(recorded);
     samples.push(recorded);
   }
   return samples;
@@ -595,12 +651,7 @@ async function canvasMatchesReply(page) {
     }
     return { points: xs.length * ys.length, mismatches };
   });
-  if (result.error) throw new Error(result.error);
-  if (result.points !== 16) throw new Error(`canvas check sampled ${result.points} points`);
-  if (result.mismatches.length > 0) {
-    const first = result.mismatches[0];
-    throw new Error(`canvas pixel ${first.x},${first.y} was not the server grey`);
-  }
+  assertCanvasCheck(result);
 }
 
 async function restartAndDraw(page, binary, server) {
@@ -624,13 +675,10 @@ async function restartAndDraw(page, binary, server) {
     { timeout: 30000 },
   );
   const fault = await page.locator("#fault").textContent();
-  if (fault && fault.includes("no longer held")) {
-    throw new Error("a restart left the gone sentence on the page");
-  }
   const reposts = await page.evaluate(
     () => (window.__fileBodySizes || []).length - (window.__filePostsAtRestart || 0),
   );
-  if (reposts < 1) throw new Error("the restart did not re-post the file");
+  assertRestartRecovery(fault, reposts);
 }
 
 function instrumentOf(chromium) {
@@ -707,7 +755,23 @@ export async function measureFirstImage({ outDir, build }) {
   };
 }
 
+async function oneScroll(binary, ctDir) {
+  const server = await startViewer(binary);
+  const { browser, chromium } = await launchBrowser();
+  try {
+    const page = await openPage(browser, server.url);
+    await openFolder(page, ctDir);
+    const sample = await scrollOnce(page);
+    await page.close();
+    return { sample, chromium };
+  } finally {
+    await browser.close();
+    await stopViewer(server.child);
+  }
+}
+
 export async function measureScroll({ outDir, build }) {
+  const releaseRun = build !== false;
   const binary = await ensureReleaseBinary(build);
   const { ctDir } = await ensureWorkloads(outDir);
   const server = await startViewer(binary);
@@ -720,7 +784,8 @@ export async function measureScroll({ outDir, build }) {
     const ceilingPage = await browser.newPage();
     ceiling = await plainTimerCeiling(ceilingPage);
     await ceilingPage.close();
-    for (let index = 0; index < 5; index += 1) {
+    const runs = releaseRun ? 5 : 1;
+    for (let index = 0; index < runs; index += 1) {
       const page = await openPage(browser, server.url);
       await openFolder(page, ctDir);
       const sample = await scrollOnce(page);
@@ -733,18 +798,27 @@ export async function measureScroll({ outDir, build }) {
     await browser.close();
     await stopViewer(server.child);
   }
+  let debugBlanks = null;
+  if (releaseRun) {
+    const debugBinary = await ensureReleaseBinary(false);
+    const debug = await oneScroll(debugBinary, ctDir);
+    debugBlanks = debug.sample.blanks;
+  }
   const value = median(rates);
+  const fpsMet = !releaseRun || value >= 55;
+  const debugMet = debugBlanks == null || debugBlanks === 0;
   return {
     value,
     detail: {
       rates,
       keys,
       blank_samples: blanks,
+      debug_blank_samples: debugBlanks,
       threshold_frames_per_second: 55,
       timer_ceiling_per_second: ceiling.perSecond,
       timer_ceiling_dispatches: ceiling.dispatches,
       timer_ceiling_seconds: ceiling.seconds,
-      thresholds_met: value >= 55 && blanks === 0,
+      thresholds_met: fpsMet && blanks === 0 && debugMet,
     },
     instrument: instrumentOf(chromium),
   };
@@ -777,9 +851,7 @@ export async function measureWindow({ outDir, build }) {
     await dxPage.close();
     posted = bodies.reduce((sum, list) => sum + list.filter((length) => length > 0).length, 0);
     pagePosted = [...ctBodies, ...dxBodies].filter((length) => length !== 0).length;
-    if (posted !== 0 || pagePosted !== 0) {
-      throw new Error(`/preview carried a body ${posted + pagePosted} times while the file was held`);
-    }
+    assertNoPreviewBody(posted + pagePosted);
   } finally {
     await browser.close();
     await stopViewer(server.child);
@@ -801,6 +873,30 @@ export async function measureWindow({ outDir, build }) {
   };
 }
 
+async function sizedCanvases(page) {
+  return page.evaluate(() => {
+    const sized = [];
+    const view = document.getElementById("view");
+    // The page keeps the image size in a `let` binding, which is not a
+    // property of window. After a draw the canvas width is the image width.
+    // 300 by 150 is the unset element.
+    if (
+      view &&
+      view.width > 1 &&
+      view.height > 1 &&
+      !(view.width === 300 && view.height === 150)
+    ) {
+      sized.push([view.width, view.height]);
+    }
+    for (const node of document.querySelectorAll("canvas[data-tile]")) {
+      if (node.width === 300 && node.height === 150) continue;
+      if (node.width <= 1 || node.height <= 1) continue;
+      sized.push([node.width, node.height]);
+    }
+    return sized;
+  });
+}
+
 export async function measureResident({ outDir, build }) {
   const binary = await ensureReleaseBinary(build);
   const dirs = await ensureWorkloads(outDir);
@@ -817,20 +913,54 @@ export async function measureResident({ outDir, build }) {
   const { browser, chromium } = await launchBrowser();
   let heap = null;
   let held = null;
+  let canvases = [];
   try {
-    const page = await openPage(browser, server.url);
-    await openFolder(page, dirs.ctDir);
-    await scrollOnce(page);
-    await windowSteps(page, 9);
+    for (let index = 0; index < 9; index += 1) {
+      const page = await openPage(browser, server.url);
+      await page.locator("#folder").setInputFiles(dirs.ctDir);
+      await page.waitForFunction(() => /\d+ series\./.test(document.querySelector("#status")?.textContent || ""));
+      await page.close();
+    }
+    for (let index = 0; index < 9; index += 1) {
+      const page = await openPage(browser, server.url);
+      await openFolder(page, dirs.ctDir);
+      await page.close();
+    }
+    for (let index = 0; index < 9; index += 1) {
+      const page = await openPage(browser, server.url);
+      await openFolder(page, dirs.dxDir);
+      await page.close();
+    }
+    const restartPage = await openPage(browser, server.url);
+    await openFolder(restartPage, dirs.ctDir);
+    await restartAndDraw(restartPage, binary, server);
+    await restartPage.close();
+    for (let index = 0; index < 5; index += 1) {
+      const page = await openPage(browser, server.url);
+      await openFolder(page, dirs.ctDir);
+      await scrollOnce(page);
+      await page.close();
+    }
+    const ctPage = await openPage(browser, server.url);
+    await openFolder(ctPage, dirs.ctDir);
+    await windowSteps(ctPage, 9);
+    await ctPage.close();
     const dxPage = await openPage(browser, server.url);
     await openFolder(dxPage, dirs.dxDir);
     await windowSteps(dxPage, 9);
-    heap = await dxPage.evaluate(() => performance.memory && performance.memory.usedJSHeapSize);
+    heap = await dxPage.evaluate(() => {
+      // One collection leaves the greys evicted a moment ago. A second
+      // collection reports the cache that is still referenced.
+      if (globalThis.gc) {
+        for (let pass = 0; pass < 4; pass += 1) globalThis.gc();
+      }
+      return performance.memory && performance.memory.usedJSHeapSize;
+    });
+    canvases = await sizedCanvases(dxPage);
     held = await dxPage.evaluate(async () => {
       const response = await fetch("/held");
       return response.json();
     });
-    await page.close();
     await dxPage.close();
   } finally {
     stop = true;
@@ -844,13 +974,7 @@ export async function measureResident({ outDir, build }) {
   const sMax = (await stat(join(dirs.dxDir, "dx-0000.dcm"))).size;
   const nMax = DX_ROWS * DX_COLUMNS;
   const rssBound = serverRssBound(budget, sMax, nMax);
-  const heapBound = pageHeapBound([
-    [DX_COLUMNS, DX_ROWS],
-    [DX_COLUMNS, DX_ROWS],
-    [DX_COLUMNS, DX_ROWS],
-    [DX_COLUMNS, DX_ROWS],
-    [DX_COLUMNS, DX_ROWS],
-  ]);
+  const heapBound = pageHeapBound(canvases);
   return {
     value,
     detail: {
@@ -858,6 +982,7 @@ export async function measureResident({ outDir, build }) {
       samples: samples.length,
       held,
       js_heap_bytes: heap,
+      canvases,
       rss_bound_bytes: rssBound,
       heap_bound_bytes: heapBound,
       thresholds_met: value <= rssBound && (heap == null || heap <= heapBound),

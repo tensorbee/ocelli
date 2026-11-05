@@ -182,7 +182,7 @@ image at a time. It listens on this machine only.
 cargo run --release -p ocelli-folder-viewer
 ```
 
-The debug build is about ten times slower on a window step. Each file is posted once and held by the process. `OCELLI_CACHE_MIB` sets that cache in mebibytes and the default is 256.
+The debug build is about ten times slower on a window step. Each file is posted once while the process holds it, and posted again after eviction or a restart. `OCELLI_CACHE_MIB` sets that cache in mebibytes and the default is 256.
 
 The process prints one line, the page URL, and nothing else. It has the form
 `http://127.0.0.1:12345/`. The port is chosen at startup unless

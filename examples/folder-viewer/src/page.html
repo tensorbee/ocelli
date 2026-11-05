@@ -1524,24 +1524,32 @@ function paintThumbBitmap(grey) {
   node.width = 128;
   node.height = 128;
   const context = node.getContext("2d");
-  if (!context) return node;
-  context.fillStyle = "#000000";
-  context.fillRect(0, 0, node.width, node.height);
-  const source = document.createElement("canvas");
-  source.width = grey.width;
-  source.height = grey.height;
-  const sourceContext = source.getContext("2d");
-  if (!sourceContext) return node;
-  paintGrey(sourceContext, source, grey);
+  if (!context || !grey || !grey.bytes || !grey.width || !grey.height) return node;
+  const image = context.createImageData(128, 128);
   const aspect = greyAspect(grey.facts);
   const width = grey.width * aspect.x;
   const height = grey.height * aspect.y;
-  const fit = Math.min(node.width / width, node.height / height);
-  const drawW = width * fit;
-  const drawH = height * fit;
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
-  context.drawImage(source, (node.width - drawW) / 2, (node.height - drawH) / 2, drawW, drawH);
+  const fit = Math.min(128 / width, 128 / height);
+  const drawW = Math.max(1, Math.round(width * fit));
+  const drawH = Math.max(1, Math.round(height * fit));
+  const originX = Math.floor((128 - drawW) / 2);
+  const originY = Math.floor((128 - drawH) / 2);
+  const data = image.data;
+  const bytes = grey.bytes;
+  for (let y = 0; y < drawH; y += 1) {
+    const sourceY = Math.min(grey.height - 1, Math.floor(((y + 0.5) * grey.height) / drawH));
+    const row = sourceY * grey.width;
+    for (let x = 0; x < drawW; x += 1) {
+      const sourceX = Math.min(grey.width - 1, Math.floor(((x + 0.5) * grey.width) / drawW));
+      const value = bytes[row + sourceX];
+      const at = ((originY + y) * 128 + (originX + x)) * 4;
+      data[at] = value;
+      data[at + 1] = value;
+      data[at + 2] = value;
+      data[at + 3] = 255;
+    }
+  }
+  context.putImageData(image, 0, 0);
   return node;
 }
 
@@ -1823,6 +1831,34 @@ async function fetchGrey(image) {
   return job;
 }
 
+function abortError() {
+  const error = new Error("aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function sleepAbortable(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal && signal.aborted) {
+      reject(abortError());
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError());
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function superseded(wantedView, wantedToken, signal) {
+  return (signal && signal.aborted) || viewIndex !== wantedView || loadToken !== wantedToken;
+}
+
 async function requestGrey(image, options) {
   const plain = Boolean(options && options.plain);
   const signal = options && options.signal;
@@ -1836,45 +1872,56 @@ async function requestGrey(image, options) {
   } else if (activePreset && !plain) {
     headers["X-Ocelli-Window-Preset"] = activePreset;
   }
-  let response;
-  try {
-    response = await postPreview(image, headers, signal);
-  } catch (error) {
-    if ((error && error.name === "AbortError") || (signal && signal.aborted)) throw error;
-    if (await processAnswers()) throw new Error(UNREADABLE);
-    processGone();
-    throw new Error(GONE);
-  }
-  processBack();
-  if (response.status === 410) throw new Error(FILE_GONE);
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "the frame could not be shown");
-  }
-  const width = Number(response.headers.get("X-Ocelli-Width"));
-  const height = Number(response.headers.get("X-Ocelli-Height"));
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (!width || !height || bytes.length !== width * height) {
-    throw new Error("the preview response did not match the frame");
-  }
-  return {
-    width,
-    height,
-    fullRange: response.headers.get("X-Ocelli-Full-Range") === "1",
-    center: response.headers.get("X-Ocelli-Window-Center") || "",
-    widthText: response.headers.get("X-Ocelli-Window-Width") || "",
-    fn: response.headers.get("X-Ocelli-Window-Function") || "",
-    bytes,
-    facts: {
-      row: headerNumber(response, "X-Ocelli-Row-Spacing"),
-      column: headerNumber(response, "X-Ocelli-Column-Spacing"),
-      source: response.headers.get("X-Ocelli-Spacing-Source") || "",
-      left: response.headers.get("X-Ocelli-Edge-Left") || "",
-      right: response.headers.get("X-Ocelli-Edge-Right") || "",
-      top: response.headers.get("X-Ocelli-Edge-Top") || "",
-      bottom: response.headers.get("X-Ocelli-Edge-Bottom") || ""
+  const wantedView = viewIndex;
+  const wantedToken = loadToken;
+  for (;;) {
+    if (superseded(wantedView, wantedToken, signal)) throw abortError();
+    let response;
+    try {
+      response = await postPreview(image, headers, signal);
+    } catch (error) {
+      if ((error && error.name === "AbortError") || (signal && signal.aborted)) throw error;
+      if (await processAnswers()) throw new Error(UNREADABLE);
+      processGone();
+      throw new Error(GONE);
     }
-  };
+    processBack();
+    if (response.status === 410) throw new Error(FILE_GONE);
+    if (response.status === 503 && response.headers.get("X-Ocelli-Error") === "busy") {
+      await response.arrayBuffer().catch(() => {});
+      if (superseded(wantedView, wantedToken, signal)) throw abortError();
+      await sleepAbortable(40, signal);
+      continue;
+    }
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || "the frame could not be shown");
+    }
+    const width = Number(response.headers.get("X-Ocelli-Width"));
+    const height = Number(response.headers.get("X-Ocelli-Height"));
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (!width || !height || bytes.length !== width * height) {
+      throw new Error("the preview response did not match the frame");
+    }
+    return {
+      width,
+      height,
+      fullRange: response.headers.get("X-Ocelli-Full-Range") === "1",
+      center: response.headers.get("X-Ocelli-Window-Center") || "",
+      widthText: response.headers.get("X-Ocelli-Window-Width") || "",
+      fn: response.headers.get("X-Ocelli-Window-Function") || "",
+      bytes,
+      facts: {
+        row: headerNumber(response, "X-Ocelli-Row-Spacing"),
+        column: headerNumber(response, "X-Ocelli-Column-Spacing"),
+        source: response.headers.get("X-Ocelli-Spacing-Source") || "",
+        left: response.headers.get("X-Ocelli-Edge-Left") || "",
+        right: response.headers.get("X-Ocelli-Edge-Right") || "",
+        top: response.headers.get("X-Ocelli-Edge-Top") || "",
+        bottom: response.headers.get("X-Ocelli-Edge-Bottom") || ""
+      }
+    };
+  }
 }
 
 function headerNumber(response, name) {

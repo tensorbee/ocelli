@@ -2364,6 +2364,125 @@ fn a_connection_over_the_cap_is_busy() -> Result<(), String> {
     a_full_connection_is_busy_without_taking_the_slot()
 }
 
+fn span_frame() -> Result<Vec<u8>, String> {
+    // 1 by 3, stored 0, 20 and 200. No Window Center, Window Width or function.
+    let mut pixels = Vec::new();
+    pixels.extend_from_slice(&0_u16.to_le_bytes());
+    pixels.extend_from_slice(&20_u16.to_le_bytes());
+    pixels.extend_from_slice(&200_u16.to_le_bytes());
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    data.extend(short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le(
+        (0x0028, 0x0004),
+        *b"CS",
+        &text_pad("MONOCHROME2"),
+    )?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &3_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0100), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0101), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0102), *b"US", &15_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x1052), *b"DS", &text_pad("0"))?);
+    data.extend(short_le((0x0028, 0x1053), *b"DS", &text_pad("1"))?);
+    data.extend(long_le((0x7FE0, 0x0010), *b"OW", &pixels)?);
+    let mut bytes = vec![0_u8; 128];
+    bytes.extend_from_slice(b"DICM");
+    bytes.extend(file_meta("1.2.840.10008.1.2.1")?);
+    bytes.extend(data);
+    Ok(bytes)
+}
+
+#[test]
+fn a_function_sent_alone_selects_the_full_range_window() -> Result<(), String> {
+    // Stored 0, 20 and 200. Rescale slope 1, intercept 0. The full range is
+    // center 100 and width 200.
+    // PS3.3 C.11.2.1.2 LINEAR uses center 99.5 and width 199.
+    // Stored 20: ((20 - 99.5) / 199 + 0.5) * 255 = 25.628143310546875.
+    // display_index of that value is grey 26.
+    // PS3.3 C.11.2.1.3.2 LINEAR_EXACT uses center 100 and width 200.
+    // Stored 20: ((20 - 100) / 200 + 0.5) * 255 = 25.499998092651367.
+    // display_index of that value is grey 25.
+    // Stored 0 is grey 0 for both. Stored 200 is grey 255 for both.
+    let file = span_frame()?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id =
+        header_line(header, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())?;
+    let linear = exchange(
+        addr,
+        &preview_id(id, "X-Ocelli-Window-Function: LINEAR\r\n"),
+    )?;
+    let (linear_header, linear_body) = split_http(&linear)?;
+    if !linear_header.contains("X-Ocelli-Window-Function: LINEAR")
+        || !linear_header.contains("X-Ocelli-Full-Range: 1")
+        || !linear_header.contains("X-Ocelli-Window-Center: 100")
+        || !linear_header.contains("X-Ocelli-Window-Width: 200")
+        || linear_body != [0, 26, 255]
+    {
+        return Err(format!(
+            "LINEAR alone was not grey 26: {linear_header} body {linear_body:?}"
+        ));
+    }
+    let exact = exchange(addr, &preview_id(id, ""))?;
+    let (exact_header, exact_body) = split_http(&exact)?;
+    if !exact_header.contains("X-Ocelli-Window-Function: LINEAR_EXACT")
+        || !exact_header.contains("X-Ocelli-Full-Range: 1")
+        || exact_body != [0, 25, 255]
+    {
+        return Err(format!(
+            "the default full range was not grey 25: {exact_header} body {exact_body:?}"
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_busy_post_is_refused_before_its_body() -> Result<(), String> {
+    let addr = viewer_capped(1024, 1)?;
+    let mut first = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+    first
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    first
+        .write_all(b"GET /synthetic HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+        .map_err(|error| error.to_string())?;
+    let opened = read_one(&mut first)?;
+    let (opened_header, _) = split_http(&opened)?;
+    if !opened_header.contains("200") {
+        return Err("the first connection was not served".to_owned());
+    }
+    let mut second = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+    second
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    second
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    let started = std::time::Instant::now();
+    second
+        .write_all(b"POST /file HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 2000000\r\n\r\n")
+        .map_err(|error| error.to_string())?;
+    let response = read_one(&mut second)?;
+    if started.elapsed() > Duration::from_secs(2) {
+        return Err("the busy reply waited for the body".to_owned());
+    }
+    let (header, body) = split_http(&response)?;
+    if !header.contains("503")
+        || !header.contains("X-Ocelli-Error: busy")
+        || body != b"this process is already serving its connection limit"
+    {
+        return Err("a header-only post over the cap was not busy".to_owned());
+    }
+    Ok(())
+}
+
 #[test]
 fn the_page_names_the_release_build() -> Result<(), String> {
     let response = one_exchange(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;

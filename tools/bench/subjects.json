@@ -168,9 +168,9 @@
       "unit": "ms",
       "dimensions": ["host", "profile", "files"],
       "tiers": ["C"],
-      "subject_story": null,
+      "subject_story": "F-216",
       "feeds": ["F-216"],
-      "note": "F-216 defines this measurement. The registry names no story because a pending backlog row is refused a runner and a baseline, and the backlog was not edited. An increase is worse."
+      "note": "F-216 delivers this measurement. The backlog row is still pending, so the bench gate refuses the runner until that row is measurable. An increase is worse."
     },
     {
       "id": "viewer.first_image",
@@ -180,9 +180,9 @@
       "unit": "ms",
       "dimensions": ["host", "profile", "rows", "columns"],
       "tiers": ["C"],
-      "subject_story": null,
+      "subject_story": "F-216",
       "feeds": ["F-216"],
-      "note": "F-216 defines this measurement. The registry names no story because a pending backlog row is refused a runner and a baseline, and the backlog was not edited. An increase is worse."
+      "note": "F-216 delivers this measurement. The backlog row is still pending, so the bench gate refuses the runner until that row is measurable. An increase is worse."
     },
     {
       "id": "viewer.scroll_rate",
@@ -192,9 +192,9 @@
       "unit": "frames_per_second",
       "dimensions": ["host", "profile", "files"],
       "tiers": ["C"],
-      "subject_story": null,
+      "subject_story": "F-216",
       "feeds": ["F-216"],
-      "note": "F-216 defines this measurement. The registry names no story because a pending backlog row is refused a runner and a baseline, and the backlog was not edited. An increase is better."
+      "note": "F-216 delivers this measurement. The backlog row is still pending, so the bench gate refuses the runner until that row is measurable. An increase is better."
     },
     {
       "id": "viewer.window_step",
@@ -204,9 +204,9 @@
       "unit": "ms",
       "dimensions": ["host", "profile", "rows", "columns"],
       "tiers": ["C"],
-      "subject_story": null,
+      "subject_story": "F-216",
       "feeds": ["F-216"],
-      "note": "F-216 defines this measurement. The registry names no story because a pending backlog row is refused a runner and a baseline, and the backlog was not edited. An increase is worse."
+      "note": "F-216 delivers this measurement. The backlog row is still pending, so the bench gate refuses the runner until that row is measurable. An increase is worse."
     },
     {
       "id": "viewer.resident_memory",
@@ -216,9 +216,9 @@
       "unit": "bytes",
       "dimensions": ["host", "profile"],
       "tiers": ["C"],
-      "subject_story": null,
+      "subject_story": "F-216",
       "feeds": ["F-216"],
-      "note": "F-216 defines this measurement. The registry names no story because a pending backlog row is refused a runner and a baseline, and the backlog was not edited. An increase is worse. The bound is the formula in the F-216 design, not a second budget invented here."
+      "note": "F-216 delivers this measurement. The backlog row is still pending, so the bench gate refuses the runner until that row is measurable. An increase is worse. The bound is the formula in the F-216 design, not a second budget invented here."
     }
   ]
 }

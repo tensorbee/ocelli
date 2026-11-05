@@ -421,13 +421,75 @@ pub(crate) fn decode_held(
     finish_decode(&parsed, None, frame, native)
 }
 
-fn finish_decode(
-    parsed: &ocelli_dicom::ParsedDicom,
-    source: Option<&[u8]>,
+/// A single native frame recycled into its own posted allocation, or the
+/// original bytes when that recycle does not apply.
+pub(crate) enum OwnedDecode {
+    /// Samples occupy the posted buffer. The caller does not put it back.
+    Frame(Box<HeldFrame>),
+    /// Decode from these bytes and decide afterwards whether to restore them.
+    Keep(Vec<u8>),
+}
+
+/// Turn a uniquely owned posted file into frame 0 when the pixels are one
+/// native frame in host byte order. Every other file is returned unchanged.
+pub(crate) fn decode_owned(bytes: Vec<u8>, frame: u32) -> OwnedDecode {
+    let Some((header, range)) = split_pixel_payload(&bytes) else {
+        return OwnedDecode::Keep(bytes);
+    };
+    let Ok(parsed) = parse_part10(&header) else {
+        return OwnedDecode::Keep(bytes);
+    };
+    let path = parsed.transfer_syntax().dispatch_path();
+    if !native_dispatch(path) || !native_order_matches(path) {
+        return OwnedDecode::Keep(bytes);
+    }
+    let Some(pixels) = bytes.get(range.clone()) else {
+        return OwnedDecode::Keep(bytes);
+    };
+    if !borrowed_pixels_fit(parsed.object(), pixels) {
+        return OwnedDecode::Keep(bytes);
+    }
+    let Ok((parts, desc)) = frame_parts(parsed.object(), frame) else {
+        return OwnedDecode::Keep(bytes);
+    };
+    if parts.frames != 1
+        || frame != 0
+        || parts.expected != range.len()
+        || desc.output_len() != range.len()
+    {
+        return OwnedDecode::Keep(bytes);
+    }
+    let mut samples = bytes;
+    samples.copy_within(range, 0);
+    samples.truncate(parts.expected);
+    // A tiny fixture keeps a header-sized allocation after two samples. A CT
+    // or radiograph file is already in the sample size class, and shrinking
+    // it would allocate a second buffer this host does not return.
+    if samples.capacity() > samples.len().saturating_mul(2) {
+        samples.shrink_to_fit();
+    }
+    note_decode();
+    note_borrowed_decode();
+    OwnedDecode::Frame(Box::new(held_from_samples(
+        parsed.object(),
+        parts,
+        samples,
+        0,
+    )))
+}
+
+struct FrameParts {
+    frames: u32,
+    width: u32,
+    height: u32,
+    expected: usize,
+    description: StoredPixelDescription,
+}
+
+fn frame_parts(
+    object: &DefaultDicomObject,
     frame: u32,
-    native: &mut Vec<u8>,
-) -> Result<HeldFrame, PreviewError> {
-    let object = parsed.object();
+) -> Result<(FrameParts, FrameDesc), PreviewError> {
     let rows = required_u16(object, ROWS)?;
     let columns = required_u16(object, COLUMNS)?;
     let height = u32::from(rows);
@@ -449,7 +511,6 @@ fn finish_decode(
     if frame >= frames {
         return Err(PreviewError::Frame);
     }
-    let frame_index = usize::try_from(frame).map_err(|_| PreviewError::Frame)?;
     let vr = pixel_vr(object)?;
     let desc = FrameDesc::new(FrameDescInput {
         rows,
@@ -466,7 +527,6 @@ fn finish_decode(
         pixel_data_vr: vr,
     })
     .map_err(|_| PreviewError::Attribute)?;
-    let decoded = decode_frame(parsed, object, &desc, frames, frame_index, source, native)?;
     let stored_bits = StoredBits::new(
         u8::try_from(bits_allocated).map_err(|_| PreviewError::Attribute)?,
         u8::try_from(bits_stored).map_err(|_| PreviewError::Attribute)?,
@@ -485,23 +545,62 @@ fn finish_decode(
     let expected = count
         .checked_mul(bytes_per_sample)
         .ok_or(PreviewError::Decode)?;
-    if decoded.len() != expected {
-        return Err(PreviewError::Decode);
-    }
-    let mut samples = decoded;
-    samples.shrink_to_fit();
-    let prepared = prepare_held(object, &description, &samples, frame_index);
-    Ok(HeldFrame {
+    Ok((
+        FrameParts {
+            frames,
+            width,
+            height,
+            expected,
+            description,
+        },
+        desc,
+    ))
+}
+
+fn held_from_samples(
+    object: &DefaultDicomObject,
+    parts: FrameParts,
+    samples: Vec<u8>,
+    frame_index: usize,
+) -> HeldFrame {
+    let prepared = prepare_held(object, &parts.description, &samples, frame_index);
+    HeldFrame {
         samples,
-        description,
+        description: parts.description,
         byte_order: ByteOrder::LittleEndian,
         recipe: prepared.recipe,
         facts: prepared.facts,
         full_range: prepared.full_range,
-        frames,
-        width,
-        height,
-    })
+        frames: parts.frames,
+        width: parts.width,
+        height: parts.height,
+    }
+}
+
+fn finish_decode(
+    parsed: &ocelli_dicom::ParsedDicom,
+    source: Option<&[u8]>,
+    frame: u32,
+    native: &mut Vec<u8>,
+) -> Result<HeldFrame, PreviewError> {
+    let object = parsed.object();
+    let (parts, desc) = frame_parts(object, frame)?;
+    let frame_index = usize::try_from(frame).map_err(|_| PreviewError::Frame)?;
+    let decoded = decode_frame(
+        parsed,
+        object,
+        &desc,
+        parts.frames,
+        frame_index,
+        source,
+        native,
+    )?;
+    if decoded.len() != parts.expected {
+        return Err(PreviewError::Decode);
+    }
+    let mut samples = decoded;
+    samples.shrink_to_fit();
+    Ok(held_from_samples(object, parts, samples, frame_index))
 }
 
 struct Prepared {
@@ -847,7 +946,10 @@ fn select_window(
     match recipe.file_window.as_ref().map_err(|error| *error)? {
         FileWindow::Full => {
             let (center, width) = held.full_range?;
-            Ok((vec![center], vec![width], VoiFunction::LinearExact, true))
+            // A function sent alone replaces the full-range default. The
+            // default is LINEAR_EXACT only when the request names none.
+            let function = request.window_function.unwrap_or(VoiFunction::LinearExact);
+            Ok((vec![center], vec![width], function, true))
         }
         FileWindow::Explicit {
             centers,
@@ -1742,7 +1844,9 @@ fn split_pixel_payload(bytes: &[u8]) -> Option<(Vec<u8>, std::ops::Range<usize>)
         cursor = next;
     }
     let range = pixel_range?;
-    if range.is_empty() || out.len() >= bytes.len() {
+    // A length that runs past the file is not a pixel value. The caller then
+    // parses the whole object instead of borrowing a range it cannot see.
+    if range.is_empty() || range.end > bytes.len() || out.len() >= bytes.len() {
         return None;
     }
     Some((out, range))
@@ -1769,12 +1873,14 @@ fn dataset_origin(bytes: &[u8]) -> Option<(usize, bool, bool)> {
         }
         cursor = value_end;
     }
+    // Only the three uncompressed syntaxes whose element headers this walker
+    // reads. Every other UID, including deflated Explicit VR Little Endian
+    // (1.2.840.10008.1.2.1.99), returns None so the caller parses the file.
     let (explicit, little) = match syntax.as_str() {
         "1.2.840.10008.1.2" => (false, true),
+        "1.2.840.10008.1.2.1" => (true, true),
         "1.2.840.10008.1.2.2" => (true, false),
-        "1.2.840.10008.1.2.1.99" => return None,
-        "" => return None,
-        _ => (true, true),
+        _ => return None,
     };
     Some((cursor, explicit, little))
 }
@@ -2422,8 +2528,34 @@ fn primitive_len(value: &PrimitiveValue) -> Option<usize> {
 }
 
 #[cfg(test)]
+fn file_order_pixels(object: &DefaultDicomObject, little: bool) -> Result<Vec<u8>, ()> {
+    let element = object.element(PIXEL_DATA).map_err(|_| ())?;
+    match element.value() {
+        DicomValue::Primitive(PrimitiveValue::U8(items)) => Ok(items.to_vec()),
+        DicomValue::Primitive(PrimitiveValue::U16(items)) => {
+            let mut out = Vec::new();
+            for word in items {
+                let encoded = if little {
+                    word.to_le_bytes()
+                } else {
+                    word.to_be_bytes()
+                };
+                out.extend_from_slice(&encoded);
+            }
+            Ok(out)
+        }
+        DicomValue::Primitive(_) | DicomValue::Sequence(_) | DicomValue::PixelSequence(_) => {
+            Err(())
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use super::{borrowed_decode_ticks, preview_frame, split_pixel_payload};
+    use super::{
+        borrowed_decode_ticks, borrowed_pixels_fit, file_order_pixels, preview_frame,
+        split_pixel_payload,
+    };
     use crate::{FrameRequest, inspect_json, slice};
     use ocelli_viewport::presentation::WindowPreset;
 
@@ -2492,6 +2624,134 @@ mod tests {
         }
         if borrowed_decode_ticks() == before {
             return Err("the frame was decoded from a parsed copy".to_owned());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_deflated_syntax_is_not_walked() -> Result<(), String> {
+        let mut file = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let marker = b"1.2.840.10008.1.2.1";
+        let at = file
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .ok_or("the explicit little endian uid was absent")?;
+        // Same length as the explicit little endian UID, so the element length
+        // stays valid. This UID is not one of the three uncompressed syntaxes.
+        let stand_in = b"1.2.840.10008.1.2.5";
+        let Some(slot) = file.get_mut(at..at + marker.len()) else {
+            return Err("the transfer syntax slot was short".to_owned());
+        };
+        slot.copy_from_slice(stand_in);
+        if split_pixel_payload(&file).is_some() {
+            return Err("a non-allowlisted syntax was walked".to_owned());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_pixel_length_past_the_file_is_not_borrowed() -> Result<(), String> {
+        let file = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let (_, range) = split_pixel_payload(&file).ok_or("the native frame was not walked")?;
+        let mut short = file;
+        short.truncate(range.end.saturating_sub(1));
+        if split_pixel_payload(&short).is_some() {
+            return Err("a range past the file was borrowed".to_owned());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_short_pixel_value_does_not_fit_the_header() -> Result<(), String> {
+        let file = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let (header, range) =
+            split_pixel_payload(&file).ok_or("the native frame was not walked")?;
+        let parsed =
+            ocelli_dicom::parse_part10(&header).map_err(|_| "the stripped header did not parse")?;
+        let Some(pixels) = file.get(range.clone()) else {
+            return Err("the native frame range was not in the file".to_owned());
+        };
+        if !borrowed_pixels_fit(parsed.object(), pixels) {
+            return Err("the native frame did not fit its header".to_owned());
+        }
+        let short = file
+            .get(range.start..range.end.saturating_sub(2))
+            .ok_or("the shortened pixel value was absent")?;
+        if borrowed_pixels_fit(parsed.object(), short) {
+            return Err("a short pixel value fitted the header".to_owned());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn borrowed_bytes_match_the_parsed_pixels_for_every_accepted_corpus_file() -> Result<(), String>
+    {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let data = root.join("corpus/data");
+        let manifest_path = root.join("corpus/manifest.tsv");
+        if !data.is_dir() {
+            return Ok(());
+        }
+        let manifest = std::fs::read_to_string(&manifest_path)
+            .map_err(|_| "tracked corpus manifest is unreadable".to_owned())?;
+        let mut accepted = 0_usize;
+        for (row_index, line) in manifest.lines().skip(1).enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let row = row_index + 2;
+            let mut columns = line.split('\t');
+            let relative = columns
+                .next()
+                .ok_or_else(|| format!("manifest row {row} has no path"))?;
+            let _modality = columns
+                .next()
+                .ok_or_else(|| format!("manifest row {row} has no modality"))?;
+            let syntax = columns
+                .next()
+                .ok_or_else(|| format!("manifest row {row} has no transfer syntax"))?
+                .trim();
+            let bytes = std::fs::read(data.join(relative))
+                .map_err(|_| format!("corpus file for manifest row {row} is unreadable"))?;
+            let walked = split_pixel_payload(&bytes);
+            let allowed = matches!(
+                syntax,
+                "1.2.840.10008.1.2" | "1.2.840.10008.1.2.1" | "1.2.840.10008.1.2.2"
+            );
+            if !allowed {
+                if walked.is_some() {
+                    return Err(format!(
+                        "manifest row {row} was walked under a syntax the allowlist excludes"
+                    ));
+                }
+                continue;
+            }
+            let Some((_, range)) = walked else {
+                continue;
+            };
+            let header = ocelli_dicom::parse_part10(&bytes)
+                .map_err(|_| format!("manifest row {row} was walked but the file did not parse"))?;
+            let little = syntax != "1.2.840.10008.1.2.2";
+            let parsed_pixels = file_order_pixels(header.object(), little)
+                .map_err(|_| format!("manifest row {row} pixel value could not be read"))?;
+            let Some(borrowed) = bytes.get(range) else {
+                return Err(format!("manifest row {row} borrowed a range past the file"));
+            };
+            // Rows, columns, samples, bits allocated and frames name the
+            // expected length. A different length is not an acceptance. The
+            // preview path parses the whole file instead.
+            if !borrowed_pixels_fit(header.object(), borrowed) {
+                continue;
+            }
+            if borrowed != parsed_pixels.as_slice() {
+                return Err(format!(
+                    "manifest row {row} borrowed pixels differ from the parsed value"
+                ));
+            }
+            accepted = accepted.saturating_add(1);
+        }
+        if accepted == 0 {
+            return Err("the corpus had no file the walker accepts".to_owned());
         }
         Ok(())
     }

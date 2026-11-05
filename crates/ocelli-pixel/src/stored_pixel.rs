@@ -218,6 +218,7 @@ impl StoredBits {
     /// High Bit is Bits Stored minus one for every value this type accepts,
     /// so the shift is zero. The mask still drops container bits above Bits
     /// Stored.
+    #[must_use]
     pub fn meaningful_bits(self, raw: u32) -> u32 {
         let shift = u32::from(self.high_bit + 1 - self.bits_stored);
         let mask = if self.bits_stored == 32 {
@@ -232,6 +233,7 @@ impl StoredBits {
     ///
     /// Unsigned samples are the masked bits. Signed samples are extended from
     /// the highest stored bit.
+    #[must_use = "a stored sample the caller drops is a pixel that was read and not used"]
     pub fn stored_sample(self, raw: u32) -> Result<f32, PixelError> {
         let value = self.meaningful_bits(raw);
         if self.pixel_representation == PixelRepresentation::Signed {
