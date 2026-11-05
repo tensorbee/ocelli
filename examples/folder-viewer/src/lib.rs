@@ -5,14 +5,16 @@
 //! It does not read a path of its own.
 
 mod preview;
+mod synthetic;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod serve;
 
 pub use preview::{
-    FrameRequest, Preview, PreviewError, headers_json, inspect_json, preview_first_frame,
-    preview_frame, window_function_from_token,
+    FrameFacts, FrameRequest, Preview, PreviewError, headers_json, inspect_json,
+    preview_first_frame, preview_frame, window_function_from_token, window_preset_from_token,
 };
+pub use synthetic::{SLICES, slice};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use serve::{handle_connection, serve};

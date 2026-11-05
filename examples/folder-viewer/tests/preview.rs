@@ -6,10 +6,11 @@ use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
 
 use ocelli_folder_viewer::{
-    FrameRequest, Preview, PreviewError, handle_connection, headers_json, inspect_json,
-    preview_first_frame, preview_frame,
+    FrameRequest, Preview, PreviewError, SLICES, handle_connection, headers_json, inspect_json,
+    preview_first_frame, preview_frame, slice,
 };
 use ocelli_pixel::VoiFunction;
+use ocelli_viewport::presentation::WindowPreset;
 
 #[test]
 fn an_enhanced_frame_uses_its_functional_group_window() -> Result<(), String> {
@@ -596,6 +597,7 @@ fn a_window_override_maps_stored_50_to_grey_128() -> Result<(), String> {
             window_center: Some(50.0),
             window_width: Some(1.0),
             window_function: Some(VoiFunction::LinearExact),
+            window_preset: None,
         },
     )
     .map_err(|_| "the window override was refused".to_owned())?;
@@ -655,12 +657,19 @@ fn inspect_json_reports_the_series_fields() -> Result<(), String> {
         "\"patientName\":\"\"",
         "\"monochrome\":true",
         "\"windowFunction\":\"LINEAR_EXACT\"",
+        "\"rowSpacing\":null",
+        "\"columnSpacing\":null",
+        "\"spacingSource\":\"\"",
+        "\"edgeLeft\":\"\"",
+        "\"edgeRight\":\"\"",
+        "\"edgeTop\":\"\"",
+        "\"edgeBottom\":\"\"",
     ] {
         if !json.contains(needle) {
             return Err("inspect omitted a series field".to_owned());
         }
     }
-    let direct = inspect_json(&file).map_err(|_| "inspect_json refused the file".to_owned())?;
+    let direct = inspect_json(&file, 0).map_err(|_| "inspect_json refused the file".to_owned())?;
     if direct != json {
         return Err("inspect_json and the page disagree".to_owned());
     }
@@ -806,6 +815,543 @@ fn a_window_override_ignores_an_unusable_file_window() -> Result<(), String> {
         return Err("the override of an unusable window was not grey 128".to_owned());
     }
     Ok(())
+}
+
+#[test]
+fn synthetic_study_has_no_patient_name() -> Result<(), String> {
+    // The study is a phantom. (0010,0010) and (0010,0020) must not be written.
+    let file = slice(0).ok_or_else(|| "slice 0 was not built".to_owned())?;
+    if contains_tag(&file, 0x0010, 0x0010) || contains_tag(&file, 0x0010, 0x0020) {
+        return Err("the synthetic study wrote a patient tag".to_owned());
+    }
+    if !file
+        .windows(b"Synthetic phantom".len())
+        .any(|window| window == b"Synthetic phantom")
+    {
+        return Err("the series description is not Synthetic phantom".to_owned());
+    }
+    if !file
+        .windows(b"2.25.".len())
+        .any(|window| window == b"2.25.")
+    {
+        return Err("the synthetic study has no 2.25 uid".to_owned());
+    }
+    let json =
+        inspect_json(&file, 0).map_err(|_| "inspect refused the synthetic slice".to_owned())?;
+    if !json.contains("\"patientName\":\"\"") || !json.contains("\"patientId\":\"\"") {
+        return Err("inspect reported a patient name or id".to_owned());
+    }
+    if !json.contains("\"seriesDescription\":\"Synthetic phantom\"") {
+        return Err("inspect omitted the series description".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn every_synthetic_slice_previews() -> Result<(), String> {
+    if SLICES != 12 {
+        return Err("the study is not 12 slices".to_owned());
+    }
+    if slice(SLICES).is_some() {
+        return Err("an index past the study returned bytes".to_owned());
+    }
+    for index in 0..SLICES {
+        let file = slice(index).ok_or_else(|| format!("slice {index} was not built"))?;
+        let preview = preview_frame(&file, FrameRequest::default())
+            .map_err(|_| format!("slice {index} was refused"))?;
+        if preview.width != 128 || preview.height != 96 || preview.frames != 1 {
+            return Err(format!("slice {index} is not 128 by 96"));
+        }
+        if preview.grey.len() != 128 * 96 {
+            return Err(format!("slice {index} did not return one byte per pixel"));
+        }
+        // Corner is air. Centre of slice 0 is body and stays body as the
+        // ellipse grows. Stored values are HU + 1024.
+        if pixel_i16(&file, 0, 0)? != 24 {
+            return Err(format!("slice {index} corner is not air"));
+        }
+        if pixel_i16(&file, 64, 48)? != 1064 {
+            return Err(format!("slice {index} centre is not body"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn soft_tissue_matches_the_file_window() -> Result<(), String> {
+    // File window is centre 40 width 400 LINEAR. Soft tissue is the same
+    // pair from WindowPreset, so the grey bytes match. A second formula
+    // would move the body pixel off 128.
+    let file = slice(0).ok_or_else(|| "slice 0 was not built".to_owned())?;
+    let file_window = preview_frame(&file, FrameRequest::default())
+        .map_err(|_| "the file window was refused".to_owned())?;
+    let preset = preview_frame(
+        &file,
+        FrameRequest {
+            window_preset: Some(WindowPreset::SoftTissue),
+            ..FrameRequest::default()
+        },
+    )
+    .map_err(|_| "the soft tissue preset was refused".to_owned())?;
+    if file_window.grey != preset.grey {
+        return Err("soft tissue disagreed with the file window".to_owned());
+    }
+    if preset.window_function != "LINEAR" {
+        return Err("soft tissue was not LINEAR".to_owned());
+    }
+    if preset.window_center.to_bits() != WindowPreset::SoftTissue.center().to_bits()
+        || preset.window_width.to_bits() != WindowPreset::SoftTissue.width().to_bits()
+    {
+        return Err("soft tissue did not use the library centre and width".to_owned());
+    }
+    // Body at column 64 row 48. PS3.3 C.11.2.1.2 LINEAR.
+    // x = 40, c' = 39.5, w' = 399.
+    // y = ((40 - 39.5) / 399 + 0.5) * 255 = 127.819550 in f32.
+    // display_index adds 0.5 in f32 and addresses 128.
+    if grey_at(&preset, 64, 48)? != 128 {
+        return Err("the body pixel was not grey 128".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn preset_grey_matches_ps3_3_c_11() -> Result<(), String> {
+    // Named pixels on slice 0, stored = HU + 1024 with intercept -1024.
+    // Air (0, 0) is HU -1000. Body (64, 48) is HU 40.
+    // Lung (46, 48) is HU -800. Bone (72, 48) is HU 700.
+    // PS3.3 C.11.2.1.2 LINEAR. ymin 0, ymax 255.
+    // c' = c - 0.5, w' = w - 1.
+    // y = ((x - c') / w' + 0.5) * 255 inside the window, else 0 or 255.
+    // display_index is the largest n in 0..=255 with f32(n) <= y + 0.5.
+    //
+    // Soft tissue c = 40, w = 400. Air 0, body 128, lung 0, bone 255.
+    // Lung c = -600, w = 1500.
+    // Air y = 59.539696 grey 60. Body y = 236.457626 grey 236.
+    // Lung y = 93.562378 grey 94. Bone y = 255 grey 255.
+    // Bone c = 300, w = 1500.
+    // Air 0, body y = 83.355568 grey 83, lung 0, bone y = 195.630417 grey 196.
+    // Changing the intercept from -1024 moves body off these codes.
+    let file = slice(0).ok_or_else(|| "slice 0 was not built".to_owned())?;
+    if pixel_i16(&file, 0, 0)? != 24
+        || pixel_i16(&file, 64, 48)? != 1064
+        || pixel_i16(&file, 46, 48)? != 224
+        || pixel_i16(&file, 72, 48)? != 1724
+    {
+        return Err("a named pixel is not the planned Hounsfield value".to_owned());
+    }
+    let cases = [
+        (WindowPreset::SoftTissue, [0_u8, 128, 0, 255]),
+        (WindowPreset::Lung, [60, 236, 94, 255]),
+        (WindowPreset::Bone, [0, 83, 0, 196]),
+    ];
+    let points = [(0_usize, 0_usize), (64, 48), (46, 48), (72, 48)];
+    for (preset, expected) in cases {
+        let preview = preview_frame(
+            &file,
+            FrameRequest {
+                window_preset: Some(preset),
+                ..FrameRequest::default()
+            },
+        )
+        .map_err(|_| "a preset was refused".to_owned())?;
+        if preview.window_center.to_bits() != preset.center().to_bits()
+            || preview.window_width.to_bits() != preset.width().to_bits()
+        {
+            return Err("a preset did not use the library centre and width".to_owned());
+        }
+        for (point, grey) in points.iter().zip(expected) {
+            if grey_at(&preview, point.0, point.1)? != grey {
+                return Err("a named pixel missed the hand-computed grey".to_owned());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn spacing_keeps_row_then_column() -> Result<(), String> {
+    // PS3.3 C.7.6.2.1.1 stores adjacent row spacing, then adjacent column
+    // spacing. The phantom writes 0.7 then 0.5. The tokens stay decimal text.
+    let file = slice(0).ok_or_else(|| "slice 0 was not built".to_owned())?;
+    let json =
+        inspect_json(&file, 0).map_err(|_| "inspect refused the synthetic slice".to_owned())?;
+    if !json.contains("\"rowSpacing\":0.7") || !json.contains("\"columnSpacing\":0.5") {
+        return Err("spacing was not row 0.7 then column 0.5".to_owned());
+    }
+    if !json.contains("\"spacingSource\":\"PixelSpacing\"") {
+        return Err("pixel spacing was not named".to_owned());
+    }
+    let preview = preview_frame(&file, FrameRequest::default())
+        .map_err(|_| "the spaced slice was refused".to_owned())?;
+    if preview.facts.row_spacing.as_deref() != Some("0.7")
+        || preview.facts.column_spacing.as_deref() != Some("0.5")
+        || preview.facts.spacing_source != "PixelSpacing"
+    {
+        return Err("the preview spacing disagreed with inspect".to_owned());
+    }
+    let both = spacing_object(Some("0.7\\0.5"), Some("1.5\\1.5"))?;
+    let both_json =
+        inspect_json(&both, 0).map_err(|_| "inspect refused both spacings".to_owned())?;
+    if !both_json.contains("\"spacingSource\":\"PixelSpacing\"")
+        || !both_json.contains("\"rowSpacing\":0.7")
+    {
+        return Err("imager spacing replaced pixel spacing".to_owned());
+    }
+    let imager = spacing_object(None, Some("0.3\\0.2"))?;
+    let imager_json =
+        inspect_json(&imager, 0).map_err(|_| "inspect refused imager spacing".to_owned())?;
+    if !imager_json.contains("\"spacingSource\":\"ImagerPixelSpacing\"")
+        || !imager_json.contains("\"rowSpacing\":0.3")
+        || !imager_json.contains("\"columnSpacing\":0.2")
+    {
+        return Err("imager spacing was not labelled".to_owned());
+    }
+    // 00.5 is legal DS and not a JSON number. The reply uses 0.5.
+    let padded = spacing_object(Some("00.5\\00.5"), None)?;
+    let padded_json =
+        inspect_json(&padded, 0).map_err(|_| "inspect refused a padded spacing".to_owned())?;
+    if !padded_json.contains("\"rowSpacing\":0.5")
+        || !padded_json.contains("\"spacingSource\":\"PixelSpacing\"")
+        || padded_json.contains("00.5")
+    {
+        return Err("a padded spacing was not a JSON number".to_owned());
+    }
+    // -.5 is legal DS. The reply uses -0.5, which is a JSON number.
+    let dotted = spacing_object(Some("-.5\\-.5"), None)?;
+    let dotted_json =
+        inspect_json(&dotted, 0).map_err(|_| "inspect refused a dotted spacing".to_owned())?;
+    if !dotted_json.contains("\"rowSpacing\":-0.5")
+        || !dotted_json.contains("\"columnSpacing\":-0.5")
+    {
+        return Err("a leading dot was not rewritten as a JSON number".to_owned());
+    }
+    // 5E-1 is legal DS. It must stay Pixel Spacing and must not be replaced
+    // by the imager pair 0.6.
+    let exponent = spacing_object(Some("5E-1\\5E-1"), Some("0.6\\0.6"))?;
+    let exponent_json =
+        inspect_json(&exponent, 0).map_err(|_| "inspect refused an exponent spacing".to_owned())?;
+    if !exponent_json.contains("\"spacingSource\":\"PixelSpacing\"")
+        || !exponent_json.contains("\"rowSpacing\":5E-1")
+        || exponent_json.contains("0.6")
+    {
+        return Err("an exponent spacing fell through to the imager pair".to_owned());
+    }
+    // Three values are not a pair. The imager value must not be substituted.
+    let triple = spacing_object(Some("1\\2\\3"), Some("0.6\\0.6"))?;
+    let triple_json =
+        inspect_json(&triple, 0).map_err(|_| "inspect refused a triple spacing".to_owned())?;
+    if !triple_json.contains("\"rowSpacing\":null")
+        || !triple_json.contains("\"spacingSource\":\"\"")
+        || triple_json.contains("0.6")
+    {
+        return Err("a triple pixel spacing used the imager pair".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn axial_edge_letters() -> Result<(), String> {
+    // PS3.3 C.7.6.1.1.1. Row cosine 1\\0\\0 points to the patient's left,
+    // which is the right edge of an axial image. Column cosine 0\\1\\0
+    // points posterior, which is the bottom edge. The opposite edges are
+    // R and A. Left R, right L, top A, bottom P.
+    let file = slice(0).ok_or_else(|| "slice 0 was not built".to_owned())?;
+    let json =
+        inspect_json(&file, 0).map_err(|_| "inspect refused the synthetic slice".to_owned())?;
+    for needle in [
+        "\"edgeLeft\":\"R\"",
+        "\"edgeRight\":\"L\"",
+        "\"edgeTop\":\"A\"",
+        "\"edgeBottom\":\"P\"",
+    ] {
+        if !json.contains(needle) {
+            return Err("the axial letters were not R L A P".to_owned());
+        }
+    }
+    let preview = preview_frame(&file, FrameRequest::default())
+        .map_err(|_| "the oriented slice was refused".to_owned())?;
+    if preview.facts.edge_left != "R"
+        || preview.facts.edge_right != "L"
+        || preview.facts.edge_top != "A"
+        || preview.facts.edge_bottom != "P"
+    {
+        return Err("the preview letters disagreed with inspect".to_owned());
+    }
+    // Row cosine 2\\0\\0 is not a unit vector. Letters stay empty and the
+    // frame still previews.
+    let stretched = oriented_frame("2\\0\\0\\0\\1\\0")?;
+    let stretched_json = inspect_json(&stretched, 0)
+        .map_err(|_| "inspect refused a non-unit orientation".to_owned())?;
+    if !stretched_json.contains("\"edgeLeft\":\"\"")
+        || !stretched_json.contains("\"edgeRight\":\"\"")
+    {
+        return Err("a non-unit orientation still produced letters".to_owned());
+    }
+    preview_frame(&stretched, FrameRequest::default())
+        .map_err(|_| "a non-unit orientation was refused".to_owned())?;
+    Ok(())
+}
+
+#[test]
+fn a_preset_refuses_a_voi_lut_sequence() -> Result<(), String> {
+    // The file has a VOI LUT Sequence. A numeric override may replace it.
+    // A named preset must not. Lung would otherwise draw a window.
+    let file = mono_with(true, &[(0x0028, 0x3010)])?;
+    match preview_frame(
+        &file,
+        FrameRequest {
+            window_preset: Some(WindowPreset::Lung),
+            ..FrameRequest::default()
+        },
+    ) {
+        Err(PreviewError::Window) => {}
+        Ok(_) => return Err("a preset replaced a VOI LUT sequence".to_owned()),
+        Err(error) => {
+            return Err(format!(
+                "a preset on a VOI LUT sequence was refused as {error}"
+            ));
+        }
+    }
+    // A Modality LUT Sequence is also refused. The preset must not draw
+    // the identity slope in its place.
+    let modality = mono_with(true, &[(0x0028, 0x3000)])?;
+    match preview_frame(
+        &modality,
+        FrameRequest {
+            window_preset: Some(WindowPreset::SoftTissue),
+            ..FrameRequest::default()
+        },
+    ) {
+        Err(PreviewError::Window) => Ok(()),
+        Ok(_) => Err("a preset replaced a modality LUT sequence".to_owned()),
+        Err(error) => Err(format!(
+            "a preset on a modality LUT sequence was refused as {error}"
+        )),
+    }
+}
+
+#[test]
+fn a_preset_with_a_numeric_window_is_refused() -> Result<(), String> {
+    let file = slice(0).ok_or_else(|| "slice 0 was not built".to_owned())?;
+    match preview_frame(
+        &file,
+        FrameRequest {
+            window_center: Some(40.0),
+            window_width: Some(400.0),
+            window_preset: Some(WindowPreset::Bone),
+            ..FrameRequest::default()
+        },
+    ) {
+        Err(PreviewError::Window) => {}
+        Ok(_) => return Err("a preset was combined with a numeric window".to_owned()),
+        Err(error) => {
+            return Err(format!("a combined window was refused as {error}"));
+        }
+    }
+    let request = http_post_to(
+        "/preview",
+        "X-Ocelli-Window-Preset: lung\r\nX-Ocelli-Window-Center: 40\r\n",
+        &file,
+    );
+    let response = one_exchange(&request)?;
+    let (header, _) = split_http(&response)?;
+    if !header.contains("400") || !header.contains("X-Ocelli-Error: window") {
+        return Err("the preset header was combined with a centre".to_owned());
+    }
+    let lung = http_post_to("/preview", "X-Ocelli-Window-Preset: lung\r\n", &file);
+    let drawn = one_exchange(&lung)?;
+    let (header, body) = split_http(&drawn)?;
+    if !header.contains("200")
+        || !header.contains("X-Ocelli-Window-Center: -600")
+        || !header.contains("X-Ocelli-Window-Width: 1500")
+        || !header.contains("X-Ocelli-Window-Function: LINEAR")
+        || !header.contains("X-Ocelli-Row-Spacing: 0.7")
+        || !header.contains("X-Ocelli-Column-Spacing: 0.5")
+        || !header.contains("X-Ocelli-Spacing-Source: PixelSpacing")
+        || !header.contains("X-Ocelli-Edge-Left: R")
+        || !header.contains("X-Ocelli-Edge-Right: L")
+        || !header.contains("X-Ocelli-Edge-Top: A")
+        || !header.contains("X-Ocelli-Edge-Bottom: P")
+    {
+        return Err("the lung preset response omitted the window or the geometry".to_owned());
+    }
+    // Lung window, body pixel. y = 236.457626, grey 236.
+    let index = 48 * 128 + 64;
+    let grey = body
+        .get(index)
+        .copied()
+        .ok_or_else(|| "the lung preview was short".to_owned())?;
+    if grey != 236 {
+        return Err("the lung preset body pixel was not grey 236".to_owned());
+    }
+    match preview_frame(
+        &file,
+        FrameRequest {
+            window_preset: Some(WindowPreset::Lung),
+            window_function: Some(VoiFunction::LinearExact),
+            ..FrameRequest::default()
+        },
+    ) {
+        Err(PreviewError::Window) => {}
+        Ok(_) => return Err("a preset kept a different window function".to_owned()),
+        Err(error) => return Err(format!("a preset function was refused as {error}")),
+    }
+    // The body is empty so the window error is written with nothing left
+    // unread on the socket.
+    let bad = http_post_to("/preview", "X-Ocelli-Window-Preset: soft\r\n", b"");
+    let refused = one_exchange(&bad)?;
+    let (header, _) = split_http(&refused)?;
+    if !header.contains("400") || !header.contains("X-Ocelli-Error: window") {
+        return Err("a bad preset token was not the window error".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn synthetic_routes_serve_part10() -> Result<(), String> {
+    let count = one_exchange(b"GET /synthetic HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, body) = split_http(&count)?;
+    if !header.contains("200") || body != br#"{"slices":12}"# {
+        return Err("the study count was not 12".to_owned());
+    }
+    let first = one_exchange(b"GET /synthetic/0 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, body) = split_http(&first)?;
+    let expected = slice(0).ok_or_else(|| "slice 0 was not built".to_owned())?;
+    if !header.contains("200") || !header.contains("application/octet-stream") || body != expected {
+        return Err("GET /synthetic/0 was not the first slice".to_owned());
+    }
+    let missing = one_exchange(b"GET /synthetic/12 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, _) = split_http(&missing)?;
+    if !header.contains("404") {
+        return Err("an index past the study was not 404".to_owned());
+    }
+    let word = one_exchange(b"GET /synthetic/no HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, _) = split_http(&word)?;
+    if !header.contains("404") {
+        return Err("a non-numeric slice was not 404".to_owned());
+    }
+    Ok(())
+}
+
+fn grey_at(preview: &Preview, column: usize, row: usize) -> Result<u8, String> {
+    let index = row
+        .checked_mul(128)
+        .and_then(|row_start| row_start.checked_add(column))
+        .ok_or_else(|| "the pixel index overflowed".to_owned())?;
+    preview
+        .grey
+        .get(index)
+        .copied()
+        .ok_or_else(|| "the pixel is outside the frame".to_owned())
+}
+
+fn pixel_i16(file: &[u8], column: usize, row: usize) -> Result<i16, String> {
+    let marker = [0xE0, 0x7F, 0x10, 0x00, b'O', b'W', 0, 0];
+    let start = file
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .ok_or_else(|| "the slice has no OW pixel data".to_owned())?;
+    let length_at = start + marker.len();
+    let length_bytes = file
+        .get(length_at..length_at + 4)
+        .ok_or_else(|| "the pixel length is short".to_owned())?;
+    let length_bytes: [u8; 4] = length_bytes
+        .try_into()
+        .map_err(|_| "the pixel length is short".to_owned())?;
+    let length = u32::from_le_bytes(length_bytes);
+    let pixels_at = length_at + 4;
+    let offset = row
+        .checked_mul(128)
+        .and_then(|row_start| row_start.checked_add(column))
+        .and_then(|index| index.checked_mul(2))
+        .ok_or_else(|| "the stored index overflowed".to_owned())?;
+    if u32::try_from(offset + 2).map_err(|_| "the stored index overflowed".to_owned())? > length {
+        return Err("the stored pixel is outside pixel data".to_owned());
+    }
+    let at = pixels_at + offset;
+    let bytes = file
+        .get(at..at + 2)
+        .ok_or_else(|| "the stored pixel is short".to_owned())?;
+    let bytes: [u8; 2] = bytes
+        .try_into()
+        .map_err(|_| "the stored pixel is short".to_owned())?;
+    Ok(i16::from_le_bytes(bytes))
+}
+
+fn contains_tag(bytes: &[u8], group: u16, element: u16) -> bool {
+    let mut needle = [0_u8; 4];
+    needle[..2].copy_from_slice(&group.to_le_bytes());
+    needle[2..].copy_from_slice(&element.to_le_bytes());
+    bytes.windows(4).any(|window| window == needle)
+}
+
+fn oriented_frame(orientation: &str) -> Result<Vec<u8>, String> {
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    data.extend(short_le((0x0020, 0x0037), *b"DS", &text_pad(orientation))?);
+    data.extend(short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le(
+        (0x0028, 0x0004),
+        *b"CS",
+        &text_pad("MONOCHROME2"),
+    )?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0100), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0101), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0102), *b"US", &15_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x1050), *b"DS", &text_pad("100"))?);
+    data.extend(short_le((0x0028, 0x1051), *b"DS", &text_pad("200"))?);
+    data.extend(short_le((0x0028, 0x1052), *b"DS", &text_pad("0"))?);
+    data.extend(short_le((0x0028, 0x1053), *b"DS", &text_pad("1"))?);
+    data.extend(long_le((0x7FE0, 0x0010), *b"OW", &0_u16.to_le_bytes())?);
+    let mut bytes = vec![0_u8; 128];
+    bytes.extend_from_slice(b"DICM");
+    bytes.extend(file_meta("1.2.840.10008.1.2.1")?);
+    bytes.extend(data);
+    Ok(bytes)
+}
+
+fn spacing_object(pixel: Option<&str>, imager: Option<&str>) -> Result<Vec<u8>, String> {
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    if let Some(pair) = imager {
+        data.extend(short_le((0x0018, 0x1164), *b"DS", &text_pad(pair))?);
+    }
+    data.extend(short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le(
+        (0x0028, 0x0004),
+        *b"CS",
+        &text_pad("MONOCHROME2"),
+    )?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &1_u16.to_le_bytes())?);
+    if let Some(pair) = pixel {
+        data.extend(short_le((0x0028, 0x0030), *b"DS", &text_pad(pair))?);
+    }
+    data.extend(short_le((0x0028, 0x0100), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0101), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0102), *b"US", &15_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x1050), *b"DS", &text_pad("0"))?);
+    data.extend(short_le((0x0028, 0x1051), *b"DS", &text_pad("1"))?);
+    data.extend(short_le((0x0028, 0x1052), *b"DS", &text_pad("0"))?);
+    data.extend(short_le((0x0028, 0x1053), *b"DS", &text_pad("1"))?);
+    data.extend(long_le((0x7FE0, 0x0010), *b"OW", &0_u16.to_le_bytes())?);
+    let mut bytes = vec![0_u8; 128];
+    bytes.extend_from_slice(b"DICM");
+    bytes.extend(file_meta("1.2.840.10008.1.2.1")?);
+    bytes.extend(data);
+    Ok(bytes)
 }
 
 fn http_post_to(path: &str, extra: &str, body: &[u8]) -> Vec<u8> {

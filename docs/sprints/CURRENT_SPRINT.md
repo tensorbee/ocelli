@@ -7,7 +7,7 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-206 | E38.16 | Folder viewer synthetic study, spacing, edge letters and preset window | Rust | 5w | pending |
+| F-206 | E38.16 | Folder viewer synthetic study, spacing, edge letters and preset window | Rust | 5w | done |
 | F-207 | E38.17 | Folder viewer layout, gestures, marks and image controls | TS | 8w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes

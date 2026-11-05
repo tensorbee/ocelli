@@ -123,6 +123,14 @@ Depends on F-201, which is done. Writes `examples/folder-viewer` and `crates/oce
 
 None. Appendix B is the cornerstone parity of the library renderer. This story does not change that renderer.
 
+## Deviations
+
+none
+
+## LLD impact
+
+none. The local example is not the published API. `docs/lld/public-api.md` already names the preset tokens.
+
 ## Open questions
 
 None. The phantom, the preset refusal, and the spacing order were fixed before implementation.

@@ -5013,3 +5013,29 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The approved plan named `s44-panels.test.tsx`. The panel observation is `measurement-panel.test.tsx`. The combined file was not added.
 
 **Notes for future sessions.** Ignoring the shortcut key left the action at scroll-previous and the panel test went red, then the key was restored. Copying the TID number from the loaded document left 12.5 when the source instance was blank, and that test went red. Using the loaded document after a successful write left 12.5 in the TID line when the written number was 7, and that test went red. Echoing the written number left 7 when the read-back was replaced with 3, and that test went red. The TID line was restored to the read-back. Pass 4 reported 0 defects, 0 smells and 3 nitpicks. Reviewer Claude Code, read only, with no shell. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish. Sprint review pass 1 found the panel TID line could copy the stored 12.5 and stay green. The panel test now replaces the read-back with 3. Copying the stored number left 12.5 on that line and the spy went red, then the line was restored. A constant key image text and a constant touch name each failed their spy and were restored.
+
+## F-206, Folder viewer synthetic study, spacing, edge letters and preset window, completed 2026-11-05
+
+**What was built.** The local folder viewer builds a 12-slice synthetic CT in memory and serves it on loopback. Inspect and preview report row spacing, column spacing, the spacing source and the four edge letters. A named window preset reruns the existing LUT. A VOI LUT Sequence, a Modality LUT Sequence, a numeric window or a window function refuses that preset.
+
+**HLD sections implemented.** `docs/hld/15-lut-chain.md` section 18. The local rules are `.claude/plans/F-206-design.md`. Appendix B is not marked measured.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/folder-viewer` and `crates/ocelli-viewport`.
+
+**Tests added.** `examples/folder-viewer/tests/preview.rs`.
+
+**Fixture provenance.** Hand-computed grey from PS3.3 C.11.2.1.2 for air, body, lung and bone under the soft-tissue, lung and bone windows. Row then column spacing from PS3.3 C.7.6.2.1.1. Edge letters from PS3.3 C.7.6.1.1.1.
+
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+
+**Tier coverage.** Tiers A and B are not applicable. This story does not open a device. Tier C is full. `preview_frame` is the CPU `LutChain`.
+
+**LLD updated.** none. The example is not the published API. `WindowPreset::center` and `width` stay the numbers already named in `docs/lld/public-api.md`.
+
+**Deviations from the design plan.** The plan refuses a preset together with a centre or a width. The code also refuses a preset together with a window function. A present but unusable Pixel Spacing does not fall through to imager spacing. A spacing token that is not already a JSON number is written as the parsed value.
+
+**Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 1 nitpick. The nitpick is the FrameFacts doc. It says a JSON number is kept. Only a finite trimmed token is kept. It does not block. Reviewer Claude Code, read only, with no shell. Changing the intercept string from -1024 to 0 made the grey tests go red, then the string was restored. That mutation was not repeated after the later comment edits. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.

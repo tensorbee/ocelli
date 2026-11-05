@@ -345,7 +345,7 @@ The local folder viewer opens a synthetic study or a folder, and the page shows 
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-206 | E38.16 | S45 | Folder viewer synthetic study, spacing, edge letters and preset window | Rust | 5w | F-201 | pending |
+| F-206 | E38.16 | S45 | Folder viewer synthetic study, spacing, edge letters and preset window | Rust | 5w | F-201 | done |
 | F-207 | E38.17 | S45 | Folder viewer layout, gestures, marks and image controls | TS | 8w | F-206 | pending |
 
 ### M14, Out-of-core volume streaming

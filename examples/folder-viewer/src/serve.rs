@@ -9,7 +9,10 @@ use std::time::Duration;
 
 use ocelli_pixel::VoiFunction;
 
-use crate::{FrameRequest, headers_json, inspect_json, preview_frame, window_function_from_token};
+use crate::{
+    FrameRequest, SLICES, headers_json, inspect_json, preview_frame, slice,
+    window_function_from_token, window_preset_from_token,
+};
 
 const HEADER_CAP: usize = 16 * 1024;
 /// One posted file. A multi-frame object arrives whole, so the cap is one
@@ -34,6 +37,13 @@ struct Grey {
     window_width: f32,
     window_function: &'static str,
     inverted: bool,
+    row_spacing: Option<String>,
+    column_spacing: Option<String>,
+    spacing_source: &'static str,
+    edge_left: String,
+    edge_right: String,
+    edge_top: String,
+    edge_bottom: String,
 }
 
 struct Reply {
@@ -91,12 +101,29 @@ fn route(request: &Request) -> Reply {
         return text_reply(400, Some("body"), "the preview request is too large");
     }
     match (request.method.as_str(), request.path.as_str()) {
-        ("GET", "/" | "/index.html") => page_reply(),
+        ("GET", _) => get_reply(request),
         ("POST", "/preview") => preview_reply(&request.body, request.frame),
-        ("POST", "/inspect") => json_or_error(inspect_json(&request.body)),
+        ("POST", "/inspect") => json_or_error(inspect_json(&request.body, request.frame.frame)),
         ("POST", "/headers") => json_or_error(headers_json(&request.body)),
         _ => text_reply(404, None, "not found"),
     }
+}
+
+fn get_reply(request: &Request) -> Reply {
+    if request.path == "/" || request.path == "/index.html" {
+        return page_reply();
+    }
+    if request.path == "/synthetic" {
+        let body = format!("{{\"slices\":{SLICES}}}");
+        return bare(200, "application/json", body.into_bytes());
+    }
+    if let Some(rest) = request.path.strip_prefix("/synthetic/")
+        && let Ok(index) = rest.parse::<u32>()
+        && let Some(bytes) = slice(index)
+    {
+        return bare(200, "application/octet-stream", bytes);
+    }
+    text_reply(404, None, "not found")
 }
 
 fn page_reply() -> Reply {
@@ -119,6 +146,13 @@ fn preview_reply(body: &[u8], frame: FrameRequest) -> Reply {
                 window_width: preview.window_width,
                 window_function: preview.window_function,
                 inverted: preview.inverted,
+                row_spacing: preview.facts.row_spacing,
+                column_spacing: preview.facts.column_spacing,
+                spacing_source: preview.facts.spacing_source,
+                edge_left: preview.facts.edge_left,
+                edge_right: preview.facts.edge_right,
+                edge_top: preview.facts.edge_top,
+                edge_bottom: preview.facts.edge_bottom,
             })),
             body: preview.grey,
         },
@@ -207,6 +241,28 @@ fn write_reply(stream: &mut TcpStream, reply: &Reply) -> std::io::Result<()> {
             frame = grey.shown_frame,
             function = grey.window_function,
         ));
+        if let Some(row) = &grey.row_spacing {
+            head.push_str("X-Ocelli-Row-Spacing: ");
+            head.push_str(row);
+            head.push_str("\r\n");
+        }
+        if let Some(column) = &grey.column_spacing {
+            head.push_str("X-Ocelli-Column-Spacing: ");
+            head.push_str(column);
+            head.push_str("\r\n");
+        }
+        head.push_str("X-Ocelli-Spacing-Source: ");
+        head.push_str(grey.spacing_source);
+        head.push_str("\r\n");
+        head.push_str("X-Ocelli-Edge-Left: ");
+        head.push_str(&grey.edge_left);
+        head.push_str("\r\nX-Ocelli-Edge-Right: ");
+        head.push_str(&grey.edge_right);
+        head.push_str("\r\nX-Ocelli-Edge-Top: ");
+        head.push_str(&grey.edge_top);
+        head.push_str("\r\nX-Ocelli-Edge-Bottom: ");
+        head.push_str(&grey.edge_bottom);
+        head.push_str("\r\n");
     }
     head.push_str("\r\n");
     stream.write_all(head.as_bytes())?;
@@ -351,6 +407,7 @@ fn parse_header(header: &str) -> Result<(String, String, Option<usize>, FrameReq
     let mut seen_center = false;
     let mut seen_width = false;
     let mut seen_function = false;
+    let mut seen_preset = false;
     let mut frame = FrameRequest::default();
     for line in lines {
         if line.is_empty() {
@@ -400,6 +457,10 @@ fn parse_header(header: &str) -> Result<(String, String, Option<usize>, FrameReq
         } else if name.eq_ignore_ascii_case("x-ocelli-window-function") {
             once(&mut seen_function)?;
             frame.window_function = Some(parse_function(text)?);
+        } else if name.eq_ignore_ascii_case("x-ocelli-window-preset") {
+            once(&mut seen_preset)?;
+            frame.window_preset =
+                Some(window_preset_from_token(text).map_err(|_| window_unusable())?);
         }
     }
     Ok((method.to_owned(), path.to_owned(), length, frame))
