@@ -1,7 +1,7 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055, F-056, F-X004, F-197
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055, F-056, F-X004, F-197, F-119
+**Last updated:** 2026-11-05
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
 `ImagePositionPatient` projected on the slice normal, DICOM PS3.3
@@ -19,7 +19,7 @@ C.7.6.2.1.1. `SpacingBetweenSlices`, `SliceThickness`, `SliceLocation`,
 | `Volume` | Section 19's struct over one `VoxelStore` |
 | `TiltedVolume` | The same cleared store, projected spacing, sort, origin and direction, plus one shared lateral step |
 | `VoxelStore` | One contiguous `Vec<u8>`, x fastest, then y, then z |
-| `Level` | Level 0 is full resolution at offset 0. Later entries are caller-supplied coarser levels on the same store |
+| `Level` | Level 0 is full resolution at offset 0. Later entries are coarser levels on the same store, either caller bytes from `append_level` or a downsample of level 0 |
 | `SlicePresence` | One bit per slice over `Vec<u64>`. Deviation D-25 |
 | `VolumeKey` | The series id a cached volume is stored under |
 | `VolumeCache` | Its own `Lru` on `CacheTier::Decoded`, with its own budget |
@@ -124,8 +124,33 @@ Admission, eviction and pressure are `Lru`'s, on the decoded tier.
 
 Level 0 is full resolution at offset 0. `Volume::append_level` copies
 caller-supplied bytes onto the end of the same store and pushes the next
-`Level`. It does not downsample. Pyramid generation is F-119. Opacity
-correction is F-121.
+`Level`. It does not downsample, and it is still the only place a level's
+spacing is written.
+
+`Volume::downsample_level` builds one coarser level and
+`Volume::generate_pyramid` builds all of them. Every level is computed
+straight from level 0, never from the level above it, with an exact-overlap
+box filter: each level 0 voxel counts by how much of it falls inside the
+child voxel, summed in integers. On an even axis that is the 2 by 2 by 2
+average. The domain is the stored container value. Integer means round to
+nearest with ties away from zero, and F32 means are taken in f64 and
+narrowed once. Level k has `max(1, ceil(D0 / 2^k))` on each axis, and
+generation stops after the first level that fits in one brick of the edge
+`BrickGrid::new` chooses. Both refuse an incomplete level 0 with
+`SliceNotPresent` and leave the volume unchanged. `generate_pyramid`
+replaces any levels above 0 that a caller appended. A successful `place`
+drops every level above 0, so a coarse level never outlives the level 0
+bytes it came from.
+
+`Volume::cut_level_brick` cuts a brick from any stored level against that
+level's own grid, and level 0 still goes through `cut_ready_brick`.
+`Volume::level_voxel_to_level0` maps a level voxel centre to level 0
+coordinates as `(c + 0.5) * D0 / Dk - 0.5` on each axis, and returns its
+input unchanged on an axis whose dimension equals level 0's. A level 1
+voxel 0 sits at level 0 index 0.5. Nothing outside this crate calls these
+yet. F-120 is the first consumer. What a non-finite F32 sample does to a
+coarser level is an open operator question, recorded in
+`docs/sprints/CURRENT_SPRINT.md`. Opacity correction is F-121.
 
 Spacing on the new entry is level 0 spacing times level 0's dimension
 divided by the child dimension, on each axis. The ratio is baked at append
