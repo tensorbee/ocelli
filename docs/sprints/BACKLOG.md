@@ -363,6 +363,8 @@ beside F-119.
 | F-217 | E38.27 | S46 | Licence hygiene: no copyleft dependency in any tracked manifest, a permissive JPEG reference decoder for the corpus, licence allowlist gates for Rust, npm and Python, and a third-party notices file | All | 2w | - | done |
 | F-218 | E38.28 | S46 | Dependency advisories in shipped packages: adm-zip below 0.6.1 reaches the published @ocelli/core runtime through dcmjs, resolved by a patched override or a proof that no shipped path reaches it, with an audit gate over shipped dependencies | TS | 1w | F-217 | pending |
 | F-219 | E38.29 | S46 | Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red | Test | 1w | - | done |
+| F-220 | E38.30 | S46 | Shipped binary notices: the full licence text of every crate compiled into the wasm module and the native binaries, generated from the lockfile and checked by a gate | Build | 2w | F-217 | pending |
+| F-221 | E38.31 | S46 | Published package contents: the @ocelli/core tarball stops shipping compiled test files, with a packages gate refusal for any test file in a published tarball | TS | 1w | - | pending |
 
 ### M14, Out-of-core volume streaming
 
@@ -376,6 +378,7 @@ Bounded GPU residency on unbounded data. The first of the three checkable claims
 | F-122 | E30.4 | S48 | Residency budget, prefetch and eviction policy | Rust | 8w | F-120 | pending |
 | F-123 | E30.5 | S49 | Chunk-cost indicator surface | Rust | 3w | F-122 | pending |
 | F-124 | E30.6 | S49 | 4D and time-series as a first-class chunked axis | Rust | 12w | F-122 | pending |
+| F-222 | E30.7 | S46 | Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero | Rust | 1w | F-119 | pending |
 
 ### M15, The WebGPU compute subsystem
 
@@ -446,7 +449,6 @@ expensive is visible at design time, which is the whole point of HLD
 section 13. F-202, F-203, F-204 and F-205 are Phase 1 rows in this table.
 They have no sprint. F-202 is worker decode of a posted WADO-RS envelope.
 F-203, F-204 and F-205 are the example controls S44 does not invent.
-F-220 and F-221 are follow-ups found during S46 and have no sprint yet.
 
 | F-ID | Epic ref | Phase | Epic | Story | Layer | Est | Status |
 |------|----------|-------|------|-------|-------|-----|--------|
@@ -454,8 +456,6 @@ F-220 and F-221 are follow-ups found during S46 and have no sprint yet.
 | F-203 | E38.13 | P1 | E38 Series open | Example prior studies, linked scroll, synced window and zoom, frame-of-reference cursor, MPR, slab, volume rendering and fusion | TS | 4w | pending |
 | F-204 | E38.14 | P1 | E38 Series open | Example one to one, histogram, four corners, and a shutter beyond the overlay panel | TS | 4w | pending |
 | F-205 | E38.15 | P1 | E38 Series open | Example metadata browser with compare and copy, export beyond the document panel, and preferences | TS | 4w | pending |
-| F-220 | E38.30 | P1 | E38 Series open | Shipped binary notices: the full licence text of every crate compiled into the wasm module and the native binaries, generated from the lockfile and checked by a gate | Build | 2w | pending |
-| F-221 | E38.31 | P1 | E38 Series open | Published package contents: the @ocelli/core tarball stops shipping compiled test files, with a packages gate refusal for any test file in a published tarball | TS | 1w | pending |
 | F-158 | E20.1 | P2 | E20 DICOM gateway (adopt, do not build) | Deploy and harden Orthanc or dcm4che as the DIMSE edge | Server | 6w | pending |
 | F-159 | E20.2 | P2 | E20 DICOM gateway (adopt, do not build) | C-STORE, C-FIND, C-MOVE and C-ECHO configuration with TLS | Server | 5w | pending |
 | F-160 | E20.3 | P2 | E20 DICOM gateway (adopt, do not build) | Autorouting rules and always-on listener operations | Server | 5w | pending |

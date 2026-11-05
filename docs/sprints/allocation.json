@@ -2730,8 +2730,8 @@
         "F-217"
       ],
       "notes": "F-217's plan question 6 recommended a follow-up. THIRD_PARTY_NOTICES covers the vendored sources only, while MIT and BSD grants in every compiled crate also require their notice on redistribution.",
-      "milestone": "",
-      "sprint": ""
+      "milestone": "M20",
+      "sprint": "S46"
     },
     {
       "fid": "F-221",
@@ -2745,8 +2745,27 @@
       "depends_eids": [],
       "depends_fids": [],
       "notes": "Found while designing F-218 on 2026-11-05. npm pack lists 47 compiled *.test.js files under dist/ among 280 entries.",
-      "milestone": "",
-      "sprint": ""
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-222",
+      "eid": "E30.7",
+      "phase": "P1.5",
+      "epic": "E30 Out-of-core volume streaming",
+      "epic_key": "E30",
+      "story": "Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero",
+      "layer": "Rust",
+      "weeks": 1,
+      "depends_eids": [
+        "E30.1"
+      ],
+      "depends_fids": [
+        "F-119"
+      ],
+      "notes": "The operator answered F-119's open question on 2026-11-05. Due before F-120 makes the pyramid reachable.",
+      "milestone": "M14",
+      "sprint": "S46"
     },
     {
       "fid": "F-208",
