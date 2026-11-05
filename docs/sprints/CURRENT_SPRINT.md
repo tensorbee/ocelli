@@ -118,6 +118,13 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   neither a refusal nor the effect. The choice is a story that honours them,
   or removing them from that entry point's accepted keys.
 
+- **A deeply nested sequence overflows the stack in `parse_part10`.** Found
+  by F-225's first review while fuzzing, before the conformance checker runs,
+  so it is older than F-225. With `panic = "abort"` a stack overflow ends the
+  process, so one crafted file can stop the folder viewer's local process.
+  The choice is a story that bounds sequence depth in the parser and refuses
+  deeper input with an error, or accepting the risk for local files.
+
 ## What is carried in
 
 - **D-22 still blocks publication.** The version stays 0.1.0.
