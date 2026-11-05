@@ -1,6 +1,6 @@
 # Volumes
 
-**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055, F-056, F-X004, F-197, F-119
+**F-IDs that contributed:** F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055, F-056, F-X004, F-197, F-119, F-222
 **Last updated:** 2026-11-05
 
 HLD section 19's volume, made into `crates/ocelli-volume`. Spacing comes from
@@ -148,9 +148,12 @@ level's own grid, and level 0 still goes through `cut_ready_brick`.
 coordinates as `(c + 0.5) * D0 / Dk - 0.5` on each axis, and returns its
 input unchanged on an axis whose dimension equals level 0's. A level 1
 voxel 0 sits at level 0 index 0.5. Nothing outside this crate calls these
-yet. F-120 is the first consumer. What a non-finite F32 sample does to a
-coarser level is an open operator question, recorded in
-`docs/sprints/CURRENT_SPRINT.md`. Opacity correction is F-121.
+yet. F-120 is the first consumer. An F32 coarser level leaves NaN and both
+infinities out of each mean and divides by the overlap weight of the finite
+samples only. A box with no finite sample is written as the NaN `0x7fc0_0000`,
+and a mean that narrows to negative zero is written as positive zero.
+`level_voxel_to_level0` takes no mean, so a non-finite centre follows IEEE
+arithmetic. Opacity correction is F-121.
 
 Spacing on the new entry is level 0 spacing times level 0's dimension
 divided by the child dimension, on each axis. The ratio is baked at append
