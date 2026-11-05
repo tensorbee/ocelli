@@ -2855,9 +2855,9 @@
       "phase": "P1",
       "epic": "E38 Series open",
       "epic_key": "E38",
-      "story": "Automatic window when the file has none: the 1st to 99th percentile of modality values by nearest rank, leaving out stored zero and the Pixel Padding Value range, computed once in ocelli-pixel, labelled Auto window in the folder viewer, and every window in the file still used as it is",
+      "story": "Automatic window per series when the file has none: one window from the 1st to 99th nearest-rank percentile of modality values pooled over up to 16 frames spread through the series, each frame through its own rescale, leaving out stored zero and the Pixel Padding Value range, computed once in ocelli-pixel, labelled Auto window in the folder viewer, and every window in the file still used as it is",
       "layer": "All",
-      "weeks": 2,
+      "weeks": 3,
       "depends_eids": [
         "E38.20",
         "E38.23"
