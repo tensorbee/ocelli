@@ -1,6 +1,6 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218, F-221
 **Last updated:** 2026-11-05
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
@@ -23,7 +23,10 @@ ring drain. `coreAvailable()` stays false until a built module is loaded.
 
 ### What is in the `@ocelli/core` tarball today
 
-Everything under `packages/core/src` compiles into `dist`. Public modules are
+`packages/core/tsconfig.json` is the library project. It compiles the modules
+under `packages/core/src` into `dist` and excludes `src/**/*.test.ts`,
+`src/**/*.test.tsx` and `src/node-test-modules.d.ts`. `@ocelli/react`
+excludes the two test globs. A compiled test is not a library output. Public modules are
 re-exported from `index.ts`, including F-021's DICOMweb client, request
 options, errors, response kinds, sink contract, and one-write helper, and
 F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
@@ -43,6 +46,34 @@ F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
 | `fatal.ts` | `CoreStatus` and the never-returns-to-ok latch |
 | `capabilities.ts` | The shell-side probes `wasmSimd128Supported` and `sharedMemoryAvailable`, and the committed SIMD module they validate |
 | `viewport.ts` | F-100's viewport, scene and tool types. No wasm call and no pixels |
+
+`packages/core/tsconfig.test.json` and `packages/react/tsconfig.test.json`
+include only the test sources. The core test project also includes
+`src/node-test-modules.d.ts` and `src/dcmjs.d.ts`. Test files import `dcmjs`
+directly, and that ambient module declaration does not cross a project
+reference. Each references its library project, and the
+react test project also references `packages/core`. The react test project
+sets `jsx` to `react-jsx`, because it extends the base config and the base
+does not set it. The root `tsconfig.json` references both test projects, so
+`npm run typecheck` still sees every test file, including
+`boundary.wasm.test.ts`. Vitest discovers tests by its own globs and does not
+read these projects.
+
+The test projects emit under `node_modules/.cache/ocelli-tsc/`. That directory
+is ignored, never packed and never linted. Each test project names its own
+`tsBuildInfoFile` there, so the two never write one build info file. `dist` stays the library output
+whether `build` or `typecheck` ran last.
+
+`build` and `clean` both remove `dist` and `tsconfig.tsbuildinfo`.
+`tsc --build` treats a surviving `.tsbuildinfo` as proof that `dist` is
+current, so deleting `dist` alone leaves the directory absent and the next
+build writes nothing. The two go together. A file planted in `dist` cannot
+survive `build`.
+
+`scripts/package_check.py` refuses a packed path whose basename contains
+`.test.` or `.spec.`, and a path with a `__tests__` segment. The message
+names the package and the path. `latest.js` and `contest.d.ts` are not test
+files. The probe is `packages.test-file-in-tarball`.
 
 `docs/lld/errors.md` specifies `errors.ts`, `panic.ts` and `fatal.ts`, and
 `docs/lld/tier-resolution.md` specifies `capabilities.ts`. What belongs to
@@ -152,6 +183,7 @@ consumer receives, and every check here is about the second thing.
 | Every path `main`, `types` and each `exports` condition names is inside the tarball | The package installs cleanly and fails at the consumer's first import. npm does not check this |
 | `README.md`, `LICENSE-MIT`, `LICENSE-APACHE` and `NOTICE` are inside the tarball | A manifest saying `MIT OR Apache-2.0` with no licence text is a claim rather than a grant. `NOTICE` names the holder |
 | No `src/`, no `node_modules/`, no `.tsbuildinfo` | Bytes a consumer downloads and never uses. `.tsbuildinfo` additionally embeds absolute paths from the build machine |
+| No packed path whose basename contains `.test.` or `.spec.`, and no `__tests__` segment | A published tarball that ships a compiled test. The library projects exclude tests, and this refusal is the backstop |
 | The npm version equals the Rust workspace version | `docs/RELEASE.md` says the crates and the packages version together and that a skew is not supported |
 | `@ocelli/react` depends on the exact version `@ocelli/core` publishes | A range resolves to whatever the registry happens to have |
 | A project **outside the workspace** installs the real tarballs, imports under `node`, and type-checks under both `bundler` and `node16` | The one that matters. See below |
