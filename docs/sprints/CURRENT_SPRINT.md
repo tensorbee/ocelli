@@ -70,7 +70,8 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
 
 - **Licence file waivers the lead decided, for the operator to confirm.**
   F-217's plan lets the lead waive a licence file only when its text is an
-  allowlisted licence that grants nothing copyleft. Four rows in
+  allowlisted licence that grants nothing copyleft, or when it is an empty
+  file that states no licence. Four rows in
   `ci/licences.toml` use that rule: the empty `LICENSE-heif`,
   `LICENSE-jetraw` and `LICENSE-libjxs` placeholders in imagecodecs
   2026.10.10, for codecs not compiled into the wheel, and et-xmlfile 2.0.0's
