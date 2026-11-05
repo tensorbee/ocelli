@@ -4,12 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ocelli, More</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%22-6 -6 112 112%22 fill=%22%23e6e6e6%22%3E %3Cg transform=%22translate(50 50)%22%3E%3Cpath d=%22M-46.64762 -18 A50 50 0 0 1 46.64762 -18 L20.12461 -18 A27 27 0 0 0 -20.12461 -18 Z%22/%3E%3Cpath d=%22M-46.64762 -18 A50 50 0 0 1 46.64762 -18 L20.12461 -18 A27 27 0 0 0 -20.12461 -18 Z%22 transform=%22scale(1 -1)%22/%3E%3Cpath d=%22M48.28043 -13 A50 50 0 0 1 48.28043 13 L23.66432 13 A27 27 0 0 0 23.66432 -13 Z%22/%3E%3Cpath d=%22M48.28043 -13 A50 50 0 0 1 48.28043 13 L23.66432 13 A27 27 0 0 0 23.66432 -13 Z%22 transform=%22scale(-1 1)%22/%3E%3C/g%3E %3C/svg%3E">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: #141414; color: #e6e6e6; }
+  html { scroll-padding-top: 16px; }
   body {
     font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Liberation Sans", Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
   header.top {
     height: 44px;
@@ -20,26 +24,90 @@
     background: #1c1c1c;
     border-bottom: 1px solid #2e2e2e;
   }
-  header.top strong { font-size: 15px; font-weight: 600; }
-  nav { margin-left: auto; display: flex; gap: 14px; }
-  nav a { color: #999999; text-decoration: none; }
-  nav a[aria-current="page"] { color: #e6e6e6; }
-  main { max-width: 680px; margin: 0 auto; padding: 28px 20px 64px; }
-  h1 { font-size: 20px; font-weight: 600; margin: 0 0 12px; }
-  h2 { font-size: 20px; font-weight: 600; margin: 28px 0 8px; }
-  p { margin: 0 0 12px; }
-  section { border-top: 1px solid #2e2e2e; padding-top: 8px; }
+  header.top nav { margin-left: auto; display: flex; gap: 14px; }
+  header.top nav a { color: #999999; text-decoration: none; }
+  header.top nav a[aria-current="page"] { color: #e6e6e6; }
+
+  main { max-width: 760px; margin: 0 auto; padding: 28px 20px 96px; }
+  main > * { max-width: 72ch; }
+  h1 { font-size: 26px; line-height: 1.25; font-weight: 600; margin: 0 0 12px; letter-spacing: -0.01em; }
+  h2 { font-size: 20px; line-height: 1.3; font-weight: 600; margin: 0 0 6px; }
+  h3 { font-size: 13px; font-weight: 600; margin: 18px 0 6px; color: #999999; text-transform: uppercase; letter-spacing: 0.06em; }
+  p { margin: 0 0 14px; }
+  ul { margin: 0 0 14px; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .lede { color: #bdbdbd; font-size: 16px; }
+  main a { color: #e6e6e6; text-decoration: underline; text-decoration-color: #808080; text-underline-offset: 2px; }
+  main a:hover { text-decoration-color: #e6e6e6; }
+  strong { font-weight: 600; }
+
+  .index {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4px 16px;
+    padding: 12px 14px;
+    margin: 0 0 8px;
+    list-style: none;
+    background: #1c1c1c;
+    border: 1px solid #2e2e2e;
+    font-size: 14px;
+  }
+  .index li { margin: 2px 0; display: flex; justify-content: space-between; gap: 8px; }
+  .index a { color: #bdbdbd; text-decoration: none; }
+  .index a:hover { color: #ffffff; }
+  .index .mark { color: #808080; font-size: 12px; white-space: nowrap; }
+
+  section.feature { border-top: 1px solid #2e2e2e; padding-top: 22px; margin-top: 36px; }
+  .status {
+    display: inline-block;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 2px 8px;
+    margin: 0 0 12px;
+    border: 1px solid #808080;
+    color: #e6e6e6;
+  }
+  .status.done { border-style: solid; border-color: #bdbdbd; }
+  .status.part { border-style: dashed; color: #cfcfcf; }
+  .status.none { border-style: dotted; color: #999999; }
+  .where { color: #bdbdbd; }
+  .tiers { font-size: 14px; color: #bdbdbd; }
+
   code {
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    font-size: 0.88em;
     background: #1c1c1c;
+    border: 1px solid #2a2a2a;
     padding: 0 4px;
+    overflow-wrap: anywhere;
   }
+  pre {
+    background: #1c1c1c;
+    border: 1px solid #2e2e2e;
+    padding: 12px 14px;
+    margin: 0 0 16px;
+    overflow: auto;
+    max-width: 100%;
+    font: 13px/1.55 ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    tab-size: 4;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: inherit; overflow-wrap: normal; }
+  .note {
+    border-left: 3px solid #808080;
+    background: #1a1a1a;
+    padding: 10px 14px;
+    margin: 0 0 16px;
+    color: #cfcfcf;
+  }
+  .note p:last-child { margin-bottom: 0; }
   a:focus-visible, button:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
+  .brand { display: flex; align-items: center; color: #e6e6e6; text-decoration: none; }
+  .brand .logo { display: block; height: 20px; width: auto; }
 </style>
 </head>
 <body>
 <header class="top">
-  <strong>Ocelli</strong>
+  <a class="brand" href="/" aria-label="Ocelli"><svg class="logo" viewBox="-6 -6 374 112" fill="currentColor" role="img" aria-label="Ocelli"><title>Ocelli</title><g transform="translate(50 50)"><path d="M-46.64762 -18 A50 50 0 0 1 46.64762 -18 L20.12461 -18 A27 27 0 0 0 -20.12461 -18 Z"/><path d="M-46.64762 -18 A50 50 0 0 1 46.64762 -18 L20.12461 -18 A27 27 0 0 0 -20.12461 -18 Z" transform="scale(1 -1)"/><path d="M48.28043 -13 A50 50 0 0 1 48.28043 13 L23.66432 13 A27 27 0 0 0 23.66432 -13 Z"/><path d="M48.28043 -13 A50 50 0 0 1 48.28043 13 L23.66432 13 A27 27 0 0 0 23.66432 -13 Z" transform="scale(-1 1)"/></g><g transform="translate(113.512 0)"><path d="M4.4879999999999995 54.22834645669292Q4.4879999999999995 48.39370078740157 6.579 43.63385826771653Q8.67 38.874015748031496 12.239999999999998 35.496062992125985Q15.809999999999999 32.118110236220474 20.705999999999996 30.275590551181104Q25.601999999999997 28.433070866141733 31.11 28.433070866141733Q36.617999999999995 28.433070866141733 41.513999999999996 30.275590551181104Q46.41 32.118110236220474 49.98 35.496062992125985Q53.55 38.874015748031496 55.641 43.63385826771653Q57.732 48.39370078740157 57.732 54.22834645669292Q57.732 60.06299212598425 55.641 64.8740157480315Q53.55 69.68503937007874 49.98 73.11417322834646Q46.41 76.54330708661418 41.513999999999996 78.48818897637796Q36.617999999999995 80.43307086614173 31.11 80.43307086614173Q25.601999999999997 80.43307086614173 20.705999999999996 78.48818897637796Q15.809999999999999 76.54330708661418 12.239999999999998 73.11417322834646Q8.67 69.68503937007874 6.579 64.8740157480315Q4.4879999999999995 60.06299212598425 4.4879999999999995 54.22834645669292ZM16.932 54.22834645669292Q16.932 57.09448818897638 17.799 59.96062992125984Q18.666 62.826771653543304 20.4 65.07874015748031Q22.134 67.33070866141732 24.786 68.76377952755905Q27.438 70.19685039370079 31.11 70.19685039370079Q34.782 70.19685039370079 37.434 68.76377952755905Q40.086 67.33070866141732 41.81999999999999 65.07874015748031Q43.553999999999995 62.826771653543304 44.42099999999999 59.96062992125984Q45.288 57.09448818897638 45.288 54.22834645669292Q45.288 51.36220472440945 44.42099999999999 48.54724409448819Q43.553999999999995 45.732283464566926 41.81999999999999 43.48031496062992Q40.086 41.22834645669291 37.434 39.846456692913385Q34.782 38.46456692913386 31.11 38.46456692913386Q27.438 38.46456692913386 24.786 39.846456692913385Q22.134 41.22834645669291 20.4 43.48031496062992Q18.666 45.732283464566926 17.799 48.54724409448819Q16.932 51.36220472440945 16.932 54.22834645669292Z"/><path d="M103.37 43.48031496062992Q101.94200000000001 41.43307086614173 99.086 40.05118110236221Q96.22999999999999 38.669291338582674 93.27199999999999 38.669291338582674Q89.906 38.669291338582674 87.356 40.05118110236221Q84.806 41.43307086614173 83.12299999999999 43.68503937007874Q81.44 45.93700787401575 80.624 48.75196850393701Q79.80799999999999 51.56692913385827 79.80799999999999 54.43307086614173Q79.80799999999999 57.2992125984252 80.675 60.11417322834646Q81.542 62.92913385826772 83.276 65.18110236220473Q85.00999999999999 67.43307086614173 87.61099999999999 68.81496062992126Q90.212 70.19685039370079 93.68 70.19685039370079Q96.536 70.19685039370079 99.392 69.07086614173228Q102.24799999999999 67.94488188976378 103.982 65.79527559055119L111.632 73.5748031496063Q108.572 76.85039370078741 103.82900000000001 78.64173228346456Q99.086 80.43307086614173 93.578 80.43307086614173Q88.172 80.43307086614173 83.327 78.69291338582677Q78.482 76.95275590551181 74.86099999999999 73.5748031496063Q71.24 70.19685039370079 69.149 65.38582677165354Q67.05799999999999 60.574803149606296 67.05799999999999 54.43307086614173Q67.05799999999999 48.496062992125985 69.149 43.68503937007874Q71.24 38.874015748031496 74.81 35.496062992125985Q78.38 32.118110236220474 83.12299999999999 30.275590551181104Q87.866 28.433070866141733 93.27199999999999 28.433070866141733Q98.678 28.433070866141733 103.727 30.480314960629922Q108.776 32.52755905511811 111.734 36.110236220472444Z"/><path d="M154.516 49.519685039370074Q154.516 47.16535433070867 153.853 45.01574803149607Q153.19 42.86614173228347 151.762 41.22834645669292Q150.334 39.59055118110236 148.141 38.618110236220474Q145.94799999999998 37.645669291338585 142.99 37.645669291338585Q137.482 37.645669291338585 133.65699999999998 40.972440944881896Q129.832 44.2992125984252 129.424 49.519685039370074ZM166.756 55.04724409448819Q166.756 55.86614173228347 166.756 56.68503937007874Q166.756 57.503937007874015 166.654 58.32283464566929H129.424Q129.628 60.98425196850394 130.801 63.18503937007874Q131.974 65.38582677165354 133.91199999999998 66.9724409448819Q135.85 68.55905511811024 138.298 69.48031496062993Q140.74599999999998 70.4015748031496 143.398 70.4015748031496Q147.988 70.4015748031496 151.15 68.71259842519684Q154.312 67.02362204724409 156.352 64.05511811023622L164.512 70.60629921259843Q157.26999999999998 80.43307086614173 143.5 80.43307086614173Q137.788 80.43307086614173 132.994 78.64173228346456Q128.2 76.85039370078741 124.68099999999998 73.57480314960631Q121.16199999999999 70.2992125984252 119.173 65.53937007874016Q117.184 60.77952755905512 117.184 54.74015748031496Q117.184 48.803149606299215 119.173 43.94094488188976Q121.16199999999999 39.07874015748032 124.63 35.6496062992126Q128.09799999999998 32.22047244094488 132.841 30.326771653543307Q137.584 28.433070866141733 143.09199999999998 28.433070866141733Q148.192 28.433070866141733 152.527 30.12204724409449Q156.862 31.811023622047244 160.024 35.13779527559055Q163.18599999999998 38.46456692913386 164.971 43.42913385826772Q166.756 48.39370078740157 166.756 55.04724409448819Z"/><path d="M179.142 9.0H191.382V79.0H179.142Z"/><path d="M206.828 9.0H219.068V79.0H206.828Z"/><path d="M234.514 34.55555555555556H246.75400000000002V79.0H234.514ZM232.78 19.46296296296297Q232.78 16.77777777777778 234.973 14.787037037037042Q237.166 12.796296296296305 240.532 12.796296296296305Q243.898 12.796296296296305 246.19299999999998 14.69444444444445Q248.488 16.592592592592595 248.488 19.46296296296297Q248.488 22.333333333333336 246.19299999999998 24.231481481481485Q243.898 26.129629629629633 240.532 26.129629629629633Q237.166 26.129629629629633 234.973 24.138888888888893Q232.78 22.148148148148152 232.78 19.46296296296297Z"/></g></svg></a>
   <nav>
     <a href="/">Images</a>
     <a href="/more" aria-current="page">More</a>
@@ -48,40 +116,348 @@
 </header>
 <main>
   <h1>More than this image</h1>
-  <p>This page names library behaviour the image does not draw. There is no picture here and there is no stand-in result. The example page started with <code>npm run dev</code> is where those controls run.</p>
+  <p class="lede">The image page shows one slice of one series. The library does more than that page draws. This page names each of those features, says what it is for, where it lives, how to call it, and whether it is built.</p>
+  <div class="note">
+    <p>There is no picture on this page and no stand-in result. The code below is real API from this repository, so it shows the calls and not their output. The example viewer started with <code>npm run dev</code> is where the library's controls run, and it labels a control <em>unavailable</em> when that control is not built.</p>
+  </div>
+  <p>Each feature carries one of three marks. <strong>Implemented</strong> means the library code exists with tests. <strong>Partial</strong> means part of it exists and the rest is named. <strong>Not yet</strong> means there is no code. A tier line says what tiers A (WebGPU), B (WebGL2) and C (CPU) do. A tier that cannot run a feature reports unavailable and never draws something else instead.</p>
 
-  <section>
-    <h2>Overlay and shutter</h2>
-    <p>Overlay planes and display shutters are read by the library. The example page shows a hit and a hide. This image does not draw either one.</p>
+  <ul class="index">
+    <li><a href="#overlay">Overlay and shutter</a><span class="mark">implemented</span></li>
+    <li><a href="#interpolation">Interpolation</a><span class="mark">partial</span></li>
+    <li><a href="#reference">Reference line</a><span class="mark">implemented</span></li>
+    <li><a href="#series">Several series</a><span class="mark">partial</span></li>
+    <li><a href="#mpr">MPR</a><span class="mark">implemented</span></li>
+    <li><a href="#slab">Slab</a><span class="mark">partial</span></li>
+    <li><a href="#volume">Volume rendering</a><span class="mark">partial</span></li>
+    <li><a href="#fusion">Fusion</a><span class="mark">partial</span></li>
+    <li><a href="#histogram">Histogram</a><span class="mark">partial</span></li>
+    <li><a href="#metadata">Metadata browser</a><span class="mark">partial</span></li>
+    <li><a href="#one">One to one</a><span class="mark">not yet</span></li>
+    <li><a href="#preferences">Preferences</a><span class="mark">not yet</span></li>
+    <li><a href="#worker">Worker decode</a><span class="mark">partial</span></li>
+    <li><a href="#documents">Documents</a><span class="mark">implemented</span></li>
+  </ul>
+
+  <section class="feature" id="overlay">
+    <h2>Overlay planes and display shutters</h2>
+    <span class="status done">Implemented as a reader. Nothing draws it yet.</span>
+    <p>An overlay plane is a one bit graphic stored beside the image, such as a marker or a region of interest drawn by the modality, PS3.3 C.9.2. A display shutter masks part of the image that should not be shown, often the collimated edge of a radiograph, PS3.3 C.7.6.11.</p>
+    <p class="where">Lives in <code>ocelli-dicom</code>, <code>crates/ocelli-dicom/src/overlay.rs</code>. <code>read_overlays</code> returns an <code>OverlaySet</code> for one frame.</p>
+<pre><code>use ocelli_dicom::{parse_part10, read_overlays, ShutterShape};
+
+let parsed = parse_part10(bytes)?;
+let set = read_overlays(&amp;parsed, 0)?;          // frame 0
+
+for plane in set.planes() {
+    let group = plane.group();                   // an even group from 0x6000
+    let kind = plane.overlay_type();             // OverlayType::Graphics or Roi
+    let on = plane.bit(row, column);             // 1-based image pixel
+}
+
+if let Some(shutter) = set.shutter() {
+    let hidden = shutter.hides(row, column);     // shapes combine by intersection
+    for shape in shutter.shapes() {
+        match shape {
+            ShutterShape::Rectangular { left, right, upper, lower } =&gt; {}
+            ShutterShape::Circular { center_row, center_column, radius } =&gt; {}
+            ShutterShape::Polygonal { vertices } =&gt; {}
+            ShutterShape::Bitmap { group } =&gt; {}
+            _ =&gt; {}                              // non_exhaustive
+        }
+    }
+}
+let grey = set.presentation_value();             // Shutter Presentation Value, when present</code></pre>
+    <p class="tiers">Tiers A, B and C do not draw this module. The reader does not decode Pixel Data. The example page posts a synthetic object and prints whether one pixel is set and whether the shutter hides it.</p>
   </section>
-  <section>
-    <h2>Between slices</h2>
-    <p>Nearest and linear blending between slices is stack interpolation. The example page shows both. This image shows one slice and does not blend it with the next.</p>
+
+  <section class="feature" id="interpolation">
+    <h2>Interpolation between pixels and between slices</h2>
+    <span class="status part">Partial. In-plane nearest and linear are built. Blending two stack slices is not.</span>
+    <p>When an image is zoomed, each screen pixel falls between stored pixels. Nearest shows the closest stored value, which keeps edges hard. Linear blends the four neighbours, which looks smoother but is no longer a stored value. A reader should know which one is on.</p>
+    <p class="where">Lives in <code>ocelli-render</code>, <code>crates/ocelli-render/src/interpolation.rs</code>. <code>Interpolation</code> is <code>Nearest</code> or <code>Linear</code>, and <code>available(mode, tier)</code> answers before a draw.</p>
+<pre><code>use ocelli_render::{available, Interpolation, Tier};
+
+let mode = Interpolation::Linear;
+if available(mode, resolution.caps.tier) {
+    graph.set_stack_interpolation(&amp;ctx, viewport, mode)?;   // tiers A and B
+}
+raster.set_interpolation(mode.mode())?;                       // tier C, CpuRaster</code></pre>
+    <p>Sampling <em>between</em> two slices is a volume operation. <code>Volume::reslice</code> takes a fractional slice index and reads it through the volume's trilinear sample, shown under MPR below. A stack mode that blends slice <em>n</em> with slice <em>n + 1</em> on screen is not built.</p>
+    <p class="tiers">Nearest and linear are available on tiers A, B and C. Linear on an orthographic plane is refused rather than drawn as nearest.</p>
   </section>
-  <section>
-    <h2>Reference line</h2>
-    <p>A reference line and a reference cursor belong to the example page. This image does not draw a line from another series.</p>
+
+  <section class="feature" id="reference">
+    <h2>Reference line and reference cursor</h2>
+    <span class="status done">Implemented as segment geometry. Projection is the caller's.</span>
+    <p>A reference line shows where the slice in one viewport cuts the image in another, so a reader can tell which axial level a coronal line is at. A reference cursor marks the same patient point in every viewport.</p>
+    <p class="where">Lives in <code>@ocelli/core</code>, <code>packages/core/src/crosshair.ts</code> and <code>packages/core/src/intersection.ts</code>, where <code>overlayGrid</code> lives. The functions take a point already projected into viewport pixels and return segments for the SVG layer.</p>
+<pre><code>import { crosshairLines, overlayGrid, referenceCursor, referenceLines } from "@ocelli/core";
+
+// x and y are viewport pixels. Null when the point is outside the viewport.
+const lines = referenceLines(x, y, width, height);   // [horizontal, vertical] Segments
+const cursor = referenceCursor(x, y, width, height); // { x, y } or null
+const cross = crosshairLines(x, y, width, height);   // the same two segments
+const grid = overlayGrid(2, 2, width, height);       // interior lines of a layout grid
+
+for (const { x0, y0, x1, y1 } of lines ?? []) {
+  // append an SVG line element
+}</code></pre>
+    <p class="tiers">These functions do not project a plane and do not read a frame of reference. The projection from another series comes from the geometry chapter of <a href="/use#geometry">Use</a> or from <code>SyncScene</code> below. This shell code runs the same on every tier.</p>
   </section>
-  <section>
+
+  <section class="feature" id="series">
     <h2>Several series at once</h2>
-    <p>A tilted pair, prior studies, linked scroll and a synced window are named on the example page. This image does not build them.</p>
+    <span class="status part">Partial. Slice sync by patient point is built. Linked scroll, synced window and priors are not.</span>
+    <p>Reading often means two series side by side: a current scan beside a prior, or two sequences of the same MRI. Scrolling one should move the other to the same anatomy, and a window change may apply to both.</p>
+    <p class="where">Lives in <code>ocelli-volume</code> as <code>HeldPlane</code> and in <code>ocelli-viewport</code> as <code>sync::SyncScene</code>. A scene moves every viewport that shares the source's Frame of Reference UID onto one patient point.</p>
+<pre><code>use glam::DVec3;
+use ocelli_core::{Pt, World};
+use ocelli_viewport::sync::SyncScene;
+use ocelli_volume::{FrameOfReferenceUid, HeldPlane};
+
+let mut scene = SyncScene::new();
+let plane = HeldPlane {
+    anchor: Pt::&lt;World&gt;::new(0.0, 0.0, 0.0),  // world point of index 0
+    normal: DVec3::new(0.0, 0.0, 1.0),
+    spacing_mm: 2.5,
+    index: 0.0,
+};
+scene.register(1, Some(FrameOfReferenceUid(uid.clone())), plane);
+scene.register(2, Some(FrameOfReferenceUid(uid.clone())), other_plane);
+
+// Viewport 1 moved to this point. Every peer with the same UID follows.
+for change in scene.set_point(1, point)? {
+    let (id, index) = (change.id, change.index);
+}</code></pre>
+    <p>A different Frame of Reference UID stays where it is, and a refused point is <code>SyncError::Unavailable</code> with no slot written. <code>attachSideBySide(ocelliElement, neighbour)</code> in <code>@ocelli/core</code> pairs an Ocelli element with an element another library owns and enables the seam, which is the migration case rather than a second series.</p>
+    <p class="tiers">Not built: linked scroll and synced window as shell features, and prior study lookup. The example page reads Prior studies, Linked scroll and Synced window unavailable.</p>
   </section>
-  <section>
-    <h2>MPR, slab, volume and fusion</h2>
-    <p>MPR, slab, volume rendering and fusion are named on the example page. This image does not build them.</p>
+
+  <section class="feature" id="mpr">
+    <h2>MPR</h2>
+    <span class="status done">Implemented in the library. The example page reads it unavailable.</span>
+    <p>Multiplanar reformation rebuilds sagittal, coronal or any oblique plane from a stack of axial slices, so anatomy can be seen in the plane that shows it best. It depends on correct spacing and orientation, which is why a sheared stack is refused rather than straightened.</p>
+    <p class="where">Lives in <code>ocelli-volume</code>, <code>crates/ocelli-volume/src/ortho.rs</code>, with presentation in <code>ocelli-render</code>, <code>crates/ocelli-render/src/ortho.rs</code>.</p>
+<pre><code>use ocelli_volume::{ObliquePlane, OrthoPlane, PlaneSample, Volume};
+
+let volume = Volume::construct(candidate)?;
+
+let axial    = volume.reslice(OrthoPlane::Axial    { slice: 10.5 })?;   // fractional is allowed
+let sagittal = volume.reslice(OrthoPlane::Sagittal { column: 256.0 })?;
+let coronal  = volume.reslice(OrthoPlane::Coronal  { row: 256.0 })?;
+
+let oblique = volume.reslice_oblique(ObliquePlane {
+    origin, row, column,            // Pt&lt;World&gt; and two DVec3 directions
+    columns: 512, rows: 512,
+    column_mm: 0.7, row_mm: 0.7,
+})?;
+
+for sample in &amp;axial.samples {
+    match sample {
+        PlaneSample::Present(value) =&gt; {}
+        PlaneSample::Absent =&gt; {}  // a slice not landed or outside, never stored zero
+    }
+}</code></pre>
+<pre><code>use ocelli_render::{present_cpu_plane, present_plane};
+
+present_plane(tier, &amp;axial, |samples| upload(samples))?;                      // tiers A and B
+present_cpu_plane(&amp;mut raster, &amp;view, &amp;presentation, &amp;axial, quality, &amp;mut out)?; // tier C</code></pre>
+    <p class="tiers">Tiers A and B present through <code>present_plane</code> and <code>RenderGraph::show_ortho</code>. Tier C presents through <code>present_cpu_plane</code> into <code>CpuRaster</code>. An absent sample or a raster refusal writes nothing.</p>
   </section>
-  <section>
-    <h2>One to one, histogram, metadata and preferences</h2>
-    <p>One to one, histogram, a metadata browser and preferences read unavailable on the example page. This image does not invent a result for them.</p>
+
+  <section class="feature" id="slab">
+    <h2>Slab</h2>
+    <span class="status part">Partial. Built on tiers A and B. Tier C is unavailable.</span>
+    <p>A slab collapses a thick block of slices into one image. Maximum intensity projection makes contrast filled vessels or lung nodules stand out, minimum intensity projection shows airways, and an average reduces noise.</p>
+    <p class="where">The plane and samples live in <code>ocelli-volume</code>, <code>crates/ocelli-volume/src/slab.rs</code>. The reduction is a shader in <code>ocelli-render</code>, chosen by <code>BlendMode</code>.</p>
+<pre><code>use ocelli_render::BlendMode;
+use ocelli_volume::OrthoPlane;
+
+let frame = volume.slab_plane(OrthoPlane::Axial { slice: 40.0 })?;
+let image = volume.slab_samples(frame, 10.0)?;            // thickness in mm
+
+graph.show_slab(&amp;ctx, &amp;adapter, viewport, &amp;image, BlendMode::Mip)?;
+// BlendMode::MinIp and BlendMode::Average are the other two reductions.</code></pre>
+    <p class="tiers">MIP, MinIP and average reduce stored samples and then apply the one existing VOI stage. Tiers A and B draw it. Tier C returns unavailable, because there is no CPU reducer.</p>
   </section>
-  <section>
-    <h2>Worker decode</h2>
-    <p>The wasm path posts one WADO-RS instance to a worker and keeps the pixels there. This folder viewer posts the file to the local process. It is not that path.</p>
+
+  <section class="feature" id="volume">
+    <h2>Volume rendering</h2>
+    <span class="status part">Partial. Built on tiers A and B. Tier C is unavailable.</span>
+    <p>Volume rendering casts a ray through the whole volume and accumulates colour and opacity, so a reader sees bone, vessels or an organ surface in three dimensions. It is for orientation and communication, not for measurement.</p>
+    <p class="where">Lives in <code>ocelli-render</code>, <code>crates/ocelli-render/src/graph.rs</code>, with <code>OpacityTable</code> in <code>opacity.rs</code>, <code>ShadeWeights</code> in <code>shade.rs</code> and <code>ClipPlane</code> in <code>clip.rs</code>.</p>
+<pre><code>use ocelli_render::{volume_ray_admission, OpacityPreset, OpacityTable};
+
+// Answer before any sample is read.
+volume_ray_admission(tier, ready_bricks, sampled_limit)?;   // Err(TierCUnavailable) on tier C
+
+let report = graph.sync_volume(&amp;ctx, &amp;adapter, volume_id, &amp;volume)?;  // upload ready bricks
+graph.bind_volume_ray(&amp;ctx, &amp;adapter, viewport, source)?;           // a VolumeRaySource
+graph.set_opacity(&amp;ctx, viewport, &amp;OpacityTable::preset(OpacityPreset::Ramp))?;
+graph.set_shade(&amp;ctx, viewport, &amp;weights)?;
+graph.set_clip_planes(&amp;ctx, viewport, &amp;planes)?;
+let outcome = graph.tick(&amp;ctx);</code></pre>
+    <p class="tiers">Tiers A and B run the fragment ray. Tier C returns <code>TierCUnavailable</code> from <code>volume_ray_admission</code> before a sample is read and writes no colour. There is no CPU ray and the ray has no MIP body.</p>
   </section>
-  <section>
+
+  <section class="feature" id="fusion">
+    <h2>Fusion</h2>
+    <span class="status part">Partial. Built on tiers A and B. Tier C is unavailable.</span>
+    <p>Fusion lays one modality over another in the same patient space, most often PET colour over CT grey, so uptake can be placed on anatomy. The two volumes must share a frame of reference, or the overlay is in the wrong place.</p>
+    <p class="where">The plane lives in <code>ocelli-volume</code>, <code>crates/ocelli-volume/src/fusion.rs</code>. The draw lives in <code>ocelli-render</code>, <code>crates/ocelli-render/src/fusion.rs</code>.</p>
+<pre><code>use ocelli_render::{FusionError, FusionRequest};
+use ocelli_volume::{plane_from_ortho, world_on_plane, OrthoPlane};
+
+let Some(plane) = plane_from_ortho(&amp;ct, OrthoPlane::Axial { slice: 60.0 }) else { return };
+let corner = world_on_plane(&amp;plane, 0, 0);       // Pt&lt;World&gt; of one plane pixel
+
+let request = FusionRequest {
+    volume_a: &amp;ct,  frame_a: &amp;ct_frame,  chain_a: &amp;ct_chain,  opacity_a: 1.0, colormap_a: None,
+    volume_b: &amp;pet, frame_b: &amp;pet_frame, chain_b: &amp;pet_chain, opacity_b: 0.5, colormap_b: Some(hot.as_slice()),
+    plane: &amp;plane,
+};
+match graph.show_fusion(&amp;ctx, &amp;adapter, &amp;request) {
+    Ok(()) =&gt; {}
+    Err(FusionError::FrameMismatch) =&gt; {}     // the two UIDs differ
+    Err(FusionError::TierCUnavailable) =&gt; {}
+    Err(other) =&gt; {}
+}</code></pre>
+    <p class="tiers">Tiers A and B draw it when a float sample format and the <code>Rgba16Float</code> target can be bound, and otherwise return <code>FusionError::Unavailable</code>. Tier C returns <code>FusionError::TierCUnavailable</code> before a sample is read.</p>
+  </section>
+
+  <section class="feature" id="histogram">
+    <h2>Histogram</h2>
+    <span class="status part">Partial. The function is built. No histogram view exists.</span>
+    <p>A histogram counts how many pixels fall in each value range. It helps choose a window, shows whether an image is clipped, and summarises a region.</p>
+    <p class="where">Lives in <code>ocelli-geom</code>, <code>crates/ocelli-geom/src/stats.rs</code>. The counts go into a buffer you own.</p>
+<pre><code>use ocelli_geom::{histogram, roi_statistics};
+
+let mut counts = [0_u32; 256];
+let range = histogram(&amp;samples, &amp;mut counts)?;   // samples: &amp;[f64]
+let (low, high, bin) = (range.min, range.max, range.width);
+
+let stats = roi_statistics(&amp;region, area_mm2)?;   // count, mean, sd, min, max, area</code></pre>
+    <p class="tiers">This is plain arithmetic and runs anywhere. A value on an interior edge belongs to the higher bin. No viewport or shell control draws a histogram. The example page reads Histogram unavailable, and the HLD's GPU histogram pass is tier A only.</p>
+  </section>
+
+  <section class="feature" id="metadata">
+    <h2>Metadata browser</h2>
+    <span class="status part">Partial. The data model is built. No browser view exists.</span>
+    <p>A metadata browser lists every attribute of an instance by tag, keyword and value. It answers questions the image cannot, such as which kernel was used or why the spacing looks wrong.</p>
+    <p class="where">Lives in <code>ocelli-dicom</code>, <code>crates/ocelli-dicom/src/metadata.rs</code>. <code>MetadataSet</code> holds tags in order, and each <code>MetadataElement</code> carries a VR and a typed <code>MetadataValue</code>.</p>
+<pre><code>use ocelli_dicom::{MetadataSet, MetadataValue, Tag};
+
+let metadata = MetadataSet::from_object(parsed.object())?;
+
+for (tag, element) in metadata.iter() {
+    let text = element.semantic_text();       // Option&lt;Vec&lt;&amp;str&gt;&gt;
+    match element.value() {
+        MetadataValue::Sequence(items) =&gt; {}  // nested MetadataSet values
+        MetadataValue::PersonNames(names) =&gt; {}
+        MetadataValue::BulkDataUri(uri) =&gt; {}
+        _ =&gt; {}
+    }
+}
+let modality = metadata.get(Tag(0x0008, 0x0060));</code></pre>
+    <p class="tiers">The same model is what QIDO-RS JSON parses into. The image page has a Headers panel. The example viewer reads Metadata browser unavailable.</p>
+  </section>
+
+  <section class="feature" id="one">
+    <h2>One to one</h2>
+    <span class="status none">Not yet.</span>
+    <p>One to one shows each stored pixel as exactly one screen pixel, so nothing is resampled and fine texture is seen as acquired.</p>
+    <p class="where">There is no code for it. A <code>Zoom</code> command in <code>@ocelli/core</code> scales the camera by a factor, and nothing computes the factor that maps one stored pixel to one device pixel.</p>
+<pre><code>import { packCommands, viewportId } from "@ocelli/core";
+
+// What exists: an explicit zoom factor. It is not a one to one mode.
+packCommands(viewportId(1), [{ kind: "Zoom", factor: 2 }]);</code></pre>
+    <p class="tiers">The example page reads One to one unavailable.</p>
+  </section>
+
+  <section class="feature" id="preferences">
+    <h2>Preferences</h2>
+    <span class="status none">Not yet.</span>
+    <p>Preferences keep a reader's choices between sessions, such as default window presets, tool bindings and hanging layouts.</p>
+    <p class="where">There is no preferences module in the crates or packages. The session state that does exist is the viewport snapshot, which restores a viewport after a fault and is not a preference store.</p>
+<pre><code>import { parseSnapshot } from "@ocelli/core";
+
+// What exists: one viewport's state as copied JSON, for recovery.
+const parsed = parseSnapshot(session.snapshot());</code></pre>
+    <p class="tiers">The example page reads Preferences unavailable.</p>
+  </section>
+
+  <section class="feature" id="worker">
+    <h2>Worker decode and the wasm path</h2>
+    <span class="status part">Partial. Fetch, hand-off and the worker pool are built. Decoding those bytes in the worker is not.</span>
+    <p>In the browser path, the DICOM bytes go to a worker that owns the wasm core, and decoded pixels stay there. The main thread keeps the DOM responsive. This folder viewer posts the file to a local native process instead, so it is not that path.</p>
+    <p class="where">Lives in <code>@ocelli/core</code>: <code>postWadoInstance</code> in <code>instance-bytes.ts</code>, <code>holdSessionBytes</code> in <code>bulk.ts</code>, and <code>openDecodePool</code> in <code>pool.ts</code>.</p>
+<pre><code>import {
+  DEFAULT_DECODE_WORKERS, MAX_DECODE_WORKERS, holdSessionBytes, openDecodePool, postWadoInstance,
+} from "@ocelli/core";
+
+// Main thread: one WADO-RS instance, posted to the worker as a transfer.
+await postWadoInstance({
+  studiesServiceUrl, wadoUriUrl, fetch: globalThis.fetch.bind(globalThis),
+  studyUid, seriesUid, instanceUid,
+  post(bytes, boundary) {
+    worker.postMessage({ type: "instance", bytes: bytes.buffer, boundary }, [bytes.buffer]);
+  },
+});
+
+// Worker: copy the body into the session's one bulk slot. It is not parsed here.
+ticket = holdSessionBytes(wasm, new Uint8Array(message.bytes), ticket);
+
+// Several decode workers, each its own wasm instance. No SharedArrayBuffer.
+const pool = openDecodePool(owner, DEFAULT_DECODE_WORKERS, (index) =&gt; new Worker(url));
+pool?.close();</code></pre>
+    <p class="tiers">Built: the bounded fetch, the hand-off, the bulk slot, and a pool of one to <code>MAX_DECODE_WORKERS</code> workers with <code>threadingEscalation()</code> fixed at <code>"stable"</code>. Not built: decoding that envelope in the worker, its frame cache and a render of that frame. The example worker publishes one stored sample to prove the path.</p>
+  </section>
+
+  <section class="feature" id="documents">
     <h2>Documents</h2>
-    <p>TID 1500, saving and loading a measurement, undo, a key object and a secondary capture live in <code>@ocelli/core</code>. The example page calls them. A key image flag on the image page is only a mark in this session. It does not write a Key Object Selection and it is not saved.</p>
+    <span class="status done">Implemented in <code>@ocelli/core</code>.</span>
+    <p>A measurement is useful beyond the session only if another system can read it. DICOM SR TID 1500 carries measurements, a Key Object Selection flags the images that matter, and a Secondary Capture stores a rendered picture as an image.</p>
+    <p class="where">Lives in <code>packages/core/src</code>: <code>tid1500.ts</code>, <code>measurement-persist.ts</code>, <code>annotation-state.ts</code>, <code>tid2010.ts</code> and <code>secondary-capture.ts</code>. The tree they share is <code>sr.ts</code>.</p>
+    <h3>TID 1500 measurement report</h3>
+<pre><code>import { readTid1500, writeTid1500 } from "@ocelli/core";
+
+// SOP class 1.2.840.10008.5.1.4.1.1.88.34, one NUM per root item.
+const bytes = writeTid1500(items, { study, series, sopClass, sopInstance });
+const items2 = bytes === null ? null : readTid1500(bytes);</code></pre>
+    <h3>Save, load, undo</h3>
+<pre><code>import {
+  createAnnotationState, loadMeasurements, persistMeasurements,
+  putAnnotation, redoAnnotation, undoAnnotation,
+} from "@ocelli/core";
+
+const text = persistMeasurements(items);            // JSON string, or null
+const loaded = text === null ? null : loadMeasurements(text);
+
+let state = createAnnotationState();
+state = putAnnotation(state, "m1", frameOfReferenceUid, tree) ?? state;
+state = undoAnnotation(state) ?? state;
+state = redoAnnotation(state) ?? state;</code></pre>
+    <h3>Key Object Selection</h3>
+<pre><code>import { readKeyObject, writeKeyObject } from "@ocelli/core";
+
+// TID 2010, SOP class 1.2.840.10008.5.1.4.1.1.88.59.
+const kos = writeKeyObject({
+  title: "Key image",
+  study, series, instance,              // the new document's UIDs
+  referencedClass, referencedInstance,  // the image being flagged
+});
+const doc = kos === null ? null : readKeyObject(kos);   // title and the reference</code></pre>
+    <h3>Secondary capture</h3>
+<pre><code>import { readSecondaryCapture, writeSecondaryCapture } from "@ocelli/core";
+
+// SOP class 1.2.840.10008.5.1.4.1.1.7, 8-bit MONOCHROME2, your display bytes.
+const sc = writeSecondaryCapture({ study, series, instance, columns, rows, pixels });
+const image = sc === null ? null : readSecondaryCapture(sc);</code></pre>
+    <p class="tiers">These functions write and read documents and do not draw, so tiers do not apply. The key image flag on the image page is only a mark in this session. It does not write a Key Object Selection and it is not saved.</p>
   </section>
+
+  <p style="margin-top: 40px" class="where">The <a href="/use">Use</a> page is the full guide to the library, from building it to the oracle.</p>
 </main>
 </body>
 </html>

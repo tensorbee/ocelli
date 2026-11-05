@@ -61,13 +61,19 @@ enum ReadStop {
     Reply(Reply),
 }
 
-/// Bind an ephemeral port on `127.0.0.1` and serve until the process stops.
+/// Bind `127.0.0.1` and serve until the process stops.
+///
+/// The port is ephemeral unless `OCELLI_PORT` is set, so a fixed address can
+/// be bookmarked and a second copy fails to bind instead of starting beside
+/// the first. A set value that is not a port number, empty included, is
+/// refused rather than read as unset.
 ///
 /// # Errors
 ///
-/// Returns the listener error when the socket cannot be opened.
+/// Returns the listener error when the socket cannot be opened, and an
+/// `InvalidInput` error when `OCELLI_PORT` is not a port number.
 pub fn serve() -> std::io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let listener = TcpListener::bind(("127.0.0.1", chosen_port()?))?;
     let addr = listener.local_addr()?;
     println!("http://{addr}/");
     std::io::stdout().flush()?;
@@ -80,6 +86,22 @@ pub fn serve() -> std::io::Result<()> {
         });
     }
     Ok(())
+}
+
+fn chosen_port() -> std::io::Result<u16> {
+    match std::env::var("OCELLI_PORT") {
+        Ok(text) => text.trim().parse::<u16>().map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "OCELLI_PORT is not a port number",
+            )
+        }),
+        Err(std::env::VarError::NotPresent) => Ok(0),
+        Err(std::env::VarError::NotUnicode(_)) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "OCELLI_PORT is not a port number",
+        )),
+    }
 }
 
 /// Read one request and write one response.

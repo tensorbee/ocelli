@@ -207,6 +207,12 @@ when the plan is approved.}
 
 {The docs/lld/*.md files /complete-feature step 9 will update.}
 
+## User-facing documentation impact
+
+{The places in README.md, examples/folder-viewer/src/use.html and
+examples/folder-viewer/src/more.html that /implement-feature section 7 will
+update before review, or "no change" with the reason.}
+
 ## Open questions
 
 {For each material decision, name affected ACs, options, decision owner and

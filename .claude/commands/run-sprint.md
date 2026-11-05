@@ -102,6 +102,8 @@ conflict-free. Exclusive resources:
 - the same shader or pipeline
 - `CURRENT_SPRINT.md`, `BACKLOG.md`, `SPRINT_TRACKER.md`, `AS_BUILT.md`,
   `CHANGELOG.md`
+- `README.md`, which `/implement-feature` section 7 edits for any story a
+  reader of it could see
 - the same LLD section, when the edits are semantic
 - **the GPU**, for any story running the oracle or a browser tier test
 

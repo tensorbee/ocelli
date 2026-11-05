@@ -129,24 +129,19 @@ def render(data: dict) -> str:
     w(GOALS_HEADING.rstrip())
     w("")
 
-    seen_milestone = None
+    summaries = rendered_milestones(data)
     for sprint, stories in groups.items():
-        key = stories[0]["milestone"]
-        if key != seen_milestone:
+        for key, first, last, count, weeks in summaries:
+            if first != sprint:
+                continue
             milestone = milestones[key]
-            span = [s for s in groups if groups[s][0]["milestone"] == key]
-            weeks = sum(
-                st["weeks"] for sp in span for st in groups[sp]
-            )
             w(f"### {key}, {milestone['title']}")
             w("")
             w(milestone["goal"])
             w("")
-            w(f"_{span[0]} to {span[-1]}, "
-              f"{sum(len(groups[sp]) for sp in span)} stories, "
+            w(f"_{first} to {last}, {count} stories, "
               f"{weeks} engineer-weeks._")
             w("")
-            seen_milestone = key
 
         # A comma, not a semicolon. This line is generated prose and the
         # voice rules apply to it. Story titles are trimmed of their own
@@ -213,28 +208,55 @@ def parse_plan(text: str) -> dict[str, list[tuple[str, str]]]:
 
 MILESTONE_LINE = re.compile(
     r"^_(S\d+) to (S\d+), (\d+) stories, (\d+) engineer-weeks\._$", re.M)
+MILESTONE_HEAD = re.compile(r"^### (M\w+), ")
 GOAL_LINE = re.compile(r"^\*\*Goal\*\*: (.+)$")
 
 
-def rendered_milestones(data: dict) -> list[tuple[str, str, int, int]]:
-    """The milestone summary lines `render` would write, as tuples.
+def rendered_milestones(data: dict) -> list[tuple[str, str, str, int, int]]:
+    """The milestone summary lines `render` writes, as tuples.
 
-    Built by the same walk `render` uses, so a disagreement is the plan
-    lagging the allocation rather than two different derivations.
+    Each tuple is the milestone key, its first and last sprint, its story
+    count and its weeks. `render` writes its headings from this list, so a
+    disagreement is the plan lagging the allocation rather than two
+    different derivations.
     """
     groups = sprint_groups(data)
-    out: list[tuple[str, str, int, int]] = []
-    seen = None
-    for sprint, stories in groups.items():
-        key = stories[0]["milestone"]
-        if key == seen:
-            continue
-        span = [s for s in groups if groups[s][0]["milestone"] == key]
-        out.append((span[0], span[-1],
-                    sum(len(groups[sp]) for sp in span),
-                    sum(st["weeks"] for sp in span for st in groups[sp])))
-        seen = key
+    out: list[tuple[str, str, str, int, int]] = []
+    seen: set[str] = set()
+    for stories in groups.values():
+        for key in sprint_milestones(stories):
+            if key not in seen:
+                out.append((key, *milestone_summary(groups, key)))
+                seen.add(key)
     return out
+
+
+def sprint_milestones(stories: list[dict]) -> list[str]:
+    """The milestones with a story in one sprint, in story order.
+
+    Every one gets a summary line, so a milestone whose stories never lead a
+    sprint is not left without one.
+    """
+    keys: list[str] = []
+    for story in stories:
+        if story["milestone"] not in keys:
+            keys.append(story["milestone"])
+    return keys
+
+
+def milestone_summary(
+    groups: "OrderedDict[str, list[dict]]", key: str
+) -> tuple[str, str, int, int]:
+    """First sprint, last sprint, story count and weeks for one milestone.
+
+    Counted from each story's own milestone, so a sprint holding stories of
+    two milestones adds each story to its own milestone and not to whichever
+    milestone the sprint's first story belongs to.
+    """
+    span = [sp for sp, stories in groups.items()
+            if any(st["milestone"] == key for st in stories)]
+    mine = [st for sp in span for st in groups[sp] if st["milestone"] == key]
+    return (span[0], span[-1], len(mine), sum(st["weeks"] for st in mine))
 
 
 def rendered_goals(data: dict) -> dict[str, str]:
@@ -315,37 +337,43 @@ def check(data: dict, plan_path: Path = PLAN) -> int:
     # nothing compares is a hand-maintained line that looks generated.
     plan_text = plan_path.read_text()
     expected_lines = rendered_milestones(data)
-    actual_lines = [(a, b, int(n), int(w))
-                    for a, b, n, w in MILESTONE_LINE.findall(plan_text)]
-    # Matched on the SPAN a line names, not on its position in the file. A
-    # positional `zip` reads the Nth expected line against the Nth found line,
-    # so one absent summary shifts every line after it and the refusal names
-    # the wrong milestone, which is a message a maintainer cannot act on. The
-    # spans are the identity a reader has anyway: `_S01 to S05, ..._`.
-    found_by_span = {(a, b): (a, b, n, w) for a, b, n, w in actual_lines}
-    for wanted in expected_lines:
-        span = (wanted[0], wanted[1])
-        actual_line = found_by_span.get(span)
-        if actual_line is None:
-            problems.append(
-                f"the allocation puts a milestone at {span[0]} to {span[1]} "
-                f"and SPRINT_PLAN.md carries no summary line for it. The line "
-                f"is generated, so an absent one is a deleted line rather than "
-                f"a milestone nobody wrote up.")
+    # Keyed by the milestone heading a summary line sits under, not by the
+    # span it names. Two milestones can share a span once one sprint holds
+    # stories of both, and a span key then collapses them into one entry.
+    found: dict[str, list[tuple[str, str, int, int]]] = {}
+    current = None
+    for line in plan_text.splitlines():
+        head = MILESTONE_HEAD.match(line)
+        if head:
+            current = head.group(1)
             continue
-        if actual_line != wanted:
+        summary = MILESTONE_LINE.match(line)
+        if summary and current:
+            a_, b_, n_, w_ = summary.groups()
+            found.setdefault(current, []).append((a_, b_, int(n_), int(w_)))
+    for key, first, last, count, weeks in expected_lines:
+        lines = found.get(key, [])
+        if not lines:
             problems.append(
-                f"the milestone summary line for {wanted[0]} to "
-                f"{wanted[1]} should read {wanted[2]} stories and "
-                f"{wanted[3]} engineer-weeks, and SPRINT_PLAN.md says "
-                f"{actual_line[2]} stories and {actual_line[3]} "
-                f"engineer-weeks")
-    for span in sorted(set(found_by_span) - {(e[0], e[1])
-                                             for e in expected_lines}):
+                f"the allocation puts {key} at {first} to {last} and "
+                f"SPRINT_PLAN.md carries no summary line under its heading. "
+                f"The line is generated, so an absent one is a deleted line "
+                f"rather than a milestone nobody wrote up.")
+            continue
+        if len(lines) > 1:
+            problems.append(
+                f"{key} carries {len(lines)} summary lines and the generator "
+                f"writes one")
+        if lines[0] != (first, last, count, weeks):
+            problems.append(
+                f"the summary line for {key} should read {first} to {last}, "
+                f"{count} stories and {weeks} engineer-weeks, and "
+                f"SPRINT_PLAN.md says {lines[0][0]} to {lines[0][1]}, "
+                f"{lines[0][2]} stories and {lines[0][3]} engineer-weeks")
+    for key in sorted(set(found) - {e[0] for e in expected_lines}):
         problems.append(
-            f"SPRINT_PLAN.md carries a milestone summary line for {span[0]} "
-            f"to {span[1]} and the allocation has no milestone spanning those "
-            f"sprints")
+            f"SPRINT_PLAN.md carries a summary line under {key} and the "
+            f"allocation plans no story for it")
 
     expected_goals = rendered_goals(data)
     actual_goals = parse_goals(plan_text)
