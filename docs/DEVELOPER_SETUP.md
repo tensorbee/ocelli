@@ -14,11 +14,13 @@ gives it neither.
 | Node | 24+ | The TypeScript workspaces |
 | Python | 3.12+ | The guard scripts, and corpus and fixture work |
 | uv | 0.11+ | Creates the locked repository-local Python environment |
+| cargo-deny | 0.19.0 | The Rust half of the licence gate |
 | A WebGPU-capable browser | | Chrome or Edge. Required for the oracle |
 
 ```bash
 rustup toolchain install 1.97.1
 cargo install wasm-pack
+cargo install cargo-deny --version 0.19.0 --locked
 uv sync --locked
 brew install dcmtk                  # macOS
 npm ci

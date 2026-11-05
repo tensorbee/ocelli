@@ -1,7 +1,7 @@
 # The golden corpus
 
-**F-IDs that contributed:** F-009, F-013, F-014, F-016, F-026, F-030, F-X006, F-X007, F-X012, F-X013
-**Last updated:** 2026-09-14
+**F-IDs that contributed:** F-009, F-013, F-014, F-016, F-026, F-030, F-X006, F-X007, F-X012, F-X013, F-217
+**Last updated:** 2026-11-05
 
 The corpus is the input every later correctness claim is measured on. It lives
 outside git under ignored `corpus/data` behind `corpus/manifest.tsv`, which is
@@ -228,6 +228,32 @@ pyjpegls's, and a test asserts that in both directions.
 
 RLE is the one compressed syntax no external encoder touches. pydicom
 implements it, and both plugins it offers produce byte-identical output.
+
+## Read-back routes
+
+The conformance tests do not call `ds.pixel_array` for a syntax row.
+`READ_BACK` in `scripts/tests/test_corpus_synth.py` names one route per
+`SYNTAX_CASES` file. Native rows use pydicom with no plugin. RLE, JPEG 2000
+and HTJ2K pass `decoding_plugin="pylibjpeg"`. JPEG-LS passes
+`decoding_plugin="pyjpegls"`. The two lossless JPEG rows use
+`imagecodecs.ljpeg_decode` on the first fragment. The baseline colour row uses
+`imagecodecs.jpeg8_decode` with `outcolorspace="RGB"`, and that call is the
+only colour conversion. The extended 12-bit row uses `jpeg8_decode` with no
+colour argument.
+
+`DECODED_WITH` records imagecodecs 2026.10.10 and the libjpeg-turbo version
+`jpeg8_version()` reports.
+
+`corpus/decode-digests.tsv` records the SHA-256 of each decoded array as
+dtype, shape and bytes. `scripts/corpus_check.py --decode-digests` compares
+those digests only after the file digest matches the manifest.
+`bin/ocelli.sh gate corpus` runs that step after the file digests.
+
+JPEG-LS read-back is CharLS through pyjpegls, which is the library that
+encoded those rows. ISO/IEC 14495-1 decoding is exact, so the values do not
+move, and the read-back is no longer independent of the encoder. The Rust
+decoders and the cornerstone3D oracle remain separate checks of the same
+files. That loss of independence is accepted.
 
 ## Two corrections F-X007 measured
 

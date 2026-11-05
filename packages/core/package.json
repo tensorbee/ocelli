@@ -16,6 +16,7 @@
     "dist",
     "LICENSE-MIT",
     "LICENSE-APACHE",
+    "NOTICE",
     "README.md"
   ],
   "scripts": {

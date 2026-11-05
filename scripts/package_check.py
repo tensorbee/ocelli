@@ -49,7 +49,8 @@ PACKAGES = ["core", "react"]
 # Present in the tarball or the package is not publishable. The two licence
 # files matter as much as the code: the manifest says "MIT OR Apache-2.0" and a
 # tarball that carries neither text makes that a claim rather than a grant.
-REQUIRED = ["package.json", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
+REQUIRED = ["package.json", "README.md", "LICENSE-MIT", "LICENSE-APACHE",
+            "NOTICE"]
 
 # Never in the tarball. `src` and the build info are noise a consumer pays to
 # download, and `.tsbuildinfo` additionally leaks absolute paths from the

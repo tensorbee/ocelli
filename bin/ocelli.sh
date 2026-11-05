@@ -66,6 +66,8 @@ GATES=(
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
+  "licences|no|one allowlist over Rust, npm and Python manifests"
+  "licences-wheels|no|installed Python wheels and the libraries they bundle"
   "prose|no|voice rules over operator-facing prose"
   "content|no|no DICOM and no build artefacts tracked"
   "backlog|no|BACKLOG, SPRINT_PLAN, tracker and as-built agree"
@@ -165,7 +167,13 @@ run_gate() {
                    tools/bench/tests/decode_jpeg2000_test.mjs \
                    tools/bench/tests/decode_jpegls_test.mjs \
                    tools/bench/tests/tier_startup_test.mjs ;;
-    provenance)  python3 scripts/source_provenance_check.py ;;
+    provenance)  python3 scripts/source_provenance_check.py &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_source_provenance_check.py ;;
+    licences)    python3 scripts/licence_check.py &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_licence_check.py ;;
+    licences-wheels) python3 scripts/licence_check.py installed ;;
     prose)       python3 scripts/prose_check.py ;;
     content)     python3 scripts/staged_content_check.py --tracked ;;
     # `&&` and not two statements on two lines. A case arm returns the status
@@ -296,6 +304,7 @@ run_gate() {
     # first command can fail and be reported green.
     corpus)      python3 scripts/corpus_check.py --coverage &&
                  python3 scripts/corpus_check.py &&
+                 python3 scripts/corpus_check.py --decode-digests &&
                  python3 scripts/corpus_tests.py --metadata-check &&
                  cargo test -p ocelli-dicom --test corpus -- --ignored ;;
     # F-011. The reference half renders and the comparator judges, and the gate
@@ -450,7 +459,7 @@ gates_cmd() {
         # has `needs_gpu = no` and an `#[ignore]`d test therefore ran in NO
         # profile at all, including `--sprint`. It is an ADDITION to the set CI
         # does not run, so D-04's row stays true.
-        case "$name" in oracle|corpus|guards-deep|quirk-mutations|gpu) continue ;; esac
+        case "$name" in oracle|corpus|guards-deep|quirk-mutations|gpu|licences-wheels) continue ;; esac
         selected+=("$name")
       done ;;
     --sprint|--all)

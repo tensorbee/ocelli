@@ -60,6 +60,68 @@ import corpus_check  # noqa: E402
 import corpus_synth  # noqa: E402
 
 
+# One read-back route per SYNTAX_CASES filename. The helper owns the choice.
+# No route relies on pydicom plugin order. Colour conversion for the baseline
+# colour case happens inside libjpeg-turbo and this helper does not convert
+# a second time.
+READ_BACK = {
+    "implicit_vr_le.dcm": "native",
+    "explicit_vr_le.dcm": "native",
+    "deflated_explicit_vr_le.dcm": "native",
+    "explicit_vr_be.dcm": "native",
+    "rle_lossless.dcm": "pylibjpeg",
+    "jpeg_baseline_rgb8.dcm": "jpeg8-rgb",
+    "jpeg_extended_12.dcm": "jpeg8",
+    "jpeg_lossless_p14.dcm": "ljpeg",
+    "jpeg_lossless_p14_sv1.dcm": "ljpeg",
+    "jpegls_lossless.dcm": "pyjpegls",
+    "jpegls_lossless_rgb8.dcm": "pyjpegls",
+    "jpegls_near_lossless.dcm": "pyjpegls",
+    "j2k_lossless.dcm": "pylibjpeg",
+    "j2k_lossy.dcm": "pylibjpeg",
+    "htj2k_lossless.dcm": "pylibjpeg",
+    "htj2k_lossless_rpcl.dcm": "pylibjpeg",
+    "htj2k_lossy.dcm": "pylibjpeg",
+}
+
+# imagecodecs.__version__ and the string jpeg8_version() reports.
+DECODED_WITH = {
+    "imagecodecs": "2026.10.10",
+    "jpeg8_version": "libjpeg_turbo 3.2.0/8.0",
+}
+
+
+def read_back(ds: "pydicom.Dataset", name: str):
+    """Decode one syntax case through its declared route."""
+    route = READ_BACK[name]
+    if route == "native":
+        return pydicom.pixels.pixel_array(ds)
+    if route == "pylibjpeg":
+        return pydicom.pixels.pixel_array(ds, decoding_plugin="pylibjpeg")
+    if route == "pyjpegls":
+        return pydicom.pixels.pixel_array(ds, decoding_plugin="pyjpegls")
+    import imagecodecs
+    from pydicom.encaps import generate_frames
+    fragment = next(generate_frames(ds.PixelData, number_of_frames=1))
+    if route == "ljpeg":
+        return imagecodecs.ljpeg_decode(fragment)
+    if route == "jpeg8":
+        return imagecodecs.jpeg8_decode(fragment)
+    if route == "jpeg8-rgb":
+        return imagecodecs.jpeg8_decode(fragment, outcolorspace="RGB")
+    raise AssertionError(f"unknown read-back route {route}")
+
+
+def decode_array_sha256(array) -> str:
+    """SHA-256 of dtype, shape and bytes. The digest table uses this form."""
+    import hashlib
+    values = np.ascontiguousarray(array)
+    head = (
+        f"{values.dtype.str} {','.join(str(int(n)) for n in values.shape)}\n"
+    ).encode("ascii")
+    return hashlib.sha256(head + values.tobytes()).hexdigest()
+
+
 # ---------------------------------------------------------------------------
 # The hand-computed fixture table.
 # ---------------------------------------------------------------------------
@@ -294,10 +356,15 @@ class SigmoidFixture(unittest.TestCase):
 # three quarters of it. Hence the name, and hence the selector below keying on
 # PhotometricInterpretation. Shipped 0.0157, and 0.0196 on a transposed variant
 # of the same shape, so this bound is 1.5 times the worst measured.
+# Re-measured with imagecodecs jpeg8_decode and outcolorspace RGB: 4 of 255,
+# ratio 0.015686. The bound is unchanged.
 YBR_EIGHT_BIT_MAX = 0.03
 # The three transform cases at their configured settings: JPEG extended at
 # quality 90 gives 0.00049, JPEG 2000 at ratio 20 gives 0.00003, HTJ2K at
 # qstep 0.001 gives 0.00063, so this is the worst of them rounded up an order.
+# Re-measured with imagecodecs jpeg8_decode: the extended 12-bit case is 2 of
+# 4095, ratio 0.000488. JPEG 2000 and HTJ2K stay on pylibjpeg and the figures
+# above are unchanged. The bound is unchanged.
 TRANSFORM_MAX = 0.005
 
 # The identity constants a regenerated case must carry. Written out here rather
@@ -567,7 +634,7 @@ class Conformance(unittest.TestCase):
                 reference = pydicom.dcmread(
                     str(CORPUS / "syntax" / corpus_synth.SYNTAX_REFERENCE[name]))
                 self.assertTrue(
-                    np.array_equal(ds.pixel_array, reference.pixel_array),
+                    np.array_equal(read_back(ds, name), reference.pixel_array),
                     f"{name} declares a lossless syntax and did not round-trip")
 
     def test_jpeg_ls_near_lossless_holds_its_declared_near_bound(self) -> None:
@@ -576,7 +643,7 @@ class Conformance(unittest.TestCase):
         asserted exactly rather than as a sanity range."""
         ds = self.case("jpegls_near_lossless.dcm")
         reference = pydicom.dcmread(str(CORPUS / "syntax" / "explicit_vr_le.dcm"))
-        error = np.abs(ds.pixel_array.astype(np.int64)
+        error = np.abs(read_back(ds, "jpegls_near_lossless.dcm").astype(np.int64)
                        - reference.pixel_array.astype(np.int64))
         self.assertLessEqual(int(error.max()), corpus_synth.JPEG_LS_NEAR)
 
@@ -600,7 +667,7 @@ class Conformance(unittest.TestCase):
                 ds = self.case(name)
                 reference = pydicom.dcmread(
                     str(CORPUS / "syntax" / corpus_synth.SYNTAX_REFERENCE[name]))
-                got, want = ds.pixel_array, reference.pixel_array
+                got, want = read_back(ds, name), reference.pixel_array
                 self.assertEqual(got.shape, want.shape)
                 full_scale = float(1 << ds.BitsStored) - 1.0
                 error = np.abs(got.astype(np.float64) - want.astype(np.float64))
@@ -648,6 +715,36 @@ class Conformance(unittest.TestCase):
         cannot parse must not be quietly declared to be one of the four."""
         with self.assertRaises(self.failureException):
             self.codestream_method(b"\x00\x01\x02\x03")
+
+
+class ReaderRoutes(unittest.TestCase):
+    """Every syntax case names one decoder, and the decoder version is pinned."""
+
+    def test_every_syntax_has_one_declared_decoder(self) -> None:
+        self.assertEqual(set(READ_BACK), set(corpus_synth.SYNTAX_CASES))
+        allowed = {"native", "pylibjpeg", "pyjpegls", "ljpeg", "jpeg8",
+                   "jpeg8-rgb"}
+        for name, route in READ_BACK.items():
+            with self.subTest(case=name):
+                self.assertIn(route, allowed)
+                self.assertNotIn("gdcm", route)
+                self.assertNotIn("pylibjpeg-libjpeg", route)
+        self.assertEqual(READ_BACK["jpeg_lossless_p14.dcm"], "ljpeg")
+        self.assertEqual(READ_BACK["jpeg_lossless_p14_sv1.dcm"], "ljpeg")
+        self.assertEqual(READ_BACK["jpegls_lossless.dcm"], "pyjpegls")
+        self.assertEqual(READ_BACK["jpegls_lossless_rgb8.dcm"], "pyjpegls")
+        self.assertEqual(READ_BACK["jpegls_near_lossless.dcm"], "pyjpegls")
+        self.assertEqual(READ_BACK["jpeg_baseline_rgb8.dcm"], "jpeg8-rgb")
+        self.assertEqual(READ_BACK["jpeg_extended_12.dcm"], "jpeg8")
+        self.assertEqual(READ_BACK["j2k_lossy.dcm"], "pylibjpeg")
+        self.assertEqual(READ_BACK["htj2k_lossy.dcm"], "pylibjpeg")
+        self.assertEqual(READ_BACK["rle_lossless.dcm"], "pylibjpeg")
+
+    def test_reader_versions_match_decoded_with(self) -> None:
+        import imagecodecs
+        self.assertEqual(imagecodecs.__version__, DECODED_WITH["imagecodecs"])
+        self.assertEqual(imagecodecs.jpeg8_version(),
+                         DECODED_WITH["jpeg8_version"])
 
 
 class EncoderProvenance(unittest.TestCase):

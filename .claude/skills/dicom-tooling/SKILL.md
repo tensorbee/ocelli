@@ -30,8 +30,12 @@ uv sync --locked
 brew install dcmtk          # macOS
 ```
 
-`pylibjpeg-openjpeg` matters: without a decoder handler, `ds.pixel_array`
-raises on every compressed transfer syntax, which is most of a real corpus.
+`uv sync --locked` installs the corpus readers. `imagecodecs` reads the JPEG
+lossless rows and the two DCT rows. `pyjpegls` reads JPEG-LS. `pylibjpeg`
+with `pylibjpeg-openjpeg` and `pylibjpeg-rle` reads JPEG 2000, HTJ2K and RLE.
+`pylibjpeg-openjpeg` still matters for the JPEG 2000 rows. Without a decoder
+handler, `ds.pixel_array` raises on a compressed transfer syntax that has no
+declared route.
 
 ---
 

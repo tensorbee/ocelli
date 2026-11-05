@@ -1,0 +1,266 @@
+"""SPDX Annex D and the licence readers.
+
+The expressions are the ones Annex D's precedence decides. They are not
+copied from a run of this checker.
+"""
+
+import importlib.util
+import json
+import os
+import subprocess
+import tempfile
+import textwrap
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+ALLOW = {
+    "mit", "apache-2.0", "bsd-2-clause", "bsd-3-clause",
+    "apache-2.0 with llvm-exception",
+}
+
+
+def load():
+    spec = importlib.util.spec_from_file_location(
+        "licence_check_under_test", ROOT / "licence_check.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+L = load()
+
+
+class Spdx(unittest.TestCase):
+    def test_and_binds_before_or(self) -> None:
+        node = L.parse_expression("MIT OR Apache-2.0 AND GPL-3.0-only")
+        self.assertEqual(node[0], "or")
+        self.assertEqual(node[2][0], "and")
+        self.assertTrue(L.expression_allowed(
+            "MIT OR Apache-2.0 AND GPL-3.0-only", ALLOW))
+
+    def test_parentheses_force_the_other_grouping(self) -> None:
+        node = L.parse_expression("(MIT OR Apache-2.0) AND GPL-3.0-only")
+        self.assertEqual(node[0], "and")
+        self.assertEqual(node[1][0], "or")
+        self.assertFalse(L.expression_allowed(
+            "(MIT OR Apache-2.0) AND GPL-3.0-only", ALLOW))
+
+    def test_with_is_a_whole_compound(self) -> None:
+        self.assertTrue(L.expression_allowed(
+            "Apache-2.0 WITH LLVM-exception", ALLOW))
+        self.assertFalse(L.expression_allowed(
+            "GPL-2.0-only WITH Classpath-exception-2.0", ALLOW))
+
+    def test_identifiers_are_case_insensitive_and_operators_are_not(self) -> None:
+        self.assertTrue(L.expression_allowed("mit", ALLOW))
+        self.assertFalse(L.expression_allowed("MIT or Apache-2.0", ALLOW))
+
+    def test_non_expressions_are_refused(self) -> None:
+        for text in ("LicenseRef-x", "UNLICENSED", "SEE LICENSE IN x", ""):
+            with self.subTest(text=text):
+                self.assertFalse(L.expression_allowed(text, ALLOW))
+
+    def test_a_disjunction_is_satisfied_by_one_permissive_term(self) -> None:
+        self.assertTrue(L.expression_allowed(
+            "MIT OR Apache-2.0 OR LGPL-2.1-or-later", ALLOW))
+
+    def test_an_identifier_may_start_with_a_digit(self) -> None:
+        allow = ALLOW | {"0bsd", "zlib", "cc0-1.0"}
+        self.assertTrue(L.expression_allowed(
+            "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0", allow))
+
+
+class CargoDenyPin(unittest.TestCase):
+    def test_a_different_version_names_the_install_command(self) -> None:
+        self._with_stub("#!/bin/sh\necho 'cargo-deny 0.1.0'\n", "0.19.0")
+
+    def test_a_missing_binary_names_the_install_command(self) -> None:
+        empty = tempfile.mkdtemp()
+        with patch.dict(os.environ, {"PATH": empty}):
+            _found, problems = L._cargo_deny_version()
+        self.assertTrue(any(L.CARGO_DENY_INSTALL in problem for problem in problems))
+
+    def _with_stub(self, script: str, needle: str) -> None:
+        directory = tempfile.mkdtemp()
+        cargo = Path(directory) / "cargo"
+        cargo.write_text(script)
+        cargo.chmod(0o755)
+        with patch.dict(os.environ, {"PATH": directory}):
+            _found, problems = L._cargo_deny_version()
+        self.assertTrue(problems)
+        self.assertTrue(any(needle in problem for problem in problems))
+        self.assertTrue(any(L.CARGO_DENY_INSTALL in problem for problem in problems))
+
+
+class Tables(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self._patch = patch.object(L, "ROOT", self.root)
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+        (self.root / "deny.toml").write_text(
+            '[licenses]\nallow = ["MIT", "Apache-2.0", "BSD-3-Clause"]\n')
+        (self.root / "ci").mkdir()
+        (self.root / "uv.lock").write_text(textwrap.dedent("""\
+            version = 1
+            [[package]]
+            name = "pyyaml"
+            version = "6.0.3"
+            [[package]]
+            name = "ocelli-tooling"
+            version = "0.0.0"
+            """))
+        (self.root / "ci" / "licences.toml").write_text(textwrap.dedent("""\
+            [[python]]
+            package = "pyyaml"
+            version = "6.0.3"
+            spdx = "MIT"
+            metadata = "MIT"
+
+            [[exception]]
+            ecosystem = "npm"
+            package = "caniuse-lite"
+            version = "1.0.0"
+            licence = "CC-BY-4.0"
+            reason = "data"
+            scope = "dev-only"
+            decided = "2026-11-05"
+            decided_by = "operator"
+            """))
+        for rel in ("package-lock.json", "tools/oracle/package-lock.json",
+                    "tools/bench/package-lock.json"):
+            path = self.root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"packages": {
+                "": {"name": "root"},
+                "node_modules/left-pad": {"version": "1.0.0", "license": "MIT"},
+            }}))
+        for folder, name in (("packages/core", "@ocelli/core"),
+                             ("packages/react", "@ocelli/react")):
+            path = self.root / folder
+            path.mkdir(parents=True)
+            (path / "package.json").write_text(
+                '{"name": "' + name + '", "dependencies": {}}')
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+
+    def test_a_gpl_entry_is_refused_in_each_lockfile(self) -> None:
+        for rel in ("package-lock.json", "tools/oracle/package-lock.json",
+                    "tools/bench/package-lock.json"):
+            path = self.root / rel
+            data = json.loads(path.read_text())
+            data["packages"]["node_modules/probe-copyleft"] = {
+                "version": "0.0.1", "license": "GPL-3.0-only"}
+            path.write_text(json.dumps(data))
+        problems = L.npm_problems(L.allowlist())
+        for rel in ("package-lock.json", "tools/oracle/package-lock.json",
+                    "tools/bench/package-lock.json"):
+            self.assertTrue(
+                any(rel in problem and "GPL-3.0-only" in problem
+                    for problem in problems),
+                problems)
+
+    def test_a_missing_licence_is_refused(self) -> None:
+        path = self.root / "package-lock.json"
+        data = json.loads(path.read_text())
+        data["packages"]["node_modules/rechoir"] = {"version": "0.6.2"}
+        path.write_text(json.dumps(data))
+        problems = L.npm_problems(L.allowlist())
+        self.assertTrue(any("has no licence and no exception" in p for p in problems))
+
+    def test_an_exception_needs_every_field_and_a_known_scope(self) -> None:
+        rows = [{"ecosystem": "npm", "package": "x", "version": "1",
+                 "licence": "MIT", "scope": "dev-only"}]
+        problems = L.exception_problems(rows)
+        self.assertTrue(any("missing reason" in p for p in problems))
+        self.assertTrue(any("missing decided" in p for p in problems))
+        self.assertTrue(any("missing decided_by" in p for p in problems))
+
+    def test_a_stale_exception_is_refused(self) -> None:
+        problems = L.stale_problems()
+        self.assertTrue(any("caniuse-lite@1.0.0" in p for p in problems))
+
+    def test_a_shipped_exception_is_refused(self) -> None:
+        (self.root / "packages" / "core" / "package.json").write_text(
+            '{"name": "@ocelli/core", "dependencies": {"dcmjs": "0.52.2"}}')
+        (self.root / "packages" / "react" / "package.json").write_text(
+            '{"name": "@ocelli/react", "dependencies": {"@ocelli/core": "0.1.0"}}')
+        data = json.loads((self.root / "package-lock.json").read_text())
+        data["packages"]["node_modules/dcmjs"] = {
+            "version": "0.52.2", "license": "MIT", "dependencies": {}}
+        data["packages"]["node_modules/@ocelli/core"] = {
+            "version": "0.1.0", "license": "MIT", "link": True,
+            "resolved": "packages/core"}
+        (self.root / "package-lock.json").write_text(json.dumps(data))
+        (self.root / "ci" / "licences.toml").write_text(textwrap.dedent("""\
+            [[python]]
+            package = "pyyaml"
+            version = "6.0.3"
+            spdx = "MIT"
+            metadata = "MIT"
+
+            [[exception]]
+            ecosystem = "npm"
+            package = "dcmjs"
+            version = "0.52.2"
+            licence = "MIT"
+            reason = "probe"
+            scope = "dev-only"
+            decided = "2026-11-05"
+            decided_by = "probe"
+            """))
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        problems = L.npm_problems(L.allowlist())
+        self.assertTrue(any("published runtime closure" in p for p in problems))
+
+    def test_python_rows_must_cover_the_lock_and_be_allowed(self) -> None:
+        problems = L.python_problems(L.allowlist())
+        self.assertEqual(problems, [])
+        text = (self.root / "ci" / "licences.toml").read_text().replace(
+            'spdx = "MIT"', 'spdx = "GPL-3.0-only"', 1)
+        (self.root / "ci" / "licences.toml").write_text(text)
+        problems = L.python_problems(L.allowlist())
+        self.assertTrue(any("GPL-3.0-only" in p for p in problems))
+        (self.root / "ci" / "licences.toml").write_text("")
+        problems = L.python_problems(L.allowlist())
+        self.assertTrue(any("has no licence row" in p for p in problems))
+        self.assertFalse(any("ocelli-tooling" in p for p in problems))
+
+
+class WheelBytes(unittest.TestCase):
+    def test_empty_marker_and_library_rules(self) -> None:
+        self.assertTrue(L.licence_bytes_problems("a/LICENSE", b"", None))
+        self.assertEqual(
+            L.licence_bytes_problems("a/LICENSE", b"", {"empty": True}), [])
+        marked = L.licence_bytes_problems(
+            "a/LICENSE", b"see GPLv2\n", None)
+        self.assertTrue(any("copyleft marker" in p for p in marked))
+        recorded = L.licence_bytes_problems(
+            "a/LICENSE-lzf", b"see GPLv2\n",
+            {"markers": ["GPLv2"], "spdx": "BSD-2-Clause",
+             "note": "the alternative is not taken"})
+        self.assertEqual(recorded, [])
+        refused = L.licence_bytes_problems(
+            "a/LICENSE-lzf", b"see GPLv2\n",
+            {"markers": ["GPLv2"], "spdx": "MIT", "note": "not taken"})
+        self.assertTrue(refused)
+        extra = L.bundle_list_problems(
+            ["pkg/.dylibs/extra.dylib"], "darwin-arm64", set())
+        self.assertTrue(any("not on the recorded list" in p for p in extra))
+        self.assertEqual(
+            L.bundle_list_problems(
+                ["pkg/.dylibs/libz.dylib"], "darwin-arm64",
+                {"pkg/.dylibs/libz.dylib"}),
+            [])
+        missing = L.bundle_list_problems(["pkg.libs/libz.so"], "freebsd-x86_64", None)
+        self.assertTrue(any("no recorded bundled-library list" in p for p in missing))
+
+
+class RealTree(unittest.TestCase):
+    def test_notices_and_holder_match_the_tree(self) -> None:
+        self.assertEqual(L.notices_problems(), [])
+        self.assertEqual(L.holder_problems(), [])

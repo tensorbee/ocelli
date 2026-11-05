@@ -126,18 +126,20 @@ OPENJPH_INVENTORY_SHA256 = (
     "f6aef8e7211a9ab5b562414d673f5df5db01f99a3cf926ee90d01d0e65a14772"
 )
 OPENJPH_PUBLISHED_FILES = 50
-# The notice material F-027 could not obtain. crates.io reports no repository
-# URL for this package, so there is nowhere to fetch a root LICENSE from.
+# Upstream OpenJPH LICENSE at tag 0.26.3. The redistribution check pins these
+# bytes. crates.io still reports no repository URL, so the file is fetched
+# from the OpenJPH tag the port names.
+OPENJPH_LICENCE_SHA256 = "5ddf5177863dfc9ab65fa129d587db651241f00e21ed2427b218bea997591f98"
 OPENJPH_NOTICE_FILES = ("LICENSE", "LICENCE", "COPYING", "NOTICE")
 # What this repository may add beside the published archive. Unlike the ritk
 # vendor there is no patch, because the published manifest already yields the
 # graph section 15.2 wants.
 #
-# **The notice filenames are permitted additions even though none is present.**
-# The probe `pins.openjph-notice` measured why: without them, obtaining the BSD
-# notice and placing it here would trip "carries an unrecorded file" and the
-# redistribution gate could never be satisfied by the only action that is
-# supposed to satisfy it. A gate with no reachable green state is not a gate.
+# The notice filenames stay permitted additions. LICENSE is present and
+# OPENJPH_LICENCE_SHA256 pins it. The other three names stay permitted so a
+# later notice is not an unrecorded file. Without that permission, placing
+# the notice would trip "carries an unrecorded file" and the redistribution
+# gate could never be satisfied by the action that is supposed to satisfy it.
 OPENJPH_ADDITIONS = {"PACKAGE-INVENTORY.sha256", *OPENJPH_NOTICE_FILES}
 
 PACKAGE_LICENCES = ("LICENSE-MIT", "LICENSE-APACHE")
@@ -564,39 +566,37 @@ def check_openjph_vendor(
 
 
 def check_openjph_redistribution(vendor: Path = OPENJPH_VENDOR) -> list[str]:
-    """Refuse to publish while the BSD notice material is absent.
+    """Refuse to publish while the BSD notice is absent or its bytes differ.
 
-    **This refusal is expected to fire.** `openjph-core` 0.1.0's published
-    archive carries no `LICENSE`, `LICENCE`, `COPYING` or `NOTICE`, and
-    crates.io reports no repository URL where a root file could be obtained.
-    Its registry metadata and normalized manifest both declare `BSD-2-Clause`,
-    which permits redistribution **with its notice conditions retained**, and
-    the material that would satisfy them is what this repository does not have.
-
-    `docs/SOURCE-POLICY.md` decided `Depend? yes` for this package and recorded
-    the missing notice as a distribution risk. The S09 design round decided that
-    risk is held by a gate rather than by a note, so this check exists, fails
-    today, and names what would close it.
+    `openjph-core` 0.1.0's published archive carries no notice. The file at
+    `vendor/openjph-core-0.1.0/LICENSE` is the upstream OpenJPH text at tag
+    0.26.3, and `OPENJPH_LICENCE_SHA256` pins those bytes. A missing LICENSE
+    keeps the original refusal, including when some other notice name is
+    present. A present LICENSE whose bytes differ is refused on the hash.
 
     It is NOT in the `pins` gate and therefore not in `--floor`, `--sprint` or
-    `--all`, which in this repository are the same set. Those profiles gate
-    development, and the decision was that development proceeds while
-    publication cannot. `/release` invokes this flag, and
-    `guards.openjph-notice` is what proves the refusal still refuses.
+    `--all`. `/release` invokes this flag. The probes `pins.openjph-notice`
+    and `pins.openjph-notice-hash` prove both refusals.
     """
-    present = [name for name in OPENJPH_NOTICE_FILES if (vendor / name).is_file()]
-    if present:
-        return []
-    return [
-        "openjph-core 0.1.0 carries no BSD notice or copyright material, so it "
-        "cannot be redistributed. Its crates.io archive has no "
-        f"{', '.join(OPENJPH_NOTICE_FILES)} and the registry reports no "
-        "repository URL to obtain one from. BSD-2-Clause permits "
-        "redistribution only with its notice conditions retained. Obtain the "
-        f"complete notice, place it at {vendor.name}/LICENSE, record its hash "
-        "beside the other vendored licence hashes, and see D-22 in "
-        "docs/hld/DEVIATIONS.md."
-    ]
+    licence = vendor / "LICENSE"
+    if not licence.is_file():
+        return [
+            "openjph-core 0.1.0 carries no BSD notice or copyright material, so it "
+            "cannot be redistributed. Its crates.io archive has no "
+            f"{', '.join(OPENJPH_NOTICE_FILES)} and the registry reports no "
+            "repository URL to obtain one from. BSD-2-Clause permits "
+            "redistribution only with its notice conditions retained. Obtain the "
+            f"complete notice, place it at {vendor.name}/LICENSE, record its hash "
+            "beside the other vendored licence hashes, and see D-22 in "
+            "docs/hld/DEVIATIONS.md."
+        ]
+    digest = file_sha256(licence)
+    if digest != OPENJPH_LICENCE_SHA256:
+        return [
+            "openjph-core 0.1.0 LICENSE sha256 is "
+            f"{digest}, expected {OPENJPH_LICENCE_SHA256}"
+        ]
+    return []
 
 
 def main(argv: list[str] | None = None) -> int:

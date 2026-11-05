@@ -54,7 +54,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from .sandbox import Sandbox
+from .sandbox import Sandbox, SandboxError
 
 Runner = Callable[[Sandbox], "subprocess.CompletedProcess[str]"]
 
@@ -350,11 +350,136 @@ def _change_openjph_vcs_revision(box: Sandbox) -> None:
     )
 
 
-def _plant_openjph_notice(box: Sandbox) -> None:
-    box.write(
-        "vendor/openjph-core-0.1.0/LICENSE",
-        "Copyright (c) placeholder\nBSD-2-Clause notice text\n",
-    )
+def _delete_openjph_notice(box: Sandbox) -> None:
+    box.delete("vendor/openjph-core-0.1.0/LICENSE")
+
+
+def _alter_openjph_notice(box: Sandbox) -> None:
+    box.append("vendor/openjph-core-0.1.0/LICENSE", "\n")
+
+
+def _plant_npm_licence(box: Sandbox, name: str, body: str) -> None:
+    needle = '"packages": {'
+    plant = '"packages": {\n    "node_modules/' + name + '": ' + body + ","
+    for rel in ("package-lock.json", "tools/oracle/package-lock.json",
+                "tools/bench/package-lock.json"):
+        box.substitute(rel, needle, plant)
+
+
+def _plant_npm_copyleft(box: Sandbox) -> None:
+    _plant_npm_licence(
+        box, "probe-copyleft",
+        '{"version": "0.0.1", "license": "GPL-3.0-only"}')
+
+
+def _plant_npm_undeclared(box: Sandbox) -> None:
+    _plant_npm_licence(box, "probe-undeclared", '{"version": "0.0.2"}')
+
+
+def _plant_stale_exception(box: Sandbox) -> None:
+    box.append(
+        "ci/licences.toml",
+        "\n[[exception]]\n"
+        'ecosystem = "npm"\n'
+        'package = "not-a-real-package"\n'
+        'version = "9.9.9"\n'
+        'licence = "MIT"\n'
+        'reason = "probe"\n'
+        'scope = "dev-only"\n'
+        'decided = "2026-11-05"\n'
+        'decided_by = "probe"\n')
+
+
+def _plant_shipped_exception(box: Sandbox) -> None:
+    lock = json.loads(box.read("package-lock.json"))
+    version = ""
+    for key, entry in lock.get("packages", {}).items():
+        if key == "node_modules/dcmjs" or key.endswith("/node_modules/dcmjs"):
+            version = str(entry.get("version", ""))
+            break
+    if not version:
+        raise SandboxError("dcmjs is not in the root lock")
+    box.append(
+        "ci/licences.toml",
+        "\n[[exception]]\n"
+        'ecosystem = "npm"\n'
+        'package = "dcmjs"\n'
+        f'version = "{version}"\n'
+        'licence = "MIT"\n'
+        'reason = "probe"\n'
+        'scope = "dev-only"\n'
+        'decided = "2026-11-05"\n'
+        'decided_by = "probe"\n')
+
+
+def _rename_python_row(box: Sandbox) -> None:
+    box.substitute("ci/licences.toml", 'package = "pyyaml"',
+                   'package = "pyyaml-renamed"')
+
+
+def _copyleft_python_row(box: Sandbox) -> None:
+    box.substitute("ci/licences.toml", 'spdx = "BSD-3-Clause"',
+                   'spdx = "GPL-3.0-only"')
+
+
+def _copyleft_openjph(box: Sandbox) -> None:
+    box.substitute("vendor/openjph-core-0.1.0/Cargo.toml",
+                   'license = "BSD-2-Clause"', 'license = "GPL-3.0-only"')
+
+
+def _disjoin_openjph(box: Sandbox) -> None:
+    box.substitute("vendor/openjph-core-0.1.0/Cargo.toml",
+                   'license = "BSD-2-Clause"',
+                   'license = "MIT OR GPL-3.0-only"')
+
+
+def _drift_notice(box: Sandbox) -> None:
+    box.append("vendor/openjph-core-0.1.0/LICENSE", "\n")
+
+
+def _drift_holder(box: Sandbox) -> None:
+    box.substitute("LICENSE-MIT", "Tensorbee Limited", "Tensorbee")
+
+
+def _narrow_manifest_spdx(box: Sandbox) -> None:
+    box.substitute("package.json", '"license": "MIT OR Apache-2.0"',
+                   '"license": "MIT"')
+
+
+def _plant_python_dependency(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    box.substitute(
+        "pyproject.toml",
+        "dependencies = [",
+        'dependencies = [\n  "' + blocked + 'j2k>=1",')
+
+
+def _plant_lock_entry(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    box.append("uv.lock", f'\nname = "lib{blocked}"\n')
+
+
+def _plant_prefixed_lock_name(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    box.substitute(
+        "package-lock.json",
+        '"packages": {',
+        '"packages": {\n    "node_modules/lib' + blocked + 'j2k": '
+        '{"version": "0.0.1", "license": "MIT"},')
+
+
+def _plant_agent_trailer(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    target = None
+    for path in sorted((box.path / ".claude" / "reviews").glob("*.md")):
+        target = path.relative_to(box.path).as_posix()
+        break
+    if target is None:
+        raise SandboxError("no tracked review to append")
+    box.append(
+        target,
+        f"\nOcelli-Generated-By: {blocked}\n"
+        "This names the agent. It is not a read-blocked project.\n")
 
 
 def _remove_ritk_published_source(box: Sandbox) -> None:
@@ -6844,6 +6969,133 @@ GUARDS: tuple[Guard, ...] = (
         ),
     ),
 
+    # -- licences ------------------------------------------------------------
+    Guard(
+        id="licences",
+        file="scripts/licence_check.py",
+        gate="licences licences-wheels",
+        spec="F-217 and SPDX 2.3 Annex D",
+        refuses="A dependency whose licence is not on the one allowlist, "
+                "an exception that is stale or sits in a published runtime "
+                "closure, a Python package with no recorded row, a bundled "
+                "wheel file that carries a copyleft marker or an unrecorded "
+                "library, a third-party notice that drifts, and a holder or "
+                "manifest SPDX line that drifts.",
+        claims=("*",),
+        probes=(
+            Probe("licences.npm-copyleft", _plant_npm_copyleft,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "GPL-3.0-only",
+                  note="The same entry is planted in each of the three "
+                       "lockfiles."),
+            Probe("licences.npm-undeclared", _plant_npm_undeclared,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "has no licence and no exception"),
+            Probe("licences.exception-stale", _plant_stale_exception,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "stale exception"),
+            Probe("licences.exception-shipped", _plant_shipped_exception,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "published runtime closure",
+                  note="dcmjs is in the published runtime closure. Scope "
+                       "dev-only does not waive that."),
+            Probe("licences.python-unrecorded", _rename_python_row,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "has no licence row"),
+            Probe("licences.python-copyleft", _copyleft_python_row,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is not allowed"),
+            Probe("licences.notice-drift", _drift_notice,
+                  script("python3", "scripts/licence_check.py", "notices"),
+                  "sha256"),
+            Probe("licences.holder-drift", _drift_holder,
+                  script("python3", "scripts/licence_check.py", "holder"),
+                  "does not name Tensorbee Limited"),
+            Probe("licences.manifest-spdx", _narrow_manifest_spdx,
+                  script("python3", "scripts/licence_check.py", "holder"),
+                  "expected MIT OR Apache-2.0"),
+            Probe("licences.rust-copyleft", _copyleft_openjph,
+                  script("python3", "scripts/licence_check.py", "rust"),
+                  "openjph-core",
+                  needs="cargo", profile="deep",
+                  note="The vendor manifest is part of the graph. A "
+                       "registry-only reader would stay green."),
+            Probe("licences.rust-disjunction", _disjoin_openjph,
+                  script("python3", "scripts/licence_check.py", "rust"),
+                  "OK: licence check",
+                  needs="cargo", profile="deep", polarity="accept",
+                  note="MIT OR a copyleft identifier is satisfied by MIT. "
+                       "A token scan would refuse it."),
+            Probe(
+                "licences.wheel-marker", None,
+                python_snippet(
+                    "licence_bytes_problems, marker",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.licence_bytes_problems(\n"
+                    "    'pkg/licenses/LICENSE',\n"
+                    "    b'GNU General Public License\\n', None)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "copyleft marker",
+                level=1,
+                control=python_snippet(
+                    "licence_bytes_problems, healthy",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.licence_bytes_problems(\n"
+                    "    'pkg/licenses/LICENSE', b'MIT License\\n', None)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n")),
+            Probe(
+                "licences.wheel-library", None,
+                python_snippet(
+                    "bundle_list_problems, extra",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.bundle_list_problems(\n"
+                    "    ['pkg/.dylibs/libextra.dylib'], 'darwin-arm64', set())\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "is not on the recorded list",
+                level=1,
+                control=python_snippet(
+                    "bundle_list_problems, healthy",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.bundle_list_problems(\n"
+                    "    ['pkg/.dylibs/libz.dylib'], 'darwin-arm64',\n"
+                    "    {'pkg/.dylibs/libz.dylib'})\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n")),
+            Probe(
+                "licences.wheel-platform", None,
+                python_snippet(
+                    "bundle_list_problems, platform",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.bundle_list_problems(\n"
+                    "    ['pkg.libs/libz.so'], 'freebsd-x86_64', None)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "no recorded bundled-library list",
+                level=1,
+                control=python_snippet(
+                    "bundle_list_problems, known platform",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.bundle_list_problems([], 'darwin-arm64', set())\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n")),
+        ),
+    ),
+
     # -- source policy ------------------------------------------------------
     Guard(
         id="provenance",
@@ -6863,6 +7115,21 @@ GUARDS: tuple[Guard, ...] = (
             Probe("provenance.unqualified-mention", _blocked_mention,
                   script("python3", "scripts/source_provenance_check.py"),
                   "with no statement that it is out of bounds"),
+            Probe("provenance.python-dependency", _plant_python_dependency,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "depends on"),
+            Probe("provenance.lock-entry", _plant_lock_entry,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "depends on"),
+            Probe("provenance.prefixed-name", _plant_prefixed_lock_name,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "depends on"),
+            Probe("provenance.agent-trailer", _plant_agent_trailer,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "OK: source-provenance policy clean",
+                  polarity="accept",
+                  note="The trailer names the agent. Prose matching is "
+                       "unchanged, and the planted sentence negates a read."),
         ),
         limit="The URL clause has no probe, deliberately. "
               "`docs/SOURCE-POLICY.md` names the projects and does not name "
@@ -6904,9 +7171,8 @@ GUARDS: tuple[Guard, ...] = (
                 "inventory or its immutable digest, a wrong packaged VCS "
                 "revision, workspace wiring that is not the exact path and "
                 "version, and, at `--require-redistribution` only, a vendored "
-                "package carrying no licence notice. That last refusal fires "
-                "on the unmodified tree today and no development profile runs "
-                "the flag.",
+                "package carrying no licence notice or a notice whose bytes "
+                "differ from the recorded hash.",
         claims=("*",),
         probes=(
             Probe("pins.range", _relax_wgpu_pin,
@@ -6991,26 +7257,20 @@ GUARDS: tuple[Guard, ...] = (
                   note="D-22. The packaged VCS revision is half of this "
                        "package's provenance and the archive digest is the "
                        "other half. It has one release and one owner."),
-            Probe("pins.openjph-notice", _plant_openjph_notice,
+            Probe("pins.openjph-notice", _delete_openjph_notice,
                   script("python3", "scripts/pin_and_size_check.py",
                          "--require-redistribution"),
-                  "pinned exactly",
-                  polarity="accept",
-                  control=script("python3", "scripts/pin_and_size_check.py",
-                                 "--require-redistribution"),
-                  control_status=1,
-                  control_expect="carries no BSD notice or copyright material",
-                  note="D-22, and this probe runs in BOTH directions because "
-                       "the refusal fires on the unmodified tree. The control "
-                       "is the unmutated repository, where the check must "
-                       "REFUSE and name the missing notice. The mutation "
-                       "plants a licence file, where it must ACCEPT. Without "
-                       "the second half this would be a hard-coded failure "
-                       "rather than a gate on a condition, and without the "
-                       "first half nothing would record that the condition is "
-                       "open today. No development profile runs this flag: "
-                       "`--floor`, `--sprint` and `--all` gate development and "
-                       "this gates publication. `/release` step 5 runs it."),
+                  "carries no BSD notice",
+                  note="D-22. The unmodified tree carries the upstream notice "
+                       "and the control accepts. Deleting the vendor LICENSE "
+                       "must refuse. No development profile runs this flag. "
+                       "`/release` step 5 runs it."),
+            Probe("pins.openjph-notice-hash", _alter_openjph_notice,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--require-redistribution"),
+                  "LICENSE sha256",
+                  note="D-22. One extra byte in the vendor LICENSE must "
+                       "refuse on the recorded hash."),
             Probe("pins.ritk-inventory", _remove_ritk_published_source,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "published file is absent: src/lib.rs",
@@ -9147,7 +9407,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("sprint-plan.milestone-summary-absent",
                   _sprint_plan_milestone_summary_deleted,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
-                  "carries no summary line for it",
+                  "carries no summary line under its heading",
                   note="The lines were compared by POSITION, so one absent "
                        "line shifted every line after it and the refusal "
                        "named the wrong milestone. They are matched on the "
@@ -9156,7 +9416,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("sprint-plan.milestone-summary-spurious",
                   _sprint_plan_extra_milestone_summary,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
-                  "has no milestone spanning those sprints",
+                  "summary lines and the generator writes one",
                   note="The other direction of the same span comparison. A "
                        "summary line is generated, so one the allocation "
                        "cannot account for is hand-written prose wearing a "
@@ -9180,7 +9440,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("sprint-plan.wrong-milestone-summary",
                   _sprint_plan_wrong_milestone_summary,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
-                  "milestone summary line"),
+                  "should read"),
             Probe("sprint-plan.stale-goal-line", _sprint_plan_stale_goal_line,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
                   "**Goal** line"),
@@ -9677,7 +9937,7 @@ GUARDS: tuple[Guard, ...] = (
                     "     'exports': {'.': {'import': './dist/index.js'}},\n"
                     "     'files': ['dist']};\n"
                     "names = ['package.json', 'README.md', 'LICENSE-MIT',\n"
-                    "         'LICENSE-APACHE'];\n"
+                    "         'LICENSE-APACHE', 'NOTICE'];\n"
                     "bad = p.check_tarball('core', m, names);\n"
                     "print('\\n'.join(bad));\n"
                     "sys.exit(1 if bad else 0)\n"),
@@ -9691,7 +9951,7 @@ GUARDS: tuple[Guard, ...] = (
                     "     'exports': {'.': {'import': './dist/index.js'}},\n"
                     "     'files': ['dist']};\n"
                     "names = ['package.json', 'README.md', 'LICENSE-MIT',\n"
-                    "         'LICENSE-APACHE', 'dist/index.js'];\n"
+                    "         'LICENSE-APACHE', 'NOTICE', 'dist/index.js'];\n"
                     "bad = p.check_tarball('core', m, names);\n"
                     "print('\\n'.join(bad));\n"
                     "sys.exit(1 if bad else 0)\n"),
@@ -11746,11 +12006,30 @@ CONSTANTS: tuple[Constant, ...] = (
              why="HLD Appendix C.2.1's Read column set to NO."),
     Constant("provenance", "scripts/source_provenance_check.py",
              "BLOCKED_URLS", r"^BLOCKED_URLS = \[(.*?)^\]"),
+    Constant("provenance", "scripts/source_provenance_check.py", "MANIFESTS",
+             r"^MANIFESTS = \{(.*?)^\}",
+             why="The manifests whose dependency names are extracted. "
+                 "Narrowing this set reopens the lockfile hole."),
     Constant("provenance", "scripts/source_provenance_check.py",
              "POLICY_FILES", r"^POLICY_FILES = \{(.*?)^\}",
              why="Files permitted to name a read-blocked project. Widening "
                  "this list to make a build green is the exact shape this "
                  "repository distrusts."),
+    Constant("pins", "scripts/pin_and_size_check.py", "OPENJPH_LICENCE_SHA256",
+             r'^OPENJPH_LICENCE_SHA256 = "(.*?)"$',
+             why="The upstream OpenJPH notice. A changed hash is a changed "
+                 "grant."),
+    Constant("licences", "deny.toml", "allow",
+             r"^allow = \[(.*?)^\]",
+             why="The one allowlist. Widening it admits a licence in every "
+                 "ecosystem at once."),
+    Constant("licences", "scripts/licence_check.py", "COPYLEFT_MARKERS",
+             r"^COPYLEFT_MARKERS = \((.*?)^\)",
+             why="The markers that refuse a bundled licence text."),
+    Constant("licences", "scripts/licence_check.py", "EXCEPTION_FIELDS",
+             r"^EXCEPTION_FIELDS = (\(.*?\))$",
+             why="The fields an exception must carry. Dropping one lets an "
+                 "approval through with no reason."),
     Constant("pins", "scripts/pin_and_size_check.py", "EXACT_PINNED",
              r"^EXACT_PINNED = \{(.*?)^\}"),
     Constant("pins", "scripts/pin_and_size_check.py", "PACKAGE_LICENCES",
