@@ -354,15 +354,27 @@ class WheelBytes(unittest.TestCase):
         self.assertTrue(any("copyleft marker" in p for p in marked))
         recorded = L.licence_bytes_problems(
             "a/LICENSE-lzf", b"see GPLv2\n",
-            _authorised(markers=["GPLv2"], spdx="BSD-2-Clause",
-                        licence="BSD-2-Clause",
-                        note="the alternative is not taken"))
+            _authorised(markers=["GPLv2"], licence="BSD-2-Clause",
+                        reason="the alternative is not taken",
+                        spdx="GPL-3.0-only", note="unrelated"))
         self.assertEqual(recorded, [])
-        refused = L.licence_bytes_problems(
+        # spdx and note can match while licence and reason do not. The check
+        # reads the fields the waiver rule requires, so the matching pair
+        # does not rescue the row.
+        diverged = L.licence_bytes_problems(
             "a/LICENSE-lzf", b"see GPLv2\n",
-            _authorised(markers=["GPLv2"], spdx="MIT", licence="MIT",
-                        note="not taken"))
-        self.assertTrue(refused)
+            _authorised(markers=["GPLv2"], spdx="BSD-2-Clause",
+                        note="the alternative is not taken",
+                        licence="MIT",
+                        reason="the alternative is not taken"))
+        self.assertTrue(any("GPLv2" in problem for problem in diverged), diverged)
+        silent_reason = L.licence_bytes_problems(
+            "a/LICENSE-lzf", b"see GPLv2\n",
+            _authorised(markers=["GPLv2"], licence="BSD-2-Clause",
+                        reason="recorded", spdx="BSD-2-Clause",
+                        note="the alternative is not taken"))
+        self.assertTrue(any("GPLv2" in problem for problem in silent_reason),
+                        silent_reason)
 
     def test_the_placeholder_licence_pairs_only_with_an_empty_file(self) -> None:
         empty = _authorised(
@@ -383,6 +395,70 @@ class WheelBytes(unittest.TestCase):
         self.assertTrue(any(
             "is valid only on an empty file" in problem for problem in problems),
             problems)
+
+    def test_a_lead_waiver_names_an_allowlisted_expression(self) -> None:
+        base = _authorised(
+            package="et-xmlfile", version="2.0.0",
+            path="et_xmlfile-2.0.0.dist-info/LICENCE.python",
+            markers=["GNU General Public License"], licence="Python-2.0")
+        self.assertEqual(L.licence_file_waiver_problems([base]), [])
+        copyleft = dict(base, licence="GPL-3.0-only")
+        problems = L.licence_file_waiver_problems([copyleft])
+        self.assertTrue(any(
+            "allowlisted expression a lead may waive" in problem
+            for problem in problems), problems)
+        self.assertFalse(any(
+            "parseable SPDX" in problem for problem in problems), problems)
+        conjunction = dict(base, licence="MIT AND GPL-3.0-only")
+        problems = L.licence_file_waiver_problems([conjunction])
+        self.assertTrue(any(
+            "allowlisted expression a lead may waive" in problem
+            for problem in problems), problems)
+        disjunction = dict(base, licence="MIT OR GPL-3.0-only")
+        self.assertEqual(L.licence_file_waiver_problems([disjunction]), [])
+        grouped = dict(base, licence="(MIT OR Apache-2.0) AND GPL-3.0-only")
+        problems = L.licence_file_waiver_problems([grouped])
+        self.assertTrue(any(
+            "allowlisted expression a lead may waive" in problem
+            for problem in problems), problems)
+        other = dict(base, decided_by="reviewer", licence="GPL-3.0-only")
+        problems = L.licence_file_waiver_problems([other])
+        self.assertTrue(any(
+            "allowlisted expression a lead may waive" in problem
+            for problem in problems), problems)
+        placeholder = _authorised(
+            package="imagecodecs", version="2026.10.10",
+            path="imagecodecs/licenses/LICENSE-heif",
+            empty=True, licence=L.PLACEHOLDER_LICENCE)
+        self.assertEqual(L.licence_file_waiver_problems([placeholder]), [])
+
+    def test_an_operator_waiver_may_name_any_parseable_expression(self) -> None:
+        base = _authorised(
+            package="imagecodecs", version="2026.10.10",
+            path="imagecodecs/licenses/LICENSE-lzf",
+            markers=["GPLv2"], licence="GPL-3.0-only",
+            decided_by="operator",
+            reason="the alternative is not taken")
+        self.assertEqual(L.licence_file_waiver_problems([base]), [])
+        compound = dict(base, licence="GPL-3.0-or-later WITH GCC-exception-3.1")
+        self.assertEqual(L.licence_file_waiver_problems([compound]), [])
+        disjunction = dict(base, licence="MIT OR GPL-3.0-only")
+        self.assertEqual(L.licence_file_waiver_problems([disjunction]), [])
+        broken = dict(base, licence="SEE LICENSE IN FILE")
+        problems = L.licence_file_waiver_problems([broken])
+        self.assertTrue(any(
+            "is not a parseable SPDX expression" in problem
+            for problem in problems), problems)
+        self.assertFalse(any(
+            "a lead may waive" in problem for problem in problems), problems)
+        lowercase = dict(base, licence="MIT or Apache-2.0")
+        problems = L.licence_file_waiver_problems([lowercase])
+        self.assertTrue(any(
+            "is not a parseable SPDX expression" in problem
+            for problem in problems), problems)
+        placeholder = dict(
+            base, markers=[], empty=True, licence=L.PLACEHOLDER_LICENCE)
+        self.assertEqual(L.licence_file_waiver_problems([placeholder]), [])
 
     def test_a_bare_waiver_is_refused(self) -> None:
         row = {
@@ -475,11 +551,11 @@ class SyntheticWheel(unittest.TestCase):
             markers = ["GPLv2"]
             spdx = "BSD-2-Clause"
             licence = "BSD-2-Clause"
-            reason = "probe"
+            reason = "the alternative is not taken"
             scope = "tool"
             decided = "2026-11-05"
             decided_by = "lead"
-            note = "the alternative is not taken"
+            note = "a different sentence"
 
             [bundle.darwin-arm64.pyyaml]
             libs = []

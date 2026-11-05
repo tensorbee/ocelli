@@ -324,9 +324,17 @@ def exception_problems(rows: list[dict] | None = None) -> list[str]:
 
 
 def licence_file_waiver_problems(rows: list[dict] | None = None) -> list[str]:
-    """A row that waives a refusal needs the same fields as an exception."""
+    """A row that waives a refusal needs the same fields as an exception.
+
+    A lead decision may name an allowlisted expression, or the placeholder
+    on an empty file. AND needs every term on the allowlist and OR needs
+    one, which is what expression_allowed decides. An operator decision may
+    name any parseable expression, because the operator decided it, or the
+    same placeholder.
+    """
     problems: list[str] = []
     source = licence_file_rows() if rows is None else rows
+    allow: set[str] | None = None
     for row in source:
         waives = row.get("empty") is True or bool(row.get("markers"))
         if not waives:
@@ -352,6 +360,24 @@ def licence_file_waiver_problems(rows: list[dict] | None = None) -> list[str]:
             problems.append(
                 f"licence file {label} licence {licence!r} is valid only "
                 f"on an empty file together with {PLACEHOLDER_LICENCE}")
+        elif licence and licence != PLACEHOLDER_LICENCE:
+            # Only an operator may name a licence outside the allowlist.
+            # Any other decider, including the lead, is held to the list.
+            decided_by = str(row.get("decided_by", "")).strip()
+            if decided_by == "operator":
+                try:
+                    parse_expression(licence)
+                except ExpressionError:
+                    problems.append(
+                        f"licence file {label} licence {licence!r} is not a "
+                        f"parseable SPDX expression")
+            else:
+                if allow is None:
+                    allow = allowlist()
+                if not expression_allowed(licence, allow):
+                    problems.append(
+                        f"licence file {label} licence {licence!r} is not an "
+                        f"allowlisted expression a lead may waive")
     return problems
 
 
@@ -684,9 +710,12 @@ def licence_bytes_problems(relpath: str, data: bytes, record: dict | None) -> li
             f"copyleft marker in {relpath}: {', '.join(extra)}")
         return problems
     if "GPLv2" in allowed:
-        note = str(record.get("note", "") if record else "")
-        spdx = str(record.get("spdx", "") if record else "")
-        if spdx != "BSD-2-Clause" or "not taken" not in note:
+        # licence and reason are the fields the waiver rule requires.
+        # Reading spdx and note would let a second copy disagree with the
+        # record the gate checks.
+        licence = str(record.get("licence", "") if record else "")
+        reason = str(record.get("reason", "") if record else "")
+        if licence != "BSD-2-Clause" or "not taken" not in reason:
             problems.append(
                 f"{relpath} records a GPLv2 marker without BSD-2-Clause and "
                 f"the statement that the alternative is not taken")

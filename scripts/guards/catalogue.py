@@ -452,6 +452,34 @@ def _claim_licence_on_empty_file(box: Sandbox) -> None:
         'licence = "BSD-3-Clause"')
 
 
+def _lead_waiver_names_copyleft(box: Sandbox) -> None:
+    # et-xmlfile is a lead waiver of an allowlisted text. A copyleft
+    # identifier is a decision only the operator may record.
+    box.substitute(
+        "ci/licences.toml",
+        'path = "et_xmlfile-2.0.0.dist-info/LICENCE.python"\n'
+        'markers = ["GNU General Public License"]\n'
+        'spdx = "Python-2.0"\n'
+        'licence = "Python-2.0"',
+        'path = "et_xmlfile-2.0.0.dist-info/LICENCE.python"\n'
+        'markers = ["GNU General Public License"]\n'
+        'spdx = "Python-2.0"\n'
+        'licence = "GPL-3.0-only"')
+
+
+def _operator_waiver_unparseable(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'path = "imagecodecs/licenses/LICENSE-lzf"\n'
+        'spdx = "BSD-2-Clause"\n'
+        'markers = ["GPLv2"]\n'
+        'licence = "BSD-2-Clause"',
+        'path = "imagecodecs/licenses/LICENSE-lzf"\n'
+        'spdx = "BSD-2-Clause"\n'
+        'markers = ["GPLv2"]\n'
+        'licence = "SEE LICENSE IN FILE"')
+
+
 def _plant_shipped_exception(box: Sandbox) -> None:
     lock = json.loads(box.read("package-lock.json"))
     version = ""
@@ -7056,11 +7084,13 @@ GUARDS: tuple[Guard, ...] = (
         spec="F-217 and SPDX 2.3 Annex D",
         refuses="A dependency whose licence is not on the one allowlist, "
                 "an exception or a file waiver that is stale, incomplete, "
-                "out of scope or in a published runtime closure, a Python "
-                "package with no recorded row, a bundled wheel file that "
-                "carries a copyleft marker or an unrecorded library, a "
-                "third-party notice that drifts, and a holder or manifest "
-                "SPDX line that drifts.",
+                "out of scope or in a published runtime closure, a lead "
+                "file waiver whose licence is not an allowlisted expression, "
+                "an operator file waiver whose licence is not a parseable "
+                "expression, a Python package with no recorded row, a bundled "
+                "wheel file that carries a copyleft marker or an unrecorded "
+                "library, a third-party notice that drifts, and a holder or "
+                "manifest SPDX line that drifts.",
         claims=("*",),
         probes=(
             Probe("licences.npm-copyleft", _plant_npm_copyleft,
@@ -7103,6 +7133,19 @@ GUARDS: tuple[Guard, ...] = (
             Probe("licences.waiver-placeholder", _claim_licence_on_empty_file,
                   script("python3", "scripts/licence_check.py", "python"),
                   "is valid only on an empty file"),
+            Probe("licences.waiver-lead-copyleft", _lead_waiver_names_copyleft,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "allowlisted expression a lead may waive",
+                  note="et-xmlfile is a lead waiver of an allowlisted text. "
+                       "GPL-3.0-only is on no allowlist, so the lead may not "
+                       "record it. An operator row may."),
+            Probe("licences.waiver-operator-expression",
+                  _operator_waiver_unparseable,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is not a parseable SPDX expression",
+                  note="The operator may name a copyleft licence. The value "
+                       "still has to parse as an SPDX expression, or be the "
+                       "placeholder."),
             Probe("licences.python-unrecorded", _rename_python_row,
                   script("python3", "scripts/licence_check.py", "python"),
                   "has no licence row"),

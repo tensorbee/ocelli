@@ -263,7 +263,7 @@
     "hooks.commit-msg": 3,
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
-    "licences": 73,
+    "licences": 75,
     "lint-policy": 28,
     "nostd": 8,
     "oracle.faults": 22,

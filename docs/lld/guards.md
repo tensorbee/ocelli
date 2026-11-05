@@ -597,8 +597,8 @@ probes need cargo and sit in the deep profile. Three level-1 probes call the
 wheel checks on a synthetic tree.
 
 Recorded constants added with this gate are the `deny.toml` allow list,
-`COPYLEFT_MARKERS`, `EXCEPTION_FIELDS`, the provenance `MANIFESTS` set and
-`OPENJPH_LICENCE_SHA256`.
+`COPYLEFT_MARKERS`, `EXCEPTION_FIELDS`, `PLACEHOLDER_LICENCE`, the provenance
+`MANIFESTS` set and `OPENJPH_LICENCE_SHA256`.
 
 `pins.openjph-notice` deletes `vendor/openjph-core-0.1.0/LICENSE` and must
 refuse with the missing-notice text. The unmodified tree accepts.
