@@ -18,6 +18,8 @@
 | F-215 | E38.25 | Folder viewer marks written as a TID 1500 document and key images as a Key Object Selection through @ocelli/core, saved to a download and loaded back from a folder | TS | 4w | pending |
 | F-216 | E38.26 | Folder viewer performance: each file posted once and held in a bounded cache, decode reused across window changes, measured budgets for open, first image, scroll rate and resident memory, and a release build | All | 4w | pending |
 | F-217 | E38.27 | Licence hygiene: no copyleft dependency in any tracked manifest, a permissive JPEG reference decoder for the corpus, licence allowlist gates for Rust, npm and Python, and a third-party notices file | All | 2w | pending |
+| F-218 | E38.28 | Dependency advisories in shipped packages: adm-zip below 0.6.1 reaches the published @ocelli/core runtime through dcmjs, resolved by a patched override or a proof that no shipped path reaches it, with an audit gate over shipped dependencies | TS | 1w | pending |
+| F-219 | E38.29 | Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red | Test | 1w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -51,6 +53,20 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   acceptance row: the single view and the first tile of the synthetic study
   measure 64 to 67.2 within 1e-3, and the assignment swap must turn that row
   red. F-208 does not complete while that row is open.
+
+## Questions for the operator
+
+- **Non-finite F32 samples in the pyramid, before F-120.** F-119's plan does
+  not say what a NaN, an infinity or a negative zero does to a coarser level.
+  Today the mean passes NaN and infinity through unchanged, so one NaN voxel
+  spreads to eight times its volume at each coarser level, and an all `-0.0`
+  box is written as `+0.0`. No render reaches this yet, because a volume
+  refuses 32-bit samples and nothing calls `generate_pyramid` until F-120.
+  The choices are to let NaN through and have every tier draw it as no
+  value, to leave non-finite samples out of the mean and re-weight, or to
+  refuse to generate. The same answer covers non-finite input to
+  `level_voxel_to_level0`. F-119 pins the current behaviour in
+  `non_finite_floats_keep_the_current_bits` so a change is visible.
 
 ## What is carried in
 
