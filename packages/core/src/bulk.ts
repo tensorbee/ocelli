@@ -33,6 +33,8 @@
 
 /** The subset of a wasm module's exports this file needs. */
 import { submitCommands, type CommandSink } from "./commands.js";
+import { OcelliError } from "./ocelli-error.js";
+import { FRAME_COMMIT_META_KEYS, refuseUnknownOptions } from "./options.js";
 
 export interface WasmMemory {
   readonly memory: WebAssembly.Memory;
@@ -130,22 +132,26 @@ export interface SessionStackExports extends WasmMemory {
 
 /** Install nonempty ordered keys and return the new stack epoch. */
 export function writeStack(wasm: SessionStackExports, keys: readonly StackFrameKey[]): number {
-  if (keys.length < 1 || keys.length > 4194304) throw new RangeError("stack length is outside the bulk limit");
+  if (keys.length < 1 || keys.length > 4194304) {
+    throw new OcelliError("LengthMismatch", "stack length is outside the bulk limit");
+  }
   const bytes = new Uint8Array(keys.length * 16);
   const view = new DataView(bytes.buffer);
   keys.forEach((key, i) => {
-    if (key.series < 0n || key.series > 0xffff_ffff_ffff_ffffn) throw new RangeError("series is not a u64");
+    if (key.series < 0n || key.series > 0xffff_ffff_ffff_ffffn) {
+      throw new OcelliError("InvalidValue", "series is not a u64");
+    }
     view.setBigUint64(i * 16, key.series, true);
     view.setUint32(i * 16 + 8, u32(key.instance, "instance"), true);
     view.setUint32(i * 16 + 12, u32(key.frame, "frame"), true);
   });
   const ptr = wasm.alloc(bytes.length);
-  if (!ptr) throw new Error("stack allocation refused");
+  if (!ptr) throw new OcelliError("AllocationRefused", "stack allocation refused");
   const ticket = wasm.bulk_ticket();
   try {
     new Uint8Array(wasm.memory.buffer, ptr, bytes.length).set(bytes);
     const epoch = wasm.configure_stack(ticket, bytes.length);
-    if (!epoch) throw new Error("stack configuration refused");
+    if (!epoch) throw new OcelliError("CommitRefused", "stack configuration refused");
     return epoch;
   } catch (error) { wasm.release_bulk(ticket); throw error; }
 }
@@ -187,11 +193,16 @@ export function writeFrame(
   meta: unknown,
 ): void {
   if (session.commitAllocated !== undefined) {
+    // The generic refusal names the type. This message is the one callers match.
+    if (typeof meta !== "object" || meta === null) {
+      throw new OcelliError("InvalidOptions", "frame meta is not an object");
+    }
+    refuseUnknownOptions("FrameCommitMeta", meta, FRAME_COMMIT_META_KEYS);
     frameCommitMeta(meta);
   }
   const ptr = session.alloc(bytes.byteLength);
   if (ptr === 0) {
-    throw new Error("allocation refused");
+    throw new OcelliError("AllocationRefused", "allocation refused");
   }
   const ticket = session.allocationTicket?.() ?? 0;
 
@@ -200,7 +211,7 @@ export function writeFrame(
     new Uint8Array(wasm.memory.buffer, ptr, bytes.byteLength).set(bytes);
     const code = commitOwned(session, ptr, bytes.byteLength, meta, ticket);
     if (code === 0) {
-      throw new Error("commit refused");
+      throw new OcelliError("CommitRefused", "commit refused");
     }
   } catch (error) {
     session.releaseAllocated?.(ticket);
@@ -262,7 +273,9 @@ export function sessionBulkSink(wasm: SessionBulkExports): BulkSink {
       const fields = frameCommitMeta(meta);
       let code;
       if (fields.stackIndex !== undefined && fields.stackEpoch !== undefined) {
-        if (!wasm.commit_selected_frame) throw new Error("selected-frame export is unavailable");
+        if (!wasm.commit_selected_frame) {
+          throw new OcelliError("ExportUnavailable", "selected-frame export is unavailable");
+        }
         code = wasm.commit_selected_frame(presented, len, fields.viewport, fields.columns, fields.rows, fields.stackIndex, fields.stackEpoch);
       } else code = wasm.commit_frame(
         presented,
@@ -338,7 +351,7 @@ export function writeDicomwebResponse(
 ): void {
   const ptr = sink.alloc(bytes.byteLength);
   if (ptr === 0) {
-    throw new Error("allocation refused");
+    throw new OcelliError("AllocationRefused", "allocation refused");
   }
 
   // Build the view AFTER the allocation. Use it immediately. Let it go.
@@ -380,8 +393,14 @@ export function acceptTransferredFrame(
   meta: HandoffMeta,
   target: FrameCommitMeta,
 ): void {
+  // The generic refusal names the type. This message is the one callers match.
+  if (typeof target !== "object" || target === null) {
+    throw new OcelliError("InvalidOptions", "frame meta is not an object");
+  }
+  refuseUnknownOptions("FrameCommitMeta", target, FRAME_COMMIT_META_KEYS);
   if (buffer.byteLength !== meta.bytes) {
-    throw new Error(
+    throw new OcelliError(
+      "LengthMismatch",
       `handoff length ${buffer.byteLength} disagrees with meta.bytes ${meta.bytes}`,
     );
   }
@@ -397,7 +416,7 @@ export function acceptTransferredFrame(
   const len = buffer.byteLength;
   const ptr = session.alloc(len);
   if (ptr === 0) {
-    throw new Error("allocation refused");
+    throw new OcelliError("AllocationRefused", "allocation refused");
   }
   const ticket = session.allocationTicket?.() ?? 0;
 
@@ -406,7 +425,7 @@ export function acceptTransferredFrame(
     new Uint8Array(wasm.memory.buffer, ptr, len).set(new Uint8Array(buffer));
     const code = commitOwned(session, ptr, len, committed, ticket);
     if (code === 0) {
-      throw new Error("commit refused");
+      throw new OcelliError("CommitRefused", "commit refused");
     }
   } catch (error) {
     session.releaseAllocated?.(ticket);
@@ -429,7 +448,7 @@ function commitOwned(
 
 function frameCommitMeta(meta: unknown): FrameCommitMeta {
   if (typeof meta !== "object" || meta === null) {
-    throw new TypeError("frame meta is not an object");
+    throw new OcelliError("InvalidOptions", "frame meta is not an object");
   }
   const record = meta as {
     viewport?: unknown;
@@ -456,7 +475,7 @@ function u32(value: unknown, name: string): number {
     value < 0 ||
     value > 0xffff_ffff
   ) {
-    throw new TypeError(`${name} is not a u32`);
+    throw new OcelliError("InvalidValue", `${name} is not a u32`);
   }
   return value;
 }

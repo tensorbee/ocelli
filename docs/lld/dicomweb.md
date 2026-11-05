@@ -1,7 +1,7 @@
 # DICOMweb
 
-**F-IDs that contributed:** F-021, F-101, F-198
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-021, F-101, F-198, F-230
+**Last updated:** 2026-11-05
 
 The DICOMweb path has two explicit owners. `@ocelli/core` owns HTTP fetch,
 authentication injection, status handling, content negotiation, and
@@ -49,6 +49,19 @@ transport error classes are `InvalidRequest`, `Network`, `Aborted`,
 `HttpStatus`, and `ContentType`. Only `HttpStatus` retains the numeric status.
 Errors never retain a URL, UID, header, query, credential, or response body.
 
+`DicomwebError` extends `OcelliError`, so `instanceof OcelliError` catches it.
+Its `name` is `DicomwebError`, its `code` is one of the five transport classes,
+its message is fixed per code, and it carries no `cause`.
+
+An unknown own key on `DicomwebClientOptions` or `QidoSearchOptions` is not a
+transport class. It is `OcelliError` code `UnknownOption`, raised before any
+fetch, and `error.option` names the refused key and nothing else. The
+constructor throws it. `searchStudies`, `searchSeries` and `searchInstances`
+reject their promise with it. `postWadoInstance` refuses an unknown key on
+`WadoInstanceRequest` the same way. A value that is not an options object is
+`InvalidOptions`. `docs/lld/public-api.md`, "Options and refusals", holds the
+rule.
+
 The injected fetch receives the caller's `AbortSignal` unchanged. Ocelli does
 not retry a rejected fetch.
 
@@ -75,8 +88,8 @@ until the ticket is released. It does not call `commit_dicomweb_response`,
 and that wasm entry is still absent. The worker binds one offscreen canvas,
 commits one monochrome stored sample through the existing frame commit, and
 publishes with `publishCpuCanvas`. The page shows the tier string from
-`resolvedTier` and whether that publish returned. A failed load leaves
-`coreAvailable()` false.
+`resolvedTier` and whether that publish returned. A failed load rejects
+`loadCore` with `CoreLoadFailed` and leaves `coreAvailable()` false.
 
 ## Rust source contract
 

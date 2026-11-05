@@ -1,11 +1,11 @@
 # The error model, the panic path and structured logging
 
 **Area**: `crates/ocelli-core/src/error.rs`, `crates/ocelli-wasm/src/panic.rs`,
-`packages/core/src/{errors,panic,fatal,bulk,ring}.ts`, `ci/error-codes.json`
+`packages/core/src/{errors,panic,fatal,bulk,ring,ocelli-error,options}.ts`, `ci/error-codes.json`
 **Normative source**: `docs/hld/20-errors-and-panics.md` section 23, with
 `docs/hld/14-the-boundary-in-code.md` sections 17.2, 17.3 and 17.4
-**F-IDs that contributed:** F-005, F-039, F-X001, F-X017, F-101
-**Last updated:** 2026-10-26
+**F-IDs that contributed:** F-005, F-039, F-X001, F-X017, F-101, F-230
+**Last updated:** 2026-11-05
 
 Living current-state document. It describes what the code does today.
 
@@ -441,11 +441,12 @@ that suite after `eslint .`.
 
 ## The shell side
 
-Three modules, all re-exported from `packages/core/src/index.ts`.
+Four modules, all re-exported from `packages/core/src/index.ts`.
 
 | Module | Holds |
 |--------|-------|
 | `errors.ts` | The code mirror, the message table, `decodeRecord`, `describeError` |
+| `ocelli-error.ts` | `OcelliError` and the string `OcelliErrorCode` union |
 | `panic.ts` | `readPanicRecord`, and the layout it reads |
 | `fatal.ts` | `CoreStatus` and the latch |
 
@@ -476,6 +477,48 @@ not be read is still a dead instance, and reporting `ok` there would be section
 No class and no interface for the status. A discriminated union reduces the
 cases a reader must consider and an interface with one implementer increases
 the places they must look, which is `AGENTS.md`'s structural test.
+
+## Shell errors are a second namespace
+
+`OcelliError extends Error` is the class for every failure the shell raises.
+It carries a string `code`, and a caller matches that code. The message is
+for a person. `OcelliErrorCode` is a closed union, and `errors-class.test.ts`
+pins it in this order:
+
+`InvalidRequest`, `Network`, `Aborted`, `HttpStatus`, `ContentType`,
+`UnknownOption`, `InvalidOptions`, `AllocationRefused`, `CommitRefused`,
+`LengthMismatch`, `InvalidValue`, `ExportUnavailable`, `CoreLoadFailed`.
+
+The first five are `DicomwebErrorCode`, and `DicomwebError` is the subclass
+that raises them. `docs/lld/dicomweb.md` holds those.
+
+| Code | Raised by |
+|------|-----------|
+| `UnknownOption` | `refuseUnknownOptions`, for an own key the type does not declare. `error.option` holds the key. `docs/lld/public-api.md`, "Options and refusals" |
+| `InvalidOptions` | `refuseUnknownOptions`, for a value that is not an options object, and `bulk.ts` for a frame meta that is not an object |
+| `AllocationRefused` | A zero pointer from `alloc` in `writeFrame`, `acceptTransferredFrame`, `writeStack` and `writeDicomwebResponse` |
+| `CommitRefused` | A zero commit code in `writeFrame` and `acceptTransferredFrame`, a zero epoch from `configure_stack`, and `postWadoInstance` when the instance body was not committed |
+| `LengthMismatch` | A stack length outside 1 to 4194304, and a handoff buffer whose length disagrees with `meta.bytes` |
+| `InvalidValue` | A frame or stack field outside its integer width in `bulk.ts`, and in `commands.ts` a command value outside its integer width or a payload length that disagrees with the Rust table |
+| `ExportUnavailable` | A selected-frame commit when the session has no `commit_selected_frame` export |
+| `CoreLoadFailed` | `loadCore`, with `cause` set to what the initialiser threw or rejected with |
+
+`option` is set only for `UnknownOption`. `cause` is set only for
+`CoreLoadFailed`.
+
+`submitCommands` rethrows the caller's `write` error, and `openDecodePool`
+rethrows the caller's `start` error. `writeFrame`, `acceptTransferredFrame`
+and `writeStack` release the ticket and rethrow. An engine `RangeError` or
+`TypeError` from a view over wasm memory is passed through, not coded. A sink
+pointer past the end of memory makes `new Uint8Array` throw `RangeError`, and
+`bulk.test.ts` expects that `RangeError`.
+
+**Why the string codes are not ring codes.** The numeric codes in `errors.ts`
+come from Rust through `ci/error-codes.json`, and `scripts/error_code_check.py`
+compares the two. A shell string code is raised in TypeScript, never crosses
+the boundary and never reaches the ring. Putting it in that register would
+make the `errors` gate compare two namespaces. `describeError` takes a number
+and knows only the ring codes.
 
 ## `console_error_panic_hook`, read as a behaviour
 

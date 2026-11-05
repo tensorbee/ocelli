@@ -6,21 +6,22 @@ import {
   type DicomwebResponseSink,
   type WasmMemory,
 } from "./bulk.js";
+import { OcelliError, type DicomwebErrorCode } from "./ocelli-error.js";
+import {
+  DICOMWEB_CLIENT_OPTION_KEYS,
+  QIDO_SEARCH_OPTION_KEYS,
+  refuseUnknownOptions,
+} from "./options.js";
 
-export type DicomwebErrorCode =
-  | "InvalidRequest"
-  | "Network"
-  | "Aborted"
-  | "HttpStatus"
-  | "ContentType";
+export type { DicomwebErrorCode } from "./ocelli-error.js";
 
 /** A safe transport failure that never retains a URL, header, or body. */
-export class DicomwebError extends Error {
-  readonly code: DicomwebErrorCode;
+export class DicomwebError extends OcelliError {
+  override readonly code: DicomwebErrorCode;
   readonly status?: number;
 
   constructor(code: DicomwebErrorCode, status?: number) {
-    super(messageFor(code));
+    super(code, messageFor(code));
     this.name = "DicomwebError";
     this.code = code;
     if (status !== undefined) {
@@ -60,6 +61,7 @@ export class DicomwebClient {
   readonly #sink: DicomwebResponseSink;
 
   constructor(options: DicomwebClientOptions) {
+    refuseUnknownOptions("DicomwebClientOptions", options, DICOMWEB_CLIENT_OPTION_KEYS);
     this.#studiesServiceUrl = safeUrl(options.studiesServiceUrl);
     this.#wadoUriUrl = safeUrl(options.wadoUriUrl);
     this.#fetch = options.fetch;
@@ -67,14 +69,16 @@ export class DicomwebClient {
     this.#sink = options.sink;
   }
 
-  searchStudies(options: QidoSearchOptions = {}): Promise<void> {
-    return this.#qido(["studies"], options);
+  async searchStudies(options: QidoSearchOptions = {}): Promise<void> {
+    refuseUnknownOptions("QidoSearchOptions", options, QIDO_SEARCH_OPTION_KEYS);
+    await this.#qido(["studies"], options);
   }
 
   async searchSeries(
     studyUid: string,
     options: QidoSearchOptions = {},
   ): Promise<void> {
+    refuseUnknownOptions("QidoSearchOptions", options, QIDO_SEARCH_OPTION_KEYS);
     if (!validDicomUid(studyUid)) {
       throw new DicomwebError("InvalidRequest");
     }
@@ -86,6 +90,7 @@ export class DicomwebClient {
     seriesUid: string,
     options: QidoSearchOptions = {},
   ): Promise<void> {
+    refuseUnknownOptions("QidoSearchOptions", options, QIDO_SEARCH_OPTION_KEYS);
     if (!validDicomUid(studyUid) || !validDicomUid(seriesUid)) {
       throw new DicomwebError("InvalidRequest");
     }

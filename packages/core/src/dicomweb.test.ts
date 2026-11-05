@@ -380,12 +380,15 @@ describe("DicomwebClient, DICOM PS3.18 2026c", () => {
 
   it("sanitizes configured URL and response-body transport failures", async () => {
     const marker = "SYNTHETIC_SECRET_MARKER";
+    // `commits` is the fixture's observation list. It is not a client option.
+    const fixture = responseSink();
     expect(() =>
       new DicomwebClient({
         studiesServiceUrl: marker,
         wadoUriUrl: "https://example.test/wado",
         fetch: async () => ok("[]", "application/dicom+json"),
-        ...responseSink(),
+        wasm: fixture.wasm,
+        sink: fixture.sink,
       }),
     ).toThrowError(DicomwebError);
 
