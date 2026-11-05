@@ -125,6 +125,14 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   The choice is a story that bounds sequence depth in the parser and refuses
   deeper input with an error, or accepting the risk for local files.
 
+- **A Rust advisory nobody gates: RUSTSEC-2021-0153 on the `encoding` crate.**
+  Found by F-229's first review running `cargo deny check`. The crate comes
+  in through dicom-rs, not through any S46 story. F-218's advisory gate audits
+  the npm packages Ocelli ships, and the Rust gates run `cargo deny check
+  licenses` only, so no gate reports a Rust advisory today. The choice is a
+  story that adds `cargo deny check advisories` to the floor with a reviewed
+  exception list, or recording this one as an accepted risk.
+
 ## What is carried in
 
 - **D-22 still blocks publication.** The version stays 0.1.0.
