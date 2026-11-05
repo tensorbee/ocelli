@@ -365,6 +365,7 @@ beside F-119.
 | F-219 | E38.29 | S46 | Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red | Test | 1w | - | done |
 | F-220 | E38.30 | S46 | Shipped binary notices: the full licence text of every crate compiled into the wasm module and the native binaries, generated from the lockfile and checked by a gate | Build | 2w | F-217 | pending |
 | F-221 | E38.31 | S46 | Published package contents: the @ocelli/core tarball stops shipping compiled test files, with a packages gate refusal for any test file in a published tarball | TS | 1w | - | pending |
+| F-223 | E38.32 | S46 | Comparative benchmark against cornerstone3D 5.8.2: the folder viewer and a bare cornerstone3D page on the same studies, browser and machine, with every process's memory counted, a pixel check before any timing, and a generated summary | All | 3w | F-216 | pending |
 
 ### M14, Out-of-core volume streaming
 
