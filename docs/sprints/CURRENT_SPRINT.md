@@ -20,6 +20,10 @@
 | F-217 | E38.27 | Licence hygiene: no copyleft dependency in any tracked manifest, a permissive JPEG reference decoder for the corpus, licence allowlist gates for Rust, npm and Python, and a third-party notices file | All | 2w | done |
 | F-218 | E38.28 | Dependency advisories in shipped packages: adm-zip below 0.6.1 reaches the published @ocelli/core runtime through dcmjs, resolved by a patched override or a proof that no shipped path reaches it, with an audit gate over shipped dependencies | TS | 1w | pending |
 | F-219 | E38.29 | Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red | Test | 1w | done |
+| F-220 | E38.30 | Shipped binary notices: the full licence text of every crate compiled into the wasm module and the native binaries, generated from the lockfile and checked by a gate | Build | 2w | pending |
+| F-221 | E38.31 | Published package contents: the @ocelli/core tarball stops shipping compiled test files, with a packages gate refusal for any test file in a published tarball | TS | 1w | pending |
+| F-222 | E30.7 | Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero | Rust | 1w | done |
+| F-223 | E38.32 | Comparative benchmark against cornerstone3D 5.8.2: the folder viewer and a bare cornerstone3D page on the same studies, browser and machine, with every process's memory counted, a pixel check before any timing, and a generated summary | All | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -67,6 +71,9 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   refuse to generate. The same answer covers non-finite input to
   `level_voxel_to_level0`. F-119 pins the current behaviour in
   `non_finite_floats_keep_the_current_bits` so a change is visible.
+  **Answered by the operator on 2026-11-05:** leave non-finite samples out of
+  each mean and divide by the finite weight only, keep a box with no finite
+  sample as NaN, and write negative zero as positive zero. F-222 implements it.
 
 - **Licence file waivers the lead decided, for the operator to confirm.**
   F-217's plan lets the lead waive a licence file only when its text is an
@@ -78,6 +85,16 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   `LICENCE.python`, which is the CPython licence stack and names the GPL only
   in a governing-law clause. Changing any of them to `operator`, or refusing
   it, is a one-row edit.
+  **Confirmed by the operator on 2026-11-05.** All four stay as recorded.
+
+- **The `@ocelli/core` tarball carries no wasm module, so `/release` would
+  refuse.** `docs/RELEASE.md` preflight item 6 requires the module built from
+  the release HEAD inside `@ocelli/core`. `npm pack --dry-run -w
+  packages/core` lists 281 entries on c775931 and none ends in `.wasm`. No
+  S46 story builds the module into the package. Found while designing F-220,
+  outside its scope. Not blocking S46, because S46 publishes nothing. The
+  choice is a story that packs the module, or a release rule that says where
+  the module ships instead.
 
 ## What is carried in
 

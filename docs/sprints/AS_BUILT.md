@@ -5151,3 +5151,31 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The plan's consumer map said `guard_census.py --record` re-measures wall clock. `guard_probe.py --record-budget` does, and wall clock was left as recorded because the gate stays inside it. The plan line is corrected. Implemented by an external coding agent, reviewed clean on the first pass.
 
 **Notes for future sessions.** The census counts per entry, not per refusal, so a refusal added to `gen_sprint_plan.py` later needs its own probe by review. Uniqueness of every probe fragment across all fourteen messages is a recorded hand check, not an automated test.
+
+## F-222, Pyramid means skip non-finite F32 samples, completed 2026-11-05
+
+**What was built.** An F32 coarser pyramid level now leaves NaN and both infinities out of each mean and divides by the overlap weight of the finite samples only, accumulated in f64. A box with no finite sample is written as the NaN `0x7fc0_0000`, decided by a flag rather than a float compare, and a mean that narrows to negative zero is written as positive zero. Integer means, `narrow_f32` and `level_voxel_to_level0` are unchanged. This is the operator's answer of 2026-11-05 to F-119's open question.
+
+**HLD sections implemented.** Section 26's multiscale pyramid, the F32 half of F-119's mean.
+
+**Deviations.** none
+
+**Crates / packages modified.** `ocelli-volume`.
+
+**Tests added.** Six new pyramid fixtures, AC1 to AC6, with expected bits hand-computed from IEEE 754 in their comments, and `non_finite_floats_keep_the_current_bits` replaced by `non_finite_centres_follow_ieee_arithmetic`. The implementer saw each new fixture fail on the old mean. The reviewer ran eleven mutations and ten went red. The survivor removes the empty-box early return, which `narrow_f32` makes equivalent today.
+
+**Fixture provenance.** Hand-computed from IEEE 754 binary32 and the Float Pixel Data layout of PS3.3 C.7.6.24, values cited by bit pattern in each fixture.
+
+**Verification.** Feature profile on the merged worker tree, 27 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 2a7e79a.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** CPU generation, so the same bytes on tiers A, B and C. Identity on wasm32 is argued from the arithmetic, not observed, because this crate has no wasm test runner.
+
+**LLD updated.** `docs/lld/volumes.md` and its `docs/lld/README.md` index row.
+
+**User-facing documentation.** no change. Nothing in production calls `generate_pyramid` and a volume refuses 32-bit frames, so no page reaches an F32 coarse level. F-120 updates the pages when one becomes reachable.
+
+**Deviations from the design plan.** none. Implemented by an external coding agent. Two review passes, the first finding two false test comments that the sprint lead corrected.
+
+**Notes for future sessions.** The empty-box flag is defence in depth that no test can tell apart from `narrow_f32`'s own NaN today. Keep it if `narrow_f32` changes.
