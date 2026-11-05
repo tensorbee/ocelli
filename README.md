@@ -396,6 +396,10 @@ Security issues, including a wrong pixel value or wrong geometry, go through
 Dual-licensed under **MIT** or **Apache-2.0** at your option, texts in
 `LICENSE-MIT` and `LICENSE-APACHE`. The copyright holder is Tensorbee Limited.
 `NOTICE` carries that line. Third-party notices are in `THIRD_PARTY_NOTICES`.
+`THIRD_PARTY_LICENSES` carries the full licence texts of the Rust crates and
+the Rust standard library compiled into the wasm module and the native
+binaries, and `python3 scripts/licence_check.py --write binaries` regenerates
+it after a change to `Cargo.lock` or the channel in `rust-toolchain.toml`.
 
 Permissive on purpose: integrators embed an engine like this inside closed
 products, and a disclosure obligation ends that conversation before it starts.

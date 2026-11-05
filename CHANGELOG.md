@@ -538,6 +538,10 @@ Repository bootstrap. Nothing is published.
 - The `@ocelli/core` and `@ocelli/react` tarballs no longer ship compiled
   test files. Core packs 140 entries and react 17. The packages check
   refuses any test file in a published tarball.
+- `THIRD_PARTY_LICENSES` lists the licence text of every third-party crate
+  compiled into the wasm module and the native binaries, with the Rust
+  standard library's notice. The licences gate checks that it matches the
+  lockfile, offline.
 
 ### Changed
 

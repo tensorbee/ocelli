@@ -134,6 +134,9 @@ jobs:
       - run: bin/ocelli.sh gate bench
       - name: cargo-deny 0.19.0
         run: cargo install cargo-deny --version 0.19.0 --locked
+      # F-220. The binaries section reads the registry cache offline. A
+      # missing cache is a failure, so populate it before the licence gate.
+      - run: cargo fetch --locked
       - run: bin/ocelli.sh gate licences
       # docs/SOURCE-POLICY.md and HLD gate A6. No allowlist.
       - run: bin/ocelli.sh gate provenance
