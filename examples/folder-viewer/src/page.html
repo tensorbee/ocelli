@@ -1266,6 +1266,8 @@ async function paintTiles() {
       context.putImageData(pixels, 0, 0);
     } catch {
       if (token !== tileToken) return;
+      node.width = 1;
+      node.height = 1;
     }
   }
 }
@@ -1359,6 +1361,12 @@ function showFault(message) {
   fault.textContent = message;
   stage.hidden = true;
   frame.hidden = true;
+  tileToken += 1;
+  tiles.hidden = true;
+  for (const node of tiles.querySelectorAll("canvas")) {
+    node.width = 1;
+    node.height = 1;
+  }
 }
 
 function hideFault() {

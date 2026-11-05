@@ -123,7 +123,7 @@ A slice change clears the selection. The colour row stays visible so the next ma
 
 ## Ownership, commit and recovery
 
-Marks live in the page until reload. There is no commit to a file. Removing a mark removes it from the map for that file and frame. A failed preview leaves the previous grey image in place and shows the fault sentence.
+Marks live in the page until reload. There is no commit to a file. Removing a mark removes it from the map for that file and frame. A failed preview hides the previous grey image and shows the fault sentence.
 
 ## Numbered acceptance inventory
 

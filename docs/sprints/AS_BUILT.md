@@ -5062,6 +5062,6 @@ this branch had not touched since the base.
 
 **LLD updated.** none. The example is not the published API.
 
-**Deviations from the design plan.** none. The state table now says a drawing-tool drag moves the mark and a navigation drag does not.
+**Deviations from the design plan.** The recovery sentence was corrected. A failed preview hides the previous grey image and shows the fault, so the viewport does not keep the previous slice under the fault text. The state table says a drawing-tool drag moves the mark and a navigation drag does not.
 
 **Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 3 nitpicks. A drawing-tool move does not latch after 5 pixels. A colour frame can still take a drawing from the previous image size. Leaving 2 by 2 because a neighbour is over 32 MiB does not re-enable the drawing buttons. None of those block. Reviewer Claude Code, read only, with no shell. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
