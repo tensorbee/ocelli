@@ -535,3 +535,6 @@ Repository bootstrap. Nothing is published.
   recorded exception holds only while the packages gate finds no shipped file
   that loads adm-zip. The README gives the override a consumer can add to
   install adm-zip 0.6.1.
+- The `@ocelli/core` and `@ocelli/react` tarballs no longer ship compiled
+  test files. Core packs 140 entries and react 17. The packages check
+  refuses any test file in a published tarball.

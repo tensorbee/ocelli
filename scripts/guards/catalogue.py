@@ -7269,6 +7269,45 @@ print("\\n".join(bad))
 sys.exit(1 if bad else 0)
 """
 
+# AC4. Four packed names, two packages. A suffix rule on `.test.js` only, or
+# a rule that runs for core only, leaves a path unnamed and this exits 0.
+_TEST_FILE_TARBALL = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+m = {'name': '@ocelli/core', 'version': '0.1.0',
+     'exports': {'.': {'import': './dist/index.js'}}}
+names = ['package.json', 'README.md', 'LICENSE-MIT',
+         'LICENSE-APACHE', 'NOTICE', 'dist/index.js',
+         'dist/index.test.js', 'dist/index.test.d.ts',
+         'dist/x.spec.js', 'dist/__tests__/a.js']
+wanted = ['dist/index.test.js', 'dist/index.test.d.ts',
+          'dist/x.spec.js', 'dist/__tests__/a.js']
+bad = []
+for package in ('core', 'react'):
+    bad.extend(p.check_tarball(package, m, names))
+print('\\n'.join(bad))
+named = all(
+    any(path in line and ('@ocelli/' + package) in line for line in bad)
+    for package in ('core', 'react')
+    for path in wanted)
+sys.exit(1 if named else 0)
+"""
+
+_TEST_FILE_TARBALL_HEALTHY = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+m = {'name': '@ocelli/core', 'version': '0.1.0',
+     'exports': {'.': {'import': './dist/index.js'}}}
+names = ['package.json', 'README.md', 'LICENSE-MIT',
+         'LICENSE-APACHE', 'NOTICE', 'dist/index.js',
+         'dist/latest.js', 'dist/contest.d.ts']
+bad = p.check_tarball('core', m, names)
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
 
 def _advisory_unknown_proof(box: Sandbox) -> None:
     """A proof name the packages gate does not run."""
@@ -10534,11 +10573,11 @@ GUARDS: tuple[Guard, ...] = (
         spec="story E1.3 and `docs/RELEASE.md`",
         refuses="A published package whose version skews from the workspace, "
                 "an advertised exports path absent from the tarball, a "
-                "tarball carrying sources or build state, a consumer that "
-                "cannot import or type-check what was published, and an "
-                "unreachable package the consumer resolves at another "
-                "version, loads during the smoke import, or names from "
-                "another package's file. A resolve trace that does not "
+                "tarball carrying sources, build state or a test file, a "
+                "consumer that cannot import or type-check what was "
+                "published, and an unreachable package the consumer resolves "
+                "at another version, loads during the smoke import, or names "
+                "from another package's file. A resolve trace that does not "
                 "record the dcmjs ES entry is refused as well.",
         claims=("*",),
         probes=(
@@ -10576,6 +10615,22 @@ GUARDS: tuple[Guard, ...] = (
                      "input is an exports map naming a path the name list "
                      "does not carry, which is story E1.3's sentence and not "
                      "the function's code."),
+            Probe(
+                "packages.test-file-in-tarball", None,
+                python_snippet(
+                    "package_check.check_tarball, test file",
+                    _TEST_FILE_TARBALL),
+                "which is a test file",
+                level=1,
+                control=python_snippet(
+                    "package_check.check_tarball, no test file",
+                    _TEST_FILE_TARBALL_HEALTHY),
+                note="Level 1. The name list carries dist/index.test.js, "
+                     "dist/index.test.d.ts, dist/x.spec.js and "
+                     "dist/__tests__/a.js, for both packages. The control "
+                     "carries dist/latest.js and dist/contest.d.ts and must "
+                     "return none. A suffix rule on .test.js only, or a rule "
+                     "that matches the substring test, fails one of the two."),
             Probe(
                 "packages.version-skew", None,
                 python_snippet(
@@ -10726,7 +10781,9 @@ GUARDS: tuple[Guard, ...] = (
               "`packages.smoke-requires-dcmjs` and "
               "`packages.hook-register-hooks` read the real smoke text and "
               "the real hook, so removing the dcmjs require or registerHooks "
-              "turns those probes red.",
+              "turns those probes red. `packages.test-file-in-tarball` calls "
+              "check_tarball for core and for react on the four test paths, "
+              "and its control is the healthy list.",
     ),
     Guard(
         id="advisories",

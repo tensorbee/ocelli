@@ -63,6 +63,21 @@ FORBIDDEN_PREFIXES = ["src/", "node_modules/"]
 FORBIDDEN_SUFFIXES = [".tsbuildinfo"]
 
 
+def _is_test_artifact(path: str) -> bool:
+    """True when a packed path is a compiled test.
+
+    The marker sits in the basename as `.test.` or `.spec.`, so `.js`,
+    `.js.map`, `.d.ts` and `.d.ts.map` match alike. A `__tests__` path
+    segment matches too. The substring `test` does not, so `latest.js`
+    and `contest.d.ts` are library names.
+    """
+    segments = path.split("/")
+    if "__tests__" in segments:
+        return True
+    base = segments[-1]
+    return ".test." in base or ".spec." in base
+
+
 def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
 
@@ -132,6 +147,10 @@ def check_tarball(name: str, manifest: dict, names: list[str]) -> list[str]:
                     f"@ocelli/{name} tarball carries {path}. It is build "
                     f"state, and it embeds absolute paths from the machine "
                     f"that produced it")
+        if _is_test_artifact(path):
+            problems.append(
+                f"@ocelli/{name} tarball carries {path}, which is a "
+                f"test file")
 
     # THE CHECK THIS FILE EXISTS FOR. Every path the manifest advertises has to
     # be in the tarball. npm does not verify this and a consumer finds out at

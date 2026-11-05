@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../node_modules/.cache/ocelli-tsc/core-test",
+    "tsBuildInfoFile": "../../node_modules/.cache/ocelli-tsc/core-test.tsbuildinfo",
+    "rootDir": "./src"
+  },
+  "include": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/node-test-modules.d.ts",
+    "src/dcmjs.d.ts"
+  ],
+  "references": [{ "path": "./tsconfig.json" }]
+}

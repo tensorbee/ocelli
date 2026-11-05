@@ -5207,3 +5207,31 @@ this branch had not touched since the base.
 **Deviations from the design plan.** none. The CI half of AC3 is confirmed by the CI run on the pushed head. Implemented by an external coding agent. Five review passes, the last three on wording that said the gate proves unreachability where it checks the paths it runs.
 
 **Notes for future sessions.** Removing the injection test from `gate packages` is noticed by no guard today, a pass 3 nitpick. The exception row goes stale when dcmjs stops declaring adm-zip, and the gate then refuses it.
+
+## F-221, Published package contents, completed 2026-11-05
+
+**What was built.** Each package's `tsconfig.json` stays the library project and now excludes tests. A sibling `tsconfig.test.json` per package references the library and typechecks the tests into an ignored cache under `node_modules/.cache/ocelli-tsc/`, with its own `tsBuildInfoFile`, and the root solution references both test projects. `build` removes `dist` and `tsconfig.tsbuildinfo` before `tsc --build`, because `tsc --build` does not re-emit a deleted `dist` while its build info survives. `scripts/package_check.py` refuses any tarball entry whose basename contains `.test.` or `.spec.` or whose path has a `__tests__` segment.
+
+**HLD sections implemented.** The packaging rules of the TypeScript shell.
+
+**Deviations.** none
+
+**Crates / packages modified.** `@ocelli/core` and `@ocelli/react` build configuration, root `tsconfig.json`, `scripts/package_check.py`, `scripts/guards/catalogue.py`, `ci/guard-probe-budget.json`.
+
+**Tests added.** A level-1 probe for the test-file refusal with `latest.js` and `contest.d.ts` controls. Pass 1 applied seven mutations to the rule and each went red. Vitest stays at 57 files and 468 tests.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the merged worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree f98e8e7.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes packaging only.
+
+**LLD updated.** `docs/lld/typescript-packaging.md` and its `docs/lld/README.md` index row.
+
+**User-facing documentation.** no change. README.md, the Use book and the More page do not list tarball contents.
+
+**Deviations from the design plan.** The plan measured 281 core entries and 141 test paths. A fresh build gives 278 and 138, because a stale `dist/cursor.probe.test.*` with no source is not recreated. The non-test count, 140, is what AC1 requires. Each test project also names its own `tsBuildInfoFile`, which the plan did not, after pass 1 found the two shared one path and never settled. Implemented by an external coding agent. Three review passes.
+
+**Notes for future sessions.** The plan's decision 1 still lists a three-entry exclude for react, which is now two globs. The tree is the authority.

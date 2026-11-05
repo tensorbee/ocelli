@@ -20,8 +20,8 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc --build",
-    "clean": "rm -rf dist"
+    "build": "rm -rf dist tsconfig.tsbuildinfo && tsc --build",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "publishConfig": {
     "access": "public"
