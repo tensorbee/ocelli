@@ -5123,3 +5123,31 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The plan's exception owner rule was amended by the lead under the operator's delegation: a lead may waive licence file text that is an allowlisted licence granting nothing copyleft, or an empty file, and every such waiver is listed for the operator in `docs/sprints/CURRENT_SPRINT.md`. `examples/viewer-react/vite.config.ts` sets `worker.format` to `es`, which Vite 7 requires. Implemented by an external coding agent over five independent review passes.
 
 **Notes for future sessions.** AC17's Linux half is the corpus-tooling CI job on the pushed head and is confirmed at sprint close. F-220 follows up with full notices for every crate in shipped binaries. A lead waiver over text that really grants a copyleft licence while naming an allowlisted licence cannot be refused mechanically and stays a human rule.
+
+## F-219, Sprint plan checker refusals that no guard probe triggers, completed 2026-11-05
+
+**What was built.** The four refusals in `scripts/gen_sprint_plan.py` that no guard probe triggered now each have a floor probe and a unit test, keyed by a fragment only that refusal prints: a row absent from every sprint table, a row for a story the backlog does not schedule, a sprint with no goal line, and goal titles out of order. The stale goal line probe's fragment is narrowed so it names one refusal.
+
+**HLD sections implemented.** Section 27.2 and the F-X009 guard harness.
+
+**Deviations.** none
+
+**Crates / packages modified.** `scripts/guards/catalogue.py`, `scripts/tests/test_gen_sprint_plan.py`, `ci/guard-probe-budget.json`, `docs/runbooks/guard-verification.md`.
+
+**Tests added.** Five unit tests and four floor probes. Deleting each refusal turns only its own probe and test green, measured by the implementer and again by the reviewer.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the staged worker tree, 27 floor gates plus the corpus gate, in the worker's own build directory. The verify ledger entry is in the commit trailer of 7a43b4b.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes guard tooling only.
+
+**LLD updated.** `docs/lld/guards.md`. The `docs/lld/README.md` index and `docs/lld/codecs.md` header also gain F-217, which F-217's integration missed.
+
+**User-facing documentation.** no change. README.md, the Use book and the More page do not describe the sprint plan checker.
+
+**Deviations from the design plan.** The plan's consumer map said `guard_census.py --record` re-measures wall clock. `guard_probe.py --record-budget` does, and wall clock was left as recorded because the gate stays inside it. The plan line is corrected. Implemented by an external coding agent, reviewed clean on the first pass.
+
+**Notes for future sessions.** The census counts per entry, not per refusal, so a refusal added to `gen_sprint_plan.py` later needs its own probe by review. Uniqueness of every probe fragment across all fourteen messages is a recorded hand check, not an automated test.

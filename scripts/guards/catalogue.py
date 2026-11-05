@@ -1216,6 +1216,141 @@ def _sprint_plan_two_goal_lines(box: Sandbox) -> None:
                    + goal.group(0))
 
 
+def _sprint_plan_row_absent(box: Sandbox) -> None:
+    """Delete the first story row of the first sprint table.
+
+    The allocation still plans that story, so `--check` reports that it
+    appears in no sprint table. The goal line stays and still carries the
+    title, so the missing-title refusal does not fire. A check that walked
+    only the plan's own rows would stay green.
+    """
+    head = re.compile(r"^####\s+Sprint\s+S\d+\s*$")
+    story = re.compile(r"^\|\s*F-X?\d{3}[a-z]?\s*\|")
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    heads = [i for i, line in enumerate(lines) if head.match(line.rstrip("\n"))]
+    if not heads:
+        raise AssertionError("SPRINT_PLAN.md carries no sprint table")
+    end = heads[1] if len(heads) > 1 else len(lines)
+    rows = [i for i in range(heads[0], end) if story.match(lines[i])]
+    if not rows:
+        raise AssertionError("the first sprint table carries no story row")
+    del lines[rows[0]]
+    box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+
+
+def _sprint_plan_row_unplanned(box: Sandbox) -> None:
+    """Insert a row for F-999 after the first sprint table's last row.
+
+    The allocation does not plan F-999, so the unplanned-row refusal is
+    the one that fires. The goal line is untouched. F-999 is fixed. If a
+    later allocation plans that id into a sprint, the same row would hit
+    the wrong-sprint refusal, so the fixture stops instead.
+    """
+    allocation = json.loads(box.read("docs/sprints/allocation.json"))
+    if any(story["fid"] == "F-999" and story["sprint"]
+           for story in allocation["stories"]):
+        raise SandboxError(
+            "the allocation plans F-999 into a sprint, so this fixture "
+            "would reach the wrong-sprint refusal")
+    head = re.compile(r"^####\s+Sprint\s+S\d+\s*$")
+    story = re.compile(r"^\|\s*F-X?\d{3}[a-z]?\s*\|")
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    heads = [i for i, line in enumerate(lines) if head.match(line.rstrip("\n"))]
+    if not heads:
+        raise AssertionError("SPRINT_PLAN.md carries no sprint table")
+    end = heads[1] if len(heads) > 1 else len(lines)
+    rows = [i for i in range(heads[0], end) if story.match(lines[i])]
+    if not rows:
+        raise AssertionError("the first sprint table carries no story row")
+    last = rows[-1]
+    ending = "\n" if lines[last].endswith("\n") else ""
+    lines.insert(last + 1,
+                 "| F-999 | E0.0 | A row the allocation plans nowhere "
+                 "| Test | 1w |" + ending)
+    box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+
+
+def _sprint_plan_goal_line_absent(box: Sandbox) -> None:
+    """Delete the first `**Goal**:` line and the blank line under it.
+
+    The sprint heading remains, so the parser still knows which sprint
+    lost its goal. The table rows stay, so the row refusals stay quiet.
+    The fragment is the absent line. A comparison over only the sprints
+    whose goal line the parser found would stay green.
+    """
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    goal = re.compile(r"^\*\*Goal\*\*: .+$")
+    for index, line in enumerate(lines):
+        if not goal.match(line.rstrip("\n")):
+            continue
+        remove = 1
+        if index + 1 < len(lines) and lines[index + 1].strip() == "":
+            remove = 2
+        del lines[index:index + remove]
+        box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+        return
+    raise AssertionError("SPRINT_PLAN.md carries no **Goal** line")
+
+
+def _sprint_plan_goal_order_drift(box: Sandbox) -> None:
+    """Swap two adjacent distinct titles on one sprint's goal line.
+
+    Titles come from the sandbox allocation in the generator's order,
+    with the same semicolon-to-comma substitution the goal line uses.
+    The first sprint whose single goal line contains an adjacent pair
+    as `a, b` has those two titles exchanged on that line only. Both
+    titles remain, so the missing-title refusal stays quiet and the
+    order refusal is the one that fires. A sprint with two goal lines
+    is skipped, because that state is the duplicate-line refusal. A
+    plan with no such pair cannot express the drift, and the fixture
+    stops rather than passing.
+    """
+    allocation = json.loads(box.read("docs/sprints/allocation.json"))
+    planned = [story for story in allocation["stories"] if story["sprint"]]
+    planned.sort(key=lambda story: (int(story["sprint"][1:]), story["fid"]))
+    titles_by_sprint: dict[str, list[str]] = {}
+    sprint_order: list[str] = []
+    for story in planned:
+        sprint = story["sprint"]
+        if sprint not in titles_by_sprint:
+            sprint_order.append(sprint)
+            titles_by_sprint[sprint] = []
+        titles_by_sprint[sprint].append(story["story"].replace(";", ","))
+
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    head = re.compile(r"^####\s+Sprint\s+(S\d+)\s*$")
+    goal = re.compile(r"^\*\*Goal\*\*: (.+)$")
+    current = ""
+    goals: dict[str, list[int]] = {}
+    for index, line in enumerate(lines):
+        found = head.match(line.rstrip("\n"))
+        if found:
+            current = found.group(1)
+            continue
+        if current and goal.match(line.rstrip("\n")):
+            goals.setdefault(current, []).append(index)
+
+    for sprint in sprint_order:
+        indexes = goals.get(sprint, [])
+        if len(indexes) != 1:
+            continue
+        titles = titles_by_sprint[sprint]
+        for left, right in zip(titles, titles[1:]):
+            if left == right:
+                continue
+            pair = f"{left}, {right}"
+            raw = lines[indexes[0]]
+            body = raw.rstrip("\r\n")
+            if pair not in body:
+                continue
+            lines[indexes[0]] = (
+                body.replace(pair, f"{right}, {left}", 1) + raw[len(body):])
+            box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+            return
+    raise SandboxError(
+        "no sprint goal line contains two adjacent distinct story titles")
+
+
 def _stale_codex_adapter(box: Sandbox) -> None:
     box.append(".claude/commands/verify.md",
                "\nA line the adapter has not seen.\n")
@@ -9515,11 +9650,13 @@ GUARDS: tuple[Guard, ...] = (
              "bootstrap",
         refuses="A sprint plan that disagrees with the backlog about which "
                 "sprint a story is in or how large it is, a story planned "
-                "into two sprint tables at once, a generated milestone "
-                "summary or goal line that has drifted from the allocation it "
-                "is written from or that is absent, duplicated or spurious, "
-                "an absent plan, and a bare write that would replace an "
-                "existing hand-curated plan.",
+                "into two sprint tables at once, a planned story absent from "
+                "every sprint table, a table row for a story the allocation "
+                "does not plan, a generated milestone summary or goal line "
+                "that has drifted from the allocation it is written from or "
+                "that is absent, duplicated or spurious, an absent plan, and "
+                "a bare write that would replace an existing hand-curated "
+                "plan.",
         claims=("*",),
         probes=(
             Probe("sprint-plan.existing-refuses-write",
@@ -9591,7 +9728,39 @@ GUARDS: tuple[Guard, ...] = (
                   "the summary line for"),
             Probe("sprint-plan.stale-goal-line", _sprint_plan_stale_goal_line,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
-                  "**Goal** line"),
+                  "does not carry the story title it is built from",
+                  note="The fragment used to be `**Goal** line`, which the "
+                       "absent goal line, the order drift and the duplicate "
+                       "goal lines also print. This fragment is the "
+                       "missing-title refusal alone. The fixture is "
+                       "unchanged."),
+            Probe("sprint-plan.row-absent", _sprint_plan_row_absent,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "appears in no SPRINT_PLAN.md sprint table",
+                  note="Deletes the first sprint table's first story row. "
+                       "The allocation still plans that story and the goal "
+                       "line still names it, so the absent row is the only "
+                       "refusal."),
+            Probe("sprint-plan.row-unplanned", _sprint_plan_row_unplanned,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "carries no sprint in BACKLOG.md",
+                  note="Inserts a row for F-999, which the allocation does "
+                       "not plan. The goal line is left alone, so the "
+                       "unplanned row is the only refusal."),
+            Probe("sprint-plan.goal-line-absent",
+                  _sprint_plan_goal_line_absent,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "carries no **Goal** line",
+                  note="Deletes the first goal line. The sprint heading and "
+                       "its table stay, so the refusal is the absent line "
+                       "and not a missing title."),
+            Probe("sprint-plan.goal-order-drift",
+                  _sprint_plan_goal_order_drift,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "its order or its punctuation has drifted",
+                  note="Swaps the first adjacent pair of distinct story "
+                       "titles on one goal line. Both titles remain, so a "
+                       "comparison that ignores order would stay green."),
         ),
     ),
     Guard(

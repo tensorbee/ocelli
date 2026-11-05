@@ -362,7 +362,7 @@ beside F-119.
 | F-216 | E38.26 | S46 | Folder viewer performance: each file posted once and held in a bounded cache, decode reused across window changes, measured budgets for open, first image, scroll rate and resident memory, and a release build | All | 4w | F-207 | pending |
 | F-217 | E38.27 | S46 | Licence hygiene: no copyleft dependency in any tracked manifest, a permissive JPEG reference decoder for the corpus, licence allowlist gates for Rust, npm and Python, and a third-party notices file | All | 2w | - | done |
 | F-218 | E38.28 | S46 | Dependency advisories in shipped packages: adm-zip below 0.6.1 reaches the published @ocelli/core runtime through dcmjs, resolved by a patched override or a proof that no shipped path reaches it, with an audit gate over shipped dependencies | TS | 1w | F-217 | pending |
-| F-219 | E38.29 | S46 | Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red | Test | 1w | - | pending |
+| F-219 | E38.29 | S46 | Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red | Test | 1w | - | done |
 
 ### M14, Out-of-core volume streaming
 

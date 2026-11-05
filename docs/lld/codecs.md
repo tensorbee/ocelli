@@ -1,7 +1,7 @@
 # Codec registry
 
-**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028, F-030, F-X021
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028, F-030, F-X021, F-217
+**Last updated:** 2026-11-05
 
 `ocelli-codec` owns decoder capability, registration, and exact Transfer
 Syntax UID dispatch. Concrete adapters cover native Implicit and Explicit VR
