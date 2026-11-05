@@ -19,6 +19,8 @@ const HEADER_CAP: usize = 16 * 1024;
 /// gibibyte rather than a single decoded frame.
 const BODY_CAP: usize = 1024 * 1024 * 1024;
 const PAGE: &str = include_str!("page.html");
+const MORE: &str = include_str!("more.html");
+const USE_PAGE: &str = include_str!("use.html");
 
 struct Request {
     method: String,
@@ -113,6 +115,12 @@ fn get_reply(request: &Request) -> Reply {
     if request.path == "/" || request.path == "/index.html" {
         return page_reply();
     }
+    if request.path == "/more" || request.path == "/more.html" {
+        return html_page(MORE);
+    }
+    if request.path == "/use" || request.path == "/use.html" {
+        return html_page(USE_PAGE);
+    }
     if request.path == "/synthetic" {
         let body = format!("{{\"slices\":{SLICES}}}");
         return bare(200, "application/json", body.into_bytes());
@@ -127,7 +135,11 @@ fn get_reply(request: &Request) -> Reply {
 }
 
 fn page_reply() -> Reply {
-    bare(200, "text/html; charset=utf-8", PAGE.as_bytes().to_vec())
+    html_page(PAGE)
+}
+
+fn html_page(page: &str) -> Reply {
+    bare(200, "text/html; charset=utf-8", page.as_bytes().to_vec())
 }
 
 fn preview_reply(body: &[u8], frame: FrameRequest) -> Reply {

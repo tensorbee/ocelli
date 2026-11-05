@@ -114,7 +114,8 @@ Out of scope: changing W/L drag axes, overlay drawing, shutter drawing, blending
 |------------------------------|----------------|----------------------------|-----------------------------|
 | Image shown, tool Scroll | Pinch | Scale changes, pan keeps the pointer still | No image: the page itself does not zoom |
 | Drawing press in progress | Wheel without Ctrl | Draft unchanged, slice unchanged | Ctrl zoom rescales the draft with the stage |
-| Any tool, mark under the pointer | Click with little movement | That mark is selected | A longer drag runs the tool and does not move the mark |
+| Navigation tool, mark under the pointer | Click with little movement | That mark is selected | A drag past 5 CSS pixels runs the tool and does not move the mark |
+| Drawing tool, mark under the pointer | Press | That mark is selected and moves with the pointer | A drag under 5 CSS pixels only selects |
 | Text selected | Size or swatch | `note.size` or `note.color` changes | A navigation drag does not recolour |
 | Headers open, or the note field open | Wheel | Ignored | The sheet stays |
 
@@ -168,6 +169,14 @@ Depends on F-206. Writes `examples/folder-viewer/src/page.html`, `more.html`, `u
 ## Parity surface covered
 
 None. The React harness already carries the S44 controls. This story does not add a cornerstone observation.
+
+## Deviations
+
+none
+
+## LLD impact
+
+none. The local example is not the published API.
 
 ## Open questions
 

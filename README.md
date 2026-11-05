@@ -185,23 +185,36 @@ in Chrome or Edge. The Folder control is a directory picker.
    number, the modality, the description and the image count. A file with no
    Series Instance UID keeps its own row.
 3. Select a row. The viewport shows the first image and keeps it. The arrow
-   keys and the mouse wheel move one image. The scrubber reads `n / total`.
-   Coming back to a series restores the image you left.
+   keys move one image. A wheel without Ctrl moves one image after about 40
+   pixels of travel. The scrubber reads `n / total`. Coming back to a series
+   restores the image you left.
 4. Space plays and pauses. Playback loops. The FPS control runs from 1 to 30
    and starts at 10.
-5. The toolbar is Scroll, Pan, Zoom, W/L, Contour, Text, Reset, Fit, Invert,
-   Headers and Play. Scroll starts active.
-6. The left button uses the active tool. The right button pans. The middle
-   button zooms. The wheel always changes the image. Zoom keeps the image
-   aspect ratio. The viewport clips an image that is larger than the pane.
+5. The toolbar is Scroll, Pan, Zoom, W/L, Freeform, Rectangle, Ellipse, Text,
+   Length, Fit, Reset and Full screen. Scroll starts active. Invert, window
+   presets, flips and the other image controls are in the right column.
+6. The left button uses the active tool. The right button pans. Control with
+   the left button also pans. The middle button zooms from the place you
+   pressed. A pinch, or Ctrl with the wheel, zooms at the pointer. A sideways
+   swipe does not change the image. Zoom keeps the image aspect ratio. The
+   viewport clips an image that is larger than the pane.
 7. Headers shows the data set as stored. The corners show the stored labels
-   for the current image.
-8. Contour draws a freehand outline and closes it at three or more points.
-   Text places a note. Click, type, and press Enter to keep it. Escape drops
-   the draft. Leaving the field keeps the note. Click a mark to select it,
-   drag to move it, and press Delete or Backspace to remove it. Marks last
-   until you reload the page. They are drawings on that image. They are not
-   written back into the file and they are not lengths in millimetres.
+   for the current image. Edge letters show the patient direction and hide
+   while the picture is flipped or rotated.
+8. Freeform draws a freehand outline and keeps it at three or more points.
+   Rectangle and ellipse draw a region and do not fill it. Text places a note.
+   Click, type, and press Enter to keep it. Escape drops the draft. Leaving
+   the field keeps the note. Size and colour can be changed after the note
+   exists. Length shows millimetres when the file gives Pixel Spacing,
+   millimetres at the detector when it gives only Imager Pixel Spacing, and
+   pixels when it gives no spacing. Click a mark to select it. While a drawing
+   tool is active, drag moves that mark. Press Delete, Backspace or Remove to
+   remove it. Marks last until you reload the page. They are drawings on that
+   image. They are not written back into the file.
+
+The top of the page offers Synthetic study or Folder. Synthetic study is a
+generated CT and it is not a patient. More names library behaviour this image
+does not draw. Use explains the JavaScript, React and Rust calls.
 
 A file that is not a Part 10 DICOM object is skipped and counted. A colour
 frame, a Modality LUT Sequence, or a VOI LUT Sequence without both a window

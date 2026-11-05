@@ -5039,3 +5039,29 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The plan refuses a preset together with a centre or a width. The code also refuses a preset together with a window function. A present but unusable Pixel Spacing does not fall through to imager spacing. A spacing token that is not already a JSON number is written as the parsed value.
 
 **Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 1 nitpick. The nitpick is the FrameFacts doc. It says a JSON number is kept. Only a finite trimmed token is kept. It does not block. Reviewer Claude Code, read only, with no shell. Changing the intercept string from -1024 to 0 made the grey tests go red, then the string was restored. That mutation was not repeated after the later comment edits. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-207, Folder viewer layout, gestures, marks and image controls, completed 2026-11-05
+
+**What was built.** The local series page uses the gray sans layout. A wheel without Ctrl changes the slice after about 40 pixels of travel, and a pinch zooms at the pointer. Freeform remains. Rectangle, ellipse, text and length are drawings in the browser, with a colour, a text size, and remove. More and Use are static pages.
+
+**HLD sections implemented.** `docs/hld/15-lut-chain.md` section 18. The page sends a preset name and does not copy the LUT. Decision D13 is kept by saying these marks are not DICOM SR. The local rules are `.claude/plans/F-207-design.md`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/folder-viewer` and `README.md`.
+
+**Tests added.** Contract checks in `examples/folder-viewer/tests/preview.rs`.
+
+**Fixture provenance.** no pixel arithmetic. Length reads the spacing headers from F-206. The page does not recompute the LUT.
+
+**Verification.** Feature profile on the staged tree, which is `bin/ocelli.sh gate --floor` plus the corpus gate. The gates and the corpus result are the verify ledger entry for this commit.
+
+**Corpus.** See the verification record in the commit trailer. This story adds no corpus row.
+
+**Tier coverage.** Tiers A and B are not applicable. This page does not open a device. Tier C is full for the grey image, because preview is the CPU LUT. Marks and gestures are page geometry on those bytes.
+
+**LLD updated.** none. The example is not the published API.
+
+**Deviations from the design plan.** none. The state table now says a drawing-tool drag moves the mark and a navigation drag does not.
+
+**Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 3 nitpicks. A drawing-tool move does not latch after 5 pixels. A colour frame can still take a drawing from the previous image size. Leaving 2 by 2 because a neighbour is over 32 MiB does not re-enable the drawing buttons. None of those block. Reviewer Claude Code, read only, with no shell. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.

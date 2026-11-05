@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ocelli, Use</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #141414; color: #e6e6e6; }
+  body {
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Liberation Sans", Arial, sans-serif;
+  }
+  header.top {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 14px;
+    background: #1c1c1c;
+    border-bottom: 1px solid #2e2e2e;
+  }
+  header.top strong { font-size: 15px; font-weight: 600; }
+  nav { margin-left: auto; display: flex; gap: 14px; }
+  nav a { color: #999999; text-decoration: none; }
+  nav a[aria-current="page"] { color: #e6e6e6; }
+  main { max-width: 680px; margin: 0 auto; padding: 28px 20px 64px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 12px; }
+  h2 { font-size: 20px; font-weight: 600; margin: 28px 0 8px; }
+  p { margin: 0 0 12px; }
+  section { border-top: 1px solid #2e2e2e; padding-top: 8px; }
+  pre {
+    background: #1c1c1c;
+    border: 1px solid #2e2e2e;
+    padding: 12px 14px;
+    overflow: auto;
+    font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  }
+  a:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <strong>Ocelli</strong>
+  <nav>
+    <a href="/">Images</a>
+    <a href="/more">More</a>
+    <a href="/use" aria-current="page">Use</a>
+  </nav>
+</header>
+<main>
+  <h1>Use the library</h1>
+  <p>This folder viewer is not the wasm path. Nothing is published. The three calls below are the library. The window arithmetic lives once, in <code>LutChain</code>, and this page does not copy it.</p>
+
+  <section>
+    <h2>JavaScript</h2>
+    <p>Create a viewport id and pack commands for that id. Decoded pixels stay in the worker. <code>DicomwebClient</code> takes <code>studiesServiceUrl</code>, <code>wadoUriUrl</code>, <code>fetch</code>, the wasm memory and a sink.</p>
+<pre>import { viewportId, packCommands, DicomwebClient } from "@ocelli/core";
+
+const id = viewportId(1);
+const bytes = packCommands(id, []);</pre>
+  </section>
+  <section>
+    <h2>React</h2>
+    <p>Mount one viewport. Pass the session you own. Null means there is no session yet.</p>
+<pre>import { viewportId } from "@ocelli/core";
+import { OcelliViewport } from "@ocelli/react";
+
+&lt;OcelliViewport id="view" viewport={viewportId(1)} session={null} /&gt;</pre>
+  </section>
+  <section>
+    <h2>Rust</h2>
+    <p>Parse a Part 10 object with <code>parse_part10</code>, then map stored pixels with <code>LutChain</code>. The workspace README section "Use the library" shows the path dependencies. This page does not paste a window formula.</p>
+<pre>ocelli_dicom::parse_part10
+ocelli_pixel::LutChain::map_into</pre>
+  </section>
+</main>
+</body>
+</html>

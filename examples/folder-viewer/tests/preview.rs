@@ -175,11 +175,61 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     if !page.contains("id=\"series\"") || !page.contains(">Headers<") {
         return Err("the page is not the series viewer".to_owned());
     }
-    if !page.contains(">Contour<") || !page.contains(">Text<") {
-        return Err("the page has no contour or text tool".to_owned());
+    if !page.contains(">Freeform<") || !page.contains(">Text<") {
+        return Err("the page has no freeform or text tool".to_owned());
+    }
+    if !page.contains(">Rectangle<") || !page.contains(">Ellipse<") || !page.contains(">Remove<") {
+        return Err("the page has no rectangle, ellipse, or remove control".to_owned());
+    }
+    if !page.contains("system-ui") || !page.contains("#141414") {
+        return Err("the page is not the sans gray layout".to_owned());
+    }
+    if page.contains("Georgia") || page.contains("#16130f") {
+        return Err("the page still uses the old type or the warm ground".to_owned());
+    }
+    if !page.contains("if (event.ctrlKey) {\n    event.preventDefault();") {
+        return Err("a pinch does not call preventDefault".to_owned());
+    }
+    if !page.contains("if (Math.abs(wheelAcc) >= 40) {\n    wheelAcc = 0;\n    queueSlice(sign);") {
+        return Err("a swipe still steps once per event".to_owned());
+    }
+    if !page.contains("not DICOM SR") || !page.contains("gone when you reload") {
+        return Err("the page does not say what a mark is".to_owned());
+    }
+    let wrap_at = page
+        .find("id=\"wrap\"")
+        .ok_or_else(|| "the page has no viewport".to_owned())?;
+    let note_at = page
+        .find("id=\"note\"")
+        .ok_or_else(|| "the page has no note field".to_owned())?;
+    let inspector_at = page
+        .find("id=\"inspector\"")
+        .ok_or_else(|| "the page has no inspector".to_owned())?;
+    if wrap_at > note_at || note_at > inspector_at {
+        return Err("the note field is outside the viewport".to_owned());
+    }
+    if !page.contains("id=\"draft-under\"") && !page.contains("\"draft-under\"") {
+        return Err("a draft stroke has no underlay".to_owned());
     }
     if !page.contains("Series shortened") {
         return Err("a shortened series is not labelled".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn more_and_use_are_static_pages() -> Result<(), String> {
+    for path in ["/more", "/use"] {
+        let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        let response = one_exchange(request.as_bytes())?;
+        let (header, body) = split_http(&response)?;
+        if !header.contains("200") {
+            return Err(format!("{path} was not 200"));
+        }
+        let page = std::str::from_utf8(body).map_err(|_| format!("{path} is not utf-8"))?;
+        if page.contains("<canvas") {
+            return Err(format!("{path} contains a viewer"));
+        }
     }
     Ok(())
 }

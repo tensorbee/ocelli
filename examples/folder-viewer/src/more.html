@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ocelli, More</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #141414; color: #e6e6e6; }
+  body {
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Liberation Sans", Arial, sans-serif;
+  }
+  header.top {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 14px;
+    background: #1c1c1c;
+    border-bottom: 1px solid #2e2e2e;
+  }
+  header.top strong { font-size: 15px; font-weight: 600; }
+  nav { margin-left: auto; display: flex; gap: 14px; }
+  nav a { color: #999999; text-decoration: none; }
+  nav a[aria-current="page"] { color: #e6e6e6; }
+  main { max-width: 680px; margin: 0 auto; padding: 28px 20px 64px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 12px; }
+  h2 { font-size: 20px; font-weight: 600; margin: 28px 0 8px; }
+  p { margin: 0 0 12px; }
+  section { border-top: 1px solid #2e2e2e; padding-top: 8px; }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    background: #1c1c1c;
+    padding: 0 4px;
+  }
+  a:focus-visible, button:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <strong>Ocelli</strong>
+  <nav>
+    <a href="/">Images</a>
+    <a href="/more" aria-current="page">More</a>
+    <a href="/use">Use</a>
+  </nav>
+</header>
+<main>
+  <h1>More than this image</h1>
+  <p>This page names library behaviour the image does not draw. There is no picture here and there is no stand-in result. The example page started with <code>npm run dev</code> is where those controls run.</p>
+
+  <section>
+    <h2>Overlay and shutter</h2>
+    <p>Overlay planes and display shutters are read by the library. The example page shows a hit and a hide. This image does not draw either one.</p>
+  </section>
+  <section>
+    <h2>Between slices</h2>
+    <p>Nearest and linear blending between slices is stack interpolation. The example page shows both. This image shows one slice and does not blend it with the next.</p>
+  </section>
+  <section>
+    <h2>Reference line</h2>
+    <p>A reference line and a reference cursor belong to the example page. This image does not draw a line from another series.</p>
+  </section>
+  <section>
+    <h2>Several series at once</h2>
+    <p>A tilted pair, prior studies, linked scroll and a synced window are named on the example page. This image does not build them.</p>
+  </section>
+  <section>
+    <h2>MPR, slab, volume and fusion</h2>
+    <p>MPR, slab, volume rendering and fusion are named on the example page. This image does not build them.</p>
+  </section>
+  <section>
+    <h2>One to one, histogram, metadata and preferences</h2>
+    <p>One to one, histogram, a metadata browser and preferences read unavailable on the example page. This image does not invent a result for them.</p>
+  </section>
+  <section>
+    <h2>Worker decode</h2>
+    <p>The wasm path posts one WADO-RS instance to a worker and keeps the pixels there. This folder viewer posts the file to the local process. It is not that path.</p>
+  </section>
+  <section>
+    <h2>Documents</h2>
+    <p>TID 1500, saving and loading a measurement, undo, a key object and a secondary capture live in <code>@ocelli/core</code>. The example page calls them. A key image flag on the image page is only a mark in this session. It does not write a Key Object Selection and it is not saved.</p>
+  </section>
+</main>
+</body>
+</html>
