@@ -379,7 +379,7 @@ Bounded GPU residency on unbounded data. The first of the three checkable claims
 | F-122 | E30.4 | S48 | Residency budget, prefetch and eviction policy | Rust | 8w | F-120 | pending |
 | F-123 | E30.5 | S49 | Chunk-cost indicator surface | Rust | 3w | F-122 | pending |
 | F-124 | E30.6 | S49 | 4D and time-series as a first-class chunked axis | Rust | 12w | F-122 | pending |
-| F-222 | E30.7 | S46 | Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero | Rust | 1w | F-119 | pending |
+| F-222 | E30.7 | S46 | Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero | Rust | 1w | F-119 | done |
 
 ### M15, The WebGPU compute subsystem
 

@@ -91,6 +91,9 @@ impl Volume {
     ///
     /// The exact-overlap box filter of F-119 decision 1, over stored values.
     /// Spacing comes from `append_level`.
+    /// An F32 mean leaves non-finite samples out, divides by the finite
+    /// weight only, writes the canonical quiet NaN when no sample is finite,
+    /// and stores negative zero as positive zero.
     ///
     /// # Errors
     ///
@@ -125,6 +128,9 @@ impl Volume {
     /// Level `k` has `max(1, ceil(dims_0 / 2^k))` on each axis. Generation
     /// stops after the first level whose brick grid is one brick. Returns
     /// `levels.len()` after generation, which is 1 for a one-brick level 0.
+    /// Each generated F32 level leaves non-finite samples out, divides by
+    /// the finite weight only, writes the canonical quiet NaN when no sample
+    /// is finite, and stores negative zero as positive zero.
     ///
     /// # Errors
     ///
@@ -371,21 +377,44 @@ fn mean_i128(
     round_ties_away(sum, weight_total(full)?)
 }
 
+/// Positive quiet NaN, payload only the quiet bit. F-222 decision 4.
+/// The bits are written out so every target stores the same pattern.
+const CANONICAL_NAN_BITS: u32 = 0x7fc0_0000;
+
 fn mean_f32(
     source: &[u8],
     full: [u32; 3],
     dims: [u32; 3],
     voxel: [u32; 3],
 ) -> Result<f32, VolumeError> {
-    let sum = fold_parents(full, dims, voxel, 0.0_f64, |sum, weights, parent| {
-        let [wx, wy, wz] = weights;
-        let factor = weight_f64(wx)? * weight_f64(wy)? * weight_f64(wz)?;
-        let sample = read_f32(source, full, parent)?;
-        Ok(sum + factor * f64::from(sample))
-    })?;
-    let [fx, fy, fz] = full;
-    let divisor = f64::from(fx) * f64::from(fy) * f64::from(fz);
-    Ok(narrow_f32(sum / divisor))
+    let (sum, weight, any) = fold_parents(
+        full,
+        dims,
+        voxel,
+        (0.0_f64, 0.0_f64, false),
+        |state, weights, parent| {
+            let (sum, weight, any) = state;
+            let [wx, wy, wz] = weights;
+            let factor = weight_f64(wx)? * weight_f64(wy)? * weight_f64(wz)?;
+            let sample = read_f32(source, full, parent)?;
+            // F-222 decision 1. Finiteness is tested on the stored f32, before widening.
+            if sample.is_finite() {
+                Ok((sum + factor * f64::from(sample), weight + factor, true))
+            } else {
+                Ok((sum, weight, any))
+            }
+        },
+    )?;
+    // F-222 decision 4. No finite sample, so the canonical quiet NaN, not an input payload.
+    if !any {
+        return Ok(f32::from_bits(CANONICAL_NAN_BITS));
+    }
+    let narrowed = narrow_f32(sum / weight);
+    // F-222 decision 6. `narrow_f32` can return negative zero from a negative underflow.
+    if narrowed.to_bits() == 0x8000_0000 {
+        return Ok(f32::from_bits(0));
+    }
+    Ok(narrowed)
 }
 
 fn fold_parents<T>(
