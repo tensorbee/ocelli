@@ -1070,8 +1070,8 @@ def _sprint_plan_milestone_summary_deleted(box: Sandbox) -> None:
 
     The comparison was positional, so an absent line shifted every line after
     it and the refusal named the wrong milestone, which is a message a
-    maintainer cannot act on. The lines are matched on the sprint span they
-    name now, and an absent span is refused by name.
+    maintainer cannot act on. The lines are matched on the milestone heading
+    each sits under now, and an absent line is refused by milestone.
     """
     text = box.read("docs/sprints/SPRINT_PLAN.md")
     line = re.search(r"^_S\d+ to S\d+, \d+ stories, \d+ engineer-weeks\._$",
@@ -1082,7 +1082,7 @@ def _sprint_plan_milestone_summary_deleted(box: Sandbox) -> None:
 
 
 def _sprint_plan_extra_milestone_summary(box: Sandbox) -> None:
-    """Add a summary line for a span the allocation has no milestone for."""
+    """Add a second summary line under a milestone that already has one."""
     text = box.read("docs/sprints/SPRINT_PLAN.md")
     line = re.search(r"^_S\d+ to S\d+, \d+ stories, \d+ engineer-weeks\._$",
                      text, re.M)
@@ -1091,6 +1091,23 @@ def _sprint_plan_extra_milestone_summary(box: Sandbox) -> None:
     box.substitute("docs/sprints/SPRINT_PLAN.md", line.group(0),
                    line.group(0) + "\n\n_S98 to S99, 1 stories, "
                                    "1 engineer-weeks._")
+
+
+def _sprint_plan_unplanned_milestone_summary(box: Sandbox) -> None:
+    """Add a milestone heading and summary the allocation plans nothing for.
+
+    The comparison is keyed by the milestone heading each line sits under, so
+    a heading with no planned story is hand-written prose wearing a generated
+    line's shape and is refused by name.
+    """
+    text = box.read("docs/sprints/SPRINT_PLAN.md")
+    line = re.search(r"^_S\d+ to S\d+, \d+ stories, \d+ engineer-weeks\._$",
+                     text, re.M)
+    if line is None:
+        raise AssertionError("SPRINT_PLAN.md carries no milestone summary line")
+    box.substitute("docs/sprints/SPRINT_PLAN.md", line.group(0),
+                   line.group(0) + "\n\n### M99, Unplanned\n\n"
+                                   + line.group(0))
 
 
 def _sprint_plan_two_goal_lines(box: Sandbox) -> None:
@@ -9410,17 +9427,25 @@ GUARDS: tuple[Guard, ...] = (
                   "carries no summary line under its heading",
                   note="The lines were compared by POSITION, so one absent "
                        "line shifted every line after it and the refusal "
-                       "named the wrong milestone. They are matched on the "
-                       "sprint span they name now, which is the identity a "
-                       "reader has anyway."),
+                       "named the wrong milestone. They were then matched "
+                       "on the sprint span they name, which collapses two "
+                       "milestones that share a span. They are matched on "
+                       "the milestone heading each sits under now."),
             Probe("sprint-plan.milestone-summary-spurious",
                   _sprint_plan_extra_milestone_summary,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
                   "summary lines and the generator writes one",
-                  note="The other direction of the same span comparison. A "
-                       "summary line is generated, so one the allocation "
-                       "cannot account for is hand-written prose wearing a "
-                       "generated line's shape."),
+                  note="render writes one summary line per milestone "
+                       "heading, so a second one under a heading it already "
+                       "wrote is a hand edit."),
+            Probe("sprint-plan.milestone-summary-unplanned",
+                  _sprint_plan_unplanned_milestone_summary,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "the allocation plans no story for it",
+                  note="A summary line under a heading for a milestone the "
+                       "allocation plans no story in. Before the S46 review "
+                       "the span key let such a line pass whenever its span "
+                       "matched a real milestone's."),
             Probe("sprint-plan.two-goal-lines", _sprint_plan_two_goal_lines,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
                   "**Goal** lines",
@@ -9440,7 +9465,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("sprint-plan.wrong-milestone-summary",
                   _sprint_plan_wrong_milestone_summary,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
-                  "should read"),
+                  "the summary line for"),
             Probe("sprint-plan.stale-goal-line", _sprint_plan_stale_goal_line,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
                   "**Goal** line"),
