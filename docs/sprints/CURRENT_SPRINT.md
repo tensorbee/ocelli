@@ -132,6 +132,8 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   licenses` only, so no gate reports a Rust advisory today. The choice is a
   story that adds `cargo deny check advisories` to the floor with a reviewed
   exception list, or recording this one as an accepted risk.
+  **Accepted by the operator on 2026-11-05 as a known risk for now.** No
+  gate is added in S46.
 
 ## What is carried in
 
