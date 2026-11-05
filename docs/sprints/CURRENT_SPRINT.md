@@ -104,6 +104,20 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   choice is a story that packs the module, or a release rule that says where
   the module ships instead.
 
+- **The objc2 crates in the native binaries may carry an Apple SDK
+  redistribution question.** F-220's first review read the upstream objc2
+  `LICENSE.md`, which flags that redistributing these crates, generated from
+  Apple SDK headers, under the Xcode licence is unclear. They reach the
+  native binaries through wgpu's Metal backend. Not blocking S46, because
+  S46 publishes nothing. The choice is legal advice before a native release,
+  or a native build that leaves them out.
+
+- **`acceptTransferredFrame` ignores a correctly spelt `stackIndex` and
+  `stackEpoch`.** Found by F-230's first review and older than F-230. Now
+  that both keys are on F-230's accepted list, a caller who sets them gets
+  neither a refusal nor the effect. The choice is a story that honours them,
+  or removing them from that entry point's accepted keys.
+
 ## What is carried in
 
 - **D-22 still blocks publication.** The version stays 0.1.0.
