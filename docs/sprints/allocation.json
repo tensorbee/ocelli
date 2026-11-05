@@ -2717,6 +2717,38 @@
       ]
     },
     {
+      "fid": "F-220",
+      "eid": "E38.30",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Shipped binary notices: the full licence text of every crate compiled into the wasm module and the native binaries, generated from the lockfile and checked by a gate",
+      "layer": "Build",
+      "weeks": 2,
+      "depends_eids": [],
+      "depends_fids": [
+        "F-217"
+      ],
+      "notes": "F-217's plan question 6 recommended a follow-up. THIRD_PARTY_NOTICES covers the vendored sources only, while MIT and BSD grants in every compiled crate also require their notice on redistribution.",
+      "milestone": "",
+      "sprint": ""
+    },
+    {
+      "fid": "F-221",
+      "eid": "E38.31",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Published package contents: the @ocelli/core tarball stops shipping compiled test files, with a packages gate refusal for any test file in a published tarball",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids": [],
+      "notes": "Found while designing F-218 on 2026-11-05. npm pack lists 47 compiled *.test.js files under dist/ among 280 entries.",
+      "milestone": "",
+      "sprint": ""
+    },
+    {
       "fid": "F-208",
       "eid": "E38.18",
       "phase": "P1",

@@ -446,6 +446,7 @@ expensive is visible at design time, which is the whole point of HLD
 section 13. F-202, F-203, F-204 and F-205 are Phase 1 rows in this table.
 They have no sprint. F-202 is worker decode of a posted WADO-RS envelope.
 F-203, F-204 and F-205 are the example controls S44 does not invent.
+F-220 and F-221 are follow-ups found during S46 and have no sprint yet.
 
 | F-ID | Epic ref | Phase | Epic | Story | Layer | Est | Status |
 |------|----------|-------|------|-------|-------|-----|--------|
@@ -453,6 +454,8 @@ F-203, F-204 and F-205 are the example controls S44 does not invent.
 | F-203 | E38.13 | P1 | E38 Series open | Example prior studies, linked scroll, synced window and zoom, frame-of-reference cursor, MPR, slab, volume rendering and fusion | TS | 4w | pending |
 | F-204 | E38.14 | P1 | E38 Series open | Example one to one, histogram, four corners, and a shutter beyond the overlay panel | TS | 4w | pending |
 | F-205 | E38.15 | P1 | E38 Series open | Example metadata browser with compare and copy, export beyond the document panel, and preferences | TS | 4w | pending |
+| F-220 | E38.30 | P1 | E38 Series open | Shipped binary notices: the full licence text of every crate compiled into the wasm module and the native binaries, generated from the lockfile and checked by a gate | Build | 2w | pending |
+| F-221 | E38.31 | P1 | E38 Series open | Published package contents: the @ocelli/core tarball stops shipping compiled test files, with a packages gate refusal for any test file in a published tarball | TS | 1w | pending |
 | F-158 | E20.1 | P2 | E20 DICOM gateway (adopt, do not build) | Deploy and harden Orthanc or dcm4che as the DIMSE edge | Server | 6w | pending |
 | F-159 | E20.2 | P2 | E20 DICOM gateway (adopt, do not build) | C-STORE, C-FIND, C-MOVE and C-ECHO configuration with TLS | Server | 5w | pending |
 | F-160 | E20.3 | P2 | E20 DICOM gateway (adopt, do not build) | Autorouting rules and always-on listener operations | Server | 5w | pending |
