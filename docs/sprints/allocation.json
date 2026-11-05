@@ -2917,6 +2917,38 @@
       "notes": "A sweep on 2026-11-05 found pylibjpeg-libjpeg 2.4.0 under GPL-3 pinned in pyproject.toml for corpus JPEG decoding, lightningcss 1.33.0 under MPL-2.0 through vite 8 in dev tooling, and vendor/openjph-core with no BSD-2 notice. No transitive licence check exists in any ecosystem."
     },
     {
+      "fid": "F-218",
+      "eid": "E38.28",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Dependency advisories in shipped packages: adm-zip below 0.6.1 reaches the published @ocelli/core runtime through dcmjs, resolved by a patched override or a proof that no shipped path reaches it, with an audit gate over shipped dependencies",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids": [
+        "F-217"
+      ],
+      "notes": "npm audit on 2026-11-05 reports GHSA-xcpc-8h2w-3j85 and GHSA-7q85-xj36-vmfc (high, memory exhaustion from a crafted ZIP) and GHSA-vwc7-r8mq-g2x9 (moderate) for adm-zip 0.5.17 under dcmjs 0.52.2. The audit's suggested fix downgrades dcmjs a major version.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-219",
+      "eid": "E38.29",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red",
+      "layer": "Test",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids": [],
+      "notes": "Found by the S46 guard probe review, pass 1 nitpick N1. The census counts per entry, so these four read as watched without any probe triggering them.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
       "fid": "F-206",
       "eid": "E38.16",
       "phase": "P1",

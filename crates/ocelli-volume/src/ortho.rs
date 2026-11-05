@@ -433,7 +433,7 @@ pub(crate) fn u32_from_nonneg_floor(index: f64) -> Option<u32> {
 }
 
 /// Ties-to-even narrowing. `as f32` is denied, so the bits are written out.
-fn narrow_f32(value: f64) -> f32 {
+pub(crate) fn narrow_f32(value: f64) -> f32 {
     if value.is_nan() {
         return f32::from_bits(0x7fc0_0000);
     }

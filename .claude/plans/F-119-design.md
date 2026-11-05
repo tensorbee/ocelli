@@ -270,7 +270,7 @@ Invariants: level 0 is offset 0 and full resolution. Every level above 0 is a fu
 | Resource or visible state | Acquired or staged by | Lifetime identity | Observable commit point | Failure and duplicate-operation behavior |
 |---------------------------|-----------------------|-------------------|-------------------------|------------------------------------------|
 | One level's computed buffer | `downsample_level`, a local `Vec<u8>` | The call | `append_level` returning the index | A refusal before the buffer returns with nothing allocated. The buffer is dropped after the copy |
-| Store bytes above level 0 | `append_level` | The `Volume` value | The `levels` push | `generate_pyramid` truncates first, then appends. A mid-pyramid failure cannot occur after the completeness check, because every later dims value is valid by construction. The plan still tests that the volume is left with a prefix of valid levels, never a gap |
+| Store bytes above level 0 | `append_level` | The `Volume` value | The `levels` push | `generate_pyramid` truncates first, then appends. A mid-pyramid failure cannot occur after the completeness check, because every later dims value is valid by construction. |
 | Level 0 bytes | Assembly and `place` | Offset 0 | `place` returning `Ok` | Untouched by generation |
 | `VolumeCache` entry | The caller | `VolumeKey` | The caller's re-insert | Generation never touches the cache |
 
