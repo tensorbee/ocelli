@@ -2787,6 +2787,147 @@
       "sprint": "S46"
     },
     {
+      "fid": "F-224",
+      "eid": "E5.7",
+      "phase": "P1",
+      "epic": "E5 Cache & memory",
+      "epic_key": "E5",
+      "story": "Frame identity: the decoded tier answers a lookup only when the frame's content id, from SOP Instance UID, transfer syntax and encoded bytes, and its description and plane match, DicomwebClient takes a documented cache mode defaulting to no-cache, and the folder viewer keys page caches by the picked File, lets the same folder be chosen again, and refuses to show a file that changed on disk",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E16.6",
+        "E5.8"
+      ],
+      "depends_fids": [
+        "F-230",
+        "F-226"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-225",
+      "eid": "E3.8",
+      "phase": "P1",
+      "epic": "E3 DICOM ingest & metadata",
+      "epic_key": "E3",
+      "story": "DICOM conformance report: ocelli-dicom checks each value against the VR rules of PS3.5 section 6.2 and Type 1, 1C and 2 presence for seven PS3.3 modules on CR, CT, MR and PET, a finding never carries a value or stops display, @ocelli/core reads the report, and the folder viewer shows a Checks badge and list",
+      "layer": "All",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.26",
+        "E38.23"
+      ],
+      "depends_fids": [
+        "F-216",
+        "F-213"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-226",
+      "eid": "E5.8",
+      "phase": "P1",
+      "epic": "E5 Cache & memory",
+      "epic_key": "E5",
+      "story": "Release by series and study: ImageCache::release_series and BrickCache::release_volume over one Lru range removal, a cache.released ring event decoded by @ocelli/core, and the folder viewer forgetting the previous folder's held files and frames on the local process when another folder or the synthetic study is opened or the page is left",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.26",
+        "E38.18"
+      ],
+      "depends_fids": [
+        "F-216",
+        "F-208"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-227",
+      "eid": "E38.33",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Automatic window when the file has none: the 1st to 99th percentile of modality values by nearest rank, leaving out stored zero and the Pixel Padding Value range, computed once in ocelli-pixel, labelled Auto window in the folder viewer, and every window in the file still used as it is",
+      "layer": "All",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.20",
+        "E38.23"
+      ],
+      "depends_fids": [
+        "F-210",
+        "F-213"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-228",
+      "eid": "E38.34",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Content Security Policy: the minimal policy an embedding page needs for the Ocelli worker and wasm path, documented and proven by a browser probe of the built example viewer with minimality probes, and the folder viewer served under a strict hash policy with compressed frames decoded and drawn",
+      "layer": "All",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.23",
+        "E38.25"
+      ],
+      "depends_fids": [
+        "F-213",
+        "F-215"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-229",
+      "eid": "E4.10",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "story": "JPEG XL decoding: the three JPEG XL transfer syntaxes through jxl-oxide, lossless decoded exactly, JPEG recompression rebuilt and decoded by the existing JPEG path, unsupported features refused as unavailable, with synthetic corpus rows and declared oracle rows",
+      "layer": "Rust",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.27",
+        "E38.30"
+      ],
+      "depends_fids": [
+        "F-217",
+        "F-220"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-230",
+      "eid": "E16.6",
+      "phase": "P1",
+      "epic": "E16 Public API & TypeScript shell",
+      "epic_key": "E16",
+      "story": "Public options refuse unknown keys: every options and request object in @ocelli/core refuses an unknown key at run time with a coded OcelliError naming it, DicomwebError and the bulk, command and instance errors share that class, and loadCore rejects with the initialiser's cause instead of resolving false",
+      "layer": "TS",
+      "weeks": 2,
+      "depends_eids": [],
+      "depends_fids": [],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
       "fid": "F-208",
       "eid": "E38.18",
       "phase": "P1",
