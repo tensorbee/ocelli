@@ -86,6 +86,15 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   it, is a one-row edit.
   **Confirmed by the operator on 2026-11-05.** All four stay as recorded.
 
+- **The `@ocelli/core` tarball carries no wasm module, so `/release` would
+  refuse.** `docs/RELEASE.md` preflight item 6 requires the module built from
+  the release HEAD inside `@ocelli/core`. `npm pack --dry-run -w
+  packages/core` lists 281 entries on c775931 and none ends in `.wasm`. No
+  S46 story builds the module into the package. Found while designing F-220,
+  outside its scope. Not blocking S46, because S46 publishes nothing. The
+  choice is a story that packs the module, or a release rule that says where
+  the module ships instead.
+
 ## What is carried in
 
 - **D-22 still blocks publication.** The version stays 0.1.0.
