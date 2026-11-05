@@ -43,7 +43,7 @@ one goal, not a fixed calendar box. The sprint clock starts at the first
 
 **Phase 1 is S01 to S44**, 118 stories and 397 engineer-weeks, feature parity
 with cornerstone3D 5.8.2. The HLD's v5.8.9 does not exist, and deviation D-11
-selects the nearest installable 5.8.x instead. **Phase 1.5 is S45 to S75**, 39
+selects the nearest installable 5.8.x instead. **Phase 1.5 is S46 to S76**, 39
 stories and 352 engineer-weeks, the eight differentiating capabilities of HLD
 Part III. Phase 2 and Phase 3 carry F-IDs in `BACKLOG.md` and no sprint,
 deliberately.
