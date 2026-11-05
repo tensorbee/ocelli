@@ -5179,3 +5179,31 @@ this branch had not touched since the base.
 **Deviations from the design plan.** none. Implemented by an external coding agent. Two review passes, the first finding two false test comments that the sprint lead corrected.
 
 **Notes for future sessions.** The empty-box flag is defence in depth that no test can tell apart from `narrow_f32`'s own NaN today. Keep it if `narrow_f32` changes.
+
+## F-218, Dependency advisories in shipped packages, completed 2026-11-05
+
+**What was built.** `scripts/advisory_check.py` and a floor gate `advisories` audit the dependency closure `@ocelli/core` ships against `npm audit`, refusing any high or critical advisory without a row in `ci/advisories.toml`. The one row is adm-zip 0.5.17, reached through dcmjs 0.52.2, with scope `unreachable`. That scope is accepted only while `gate packages` installs the packed tarball into a consumer, traces every module the smoke run loads through a `registerHooks` hook, and finds no adm-zip load, with an injection test that plants a load and watches the check go red. npm aliases are resolved through the lock nodes. An override of a closure package is refused, because a root override never reaches a consumer.
+
+**HLD sections implemented.** Section 27.2, the guard harness, and the packaging rules of the TypeScript shell.
+
+**Deviations.** none
+
+**Crates / packages modified.** `scripts/advisory_check.py`, `scripts/package_check.py`, `scripts/guards/catalogue.py`, `ci/advisories.toml`, `ci/guard-probe-budget.json`, `bin/ocelli.sh`, `.github/workflows/ci.yml`.
+
+**Tests added.** 48 unit tests in `scripts/tests/test_advisory_check.py`, the injection test `scripts/tests/test_unreachable_injections.py` run inside `gate packages`, and the new advisory and wiring probes in the guard catalogue.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the merged worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 79f3f63.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes packaging and guard tooling only.
+
+**LLD updated.** `docs/lld/guards.md`, `docs/lld/typescript-packaging.md` and their `docs/lld/README.md` index rows.
+
+**User-facing documentation.** `README.md`, `packages/core/README.md` and the Use book state the advisory, what the packages gate checks and its limit, and the consumer override recipe for adm-zip 0.6.1.
+
+**Deviations from the design plan.** none. The CI half of AC3 is confirmed by the CI run on the pushed head. Implemented by an external coding agent. Five review passes, the last three on wording that said the gate proves unreachability where it checks the paths it runs.
+
+**Notes for future sessions.** Removing the injection test from `gate packages` is noticed by no guard today, a pass 3 nitpick. The exception row goes stale when dcmjs stops declaring adm-zip, and the gate then refuses it.

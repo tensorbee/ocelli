@@ -305,6 +305,25 @@ that boundary. The shell sends typed commands down and drains one event ring
 per animation frame.
 
 In a browser, use the workspace packages `@ocelli/core` and `@ocelli/react`.
+
+`@ocelli/core` depends on dcmjs 0.52.2, which declares adm-zip 0.5.17 as a
+runtime dependency. Nothing in `@ocelli/core` or in dcmjs's published files
+loads adm-zip. `gate packages` checks that on every run. The check installs
+the published tarballs outside the workspace, imports `@ocelli/core`, and
+requires `dcmjs`, under a resolve hook that records ESM and CommonJS
+resolutions on the main thread. It refuses a trace that does not record
+`dcmjs/build/dcmjs.es.js` and `dcmjs/build/dcmjs.js`, a trace that records a
+URL under the excepted package, and any other installed `.js`, `.mjs` or
+`.cjs` file that names that package as a module specifier in any quote, with
+or without a subpath, including a relative `../` or `../../` path. A load
+whose specifier is built at run time in code the smoke run does not execute
+on its main thread (for example a Worker or a child process, or a function
+the import never calls) is outside the check. A consumer's own npm audit
+also lists `@ocelli/core` and `@ocelli/react` as high, because they depend
+on dcmjs. A project that needs a clean audit can add
+`"overrides": { "adm-zip": "0.6.1" }` to its own root `package.json`, which
+is safe because nothing calls it.
+
 `OcelliViewport` renders a host `div`. Pass `session={null}` when you have no
 wasm session. The frame pump starts only after the session's `memory` is the
 built module. `examples/viewer-react/src/App.tsx` is the mount this repository

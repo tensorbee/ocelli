@@ -1,0 +1,22 @@
+# High and critical advisories in the published npm runtime.
+# A row is accepted only when its proof is the packages consumer trace.
+
+[[exception]]
+ecosystem = "npm"
+package = "adm-zip"
+version = "0.5.17"
+advisories = [
+  "GHSA-xcpc-8h2w-3j85",
+  "GHSA-vwc7-r8mq-g2x9",
+  "GHSA-7q85-xj36-vmfc",
+  "GHSA-rcw4-f5rp-g42v",
+  "GHSA-j5f4-cc29-5x44",
+  "GHSA-p634-w6r4-rjp2",
+  "GHSA-c6fg-446q-cg94",
+  "GHSA-8238-w5pm-2374",
+]
+scope = "unreachable"
+proof = "packages-consumer-trace"
+reason = "dcmjs 0.52.2 declares adm-zip under dependencies and uses it only in test/testUtils.js, which it does not publish. No shipped dcmjs or @ocelli file names it. The real fix is upstream, moving adm-zip to devDependencies."
+decided = "2026-11-05"
+decided_by = "lead, under the operator's delegation of 2026-11-05"

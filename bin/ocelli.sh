@@ -79,6 +79,7 @@ GATES=(
   "native|no|the cross-target build proof and per-target features (E1.7, HLD 4)"
   "device|no|only ocelli-render creates a GPU device (E1.8, HLD 31)"
   "packages|no|npm tarball contents, exports and a consumer install (E1.3)"
+  "advisories|no|high and critical advisories in the published npm runtime closure"
   "ci|no|every floor gate is actually invoked by .github/workflows/ci.yml"
   "guards|no|every declared guard still refuses what it is for (F-X009)"
   "guards-deep|no|the guard probes needing a cargo toolchain (F-X009)"
@@ -287,9 +288,20 @@ run_gate() {
     # floor because it needs both the locked DICOM environment and cargo. The
     # corpus-tooling CI job installs both and runs it on every event.
     quirk-mutations) python3 scripts/quirk_mutations.py ;;
+    # F-218. The injection table runs after package_check.py. It replays a
+    # string-built load through the real consumer, which the static scan
+    # cannot see.
     packages)    [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
                  npm run test &&
-                 python3 scripts/package_check.py ;;
+                 python3 scripts/package_check.py &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_unreachable_injections.py ;;
+    # F-218. The audit asks the registry. A new high advisory turns this red
+    # without a tree change, and a missing report fails closed. There is no
+    # skip for an absent node_modules, because the audit reads the lock.
+    advisories)  python3 scripts/advisory_check.py &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_advisory_check.py ;;
     # Needs no corpus, so it is IN the floor. The runner fails on a skipped
     # test rather than on the exit status, because the suites exit 0 under an
     # interpreter with no pydicom while reporting a skip, and this project's
