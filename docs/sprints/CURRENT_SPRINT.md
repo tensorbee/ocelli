@@ -68,6 +68,16 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   `level_voxel_to_level0`. F-119 pins the current behaviour in
   `non_finite_floats_keep_the_current_bits` so a change is visible.
 
+- **Licence file waivers the lead decided, for the operator to confirm.**
+  F-217's plan lets the lead waive a licence file only when its text is an
+  allowlisted licence that grants nothing copyleft. Four rows in
+  `ci/licences.toml` use that rule: the empty `LICENSE-heif`,
+  `LICENSE-jetraw` and `LICENSE-libjxs` placeholders in imagecodecs
+  2026.10.10, for codecs not compiled into the wheel, and et-xmlfile 2.0.0's
+  `LICENCE.python`, which is the CPython licence stack and names the GPL only
+  in a governing-law clause. Changing any of them to `operator`, or refusing
+  it, is a one-row edit.
+
 ## What is carried in
 
 - **D-22 still blocks publication.** The version stays 0.1.0.
