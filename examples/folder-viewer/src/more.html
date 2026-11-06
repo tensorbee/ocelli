@@ -208,7 +208,7 @@ for (const { x0, y0, x1, y1 } of lines ?? []) {
 
   <section class="feature" id="series">
     <h2>Several series at once</h2>
-    <span class="status part">Partial. Slice sync by patient point is built. Linked scroll, synced window and priors are not.</span>
+    <span class="status part">Partial. Slice sync by patient point is built, and the image page shows several series side by side in its own grid. Linked scroll, synced window and priors are not.</span>
     <p>Reading often means two series side by side: a current scan beside a prior, or two sequences of the same MRI. Scrolling one should move the other to the same anatomy, and a window change may apply to both.</p>
     <p class="where">Lives in <code>ocelli-volume</code> as <code>HeldPlane</code> and in <code>ocelli-viewport</code> as <code>sync::SyncScene</code>. A scene moves every viewport that shares the source's Frame of Reference UID onto one patient point.</p>
 <pre><code>use glam::DVec3;
@@ -231,7 +231,7 @@ for change in scene.set_point(1, point)? {
     let (id, index) = (change.id, change.index);
 }</code></pre>
     <p>A different Frame of Reference UID stays where it is, and a refused point is <code>SyncError::Unavailable</code> with no slot written. <code>attachSideBySide(ocelliElement, neighbour)</code> in <code>@ocelli/core</code> pairs an Ocelli element with an element another library owns and enables the seam, which is the migration case rather than a second series.</p>
-    <p class="tiers">Not built: linked scroll and synced window as shell features, and prior study lookup. The example page reads Prior studies, Linked scroll and Synced window unavailable.</p>
+    <p class="tiers">The image page of this folder viewer lays out 1 by 1 up to 3 by 3 viewports, each with its own series, image, zoom and window, and a series row dragged onto a viewport opens there. Its viewports do not follow each other. Not built: linked scroll and synced window as shell features, and prior study lookup. The example page reads Prior studies, Linked scroll and Synced window unavailable.</p>
   </section>
 
   <section class="feature" id="mpr">

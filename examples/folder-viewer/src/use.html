@@ -180,7 +180,7 @@
   <h1>Use the library</h1>
   <p class="lede">A guide to Ocelli as it exists in this repository today. Every name on this page is a real export, read from the source. Where a piece is not built yet, the page says so.</p>
   <div class="note">
-    <p><strong>This folder viewer is not the wasm path.</strong> It is a native Rust process that reads a file you choose and draws one image through the same <code>ocelli-pixel</code> code. The browser path is a wasm core in a worker, described below. <strong>Nothing is published.</strong> There is no package on npm and no crate on crates.io. You build from this workspace and depend on it by path.</p>
+    <p><strong>This folder viewer is not the wasm path.</strong> It is a native Rust process that reads a file you choose and draws each viewport's image through the same <code>ocelli-pixel</code> code. The browser path is a wasm core in a worker, described below. <strong>Nothing is published.</strong> There is no package on npm and no crate on crates.io. You build from this workspace and depend on it by path.</p>
   </div>
   <p>The window arithmetic lives once, in <code>LutChain</code>, and this page does not copy it. Where a formula matters, the page cites its DICOM section and points at the type that implements it.</p>
 

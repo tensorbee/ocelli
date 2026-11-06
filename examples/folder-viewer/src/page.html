@@ -161,6 +161,7 @@
   }
   #series-list button:hover { background: var(--raised); }
   #series-list button.active { background: var(--raised); border-left-color: var(--on); }
+  #series-list button.shown { border-left-color: var(--faint); }
   #series-list canvas.thumb {
     width: 64px;
     height: 64px;
@@ -201,19 +202,47 @@
     position: relative;
     min-width: 0;
     min-height: 0;
+    background: #2e2e2e;
+    display: grid;
+    grid-template-columns: repeat(var(--columns, 1), minmax(0, 1fr));
+    grid-template-rows: repeat(var(--rows, 1), minmax(0, 1fr));
+    gap: 2px;
+    overflow: hidden;
+    touch-action: none;
+    overscroll-behavior: none;
+  }
+  .cell {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
     background: #000000;
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    touch-action: none;
-    overscroll-behavior: none;
   }
-  #frame { position: relative; flex: none; }
-  #stage { position: absolute; left: 50%; top: 50%; flex: none; }
-  #view, #ink { position: absolute; left: 0; top: 0; }
-  #view { image-rendering: pixelated; }
-  #ink { overflow: visible; }
+  #wrap.many .cell.active::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    box-shadow: inset 0 0 0 2px #dedede;
+    pointer-events: none;
+    z-index: 4;
+  }
+  .cell.drop-target::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    box-shadow: inset 0 0 0 2px #9a9a9a;
+    pointer-events: none;
+    z-index: 4;
+  }
+  .cell-empty { margin: 0; color: var(--muted); text-align: center; padding: 12px; pointer-events: none; }
+  .frame { position: relative; flex: none; }
+  .stage { position: absolute; left: 50%; top: 50%; flex: none; }
+  .view, .ink { position: absolute; left: 0; top: 0; }
+  .view { image-rendering: pixelated; }
+  .ink { overflow: visible; }
   #empty {
     position: absolute;
     inset: 0;
@@ -237,7 +266,7 @@
     background: var(--raised);
   }
   #empty button:hover { background: var(--hover); }
-  #tiles {
+  .tiles {
     position: absolute;
     inset: 0;
     display: grid;
@@ -246,14 +275,14 @@
     gap: 1px;
     background: #3a3a3a;
   }
-  #tiles .tile {
+  .tiles .tile {
     position: relative;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
     background: #000000;
   }
-  #tiles canvas {
+  .tiles canvas {
     position: absolute;
     left: 50%;
     top: 50%;
@@ -261,7 +290,7 @@
     background: #000000;
     image-rendering: pixelated;
   }
-  #tiles .tile-label {
+  .tiles .tile-label {
     position: absolute;
     left: 50%;
     bottom: 6px;
@@ -310,7 +339,7 @@
     background: #000000;
     z-index: 3;
   }
-  #fault {
+  .fault {
     position: absolute;
     left: 50%;
     top: 50%;
@@ -502,6 +531,28 @@
     font: 13px/1.35 ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
   }
   td:last-child { white-space: pre-wrap; word-break: break-word; }
+  #layout-picker {
+    position: fixed;
+    z-index: 8;
+    display: grid;
+    grid-template-columns: repeat(3, 22px);
+    gap: 3px;
+    padding: 8px;
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+  }
+  #layout-picker button {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: var(--raised);
+    border: 1px solid var(--edge);
+    border-radius: 3px;
+  }
+  #layout-picker button.on { background: var(--on); border-color: var(--on); }
+  #layout-picker p { grid-column: 1 / -1; margin: 4px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
   #tip {
     position: fixed;
     z-index: 9;
@@ -556,7 +607,7 @@
   <symbol id="i-mag" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6.5"/><path d="M15 15l6 6"/><path d="M7.5 8.5h2v-1M10.5 12.5h2v-2"/></symbol>
   <symbol id="i-corners" viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><path d="M8 10h6M8 13.5h8"/></symbol>
   <symbol id="i-letters" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 6.5l2.5 5.5-2.5 5.5-2.5-5.5z"/></symbol>
-  <symbol id="i-grid-1" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5"/></symbol>
+  <symbol id="i-layout" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M9.33 4v16M14.67 4v16M4 9.33h16M4 14.67h16"/></symbol>
   <symbol id="i-grid-2" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M12 4v16M4 12h16"/></symbol>
   <symbol id="i-key" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/></symbol>
   <symbol id="i-headers" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" stroke-width="2.6"/></symbol>
@@ -615,8 +666,8 @@
   <button type="button" class="icon active" id="toggle-corners" aria-label="Corners" data-key="A"><svg class="i"><use href="#i-corners"/></svg><span class="sr">Corners</span></button>
   <button type="button" class="icon active" id="toggle-letters" aria-label="Orientation letters" data-key="N"><svg class="i"><use href="#i-letters"/></svg><span class="sr">Orientation letters</span></button>
   <span class="sep"></span>
-  <button type="button" class="icon active" id="grid-1" aria-label="1 × 1" data-key="1"><svg class="i"><use href="#i-grid-1"/></svg><span class="sr">1 × 1</span></button>
-  <button type="button" class="icon" id="grid-2" aria-label="2 × 2" data-key="2"><svg class="i"><use href="#i-grid-2"/></svg><span class="sr">2 × 2</span></button>
+  <button type="button" class="icon" id="layout" aria-label="Layout" data-key="G" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-layout"/></svg><span class="sr">Layout</span></button>
+  <button type="button" class="icon" id="tile-mode" aria-label="Four images" data-key="Shift G"><svg class="i"><use href="#i-grid-2"/></svg><span class="sr">Four images</span></button>
   <span class="spacer"></span>
   <button type="button" class="icon" id="key-image" aria-label="Key image" data-key="K"><svg class="i"><use href="#i-key"/></svg><span class="sr">Key image</span></button>
   <button type="button" class="icon" id="headers" aria-label="Headers" data-key="D"><svg class="i"><use href="#i-headers"/></svg><span class="sr">Headers</span></button>
@@ -625,19 +676,45 @@
   <button type="button" class="icon" id="reset" aria-label="Reset" data-key="Shift R"><svg class="i"><use href="#i-reset"/></svg><span class="sr">Reset</span></button>
   <button type="button" class="icon" id="fullscreen" aria-label="Full screen" data-key="Shift F"><svg class="i"><use href="#i-full"/></svg><span class="sr">Full screen</span></button>
 </div>
-<div class="canvas-wrap" id="wrap">
-  <div id="frame">
-    <div id="stage" hidden>
-      <canvas id="view"></canvas>
-      <svg id="ink" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none"></svg>
+<div id="layout-picker" role="menu" aria-label="Layout" hidden>
+  <button type="button" role="menuitem" data-columns="1" data-rows="1" aria-label="1 by 1"></button>
+  <button type="button" role="menuitem" data-columns="2" data-rows="1" aria-label="2 by 1"></button>
+  <button type="button" role="menuitem" data-columns="3" data-rows="1" aria-label="3 by 1"></button>
+  <button type="button" role="menuitem" data-columns="1" data-rows="2" aria-label="1 by 2"></button>
+  <button type="button" role="menuitem" data-columns="2" data-rows="2" aria-label="2 by 2"></button>
+  <button type="button" role="menuitem" data-columns="3" data-rows="2" aria-label="3 by 2"></button>
+  <button type="button" role="menuitem" data-columns="1" data-rows="3" aria-label="1 by 3"></button>
+  <button type="button" role="menuitem" data-columns="2" data-rows="3" aria-label="2 by 3"></button>
+  <button type="button" role="menuitem" data-columns="3" data-rows="3" aria-label="3 by 3"></button>
+  <p id="layout-size">1 by 1</p>
+</div>
+<template id="cell-template">
+  <div class="cell">
+    <div class="frame" hidden>
+      <div class="stage" hidden>
+        <canvas class="view"></canvas>
+        <svg class="ink" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none"></svg>
+      </div>
     </div>
+    <div class="tiles" hidden>
+      <div class="tile"><canvas data-tile="0"></canvas><span class="tile-label"></span></div>
+      <div class="tile"><canvas data-tile="1"></canvas><span class="tile-label"></span></div>
+      <div class="tile"><canvas data-tile="2"></canvas><span class="tile-label"></span></div>
+      <div class="tile"><canvas data-tile="3"></canvas><span class="tile-label"></span></div>
+    </div>
+    <p class="cell-empty" hidden>Drag a series here.</p>
+    <div class="overlay tl"></div>
+    <div class="overlay tr"></div>
+    <div class="overlay bl"></div>
+    <div class="overlay br"></div>
+    <div class="edge left" hidden></div>
+    <div class="edge right" hidden></div>
+    <div class="edge top" hidden></div>
+    <div class="edge bottom" hidden></div>
+    <p class="fault" hidden></p>
   </div>
-  <div id="tiles" hidden>
-    <div class="tile"><canvas data-tile="0"></canvas><span class="tile-label"></span></div>
-    <div class="tile"><canvas data-tile="1"></canvas><span class="tile-label"></span></div>
-    <div class="tile"><canvas data-tile="2"></canvas><span class="tile-label"></span></div>
-    <div class="tile"><canvas data-tile="3"></canvas><span class="tile-label"></span></div>
-  </div>
+</template>
+<div class="canvas-wrap" id="wrap">
   <div id="empty">
     <h2>Open a study</h2>
     <p>Open a folder of DICOM files from this computer, or open the generated CT to try the tools. Files stay where they are.</p>
@@ -646,19 +723,10 @@
       <button type="button" data-open="synthetic">Open synthetic study</button>
     </div>
   </div>
-  <div class="overlay tl" id="ov-tl"></div>
-  <div class="overlay tr" id="ov-tr"></div>
-  <div class="overlay bl" id="ov-bl"></div>
-  <div class="overlay br" id="ov-br"></div>
-  <div class="edge left" id="edge-left" hidden></div>
-  <div class="edge right" id="edge-right" hidden></div>
-  <div class="edge top" id="edge-top" hidden></div>
-  <div class="edge bottom" id="edge-bottom" hidden></div>
   <div id="cross-h" hidden></div>
   <div id="cross-v" hidden></div>
   <div id="cross-read" hidden></div>
   <canvas id="mag" width="160" height="160" hidden></canvas>
-  <p id="fault" hidden></p>
   <input id="note" hidden placeholder="Type a note, then press Enter">
 </div>
 <div class="scrubber">
@@ -803,8 +871,8 @@ const SENTENCE = {
   "preset-soft": "The same LUT chain is run again with this preset's centre and width, in modality units. On a CT that is Hounsfield units.",
   "preset-lung": "The same LUT chain is run again with this preset's centre and width, in modality units. On a CT that is Hounsfield units.",
   "preset-bone": "The same LUT chain is run again with this preset's centre and width, in modality units. On a CT that is Hounsfield units.",
-  "grid-1": "One image.",
-  "grid-2": "Four neighbouring images from the open series, each one decoded by the same preview. Double-click one to open it alone.",
+  layout: "Choose 1 by 1 up to 3 by 3 viewports. Drag a series onto a viewport, or click a series to open it in the outlined one.",
+  "tile-mode": "Four neighbouring images from the open series, each one decoded by the same preview. Double-click one to open it alone.",
   "source-synthetic": "A generated CT. It is not a patient.",
   "source-folder": "Open a folder of DICOM files. The files stay where they are.",
   "toggle-series": "Hide or show the series list.",
@@ -838,15 +906,13 @@ const tip = document.getElementById("tip");
 const presetNote = document.getElementById("preset-note");
 const PRESET_HINT = presetNote.textContent;
 const wrap = document.getElementById("wrap");
-const frame = document.getElementById("frame");
-const stage = document.getElementById("stage");
-const canvas = document.getElementById("view");
-const ink = document.getElementById("ink");
-const tiles = document.getElementById("tiles");
-const fault = document.getElementById("fault");
+const cellTemplate = document.getElementById("cell-template");
+const layoutButton = document.getElementById("layout");
+const layoutPicker = document.getElementById("layout-picker");
+const layoutSize = document.getElementById("layout-size");
 const scrubber = document.getElementById("scrub");
 const counter = document.getElementById("counter");
-const gridMany = document.getElementById("grid-2");
+const tileButton = document.getElementById("tile-mode");
 const keyButton = document.getElementById("key-image");
 const playButton = document.getElementById("play");
 const fpsInput = document.getElementById("fps");
@@ -862,23 +928,13 @@ const sizeRow = document.getElementById("size-row");
 const selectedBox = document.getElementById("selected-box");
 const selectedKind = document.getElementById("selected-kind");
 const mag = document.getElementById("mag");
-const corners = {
-  tl: document.getElementById("ov-tl"),
-  tr: document.getElementById("ov-tr"),
-  bl: document.getElementById("ov-bl"),
-  br: document.getElementById("ov-br")
-};
-const edges = {
-  left: document.getElementById("edge-left"),
-  right: document.getElementById("edge-right"),
-  top: document.getElementById("edge-top"),
-  bottom: document.getElementById("edge-bottom")
-};
+const SERIES_TYPE = "application/x-ocelli-series";
+// The file window, for a thumbnail that ignores every viewport's window.
+const PLAIN_VIEW = { overrideWindow: null, activePreset: null, invert: false };
 
 let currentGeneration = 0;
 let seriesList = [];
-let activeIndex = -1;
-let viewIndex = 0;
+const seriesByKey = new Map();
 let sourceMode = "";
 const positions = new Map();
 const cache = new Map();
@@ -890,39 +946,16 @@ const thumbBitmaps = new Map();
 let cacheGeneration = 0;
 let cacheBytes = 0;
 let debugBuild = false;
-let mainBusy = false;
-let mainTail = Promise.resolve();
-let scrollDir = 1;
 let thumbAbort = new AbortController();
-let prefetchAbort = new AbortController();
-let tileAbort = new AbortController();
 const notes = new Map();
 const keyImages = new Set();
 let tool = "scroll";
-let fitMode = true;
-let scale = 1;
-let panX = 0;
-let panY = 0;
-let rotation = 0;
-let flipH = false;
-let flipV = false;
-let gridMode = 1;
-let imageWidth = 0;
-let imageHeight = 0;
-let overrideWindow = null;
-let draftWindow = null;
-let activePreset = null;
-let invert = false;
-let shownWindow = null;
-let shownFacts = null;
 let showCorners = true;
 let showCross = false;
 let showMag = false;
 let showLetters = true;
 let playing = false;
 let playToken = 0;
-let loadToken = 0;
-let tileToken = 0;
 let headerRows = [];
 let nextNote = 1;
 let selected = null;
@@ -934,7 +967,6 @@ let pendingPoint = null;
 let pendingKey = "";
 let editingId = null;
 let headerToken = 0;
-let zoomLabel = "100%";
 let currentColor = INKS[0];
 let currentSize = 15;
 let hoverSentence = "";
@@ -942,21 +974,44 @@ let wheelAcc = 0;
 let wheelSign = 0;
 let wheelIdle = 0;
 let wheelFrame = 0;
+let wheelCell = 0;
 let pendingDelta = 0;
-let aspectX = 1;
-let aspectY = 1;
-let layoutDirty = true;
-let layoutStamp = "";
 let marksSig = "";
 let keyButtonOn = false;
 let presetModality = null;
-let viewContext = null;
-let inkViewBox = "";
-let liveBusy = false;
-let liveDirty = false;
-let liveToken = 0;
 let tipTimer = 0;
 let thumbGeneration = 0;
+
+// The viewports. Columns and rows each run 1 to 3, and cells are numbered
+// 0 to 8 row by row. A record is made the first time its cell is shown and
+// kept when the layout shrinks, so a cell shown again keeps its series,
+// image, zoom and window.
+const MAX_SIDE = 3;
+let layout = { columns: 1, rows: 1 };
+const viewports = [];
+let activeCell = 0;
+
+function blankViewport(cell) {
+  return {
+    cell,
+    seriesKey: "",
+    viewIndex: 0,
+    fitMode: true, scale: 1, panX: 0, panY: 0,
+    rotation: 0, flipH: false, flipV: false,
+    overrideWindow: null, draftWindow: null, activePreset: null, invert: false,
+    tileMode: false,
+    imageWidth: 0, imageHeight: 0, aspectX: 1, aspectY: 1,
+    shownWindow: null, shownFacts: null, zoomLabel: "100%",
+    loadToken: 0, tileToken: 0, liveToken: 0, liveBusy: false, liveDirty: false,
+    scrollDir: 1,
+    mainBusy: false, mainTail: Promise.resolve(),
+    prefetchAbort: new AbortController(),
+    tileAbort: new AbortController(),
+    layoutDirty: true, layoutStamp: "",
+    viewContext: null, inkViewBox: "",
+    dom: null
+  };
+}
 
 for (const color of INKS) {
   const button = document.createElement("button");
@@ -995,38 +1050,42 @@ syncPanels();
 for (const name of TOOLS) {
   document.getElementById("tool-" + name).addEventListener("click", () => setTool(name));
 }
-document.getElementById("reset").addEventListener("click", resetView);
-document.getElementById("fit").addEventListener("click", fitView);
+document.getElementById("reset").addEventListener("click", () => resetView(activeViewport()));
+document.getElementById("fit").addEventListener("click", () => fitView(activeViewport()));
 document.getElementById("fullscreen").addEventListener("click", toggleFull);
 document.getElementById("invert").addEventListener("click", () => {
-  invert = !invert;
-  document.getElementById("invert").classList.toggle("active", invert);
-  showIndex(viewIndex);
+  const vp = activeViewport();
+  vp.invert = !vp.invert;
+  document.getElementById("invert").classList.toggle("active", vp.invert);
+  showIndex(vp, vp.viewIndex);
 });
 document.getElementById("rotate").addEventListener("click", () => {
-  rotation = (rotation + 90) % 360;
-  layout();
-  renderInk();
-  paintEdges();
+  const vp = activeViewport();
+  vp.rotation = (vp.rotation + 90) % 360;
+  layoutViewport(vp);
+  renderInk(vp);
+  paintEdges(vp);
 });
 document.getElementById("flip-h").addEventListener("click", () => {
-  flipH = !flipH;
-  document.getElementById("flip-h").classList.toggle("active", flipH);
-  layout();
-  renderInk();
-  paintEdges();
+  const vp = activeViewport();
+  vp.flipH = !vp.flipH;
+  document.getElementById("flip-h").classList.toggle("active", vp.flipH);
+  layoutViewport(vp);
+  renderInk(vp);
+  paintEdges(vp);
 });
 document.getElementById("flip-v").addEventListener("click", () => {
-  flipV = !flipV;
-  document.getElementById("flip-v").classList.toggle("active", flipV);
-  layout();
-  renderInk();
-  paintEdges();
+  const vp = activeViewport();
+  vp.flipV = !vp.flipV;
+  document.getElementById("flip-v").classList.toggle("active", vp.flipV);
+  layoutViewport(vp);
+  renderInk(vp);
+  paintEdges(vp);
 });
 document.getElementById("toggle-corners").addEventListener("click", () => {
   showCorners = !showCorners;
   document.getElementById("toggle-corners").classList.toggle("active", showCorners);
-  paintOverlays(currentImage());
+  for (const vp of shownViewports()) paintOverlays(vp);
 });
 document.getElementById("toggle-cross").addEventListener("click", () => {
   showCross = !showCross;
@@ -1041,13 +1100,30 @@ document.getElementById("toggle-mag").addEventListener("click", () => {
 document.getElementById("toggle-letters").addEventListener("click", () => {
   showLetters = !showLetters;
   document.getElementById("toggle-letters").classList.toggle("active", showLetters);
-  paintEdges();
+  for (const vp of shownViewports()) paintEdges(vp);
 });
-document.getElementById("grid-1").addEventListener("click", () => setGrid(1));
-document.getElementById("grid-2").addEventListener("click", () => setGrid(2));
+layoutButton.addEventListener("click", () => {
+  if (layoutPicker.hidden) openLayoutPicker();
+  else closeLayoutPicker();
+});
+for (const button of layoutPicker.querySelectorAll("[data-columns]")) {
+  button.addEventListener("pointerenter", () => markPicker(Number(button.dataset.columns), Number(button.dataset.rows)));
+  button.addEventListener("focus", () => markPicker(Number(button.dataset.columns), Number(button.dataset.rows)));
+  button.addEventListener("click", () => {
+    closeLayoutPicker();
+    setLayout(Number(button.dataset.columns), Number(button.dataset.rows));
+  });
+}
+layoutPicker.addEventListener("pointerleave", () => markPicker(layout.columns, layout.rows));
+document.addEventListener("pointerdown", (event) => {
+  if (layoutPicker.hidden) return;
+  if (layoutPicker.contains(event.target) || layoutButton.contains(event.target)) return;
+  closeLayoutPicker();
+}, true);
+tileButton.addEventListener("click", toggleTileMode);
 document.getElementById("key-image").addEventListener("click", toggleKey);
 for (const button of document.querySelectorAll("[data-preset]")) {
-  button.addEventListener("click", () => applyPreset(button.dataset.preset));
+  button.addEventListener("click", () => applyPreset(activeViewport(), button.dataset.preset));
 }
 for (const button of sizeRow.querySelectorAll("[data-size]")) {
   button.addEventListener("click", () => chooseSize(Number(button.dataset.size)));
@@ -1064,9 +1140,15 @@ modal.addEventListener("click", closeModal);
 filter.addEventListener("input", paintHeaderRows);
 playButton.addEventListener("click", togglePlay);
 fpsInput.addEventListener("input", () => { fpsValue.textContent = fpsInput.value; });
-scrubber.addEventListener("input", () => showIndex(Number(scrubber.value)));
+scrubber.addEventListener("input", () => {
+  const vp = activeViewport();
+  showIndex(vp, Number(scrubber.value));
+});
 wrap.addEventListener("contextmenu", (event) => event.preventDefault());
 wrap.addEventListener("wheel", onWheel, { passive: false });
+// A press makes its cell the active one before any other handler sees it,
+// including a mark's own handler, and the press itself is not swallowed.
+wrap.addEventListener("pointerdown", activateUnder, true);
 wrap.addEventListener("pointerdown", onPointerDown);
 wrap.addEventListener("pointermove", onPointerMove);
 wrap.addEventListener("pointerup", onPointerUp);
@@ -1085,12 +1167,15 @@ noteInput.addEventListener("keydown", (event) => {
 noteInput.addEventListener("blur", () => { if (!noteInput.hidden) commitNote(); });
 window.addEventListener("keydown", onKey);
 window.addEventListener("resize", relayout);
-new ResizeObserver(relayout).observe(wrap);
+const cellResize = new ResizeObserver(relayout);
+cellResize.observe(wrap);
 
 function relayout() {
-  layoutDirty = true;
-  layout();
-  for (const node of tiles.querySelectorAll("canvas")) sizeTile(node);
+  for (const vp of shownViewports()) {
+    vp.layoutDirty = true;
+    layoutViewport(vp);
+    for (const node of vp.dom.tiles.querySelectorAll("canvas")) sizeTile(node);
+  }
 }
 document.addEventListener("pointerover", (event) => {
   const node = event.target.closest("[data-sentence], [id]");
@@ -1109,7 +1194,7 @@ document.addEventListener("pointerout", (event) => {
 document.addEventListener("pointerover", (event) => {
   const node = event.target.closest("button[aria-label]");
   clearTimeout(tipTimer);
-  if (!node) {
+  if (!node || layoutPicker.contains(node)) {
     tip.hidden = true;
     return;
   }
@@ -1121,24 +1206,15 @@ document.addEventListener("pointerdown", () => {
 }, true);
 document.addEventListener("focusin", (event) => {
   const node = event.target.closest && event.target.closest("button[aria-label]");
-  if (node && node.matches(":focus-visible")) showTip(node);
+  if (node && !layoutPicker.contains(node) && node.matches(":focus-visible")) showTip(node);
 });
 document.addEventListener("focusout", () => { tip.hidden = true; });
-tiles.addEventListener("dblclick", (event) => {
-  const node = event.target.closest(".tile");
-  if (!node) return;
-  const offset = Array.from(tiles.children).indexOf(node);
-  const series = seriesList[activeIndex];
-  if (!series || offset < 0 || viewIndex + offset >= series.images.length) return;
-  viewIndex += offset;
-  setGrid(1, true);
-  showIndex(viewIndex);
-});
 if (!document.fullscreenEnabled) {
   const button = document.getElementById("fullscreen");
   button.disabled = true;
   SENTENCE.fullscreen = "Full screen is not available in this browser.";
 }
+setLayout(1, 1);
 syncSwatches();
 syncSizes();
 syncPresetAvailability(null);
@@ -1146,11 +1222,13 @@ showSentence();
 noteBuild();
 
 function liveSentence(id, text) {
-  if (id === "grid-2" && isDraw(tool)) return "Drawing works in the single view.";
-  if (id === "grid-2" && currentImage() && currentImage().file.size > GRID_CAP) {
+  const vp = activeViewport();
+  const image = vp ? currentImage(vp) : null;
+  if (id === "tile-mode" && isDraw(tool)) return "Drawing works in the single view.";
+  if (id === "tile-mode" && image && image.file.size > GRID_CAP) {
     return "Four images are not shown for a file larger than 32 MiB.";
   }
-  if (id.startsWith("tool-") && isDraw(id.slice(5)) && gridMode === 2) {
+  if (id.startsWith("tool-") && isDraw(id.slice(5)) && vp && vp.tileMode) {
     return "Drawing works in the single view.";
   }
   return text;
@@ -1311,19 +1389,28 @@ function isDraw(name) {
 }
 
 function setTool(next) {
-  const leavingGrid = gridMode === 2 && isDraw(next);
+  const vp = activeViewport();
+  const leavingTiles = vp.tileMode && isDraw(next);
   tool = next;
   cancelDraft();
-  for (const name of TOOLS) {
-    const button = document.getElementById("tool-" + name);
-    button.classList.toggle("active", name === next);
-    button.classList.toggle("dim", gridMode === 2 && isDraw(name) && !leavingGrid);
-  }
-  if (isDraw(tool)) setGrid(1, !leavingGrid);
-  else gridMany.disabled = !gridAllowed();
-  if (!leavingGrid) renderInk();
+  if (leavingTiles) setTileMode(vp, false);
+  syncToolButtons();
+  if (!leavingTiles) renderInk(vp);
   paintMarks();
   showSentence();
+}
+
+// The tool buttons and the tile button, from the active viewport.
+function syncToolButtons() {
+  const vp = activeViewport();
+  for (const name of TOOLS) {
+    const button = document.getElementById("tool-" + name);
+    button.classList.toggle("active", name === tool);
+    button.classList.toggle("dim", vp.tileMode && isDraw(name));
+  }
+  tileButton.classList.toggle("active", vp.tileMode);
+  const allowed = gridAllowed(vp) && (vp.tileMode || !isDraw(tool));
+  if (tileButton.disabled !== !allowed) tileButton.disabled = !allowed;
 }
 
 function markSource() {
@@ -1384,16 +1471,15 @@ async function readFolder(fileList) {
   const generation = ++currentGeneration;
   stopPlay();
   seriesList = [];
+  seriesByKey.clear();
   notes.clear();
   keyImages.clear();
   dropCache();
   positions.clear();
-  activeIndex = -1;
-  viewIndex = 0;
   selected = null;
   thumbBitmaps.clear();
   thumbGeneration += 1;
-  clearView();
+  resetViewports();
   const files = Array.from(fileList);
   let cursor = 0;
   let skipped = 0;
@@ -1454,7 +1540,7 @@ async function readFolder(fileList) {
   for (let index = 1; index < seriesList.length; index += 1) {
     if (seriesList[index].images.length > seriesList[best].images.length) best = index;
   }
-  selectSeries(best);
+  startViewports(seriesList[best].key);
   loadThumbs();
 }
 
@@ -1492,6 +1578,8 @@ function groupSeries(found) {
   });
   seriesList = Array.from(map.values());
   seriesList.sort((a, b) => numeric(a.number) - numeric(b.number) || a.description.localeCompare(b.description) || a.key.localeCompare(b.key));
+  seriesByKey.clear();
+  for (const series of seriesList) seriesByKey.set(series.key, series);
   for (const series of seriesList) {
     series.images.sort((a, b) => numeric(a.info.instanceNumber) - numeric(b.info.instanceNumber) || a.file.name.localeCompare(b.file.name) || a.frame - b.frame);
   }
@@ -1501,11 +1589,11 @@ function renderSeries() {
   seriesEl.replaceChildren();
   seriesEmpty.hidden = seriesList.length > 0;
   emptyEl.hidden = seriesList.length > 0 || status.classList.contains("fault") || status.textContent.startsWith("Reading") || status.textContent.startsWith("Opening");
-  seriesList.forEach((series, index) => {
+  for (const series of seriesList) {
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.key = series.key;
-    if (index === activeIndex) button.className = "active";
+    button.draggable = true;
     const thumb = document.createElement("canvas");
     thumb.className = "thumb";
     thumb.width = 128;
@@ -1536,9 +1624,34 @@ function renderSeries() {
     }
     button.append(thumb, meta);
     button.title = [title.textContent, series.description].filter(Boolean).join(" · ");
-    button.addEventListener("click", () => selectSeries(index));
+    // A click or a double-click opens the series in the outlined viewport.
+    button.addEventListener("click", () => loadSeries(activeViewport(), series.key));
+    button.addEventListener("dblclick", () => loadSeries(activeViewport(), series.key));
+    button.addEventListener("dragstart", (event) => {
+      if (!event.dataTransfer) return;
+      event.dataTransfer.setData(SERIES_TYPE, series.key);
+      event.dataTransfer.effectAllowed = "copy";
+    });
+    button.addEventListener("dragend", clearDropTargets);
     seriesEl.append(button);
-  });
+  }
+  syncSeriesRows();
+}
+
+// The active viewport's series is `active`. A series shown in another
+// visible viewport is `shown`.
+function syncSeriesRows() {
+  const vp = activeViewport();
+  const active = vp ? vp.seriesKey : "";
+  const others = new Set();
+  for (const other of shownViewports()) {
+    if (other !== vp && other.seriesKey) others.add(other.seriesKey);
+  }
+  for (const button of seriesEl.querySelectorAll("button")) {
+    const key = button.dataset.key;
+    button.classList.toggle("active", active !== "" && key === active);
+    button.classList.toggle("shown", key !== active && others.has(key));
+  }
 }
 
 function paintThumb(node, series) {
@@ -1597,12 +1710,11 @@ async function loadThumbs() {
     const image = series.images[Math.floor(series.images.length / 2)];
     if (!image || !image.info.monochrome) continue;
     try {
-      // The thumbnail is the file window. When the main view is also on the
-      // file window, share that in-flight preview so a large frame is decoded
-      // once. A later invert or override still requests the plain file window.
-      const grey = (!invert && !overrideWindow && !activePreset)
-        ? await fetchGrey(image)
-        : await requestGrey(image, { plain: true, signal });
+      // The thumbnail is the file window. It goes through the shared cache
+      // under the file window's key, so a viewport on the file window and
+      // the thumbnail share one in-flight preview and a large frame is
+      // decoded once.
+      const grey = await fetchGrey(image, PLAIN_VIEW);
       if (generation !== thumbGeneration || signal.aborted) return;
       thumbBitmaps.set(series.key, paintThumbBitmap(grey));
       const buttons = seriesEl.querySelectorAll("button");
@@ -1621,25 +1733,48 @@ function greyAspect(facts) {
   return { x: facts.column / least, y: facts.row / least };
 }
 
-function selectSeries(index) {
-  stopPlay();
-  activeIndex = index;
-  fitMode = true;
-  layoutDirty = true;
-  overrideWindow = null;
-  draftWindow = null;
-  activePreset = null;
-  syncPresets();
-  const series = seriesList[index];
-  const remembered = series ? positions.get(series.key) : 0;
-  renderSeries();
-  showIndex(Number.isInteger(remembered) ? remembered : 0);
+// Opens a series in one viewport at the image last shown for that series.
+// The viewport's fit, window and preset start again. A viewport already
+// showing that series keeps its image and view.
+function loadSeries(vp, key) {
+  const series = seriesByKey.get(key);
+  if (!vp || !series) return;
+  if (vp.seriesKey === key) {
+    syncSeriesRows();
+    return;
+  }
+  if (vp.cell === activeCell) {
+    stopPlay();
+    selected = null;
+    cancelDraft();
+  }
+  vp.loadToken += 1;
+  vp.tileToken += 1;
+  vp.liveToken += 1;
+  vp.prefetchAbort.abort();
+  vp.tileAbort.abort();
+  vp.seriesKey = key;
+  vp.fitMode = true;
+  vp.layoutDirty = true;
+  vp.overrideWindow = null;
+  vp.draftWindow = null;
+  vp.activePreset = null;
+  if (vp.cell === activeCell) syncPresets();
+  syncStage(vp);
+  syncSeriesRows();
+  const remembered = positions.get(key);
+  showIndex(vp, Number.isInteger(remembered) ? remembered : 0);
 }
 
-function currentImage() {
-  const series = seriesList[activeIndex];
+function currentImage(vp) {
+  const series = seriesOf(vp);
   if (!series) return null;
-  return series.images[viewIndex] || null;
+  return series.images[vp.viewIndex] || null;
+}
+
+function seriesOf(vp) {
+  if (!vp || !vp.seriesKey) return null;
+  return seriesByKey.get(vp.seriesKey) || null;
 }
 
 function fileIdentity(file) {
@@ -1652,162 +1787,176 @@ function noteKey(image) {
   return fileIdentity(image.file) + "\0" + image.frame;
 }
 
-function gridAllowed() {
-  if (isDraw(tool)) return false;
-  const series = seriesList[activeIndex];
-  if (!series || !currentImage()) return false;
-  const last = Math.min(series.images.length, viewIndex + 4);
-  for (let index = viewIndex; index < last; index += 1) {
+// The four-image view stays allowed while the four images it would show
+// are each at most GRID_CAP. Entering it also needs a navigation tool.
+function gridAllowed(vp) {
+  const series = seriesOf(vp);
+  if (!series || !currentImage(vp)) return false;
+  const last = Math.min(series.images.length, vp.viewIndex + 4);
+  for (let index = vp.viewIndex; index < last; index += 1) {
     if (series.images[index].file.size > GRID_CAP) return false;
   }
   return true;
 }
 
-function setGrid(mode, silent) {
-  if (mode === 2 && !gridAllowed()) mode = 1;
-  gridMode = mode;
-  document.getElementById("grid-1").classList.toggle("active", mode === 1);
-  gridMany.classList.toggle("active", mode === 2);
-  gridMany.disabled = !gridAllowed();
-  for (const name of DRAW) {
-    document.getElementById("tool-" + name).classList.toggle("dim", mode === 2);
+function setTileMode(vp, on, silent) {
+  const next = Boolean(on) && gridAllowed(vp);
+  vp.tileMode = next;
+  if (!next) {
+    vp.tileToken += 1;
+    vp.tileAbort.abort();
   }
-  tiles.hidden = mode !== 2;
-  if (!silent && currentImage()) showIndex(viewIndex);
-  else syncStage();
+  if (vp.dom.tiles.hidden !== !next) vp.dom.tiles.hidden = !next;
+  if (vp.cell === activeCell) syncToolButtons();
+  if (!silent && currentImage(vp)) showIndex(vp, vp.viewIndex);
+  else {
+    syncStage(vp);
+    renderInk(vp);
+    paintOverlays(vp);
+    paintEdges(vp);
+  }
 }
 
-function directionOf(previous, next, count) {
-  if (next === previous || count < 2) return scrollDir;
+function toggleTileMode() {
+  const vp = activeViewport();
+  if (!vp.tileMode && (isDraw(tool) || !gridAllowed(vp))) return;
+  setTileMode(vp, !vp.tileMode);
+}
+
+function directionOf(vp, previous, next, count) {
+  if (next === previous || count < 2) return vp.scrollDir;
   const forward = (next - previous + count) % count;
   const backward = (previous - next + count) % count;
   return forward <= backward ? 1 : -1;
 }
 
-function commitLabels() {
-  const series = seriesList[activeIndex];
+function commitLabels(vp) {
+  if (vp.cell !== activeCell) return;
+  const series = seriesOf(vp);
   if (!series) return;
   const count = series.images.length;
   scrubber.disabled = count <= 1;
   scrubber.max = String(Math.max(0, count - 1));
-  scrubber.value = String(viewIndex);
+  scrubber.value = String(vp.viewIndex);
   const total = count + (series.omitted || 0);
   counter.textContent = series.omitted
-    ? (viewIndex + 1) + " / " + count + " of " + total
-    : (viewIndex + 1) + " / " + count;
+    ? (vp.viewIndex + 1) + " / " + count + " of " + total
+    : (vp.viewIndex + 1) + " / " + count;
   paintMarks();
 }
 
-async function showIndex(next) {
-  const series = seriesList[activeIndex];
+async function showIndex(vp, next) {
+  const series = seriesOf(vp);
   if (!series || !series.images.length) return;
   const count = series.images.length;
-  const previousKey = noteKey(currentImage());
+  const active = vp.cell === activeCell;
+  const previousKey = noteKey(currentImage(vp));
   const wrapped = ((next % count) + count) % count;
-  scrollDir = directionOf(viewIndex, wrapped, count);
-  viewIndex = wrapped;
-  positions.set(series.key, viewIndex);
-  syncPresetAvailability(series.images[viewIndex]);
-  const image = series.images[viewIndex];
+  vp.scrollDir = directionOf(vp, vp.viewIndex, wrapped, count);
+  vp.viewIndex = wrapped;
+  positions.set(series.key, vp.viewIndex);
+  const image = series.images[vp.viewIndex];
+  // The presets are in Hounsfield units, so a preset leaves a viewport that
+  // moves to an image that is not CT.
+  if (vp.activePreset && String(image.info.modality || "") !== "CT") vp.activePreset = null;
+  if (active) syncPresetAvailability(image);
   if (noteKey(image) !== previousKey) {
-    selected = null;
-    cancelDraft();
+    if (active) {
+      selected = null;
+      cancelDraft();
+    }
     resetValue();
     paintValue();
   }
-  liveToken += 1;
-  const allowGrid = gridAllowed();
-  if (gridMany.disabled !== !allowGrid) gridMany.disabled = !allowGrid;
-  if (gridMode === 2 && !gridAllowed()) {
-    gridMode = 1;
-    document.getElementById("grid-1").classList.add("active");
-    document.getElementById("grid-2").classList.remove("active");
-    tiles.hidden = true;
-  }
+  vp.liveToken += 1;
+  if (vp.tileMode && !gridAllowed(vp)) setTileMode(vp, false, true);
+  if (active) syncToolButtons();
   if (!image.info.monochrome) {
-    shownWindow = null;
-    shownFacts = null;
-    commitLabels();
-    stage.hidden = true;
-    tiles.hidden = true;
-    ink.replaceChildren();
-    paintOverlays(image);
-    showFault("this preview shows monochrome frames only");
+    vp.shownWindow = null;
+    vp.shownFacts = null;
+    commitLabels(vp);
+    vp.dom.stage.hidden = true;
+    vp.dom.tiles.hidden = true;
+    vp.dom.ink.replaceChildren();
+    paintOverlays(vp);
+    showFault(vp, "this preview shows monochrome frames only");
     return;
   }
-  if (gridMode === 2) paintTiles();
-  schedulePrefetch();
-  const hit = takeGrey(cacheKey(image));
+  if (vp.tileMode) paintTiles(vp);
+  schedulePrefetch(vp);
+  const hit = takeGrey(cacheKey(image, vp));
   if (hit) {
-    applyGrey(hit, image);
+    applyGrey(vp, hit, image);
     return;
   }
-  return pumpMain();
+  return pumpMain(vp);
 }
 
-async function pumpMain() {
-  if (mainBusy) return mainTail;
+// One main-view request in flight per viewport. The loop re-reads the
+// viewport after each reply, so the last wanted image wins, a viewport that
+// was given a new series or hidden stops, and a reply for anything else is
+// not painted.
+async function pumpMain(vp) {
+  if (vp.mainBusy) return vp.mainTail;
   let resolveTail = () => {};
   const tail = new Promise((resolve) => {
     resolveTail = resolve;
   });
-  mainTail = tail;
-  mainBusy = true;
-  const token = loadToken;
+  vp.mainTail = tail;
+  vp.mainBusy = true;
   try {
-    while (token === loadToken) {
-      const wanted = viewIndex;
-      const open = seriesList[activeIndex];
-      const image = open && open.images[wanted];
-      if (!image || !image.info.monochrome) break;
+    for (;;) {
+      const token = vp.loadToken;
+      const wanted = vp.viewIndex;
+      const image = currentImage(vp);
+      if (!image || !image.info.monochrome || !cellShown(vp)) break;
+      const moved = () => token !== vp.loadToken || vp.viewIndex !== wanted || currentImage(vp) !== image;
       try {
-        const grey = await fetchGrey(image);
-        if (token !== loadToken) break;
-        if (viewIndex !== wanted) continue;
-        applyGrey(grey, image);
-        if (viewIndex !== wanted) continue;
+        const grey = await fetchGrey(image, vp);
+        if (moved()) continue;
+        applyGrey(vp, grey, image);
         break;
       } catch (error) {
-        if (token !== loadToken) break;
-        if (error && error.name === "AbortError") {
-          if (viewIndex !== wanted) continue;
-          break;
-        }
-        if (viewIndex !== wanted) continue;
-        showFault(error instanceof Error ? error.message : "the frame could not be shown");
+        if (moved()) continue;
+        // Another viewport's request for the same frame and window can be
+        // superseded by that viewport. This one still wants it, so it asks
+        // again under its own request.
+        if (error && error.name === "AbortError") continue;
+        showFault(vp, error instanceof Error ? error.message : "the frame could not be shown");
         break;
       }
     }
   } finally {
-    mainBusy = false;
+    vp.mainBusy = false;
     resolveTail();
   }
   return tail;
 }
 
-function applyGrey(grey, image) {
-  hideFault();
-  shownWindow = {
+function applyGrey(vp, grey, image) {
+  hideFault(vp);
+  vp.shownWindow = {
     center: grey.center,
     width: grey.widthText,
     fn: grey.fn || "LINEAR",
     fullRange: grey.fullRange
   };
-  shownFacts = grey.facts;
-  drawGrey(grey);
-  if (image === currentImage()) {
-    commitLabels();
-    paintOverlays(image);
-    paintEdges();
+  vp.shownFacts = grey.facts;
+  drawGrey(vp, grey);
+  if (image === currentImage(vp)) {
+    commitLabels(vp);
+    paintOverlays(vp);
+    paintEdges(vp);
   }
-  syncKey();
+  if (vp.cell === activeCell) syncKey();
 }
 
-function cacheKey(image) {
-  const win = overrideWindow
-    ? overrideWindow.center + "/" + overrideWindow.width + "/" + overrideWindow.fn
-    : (activePreset || "file");
-  return fileIdentity(image.file) + "\0" + image.frame + "\0" + win + "\0" + (invert ? "1" : "0");
+// `view` is a viewport record, or PLAIN_VIEW for the file window.
+function cacheKey(image, view) {
+  const win = view.overrideWindow
+    ? view.overrideWindow.center + "/" + view.overrideWindow.width + "/" + view.overrideWindow.fn
+    : (view.activePreset || "file");
+  return fileIdentity(image.file) + "\0" + image.frame + "\0" + win + "\0" + (view.invert ? "1" : "0");
 }
 
 function dropCache() {
@@ -1818,8 +1967,10 @@ function dropCache() {
   posting.clear();
   cacheBytes = 0;
   thumbAbort.abort();
-  prefetchAbort.abort();
-  tileAbort.abort();
+  for (const vp of viewports) {
+    vp.prefetchAbort.abort();
+    vp.tileAbort.abort();
+  }
 }
 
 function greyBytes(grey) {
@@ -1850,14 +2001,14 @@ function rememberGrey(key, grey) {
   }
 }
 
-async function fetchGrey(image) {
-  const key = cacheKey(image);
+async function fetchGrey(image, view) {
+  const key = cacheKey(image, view);
   const hit = takeGrey(key);
   if (hit) return hit;
   const pending = inflight.get(key);
   if (pending) return pending;
   const generation = cacheGeneration;
-  const job = requestGrey(image).then((grey) => {
+  const job = requestGrey(image, { view }).then((grey) => {
     if (generation === cacheGeneration) rememberGrey(key, grey);
     return grey;
   }).finally(() => {
@@ -1891,27 +2042,31 @@ function sleepAbortable(ms, signal) {
   });
 }
 
-function superseded(wantedView, wantedToken, signal) {
-  return (signal && signal.aborted) || viewIndex !== wantedView || loadToken !== wantedToken;
+// A request made for a viewport is superseded when that viewport moves to
+// another image or is reloaded. PLAIN_VIEW has no image of its own.
+function superseded(view, wantedView, wantedToken, signal) {
+  if (signal && signal.aborted) return true;
+  if (view.loadToken === undefined) return false;
+  return view.viewIndex !== wantedView || view.loadToken !== wantedToken;
 }
 
 async function requestGrey(image, options) {
-  const plain = Boolean(options && options.plain);
+  const view = (options && options.view) || PLAIN_VIEW;
   const signal = options && options.signal;
-  const chosen = options && options.window ? options.window : (plain ? null : overrideWindow);
+  const chosen = options && options.window ? options.window : view.overrideWindow;
   const headers = { "X-Ocelli-Frame": String(image.frame) };
-  if (invert && !plain) headers["X-Ocelli-Invert"] = "1";
+  if (view.invert) headers["X-Ocelli-Invert"] = "1";
   if (chosen) {
     headers["X-Ocelli-Window-Center"] = String(chosen.center);
     headers["X-Ocelli-Window-Width"] = String(chosen.width);
     headers["X-Ocelli-Window-Function"] = chosen.fn;
-  } else if (activePreset && !plain) {
-    headers["X-Ocelli-Window-Preset"] = activePreset;
+  } else if (view.activePreset) {
+    headers["X-Ocelli-Window-Preset"] = view.activePreset;
   }
-  const wantedView = viewIndex;
-  const wantedToken = loadToken;
+  const wantedView = view.viewIndex;
+  const wantedToken = view.loadToken;
   for (;;) {
-    if (superseded(wantedView, wantedToken, signal)) throw abortError();
+    if (superseded(view, wantedView, wantedToken, signal)) throw abortError();
     let response;
     try {
       response = await postPreview(image, headers, signal);
@@ -1925,7 +2080,7 @@ async function requestGrey(image, options) {
     if (response.status === 410) throw new Error(FILE_GONE);
     if (response.status === 503 && response.headers.get("X-Ocelli-Error") === "busy") {
       await response.arrayBuffer().catch(() => {});
-      if (superseded(wantedView, wantedToken, signal)) throw abortError();
+      if (superseded(view, wantedView, wantedToken, signal)) throw abortError();
       await sleepAbortable(40, signal);
       continue;
     }
@@ -1967,38 +2122,38 @@ function headerNumber(response, name) {
   return Number.isFinite(value) ? value : null;
 }
 
-function schedulePrefetch() {
-  const series = seriesList[activeIndex];
+function schedulePrefetch(vp) {
+  const series = seriesOf(vp);
   if (!series || !series.images.length) return;
   const count = series.images.length;
-  if (prefetchCovered(series, count)) return;
-  prefetchAbort.abort();
-  prefetchAbort = new AbortController();
-  const signal = prefetchAbort.signal;
+  if (prefetchCovered(vp, series, count)) return;
+  vp.prefetchAbort.abort();
+  vp.prefetchAbort = new AbortController();
+  const signal = vp.prefetchAbort.signal;
   const generation = cacheGeneration;
-  const offsets = [scrollDir, scrollDir * 2, -scrollDir];
+  const offsets = [vp.scrollDir, vp.scrollDir * 2, -vp.scrollDir];
   for (const offset of offsets) {
-    const index = viewIndex + offset;
+    const index = vp.viewIndex + offset;
     if (index < 0 || index >= count) continue;
     const image = series.images[index];
     if (!image || !image.info.monochrome) continue;
-    const key = cacheKey(image);
+    const key = cacheKey(image, vp);
     if (cache.has(key) || inflight.has(key)) continue;
-    requestGrey(image, { signal }).then((grey) => {
+    requestGrey(image, { view: vp, signal }).then((grey) => {
       if (signal.aborted || generation !== cacheGeneration) return;
       rememberGrey(key, grey);
     }).catch(() => {});
   }
 }
 
-function prefetchCovered(series, count) {
-  const offsets = [scrollDir, scrollDir * 2, -scrollDir];
+function prefetchCovered(vp, series, count) {
+  const offsets = [vp.scrollDir, vp.scrollDir * 2, -vp.scrollDir];
   for (const offset of offsets) {
-    const index = viewIndex + offset;
+    const index = vp.viewIndex + offset;
     if (index < 0 || index >= count) continue;
     const image = series.images[index];
     if (!image || !image.info.monochrome) continue;
-    const key = cacheKey(image);
+    const key = cacheKey(image, vp);
     if (!cache.has(key) && !inflight.has(key)) return false;
   }
   return true;
@@ -2087,50 +2242,55 @@ function paintGrey(context, node, grey) {
   context.putImageData(buffer.image, 0, 0);
 }
 
-function drawGrey(grey) {
-  imageWidth = grey.width;
-  imageHeight = grey.height;
+function drawGrey(vp, grey) {
+  vp.imageWidth = grey.width;
+  vp.imageHeight = grey.height;
   const aspect = greyAspect(grey.facts);
-  aspectX = aspect.x;
-  aspectY = aspect.y;
-  if (!viewContext) viewContext = canvas.getContext("2d");
-  if (!viewContext) {
-    showFault("this browser did not provide a canvas");
+  vp.aspectX = aspect.x;
+  vp.aspectY = aspect.y;
+  const dom = vp.dom;
+  if (!vp.viewContext) vp.viewContext = dom.canvas.getContext("2d");
+  if (!vp.viewContext) {
+    showFault(vp, "this browser did not provide a canvas");
     return;
   }
-  paintGrey(viewContext, canvas, grey);
+  paintGrey(vp.viewContext, dom.canvas, grey);
   const viewBox = "0 0 " + grey.width + " " + grey.height;
-  if (inkViewBox !== viewBox) {
-    ink.setAttribute("viewBox", viewBox);
-    inkViewBox = viewBox;
+  if (vp.inkViewBox !== viewBox) {
+    dom.ink.setAttribute("viewBox", viewBox);
+    vp.inkViewBox = viewBox;
   }
-  syncStage();
-  if (gridMode === 1) {
-    layout();
-    const drawn = notes.get(noteKey(currentImage()));
-    if (draft || selected != null || ink.childElementCount || (drawn && drawn.length)) renderInk();
+  syncStage(vp);
+  if (!vp.tileMode) {
+    layoutViewport(vp);
+    const drawn = notes.get(noteKey(currentImage(vp)));
+    const mine = vp.cell === activeCell && (draft || selected != null);
+    if (mine || dom.ink.childElementCount || (drawn && drawn.length)) renderInk(vp);
   }
 }
 
-function syncStage() {
-  const single = gridMode === 1 && imageWidth > 0 && !fault.textContent;
-  if (stage.hidden !== !single) stage.hidden = !single;
-  if (tiles.hidden !== (gridMode !== 2)) tiles.hidden = gridMode !== 2;
-  if (frame.hidden !== !single) frame.hidden = !single;
+function syncStage(vp) {
+  const dom = vp.dom;
+  const single = !vp.tileMode && vp.imageWidth > 0 && !dom.fault.textContent;
+  if (dom.stage.hidden !== !single) dom.stage.hidden = !single;
+  if (dom.tiles.hidden !== !vp.tileMode) dom.tiles.hidden = !vp.tileMode;
+  if (dom.frame.hidden !== !single) dom.frame.hidden = !single;
+  const empty = !vp.seriesKey && seriesList.length > 0;
+  if (dom.empty.hidden !== !empty) dom.empty.hidden = !empty;
 }
 
-async function paintTiles() {
-  tileAbort.abort();
-  tileAbort = new AbortController();
-  const signal = tileAbort.signal;
-  const token = ++tileToken;
-  const series = seriesList[activeIndex];
-  const nodes = tiles.querySelectorAll("canvas");
-  const labels = tiles.querySelectorAll(".tile-label");
+async function paintTiles(vp) {
+  vp.tileAbort.abort();
+  vp.tileAbort = new AbortController();
+  const signal = vp.tileAbort.signal;
+  const token = ++vp.tileToken;
+  const series = seriesOf(vp);
+  const nodes = vp.dom.tiles.querySelectorAll("canvas");
+  const labels = vp.dom.tiles.querySelectorAll(".tile-label");
   for (let index = 0; index < nodes.length; index += 1) {
     const node = nodes[index];
-    const image = series && series.images[viewIndex + index];
-    labels[index].textContent = image ? "Image " + (viewIndex + index + 1) : "";
+    const image = series && series.images[vp.viewIndex + index];
+    labels[index].textContent = image ? "Image " + (vp.viewIndex + index + 1) : "";
     if (!image || !image.info.monochrome) {
       node.width = 1;
       node.height = 1;
@@ -2139,13 +2299,13 @@ async function paintTiles() {
       continue;
     }
     try {
-      const key = cacheKey(image);
+      const key = cacheKey(image, vp);
       let grey = takeGrey(key);
       if (!grey) {
-        grey = await requestGrey(image, { signal });
-        if (!signal.aborted && token === tileToken) rememberGrey(key, grey);
+        grey = await requestGrey(image, { view: vp, signal });
+        if (!signal.aborted && token === vp.tileToken) rememberGrey(key, grey);
       }
-      if (token !== tileToken || gridMode !== 2 || signal.aborted) return;
+      if (token !== vp.tileToken || !vp.tileMode || signal.aborted) return;
       const context = node.getContext("2d");
       if (!context) continue;
       paintGrey(context, node, grey);
@@ -2154,7 +2314,7 @@ async function paintTiles() {
       sizeTile(node);
     } catch (error) {
       if (error && error.name === "AbortError") return;
-      if (token !== tileToken) return;
+      if (token !== vp.tileToken) return;
       node.width = 1;
       node.height = 1;
       sizeTile(node);
@@ -2179,69 +2339,73 @@ function sizeTile(node) {
   node.style.height = (height * fit) + "px";
 }
 
-function fitScale() {
-  const rect = wrap.getBoundingClientRect();
-  if (!imageWidth || !imageHeight || rect.width < 1 || rect.height < 1) return 1;
-  const turned = rotation % 180 !== 0;
-  const shownW = imageWidth * aspectX;
-  const shownH = imageHeight * aspectY;
+function fitScale(vp) {
+  const rect = vp.dom.cell.getBoundingClientRect();
+  if (!vp.imageWidth || !vp.imageHeight || rect.width < 1 || rect.height < 1) return 1;
+  const turned = vp.rotation % 180 !== 0;
+  const shownW = vp.imageWidth * vp.aspectX;
+  const shownH = vp.imageHeight * vp.aspectY;
   const width = turned ? shownH : shownW;
   const height = turned ? shownW : shownH;
   return Math.min(rect.width / width, rect.height / height);
 }
 
-function layout() {
-  if (!imageWidth || stage.hidden) return;
+function layoutViewport(vp) {
+  const { imageWidth, imageHeight, aspectX, aspectY, dom } = vp;
+  if (!imageWidth || dom.stage.hidden) return;
   const stamp = imageWidth + "x" + imageHeight
     + ":" + aspectX + ":" + aspectY
-    + ":" + (fitMode ? "fit" : String(scale) + ":" + panX + ":" + panY)
-    + ":" + rotation
-    + ":" + (flipH ? 1 : 0)
-    + ":" + (flipV ? 1 : 0)
+    + ":" + (vp.fitMode ? "fit" : String(vp.scale) + ":" + vp.panX + ":" + vp.panY)
+    + ":" + vp.rotation
+    + ":" + (vp.flipH ? 1 : 0)
+    + ":" + (vp.flipV ? 1 : 0)
     + ":" + window.devicePixelRatio;
-  if (!layoutDirty && stamp === layoutStamp) return;
-  if (fitMode) {
-    scale = fitScale();
-    panX = 0;
-    panY = 0;
+  if (!vp.layoutDirty && stamp === vp.layoutStamp) return;
+  if (vp.fitMode) {
+    vp.scale = fitScale(vp);
+    vp.panX = 0;
+    vp.panY = 0;
   }
+  const scale = vp.scale;
   const pictureW = Math.max(1, imageWidth * scale * aspectX);
   const pictureH = Math.max(1, imageHeight * scale * aspectY);
-  canvas.style.imageRendering = scale * Math.min(aspectX, aspectY) * window.devicePixelRatio < 1 ? "auto" : "pixelated";
-  const turned = rotation % 180 !== 0;
-  frame.style.width = (turned ? pictureH : pictureW) + "px";
-  frame.style.height = (turned ? pictureW : pictureH) + "px";
-  frame.style.transform = "translate(" + panX + "px, " + panY + "px)";
-  stage.style.width = pictureW + "px";
-  stage.style.height = pictureH + "px";
-  stage.style.marginLeft = (-pictureW / 2) + "px";
-  stage.style.marginTop = (-pictureH / 2) + "px";
-  const fx = flipH ? -1 : 1;
-  const fy = flipV ? -1 : 1;
-  stage.style.transform = "rotate(" + rotation + "deg) scale(" + fx + ", " + fy + ")";
-  stage.style.transformOrigin = "center center";
-  canvas.style.width = pictureW + "px";
-  canvas.style.height = pictureH + "px";
-  ink.style.width = pictureW + "px";
-  ink.style.height = pictureH + "px";
-  const fitted = fitScale();
-  zoomLabel = (fitted > 0 ? Math.round((scale / fitted) * 100) : 100) + "%";
-  paintOverlays(currentImage());
-  syncTextScale();
-  paintSelection();
-  layoutDirty = false;
-  layoutStamp = stamp;
+  dom.canvas.style.imageRendering = scale * Math.min(aspectX, aspectY) * window.devicePixelRatio < 1 ? "auto" : "pixelated";
+  const turned = vp.rotation % 180 !== 0;
+  dom.frame.style.width = (turned ? pictureH : pictureW) + "px";
+  dom.frame.style.height = (turned ? pictureW : pictureH) + "px";
+  dom.frame.style.transform = "translate(" + vp.panX + "px, " + vp.panY + "px)";
+  dom.stage.style.width = pictureW + "px";
+  dom.stage.style.height = pictureH + "px";
+  dom.stage.style.marginLeft = (-pictureW / 2) + "px";
+  dom.stage.style.marginTop = (-pictureH / 2) + "px";
+  const fx = vp.flipH ? -1 : 1;
+  const fy = vp.flipV ? -1 : 1;
+  dom.stage.style.transform = "rotate(" + vp.rotation + "deg) scale(" + fx + ", " + fy + ")";
+  dom.stage.style.transformOrigin = "center center";
+  dom.canvas.style.width = pictureW + "px";
+  dom.canvas.style.height = pictureH + "px";
+  dom.ink.style.width = pictureW + "px";
+  dom.ink.style.height = pictureH + "px";
+  const fitted = fitScale(vp);
+  vp.zoomLabel = (fitted > 0 ? Math.round((scale / fitted) * 100) : 100) + "%";
+  paintOverlays(vp);
+  syncTextScale(vp);
+  paintSelection(vp);
+  vp.layoutDirty = false;
+  vp.layoutStamp = stamp;
 }
 
-function turnedOrFlipped() {
-  return rotation !== 0 || flipH || flipV;
+function turnedOrFlipped(vp) {
+  return vp.rotation !== 0 || vp.flipH || vp.flipV;
 }
 
 function assignText(node, text) {
   if (node.textContent !== text) node.textContent = text;
 }
 
-function paintOverlays(image) {
+function paintOverlays(vp) {
+  const corners = vp.dom.corners;
+  const image = currentImage(vp);
   const hidden = !showCorners;
   if (corners.tl.hidden !== hidden) {
     corners.tl.hidden = hidden;
@@ -2257,25 +2421,26 @@ function paintOverlays(image) {
     return;
   }
   const info = image.info || {};
-  const series = seriesList[activeIndex];
+  const series = seriesOf(vp);
   const count = series ? series.images.length : 0;
+  const viewIndex = vp.viewIndex;
   assignText(corners.tl, [personName(info.patientName), info.patientId, dicomDate(info.studyDate)].filter(Boolean).join("\n"));
   const head = [info.modality, info.seriesDescription].filter(Boolean).join(" ");
   assignText(corners.tr, [head, info.studyDescription, info.accession ? "Acc " + info.accession : ""].filter(Boolean).join("\n"));
   const last = Math.min(count, viewIndex + 4);
-  const lower = [gridMode === 2 && last > viewIndex + 1
+  const lower = [vp.tileMode && last > viewIndex + 1
     ? "Images " + (viewIndex + 1) + " to " + last + " / " + count
     : "Image " + (viewIndex + 1) + " / " + count];
   if (series && series.omitted) lower.push("Series shortened");
   if (info.instanceNumber) lower.push("Instance " + info.instanceNumber);
   if (image.reported > 1) lower.push("Frame " + (image.frame + 1) + " / " + image.reported);
   assignText(corners.bl, lower.join("\n"));
-  const win = draftWindow || overrideWindow || shownWindow;
+  const win = vp.draftWindow || vp.overrideWindow || vp.shownWindow;
   const center = win ? win.center : (info.windowCenter || "");
   const width = win ? (win.width == null ? win.widthText : win.width) : (info.windowWidth || "");
   let windowLine = "WW " + width + "  WL " + center;
-  if (shownWindow && shownWindow.fullRange && !overrideWindow && !draftWindow && !activePreset) windowLine += "  full range";
-  assignText(corners.br, windowLine + "\nZoom " + zoomLabel);
+  if (vp.shownWindow && vp.shownWindow.fullRange && !vp.overrideWindow && !vp.draftWindow && !vp.activePreset) windowLine += "  full range";
+  assignText(corners.br, windowLine + "\nZoom " + vp.zoomLabel);
 }
 
 function personName(text) {
@@ -2295,9 +2460,10 @@ function dicomDate(text) {
   return /^\d{8}$/.test(value) ? value.slice(0, 4) + "-" + value.slice(4, 6) + "-" + value.slice(6, 8) : value;
 }
 
-function paintEdges() {
-  const facts = shownFacts;
-  const hide = !showLetters || !facts || gridMode !== 1 || turnedOrFlipped();
+function paintEdges(vp) {
+  const facts = vp.shownFacts;
+  const edges = vp.dom.edges;
+  const hide = !showLetters || !facts || vp.tileMode || turnedOrFlipped(vp);
   assignEdge(edges.left, hide, facts ? facts.left : "");
   assignEdge(edges.right, hide, facts ? facts.right : "");
   assignEdge(edges.top, hide, facts ? facts.top : "");
@@ -2311,85 +2477,122 @@ function assignEdge(node, hide, value) {
   if (node.textContent !== text) node.textContent = text;
 }
 
-function showFault(message) {
-  fault.hidden = false;
-  fault.textContent = message;
-  stage.hidden = true;
-  frame.hidden = true;
-  tileToken += 1;
-  tiles.hidden = true;
-  for (const node of tiles.querySelectorAll("canvas")) {
+function showFault(vp, message) {
+  const dom = vp.dom;
+  dom.fault.hidden = false;
+  dom.fault.textContent = message;
+  dom.stage.hidden = true;
+  dom.frame.hidden = true;
+  vp.tileToken += 1;
+  dom.tiles.hidden = true;
+  for (const node of dom.tiles.querySelectorAll("canvas")) {
     node.width = 1;
     node.height = 1;
   }
 }
 
-function hideFault() {
+function hideFault(vp) {
+  const fault = vp.dom.fault;
   if (fault.hidden && fault.textContent === "") return;
   fault.hidden = true;
   fault.textContent = "";
 }
 
-function clearView() {
+// A new study or folder. Every viewport starts again from its blank record
+// and the layout is kept. Each record keeps its object, its cell and its
+// tokens, so a late reply for the previous study does not paint.
+function resetViewports() {
   resetValue();
-  loadToken += 1;
-  tileToken += 1;
-  shownWindow = null;
-  shownFacts = null;
   cancelDraft();
   cancelNote();
-  imageWidth = 0;
-  imageHeight = 0;
-  layoutDirty = true;
-  inkViewBox = "";
-  stage.hidden = true;
-  frame.hidden = true;
-  tiles.hidden = true;
-  hideFault();
-  ink.replaceChildren();
-  counter.textContent = "0 / 0";
-  scrubber.value = "0";
-  scrubber.disabled = true;
+  for (const vp of viewports) {
+    vp.loadToken += 1;
+    vp.tileToken += 1;
+    vp.liveToken += 1;
+    vp.prefetchAbort.abort();
+    vp.tileAbort.abort();
+    const fresh = blankViewport(vp.cell);
+    fresh.loadToken = vp.loadToken;
+    fresh.tileToken = vp.tileToken;
+    fresh.liveToken = vp.liveToken;
+    fresh.mainBusy = vp.mainBusy;
+    fresh.mainTail = vp.mainTail;
+    fresh.viewContext = vp.viewContext;
+    fresh.dom = vp.dom;
+    Object.assign(vp, fresh);
+    const dom = vp.dom;
+    dom.stage.hidden = true;
+    dom.frame.hidden = true;
+    dom.tiles.hidden = true;
+    hideFault(vp);
+    dom.ink.replaceChildren();
+    syncStage(vp);
+    paintOverlays(vp);
+    paintEdges(vp);
+  }
+  activeCell = 0;
+  syncActiveOutline();
   renderSeries();
-  paintOverlays(null);
-  paintEdges();
-  paintMarks();
+  syncControls();
 }
 
-function fitView() {
-  fitMode = true;
-  layout();
+// The first series goes to cell 0 and every other visible cell takes the
+// next series in list order that no visible cell shows.
+function startViewports(key) {
+  renderSeries();
+  loadSeries(viewports[0], key);
+  fillCells();
+  syncControls();
 }
 
-function resetView() {
-  overrideWindow = null;
-  draftWindow = null;
-  activePreset = null;
-  syncPresets();
-  invert = false;
-  document.getElementById("invert").classList.remove("active");
-  rotation = 0;
-  flipH = false;
-  flipV = false;
-  document.getElementById("flip-h").classList.remove("active");
-  document.getElementById("flip-v").classList.remove("active");
-  fitMode = true;
-  panX = 0;
-  panY = 0;
-  showIndex(viewIndex);
+function fillCells() {
+  if (!seriesList.length) return;
+  for (const vp of shownViewports()) {
+    if (vp.seriesKey) continue;
+    const key = nextUnshownKey();
+    if (!key) return;
+    loadSeries(vp, key);
+  }
 }
 
-function applyPreset(name) {
-  activePreset = name;
-  overrideWindow = null;
-  draftWindow = null;
-  syncPresets();
-  showIndex(viewIndex);
+function nextUnshownKey() {
+  const shown = new Set(shownViewports().map((vp) => vp.seriesKey));
+  const next = seriesList.find((series) => !shown.has(series.key));
+  return next ? next.key : "";
+}
+
+function fitView(vp) {
+  vp.fitMode = true;
+  layoutViewport(vp);
+}
+
+function resetView(vp) {
+  vp.overrideWindow = null;
+  vp.draftWindow = null;
+  vp.activePreset = null;
+  vp.invert = false;
+  vp.rotation = 0;
+  vp.flipH = false;
+  vp.flipV = false;
+  vp.fitMode = true;
+  vp.panX = 0;
+  vp.panY = 0;
+  if (vp.cell === activeCell) syncControls();
+  showIndex(vp, vp.viewIndex);
+}
+
+function applyPreset(vp, name) {
+  vp.activePreset = name;
+  vp.overrideWindow = null;
+  vp.draftWindow = null;
+  if (vp.cell === activeCell) syncPresets();
+  showIndex(vp, vp.viewIndex);
 }
 
 function syncPresets() {
+  const vp = activeViewport();
   for (const button of document.querySelectorAll("[data-preset]")) {
-    button.classList.toggle("active", button.dataset.preset === activePreset && !overrideWindow);
+    button.classList.toggle("active", button.dataset.preset === vp.activePreset && !vp.overrideWindow);
   }
 }
 
@@ -2402,8 +2605,9 @@ function syncPresetAvailability(image) {
   presetNote.textContent = !image || ct
     ? PRESET_HINT
     : "These presets are in Hounsfield units, so they apply to CT only. Drag with the W/L tool to set a window for " + (modality || "this image") + ".";
-  if (!ct && activePreset) {
-    activePreset = null;
+  const vp = activeViewport();
+  if (!ct && vp && vp.activePreset) {
+    vp.activePreset = null;
     syncPresets();
   }
 }
@@ -2420,20 +2624,37 @@ function pixelDelta(event) {
 }
 
 function onWheel(event) {
+  // The wheel acts on the viewport under the pointer and makes it active,
+  // except while a press is held, which keeps its own viewport.
+  const under = viewportAt(event.clientX, event.clientY);
+  const held = Boolean(draft || move || grip || drag);
+  if (under && under.cell !== activeCell) {
+    if (held) {
+      event.preventDefault();
+      return;
+    }
+    setActive(under.cell);
+  }
+  const vp = activeViewport();
+  if (wheelCell !== vp.cell) {
+    wheelCell = vp.cell;
+    wheelAcc = 0;
+    pendingDelta = 0;
+  }
   if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
     event.preventDefault();
     return;
   }
   if (event.ctrlKey) {
     event.preventDefault();
-    if (!currentImage() || stage.hidden || gridMode !== 1) return;
+    if (!currentImage(vp) || vp.dom.stage.hidden || vp.tileMode) return;
     if (!noteInput.hidden || !modal.hidden || move) return;
     const dy = clamp(pixelDelta(event), -10, 10);
-    zoomAt(event.clientX, event.clientY, Math.exp(-dy * 0.01));
+    zoomAt(vp, event.clientX, event.clientY, Math.exp(-dy * 0.01));
     return;
   }
   if (!noteInput.hidden || !modal.hidden) return;
-  if (!currentImage()) return;
+  if (!currentImage(vp)) return;
   if (draft || move) return;
   event.preventDefault();
   const dy = pixelDelta(event);
@@ -2456,31 +2677,31 @@ function onWheel(event) {
   }
 }
 
-async function scheduleLive() {
-  if (liveBusy) {
-    liveDirty = true;
+async function scheduleLive(vp) {
+  if (vp.liveBusy) {
+    vp.liveDirty = true;
     return;
   }
-  const image = currentImage();
-  if (!image || !draftWindow || gridMode !== 1) return;
-  liveBusy = true;
-  liveDirty = false;
-  const token = liveToken;
-  const win = { center: draftWindow.center, width: draftWindow.width, fn: draftWindow.fn };
+  const image = currentImage(vp);
+  if (!image || !vp.draftWindow || vp.tileMode) return;
+  vp.liveBusy = true;
+  vp.liveDirty = false;
+  const token = vp.liveToken;
+  const win = { center: vp.draftWindow.center, width: vp.draftWindow.width, fn: vp.draftWindow.fn };
   try {
-    const grey = await requestGrey(image, { window: win });
-    if (token === liveToken && draftWindow && image === currentImage()) {
-      const keep = { scale, panX, panY, fitMode };
-      drawGrey(grey);
-      scale = keep.scale;
-      panX = keep.panX;
-      panY = keep.panY;
-      fitMode = keep.fitMode;
-      layout();
+    const grey = await requestGrey(image, { view: vp, window: win });
+    if (token === vp.liveToken && vp.draftWindow && image === currentImage(vp)) {
+      const keep = { scale: vp.scale, panX: vp.panX, panY: vp.panY, fitMode: vp.fitMode };
+      drawGrey(vp, grey);
+      vp.scale = keep.scale;
+      vp.panX = keep.panX;
+      vp.panY = keep.panY;
+      vp.fitMode = keep.fitMode;
+      layoutViewport(vp);
     }
   } catch {}
-  liveBusy = false;
-  if (liveDirty && draftWindow) scheduleLive();
+  vp.liveBusy = false;
+  if (vp.liveDirty && vp.draftWindow) scheduleLive(vp);
 }
 
 function queueSlice(delta) {
@@ -2490,24 +2711,25 @@ function queueSlice(delta) {
     wheelFrame = 0;
     const step = pendingDelta;
     pendingDelta = 0;
-    if (step) showIndex(viewIndex + step);
+    const vp = viewports[wheelCell];
+    if (step && vp) showIndex(vp, vp.viewIndex + step);
   });
 }
 
-function zoomAt(clientX, clientY, factor) {
-  if (!imageWidth || !scale || stage.hidden) return;
-  const fitted = fitScale();
-  const next = clamp(scale * factor, fitted * 0.05, fitted * 40);
-  if (next === scale) return;
-  const rect = wrap.getBoundingClientRect();
-  const qx = clientX - (rect.left + rect.width / 2) - panX;
-  const qy = clientY - (rect.top + rect.height / 2) - panY;
-  const ratio = next / scale;
-  panX += qx * (1 - ratio);
-  panY += qy * (1 - ratio);
-  scale = next;
-  fitMode = false;
-  layout();
+function zoomAt(vp, clientX, clientY, factor) {
+  if (!vp.imageWidth || !vp.scale || vp.dom.stage.hidden) return;
+  const fitted = fitScale(vp);
+  const next = clamp(vp.scale * factor, fitted * 0.05, fitted * 40);
+  if (next === vp.scale) return;
+  const rect = vp.dom.cell.getBoundingClientRect();
+  const qx = clientX - (rect.left + rect.width / 2) - vp.panX;
+  const qy = clientY - (rect.top + rect.height / 2) - vp.panY;
+  const ratio = next / vp.scale;
+  vp.panX += qx * (1 - ratio);
+  vp.panY += qy * (1 - ratio);
+  vp.scale = next;
+  vp.fitMode = false;
+  layoutViewport(vp);
 }
 
 function pointerMode(event) {
@@ -2517,8 +2739,10 @@ function pointerMode(event) {
 }
 
 function onPointerDown(event) {
-  if (!currentImage() || gridMode !== 1) {
-    if (gridMode === 2) pointReadout(event);
+  const vp = activeViewport();
+  if (viewportAt(event.clientX, event.clientY) !== vp) return;
+  if (!currentImage(vp) || vp.tileMode) {
+    if (vp.tileMode) pointReadout(event);
     return;
   }
   if (event.button === 1) event.preventDefault();
@@ -2528,9 +2752,11 @@ function onPointerDown(event) {
   const waiting = Boolean(draft && draft.waiting);
   const onMark = !waiting && event.button === 0 && !event.ctrlKey && event.target.closest("[data-id]");
   if (onMark && isDraw(tool)) return;
-  if (mode === "wl" && !shownWindow && !overrideWindow && currentWindowText("windowCenter") === "") return;
+  if (mode === "wl" && !vp.shownWindow && !vp.overrideWindow && currentWindowText(vp, "windowCenter") === "") return;
+  const origin = dragWindow(vp);
   drag = {
     id: event.pointerId,
+    cell: vp.cell,
     button: event.button,
     mode,
     x: event.clientX,
@@ -2539,15 +2765,15 @@ function onPointerDown(event) {
     originY: event.clientY,
     moved: 0,
     markId: onMark ? onMark.dataset.id : "",
-    originCenter: Number(dragWindow().center),
-    originWidth: Number(dragWindow().width) || 1,
-    originFn: knownFunction(dragWindow().fn)
+    originCenter: Number(origin.center),
+    originWidth: Number(origin.width) || 1,
+    originFn: knownFunction(origin.fn)
   };
   wrap.setPointerCapture(event.pointerId);
-  if (draft && draft.waiting && draft.key !== noteKey(currentImage())) cancelDraft();
+  if (draft && draft.waiting && draft.key !== noteKey(currentImage(vp))) cancelDraft();
   if (!onMark && event.button === 0 && !event.ctrlKey && draft && draft.waiting) {
     // The second stage of an angle or a Cobb angle.
-    const point = clampedImagePoint(event);
+    const point = clampedImagePoint(vp, event);
     if (point && draft.kind === "angle") {
       draft.points[2] = point;
       finishAngle();
@@ -2559,14 +2785,14 @@ function onPointerDown(event) {
     }
   } else if (!onMark && event.button === 0 && !event.ctrlKey && SHAPES.includes(mode)) {
     stopPlay();
-    const point = mode === "contour" ? imagePoint(event) : clampedImagePoint(event);
-    if (point) draft = { kind: mode, points: [point], key: noteKey(currentImage()), image: currentImage(), waiting: false };
+    const point = mode === "contour" ? imagePoint(vp, event) : clampedImagePoint(vp, event);
+    if (point) draft = { kind: mode, cell: vp.cell, points: [point], key: noteKey(currentImage(vp)), image: currentImage(vp), waiting: false };
   }
   if (!onMark && (mode === "text" || mode === "probe") && event.button === 0) drag.textClick = true;
   if (!onMark && NAV.includes(mode) && event.button === 0 && !event.ctrlKey) {
     selected = null;
     paintMarks();
-    renderInk();
+    renderInk(vp);
   }
 }
 
@@ -2576,8 +2802,9 @@ function onPointerMove(event) {
     moveGrip(event);
     return;
   }
+  const vp = activeViewport();
   if (draft && draft.waiting && draft.kind === "angle" && !drag) {
-    const point = clampedImagePoint(event);
+    const point = clampedImagePoint(vp, event);
     if (point) {
       draft.points[2] = point;
       paintDraft();
@@ -2596,33 +2823,33 @@ function onPointerMove(event) {
   if (drag.markId && travel >= 5) drag.markId = "";
   const mode = drag.mode;
   if (mode === "pan") {
-    fitMode = false;
-    panX += event.clientX - drag.x;
-    panY += event.clientY - drag.y;
+    vp.fitMode = false;
+    vp.panX += event.clientX - drag.x;
+    vp.panY += event.clientY - drag.y;
     drag.x = event.clientX;
     drag.y = event.clientY;
-    layout();
+    layoutViewport(vp);
   } else if (mode === "zoom") {
     const factor = Math.exp(-(event.clientY - drag.y) * 0.01);
     drag.y = event.clientY;
-    zoomAt(drag.originX, drag.originY, factor);
+    zoomAt(vp, drag.originX, drag.originY, factor);
   } else if (mode === "scroll") {
     drag.moved += event.clientY - drag.y;
     drag.y = event.clientY;
-    while (drag.moved >= 24) { drag.moved -= 24; showIndex(viewIndex + 1); }
-    while (drag.moved <= -24) { drag.moved += 24; showIndex(viewIndex - 1); }
+    while (drag.moved >= 24) { drag.moved -= 24; showIndex(vp, vp.viewIndex + 1); }
+    while (drag.moved <= -24) { drag.moved += 24; showIndex(vp, vp.viewIndex - 1); }
   } else if (mode === "wl") {
     const speed = Math.max(0.5, Math.abs(drag.originWidth) / 200);
     const minWidth = drag.originFn === "LINEAR" ? 1 : 0.01;
-    draftWindow = {
+    vp.draftWindow = {
       center: Math.round((drag.originCenter + (drag.originY - event.clientY) * speed) * 100) / 100,
       width: Math.round(Math.max(minWidth, drag.originWidth + (event.clientX - drag.originX) * speed) * 100) / 100,
       fn: drag.originFn
     };
-    paintOverlays(currentImage());
-    scheduleLive();
+    paintOverlays(vp);
+    scheduleLive(vp);
   } else if (draft && !draft.waiting && SHAPES.includes(mode)) {
-    const point = mode === "contour" ? imagePoint(event) : clampedImagePoint(event);
+    const point = mode === "contour" ? imagePoint(vp, event) : clampedImagePoint(vp, event);
     if (!point) return;
     if (mode === "contour") {
       const last = draft.points[draft.points.length - 1];
@@ -2641,15 +2868,16 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  const vp = activeViewport();
   if (grip && grip.pointer === event.pointerId) {
     const note = findNote(grip.id);
     const origin = grip.origin;
     grip = null;
     if (note && pointsMoved(note, origin)) {
-      renderInk();
-      remeasure(note, noteKey(currentImage()), currentImage());
+      renderInkAll();
+      remeasure(note, noteKey(currentImage(vp)), currentImage(vp));
       paintMarks();
-    } else paintSelection();
+    } else paintSelection(vp);
     return;
   }
   if (move && move.pointer === event.pointerId) {
@@ -2657,10 +2885,10 @@ function onPointerUp(event) {
     const note = findNote(move.id);
     move = null;
     if (pointsMoved(note, origin)) {
-      renderInk();
-      if (note) remeasure(note, noteKey(currentImage()), currentImage());
+      renderInkAll();
+      if (note) remeasure(note, noteKey(currentImage(vp)), currentImage(vp));
       paintMarks();
-    } else paintSelection();
+    } else paintSelection(vp);
   }
   if (!drag || drag.id !== event.pointerId) return;
   const mode = drag.mode;
@@ -2668,25 +2896,25 @@ function onPointerUp(event) {
   if (drag.markId && travel < 5) {
     selected = Number(drag.markId);
     paintMarks();
-    paintSelection();
+    paintSelection(vp);
   }
-  if (mode === "wl" && draftWindow) {
-    overrideWindow = {
-      center: draftWindow.center,
-      width: draftWindow.width,
-      fn: draftWindow.fn
+  if (mode === "wl" && vp.draftWindow) {
+    vp.overrideWindow = {
+      center: vp.draftWindow.center,
+      width: vp.draftWindow.width,
+      fn: vp.draftWindow.fn
     };
-    draftWindow = null;
-    activePreset = null;
+    vp.draftWindow = null;
+    vp.activePreset = null;
     syncPresets();
-    showIndex(viewIndex);
+    showIndex(vp, vp.viewIndex);
   }
   if (draft && !draft.waiting && SHAPES.includes(mode)) {
     finishDraft(travel);
   }
   if (drag.textClick && travel < 5) {
-    const point = imagePoint(event);
-    if (point && mode === "probe") addNote({ type: "probe", points: [point], color: currentColor }, noteKey(currentImage()));
+    const point = imagePoint(vp, event);
+    if (point && mode === "probe") addNote({ type: "probe", points: [point], color: currentColor }, noteKey(currentImage(vp)));
     else if (point) openNote(point, event.clientX, event.clientY);
   }
   drag = null;
@@ -2745,7 +2973,7 @@ function finishDraft(travel) {
       return;
     }
     const note = addNote({ type: kind, points: [a, b], color: currentColor, text: "" }, key, image);
-    if (kind === "arrow" && note && key === noteKey(currentImage())) beginEdit(note);
+    if (kind === "arrow" && note && key === noteKey(currentImage(activeViewport()))) beginEdit(note);
     return;
   }
   const box = normalBox(points[0], points[1]);
@@ -2763,73 +2991,87 @@ function finishAngle() {
   addNote({ type: "angle", points, color: currentColor }, key, image);
 }
 
-function imagePoint(event) {
-  const point = clientToImage(event.clientX, event.clientY);
+function imagePoint(vp, event) {
+  const point = clientToImage(vp, event.clientX, event.clientY);
   if (!point) return null;
-  if (point.x < 0 || point.y < 0 || point.x > imageWidth || point.y > imageHeight) return null;
+  if (point.x < 0 || point.y < 0 || point.x > vp.imageWidth || point.y > vp.imageHeight) return null;
   return point;
 }
 
-function clampedImagePoint(event) {
-  const point = clientToImage(event.clientX, event.clientY);
-  if (!point || !imageWidth || !imageHeight) return null;
+function clampedImagePoint(vp, event) {
+  const point = clientToImage(vp, event.clientX, event.clientY);
+  if (!point || !vp.imageWidth || !vp.imageHeight) return null;
   return {
-    x: clamp(point.x, 0, imageWidth),
-    y: clamp(point.y, 0, imageHeight)
+    x: clamp(point.x, 0, vp.imageWidth),
+    y: clamp(point.y, 0, vp.imageHeight)
   };
 }
 
-function clientToImage(clientX, clientY) {
-  if (!imageWidth || !imageHeight || !scale) return null;
-  const rect = wrap.getBoundingClientRect();
-  let x = clientX - (rect.left + rect.width / 2 + panX);
-  let y = clientY - (rect.top + rect.height / 2 + panY);
-  const rad = -rotation * Math.PI / 180;
+function clientToImage(vp, clientX, clientY) {
+  if (!vp.imageWidth || !vp.imageHeight || !vp.scale) return null;
+  const rect = vp.dom.cell.getBoundingClientRect();
+  const x = clientX - (rect.left + rect.width / 2 + vp.panX);
+  const y = clientY - (rect.top + rect.height / 2 + vp.panY);
+  const rad = -vp.rotation * Math.PI / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
   const rx = x * cos - y * sin;
   const ry = x * sin + y * cos;
-  const fx = flipH ? -1 : 1;
-  const fy = flipV ? -1 : 1;
+  const fx = vp.flipH ? -1 : 1;
+  const fy = vp.flipV ? -1 : 1;
   return {
-    x: imageWidth / 2 + (rx / fx) / (scale * aspectX),
-    y: imageHeight / 2 + (ry / fy) / (scale * aspectY)
+    x: vp.imageWidth / 2 + (rx / fx) / (vp.scale * vp.aspectX),
+    y: vp.imageHeight / 2 + (ry / fy) / (vp.scale * vp.aspectY)
   };
 }
 
-function imageToClient(point) {
-  if (!point || !imageWidth || !imageHeight || !scale) return null;
-  const rect = wrap.getBoundingClientRect();
-  const fx = flipH ? -1 : 1;
-  const fy = flipV ? -1 : 1;
-  const rx = (point.x - imageWidth / 2) * scale * aspectX * fx;
-  const ry = (point.y - imageHeight / 2) * scale * aspectY * fy;
-  const rad = rotation * Math.PI / 180;
+function imageToClient(vp, point) {
+  if (!point || !vp.imageWidth || !vp.imageHeight || !vp.scale) return null;
+  const rect = vp.dom.cell.getBoundingClientRect();
+  const fx = vp.flipH ? -1 : 1;
+  const fy = vp.flipV ? -1 : 1;
+  const rx = (point.x - vp.imageWidth / 2) * vp.scale * vp.aspectX * fx;
+  const ry = (point.y - vp.imageHeight / 2) * vp.scale * vp.aspectY * fy;
+  const rad = vp.rotation * Math.PI / 180;
   const x = rx * Math.cos(rad) - ry * Math.sin(rad);
   const y = rx * Math.sin(rad) + ry * Math.cos(rad);
-  return { x: rect.left + rect.width / 2 + panX + x, y: rect.top + rect.height / 2 + panY + y };
+  return { x: rect.left + rect.width / 2 + vp.panX + x, y: rect.top + rect.height / 2 + vp.panY + y };
 }
 
+// The cross and the magnifier follow the viewport under the pointer.
 function pointReadout(event) {
-  const tile = gridMode === 2 ? event.target.closest("#tiles canvas") : null;
-  const point = tile ? tilePoint(tile, event) : imagePoint(event);
-  if (showCross && point && gridMode === 1) {
+  const vp = viewportAt(event.clientX, event.clientY);
+  if (!vp) {
+    hideCross();
+    mag.hidden = true;
+    return;
+  }
+  const tile = vp.tileMode ? event.target.closest(".tiles canvas") : null;
+  const point = tile ? tilePoint(tile, event) : imagePoint(vp, event);
+  if (showCross && point && !vp.tileMode) {
     const local = wrap.getBoundingClientRect();
-    document.getElementById("cross-h").hidden = false;
-    document.getElementById("cross-v").hidden = false;
+    const box = vp.dom.cell.getBoundingClientRect();
+    const crossH = document.getElementById("cross-h");
+    const crossV = document.getElementById("cross-v");
+    crossH.hidden = false;
+    crossV.hidden = false;
     document.getElementById("cross-read").hidden = false;
-    document.getElementById("cross-h").style.top = (event.clientY - local.top) + "px";
-    document.getElementById("cross-v").style.left = (event.clientX - local.left) + "px";
-    const column = Math.min(imageWidth, Math.max(1, Math.floor(point.x) + 1));
-    const row = Math.min(imageHeight, Math.max(1, Math.floor(point.y) + 1));
+    crossH.style.top = (event.clientY - local.top) + "px";
+    crossH.style.left = (box.left - local.left) + "px";
+    crossH.style.right = (local.right - box.right) + "px";
+    crossV.style.left = (event.clientX - local.left) + "px";
+    crossV.style.top = (box.top - local.top) + "px";
+    crossV.style.bottom = (local.bottom - box.bottom) + "px";
+    const column = Math.min(vp.imageWidth, Math.max(1, Math.floor(point.x) + 1));
+    const row = Math.min(vp.imageHeight, Math.max(1, Math.floor(point.y) + 1));
     const read = document.getElementById("cross-read");
     read.style.left = (event.clientX - local.left) + "px";
     read.style.top = (event.clientY - local.top) + "px";
     valueState.base = "C " + column + "  R " + row;
-    requestValue(point, column - 1, row - 1);
+    requestValue(vp, point, column - 1, row - 1);
     paintValue();
   } else hideCross();
-  if (showMag && point) updateMag(event, tile, point);
+  if (showMag && point) updateMag(vp, event, tile, point);
   else mag.hidden = true;
 }
 
@@ -2874,8 +3116,8 @@ function paintValue() {
   read.textContent = known && valueState.shown ? valueState.base + "  " + valueState.shown : valueState.base;
 }
 
-function requestValue(point, column, row) {
-  const image = currentImage();
+function requestValue(vp, point, column, row) {
+  const image = currentImage(vp);
   if (!image || !image.info.monochrome) return;
   const key = noteKey(image);
   if (valueState.key !== key) {
@@ -2951,12 +3193,12 @@ function hideCross() {
   document.getElementById("cross-read").hidden = true;
 }
 
-function updateMag(event, tile, point) {
-  const source = tile || canvas;
+function updateMag(vp, event, tile, point) {
+  const source = tile || vp.dom.canvas;
   const context = mag.getContext("2d");
   if (!context) return;
-  const width = point.width || imageWidth;
-  const height = point.height || imageHeight;
+  const width = point.width || vp.imageWidth;
+  const height = point.height || vp.imageHeight;
   const side = 160;
   const ratio = window.devicePixelRatio || 1;
   if (mag.width !== Math.round(side * ratio)) {
@@ -2967,13 +3209,13 @@ function updateMag(event, tile, point) {
   context.imageSmoothingEnabled = false;
   context.fillStyle = "#000000";
   context.fillRect(0, 0, mag.width, mag.height);
-  const shownX = tile ? tile.getBoundingClientRect().width / width : scale * aspectX;
-  const shownY = tile ? tile.getBoundingClientRect().height / height : scale * aspectY;
+  const shownX = tile ? tile.getBoundingClientRect().width / width : vp.scale * vp.aspectX;
+  const shownY = tile ? tile.getBoundingClientRect().height / height : vp.scale * vp.aspectY;
   const power = 2 * ratio;
   context.translate(mag.width / 2, mag.height / 2);
   if (!tile) {
-    context.rotate(rotation * Math.PI / 180);
-    context.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+    context.rotate(vp.rotation * Math.PI / 180);
+    context.scale(vp.flipH ? -1 : 1, vp.flipV ? -1 : 1);
   }
   context.scale(power * shownX, power * shownY);
   context.drawImage(source, -point.x, -point.y);
@@ -2997,13 +3239,15 @@ function draftShape() {
   return draft.kind;
 }
 
+// Only the active viewport ever holds a draft, so its nodes keep their ids.
 function ensureDraftNode(id, kind) {
   let node = document.getElementById(id);
   if (!node || node.tagName.toLowerCase() !== kind) {
     if (node) node.remove();
     node = document.createElementNS(SVGNS, kind);
     node.id = id;
-    ink.append(node);
+    const owner = viewports[draft.cell] || activeViewport();
+    owner.dom.ink.append(node);
   }
   return node;
 }
@@ -3083,17 +3327,21 @@ function stroke(node, color, width) {
 
 function addNote(note, key, image) {
   if (!key) return null;
+  const vp = activeViewport();
   const list = notes.get(key) || [];
   note.id = nextNote;
   nextNote += 1;
   if (note.type === "text") note.size = currentSize;
   list.push(note);
   notes.set(key, list);
-  const source = image || currentImage();
+  const source = image || currentImage(vp);
   if (source && noteKey(source) === key) remeasure(note, key, source);
-  if (key !== noteKey(currentImage())) return note;
+  if (key !== noteKey(currentImage(vp))) {
+    renderInkAll();
+    return note;
+  }
   selected = note.id;
-  renderInk();
+  renderInkAll();
   paintMarks();
   return note;
 }
@@ -3121,11 +3369,14 @@ function remeasure(note, key, image) {
     live.pending = false;
     live.result = outcome.result;
     live.error = outcome.error;
-    if (key !== noteKey(currentImage())) return;
     // A reply changes text only, so a drag in progress keeps its nodes.
-    const node = ink.querySelector('[data-id="' + live.id + '"]');
-    if (node) repaintNote(node, live);
-    paintMarks();
+    // The mark shows in every viewport that shows its image.
+    for (const vp of shownViewports()) {
+      if (vp.tileMode || noteKey(currentImage(vp)) !== key) continue;
+      const node = vp.dom.ink.querySelector('[data-id="' + live.id + '"]');
+      if (node) repaintNote(vp, node, live);
+    }
+    if (key === noteKey(currentImage(activeViewport()))) paintMarks();
   });
 }
 
@@ -3190,29 +3441,39 @@ function noteText(note) {
   return "";
 }
 
-function renderInk() {
+function renderInk(vp) {
+  const ink = vp.dom.ink;
   ink.replaceChildren();
-  if (gridMode !== 1) return;
-  const list = notes.get(noteKey(currentImage())) || [];
-  for (const note of list) appendNote(note);
-  if (draft && draft.key === noteKey(currentImage())) paintDraft();
-  paintSelection();
+  if (vp.tileMode) return;
+  const key = noteKey(currentImage(vp));
+  const list = key ? notes.get(key) || [] : [];
+  for (const note of list) appendNote(vp, note);
+  if (vp.cell !== activeCell) return;
+  if (draft && draft.cell === vp.cell && draft.key === key) paintDraft();
+  paintSelection(vp);
 }
 
-function appendNote(note) {
+// A mark belongs to its image, so a change repaints every viewport.
+function renderInkAll() {
+  for (const vp of shownViewports()) renderInk(vp);
+}
+
+function appendNote(vp, note) {
+  const ink = vp.dom.ink;
   if (note.type === "text") {
     const text = document.createElementNS(SVGNS, "text");
     text.dataset.id = String(note.id);
     text.dataset.size = String(note.size || 15);
     text.classList.add("label");
     text.textContent = note.text || "";
-    placeText(text, note);
+    placeText(vp, text, note);
     text.addEventListener("dblclick", (event) => {
       event.stopPropagation();
+      if (vp.cell !== activeCell) return;
       selected = note.id;
       beginEdit(note);
     });
-    bindShape(text, note);
+    bindShape(vp, text, note);
     ink.append(text);
     return;
   }
@@ -3223,9 +3484,9 @@ function appendNote(note) {
   const inked = document.createElementNS(SVGNS, shape);
   const hit = document.createElementNS(SVGNS, shape);
   for (const node of [under, inked, hit]) node.dataset.shape = "1";
-  paintShape(under, note);
-  paintShape(inked, note);
-  paintShape(hit, note);
+  paintShape(vp, under, note);
+  paintShape(vp, inked, note);
+  paintShape(vp, hit, note);
   stroke(under, "#000000", 4);
   under.setAttribute("opacity", "0.8");
   under.setAttribute("pointer-events", "none");
@@ -3243,7 +3504,7 @@ function appendNote(note) {
       handle.setAttribute("stroke-width", "1");
       handle.setAttribute("vector-effect", "non-scaling-stroke");
       handle.setAttribute("pointer-events", "none");
-      placeHandle(handle, point);
+      placeHandle(vp, handle, point);
       group.append(handle);
     }
   }
@@ -3251,10 +3512,10 @@ function appendNote(note) {
     const label = document.createElementNS(SVGNS, "text");
     label.classList.add("label");
     label.dataset.size = "15";
-    placeLabel(label, note);
+    placeLabel(vp, label, note);
     group.append(label);
   }
-  bindShape(group, note);
+  bindShape(vp, group, note);
   ink.append(group);
 }
 
@@ -3274,15 +3535,15 @@ function labelled(note) {
     note.type === "bidirectional" || note.type === "probe" || note.type === "arrow";
 }
 
-function paintShape(node, note) {
+function paintShape(vp, node, note) {
   if (note.type === "contour" || note.type === "angle") node.setAttribute("points", pointsAttr(note.points));
   else if (note.type === "length") setLine(node, note.points[0], note.points[1]);
   else if (note.type === "cobb" || note.type === "bidirectional") node.setAttribute("d", segmentsPath(note.points));
-  else if (note.type === "arrow") node.setAttribute("d", arrowPath(note.points[0], note.points[1]));
+  else if (note.type === "arrow") node.setAttribute("d", arrowPath(vp, note.points[0], note.points[1]));
   else if (note.type === "probe") {
     node.setAttribute("cx", String(note.points[0].x));
     node.setAttribute("cy", String(note.points[0].y));
-    node.setAttribute("r", String(4 / (scale || 1)));
+    node.setAttribute("r", String(4 / (vp.scale || 1)));
   } else setBox(node, note.points[0], note.points[1]);
 }
 
@@ -3296,11 +3557,11 @@ function segmentsPath(points) {
 }
 
 // The shaft and a two-stroke head at `head`, sized in screen pixels.
-function arrowPath(tail, head) {
+function arrowPath(vp, tail, head) {
   const dx = tail.x - head.x;
   const dy = tail.y - head.y;
   const span = Math.hypot(dx, dy) || 1;
-  const size = Math.min(span * 0.4, 12 / (scale || 1));
+  const size = Math.min(span * 0.4, 12 / (vp.scale || 1));
   const ux = dx / span;
   const uy = dy / span;
   const wing = (turn) => {
@@ -3314,27 +3575,27 @@ function arrowPath(tail, head) {
     " M" + left.x + " " + left.y + " L" + head.x + " " + head.y + " L" + right.x + " " + right.y;
 }
 
-function uprightTransform(x, y) {
-  const fx = flipH ? -1 : 1;
-  const fy = flipV ? -1 : 1;
-  return "translate(" + x + " " + y + ") scale(" + (1 / aspectX) + " " + (1 / aspectY) + ") scale(" + fx + " " + fy + ") rotate(" + (-rotation) + ") translate(" + (-x) + " " + (-y) + ")";
+function uprightTransform(vp, x, y) {
+  const fx = vp.flipH ? -1 : 1;
+  const fy = vp.flipV ? -1 : 1;
+  return "translate(" + x + " " + y + ") scale(" + (1 / vp.aspectX) + " " + (1 / vp.aspectY) + ") scale(" + fx + " " + fy + ") rotate(" + (-vp.rotation) + ") translate(" + (-x) + " " + (-y) + ")";
 }
 
-function placeText(node, note) {
+function placeText(vp, node, note) {
   const point = note.points[0] || { x: 0, y: 0 };
   const size = note.size || 15;
   node.setAttribute("x", String(point.x));
   node.setAttribute("y", String(point.y));
   node.setAttribute("fill", note.color || currentColor);
   node.setAttribute("stroke", "#000000");
-  node.setAttribute("font-size", String(size / scale));
-  node.setAttribute("stroke-width", String(size * 0.18 / scale));
+  node.setAttribute("font-size", String(size / vp.scale));
+  node.setAttribute("stroke-width", String(size * 0.18 / vp.scale));
   node.setAttribute("paint-order", "stroke");
   node.setAttribute("pointer-events", "visiblePainted");
-  node.setAttribute("transform", uprightTransform(point.x, point.y));
+  node.setAttribute("transform", uprightTransform(vp, point.x, point.y));
 }
 
-function placeLabel(node, note) {
+function placeLabel(vp, node, note) {
   const a = note.points[0];
   const b = note.points[1] || a;
   // An angle's text sits at its vertex, an arrow's at its tail, a probe's
@@ -3343,51 +3604,55 @@ function placeLabel(node, note) {
   if (note.type === "angle") at = b;
   if (note.type === "arrow" || note.type === "probe") at = a;
   node.textContent = noteText(note);
-  placeText(node, { points: [at], color: note.color, size: 15 });
+  placeText(vp, node, { points: [at], color: note.color, size: 15 });
   node.dataset.offset = "1";
-  offsetLabel(node);
+  offsetLabel(vp, node);
 }
 
-function offsetLabel(node) {
-  node.setAttribute("dx", String(8 / scale));
-  node.setAttribute("dy", String(-8 / scale));
+function offsetLabel(vp, node) {
+  node.setAttribute("dx", String(8 / vp.scale));
+  node.setAttribute("dy", String(-8 / vp.scale));
   node.setAttribute("font-weight", "600");
 }
 
-function placeHandle(node, point) {
+function placeHandle(vp, node, point) {
   node.setAttribute("cx", String(point.x));
   node.setAttribute("cy", String(point.y));
-  node.setAttribute("rx", String(3.5 / (scale * aspectX)));
-  node.setAttribute("ry", String(3.5 / (scale * aspectY)));
+  node.setAttribute("rx", String(3.5 / (vp.scale * vp.aspectX)));
+  node.setAttribute("ry", String(3.5 / (vp.scale * vp.aspectY)));
 }
 
-function syncTextScale() {
+function syncTextScale(vp) {
+  const ink = vp.dom.ink;
   ink.querySelectorAll("text.label").forEach((node) => {
     const size = Number(node.dataset.size) || 15;
-    node.setAttribute("font-size", String(size / scale));
-    node.setAttribute("stroke-width", String(size * 0.18 / scale));
-    if (node.dataset.offset) offsetLabel(node);
+    node.setAttribute("font-size", String(size / vp.scale));
+    node.setAttribute("stroke-width", String(size * 0.18 / vp.scale));
+    if (node.dataset.offset) offsetLabel(vp, node);
   });
   ink.querySelectorAll("ellipse.handle").forEach((node) => {
-    placeHandle(node, { x: Number(node.getAttribute("cx")), y: Number(node.getAttribute("cy")) });
+    placeHandle(vp, node, { x: Number(node.getAttribute("cx")), y: Number(node.getAttribute("cy")) });
   });
   // An arrow head and a probe ring keep their screen size.
-  for (const note of notes.get(noteKey(currentImage())) || []) {
+  for (const note of notes.get(noteKey(currentImage(vp))) || []) {
     if (note.type !== "arrow" && note.type !== "probe") continue;
     const node = ink.querySelector('[data-id="' + note.id + '"]');
-    if (node) node.querySelectorAll("[data-shape]").forEach((shape) => paintShape(shape, note));
+    if (node) node.querySelectorAll("[data-shape]").forEach((shape) => paintShape(vp, shape, note));
   }
 }
 
-function bindShape(node, note) {
+function bindShape(vp, node, note) {
   node.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || event.ctrlKey || gridMode !== 1) return;
+    // The capture listener on #wrap has already made this cell active.
+    if (event.button !== 0 || event.ctrlKey || vp.tileMode || vp.cell !== activeCell) return;
     if (draft && draft.waiting) return;
     event.stopPropagation();
     event.preventDefault();
     if (!isDraw(tool)) {
+      const origin = dragWindow(vp);
       drag = {
         id: event.pointerId,
+        cell: vp.cell,
         button: 0,
         mode: tool,
         x: event.clientX,
@@ -3396,81 +3661,88 @@ function bindShape(node, note) {
         originY: event.clientY,
         moved: 0,
         markId: String(note.id),
-        originCenter: Number(dragWindow().center),
-        originWidth: Number(dragWindow().width) || 1,
-        originFn: knownFunction(dragWindow().fn)
+        originCenter: Number(origin.center),
+        originWidth: Number(origin.width) || 1,
+        originFn: knownFunction(origin.fn)
       };
       wrap.setPointerCapture(event.pointerId);
       return;
     }
     selected = note.id;
-    const origin = clientToImage(event.clientX, event.clientY);
+    const start = clientToImage(vp, event.clientX, event.clientY);
     move = {
       pointer: event.pointerId,
+      cell: vp.cell,
       id: note.id,
       x: event.clientX,
       y: event.clientY,
-      originImage: origin,
+      originImage: start,
       origin: note.points.map((point) => ({ x: point.x, y: point.y }))
     };
     node.setPointerCapture(event.pointerId);
     paintMarks();
-    paintSelection();
+    paintSelection(vp);
   });
 }
 
 function moveNote(event) {
+  const vp = activeViewport();
   const note = findNote(move.id);
   if (!note || !move.originImage) return;
-  const now = clientToImage(event.clientX, event.clientY);
+  const now = clientToImage(vp, event.clientX, event.clientY);
   if (!now) return;
   const dx = now.x - move.originImage.x;
   const dy = now.y - move.originImage.y;
   note.points = move.origin.map((point) => ({ x: point.x + dx, y: point.y + dy }));
-  const node = ink.querySelector('[data-id="' + note.id + '"]');
+  const node = vp.dom.ink.querySelector('[data-id="' + note.id + '"]');
   if (!node) return;
-  if (note.type === "text") placeText(node, note);
+  if (note.type === "text") placeText(vp, node, note);
   else {
-    repaintNote(node, note);
+    repaintNote(vp, node, note);
   }
-  paintSelection();
+  paintSelection(vp);
 }
 
-function repaintNote(node, note) {
-  node.querySelectorAll("[data-shape]").forEach((shape) => paintShape(shape, note));
-  node.querySelectorAll("ellipse.handle").forEach((handle, index) => placeHandle(handle, note.points[index]));
+function repaintNote(vp, node, note) {
+  node.querySelectorAll("[data-shape]").forEach((shape) => paintShape(vp, shape, note));
+  node.querySelectorAll("ellipse.handle").forEach((handle, index) => placeHandle(vp, handle, note.points[index]));
   const label = node.querySelector("text");
-  if (label) placeLabel(label, note);
+  if (label) placeLabel(vp, label, note);
 }
 
 // A handle on one point of the selected mark. The drag moves that point
 // only, and the release sends one request with the next revision.
-function beginGrip(event, note, index) {
-  if (event.button !== 0 || event.ctrlKey || gridMode !== 1) return;
+function beginGrip(vp, event, note, index) {
+  if (event.button !== 0 || event.ctrlKey || vp.tileMode || vp.cell !== activeCell) return;
   event.stopPropagation();
   event.preventDefault();
   stopPlay();
-  grip = { pointer: event.pointerId, id: note.id, index, origin: note.points.map((point) => ({ x: point.x, y: point.y })) };
+  grip = { pointer: event.pointerId, cell: vp.cell, id: note.id, index, origin: note.points.map((point) => ({ x: point.x, y: point.y })) };
   wrap.setPointerCapture(event.pointerId);
 }
 
 function moveGrip(event) {
+  const vp = activeViewport();
   const note = findNote(grip.id);
-  const now = clientToImage(event.clientX, event.clientY);
+  const now = clientToImage(vp, event.clientX, event.clientY);
   if (!note || !now || !note.points[grip.index]) return;
   const free = note.type === "contour";
-  note.points[grip.index] = free ? now : { x: clamp(now.x, 0, imageWidth), y: clamp(now.y, 0, imageHeight) };
-  const node = ink.querySelector('[data-id="' + note.id + '"]');
-  if (node) repaintNote(node, note);
-  paintSelection();
+  note.points[grip.index] = free ? now : { x: clamp(now.x, 0, vp.imageWidth), y: clamp(now.y, 0, vp.imageHeight) };
+  const node = vp.dom.ink.querySelector('[data-id="' + note.id + '"]');
+  if (node) repaintNote(vp, node, note);
+  paintSelection(vp);
 }
 
-function paintSelection() {
+// The selection belongs to the active viewport. Any other viewport only
+// loses its chrome.
+function paintSelection(vp) {
+  const ink = vp.dom.ink;
   ink.querySelectorAll("[data-chrome]").forEach((node) => node.remove());
+  if (vp.cell !== activeCell) return;
   const note = findNote(selected);
-  if (!note || gridMode !== 1 || !scale) return;
-  const box = noteBounds(note);
-  const pad = 4 / scale;
+  if (!note || vp.tileMode || !vp.scale) return;
+  const box = noteBounds(vp, note);
+  const pad = 4 / vp.scale;
   const outer = document.createElementNS(SVGNS, "rect");
   const inner = document.createElementNS(SVGNS, "rect");
   outer.dataset.chrome = "1";
@@ -3491,7 +3763,7 @@ function paintSelection() {
   inner.setAttribute("stroke-width", "1");
   if (note.type === "text") {
     const point = note.points[0] || { x: 0, y: 0 };
-    const transform = uprightTransform(point.x, point.y);
+    const transform = uprightTransform(vp, point.x, point.y);
     outer.setAttribute("transform", transform);
     inner.setAttribute("transform", transform);
   }
@@ -3507,8 +3779,8 @@ function paintSelection() {
     handle.setAttribute("vector-effect", "non-scaling-stroke");
     handle.setAttribute("pointer-events", "all");
     handle.style.cursor = "move";
-    placeHandle(handle, point);
-    handle.addEventListener("pointerdown", (event) => beginGrip(event, note, index));
+    placeHandle(vp, handle, point);
+    handle.addEventListener("pointerdown", (event) => beginGrip(vp, event, note, index));
     ink.append(handle);
   });
 }
@@ -3523,10 +3795,10 @@ function pointsMoved(note, origin) {
   return false;
 }
 
-function noteBounds(note) {
+function noteBounds(vp, note) {
   if (note.type === "text") {
     const point = note.points[0] || { x: 0, y: 0 };
-    const pad = (note.size || 15) / scale;
+    const pad = (note.size || 15) / vp.scale;
     return { x: point.x, y: point.y - pad, width: Math.max(pad, String(note.text || "").length * pad * 0.6), height: pad };
   }
   let minX = Infinity;
@@ -3543,23 +3815,23 @@ function noteBounds(note) {
 }
 
 function findNote(id) {
-  const list = notes.get(noteKey(currentImage())) || [];
+  const list = notes.get(noteKey(currentImage(activeViewport()))) || [];
   return list.find((note) => note.id === Number(id)) || null;
 }
 
 function deleteSelected() {
-  const key = noteKey(currentImage());
+  const key = noteKey(currentImage(activeViewport()));
   const list = notes.get(key);
   if (!list || selected == null) return;
   notes.set(key, list.filter((note) => note.id !== selected));
   selected = null;
-  renderInk();
+  renderInkAll();
   paintMarks();
 }
 
 function marksSignature(list) {
   if (!list.length && selected == null) return "0|" + tool;
-  let sig = (noteKey(currentImage()) || "") + "|" + tool + "|" + (selected == null ? "" : String(selected));
+  let sig = (noteKey(currentImage(activeViewport())) || "") + "|" + tool + "|" + (selected == null ? "" : String(selected));
   for (const note of list) {
     sig += "|" + note.id + ":" + note.type + ":" + (note.color || "") + ":" + (note.size || "") + ":" + (note.text || "");
     sig += ":" + (note.revision || 0) + ":" + noteText(note);
@@ -3568,7 +3840,7 @@ function marksSignature(list) {
 }
 
 function paintMarks() {
-  const list = notes.get(noteKey(currentImage())) || [];
+  const list = notes.get(noteKey(currentImage(activeViewport()))) || [];
   const sig = marksSignature(list);
   if (sig === marksSig) return;
   marksSig = sig;
@@ -3598,7 +3870,7 @@ function paintMarks() {
     main.append(dot, label);
     main.addEventListener("click", () => {
       selected = note.id;
-      renderInk();
+      renderInk(activeViewport());
       paintMarks();
     });
     const drop = document.createElement("button");
@@ -3643,7 +3915,7 @@ function chooseColor(color) {
   const note = findNote(selected);
   if (note) note.color = color;
   syncSwatches();
-  if (note) renderInk();
+  if (note) renderInkAll();
 }
 
 function chooseSize(size) {
@@ -3651,7 +3923,7 @@ function chooseSize(size) {
   const note = findNote(selected);
   if (note && note.type === "text") {
     note.size = size;
-    renderInk();
+    renderInkAll();
   }
   syncSizes();
 }
@@ -3672,7 +3944,7 @@ function openNote(point, clientX, clientY) {
   stopPlay();
   editingId = null;
   pendingPoint = point;
-  pendingKey = noteKey(currentImage());
+  pendingKey = noteKey(currentImage(activeViewport()));
   noteInput.hidden = false;
   noteInput.style.left = clientX + "px";
   noteInput.style.top = clientY + "px";
@@ -3682,11 +3954,12 @@ function openNote(point, clientX, clientY) {
 
 function beginEdit(note) {
   stopPlay();
+  const vp = activeViewport();
   editingId = note.id;
   pendingPoint = note.points[0];
-  pendingKey = noteKey(currentImage());
-  const rect = wrap.getBoundingClientRect();
-  const at = imageToClient(note.points[0]) || { x: rect.left + 24, y: rect.top + 24 };
+  pendingKey = noteKey(currentImage(vp));
+  const rect = vp.dom.cell.getBoundingClientRect();
+  const at = imageToClient(vp, note.points[0]) || { x: rect.left + 24, y: rect.top + 24 };
   noteInput.hidden = false;
   noteInput.style.left = clamp(at.x, rect.left, rect.right - 200) + "px";
   noteInput.style.top = clamp(at.y - (note.size || 15) - 8, rect.top, rect.bottom - 32) + "px";
@@ -3711,7 +3984,7 @@ function commitNote() {
     // An arrow's note is optional. Clearing it keeps the arrow.
     if (edited && edited.type === "arrow") {
       edited.text = text;
-      renderInk();
+      renderInkAll();
       paintMarks();
       return;
     }
@@ -3725,7 +3998,7 @@ function commitNote() {
       note.color = note.color || currentColor;
       note.size = note.size || currentSize;
     }
-    renderInk();
+    renderInkAll();
     paintMarks();
     return;
   }
@@ -3742,7 +4015,7 @@ function cancelNote() {
 }
 
 function toggleKey() {
-  const image = currentImage();
+  const image = currentImage(activeViewport());
   if (!image) return;
   const key = noteKey(image);
   if (keyImages.has(key)) keyImages.delete(key);
@@ -3752,7 +4025,7 @@ function toggleKey() {
 }
 
 function syncKey() {
-  const image = currentImage();
+  const image = currentImage(activeViewport());
   const on = image ? keyImages.has(noteKey(image)) : false;
   if (on === keyButtonOn) return;
   keyButtonOn = on;
@@ -3766,25 +4039,31 @@ function onKey(event) {
       cancelNote();
       return;
     }
+    if (!layoutPicker.hidden) {
+      closeLayoutPicker();
+      layoutButton.focus();
+      return;
+    }
     if (!modal.hidden) closeModal();
     if (draft) {
       cancelDraft();
       return;
     }
     selected = null;
-    renderInk();
+    renderInk(activeViewport());
     paintMarks();
     return;
   }
   if (!modal.hidden || draft || !noteInput.hidden) return;
   if (typingTarget(event)) return;
   if (event.metaKey || event.ctrlKey || event.altKey) return;
+  const vp = activeViewport();
   if (event.key === "ArrowRight" || event.key === "ArrowDown") {
     event.preventDefault();
-    showIndex(viewIndex + 1);
+    showIndex(vp, vp.viewIndex + 1);
   } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
     event.preventDefault();
-    showIndex(viewIndex - 1);
+    showIndex(vp, vp.viewIndex - 1);
   } else if (event.key === " ") {
     event.preventDefault();
     togglePlay();
@@ -3795,23 +4074,27 @@ function onKey(event) {
     }
   } else if (event.key === "=" || event.key === "+") {
     event.preventDefault();
-    zoomCentre(Math.exp(0.1));
+    zoomCentre(vp, Math.exp(0.1));
   } else if (event.key === "-" || event.key === "_") {
     event.preventDefault();
-    zoomCentre(Math.exp(-0.1));
+    zoomCentre(vp, Math.exp(-0.1));
   } else if (event.key === "0") {
     event.preventDefault();
-    fitView();
+    fitView(vp);
   } else if (event.key === "[") {
     togglePanel("no-series");
   } else if (event.key === "]") {
     togglePanel("no-inspector");
   } else if (event.shiftKey && event.key.toLowerCase() === "r") {
-    resetView();
+    resetView(vp);
   } else if (event.shiftKey && event.key.toLowerCase() === "f") {
     toggleFull();
+  } else if (event.shiftKey && event.key.toLowerCase() === "g") {
+    toggleTileMode();
+  } else if (event.key.toLowerCase() === "g") {
+    openLayoutPicker();
   } else {
-    const clicks = { i: "invert", o: "rotate", h: "flip-h", v: "flip-v", c: "toggle-cross", m: "toggle-mag", a: "toggle-corners", n: "toggle-letters", "1": "grid-1", "2": "grid-2", k: "key-image", d: "headers" };
+    const clicks = { i: "invert", o: "rotate", h: "flip-h", v: "flip-v", c: "toggle-cross", m: "toggle-mag", a: "toggle-corners", n: "toggle-letters", k: "key-image", d: "headers" };
     const target = clicks[event.key.toLowerCase()];
     if (target && event.key.length === 1) {
       const button = document.getElementById(target);
@@ -3824,9 +4107,9 @@ function onKey(event) {
   }
 }
 
-function zoomCentre(factor) {
-  const rect = wrap.getBoundingClientRect();
-  zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
+function zoomCentre(vp, factor) {
+  const rect = vp.dom.cell.getBoundingClientRect();
+  zoomAt(vp, rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
 }
 
 function typingTarget(event) {
@@ -3844,7 +4127,8 @@ function togglePlay() {
 }
 
 function startPlay() {
-  if (!currentImage()) return;
+  const vp = activeViewport();
+  if (!currentImage(vp)) return;
   playing = true;
   playButton.innerHTML = ICON_PAUSE;
   playButton.setAttribute("aria-label", "Pause");
@@ -3853,7 +4137,7 @@ function startPlay() {
   const loop = async () => {
     while (playing && token === playToken) {
       const started = performance.now();
-      await showIndex(viewIndex + 1);
+      await showIndex(vp, vp.viewIndex + 1);
       const fps = Number(fpsInput.value) || 10;
       const remain = 1000 / fps - (performance.now() - started);
       if (remain > 0) await delay(remain);
@@ -3881,7 +4165,7 @@ function toggleFull() {
 }
 
 async function openHeaders() {
-  const image = currentImage();
+  const image = currentImage(activeViewport());
   if (!image) return;
   const token = ++headerToken;
   const file = image.file;
@@ -3956,8 +4240,8 @@ function closeModal() {
   headerToken += 1;
 }
 
-function currentWindowText(field) {
-  const image = currentImage();
+function currentWindowText(vp, field) {
+  const image = currentImage(vp);
   const value = image && image.info ? image.info[field] : "";
   return String(value || "").split("\\")[0];
 }
@@ -3967,15 +4251,231 @@ function knownFunction(text) {
   return "LINEAR";
 }
 
-function dragWindow() {
-  if (draftWindow) return { center: draftWindow.center, width: draftWindow.width, fn: draftWindow.fn };
-  if (shownWindow) return { center: shownWindow.center, width: shownWindow.width, fn: shownWindow.fn };
-  if (overrideWindow) return { center: overrideWindow.center, width: overrideWindow.width, fn: overrideWindow.fn };
+function dragWindow(vp) {
+  if (vp.draftWindow) return { center: vp.draftWindow.center, width: vp.draftWindow.width, fn: vp.draftWindow.fn };
+  if (vp.shownWindow) return { center: vp.shownWindow.center, width: vp.shownWindow.width, fn: vp.shownWindow.fn };
+  if (vp.overrideWindow) return { center: vp.overrideWindow.center, width: vp.overrideWindow.width, fn: vp.overrideWindow.fn };
   return {
-    center: Number(currentWindowText("windowCenter")) || 0,
-    width: Number(currentWindowText("windowWidth")) || 1,
-    fn: knownFunction(currentWindowText("windowFunction"))
+    center: Number(currentWindowText(vp, "windowCenter")) || 0,
+    width: Number(currentWindowText(vp, "windowWidth")) || 1,
+    fn: knownFunction(currentWindowText(vp, "windowFunction"))
   };
+}
+
+function activeViewport() {
+  return viewports[activeCell];
+}
+
+function shownViewports() {
+  return viewports.slice(0, layout.columns * layout.rows);
+}
+
+function cellShown(vp) {
+  return vp.cell < layout.columns * layout.rows;
+}
+
+function viewportAt(clientX, clientY) {
+  for (const vp of shownViewports()) {
+    const box = vp.dom.cell.getBoundingClientRect();
+    if (clientX >= box.left && clientX < box.right && clientY >= box.top && clientY < box.bottom) return vp;
+  }
+  return null;
+}
+
+// Cells are cloned from the template the first time a layout shows them.
+function ensureViewport(cell) {
+  for (let index = viewports.length; index <= cell; index += 1) {
+    const vp = blankViewport(index);
+    const node = cellTemplate.content.firstElementChild.cloneNode(true);
+    node.dataset.cell = String(index);
+    vp.dom = {
+      cell: node,
+      frame: node.querySelector(".frame"),
+      stage: node.querySelector(".stage"),
+      canvas: node.querySelector(".view"),
+      ink: node.querySelector(".ink"),
+      tiles: node.querySelector(".tiles"),
+      empty: node.querySelector(".cell-empty"),
+      fault: node.querySelector(".fault"),
+      corners: {
+        tl: node.querySelector(".overlay.tl"),
+        tr: node.querySelector(".overlay.tr"),
+        bl: node.querySelector(".overlay.bl"),
+        br: node.querySelector(".overlay.br")
+      },
+      edges: {
+        left: node.querySelector(".edge.left"),
+        right: node.querySelector(".edge.right"),
+        top: node.querySelector(".edge.top"),
+        bottom: node.querySelector(".edge.bottom")
+      }
+    };
+    node.addEventListener("dragover", (event) => onCellDragOver(vp, event));
+    node.addEventListener("dragleave", (event) => {
+      if (!node.contains(event.relatedTarget)) node.classList.remove("drop-target");
+    });
+    node.addEventListener("drop", (event) => onCellDrop(vp, event));
+    vp.dom.tiles.addEventListener("dblclick", (event) => openTile(vp, event));
+    wrap.insertBefore(node, emptyEl);
+    cellResize.observe(node);
+    viewports.push(vp);
+  }
+  return viewports[cell];
+}
+
+function carriesSeries(event) {
+  const types = event.dataTransfer ? Array.from(event.dataTransfer.types || []) : [];
+  return types.includes(SERIES_TYPE);
+}
+
+// Only a series row is accepted. Any other drag, including files from the
+// desktop, is left to the browser.
+function onCellDragOver(vp, event) {
+  if (!carriesSeries(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  vp.dom.cell.classList.add("drop-target");
+}
+
+function onCellDrop(vp, event) {
+  if (!carriesSeries(event)) return;
+  event.preventDefault();
+  clearDropTargets();
+  const key = event.dataTransfer.getData(SERIES_TYPE);
+  if (!seriesByKey.has(key) || !cellShown(vp)) return;
+  setActive(vp.cell);
+  loadSeries(vp, key);
+}
+
+function clearDropTargets() {
+  for (const vp of viewports) vp.dom.cell.classList.remove("drop-target");
+}
+
+function openTile(vp, event) {
+  const node = event.target.closest(".tile");
+  if (!node) return;
+  const offset = Array.from(vp.dom.tiles.children).indexOf(node);
+  const series = seriesOf(vp);
+  if (!series || offset < 0 || vp.viewIndex + offset >= series.images.length) return;
+  vp.viewIndex += offset;
+  setTileMode(vp, false, true);
+  showIndex(vp, vp.viewIndex);
+}
+
+// Columns and rows each from 1 to MAX_SIDE. A cell the layout hides keeps
+// its record, and its tokens move on so no late frame paints into it.
+function setLayout(columns, rows) {
+  const width = clamp(Math.floor(Number(columns) || 1), 1, MAX_SIDE);
+  const height = clamp(Math.floor(Number(rows) || 1), 1, MAX_SIDE);
+  layout = { columns: width, rows: height };
+  const count = width * height;
+  ensureViewport(count - 1);
+  wrap.style.setProperty("--columns", String(width));
+  wrap.style.setProperty("--rows", String(height));
+  wrap.classList.toggle("many", count > 1);
+  for (const vp of viewports) {
+    const shown = vp.cell < count;
+    if (vp.dom.cell.hidden !== !shown) vp.dom.cell.hidden = !shown;
+    if (shown) continue;
+    vp.loadToken += 1;
+    vp.tileToken += 1;
+    vp.liveToken += 1;
+    vp.draftWindow = null;
+    vp.prefetchAbort.abort();
+    vp.tileAbort.abort();
+  }
+  if (activeCell >= count) setActive(0);
+  syncActiveOutline();
+  fillCells();
+  for (const vp of shownViewports()) {
+    vp.layoutDirty = true;
+    syncStage(vp);
+    if (currentImage(vp)) showIndex(vp, vp.viewIndex);
+  }
+  relayout();
+  syncSeriesRows();
+  markPicker(width, height);
+}
+
+function markPicker(columns, rows) {
+  for (const button of layoutPicker.querySelectorAll("[data-columns]")) {
+    const on = Number(button.dataset.columns) <= columns && Number(button.dataset.rows) <= rows;
+    button.classList.toggle("on", on);
+  }
+  layoutSize.textContent = columns + " by " + rows;
+}
+
+function openLayoutPicker() {
+  const box = layoutButton.getBoundingClientRect();
+  layoutPicker.hidden = false;
+  layoutPicker.style.left = clamp(box.left, 6, window.innerWidth - layoutPicker.offsetWidth - 6) + "px";
+  layoutPicker.style.top = (box.bottom + 6) + "px";
+  layoutButton.setAttribute("aria-expanded", "true");
+  markPicker(layout.columns, layout.rows);
+  const current = layoutPicker.querySelector('[data-columns="' + layout.columns + '"][data-rows="' + layout.rows + '"]');
+  if (current) current.focus();
+}
+
+function closeLayoutPicker() {
+  if (layoutPicker.hidden) return;
+  layoutPicker.hidden = true;
+  layoutButton.setAttribute("aria-expanded", "false");
+}
+
+// A press in another cell makes it active. Play stops, a draft and a W/L
+// drag are cancelled, and every control is read again from that viewport.
+function activateUnder(event) {
+  if (event.target === noteInput) return;
+  if (drag || move || grip) return;
+  const vp = viewportAt(event.clientX, event.clientY);
+  if (vp && vp.cell !== activeCell) setActive(vp.cell);
+}
+
+function setActive(cell) {
+  if (cell === activeCell || !viewports[cell]) return;
+  const old = viewports[activeCell];
+  stopPlay();
+  cancelDraft();
+  if (old && old.draftWindow) {
+    old.draftWindow = null;
+    old.liveToken += 1;
+    if (currentImage(old)) showIndex(old, old.viewIndex);
+  }
+  drag = null;
+  selected = null;
+  activeCell = cell;
+  if (old) paintSelection(old);
+  paintSelection(viewports[cell]);
+  syncActiveOutline();
+  syncControls();
+}
+
+function syncActiveOutline() {
+  for (const vp of viewports) vp.dom.cell.classList.toggle("active", vp.cell === activeCell);
+}
+
+function syncControls() {
+  const vp = activeViewport();
+  document.getElementById("invert").classList.toggle("active", vp.invert);
+  document.getElementById("flip-h").classList.toggle("active", vp.flipH);
+  document.getElementById("flip-v").classList.toggle("active", vp.flipV);
+  presetModality = null;
+  syncPresetAvailability(currentImage(vp));
+  syncPresets();
+  syncToolButtons();
+  if (currentImage(vp)) commitLabels(vp);
+  else {
+    counter.textContent = "0 / 0";
+    scrubber.max = "0";
+    scrubber.value = "0";
+    scrubber.disabled = true;
+  }
+  marksSig = "";
+  keyButtonOn = null;
+  paintMarks();
+  syncKey();
+  syncSeriesRows();
+  showSentence();
 }
 </script>
 </body>

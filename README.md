@@ -175,8 +175,9 @@ DICOM files on this machine, use the local series page below.
 
 ## Start the local series viewer
 
-`examples/folder-viewer` lists series from a folder you choose and shows one
-image at a time. It listens on this machine only.
+`examples/folder-viewer` lists series from a folder you choose and shows them
+in up to nine viewports, from 1 by 1 to 3 by 3. Each viewport has its own
+series, image, zoom, pan and window. It listens on this machine only.
 
 ```bash
 cargo run --release -p ocelli-folder-viewer
@@ -201,28 +202,39 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
 2. The left column has one row per Series Instance UID. A row shows the series
    number, the modality, the description and the image count. A file with no
    Series Instance UID keeps its own row.
-3. Select a row. The viewport shows the first image and keeps it. The arrow
-   keys move one image. A wheel without Ctrl moves one image after about 40
-   pixels of travel. The scrubber reads `n / total`. Coming back to a series
-   restores the image you left.
-4. Space plays and pauses. Playback loops. The FPS control runs from 1 to 30
+3. Select a row. The outlined viewport shows the first image and keeps it.
+   The arrow keys move one image in the outlined viewport. A wheel without
+   Ctrl moves one image in the viewport under the pointer after about 40
+   pixels of travel, and makes that viewport the outlined one, as a press in
+   it does. The scrubber reads `n / total` for the outlined viewport. Coming
+   back to a series restores the image you left. With one viewport there is
+   no outline.
+4. Drag a series row onto a viewport to open it there, or click or
+   double-click a row to open it in the outlined viewport. Opening a folder
+   puts the series with the most images in the first viewport and the next
+   series in list order into each other viewport. A viewport with no series
+   reads "Drag a series here."
+5. Space plays and pauses. Playback loops. The FPS control runs from 1 to 30
    and starts at 10.
-5. The toolbar is a row of icons. Point at one to see its name, its key and
+6. The toolbar is a row of icons. Point at one to see its name, its key and
    what it does. The groups are the navigation tools (Scroll, Pan, Zoom,
    W/L), the drawing tools (Length, Angle `Q`, Cobb `J`, Bidirectional `B`,
    Rectangle, Ellipse, Freeform, Arrow `U`, Probe `X`, Text), the
    view (Invert, Rotate 90, Flip horizontal, Flip vertical), the display
    (Pointer cross, Magnifier, Corners, Orientation letters), the layout
-   (1 by 1, 2 by 2), and Key image, Headers, Fit, Reset and Full screen.
+   (Layout `G`, which opens a 3 by 3 picker, and Four images `Shift G`,
+   which shows four neighbouring images in the outlined viewport), and Key
+   image, Headers, Fit, Reset and Full screen. The view, window, Fit, Reset,
+   Key image and Headers act on the outlined viewport.
    Scroll starts active. The right column holds the window presets, the marks
    and the mouse and key lists. The icons at either end of the top bar, or
    the `[` and `]` keys, hide and show the two side columns.
-6. The left button uses the active tool. The right button pans. Control with
+7. The left button uses the active tool. The right button pans. Control with
    the left button also pans. The middle button zooms from the place you
    pressed. A pinch, or Ctrl with the wheel, zooms at the pointer. A sideways
    swipe does not change the image. Zoom keeps the image aspect ratio. The
    viewport clips an image that is larger than the pane.
-7. Headers shows the data set as stored. The corners show the current image's
+8. Headers shows the data set as stored. The corners show the current image's
    labels, with a person name in family, given order and a date as
    year-month-day. Edge letters show the patient direction and hide
    while the picture is flipped or rotated. The pointer cross shows the
@@ -231,7 +243,7 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    not multi-energy, `unspecified` for Rescale Type `US`, the Units
    attribute on a PET, `padding` for a padded sample, and `not held`
    for a file the process could not hold.
-8. Every number on a mark comes from the local process, and the page prints
+9. Every number on a mark comes from the local process, and the page prints
    its text. Probe asks `POST /value`, and every other mark asks `POST
    /measure`. Length, Angle, Cobb and Bidirectional are in millimetres from
    Pixel Spacing, or from Imager Pixel Spacing divided by the Estimated

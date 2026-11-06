@@ -478,9 +478,11 @@ async function openPage(browser, url) {
     CanvasRenderingContext2D.prototype.putImageData = function patched(...args) {
       const result = original.apply(this, args);
       const canvas = this.canvas;
-      if (!canvas || canvas.id !== "view") return result;
+      // F-208. The image is the active viewport's `canvas.view`, and these
+      // runs keep the 1 by 1 layout, so there is one.
+      if (!canvas || !canvas.classList.contains("view")) return result;
       queueMicrotask(() => {
-        const stage = document.getElementById("stage");
+        const stage = document.querySelector("#wrap .cell.active .stage");
         const counter = document.getElementById("counter");
         const draws = window.__draws || (window.__draws = []);
         const at = performance.now();
@@ -594,8 +596,8 @@ async function scrollOnce(page) {
     // previous animation callback. The first callback only records the index.
     // Visibility is sampled on this callback, including the frames between draws.
     const observe = () => {
-      const stage = document.getElementById("stage");
-      const fault = document.getElementById("fault");
+      const stage = document.querySelector("#wrap .cell.active .stage");
+      const fault = document.querySelector("#wrap .cell.active .fault");
       const faultText = fault && !fault.hidden ? (fault.textContent || "").trim() : "";
       const hidden = !stage || stage.hidden;
       samples.push({ hidden, fault: faultText });
@@ -671,9 +673,10 @@ async function windowSteps(page, count) {
   for (let step = 0; step < count; step += 1) {
     await page.evaluate((center) => {
       window.__armWindow = true;
-      overrideWindow = { center, width: 400, fn: "LINEAR" };
-      activePreset = null;
-      return showIndex(viewIndex);
+      const viewport = activeViewport();
+      viewport.overrideWindow = { center, width: 400, fn: "LINEAR" };
+      viewport.activePreset = null;
+      return showIndex(viewport, viewport.viewIndex);
     }, 40 + step);
     await page.waitForFunction(() => window.__armWindow !== true);
     const recorded = await page.evaluate(() => {
@@ -691,17 +694,19 @@ async function canvasMatchesReply(page) {
   // here would miss them. One more id-form preview is the reply the canvas
   // is checked against, and it is not part of the timed samples.
   const result = await page.evaluate(async () => {
-    const image = currentImage();
+    const viewport = activeViewport();
+    const image = currentImage(viewport);
+    const chosen = viewport.overrideWindow;
     const headers = { "X-Ocelli-Frame": String(image.frame) };
-    if (overrideWindow) {
-      headers["X-Ocelli-Window-Center"] = String(overrideWindow.center);
-      headers["X-Ocelli-Window-Width"] = String(overrideWindow.width);
-      headers["X-Ocelli-Window-Function"] = overrideWindow.fn;
+    if (chosen) {
+      headers["X-Ocelli-Window-Center"] = String(chosen.center);
+      headers["X-Ocelli-Window-Width"] = String(chosen.width);
+      headers["X-Ocelli-Window-Function"] = chosen.fn;
     }
     const response = await postPreview(image, headers, null);
     if (!response.ok) return { error: `preview status ${response.status}` };
     const grey = new Uint8Array(await response.arrayBuffer());
-    const canvas = document.getElementById("view");
+    const canvas = document.querySelector("#wrap .cell.active canvas.view");
     const context = canvas.getContext("2d");
     const width = canvas.width;
     const height = canvas.height;
@@ -963,16 +968,11 @@ export async function measureWindow({ outDir, build, profile }) {
 async function sizedCanvases(page) {
   return page.evaluate(() => {
     const sized = [];
-    const view = document.getElementById("view");
-    // The page keeps the image size in a `let` binding, which is not a
-    // property of window. After a draw the canvas width is the image width.
-    // 300 by 150 is the unset element.
-    if (
-      view &&
-      view.width > 1 &&
-      view.height > 1 &&
-      !(view.width === 300 && view.height === 150)
-    ) {
+    // After a draw a viewport's canvas width is its image width. 300 by 150
+    // is the unset element. Every viewport canvas the page has made counts.
+    for (const view of document.querySelectorAll("#wrap canvas.view")) {
+      if (view.width <= 1 || view.height <= 1) continue;
+      if (view.width === 300 && view.height === 150) continue;
       sized.push([view.width, view.height]);
     }
     for (const node of document.querySelectorAll("canvas[data-tile]")) {
