@@ -153,6 +153,42 @@ fn equal_pixel_and_imager_spacing_is_the_detector_plane() {
     };
     assert_eq!(differs.source, CalibrationSource::PixelSpacing);
     assert_eq!(bits(differs.spacing.column), bits(0.18));
+    // F-211 review pass 2, D1. A pair that differs only in the row half is
+    // corrected too: 0.18\0.2 beside 0.2\0.2 is Pixel Spacing 0.18 and 0.2.
+    let row_differs = select_calibration(CalibrationRequest {
+        pixel_spacing: Some(pair(0.18, 0.2)),
+        imager_spacing: equal,
+        ..empty()
+    });
+    assert!(row_differs.is_ok());
+    let Ok(row_differs) = row_differs else {
+        unreachable!("asserted immediately above")
+    };
+    assert_eq!(row_differs.source, CalibrationSource::PixelSpacing);
+    assert_eq!(bits(row_differs.spacing.row), bits(0.18));
+    assert_eq!(bits(row_differs.spacing.column), bits(0.2));
+}
+
+#[test]
+fn an_equal_pair_is_equal_within_the_one_spacing_tolerance() {
+    // F-211 review pass 2, S1. One definition of an equal pair,
+    // `ocelli_core::spacing_pair_agrees`, the one `ocelli-dicom`'s
+    // `ImagerAgrees` uses. 0.1430000001 and 0.143 are both legal DS text and
+    // differ by about 1e-10 mm, inside the 1e-9 mm tolerance, so the pair is
+    // equal under PS3.3 10.7.1.1 and with no factor it is the detector plane.
+    // A difference of 1e-6 mm is outside it and Pixel Spacing decides.
+    let near = select_calibration(CalibrationRequest {
+        pixel_spacing: Some(pair(0.143_000_000_1, 0.143_000_000_1)),
+        imager_spacing: Some(pair(0.143, 0.143)),
+        ..empty()
+    });
+    assert!(matches!(near, Ok(found) if found.source == CalibrationSource::Detector));
+    let apart = select_calibration(CalibrationRequest {
+        pixel_spacing: Some(pair(0.143_001, 0.143)),
+        imager_spacing: Some(pair(0.143, 0.143)),
+        ..empty()
+    });
+    assert!(matches!(apart, Ok(found) if found.source == CalibrationSource::PixelSpacing));
 }
 
 #[test]

@@ -55,11 +55,6 @@ const DECIMAL_STRING_MAX_BYTES: usize = 16;
 /// `.claude/WORKFLOW.md`'s tolerance policy, not a fix for a failing case.
 const GEOMETRY_TOLERANCE_MM: f64 = 1e-6;
 
-/// Millimetres. Two spacing values that arrive as decimal text agree exactly as
-/// text in the ordinary case, so this only absorbs a differing number of
-/// trailing zeros. It is not a physical tolerance.
-const SPACING_EQUALITY_MM: f64 = 1e-9;
-
 /// A derivation that cannot be performed from the evidence present.
 ///
 /// Variants retain tags and counts only. No attribute value is ever copied into
@@ -134,12 +129,13 @@ pub enum FrameGeometryError {
     Multiframe(#[from] MultiframeError),
 }
 
-/// How Pixel Spacing relates to Imager Pixel Spacing, DICOM PS3.3 C.7.6.1.1.5.
+/// How Pixel Spacing relates to Imager Pixel Spacing, DICOM PS3.3 10.7.1.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpacingRelationship {
     /// Only Pixel Spacing is present.
     ImageOnly,
-    /// Both are present and equal, so no calibration is implied.
+    /// Both are present and agree under [`ocelli_core::spacing_pair_agrees`],
+    /// so no correction for geometric magnification is implied.
     ImagerAgrees,
     /// Both are present and differ, so Pixel Spacing has been calibrated.
     Calibrated,
@@ -162,15 +158,15 @@ impl SpacingEvidence {
 
     /// Imager Pixel Spacing `(0018,1164)`, detector-plane spacing.
     ///
-    /// Retained as evidence. It is never substituted for [`Self::image_mm`],
-    /// because on a projection radiograph the two differ by the
-    /// source-to-image magnification factor.
+    /// Retained as evidence. It is never substituted for [`Self::image_mm`].
+    /// PS3.3 10.7.1.1: the two are the same when the image has not been
+    /// corrected for geometric magnification, and differ when it has.
     #[must_use]
     pub const fn imager_mm(&self) -> Option<PixelSpacing> {
         self.imager_mm
     }
 
-    /// Which of PS3.3 C.7.6.1.1.5's cases this frame is in.
+    /// Which of PS3.3 10.7.1.1's cases this frame is in.
     #[must_use]
     pub const fn relationship(&self) -> SpacingRelationship {
         self.relationship
@@ -267,7 +263,7 @@ impl FrameGeometry {
         let pixel_spacing = resolve(metadata, frame, PIXEL_MEASURES_SEQUENCE, PIXEL_SPACING)?;
 
         let imager_mm = imager_pixel_spacing(metadata.metadata())?;
-        // DICOM PS3.3 C.7.6.1.1.5. Imager Pixel Spacing is spacing at the
+        // DICOM PS3.3 10.7.1.1. Imager Pixel Spacing is spacing at the
         // detector plane. Substituting it for image spacing scales every
         // measurement by the source-to-image magnification factor on an image
         // that still renders correctly, so the caller decides rather than us.
@@ -547,10 +543,16 @@ pub(crate) fn cosines_agree(left: glam::DVec3, right: glam::DVec3) -> bool {
         && (left.z - right.z).abs() <= DIRECTION_COSINE_TOLERANCE
 }
 
-/// In-plane spacing agrees within the one spacing equality used by stack derivation.
+/// In-plane spacing agrees within the one spacing equality,
+/// [`ocelli_core::spacing_pair_agrees`], which `ocelli_geom::select_calibration`
+/// also uses for PS3.3 10.7.1.1.
 pub(crate) fn spacing_agrees(left: PixelSpacing, right: PixelSpacing) -> bool {
-    (left.row_mm() - right.row_mm()).abs() <= SPACING_EQUALITY_MM
-        && (left.column_mm() - right.column_mm()).abs() <= SPACING_EQUALITY_MM
+    ocelli_core::spacing_pair_agrees(
+        left.row_mm(),
+        left.column_mm(),
+        right.row_mm(),
+        right.column_mm(),
+    )
 }
 
 /// Two projected positions name one spatial slot.
@@ -626,12 +628,7 @@ fn spacing_evidence(
 
     let relationship = match imager {
         None => SpacingRelationship::ImageOnly,
-        Some(imager)
-            if (imager.row_mm() - image_mm.row_mm()).abs() <= SPACING_EQUALITY_MM
-                && (imager.column_mm() - image_mm.column_mm()).abs() <= SPACING_EQUALITY_MM =>
-        {
-            SpacingRelationship::ImagerAgrees
-        }
+        Some(imager) if spacing_agrees(imager, image_mm) => SpacingRelationship::ImagerAgrees,
         Some(_) => SpacingRelationship::Calibrated,
     };
 

@@ -1,7 +1,7 @@
 # DICOM ingest
 
-**F-IDs that contributed:** F-016, F-017, F-019, F-020, F-021, F-025
-**Last updated:** 2026-09-13
+**F-IDs that contributed:** F-016, F-017, F-019, F-020, F-021, F-025, F-211
+**Last updated:** 2026-11-06
 
 `ocelli-dicom` owns the first ingest boundary. It accepts an in-memory DICOM
 Part 10 file, resolves its declared transfer syntax, and returns the complete
@@ -171,12 +171,12 @@ Imager Pixel Spacing `(0018,1164)`, Gantry/Detector Tilt `(0018,1120)`, Rows and
 Columns belong to no functional group macro and are read from the main data set
 only.
 
-### Spacing precedence, PS3.3 C.7.6.1.1.5
+### Spacing precedence, PS3.3 10.7.1.1
 
 | Present | `SpacingRelationship` | Spacing used |
 |---------|----------------------|--------------|
 | Pixel Spacing only | `ImageOnly` | Pixel Spacing |
-| both, equal within `1e-9 mm` | `ImagerAgrees` | Pixel Spacing |
+| both, equal within `1e-9 mm` (`ocelli_core::spacing_pair_agrees`) | `ImagerAgrees` | Pixel Spacing |
 | both, different | `Calibrated` | Pixel Spacing, Imager retained |
 | Imager Pixel Spacing only | refused, `UncalibratedSpacingOnly` | none |
 | neither | refused, `MissingPixelSpacing` | none |
@@ -240,9 +240,13 @@ The figure is therefore below the precision the source attribute can state,
 which is the property wanted: it absorbs `f64` arithmetic noise and can never
 mask a difference a file could actually express.
 
-`SPACING_EQUALITY_MM` is `1e-9` and is not a physical tolerance. Two spacing
-values that arrive as decimal text agree exactly as text in the ordinary case,
-so it only absorbs a differing number of trailing zeros.
+`SPACING_EQUALITY_MM` is `1e-9` and is not a physical tolerance. It lives in
+`ocelli_core::spacing`, with `spacing_pair_agrees`, since F-211. `ImagerAgrees`,
+in-plane agreement between frames and series, and `ocelli_geom::select_calibration`'s
+PS3.3 10.7.1.1 test all call that one function. Text that differs only in
+trailing zeros or exponent form already parses to the same `f64`. What the
+tolerance absorbs is a difference a 16-byte Decimal String can still state, such
+as `0.1430000001` against `0.143`, about 1e-10 mm.
 
 ### Decimal String parsing
 

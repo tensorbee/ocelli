@@ -608,6 +608,43 @@ fn measure_calibration_provenance() -> Result<(), String> {
         contains(&json, calibration, name)?;
         contains(&json, text, name)?;
     }
+    // F-211 review pass 2. A pair that differs only in the row is a
+    // corrected Pixel Spacing, 4 columns * 0.2 = 0.8 mm. A pair inside the
+    // one spacing tolerance, 0.1430000001 against 0.143 (about 1e-10 mm), is
+    // equal and with no factor is the detector plane, 4 * 0.143 = 0.572 mm,
+    // text 0.6 mm at the detector.
+    let row_only = spaced(&[(PIXEL_SPACING, "0.18\\0.2"), (IMAGER_SPACING, equal)])?;
+    let json = measured(
+        &row_only,
+        MeasureShape::Length,
+        &segment,
+        "row only differs",
+    )?;
+    contains(
+        &json,
+        "\"calibration\":{\"source\":\"pixel-spacing\",\"row_mm\":0.18,\"column_mm\":0.2}",
+        "row only differs",
+    )?;
+    let near = spaced(&[
+        (PIXEL_SPACING, "0.1430000001\\0.1430000001"),
+        (IMAGER_SPACING, "0.143\\0.143"),
+    ])?;
+    let json = measured(
+        &near,
+        MeasureShape::Length,
+        &segment,
+        "within the tolerance",
+    )?;
+    contains(
+        &json,
+        "\"calibration\":{\"source\":\"detector\",\"row_mm\":0.143,\"column_mm\":0.143}",
+        "within the tolerance",
+    )?;
+    contains(
+        &json,
+        "\"text\":\"0.6 mm at the detector\"",
+        "within the tolerance",
+    )?;
     for factor in ["two", "0", "-2"] {
         let file = spaced(&[
             (PIXEL_SPACING, equal),

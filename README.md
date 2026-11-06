@@ -235,12 +235,15 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    /measure`. Length, Angle, Cobb and Bidirectional are in millimetres from
    Pixel Spacing, or from Imager Pixel Spacing divided by the Estimated
    Radiographic Magnification Factor, in millimetres at the detector from
-   Imager Pixel Spacing alone, and in pixels when the file gives no spacing. A
-   Pixel Spacing equal to the Imager Pixel Spacing has not been corrected for
-   magnification, PS3.3 10.7.1.1, so it is divided by the factor when the file
-   has one and is millimetres at the detector when it has none. A factor that
-   is present but cannot be used is not measured, with or without Pixel
-   Spacing. An angle without spacing says square pixels are assumed. A Pixel
+   Imager Pixel Spacing alone, and in pixels when the file gives no spacing.
+   PS3.3 10.7.1.1 says a Pixel Spacing that has not been corrected for
+   magnification has the same values as the Imager Pixel Spacing, so a Pixel
+   Spacing equal to it takes the imager path: it is divided by the factor when
+   the file has one and is millimetres at the detector when it has none. On
+   that path, and on Imager Pixel Spacing alone, a factor that is present but
+   cannot be used is not measured. Beside a Pixel Spacing that differs from
+   the Imager Pixel Spacing, the factor is not read and the Pixel Spacing
+   decides. An angle without spacing says square pixels are assumed. A Pixel
    Spacing that is present but not usable is not measured. Angle is a drag
    along the first arm to the vertex and a click at the end of the second arm.
    Cobb is two drags, one per line, and reports the acute angle between them.

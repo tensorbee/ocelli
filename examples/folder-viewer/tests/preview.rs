@@ -302,6 +302,13 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     )) {
         return Err("the outline sentence does not name the server's cap".to_owned());
     }
+    // The sentence is used for a freeform the route refuses with `points`
+    // for its length, not only declared.
+    if !page.contains(
+        "if (code === \"points\" && shape === \"contour\" && points.length > OUTLINE_CAP) return { result: null, error: OUTLINE_LONG };",
+    ) {
+        return Err("the outline sentence is not used for a long outline".to_owned());
+    }
     if !page.contains("if (!live || live.revision !== revision) return;") {
         return Err("a measure reply is applied without the revision check".to_owned());
     }

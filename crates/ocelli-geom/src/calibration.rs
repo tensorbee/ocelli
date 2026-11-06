@@ -4,7 +4,12 @@
 //! `.claude/plans/F-195-design.md`. This module does not read DICOM tags
 //! and does not call the modality LUT.
 //!
-//! Pixel spacing is the patient spacing of PS3.3 C.7.6.2, row then column.
+//! Pixel spacing is the patient spacing of PS3.3 C.7.6.2, row then column,
+//! except where PS3.3 10.7.1.1 says otherwise: an uncalibrated Pixel
+//! Spacing has the same values as Imager Pixel Spacing, so an equal pair is
+//! detector-plane spacing and takes the imager path. A
+//! [`CalibrationSource::Detector`] result is detector-plane spacing, not a
+//! patient spacing.
 //! Imager pixel spacing is PS3.3 C.8.11.4, in millimetres at the detector,
 //! and it is not already corrected for magnification. PS3.3 C.8.7.5 defines
 //! the estimated radiographic magnification factor as source image receptor
@@ -27,8 +32,10 @@ pub enum CalibrationSource {
     /// Imager Pixel Spacing divided by the magnification factor.
     ImagerSpacing,
     /// Imager Pixel Spacing at the detector plane, not corrected for
-    /// magnification. Chosen when Pixel Spacing equals Imager Pixel Spacing
-    /// (PS3.3 10.7.1.1) and no usable magnification factor is present.
+    /// magnification, and not a patient spacing. Chosen only when Pixel
+    /// Spacing equals Imager Pixel Spacing (PS3.3 10.7.1.1) and no
+    /// magnification factor is present. A present factor that cannot be used
+    /// refuses instead.
     Detector,
     /// Ultrasound physical deltas supplied as a row and column pair.
     Ultrasound,
@@ -77,12 +84,18 @@ pub struct CalibrationRequest {
     pub manual: Option<SpacingMm>,
 }
 
-/// The selected source and the patient spacing in millimetres.
+/// The selected source and its spacing in millimetres.
+///
+/// The spacing is a patient spacing unless the source is
+/// [`CalibrationSource::Detector`], which is detector-plane spacing, not
+/// corrected for magnification.
 #[derive(Debug, Clone, Copy)]
 pub struct Calibration {
     /// Which source won.
     pub source: CalibrationSource,
-    /// Patient spacing after applying the magnification factor, when that source is the imager.
+    /// The spacing of [`Self::source`]. After applying the magnification
+    /// factor when the source is the imager, and raw at the detector plane
+    /// when the source is [`CalibrationSource::Detector`].
     pub spacing: SpacingMm,
 }
 
@@ -150,10 +163,11 @@ pub fn select_calibration(request: CalibrationRequest) -> Result<Calibration, Su
     Err(SuvError::Unavailable)
 }
 
-/// Both halves are the same number. `total_cmp` keeps this exact without a
-/// float equality, and a validity check follows in [`accept`].
+/// Both halves agree under [`ocelli_core::spacing_pair_agrees`], the one
+/// definition `ocelli-dicom`'s `ImagerAgrees` also uses. A validity check
+/// follows in [`accept`].
 fn same_pair(left: SpacingMm, right: SpacingMm) -> bool {
-    left.row.total_cmp(&right.row).is_eq() && left.column.total_cmp(&right.column).is_eq()
+    ocelli_core::spacing_pair_agrees(left.row, left.column, right.row, right.column)
 }
 
 /// The imager path of an equal pair, PS3.3 10.7.1.1 and C.8.7.5.

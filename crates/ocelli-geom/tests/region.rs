@@ -432,6 +432,39 @@ fn a_figure_of_eight_crosses_itself() -> Result<(), String> {
             return Err(format!("{name} was not refused"));
         }
     }
+    // F-211 review pass 2, D2. The flat ring (0, 0), (1, 0), (-2, 0) folds
+    // at (1, 0) and at (-2, 0), both between an edge and the next one, and
+    // continues straight across the wrap at (0, 0). Only the next-neighbour
+    // fold can refuse it.
+    let next_fold = [at(0.0, 0.0), at(1.0, 0.0), at(-2.0, 0.0)];
+    if polygon_crosses_itself(&next_fold) != Ok(true) {
+        return Err("the next-neighbour fold was not refused".to_owned());
+    }
+    // A square with a duplicate closing point, and one with a repeated
+    // corner, have zero-length edges. They are skipped, so the edges either
+    // side are neighbours that meet only at their shared vertex.
+    let closing = [
+        at(0.0, 0.0),
+        at(4.0, 0.0),
+        at(4.0, 4.0),
+        at(0.0, 4.0),
+        at(0.0, 0.0),
+    ];
+    let repeated = [
+        at(0.0, 0.0),
+        at(4.0, 0.0),
+        at(4.0, 0.0),
+        at(4.0, 4.0),
+        at(0.0, 4.0),
+    ];
+    for (name, ring) in [
+        ("a duplicate closing point", &closing[..]),
+        ("a repeated corner", &repeated[..]),
+    ] {
+        if polygon_crosses_itself(ring) != Ok(false) {
+            return Err(format!("a square with {name} was refused"));
+        }
+    }
     // Neighbours that continue in a straight line touch only at the shared
     // vertex: (0, 0), (2, 0), (4, 0), (4, 4), (0, 4) is a simple square.
     let straight = [
