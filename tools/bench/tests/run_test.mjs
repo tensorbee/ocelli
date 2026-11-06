@@ -101,7 +101,10 @@ test("a per-subject tolerance for a subject not in the run is refused", () => {
 
 // Through the real entry, not only resolveRun. main must refuse before
 // runSubjects, so the --out directory is never created and no build or
-// runner starts. The ids are from the tracked subjects.json.
+// runner starts. The ids are from the tracked subjects.json. --list is
+// added because resolveRun runs before main's --list return, so a main that
+// skipped the refusal lists the subjects and returns rather than running
+// the bench.
 async function mainRefusal(argv) {
   const parent = await mkdtemp(join(tmpdir(), "ocelli-bench-main-"));
   const out = join(parent, "never");
@@ -109,13 +112,14 @@ async function mainRefusal(argv) {
   const original = process.stderr.write;
   process.stderr.write = (chunk) => { written.push(String(chunk)); return true; };
   let code;
+  let outCreated;
   try {
-    code = await command.main([...argv, "--out", out]);
+    code = await command.main([...argv, "--list", "--out", out]);
   } finally {
     process.stderr.write = original;
+    outCreated = existsSync(out);
+    await rm(parent, { recursive: true });
   }
-  const outCreated = existsSync(out);
-  await rm(parent, { recursive: true });
   return { code, stderr: written.join(""), outCreated };
 }
 
