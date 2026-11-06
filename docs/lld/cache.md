@@ -201,17 +201,24 @@ pixels, whose grey alone is over the cap, draws alone. Its grey is admitted
 only when the gate holds no other grey, and while it is held no other grey is
 admitted, so grey bytes stay within the larger of the cap and that one frame.
 Its decode thread frees that grey after the write and never keeps it, and a
-refused render of that size leaves no buffer behind. Once such a frame waits,
-no preview that holds no room yet is admitted until it has been served, so a
-stream of smaller previews cannot keep it waiting. A preview that already
-holds room still renders. No frame is refused for its size below the preview
-library's `MAX_PIXELS` of 67,108,864. The resident bound adds that one frame's
-grey above the design term. The measured workload has no such frame, so its
-bound is unchanged. Measured on the release binary with a synthetic 4740 by
-5928 frame, the preview answered 200 with 28,098,720 grey bytes in 45.6 ms
-decoded and 23.9 ms cached. A smaller preview waited while that grey was held
-and was served 3.1 ms after it was released. Two such previews read together
-peaked at 28,098,720 grey bytes, one frame. A preview whose grey does not fit waits for room for up to the 60
+refused render of that size leaves no buffer behind. Previews that wait for
+room are served in the order they first waited. A preview takes its place in
+one queue when its render is first refused for room. A waiting preview is
+admitted only at the head of that queue and only when its grey fits. A preview
+that fits is admitted at once only when the queue is empty, so it cannot pass
+one that waited first. A preview that already holds room still renders and is
+never queued. Every way out of the wait, admission, the deadline and a client
+gone, leaves the queue and wakes the next waiter. No frame is refused for its
+size below the preview library's `MAX_PIXELS` of 67,108,864. The resident
+bound is stated for frames within the design size. A frame over the design
+size can raise resident memory above that bound. Measured on the release
+binary with a synthetic 4740 by 5928 frame, the preview answered 200 with
+28,098,720 grey bytes in 49.8 ms decoded and 25.5 ms cached. A smaller preview
+waited while that grey was held and was served 3.8 ms after it was released.
+Two such previews read together peaked at 28,098,720 grey bytes, one frame.
+With two clients previewing two such frames in a loop and reading every reply,
+twenty 512 by 512 previews sent among them all answered 200, the slowest in
+42.0 ms. A preview whose grey does not fit waits for room for up to the 60
 second write timeout, and answers 503 busy if none comes. A waiting preview
 holds no decode permit. A held frame it decoded is in the cache before it
 waits. A whole reply must be written within the write timeout, and each send

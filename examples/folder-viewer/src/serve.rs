@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use ocelli_pixel::VoiFunction;
 
 use crate::held::{
-    BodyPermit, CacheHandle, CachedFrame, FileId, GreyClaim, GreyGate, GreyHome, GreyRefusal,
+    BodyPermit, CacheHandle, CachedFrame, FileId, GreyClaim, GreyGate, GreyHome, GreyWaiter,
     PreviewSource, Viewer, ViewerConfig, detach_grey, retire_bytes, with_decode_workspace,
 };
 use crate::preview::{
@@ -519,7 +519,8 @@ fn preview_route(
     let work = match outcome {
         PooledOutcome::Ready(work) => work,
         PooledOutcome::Congested(congested) => {
-            let grey_len = congested.input.grey_len();
+            debug_assert_eq!(congested.place.grey_len(), congested.input.grey_len());
+            let place = congested.place;
             let sample_charge = congested.sample_charge;
             // The samples stay charged as in flight until they are recycled,
             // on every path out of this branch.
@@ -533,6 +534,7 @@ fn preview_route(
             };
             let RenderInput::Decoded(held) = congested.input else {
                 // The body form only defers a frame it decoded.
+                drop(place);
                 settle(None);
                 return (grey_busy_reply(), None);
             };
@@ -540,7 +542,7 @@ fn preview_route(
             // body slot is kept, so at most four body-form previews wait with
             // their samples.
             drop(permit);
-            let Some(claim) = wait_for_grey(&gate, grey_len, stream) else {
+            let Some(claim) = wait_for_grey(&gate, place, stream) else {
                 settle(Some(held.samples));
                 return (grey_busy_reply(), None);
             };
@@ -660,10 +662,11 @@ fn pooled_body_preview(
         Ok(held) => {
             let (preview, claim) = match render_capped(&held, request, gate, None) {
                 Capped::Rendered(done) => *done,
-                Capped::Full => {
+                Capped::Full(place) => {
                     return PooledOutcome::Congested(Box::new(CongestedWork {
                         input: RenderInput::Decoded(Box::new(held)),
                         sample_charge,
+                        place,
                     }));
                 }
             };
@@ -832,14 +835,17 @@ struct CongestedWork {
     input: RenderInput,
     /// Inflight charge on decoded samples, released when they are consumed.
     sample_charge: usize,
+    /// The request's place in the queue, taken when the cap refused it.
+    place: GreyWaiter,
 }
 
 /// One render under the grey cap.
 enum Capped {
     /// The render ran. A grey reply holds its claim. A refusal holds none.
     Rendered(Box<(Result<Preview, PreviewError>, Option<GreyClaim>)>),
-    /// The cap has no room now. Nothing was rendered and nothing is held.
-    Full,
+    /// The cap has no room now. Nothing was rendered and nothing is held
+    /// but the request's place in the queue.
+    Full(GreyWaiter),
 }
 
 /// Grey bytes for one frame: one display byte per pixel.
@@ -875,7 +881,7 @@ fn render_capped(
         let kept = workspace.grey.capacity();
         let mut claim = match gate.admit(claim, len, kept) {
             Ok(claim) => claim,
-            Err(GreyRefusal::Full) => return Capped::Full,
+            Err(place) => return Capped::Full(place),
         };
         let preview = render_held(held, request, &mut workspace.scratch, &mut workspace.grey);
         let reply = grey_capacity(&preview);
@@ -896,42 +902,49 @@ fn render_capped(
 
 /// Wait for grey cap room, up to the write timeout, while the client waits.
 ///
-/// The request counts as waiting for the whole call, so the workers free
-/// their returned buffers and a written reply's buffer is freed rather than
-/// kept. `None` means the client is gone or the cap stayed full to the
-/// deadline, and nothing is held.
+/// `place` is the request's place in the queue, taken when the cap first
+/// refused it. The request is admitted when it reaches the head and its grey
+/// fits. While it waits the workers free their returned buffers and a written
+/// reply's buffer is freed rather than kept. `None` means the client is gone
+/// or the deadline passed, and nothing is held. Every return drops `place`,
+/// which leaves the queue and wakes the next waiter.
 fn wait_for_grey(
     gate: &Arc<GreyGate>,
-    len: usize,
+    place: GreyWaiter,
     stream: Option<&TcpStream>,
 ) -> Option<GreyClaim> {
-    wait_for_grey_until(gate, len, stream, Instant::now() + WRITE_TIMEOUT)
+    wait_for_grey_until(
+        gate,
+        place,
+        stream,
+        Instant::now() + WRITE_TIMEOUT,
+        LIVE_POLL,
+    )
 }
+
+/// How often a waiting request checks that its client is still there. A
+/// closed peer wakes nothing, so this poll is how a gone client leaves the
+/// queue. Admission does not rely on it, since a release or a departure from
+/// the queue wakes the waiters.
+const LIVE_POLL: Duration = Duration::from_millis(50);
 
 fn wait_for_grey_until(
     gate: &Arc<GreyGate>,
-    len: usize,
+    place: GreyWaiter,
     stream: Option<&TcpStream>,
     deadline: Instant,
+    poll: Duration,
 ) -> Option<GreyClaim> {
-    let _waiting = gate.enter_wait(len);
     let live = || stream.is_none_or(peer_open);
     loop {
-        if let Some(claim) = gate.reserve(len) {
+        let now = Instant::now();
+        let slice = deadline.saturating_duration_since(now).min(poll);
+        if let Some(claim) = gate.wait_turn(&place, slice) {
             return Some(claim);
         }
-        if !live() {
+        if !live() || Instant::now() >= deadline {
             return None;
         }
-        let now = Instant::now();
-        if now >= deadline {
-            return None;
-        }
-        gate.wait_slice(
-            deadline
-                .saturating_duration_since(now)
-                .min(Duration::from_millis(50)),
-        );
     }
 }
 
@@ -1015,7 +1028,8 @@ fn preview_held_on_worker(
         let work = match outcome {
             PooledOutcome::Ready(work) => work,
             PooledOutcome::Congested(congested) => {
-                let grey_len = congested.input.grey_len();
+                debug_assert_eq!(congested.place.grey_len(), congested.input.grey_len());
+                let place = congested.place;
                 // The frame goes into the cache before the wait, so a waiting
                 // request holds no frame and no permit. After the wait it
                 // looks the frame up again.
@@ -1033,7 +1047,7 @@ fn preview_held_on_worker(
                     viewer.leave_inflight(congested.sample_charge);
                 }
                 drop(permit);
-                let Some(waited) = wait_for_grey(&gate, grey_len, stream) else {
+                let Some(waited) = wait_for_grey(&gate, place, stream) else {
                     return (grey_busy_reply(), None);
                 };
                 claim = Some(waited);
@@ -1100,9 +1114,10 @@ fn pooled_preview(
             }))
         }
         PreviewSource::Hit(held) => match render_capped(&held, request, gate, claim) {
-            Capped::Full => PooledOutcome::Congested(Box::new(CongestedWork {
+            Capped::Full(place) => PooledOutcome::Congested(Box::new(CongestedWork {
                 input: RenderInput::Hit(held),
                 sample_charge: 0,
+                place,
             })),
             Capped::Rendered(done) => PooledOutcome::Ready(Box::new(PooledWork {
                 gone: false,
@@ -1132,9 +1147,10 @@ fn pooled_preview(
             drop(bytes);
             match decoded {
                 Ok(held) => match render_capped(&held, request, gate, claim) {
-                    Capped::Full => PooledOutcome::Congested(Box::new(CongestedWork {
+                    Capped::Full(place) => PooledOutcome::Congested(Box::new(CongestedWork {
                         input: RenderInput::Decoded(Box::new(held)),
                         sample_charge,
+                        place,
                     })),
                     Capped::Rendered(done) => {
                         let (preview, claim) = *done;
@@ -3715,9 +3731,9 @@ mod tests {
         replies_settle(&viewer, "after the large frame")
     }
 
-    /// Once a frame over the design size waits, normal previews that hold no
-    /// room are held back until it has been served, so a stream of them
-    /// cannot keep it waiting. They are all served after it.
+    /// Once a frame over the design size waits, normal previews that arrive
+    /// after it queue behind it, so a stream of them cannot keep it waiting.
+    /// They are all served after it.
     #[test]
     fn normal_previews_do_not_starve_a_waiting_large_frame() -> Result<(), String> {
         let (addr, viewer) = grey_server(256)?;
@@ -3765,6 +3781,156 @@ mod tests {
         Ok(())
     }
 
+    /// Two clients that read every reply loop two different frames over the
+    /// design size. A small preview sent while they loop waits behind the
+    /// requests that arrived before it, and is served well before the write
+    /// timeout. Pass 7 measured a 503 at 60 s here.
+    #[test]
+    fn looping_large_frames_do_not_starve_a_small_preview() -> Result<(), String> {
+        let (addr, viewer) = grey_server(256)?;
+        let first_id = post_id(addr, &varied_file(OVER, 0)?)?;
+        let second_id = post_id(addr, &varied_file(OVER, 7)?)?;
+        let small_id = post_id(addr, &grey_file(512, 512)?)?;
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let served = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut loops = Vec::new();
+        for id in [first_id, second_id] {
+            let stop = Arc::clone(&stop);
+            let served = Arc::clone(&served);
+            loops.push(std::thread::spawn(move || -> Result<(), String> {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let started = std::time::Instant::now();
+                    let client = send_late(addr, &id_preview(&id, ""))?;
+                    let reply = read_late_bytes(client, started, "a large frame")?;
+                    let head = reply.get(..reply.len().min(64)).unwrap_or(&[]);
+                    expect_status(&String::from_utf8_lossy(head), 200, "a large frame")?;
+                    served.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                Ok(())
+            }));
+        }
+        // Both loops have been served more than once, so they overlap.
+        let warm = std::time::Instant::now();
+        while served.load(std::sync::atomic::Ordering::Relaxed) < 4 {
+            if warm.elapsed() > Duration::from_secs(60) {
+                return Err("the large frames were not served four times".to_owned());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let started = std::time::Instant::now();
+        let small = send_late(addr, &id_preview(&small_id, ""))
+            .and_then(|client| read_late(client, started, "the small preview"));
+        let waited = started.elapsed();
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for handle in loops {
+            handle
+                .join()
+                .map_err(|_| "a loop thread panicked".to_owned())??;
+        }
+        expect_status(&small?, 200, "the small preview")?;
+        if waited > Duration::from_secs(10) {
+            return Err(format!("the small preview waited {waited:?}"));
+        }
+        replies_settle(&viewer, "after the loops")
+    }
+
+    /// A waiter that leaves the queue at its deadline wakes the next one,
+    /// which is admitted at once. The poll here is 20 s, so only the wake
+    /// from the departing place can admit the next waiter inside 5 s.
+    #[test]
+    fn a_waiter_that_leaves_wakes_the_next_without_the_poll() -> Result<(), String> {
+        let gate = Arc::new(GreyGate::new(100));
+        let held = gate
+            .admit(None, 60, 0)
+            .map_err(|_| "no room for 60".to_owned())?;
+        // The head needs 60 beside 60 and cannot fit. The next needs 30,
+        // which fits, but it is not at the head.
+        let head = gate.enter_wait(60);
+        let next = gate.enter_wait(30);
+        let poll = Duration::from_secs(20);
+        let head_gate = Arc::clone(&gate);
+        let head_thread = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_millis(300);
+            wait_for_grey_until(&head_gate, head, None, deadline, poll).is_some()
+        });
+        let next_gate = Arc::clone(&gate);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let started = Instant::now();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + poll;
+            let claim = wait_for_grey_until(&next_gate, next, None, deadline, poll);
+            let admitted = claim.is_some();
+            drop(claim);
+            let _ = tx.send(admitted);
+        });
+        let admitted = rx
+            .recv_timeout(Duration::from_secs(5))
+            .map_err(|_| format!("the next waiter slept {:?}", started.elapsed()))?;
+        if !admitted {
+            return Err("the next waiter was refused".to_owned());
+        }
+        if head_thread
+            .join()
+            .map_err(|_| "the head thread panicked".to_owned())?
+        {
+            return Err("the head was admitted beside 60".to_owned());
+        }
+        drop(held);
+        if gate.waiting() != 0 || gate.held() != (0, 0) {
+            return Err(format!(
+                "{} waiting and {:?} held at the end",
+                gate.waiting(),
+                gate.held()
+            ));
+        }
+        Ok(())
+    }
+
+    /// An admission at the head wakes the next waiter, which fits too and is
+    /// admitted at once. The poll here is 20 s, as above.
+    #[test]
+    fn an_admission_at_the_head_wakes_the_next_without_the_poll() -> Result<(), String> {
+        let gate = Arc::new(GreyGate::new(100));
+        let held = gate
+            .admit(None, 60, 0)
+            .map_err(|_| "no room for 60".to_owned())?;
+        let head = gate.enter_wait(20);
+        let next = gate.enter_wait(10);
+        let poll = Duration::from_secs(20);
+        let next_gate = Arc::clone(&gate);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + poll;
+            let claim = wait_for_grey_until(&next_gate, next, None, deadline, poll);
+            let admitted = claim.is_some();
+            drop(claim);
+            let _ = tx.send(admitted);
+        });
+        // The next waiter is asleep behind the head before the head goes in.
+        std::thread::sleep(Duration::from_millis(200));
+        let started = Instant::now();
+        let head_claim = gate
+            .wait_turn(&head, Duration::ZERO)
+            .ok_or("the head was not admitted")?;
+        let admitted = rx
+            .recv_timeout(Duration::from_secs(5))
+            .map_err(|_| format!("the next waiter slept {:?}", started.elapsed()))?;
+        if !admitted {
+            return Err("the next waiter was refused".to_owned());
+        }
+        drop(head_claim);
+        drop(head);
+        drop(held);
+        if gate.waiting() != 0 || gate.held() != (0, 0) {
+            return Err(format!(
+                "{} waiting and {:?} held at the end",
+                gate.waiting(),
+                gate.held()
+            ));
+        }
+        Ok(())
+    }
+
     /// A render over the cap that fails after its grey buffer was sized
     /// leaves no buffer on the worker and nothing counted.
     #[test]
@@ -3792,7 +3958,7 @@ mod tests {
             let rendered = render_capped(&held, FrameRequest::default(), &worker_gate, None);
             let refused = match rendered {
                 Capped::Rendered(done) => done.0.is_err() && done.1.is_none(),
-                Capped::Full => false,
+                Capped::Full(_) => false,
             };
             (
                 refused,
