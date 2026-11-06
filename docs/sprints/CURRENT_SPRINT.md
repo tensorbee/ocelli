@@ -32,6 +32,9 @@
 | F-229 | E4.10 | JPEG XL decoding: the three JPEG XL transfer syntaxes through jxl-oxide, lossless decoded exactly, JPEG recompression rebuilt and decoded by the existing JPEG path, unsupported features refused as unavailable, with synthetic corpus rows and declared oracle rows | Rust | 3w | in-progress |
 | F-230 | E16.6 | Public options refuse unknown keys: every options and request object in @ocelli/core refuses an unknown key at run time with a coded OcelliError naming it, DicomwebError and the bulk, command and instance errors share that class, and loadCore rejects with the initialiser's cause instead of resolving false | TS | 2w | done |
 | F-231 | E5.9 | Session frame cache: the wasm session keeps committed stack frames in a caller-budgeted ImageCache checked by ContentId, reports eviction, pressure and release through the ring, and exports a residency query, a show-from-cache call, and releaseSeries and releaseStudy in @ocelli/core | Rust+TS | 4w | pending |
+| F-232 | E38.35 | Unsafe guard soundness: unsafe_code forbidden by rustc through the workspace lint table on every target of every workspace member, and scripts/unsafe_allowlist_check.py rebuilt on a left-to-right Rust tokenizer with a planted unsafe test for each of the five triggers the F-229 review found | Build | 2w | pending |
+| F-233 | E38.36 | SIMD wasm builds compile SIMD code: the SIMD codec verification variants pass +simd128 to every crate through a target-scoped RUSTFLAGS, a native arm step refuses a SIMD variant whose dependency rlibs match the plain build, and D-22's F-X013 claim is rechecked on that build | Build | 1w | pending |
+| F-234 | E3.9 | Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression | Rust | 1w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -105,7 +108,8 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   the module ships instead.
   **Answered by the operator on 2026-11-06:** change the release rule. The
   module ships outside the `@ocelli/core` tarball and `docs/RELEASE.md` item 6
-  says where. A story in S47 decides where and rewrites the rule.
+  says where. A story in S47 decides where and rewrites the rule. F-237
+  implements it.
 
 - **The objc2 crates in the native binaries may carry an Apple SDK
   redistribution question.** F-220's first review read the upstream objc2
@@ -116,6 +120,7 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   or a native build that leaves them out.
   **Answered by the operator on 2026-11-06:** a native build without wgpu's
   Metal backend, so the objc2 crates are not shipped. A story in S47.
+  F-238 implements it.
 
 - **`acceptTransferredFrame` ignores a correctly spelt `stackIndex` and
   `stackEpoch`.** Found by F-230's first review and older than F-230. Now
@@ -123,7 +128,7 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   neither a refusal nor the effect. The choice is a story that honours them,
   or removing them from that entry point's accepted keys.
   **Answered by the operator on 2026-11-06:** a story in S47 honours both keys
-  with tests.
+  with tests. F-236 implements it.
 
 - **A deeply nested sequence overflows the stack in `parse_part10`.** Found
   by F-225's first review while fuzzing, before the conformance checker runs,
@@ -133,6 +138,7 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   deeper input with an error, or accepting the risk for local files.
   **Answered by the operator on 2026-11-06:** fixed in S46. A new story bounds
   sequence depth in the parser and refuses deeper input with a typed error.
+  F-234 implements it.
 
 - **A Rust advisory nobody gates: RUSTSEC-2021-0153 on the `encoding` crate.**
   Found by F-229's first review running `cargo deny check`. The crate comes
@@ -161,6 +167,7 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   constant window is exposed to it too.
   **Answered by the operator on 2026-11-06:** a story in S47 makes the shader's
   rescale match `LutChain` on every tier, with a tier A fixture that fails today.
+  F-235 implements it.
 - **The unsafe guard has blind spots.** F-229's eighth review found that
   `scripts/unsafe_allowlist_check.py`'s string pattern opens a false string
   after a `'"'` character literal, after a raw string holding a quote or
@@ -169,14 +176,14 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   guard. No audited count changes. The choice is a story that gives the guard a
   real Rust lexer, or a recorded limit on the guard.
   **Answered by the operator on 2026-11-06:** fixed in S46. A new story makes
-  the guard sound against every trigger above.
+  the guard sound against every trigger above. F-232 implements it.
 - **No build compiles the jxl-oxide SIMD code.** The same review found that
   `bin/ocelli.sh native` passes `+simd128` after `cargo rustc --`, which reaches
   only the final example crate, so the SIMD code of its dependencies is never
   built. D-22's F-X013 SIMD check is built the same way and may not test what it
   says.
   **Answered by the operator on 2026-11-06:** fixed in S46. A new story builds
-  every crate with `+simd128` for the SIMD variants and rechecks F-X013's claim.
+  every crate with `+simd128` for the SIMD variants and rechecks F-X013's claim. F-233 implements it.
 
 ## What is carried in
 
