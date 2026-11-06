@@ -152,6 +152,8 @@ waves.
 
 ## 5. Consolidated verification
 
+Run this and step 6 once, after every story is completed or carried, never while a story is open. `.claude/WORKFLOW.md` records the operator's rule.
+
 After every branch is integrated, stage the final owned content and invalidate
 any earlier receipt before the new attempt:
 
