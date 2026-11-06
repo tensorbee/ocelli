@@ -135,6 +135,17 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   **Accepted by the operator on 2026-11-05 as a known risk for now.** No
   gate is added in S46.
 
+- **The VOI shader rescales with one fused rounding on Apple GPUs.** Found by
+  F-227's fourth review on an Apple M4 Max under Metal: the shader's
+  `stored * slope + intercept` in `crates/ocelli-render/shaders/voi.wgsl`
+  compiles to a fused multiply-add, so tier A can differ from `LutChain` by up
+  to eight f32 units at the top of the range, not the two F-041 recorded. In a
+  window one unit wide this drew the 99th percentile black on tier A and white
+  on tier C. F-227 now accepts a window only with a 16 unit margin, so its own
+  windows hold. Any other narrow window on tier A is still exposed. The choice
+  is a story that makes the shader's rescale match `LutChain` on every tier, or
+  a recorded divergence with a minimum window width.
+
 ## What is carried in
 
 - **D-22 still blocks publication.** The version stays 0.1.0.
