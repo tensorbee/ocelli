@@ -9,9 +9,8 @@
 use std::collections::BTreeMap;
 
 use ocelli_cache::{
-    Budgeted, CacheEvent, CacheTier, ContentId, DecodedFrame, FrameKey, FrameLookup, FrameSource,
-    ImageCache, KIND_DISPLACED, KIND_EVICTED, KIND_REFUSED, KIND_RELEASED, Lru, RingEvent,
-    SeriesId, TierCounters,
+    Budgeted, CacheEvent, ContentId, DecodedFrame, FrameKey, FrameLookup, FrameSource, ImageCache,
+    KIND_DISPLACED, KIND_EVICTED, KIND_REFUSED, KIND_RELEASED, RingEvent, SeriesId,
 };
 use ocelli_pixel::{
     ImageDimensions, ImageOrientationPatient, ImagePlane, ImagePositionPatient,
@@ -400,6 +399,41 @@ fn read_side_and_accessors_are_executed() -> Result<(), ocelli_pixel::PixelError
 }
 
 #[test]
+fn a_hit_refreshes_recency_so_the_second_is_evicted() -> Result<(), ocelli_pixel::PixelError> {
+    // The state table's row where a hit makes the frame the most recently
+    // used, watched through the `ImageCache` entry point. The budget holds
+    // exactly two 32-byte frames, so the third frame's insert must evict
+    // one. The hit was on the first, so the second is the one evicted. A
+    // get that stopped refreshing recency would leave the first the older
+    // one and evict it instead, which is the mutation this is red on.
+    let mut cache = ImageCache::new(64);
+    let first = make_frame(4, 4, 16, vec![0x11_u8; 32])?;
+    let second = make_frame(4, 4, 16, vec![0x55_u8; 32])?;
+    let third = make_frame(4, 4, 16, vec![0x99_u8; 32])?;
+    let source = FrameSource {
+        content: content(),
+        description: description(4, 4, 16)?,
+        plane: plane(4, 4)?,
+    };
+    assert!(
+        cache
+            .insert(key(1, 0, 0), content(), first.clone())
+            .is_empty()
+    );
+    assert!(cache.insert(key(1, 1, 0), content(), second).is_empty());
+    assert_eq!(cache.get(&key(1, 0, 0), &source), FrameLookup::Hit(&first));
+    let events = cache.insert(key(1, 2, 0), content(), third);
+    assert_eq!(
+        events.events(),
+        [CacheEvent::Evicted {
+            key: key(1, 1, 0),
+            bytes: 32,
+        }]
+    );
+    Ok(())
+}
+
+#[test]
 fn one_insert_can_displace_and_evict_with_displaced_first() -> Result<(), ocelli_pixel::PixelError>
 {
     // Budget 250, two 100-byte frames live. Replacing the first with a
@@ -715,9 +749,9 @@ fn metadata_changes_are_stale() -> Result<(), ocelli_pixel::PixelError> {
 #[test]
 fn stale_removal_is_explicit() -> Result<(), ocelli_pixel::PixelError> {
     // Decision 4: a mismatch removes the held frame explicitly and emits no
-    // event. A removal is not an `Admission`, so `TierCounters` has nothing
-    // to record and the counters cannot count it. The insert after the
-    // stale finds an empty slot and displaces nothing, which rejects an
+    // event. The lookup reports the bytes of the frame it removed and the
+    // pressure drops by them, with no event of any kind. The insert after
+    // the stale finds an empty slot and displaces nothing, which rejects an
     // implementation that reports the removal on the next insert. An insert
     // over a live slot still displaces, which is the control.
     let mut cache = ImageCache::new(32);
@@ -768,24 +802,6 @@ fn stale_removal_is_explicit() -> Result<(), ocelli_pixel::PixelError> {
             bytes: 32,
         }]
     );
-
-    // The same removal through the `Lru` the decoded tier wraps, driven
-    // directly because the removal is private to the lookup. An eviction
-    // counts and a displacement does not. `remove` is the release the
-    // stale path makes, and it is nothing at all to `TierCounters`. The
-    // budget is 64: the first frame is 32 bytes and the second is 64, so
-    // 64 bytes against 32 free evict the first exactly, and the counters
-    // read 1 and 32.
-    let mut lru = Lru::new(CacheTier::Decoded, 64);
-    let mut counters = TierCounters::default();
-    counters.record(&lru.insert(key(1, 0, 0), make_frame(4, 4, 16, vec![0; 32])?));
-    assert_eq!(counters.take(), TierCounters::default());
-    counters.record(&lru.insert(key(1, 1, 0), make_frame(4, 4, 16, vec![0; 64])?));
-    let taken = counters.take();
-    assert_eq!(taken.evicted, 1);
-    assert_eq!(taken.evicted_bytes, 32);
-    assert!(lru.remove(&key(1, 1, 0)).is_some());
-    assert_eq!(counters.take(), TierCounters::default());
     Ok(())
 }
 

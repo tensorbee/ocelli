@@ -390,7 +390,7 @@ writeFrame({ memory }, sessionBulkSink(session), sampleBytes, {
     <p>For this call the session object needs the module's <code>commit_frame</code> export too. <code>holdSessionBytes(wasm, bytes, previousTicket)</code> copies a whole response into the session's one bulk slot and returns its ticket without parsing it. That slot is the only bulk allocation, so other writes refuse until <code>release_bulk</code> drops the ticket.</p>
 
     <h3 id="js-dicomweb"><span class="num">5.6</span>DICOMweb</h3>
-    <p><code>DicomwebClient</code> is a bounded QIDO-RS, WADO-RS and WADO-URI GET client. Its constructor takes five options.</p>
+    <p><code>DicomwebClient</code> is a bounded QIDO-RS, WADO-RS and WADO-URI GET client. Its constructor takes six options.</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Option</th><th>Type</th></tr></thead>
       <tbody>

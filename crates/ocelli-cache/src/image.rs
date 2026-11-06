@@ -553,13 +553,12 @@ impl ImageCache {
             return FrameLookup::Miss;
         };
         let stale = !held.matches(source);
-        let bytes = held.frame.bytes();
         // The reference is not used past this line, so on the stale path the
         // map is free to take back. The reference that escapes on the hit
         // path is taken by a second read, because a loan that may escape
         // into the return cannot be the one the removal ended.
         if stale {
-            self.decoded.remove(key);
+            let bytes = self.decoded.remove(key).map_or(0, |h| h.frame.bytes());
             return FrameLookup::Stale { bytes };
         }
         match self.decoded.get(key) {

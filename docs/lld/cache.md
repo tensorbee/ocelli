@@ -21,7 +21,7 @@ crate links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
 | `CacheTier` | Section 8's three tiers, `Encoded`, `Decoded` and `Gpu` |
 | `Pressure` | One tier's reading: the tier, the bytes used and the budget |
 | `DecodedFrame` | F-032. The decoded tier's value type. Its `bytes` is the sample buffer length |
-| `ImageCache` | F-032. An `Lru<FrameKey, DecodedFrame>` fixed to the decoded tier, returning events |
+| `ImageCache` | F-032. An `Lru<FrameKey, HeldFrame>` fixed to the decoded tier, returning events. The value is the private `HeldFrame`, the content id beside the `DecodedFrame` |
 | `CacheEvent` | F-032 and F-226. One variant per `Admission` field: `Evicted`, `Displaced`, `Refused`, plus `Released` from a series release |
 | `RingEvent` | F-032. Section 17.3's 48-byte event envelope, `#[repr(C)]` and `Pod` |
 | `HandoffMeta` | F-035. Frame identity plus the sample length a section 24 transfer must match. `#[repr(C)]`, little-endian, no samples |
