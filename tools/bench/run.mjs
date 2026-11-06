@@ -63,7 +63,8 @@ export const USAGE = `bin/ocelli.sh bench [options]
                          every subject no per-subject form names. Once only
   --tolerance <subject id>=<fraction>
                          the tolerance for that one subject. Repeatable, once
-                         per subject, and the subject must be in this run
+                         per subject. The subject must be in this run and,
+                         with --subject, be that subject
   --tolerance-why <text> where those tolerances came from. Required with either
                          form, in the shape ci/tier-thresholds.json states per
                          figure: measured, derived from something named, or
@@ -211,13 +212,18 @@ export function resolveRun(loaded, options) {
     const wanted = new Set(options.only);
     resolved = loaded.filter((row) => wanted.has(row.subject.id));
   }
-  const inRun = new Set(resolved.map((row) => row.subject.id)
-    .filter((id) => options.subject === null || id === options.subject));
+  const inRun = new Set(resolved.map((row) => row.subject.id));
   for (const id of Object.keys(options.tolerances)) {
     if (!inRun.has(id)) {
       throw new Error(
         `--tolerance names ${id}, which is not in this run, so the ` +
           "tolerance would be recorded against nothing.",
+      );
+    }
+    if (options.subject !== null && id !== options.subject) {
+      throw new Error(
+        `--tolerance names ${id}, which is outside --subject ` +
+          `${options.subject}, so --accept would record it against nothing.`,
       );
     }
   }
@@ -320,9 +326,12 @@ export async function main(argv) {
     return 0;
   }
 
+  // Outside the try, so a registry the loader refuses still rejects main and
+  // exits 1 with its stack rather than reading as an argument refusal.
+  const loaded = loadRegistry();
   let resolved;
   try {
-    resolved = resolveRun(loadRegistry(), options);
+    resolved = resolveRun(loaded, options);
   } catch (error) {
     process.stderr.write(`${String(error?.message ?? error)}\n`);
     return 2;

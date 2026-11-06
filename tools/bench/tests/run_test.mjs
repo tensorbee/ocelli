@@ -6,6 +6,7 @@
 import { Buffer } from "node:buffer";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,7 +85,7 @@ test("a per-subject tolerance for a subject not in the run is refused", () => {
   assert.throws(() => command.resolveRun(REGISTRY, tolerate([
     "--accept", "--story", "F-000", "--why", "probe",
     "--subject", "viewer.first_image",
-  ])), /--tolerance names viewer\.open, which is not in this run/);
+  ])), /--tolerance names viewer\.open, which is outside --subject viewer\.first_image/);
   assert.throws(() => command.resolveRun(REGISTRY, command.parseArgs([
     "--tolerance", "viewer.absent=0.1", "--tolerance-why", "stated",
   ])), /--tolerance names viewer\.absent, which is not in this run/);
@@ -96,6 +97,45 @@ test("a per-subject tolerance for a subject not in the run is refused", () => {
       .map((row) => row.subject.id),
     ["viewer.open", "viewer.scroll_rate"]);
   assert.equal(command.resolveRun(REGISTRY, tolerate([])).length, 3);
+});
+
+// Through the real entry, not only resolveRun. main must refuse before
+// runSubjects, so the --out directory is never created and no build or
+// runner starts. The ids are from the tracked subjects.json.
+async function mainRefusal(argv) {
+  const parent = await mkdtemp(join(tmpdir(), "ocelli-bench-main-"));
+  const out = join(parent, "never");
+  const written = [];
+  const original = process.stderr.write;
+  process.stderr.write = (chunk) => { written.push(String(chunk)); return true; };
+  let code;
+  try {
+    code = await command.main([...argv, "--out", out]);
+  } finally {
+    process.stderr.write = original;
+  }
+  const outCreated = existsSync(out);
+  await rm(parent, { recursive: true });
+  return { code, stderr: written.join(""), outCreated };
+}
+
+const ACCEPT = ["--accept", "--story", "F-000", "--why", "probe"];
+const NAMED = ["--tolerance", "viewer.open=0.06", "--tolerance-why", "stated"];
+
+test("main refuses a per-subject tolerance before any run", async () => {
+  const cases = [
+    [["viewer.first_image", ...ACCEPT, ...NAMED],
+      /^--tolerance names viewer\.open, which is not in this run, so the tolerance would be recorded against nothing\.\n$/],
+    [[...ACCEPT, "--subject", "viewer.first_image", ...NAMED],
+      /^--tolerance names viewer\.open, which is outside --subject viewer\.first_image, so --accept would record it against nothing\.\n$/],
+    [["viewer.absent", ...ACCEPT], /^unknown subject viewer\.absent\n$/],
+  ];
+  for (const [argv, expected] of cases) {
+    const { code, stderr, outCreated } = await mainRefusal(argv);
+    assert.equal(code, 2, `${argv.join(" ")} must exit 2`);
+    assert.match(stderr, expected);
+    assert.equal(outCreated, false, "main must return before the run");
+  }
 });
 
 test("--accept records each named tolerance and the bare one for the rest", () => {
@@ -132,6 +172,9 @@ test("--accept records each named tolerance and the bare one for the rest", () =
   assert.equal(after["viewer.first_image"].tolerance_provenance, "stated");
   assert.throws(() => acceptRecord(before, run, { ...shared, tolerance: null,
     toleranceWhy: null }), /a new tolerance needs its own reason/);
+  assert.throws(() => acceptRecord(before, run, { ...shared, tolerance: null,
+    tolerances: { "viewer.open": 0.06 }, toleranceWhy: null }),
+  /a new tolerance needs its own reason/);
 });
 
 test("subject execution refuses a runner for a pending subject", async () => {
