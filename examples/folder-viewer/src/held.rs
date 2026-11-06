@@ -1499,9 +1499,9 @@ impl CacheState {
     ///
     /// Every route makes room for the whole `frame_sample_cost` of the buffer
     /// it returns: a parked buffer, a buffer stolen from the oldest frame of
-    /// the same length when no reply reads it, and a fresh one. A stolen frame may have
-    /// charged less than the new frame will, so its freed bytes alone are not
-    /// the room.
+    /// the same length when no reply reads it, and a fresh one. A stolen
+    /// frame may have charged less than the new frame will, so its freed
+    /// bytes alone are not the room.
     fn claim_buffer(&mut self, len: usize) -> Vec<u8> {
         self.drain_recycled();
         if let Some(buffer) = self.pop_free(len) {

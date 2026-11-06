@@ -991,6 +991,102 @@ fn refused_with(reply: &(String, String), status: &str, code: &str) -> bool {
         && header_line(&reply.0, "X-Ocelli-Error").as_deref() == Some(code)
 }
 
+/// `inflight` from `GET /held`, the sample bytes a decode still charges.
+fn inflight(addr: SocketAddr) -> Result<usize, String> {
+    let (header, body) = split_http(&exchange(
+        addr,
+        b"GET /held HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+    )?)?;
+    if !header.starts_with("HTTP/1.1 200 ") {
+        return Err(header);
+    }
+    let rest = body
+        .split_once("\"inflight\":")
+        .ok_or_else(|| format!("the census omitted inflight: {body}"))?
+        .1;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits
+        .parse::<usize>()
+        .map_err(|_| format!("the census inflight was not a number: {body}"))
+}
+
+#[test]
+fn value_route_refusals_are_400_and_release_their_charge() -> Result<(), String> {
+    // A refusal is not 410, which the page reads as "post the file again".
+    // Slice 0 has one frame and 128 columns, so frame 3 is `frame` and
+    // x = 200.5 is `point`. A Modality LUT Sequence object decodes and is
+    // refused `window` (PS3.3 C.11.1). A one-pixel-row object whose Pixel
+    // Data holds one of its two samples is refused after the sample buffer
+    // is charged. Every decode, answered or refused, leaves no bytes in
+    // flight.
+    let file = slice(0).ok_or_else(|| "no synthetic slice".to_owned())?;
+    let mut lut = Spec::mono(1, &[50]);
+    lut.rescale = Some(("1", "0"));
+    lut.extra
+        .push(((0x0028, 0x3000), long_le((0x0028, 0x3000), *b"SQ", &[])?));
+    let lut = build(lut)?;
+    let mut short = Spec::mono(2, &[]);
+    short.pixels = 7_u16.to_le_bytes().to_vec();
+    let short = build(short)?;
+    for (name, addr) in both_viewers()? {
+        let id = post_file(addr, &file)?;
+        let cases = [
+            (
+                "frame 3",
+                id.clone(),
+                "X-Ocelli-Frame: 3\r\nX-Ocelli-Points: 0.5,0.5\r\n",
+                "400",
+                "frame",
+            ),
+            (
+                "outside point",
+                id.clone(),
+                "X-Ocelli-Frame: 0\r\nX-Ocelli-Points: 200.5,0.5\r\n",
+                "400",
+                "point",
+            ),
+            (
+                "Modality LUT",
+                post_file(addr, &lut)?,
+                "X-Ocelli-Points: 0.5,0.5\r\n",
+                "400",
+                "window",
+            ),
+        ];
+        for (case, target, extra, status, code) in cases {
+            let reply = ask(addr, &target, extra)?;
+            if !refused_with(&reply, status, code) {
+                return Err(format!("{name} {case}: {}", reply.0));
+            }
+            let left = inflight(addr)?;
+            if left != 0 {
+                return Err(format!("{name} {case}: {left} bytes left in flight"));
+            }
+        }
+        let short_id = post_file(addr, &short)?;
+        let reply = ask(addr, &short_id, "X-Ocelli-Points: 0.5,0.5\r\n")?;
+        if !reply.0.starts_with("HTTP/1.1 400 ") {
+            return Err(format!("{name} short pixel data: {}", reply.0));
+        }
+        let left = inflight(addr)?;
+        if left != 0 {
+            return Err(format!(
+                "{name} short pixel data: {left} bytes left in flight"
+            ));
+        }
+        let fresh = post_file(addr, &slice(1).ok_or_else(|| "no slice 1".to_owned())?)?;
+        let reply = ask(addr, &fresh, "X-Ocelli-Points: 0.5,0.5\r\n")?;
+        if !reply.0.starts_with("HTTP/1.1 200 ") {
+            return Err(format!("{name} decoded value: {}", reply.0));
+        }
+        let left = inflight(addr)?;
+        if left != 0 {
+            return Err(format!("{name} decoded value: {left} bytes left in flight"));
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn value_route_reads_the_synthetic_named_pixels() -> Result<(), String> {
     // Synthetic slice 0: stored is HU + 1024 and the intercept is -1024, so
