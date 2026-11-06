@@ -3445,8 +3445,10 @@ mod tests {
             // at payload offset 24, a repeat commit of the same content
             // displaces and the next reading reports 0, a stale removal
             // pushes a crossing reading with 0, and the release pushes one
-            // with 0 too. Counting a Displaced or a Released event as an
-            // eviction in note_counters goes red here.
+            // with 0 too. Counting a Displaced event as an eviction in
+            // note_counters goes red here. release_series does not call
+            // note_counters, so the release half goes red only when a
+            // release both reaches note_counters and is counted there.
             let keys: Vec<FrameKey> = (0..3).map(|instance| key(5, instance)).collect();
             let (mut session, epoch) = cached_session(&keys);
             with_budget(&mut session, 8);

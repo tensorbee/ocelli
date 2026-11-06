@@ -934,9 +934,9 @@ it("refuses a content id without both stack positions before any export call", (
   // stackEpoch would be accepted and then silently dropped, because only
   // a stack commit fills the cache. F-230's rule for the key is a refusal
   // with InvalidValue before the allocation, so no export is called and
-  // the ticket is never taken. Only the no-position case reaches that
-  // guard: a lone stackIndex or stackEpoch is refused by the u32 check
-  // first.
+  // the ticket is never taken. Only the no-position case depends on that
+  // guard. Without it, a lone stackIndex or stackEpoch would still be
+  // refused by the u32 check.
   const memory = new WebAssembly.Memory({ initial: 1 });
   let calls = 0;
   const wasm = {

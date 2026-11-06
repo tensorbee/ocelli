@@ -406,9 +406,10 @@ writeFrame({ memory: session.memory }, sessionBulkSink(session), sampleBytes, {
   content,
 });
 
-// Later, with no bytes crossing again. A show answers only for the slice
-// the viewport has selected: another index throws the coded
-// CommitRefused, and a miss returns false.
+// Later, with no bytes crossing again. A wrong epoch returns false at any
+// index. Under the current epoch a show answers only for the slice the
+// viewport has selected, another index throws the coded CommitRefused,
+// and at the selected index a miss or a stale entry returns false.
 const slot = { index: 0, epoch, content, columns: 512, rows: 512 };
 if (showResident(session, slot)) {
   // The frame is displayed. frameResident asks without showing, and a

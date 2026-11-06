@@ -310,8 +310,10 @@ moves it. A commit that carries a `content` id with its `stackIndex` and
 `stackEpoch` fills the cache, and a commit that carries a `content` id
 without both is refused with `InvalidValue` and commits nothing.
 `frameResident` and `showResident` read it back without the bytes crossing
-the boundary again, and a `showResident` answers only for the slice the
-viewport has selected: another index throws the coded `CommitRefused`.
+the boundary again. Under a wrong epoch `showResident` returns false at any
+index. Under the current epoch it answers only for the slice the viewport has
+selected, another index throws the coded `CommitRefused`, and at the selected
+index a miss or a stale entry returns false.
 `releaseSeries` and `releaseStudy` release the named series, one
 `cache.released` event per series that held frames, a series with nothing
 cached emits no event, and a release that crosses a pressure band pushes

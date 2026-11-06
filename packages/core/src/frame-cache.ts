@@ -12,9 +12,10 @@
  * with nothing cached emits no event, and a release that crosses a
  * pressure band pushes `cache.pressure` after `cache.released`.
  *
- * Every function here refuses before any export call. A bad number is an
+ * Every argument is validated before any export call. A bad number is an
  * `OcelliError` `InvalidValue` and an unknown option key is `UnknownOption`,
- * both F-230's codes.
+ * both F-230's codes. The one refusal that comes after an export call is
+ * {@link showResident}'s `CommitRefused`, thrown from the session's answer.
  */
 
 import { OcelliError } from "./ocelli-error.js";
@@ -116,12 +117,12 @@ export function frameResident(
 
 /**
  * Show the cached frame at `request.index` when it answers for
- * `request.content` at `request.columns` by `request.rows`. The index
- * must be the slice the viewport has selected, the rule `writeFrame`
- * commits under: another index throws the coded `CommitRefused` with
- * nothing drawn. A mismatched entry is removed and leaves the displayed
- * frame unchanged. `false` is a miss, a stale entry or a wrong epoch
- * only.
+ * `request.content` at `request.columns` by `request.rows`. A wrong epoch
+ * returns `false` at any index. Under the current epoch the index must be
+ * the slice the viewport has selected: another index throws the coded
+ * `CommitRefused` with nothing drawn. At the selected index a miss returns
+ * `false`, and a mismatched entry returns `false`, is removed and leaves
+ * the displayed frame unchanged.
  */
 export function showResident(
   wasm: FrameCacheExports,
