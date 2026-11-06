@@ -818,8 +818,8 @@ impl RenderInput {
 
 /// What one decode worker job returned.
 enum PooledOutcome {
-    /// The grey cap admitted the render, or refused it for good, and the
-    /// reply is ready.
+    /// The grey cap admitted the render, or the frame failed before it, and
+    /// the reply is ready.
     Ready(Box<PooledWork>),
     /// The grey would exceed the cap now, so nothing was rendered. The input
     /// is returned unharmed and nothing is counted except the input's own
@@ -836,8 +836,7 @@ struct CongestedWork {
 
 /// One render under the grey cap.
 enum Capped {
-    /// The render ran, or the grey is larger than the whole cap. A grey
-    /// reply holds its claim. A refusal holds none.
+    /// The render ran. A grey reply holds its claim. A refusal holds none.
     Rendered(Box<(Result<Preview, PreviewError>, Option<GreyClaim>)>),
     /// The cap has no room now. Nothing was rendered and nothing is held.
     Full,
@@ -857,7 +856,8 @@ fn grey_bytes(width: u32, height: u32) -> usize {
 /// the reply. A returned buffer more than twice the grey is freed first, so
 /// a small grey does not hold a large frame's room. `claim` is room the
 /// request already waited for. A refused render leaves the buffer with the
-/// worker, where it counts as returned.
+/// worker, where it counts as returned, unless it is larger than the cap. A
+/// grey larger than the cap is admitted only when no other grey is held.
 fn render_capped(
     held: &crate::preview::HeldFrame,
     request: FrameRequest,
@@ -876,12 +876,14 @@ fn render_capped(
         let mut claim = match gate.admit(claim, len, kept) {
             Ok(claim) => claim,
             Err(GreyRefusal::Full) => return Capped::Full,
-            Err(GreyRefusal::TooLarge) => {
-                return Capped::Rendered(Box::new((Err(PreviewError::TooLarge), None)));
-            }
         };
         let preview = render_held(held, request, &mut workspace.scratch, &mut workspace.grey);
         let reply = grey_capacity(&preview);
+        // A refused render can leave its buffer here. One larger than the cap
+        // is never kept, so it is freed before the settle.
+        if workspace.grey.capacity() > gate.cap() {
+            drop(std::mem::take(&mut workspace.grey));
+        }
         gate.settle(&mut claim, reply, workspace.grey.capacity());
         detach_grey(reply);
         match preview {
@@ -912,7 +914,7 @@ fn wait_for_grey_until(
     stream: Option<&TcpStream>,
     deadline: Instant,
 ) -> Option<GreyClaim> {
-    let _waiting = gate.enter_wait();
+    let _waiting = gate.enter_wait(len);
     let live = || stream.is_none_or(peer_open);
     loop {
         if let Some(claim) = gate.reserve(len) {
@@ -1068,6 +1070,8 @@ fn preview_held_on_worker(
 
 /// Rounds a held preview may take. The second round holds room for the
 /// frame's whole grey, which the cap always admits, so a third is not needed.
+/// A grey larger than the cap reserves room only when nothing else is held,
+/// and nothing else enters while it holds that room, so it is admitted too.
 const GREY_ROUNDS: usize = 2;
 
 /// One held preview on a decode worker.
@@ -2844,6 +2848,16 @@ mod tests {
 
     /// One Part 10 monochrome frame of `rows` by `columns`, 16-bit.
     fn grey_file(rows: u16, columns: u16) -> Result<Vec<u8>, String> {
+        grey_file_with(rows, columns, |_| 50)
+    }
+
+    /// One Part 10 monochrome frame whose stored value at pixel `i` is
+    /// `stored(i)`, 16-bit, window centre 40 and width 400.
+    fn grey_file_with(
+        rows: u16,
+        columns: u16,
+        stored: impl Fn(usize) -> u16,
+    ) -> Result<Vec<u8>, String> {
         let short = |group: u16, element: u16, vr: [u8; 2], value: &[u8]| {
             let mut bytes = Vec::new();
             bytes.extend_from_slice(&group.to_le_bytes());
@@ -2899,7 +2913,11 @@ mod tests {
         data.extend(short(0x0028, 0x1052, *b"DS", &pad(b"0")));
         data.extend(short(0x0028, 0x1053, *b"DS", &pad(b"1")));
         data.extend(short(0x0028, 0x1056, *b"CS", &pad(b"LINEAR")));
-        let pixels = vec![50_u8; usize::from(rows) * usize::from(columns) * 2];
+        let count = usize::from(rows) * usize::from(columns);
+        let mut pixels = Vec::with_capacity(count * 2);
+        for index in 0..count {
+            pixels.extend_from_slice(&stored(index).to_le_bytes());
+        }
         data.extend(long(0x7FE0, 0x0010, *b"OW", &pixels));
         let mut meta = Vec::new();
         meta.extend(long(0x0002, 0x0001, *b"OB", &[0, 1]));
@@ -2936,10 +2954,20 @@ mod tests {
 
     /// Read one reply whole, failing past 15 s from `started`.
     fn read_late(
-        mut late: TcpStream,
+        late: TcpStream,
         started: std::time::Instant,
         name: &str,
     ) -> Result<String, String> {
+        let reply = read_late_bytes(late, started, name)?;
+        Ok(String::from_utf8_lossy(&reply).into_owned())
+    }
+
+    /// Read one reply whole as bytes, failing past 15 s from `started`.
+    fn read_late_bytes(
+        mut late: TcpStream,
+        started: std::time::Instant,
+        name: &str,
+    ) -> Result<Vec<u8>, String> {
         let mut reply = Vec::new();
         let mut chunk = [0_u8; 64 * 1024];
         loop {
@@ -2963,7 +2991,7 @@ mod tests {
                 return Err(format!("{name} answered too late"));
             }
         }
-        Ok(String::from_utf8_lossy(&reply).into_owned())
+        Ok(reply)
     }
 
     /// Grey-sized bytes the two workspaces may hold: each keeps native bytes
@@ -3500,25 +3528,289 @@ mod tests {
         Ok(())
     }
 
-    /// A grey larger than the whole cap is refused at once, never waited for.
+    /// The 4740 by 5928 frame of the operator answer, over the design size.
+    const BIG: (u16, u16) = (4740, 5928);
+    const BIG_LEN: usize = 4740 * 5928;
+    /// 3000 by 5801 is 17,403,000 grey bytes, 3,000 over the cap, and is the
+    /// smallest frame over the design size these tests use.
+    const OVER: (u16, u16) = (3000, 5801);
+    const OVER_LEN: usize = 3000 * 5801;
+
+    /// A frame of `size` whose stored values step through 0 to 400 from
+    /// `offset`, so its grey spans the whole 40 / 400 window.
+    fn varied_file(size: (u16, u16), offset: usize) -> Result<Vec<u8>, String> {
+        grey_file_with(size.0, size.1, |index| {
+            u16::try_from((index + offset) % 401).unwrap_or(0)
+        })
+    }
+
+    /// The grey a fresh decode of `file` draws, with no cache and no gate.
+    fn fresh_grey(file: &[u8]) -> Result<Vec<u8>, String> {
+        preview_frame(file, FrameRequest::default())
+            .map(|preview| preview.grey)
+            .map_err(|error| format!("the file did not decode: {error}"))
+    }
+
+    /// A 200 whose body is exactly `expected`.
+    fn expect_grey(reply: &[u8], expected: &[u8], name: &str) -> Result<(), String> {
+        let head_end = header_end_at(reply).ok_or_else(|| format!("{name} had no header"))?;
+        let head = String::from_utf8_lossy(reply.get(..head_end).unwrap_or(&[])).into_owned();
+        expect_status(&head, 200, name)?;
+        let body = reply.get(head_end..).unwrap_or(&[]);
+        if body != expected {
+            return Err(format!(
+                "{name} grey was {} bytes and differed from a fresh decode of {} bytes",
+                body.len(),
+                expected.len()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Read `client` on its own thread, so replies that block on each other
+    /// are all read.
+    fn read_aside(
+        client: TcpStream,
+        started: std::time::Instant,
+        name: &'static str,
+    ) -> std::thread::JoinHandle<Result<Vec<u8>, String>> {
+        std::thread::spawn(move || read_late_bytes(client, started, name))
+    }
+
+    fn joined(handle: std::thread::JoinHandle<Result<Vec<u8>, String>>) -> Result<Vec<u8>, String> {
+        handle
+            .join()
+            .map_err(|_| "a reader thread panicked".to_owned())?
+    }
+
+    /// Wait long enough for an admission that should not happen, then check
+    /// the unwritten replies still hold `held` grey bytes.
+    fn replies_stay(viewer: &Viewer, held: usize, what: &str) -> Result<(), String> {
+        std::thread::sleep(Duration::from_millis(300));
+        let census = viewer.memory_census();
+        if census.grey_replies != held {
+            return Err(format!(
+                "{what}: replies held {} grey bytes, not {held}",
+                census.grey_replies
+            ));
+        }
+        Ok(())
+    }
+
+    /// A frame over the design size draws, held and body form, its grey is
+    /// the grey of a fresh decode, and its worker does not keep it after the
+    /// write.
     #[test]
-    fn a_grey_larger_than_the_cap_is_refused_at_once() -> Result<(), String> {
-        let (addr, viewer) = grey_server(128)?;
-        // 3000 by 5801 is 17,403,000 grey bytes, 3,000 over the cap.
-        let file = grey_file(3000, 5801)?;
+    fn a_frame_over_the_design_size_draws_its_fresh_grey() -> Result<(), String> {
+        let (addr, viewer) = grey_server(256)?;
+        let file = varied_file(BIG, 0)?;
+        let expected = fresh_grey(&file)?;
+        if expected.len() != BIG_LEN || BIG_LEN <= GREY_CAP {
+            return Err(format!("the grey was {} bytes", expected.len()));
+        }
         let id = post_id(addr, &file)?;
-        let started = std::time::Instant::now();
+        viewer.grey_gate().reset_peak();
         for (name, request) in [
             ("the held form", id_preview(&id, "").into_bytes()),
+            ("the cached frame", id_preview(&id, "").into_bytes()),
             ("the body form", body_preview(&file, "")),
         ] {
-            let text = read_late(send_bytes(addr, &request)?, started, name)?;
-            expect_status(&text, 400, name)?;
-            if header_value(&text, "X-Ocelli-Error").as_deref() != Some("too-large") {
-                return Err(format!("{name} did not say too-large"));
-            }
+            let started = std::time::Instant::now();
+            let reply = read_late_bytes(send_bytes(addr, &request)?, started, name)?;
+            expect_grey(&reply, &expected, name)?;
+            census_until(viewer.as_ref(), Duration::from_secs(5), name, |census| {
+                census.grey == 0 && census.grey_replies == 0
+            })?;
         }
-        replies_settle(&viewer, "after the refusals")
+        let peak = viewer.grey_gate().peak();
+        if peak != BIG_LEN {
+            return Err(format!("the grey peak was {peak}, not {BIG_LEN}"));
+        }
+        Ok(())
+    }
+
+    /// While a frame over the design size is held, a normal preview waits,
+    /// and it is served once that grey is released.
+    #[test]
+    fn a_preview_waits_while_a_frame_over_the_design_size_is_held() -> Result<(), String> {
+        let (addr, viewer) = grey_server(256)?;
+        let big = varied_file(BIG, 0)?;
+        let big_id = post_id(addr, &big)?;
+        let small = grey_file(512, 512)?;
+        let small_id = post_id(addr, &small)?;
+        // A client that never reads holds the large grey.
+        let stall = send_late(addr, &id_preview(&big_id, ""))?;
+        census_until(
+            viewer.as_ref(),
+            Duration::from_secs(30),
+            "the large stall",
+            |census| census.grey_replies == BIG_LEN,
+        )?;
+        let started = std::time::Instant::now();
+        let waiter = send_late(addr, &id_preview(&small_id, ""))?;
+        waiters_reach(&viewer, 1)?;
+        replies_stay(&viewer, BIG_LEN, "beside the large grey")?;
+        drop(stall);
+        let text = read_late(waiter, started, "the waiting preview")?;
+        expect_status(&text, 200, "the waiting preview")?;
+        replies_settle(&viewer, "after the large grey")
+    }
+
+    /// Two frames over the design size requested together are served one
+    /// after the other, and the grey held never passes one of them.
+    #[test]
+    fn two_frames_over_the_design_size_draw_one_after_the_other() -> Result<(), String> {
+        let (addr, viewer) = grey_server(256)?;
+        let first = varied_file(OVER, 0)?;
+        let second = varied_file(OVER, 7)?;
+        let first_grey = fresh_grey(&first)?;
+        let second_grey = fresh_grey(&second)?;
+        if first_grey == second_grey {
+            return Err("the two frames drew the same grey".to_owned());
+        }
+        let first_id = post_id(addr, &first)?;
+        let second_id = post_id(addr, &second)?;
+        viewer.grey_gate().reset_peak();
+        let started = std::time::Instant::now();
+        let one = send_late(addr, &id_preview(&first_id, ""))?;
+        let two = send_late(addr, &id_preview(&second_id, ""))?;
+        // Neither client reads yet, so the one admitted blocks in its write
+        // and the other must be waiting.
+        census_until(
+            viewer.as_ref(),
+            Duration::from_secs(30),
+            "the first admission",
+            |census| census.grey_replies == OVER_LEN,
+        )?;
+        waiters_reach(&viewer, 1)?;
+        replies_stay(&viewer, OVER_LEN, "two large greys")?;
+        let one = read_aside(one, started, "the first large frame");
+        let two = read_aside(two, started, "the second large frame");
+        expect_grey(&joined(one)?, &first_grey, "the first large frame")?;
+        expect_grey(&joined(two)?, &second_grey, "the second large frame")?;
+        replies_settle(&viewer, "after the two large frames")?;
+        let peak = viewer.grey_gate().peak();
+        if peak != OVER_LEN {
+            return Err(format!("the grey peak was {peak}, not {OVER_LEN}"));
+        }
+        Ok(())
+    }
+
+    /// A frame over the design size that meets normal greys waits until
+    /// they drain, then draws.
+    #[test]
+    fn a_frame_over_the_design_size_waits_for_normal_greys_to_drain() -> Result<(), String> {
+        let (addr, viewer) = grey_server(256)?;
+        let over = varied_file(OVER, 0)?;
+        let expected = fresh_grey(&over)?;
+        let over_id = post_id(addr, &over)?;
+        let stalls = fill_grey_cap(addr, &viewer)?;
+        let started = std::time::Instant::now();
+        let client = send_late(addr, &id_preview(&over_id, ""))?;
+        waiters_reach(&viewer, 1)?;
+        replies_stay(&viewer, GREY_CAP, "beside the normal greys")?;
+        drop(stalls);
+        let reply = read_late_bytes(client, started, "the large frame")?;
+        expect_grey(&reply, &expected, "the large frame")?;
+        replies_settle(&viewer, "after the large frame")
+    }
+
+    /// Once a frame over the design size waits, normal previews that hold no
+    /// room are held back until it has been served, so a stream of them
+    /// cannot keep it waiting. They are all served after it.
+    #[test]
+    fn normal_previews_do_not_starve_a_waiting_large_frame() -> Result<(), String> {
+        let (addr, viewer) = grey_server(256)?;
+        let normal = grey_file(3000, 2900)?;
+        let normal_id = post_id(addr, &normal)?;
+        let small = grey_file(512, 512)?;
+        let small_id = post_id(addr, &small)?;
+        let over = varied_file(OVER, 0)?;
+        let expected = fresh_grey(&over)?;
+        let over_id = post_id(addr, &over)?;
+        // One normal grey held by a client that never reads.
+        let stall = send_late(addr, &id_preview(&normal_id, ""))?;
+        census_until(
+            viewer.as_ref(),
+            Duration::from_secs(30),
+            "the normal stall",
+            |census| census.grey_replies == N_MAX_PIXELS,
+        )?;
+        let started = std::time::Instant::now();
+        let large = send_late(addr, &id_preview(&over_id, ""))?;
+        waiters_reach(&viewer, 1)?;
+        // A stream of normal previews, each of which fits beside the stall.
+        let mut stream = vec![send_late(addr, &id_preview(&normal_id, ""))?];
+        for _ in 0..4 {
+            stream.push(send_late(addr, &id_preview(&small_id, ""))?);
+        }
+        waiters_reach(&viewer, 6)?;
+        replies_stay(&viewer, N_MAX_PIXELS, "while the large frame waits")?;
+        drop(stall);
+        let readers: Vec<_> = stream
+            .into_iter()
+            .map(|client| read_aside(client, started, "a normal preview"))
+            .collect();
+        let reply = read_late_bytes(large, started, "the large frame")?;
+        expect_grey(&reply, &expected, "the large frame")?;
+        for reader in readers {
+            let reply = joined(reader)?;
+            expect_status(&String::from_utf8_lossy(&reply), 200, "a normal preview")?;
+        }
+        replies_settle(&viewer, "after the stream")?;
+        let peak = viewer.grey_gate().peak();
+        if peak > GREY_CAP.max(OVER_LEN) {
+            return Err(format!("the grey peak was {peak}"));
+        }
+        Ok(())
+    }
+
+    /// A render over the cap that fails after its grey buffer was sized
+    /// leaves no buffer on the worker and nothing counted.
+    #[test]
+    fn a_failed_render_over_the_cap_keeps_no_buffer() -> Result<(), String> {
+        let file = varied_file(OVER, 0)?;
+        let mut native = Vec::new();
+        let mut samples = Vec::new();
+        let mut held = decode_held(
+            &file,
+            0,
+            &mut native,
+            &mut samples,
+            &mut |_| {},
+            &mut |len| Vec::with_capacity(len),
+        )
+        .map_err(|error| format!("the frame did not decode: {error}"))?;
+        // Half the samples pass every check before the grey is sized, then
+        // the per-sample map refuses them.
+        let half = held.samples.len() / 2;
+        held.samples.truncate(half);
+        let gate = Arc::new(GreyGate::new(GREY_CAP));
+        let worker_gate = Arc::clone(&gate);
+        // A fresh thread has an empty workspace, as a new worker does.
+        let (refused, left) = std::thread::spawn(move || {
+            let rendered = render_capped(&held, FrameRequest::default(), &worker_gate, None);
+            let refused = match rendered {
+                Capped::Rendered(done) => done.0.is_err() && done.1.is_none(),
+                Capped::Full => false,
+            };
+            (
+                refused,
+                with_decode_workspace(|workspace| workspace.grey.capacity()),
+            )
+        })
+        .join()
+        .map_err(|_| "the render thread panicked".to_owned())?;
+        if !refused {
+            return Err("the short frame was not refused".to_owned());
+        }
+        if left != 0 || gate.held() != (0, 0) {
+            return Err(format!(
+                "the worker kept {left} bytes and the gate held {:?}",
+                gate.held()
+            ));
+        }
+        Ok(())
     }
 
     /// A job that takes over a claim releases it on paths no request reaches:

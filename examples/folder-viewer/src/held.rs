@@ -378,8 +378,15 @@ pub(crate) const GREY_CAP: usize = PERMITS * N_MAX_PIXELS;
 /// grey from the moment its render is admitted, by capacity. Each decode
 /// worker keeps at most one returned grey buffer to render into next. Their
 /// sum never exceeds the cap, which is [`GREY_CAP`] for the server. A render
-/// whose grey would exceed it waits, and a grey larger than the whole cap is
-/// refused at once.
+/// whose grey would exceed it waits.
+///
+/// A grey larger than the whole cap, a frame of more than [`GREY_CAP`] pixels,
+/// draws alone. It is admitted only when the gate holds no other grey, and
+/// while it is held nothing else fits, so grey bytes stay within the larger
+/// of the cap and that one grey. Once such a grey waits, no request that
+/// holds no room yet is admitted until it has been served, so a stream of
+/// smaller greys cannot keep it waiting forever. Its buffer is never kept by
+/// a worker after the write.
 pub(crate) struct GreyGate {
     state: Mutex<GreyState>,
     ready: Condvar,
@@ -393,11 +400,19 @@ struct GreyState {
     returned: usize,
     /// Requests waiting for room. While any waits, no returned buffer is kept.
     waiting: usize,
+    /// The part of `waiting` whose grey is larger than the cap.
+    oversized_waiting: usize,
+    /// The largest `used` seen since the gate was made or last reset.
+    peak: usize,
 }
 
 impl GreyState {
     fn used(&self) -> usize {
         self.replies.saturating_add(self.returned)
+    }
+
+    fn note_peak(&mut self) {
+        self.peak = self.peak.max(self.used());
     }
 }
 
@@ -406,8 +421,6 @@ impl GreyState {
 pub(crate) enum GreyRefusal {
     /// No room now. The caller may wait for room.
     Full,
-    /// The grey alone is larger than the cap, so no wait can admit it.
-    TooLarge,
 }
 
 /// Grey bytes one request holds under the cap. Drop releases them.
@@ -466,12 +479,20 @@ impl Drop for KeptGrey {
 /// One request waiting for grey room. Drop ends the wait.
 pub(crate) struct GreyWaiter<'a> {
     gate: &'a GreyGate,
+    /// The wait is for a grey larger than the cap.
+    oversized: bool,
 }
 
 impl Drop for GreyWaiter<'_> {
     fn drop(&mut self) {
         let mut state = lock_mutex(&self.gate.state);
         state.waiting = state.waiting.saturating_sub(1);
+        if self.oversized {
+            state.oversized_waiting = state.oversized_waiting.saturating_sub(1);
+            drop(state);
+            // Requests held back behind this grey may be admitted now.
+            self.gate.ready.notify_all();
+        }
     }
 }
 
@@ -482,10 +503,27 @@ impl GreyGate {
                 replies: 0,
                 returned: 0,
                 waiting: 0,
+                oversized_waiting: 0,
+                peak: 0,
             }),
             ready: Condvar::new(),
             cap,
         }
+    }
+
+    /// Whether `len` more grey bytes may enter beside `others` held now.
+    ///
+    /// A grey larger than the cap enters only when nothing else is held. Any
+    /// other grey enters when the sum fits the cap and, unless the request
+    /// already holds room (`holds_room`), no grey larger than the cap waits.
+    fn fits(&self, state: &GreyState, others: usize, len: usize, holds_room: bool) -> bool {
+        if len > self.cap {
+            return others == 0;
+        }
+        if !holds_room && state.oversized_waiting > 0 {
+            return false;
+        }
+        others.saturating_add(len) <= self.cap
     }
 
     /// Reserve `len` grey bytes for a render that has not run yet.
@@ -493,10 +531,11 @@ impl GreyGate {
     /// `None` means the cap has no room for them now.
     pub(crate) fn reserve(self: &Arc<Self>, len: usize) -> Option<GreyClaim> {
         let mut state = lock_mutex(&self.state);
-        if state.used().saturating_add(len) > self.cap {
+        if !self.fits(&state, state.used(), len, false) {
             return None;
         }
         state.replies = state.replies.saturating_add(len);
+        state.note_peak();
         Some(GreyClaim {
             gate: Arc::clone(self),
             bytes: len,
@@ -510,6 +549,7 @@ impl GreyGate {
     /// otherwise, so the reply then holds `max(kept, len)` bytes and the
     /// buffer is no longer returned. `claim` is room this request already
     /// waited for, and it counts toward the admission. A refusal releases it.
+    /// A grey larger than the cap is admitted only when no other grey is held.
     pub(crate) fn admit(
         self: &Arc<Self>,
         claim: Option<GreyClaim>,
@@ -520,24 +560,22 @@ impl GreyGate {
             gate: Arc::clone(self),
             bytes: 0,
         });
-        if len > self.cap {
-            return Err(GreyRefusal::TooLarge);
-        }
         let charged = kept.max(len);
         let mut state = lock_mutex(&self.state);
-        let after = state
+        let others = state
             .used()
             .saturating_sub(claim.bytes)
-            .saturating_sub(kept)
-            .saturating_add(charged);
-        if after > self.cap {
+            .saturating_sub(kept);
+        if !self.fits(&state, others, charged, claim.bytes > 0) {
             drop(state);
             return Err(GreyRefusal::Full);
         }
+        let after = others.saturating_add(charged);
         let before = state.used();
         let held = claim.disarm();
         state.replies = state.replies.saturating_sub(held).saturating_add(charged);
         state.returned = state.returned.saturating_sub(kept);
+        state.note_peak();
         drop(state);
         claim.bytes = charged;
         // Reusing a buffer for a smaller grey than the room waited for
@@ -570,10 +608,10 @@ impl GreyGate {
     }
 
     /// The reply was written. Keep its buffer as returned, or free it when a
-    /// request waits for room.
+    /// request waits for room or the buffer is larger than the cap.
     pub(crate) fn return_reply(&self, mut claim: GreyClaim) -> ReturnedGrey {
         let mut state = lock_mutex(&self.state);
-        if state.waiting > 0 {
+        if state.waiting > 0 || claim.bytes > self.cap {
             drop(state);
             return ReturnedGrey::Free(claim);
         }
@@ -610,11 +648,38 @@ impl GreyGate {
         lock_mutex(&self.state).waiting > 0
     }
 
-    /// Count one request as waiting until the guard drops.
-    pub(crate) fn enter_wait(&self) -> GreyWaiter<'_> {
+    /// Count one request for `len` grey bytes as waiting until the guard
+    /// drops. A wait for a grey larger than the cap holds back requests that
+    /// hold no room yet.
+    pub(crate) fn enter_wait(&self, len: usize) -> GreyWaiter<'_> {
+        let oversized = len > self.cap;
         let mut state = lock_mutex(&self.state);
         state.waiting = state.waiting.saturating_add(1);
-        GreyWaiter { gate: self }
+        if oversized {
+            state.oversized_waiting = state.oversized_waiting.saturating_add(1);
+        }
+        GreyWaiter {
+            gate: self,
+            oversized,
+        }
+    }
+
+    /// The cap in bytes.
+    pub(crate) fn cap(&self) -> usize {
+        self.cap
+    }
+
+    /// The largest grey total held at once since the last reset.
+    #[cfg(test)]
+    pub(crate) fn peak(&self) -> usize {
+        lock_mutex(&self.state).peak
+    }
+
+    /// Start the peak again from the grey held now.
+    #[cfg(test)]
+    pub(crate) fn reset_peak(&self) {
+        let mut state = lock_mutex(&self.state);
+        state.peak = state.used();
     }
 
     /// Grey bytes held by unwritten replies, then by returned buffers.
@@ -637,6 +702,7 @@ impl GreyGate {
             return false;
         }
         state.returned = state.returned.saturating_add(bytes);
+        state.note_peak();
         true
     }
 
@@ -1992,12 +2058,9 @@ mod tests {
         assert!(waited.is_some());
         assert_eq!(gate.admit(waited, 50, 0).err(), Some(GreyRefusal::Full));
         assert_eq!(gate.held(), (80, 0));
-        // A grey larger than the cap is refused whatever was waited for.
+        // A grey larger than the cap is not admitted beside other grey.
         let waited = gate.reserve(10);
-        assert_eq!(
-            gate.admit(waited, 101, 0).err(),
-            Some(GreyRefusal::TooLarge)
-        );
+        assert_eq!(gate.admit(waited, 101, 0).err(), Some(GreyRefusal::Full));
         assert_eq!(gate.held(), (80, 0));
         drop(other);
         assert_eq!(gate.held(), (0, 0));
@@ -2058,7 +2121,7 @@ mod tests {
         let Some(claim) = gate.reserve(40) else {
             return Err("no room".to_owned());
         };
-        let waiter = gate.enter_wait();
+        let waiter = gate.enter_wait(40);
         assert!(gate.has_waiters());
         let ReturnedGrey::Free(claim) = gate.return_reply(claim) else {
             return Err("the reply was kept while a request waited".to_owned());
@@ -2070,6 +2133,57 @@ mod tests {
         drop(waiter);
         assert!(!gate.has_waiters());
         assert_eq!(gate.waiting(), 0);
+        Ok(())
+    }
+    #[test]
+    fn a_grey_over_the_cap_is_admitted_only_alone() -> Result<(), String> {
+        let gate = small_gate();
+        // Beside 1 byte held, 150 is not admitted, by either door.
+        let other = gate.reserve(1).ok_or("no room for 1")?;
+        assert!(gate.reserve(150).is_none());
+        assert_eq!(gate.admit(None, 150, 0).err(), Some(GreyRefusal::Full));
+        drop(other);
+        // Beside a returned buffer it is not admitted either.
+        assert!(gate.count_returned(10));
+        assert!(gate.reserve(150).is_none());
+        gate.release_returned(10);
+        // Alone it is, and nothing else enters while it is held.
+        let big = gate
+            .admit(None, 150, 0)
+            .map_err(|_| "150 alone was refused")?;
+        assert_eq!(gate.held(), (150, 0));
+        assert!(gate.reserve(1).is_none());
+        assert!(gate.reserve(150).is_none());
+        assert_eq!(gate.admit(None, 1, 0).err(), Some(GreyRefusal::Full));
+        // Written, it is freed rather than kept by its worker.
+        let ReturnedGrey::Free(big) = gate.return_reply(big) else {
+            return Err("a grey over the cap was kept".to_owned());
+        };
+        drop(big);
+        assert_eq!(gate.held(), (0, 0));
+        assert_eq!(gate.peak(), 150);
+        Ok(())
+    }
+
+    #[test]
+    fn a_waiting_grey_over_the_cap_holds_back_new_greys() -> Result<(), String> {
+        let gate = small_gate();
+        let held = gate.reserve(40).ok_or("no room for 40")?;
+        let waiter = gate.enter_wait(150);
+        // There is room for 20 beside 40, but a grey over the cap waits, so a
+        // request holding no room is not admitted by either door.
+        assert!(gate.reserve(20).is_none());
+        assert_eq!(gate.admit(None, 20, 0).err(), Some(GreyRefusal::Full));
+        // A request that already holds room still renders.
+        let rendered = gate
+            .admit(Some(held), 40, 0)
+            .map_err(|_| "40 was refused")?;
+        drop(rendered);
+        let big = gate.reserve(150).ok_or("150 was not admitted alone")?;
+        drop(waiter);
+        assert!(gate.reserve(20).is_none());
+        drop(big);
+        assert!(gate.reserve(20).is_some());
         Ok(())
     }
 }

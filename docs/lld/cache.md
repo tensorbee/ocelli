@@ -197,8 +197,21 @@ inside the cap, so nothing is counted twice and nothing is outside it. A
 decode thread frees the grey it kept while any preview waits for room, and
 before it renders a grey less than half that size. A written reply's grey is
 freed rather than kept while a preview waits. A frame of more than 17,400,000
-pixels is refused at once with 400 `too-large`, because its grey alone is over
-the cap. A preview whose grey does not fit waits for room for up to the 60
+pixels, whose grey alone is over the cap, draws alone. Its grey is admitted
+only when the gate holds no other grey, and while it is held no other grey is
+admitted, so grey bytes stay within the larger of the cap and that one frame.
+Its decode thread frees that grey after the write and never keeps it, and a
+refused render of that size leaves no buffer behind. Once such a frame waits,
+no preview that holds no room yet is admitted until it has been served, so a
+stream of smaller previews cannot keep it waiting. A preview that already
+holds room still renders. No frame is refused for its size below the preview
+library's `MAX_PIXELS` of 67,108,864. The resident bound adds that one frame's
+grey above the design term. The measured workload has no such frame, so its
+bound is unchanged. Measured on the release binary with a synthetic 4740 by
+5928 frame, the preview answered 200 with 28,098,720 grey bytes in 45.6 ms
+decoded and 23.9 ms cached. A smaller preview waited while that grey was held
+and was served 3.1 ms after it was released. Two such previews read together
+peaked at 28,098,720 grey bytes, one frame. A preview whose grey does not fit waits for room for up to the 60
 second write timeout, and answers 503 busy if none comes. A waiting preview
 holds no decode permit. A held frame it decoded is in the cache before it
 waits. A whole reply must be written within the write timeout, and each send
