@@ -626,10 +626,13 @@ fn declared_icc_refuses_unsupported_before_any_parse() -> TestResult {
     }
 
     // The same stream in a jxlc box that declares 1000 bytes more than are
-    // present, review pass 2 D2. The box lies about its size. The pre-check
-    // reads the header from the bytes that exist and refuses, so `jxl-oxide`
-    // never streams the partial box and never reaches the resize. Removing
-    // the pre-check call turns this red too, through the same kind change.
+    // present, review pass 2 D2. The box lies about its size. Review pass 4
+    // D1 has the walk refuse a box whose declared size runs past the end of
+    // the input, never shortened to fit, so this container is refused
+    // `InvalidCodestream` by the walk before the pre-check runs and before
+    // `jxl-oxide` streams the partial box or reaches the resize. The bare
+    // stream above is the pre-check's own detector, and the kind here is the
+    // walk's.
     let mut container = Vec::new();
     container.extend_from_slice(b"\x00\x00\x00\x0cJXL \x0d\x0a\x87\x0a");
     let box_len = u32::try_from(crafted.len() + 8 + 1000).map_err(|_| "box length")?;
@@ -641,7 +644,7 @@ fn declared_icc_refuses_unsupported_before_any_parse() -> TestResult {
         &JpegXlDecoder::general(),
         &container,
         &desc,
-        CodecError::UnsupportedPixelFormat,
+        CodecError::InvalidCodestream,
     )
 }
 
@@ -672,14 +675,15 @@ fn libjxl_icc_profile_refuses_unavailable() -> TestResult {
 #[test]
 fn container_header_cut_short_refuses_before_jxl_oxide() -> TestResult {
     // The pass 2 lead amendment, fail closed. The box declares 1000 bytes
-    // more than are present and the codestream stops inside the header, so
-    // the pre-check cannot read to the ICC flag. It refuses before
-    // `jxl-oxide` sees a byte, with the same `InvalidCodestream` the decode
-    // returns for a truncated header, so this test does not detect the
-    // pre-check's removal. What it locks is the refusal kind and that a
-    // header no parser can read never reaches the dependency. The allocation
-    // bound itself is the measured peak resident set recorded in the module
-    // documentation of `jpegxl_icc`.
+    // more than are present and the codestream stops inside the header. The
+    // walk refuses the oversized box itself, and the pre-check would refuse
+    // the truncated header anyway, both before `jxl-oxide` sees a byte and
+    // both with the same `InvalidCodestream` the decode returns for a
+    // truncated header, so this test does not detect the pre-check's removal.
+    // What it locks is the refusal kind and that a header no parser can read
+    // never reaches the dependency. The allocation bound itself is the
+    // measured peak resident set recorded in the module documentation of
+    // `jpegxl_icc`.
     let crafted = crafted_oversized_icc_declaration()?;
     let mut container = Vec::new();
     container.extend_from_slice(b"\x00\x00\x00\x0cJXL \x0d\x0a\x87\x0a");
@@ -709,6 +713,24 @@ fn container_box(box_type: &[u8; 4], payload: &[u8]) -> Result<Vec<u8>, Box<dyn 
     Ok(out)
 }
 
+/// One box whose declared size names `extra` bytes more than its payload
+/// carries, so the box runs past the end of the input it sits in.
+fn oversized_box(
+    box_type: &[u8; 4],
+    payload: &[u8],
+    extra: u32,
+) -> Result<Vec<u8>, Box<dyn Error>> {
+    let length = u32::try_from(payload.len())
+        .ok()
+        .and_then(|len| len.checked_add(8))
+        .and_then(|len| len.checked_add(extra))
+        .ok_or("box length")?;
+    let mut out = length.to_be_bytes().to_vec();
+    out.extend_from_slice(box_type);
+    out.extend_from_slice(payload);
+    Ok(out)
+}
+
 /// A container of whole boxes after the signature box.
 fn container(boxes: &[&[u8]]) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut out = CONTAINER_SIGNATURE.to_vec();
@@ -716,6 +738,18 @@ fn container(boxes: &[&[u8]]) -> Result<Vec<u8>, Box<dyn Error>> {
         out.extend_from_slice(box_bytes);
     }
     Ok(out)
+}
+
+/// One `jxlp` box with an explicit index and last flag, for containers the
+/// regular index sequence cannot express.
+fn jxlp_box(index: u32, last: bool, payload: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+    let mut raw = index;
+    if last {
+        raw |= 0x8000_0000;
+    }
+    let mut content = raw.to_be_bytes().to_vec();
+    content.extend_from_slice(payload);
+    container_box(b"jxlp", &content)
 }
 
 /// Wraps a codestream in `jxlp` boxes carrying `chunk` bytes each.
@@ -796,7 +830,9 @@ fn containers_that_break_the_extraction_rules_refuse() -> TestResult {
     // one, and jxlp boxes without the last flag are refused before the
     // decode. The last one would decode if the rule were absent, because the
     // pieces carry a complete codestream, so it detects the rule's removal
-    // and not only its kind.
+    // and not only its kind. The other rules are mostly hidden behind a
+    // second rule here, so each of them has a case only it catches in the
+    // four tests that follow this one.
     let codestream = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
     let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
 
@@ -869,6 +905,115 @@ fn containers_that_break_the_extraction_rules_refuse() -> TestResult {
     )
 }
 
+/// The first half of the lossless RGB codestream. The containers in the
+/// tests that use both halves concatenate back to a complete codestream, so
+/// they decode when the rule that refuses them is deleted.
+fn first_codestream_half() -> Result<&'static [u8], Box<dyn Error>> {
+    let codestream = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
+    codestream
+        .get(..codestream.len() / 2)
+        .ok_or("codestream shorter than half".into())
+}
+
+/// The second half of the lossless RGB codestream.
+fn second_codestream_half() -> Result<&'static [u8], Box<dyn Error>> {
+    let codestream = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
+    codestream
+        .get(codestream.len() / 2..)
+        .ok_or("empty codestream".into())
+}
+
+#[test]
+fn jxlp_index_order_refuses_out_of_order_indexes() -> TestResult {
+    // Review pass 4 S1, the index order rule. Indexes 0 then 5 carry the two
+    // halves and the second is flagged last, so the last flag rule and the
+    // end checks pass and only the index comparison refuses the container.
+    // A single jxlp with index 1 is likewise complete and flagged last, so
+    // no other rule sees a defect in either. Deleting the index comparison
+    // makes both decode.
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+    let first = first_codestream_half()?;
+    let second = second_codestream_half()?;
+
+    let zero_then_five = container(&[&jxlp_box(0, false, first)?, &jxlp_box(5, true, second)?])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &zero_then_five,
+        &desc,
+        CodecError::InvalidCodestream,
+    )?;
+
+    let single_one = container(&[&jxlp_box(
+        1,
+        true,
+        include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl"),
+    )?])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &single_one,
+        &desc,
+        CodecError::InvalidCodestream,
+    )
+}
+
+#[test]
+fn jxlp_after_a_jxlc_refuses() -> TestResult {
+    // Review pass 4 S1, the rule that a jxlp cannot follow a jxlc. The jxlc
+    // already carries the whole codestream and the jxlp is empty, flagged
+    // last and in index order, so only the `seen_codestream_box` check in the
+    // jxlp arm refuses the container. With it deleted, the container decodes.
+    let codestream = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+    let jxlc_then_empty_jxlp = container(&[
+        &container_box(b"jxlc", codestream)?,
+        &jxlp_box(0, true, &[])?,
+    ])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &jxlc_then_empty_jxlp,
+        &desc,
+        CodecError::InvalidCodestream,
+    )
+}
+
+#[test]
+fn jxlp_after_the_final_jxlp_refuses() -> TestResult {
+    // Review pass 4 S1, the rule that no jxlp follows the final one. Both
+    // boxes are flagged last and the indexes run 0 then 1, so both index
+    // checks pass and only the `partial_finished` check refuses the second.
+    // With it deleted, the two halves decode.
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+    let first = first_codestream_half()?;
+    let second = second_codestream_half()?;
+    let both_flagged = container(&[&jxlp_box(0, true, first)?, &jxlp_box(1, true, second)?])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &both_flagged,
+        &desc,
+        CodecError::InvalidCodestream,
+    )
+}
+
+#[test]
+fn jxlc_after_a_final_jxlp_refuses() -> TestResult {
+    // Review pass 4 S1, the rule that a jxlc cannot follow a jxlp. The jxlp
+    // is flagged last and in index order, the jxlc is the only one, and the
+    // end check sees partial_finished. The jxlc arm does not check
+    // partial_finished, so only the `seen_partial_box` check refuses the
+    // container. With it deleted, the two pieces decode.
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+    let first = first_codestream_half()?;
+    let second = second_codestream_half()?;
+    let jxlp_then_jxlc =
+        container(&[&jxlp_box(0, true, first)?, &container_box(b"jxlc", second)?])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &jxlp_then_jxlc,
+        &desc,
+        CodecError::InvalidCodestream,
+    )
+}
+
 #[test]
 fn container_trailing_byte_is_trailing_data() -> TestResult {
     // An ISO BMFF container stops at the box, so a following byte is
@@ -891,6 +1036,66 @@ fn container_trailing_byte_is_trailing_data() -> TestResult {
         &padded,
         &desc,
         CodecError::TrailingData,
+    )
+}
+
+#[test]
+fn boxes_running_past_the_input_refuse() -> TestResult {
+    // Review pass 4 D1. A box whose declared size runs past the end of the
+    // input is a truncated or malformed file, because the box size is the
+    // length of the whole box. Before the walk refused it, the box was
+    // shortened to the remaining bytes and every input here decoded: the
+    // nine junk bytes and the forty junk bytes each read as a box header of
+    // a type the walk skips, and the two declared boxes name 1000 bytes more
+    // than are present, so none of them left a tail.
+    let codestream = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
+    let rgb = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+
+    let mut nine_junk_bytes = container(&[&container_box(b"jxlc", codestream)?])?;
+    nine_junk_bytes.extend_from_slice(&[1u8, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &nine_junk_bytes,
+        &rgb,
+        CodecError::InvalidCodestream,
+    )?;
+
+    let junk_forty = [0x42u8; 40];
+    let mut tracked_plus_junk = include_bytes!("fixtures/jpegxl_container.jxl").to_vec();
+    tracked_plus_junk.extend_from_slice(&junk_forty);
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &tracked_plus_junk,
+        &mono(8, 16, 8, 8)?,
+        CodecError::InvalidCodestream,
+    )?;
+
+    let mut recompression_plus_junk = include_bytes!("fixtures/jpegxl_recompression.jxl").to_vec();
+    recompression_plus_junk.extend_from_slice(&junk_forty);
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &recompression_plus_junk,
+        &colour(ROWS, COLUMNS, 8, 8, "YBR_FULL_422")?,
+        CodecError::InvalidCodestream,
+    )?;
+
+    let oversized_jxlc = container(&[&oversized_box(b"jxlc", codestream, 1000)?])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &oversized_jxlc,
+        &rgb,
+        CodecError::InvalidCodestream,
+    )?;
+
+    let codestream_then_oversized_exif = container(&[
+        &container_box(b"jxlc", codestream)?,
+        &oversized_box(b"Exif", b"II*\x00\x00\x00\x00\x00", 1000)?,
+    ])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &codestream_then_oversized_exif,
+        &rgb,
+        CodecError::InvalidCodestream,
     )
 }
 
@@ -1110,27 +1315,25 @@ fn extra_channel_header(channels: usize, name_len: usize) -> Result<Vec<u8>, Box
 
 #[test]
 fn extra_channel_header_refuses_before_the_reparse() -> TestResult {
-    // Review pass 3 D1. A header whose length comes from extra channel names
-    // is valid and has no ICC flag, so before the pre-check refusal it
-    // reached read_header and was re-parsed once per fed byte. The review
-    // measured 7.21 seconds for 64 channels and 108.4 seconds for 256. On
-    // 2026-11-06 the same shapes measured 10.29 and 163.80 seconds here
-    // before the pre-check refusal, and 882.125 microseconds and 3.564
-    // milliseconds after it. The bound is far under the reparse cost and far
-    // over the refusal cost, so removing the refusal turns this red through
-    // time and not through kind.
+    // Review pass 3 D1, reguarded after review pass 4 D2. A header whose
+    // length comes from 256 extra channel names is valid and has no ICC
+    // flag, so before the pre-check refusal it reached read_header and was
+    // re-parsed once per fed byte, 10.29 seconds for 64 channels and 163.80
+    // seconds for 256 on 2026-11-06.
+    //
+    // What this test detects: deleting the extra channel refusal from the
+    // pre-check. The descriptor declares Bits Stored 12 against the
+    // codestream's 8, so a decode that got past the pre-check would refuse
+    // `FrameMismatch` from the bit depth check in `validate_header`, which
+    // runs before that function's own extra channel check. The pre-check's
+    // `UnsupportedPixelFormat` is therefore the only way this test stays
+    // green, and the guard is the refusal kind, not a clock.
     let crafted = extra_channel_header(256, 1071)?;
-    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+    let desc = colour(ROWS, COLUMNS, 16, 12, "RGB")?;
     let mut out = vec![0xa5; desc.output_len()];
-    let start = std::time::Instant::now();
     let result = JpegXlDecoder::general().decode(&crafted, &desc, &mut out);
-    let elapsed = start.elapsed();
     assert_eq!(result, Err(CodecError::UnsupportedPixelFormat));
     assert!(out.iter().all(|byte| *byte == 0xa5));
-    assert!(
-        elapsed < std::time::Duration::from_secs(10),
-        "the extra channel header took {elapsed:?}, the pre-check refusal is not in front"
-    );
     Ok(())
 }
 

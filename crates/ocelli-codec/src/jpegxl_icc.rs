@@ -58,9 +58,12 @@
 //! The check fails closed. A header it cannot read to the ICC flag and the
 //! extra channel count is refused with [`CodecError::InvalidCodestream`]
 //! before any parsing, the same refusal `read_header` returns for a truncated
-//! header, including when a container box's declared size outruns the input
-//! and cuts the header short. Bytes of a container after the last complete
-//! box are not part of the codestream and are refused as
+//! header. A container box whose declared size runs past the end of the input
+//! is refused with [`CodecError::InvalidCodestream`] by the walk itself,
+//! never shortened to fit, because the box size is the length of the whole
+//! box (ISO/IEC 18181-2, whose box syntax comes from ISO/IEC 14496-12). The
+//! only bytes that can remain after the last complete box are an incomplete
+//! box header. Those bytes are not part of the codestream and are refused as
 //! [`CodecError::TrailingData`] after the decode, the same rule a bare
 //! codestream is under.
 
@@ -112,10 +115,9 @@ impl<'src> Prepared<'src> {
 ///
 /// [`CodecError::UnsupportedPixelFormat`] when the header declares an
 /// embedded ICC profile or any extra channel. [`CodecError::InvalidCodestream`]
-/// when the header cannot be read to those fields, including when a container
-/// box's declared size outruns the input and cuts the header short, and when
-/// the container breaks the extraction rules listed in the module
-/// documentation.
+/// when the header cannot be read to those fields, when a container box's
+/// declared size runs past the end of the input, and when the container
+/// breaks the extraction rules listed in the module documentation.
 ///
 /// # Errors
 ///
@@ -205,9 +207,17 @@ fn walk_container<'a>(
         let available = rest.len() - header_len;
         let payload_len = match declared {
             None => available,
-            // A size past the input truncates the box, as the dependency's
-            // own reader truncates it. The walk ends at the input.
-            Some(n) => usize::try_from(n).unwrap_or(available).min(available),
+            // The size is the length of the whole box, so a declared payload
+            // past the input is a truncated or malformed box. It is refused
+            // rather than shortened to fit, and a 64 bit size that no
+            // address space could hold is refused the same way.
+            Some(n) => {
+                let n = usize::try_from(n).map_err(|_| CodecError::InvalidCodestream)?;
+                if n > available {
+                    return Err(CodecError::InvalidCodestream);
+                }
+                n
+            }
         };
         let payload = rest
             .get(header_len..header_len + payload_len)
