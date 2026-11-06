@@ -209,7 +209,8 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    and starts at 10.
 5. The toolbar is a row of icons. Point at one to see its name, its key and
    what it does. The groups are the navigation tools (Scroll, Pan, Zoom,
-   W/L), the drawing tools (Length, Rectangle, Ellipse, Freeform, Text), the
+   W/L), the drawing tools (Length, Angle `Q`, Cobb `J`, Bidirectional `B`,
+   Rectangle, Ellipse, Freeform, Arrow `U`, Probe `X`, Text), the
    view (Invert, Rotate 90, Flip horizontal, Flip vertical), the display
    (Pointer cross, Magnifier, Corners, Orientation letters), the layout
    (1 by 1, 2 by 2), and Key image, Headers, Fit, Reset and Full screen.
@@ -230,14 +231,39 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    not multi-energy, `unspecified` for Rescale Type `US`, the Units
    attribute on a PET, `padding` for a padded sample, and `not held`
    for a file the process could not hold.
-8. Freeform draws a freehand outline and keeps it at three or more points.
-   Rectangle and ellipse draw a region and do not fill it. Text places a note.
-   Click, type, and press Enter to keep it. Escape drops the draft. Leaving
-   the field keeps the note. Size and colour can be changed after the note
-   exists. Length shows millimetres when the file gives Pixel Spacing,
-   millimetres at the detector when it gives only Imager Pixel Spacing, and
-   pixels when it gives no spacing. Click a mark to select it. While a drawing
-   tool is active, drag moves that mark. Press Delete, Backspace or Remove to
+8. Every number on a mark comes from the local process, and the page prints
+   its text. Probe asks `POST /value`, and every other mark asks `POST
+   /measure`. Length, Angle, Cobb and Bidirectional are in millimetres from
+   Pixel Spacing, or from Imager Pixel Spacing divided by the Estimated
+   Radiographic Magnification Factor, in millimetres at the detector from
+   Imager Pixel Spacing alone, and in pixels when the file gives no spacing.
+   PS3.3 10.7.1.1 says a Pixel Spacing that has not been corrected for
+   magnification has the same values as the Imager Pixel Spacing, so a Pixel
+   Spacing equal to it takes the imager path: it is divided by the factor when
+   the file has one and is millimetres at the detector when it has none. On
+   that path, and on Imager Pixel Spacing alone, a factor that is present but
+   cannot be used is not measured. Beside a Pixel Spacing that differs from
+   the Imager Pixel Spacing, the factor is not read and the Pixel Spacing
+   decides. An angle without spacing says square pixels are assumed. A Pixel
+   Spacing that is present but not usable is not measured. Angle is a drag
+   along the first arm to the vertex and a click at the end of the second arm.
+   Cobb is two drags, one per line, and reports the acute angle between them.
+   Bidirectional is a drag along the long axis, with a short axis placed
+   across its middle at half its length, and reports both lengths as drawn.
+   Rectangle, Ellipse and Freeform report the area of the drawn shape and the
+   mean, SD, minimum and maximum of the modality values whose pixel centres
+   are inside it. Padding pixels are left out. A freeform that crosses or
+   touches itself is not measured, and neither is one of more than 4000
+   points. Freeform keeps an outline of three or more points. Probe is a click
+   and reports the modality value of that pixel. Arrow is a drag from the tail
+   to the head with an optional note. Text places a note. Click, type, and
+   press Enter to keep it. Escape drops the draft. Leaving the field keeps the
+   note. Size and colour can be changed after the note exists. The marks list
+   shows each mark with its numbers, `measuring` while the reply is on its
+   way, or the reason it was not measured. Click a mark to select it. A
+   selected mark shows a handle on each of its points. Drag a handle to move
+   that point, and the mark is measured again on release. While a drawing tool
+   is active, drag moves the whole mark. Press Delete, Backspace or Remove to
    remove it. Marks last until you reload the page. They are drawings on that
    image. They are not written back into the file.
 

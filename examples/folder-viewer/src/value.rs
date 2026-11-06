@@ -71,6 +71,17 @@ impl ValueFacts {
         size_of::<Self>().saturating_add(self.unit_capacity())
     }
 
+    /// The stored padding range, PS3.3 C.7.5.1.1.2. F-211 reads it for
+    /// region statistics.
+    pub(crate) fn padding(&self) -> Option<PaddingRange> {
+        self.padding
+    }
+
+    /// The unit token, such as `HU`. F-211 names region statistics with it.
+    pub(crate) fn unit(&self) -> &str {
+        self.unit.as_str()
+    }
+
     /// The bytes a file's unit text owns, and 0 for a rule's unit.
     pub(crate) fn unit_capacity(&self) -> usize {
         match &self.unit {
@@ -304,7 +315,7 @@ fn cell_index(coordinate: f64, extent: u32) -> Option<u32> {
 /// 8.1.1 says nothing may be assumed about them, and a signed sample is
 /// extended from its sign bit, the High Bit, which C.7.6.3.3 makes
 /// `BitsStored - 1`.
-fn stored_at(held: &HeldFrame, column: u32, row: u32) -> Result<Stored, PreviewError> {
+pub(crate) fn stored_at(held: &HeldFrame, column: u32, row: u32) -> Result<Stored, PreviewError> {
     let width = usize::try_from(held.width).map_err(|_| PreviewError::Attribute)?;
     let column = usize::try_from(column).map_err(|_| PreviewError::Point)?;
     let row = usize::try_from(row).map_err(|_| PreviewError::Point)?;
@@ -332,7 +343,7 @@ fn stored_at(held: &HeldFrame, column: u32, row: u32) -> Result<Stored, PreviewE
 }
 
 /// A stored sample as the integer it is, for the padding comparison.
-fn stored_integer(stored: Stored) -> Result<i32, PreviewError> {
+pub(crate) fn stored_integer(stored: Stored) -> Result<i32, PreviewError> {
     let whole = exact_f32_integer(stored.0).map_err(|_| PreviewError::Decode)?;
     let magnitude = i64::try_from(whole.magnitude).map_err(|_| PreviewError::Decode)?;
     let signed = if whole.negative {

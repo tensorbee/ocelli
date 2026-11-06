@@ -1058,6 +1058,7 @@ dependencies = [
  "ocelli-codec",
  "ocelli-core",
  "ocelli-dicom",
+ "ocelli-geom",
  "ocelli-pixel",
  "ocelli-render",
  "ocelli-viewport",
@@ -1134,6 +1135,7 @@ name = "ocelli-seg"
 version = "0.1.0"
 dependencies = [
  "ocelli-core",
+ "ocelli-geom",
 ]
 
 [[package]]

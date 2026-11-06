@@ -668,7 +668,7 @@ match StackGeometry::derive(&amp;multi)?.shear() {
 }</code></pre>
     <p>A <code>Pt&lt;World&gt;</code> and a <code>Pt&lt;Index&gt;</code> are different types, so a transform cannot be handed a point from the wrong space. <code>World</code> is the LPS patient system in millimetres.</p>
     <p>Stack shear is measured from the geometry, never read from Gantry/Detector Tilt <code>(0018,1120)</code>, which is Type 3 and nominal. Non uniform frame spacing, non parallel frames and coincident frames are refused rather than averaged, because rendering them as uniform distorts geometry in a way no measurement tool flags.</p>
-    <p>Pixel Spacing and Imager Pixel Spacing stay distinct, PS3.3 C.7.6.1.1.5. On a projection radiograph they differ by the magnification factor, so one is never substituted for the other. <code>ocelli_geom::select_calibration</code> names the source it used.</p>
+    <p>Pixel Spacing and Imager Pixel Spacing stay distinct, PS3.3 10.7.1.1. They are the same when the image has not been corrected for geometric magnification, and differ when it has been corrected or calibrated. <code>ocelli_geom::select_calibration</code> names the source it used, so a measurement never reports one as the other.</p>
 <pre><code>use ocelli_geom::{select_calibration, CalibrationRequest, SpacingMm};
 
 let calibration = select_calibration(CalibrationRequest {
@@ -681,6 +681,7 @@ let calibration = select_calibration(CalibrationRequest {
 let source = calibration.source.name();     // "imager-spacing"
 let mm = calibration.spacing;               // patient spacing</code></pre>
     <p>The order is pixel spacing, then imager spacing with the magnification factor, then ultrasound deltas, then a manual pair. A present but invalid source is an error and does not fall through.</p>
+    <p>PS3.3 10.7.1.1 says a Pixel Spacing that has not been calibrated for geometric magnification has the same values as the Imager Pixel Spacing, so an equal pair takes the imager path. The pair is equal when both halves agree within <code>ocelli_core::SPACING_EQUALITY_MM</code>, the same rule <code>ImagerAgrees</code> uses. With a magnification factor the source is <code>"imager-spacing"</code>. With none it is <code>"detector"</code>, the imager spacing at the detector plane and not a patient spacing. A factor that is present but not finite, or not strictly positive, is refused, as it is without Pixel Spacing. A Pixel Spacing that differs decides on its own.</p>
   </section>
 
   <section class="chapter" id="measure">
@@ -695,6 +696,7 @@ let mm = distance(a, b)?;
 
 let stats = roi_statistics(&amp;samples, area_mm2)?;   // count, mean, sd, min, max, area</code></pre>
     <p>The full set is <code>distance</code>, <code>length</code>, <code>polyline_length</code>, <code>height</code>, <code>angle_at</code>, <code>cobb</code>, <code>bidirectional</code>, <code>rectangle</code>, <code>circle</code>, <code>ellipse</code>, <code>polygon_area</code>, <code>spline_point</code>, <code>hit_segment</code>, <code>project_onto_segment</code> and <code>project_onto_plane</code>. Statistics are <code>roi_statistics</code> and <code>histogram</code>. PET SUV is <code>suv_bw</code>, <code>suv_lbm</code> and <code>suv_bsa</code>. Refusals are <code>GeomError</code> and <code>SuvError</code>.</p>
+    <p>Which samples a region holds is <code>region_contains</code> and <code>region_bounds</code>, over a <code>RegionShape</code> of a rectangle, an axis-aligned ellipse or a polygon in index space. A sample belongs to a region when its pixel centre, the index point <code>(c, r)</code>, is inside the shape or on its boundary, and the polygon rule is the same even-odd and on-edge rule <code>ocelli-seg</code> paints a contour with. <code>polygon_crosses_itself</code> says whether a ring crosses or touches itself anywhere but at the shared vertex of two neighbouring edges.</p>
     <p><code>livewire_path</code>, <code>livewire_mask</code> and <code>redact_rect</code> live here too.</p>
   </section>
 

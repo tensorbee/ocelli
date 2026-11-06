@@ -551,6 +551,14 @@ Repository bootstrap. Nothing is published.
   pointer, HU on a CT that states HU or states no unit and is not
   multi-energy, and Units on a PET. The local process computes it from the
   held frame, and `ocelli-dicom` gains `read_padding`.
+- The local folder viewer measures angle, Cobb angle, bidirectional, arrow,
+  probe and regions with area, mean, SD, minimum and maximum in modality
+  units, with editable handles and a measurement list. An outline that
+  crosses or touches itself is not measured. A projection image whose Pixel
+  Spacing equals its Imager Pixel Spacing is measured at the detector plane
+  unless it states a magnification factor, per PS3.3 10.7.1.1. `ocelli-geom`
+  gains region sampling and `polygon_crosses_itself`, and `ocelli-core` gains
+  `spacing_pair_agrees`, the one definition of an equal spacing pair.
 
 ### Changed
 

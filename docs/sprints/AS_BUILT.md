@@ -5347,3 +5347,31 @@ this branch had not touched since the base.
 **Deviations from the design plan.** Lead rulings recorded in the plan: corrected transcriptions of C.8.2.1, C.8.9.4 and C.11.1.1.2 against PS3.3 2026d, no assumed unit for a multi-energy CT, Units deciding on a PET, stage 1 from the held recipe, the value's facts charged to the budget, and the claim covering the longest LO unit. Implemented by Claude implementer agents. Five review passes.
 
 **Notes for future sessions.** AC16, the browser check, and AC17, the pydicom check, are left for sprint close. On a cache within a few hundred bytes of full, the steal route's full-cost room can evict one more entry than before.
+
+## F-211, Folder viewer measurements, completed 2026-11-06
+
+**What was built.** `POST /measure` on the local folder viewer answers a mark's numbers for a held file id: length, angle, Cobb angle and bidirectional lengths in millimetres or pixels, and for a rectangle, ellipse, polygon or freeform region its area, mean, SD, minimum and maximum in modality units from the held frame's modality stage, with padded samples left out. The page draws angle, Cobb, bidirectional, arrow, probe and region marks with editable handles and a measurement list, asks the local process for every number, the probe through F-210's `POST /value`, and drops a reply that arrives after its mark changed. Calibration comes from `select_calibration` in `ocelli-geom`: a present valid Pixel Spacing that differs from Imager Pixel Spacing decides, an equal pair is the detector plane unless a usable magnification factor corrects it per PS3.3 10.7.1.1, and a factor that is present but unusable is refused. `ocelli-geom` gains region sampling at pixel centres and `polygon_crosses_itself`, which refuses an outline whose edges touch or cross. `ocelli-core` gains `spacing_pair_agrees`, the one definition of an equal spacing pair, which `ocelli-dicom` and `ocelli-geom` share.
+
+**HLD sections implemented.** The measurement tools of the folder viewer over the modality stage of section 18 and the calibration rules of F-195.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/folder-viewer`, `crates/ocelli-geom`, `crates/ocelli-core`, `crates/ocelli-dicom`, `crates/ocelli-seg` (dev dependency only).
+
+**Tests added.** Hand-computed geometry fixtures for every region shape and boundary tie, angle, Cobb and bidirectional fixtures with anisotropic spacing, calibration provenance rows for every route, crossing cases, the route's refusals and caps, and page pins.
+
+**Fixture provenance.** Every expected value is hand-computed with its working in the test, citing PS3.3 C.7.6.2.1.1 for Pixel Spacing order, 10.7.1.1, C.8.11.4 and C.8.7.5 for Imager Pixel Spacing and magnification, and C.7.5.1.1.2 for padding.
+
+**Verification.** Feature profile on the worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 1d5980c.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. The numbers are computed on the local process and drawn as text and SVG.
+
+**LLD updated.** `docs/lld/geometry.md`, `docs/lld/calibration.md`, `docs/lld/core-types.md`, `docs/lld/dicom-ingest.md` and their `docs/lld/README.md` index rows.
+
+**User-facing documentation.** `README.md` step 8 gives the tools and the calibration rule. The Use book's chapter 10 gives the calibration sources and the outline rule.
+
+**Deviations from the design plan.** The operator chose detector plane for equal spacings. Lead rulings recorded in the plan: the touch-or-cross outline rule, first present spacing source wins, one rule for an unusable factor on both imager routes, and one shared definition of an equal pair moved to `ocelli-core`. Implemented by Claude implementer agents. Five review passes.
+
+**Notes for future sessions.** AC18, the browser check, is left for sprint close. `F-020-design.md` and an earlier AS_BUILT entry still cite PS3.3 C.7.6.1.1.5 for the spacing relationship, which is Lossy Image Compression in 2026d.
