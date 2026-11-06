@@ -374,3 +374,7 @@ None open. Every judgement call is a lead decision.
 - Q3, the cache mode default. Answered: lead decision under the operator's delegation of 2026-11-05. `no-cache`, with `force-cache` and `only-if-cached` refused, decision 6.
 - Q4, what the folder viewer can detect. Answered: lead decision under the operator's delegation of 2026-11-05. A re-pick always, a rewrite that moves the modification time at the next focus or selection, a rewrite that restores it never, decisions 9 to 11, from evidence E1 to E3.
 - Q5, order. Answered: lead decision under the operator's delegation of 2026-11-05. After F-230 and F-226, recorded under Dependencies.
+
+### Lead ruling after review pass 1
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-224-working-pass-1.md`. `ImageCache` never hands an admission to `TierCounters`, so AC7's counter half is a structural fact checked by review, and the test block that could not fail is removed. AC7's event half, no event on `Stale` and no `Displaced` after it, stays a test.
