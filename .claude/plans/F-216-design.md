@@ -490,3 +490,11 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 - **The grey cap is `PERMITS` times the largest grey admitted so far.** That is the formula's `P * N_max` with `N_max` taken from frames actually seen, never above the design `N_max`, so the bound holds.
 - **Each worker's one returned grey buffer counts under the per-permit term.** The cap governs grey bytes held by unwritten replies. The returned buffer per worker is the existing per-permit allowance of the formula.
 - **A waiting body-form preview keeps its body slot.** With four such waiters, a `/file` post can wait up to the 60 s write timeout. This is accepted degradation under a client that stops reading, and the user documents say so.
+
+### Lead amendments after review pass 6
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-6.md`. These supersede rulings 1 and 2 of "Lead rulings on the pass 5 remediation".
+
+- **The grey cap is the formula's design term, and it holds every grey.** The cap is `P * N_max` with `N_max` the design maximum frame of the formula, not the largest grey seen. Grey bytes held by unwritten replies and each worker's returned grey buffer both count inside it, so nothing is counted twice. A worker that cannot keep its returned buffer inside the cap frees it.
+- **A client that stops reading may delay other previews, and the documents say so.** On this loopback viewer a page that abandons a request closes the connection, which releases its grey at once. A client that keeps a connection open without reading holds its grey until the write timeout. When such clients fill the cap, other previews wait up to the write timeout and then answer `503 busy`, and while body-form previews wait a `/file` post can wait as long. README.md, the Use book and `docs/lld/cache.md` state both.
+- **`GET /held` reports the grey bytes held, and every release path has a test.** Each path that releases a grey reservation, the frame gone after the wait, a refused body-form render and a body-form wait failure included, has a test that fails when its release is removed.
