@@ -20,7 +20,7 @@
 //   step     ArrowRight
 //   play     Space, about 1 s of Play, Space
 //
-// Two more cases, each on a fresh page:
+// Four more cases, each on a fresh page:
 //
 //   empty    in Four images with the pointer on tile 4, the scrubber moves
 //            to image 10, so tile 4 has no image. The magnifier must not
@@ -30,7 +30,8 @@
 //   fault    the main preview fails after ArrowRight, so the cell shows a
 //            fault. A pointer move over it must show no cross, readout or
 //            magnifier and send no POST /value.
-//   gap      in Four images, a pointer move over the strip between tile 1's
+//   gap      in Four images, the magnifier first shows over tile 1's
+//            picture, then a pointer move over the strip between that
 //            picture and tile 2's must show no magnifier.
 //
 // It runs on the synthetic study, starts the viewer with OCELLI_PORT=0,
@@ -122,12 +123,10 @@ export function stepProblems(steps) {
 }
 
 /**
- * `empty` is `{ name, before, after, magHidden }`, magnifier pixel hashes.
- * `thrown` is `{ name, threw, before, after }`, readout states.
- */
-/**
  * `faulted` is `{ name, fault, readHidden, crossHidden, magHidden, posts }`.
- * `gap` is `{ name, inGap, magHidden }`.
+ * `gap` is `{ name, overPicture, inGap, magHidden }`. `overPicture` says
+ * the magnifier showed over tile 1's picture first, so a hidden magnifier
+ * over the gap is the page's answer and not a magnifier that was never on.
  */
 export function noPictureProblems(faulted, gap) {
   const problems = [];
@@ -145,7 +144,9 @@ export function noPictureProblems(faulted, gap) {
       problems.push(`${faulted.name}: a pointer over a fault sent ${faulted.posts} POST /value`);
     }
   }
-  if (!gap.inGap) {
+  if (!gap.overPicture) {
+    problems.push(`${gap.name}: the magnifier did not show over tile 1's picture first, so the case shows nothing`);
+  } else if (!gap.inGap) {
     problems.push(`${gap.name}: the pointer was not between the tiles' pictures, so the case shows nothing`);
   } else if (!gap.magHidden) {
     problems.push(`${gap.name}: the magnifier showed over the strip between tiles`);
@@ -153,6 +154,10 @@ export function noPictureProblems(faulted, gap) {
   return problems;
 }
 
+/**
+ * `empty` is `{ name, before, after, magHidden }`, magnifier pixel hashes.
+ * `thrown` is `{ name, threw, before, after }`, readout states.
+ */
 export function faultProblems(empty, thrown) {
   const problems = [];
   if (!empty || !thrown) {
@@ -297,8 +302,19 @@ async function tileGapCase(page, url) {
     const tile = document.querySelector('.cell[data-cell="0"] .tile');
     const picture = tile.querySelector("canvas").getBoundingClientRect();
     const box = tile.getBoundingClientRect();
-    return { x: (picture.right + box.right) / 2, y: picture.top + picture.height / 2, room: box.right - picture.right };
+    return {
+      pictureX: picture.left + picture.width / 2,
+      x: (picture.right + box.right) / 2,
+      y: picture.top + picture.height / 2,
+      room: box.right - picture.right,
+    };
   });
+  // First over the middle of tile 1's picture, where the magnifier shows.
+  await page.mouse.move(spot.pictureX - 3, spot.y);
+  await page.mouse.move(spot.pictureX, spot.y);
+  await page.waitForTimeout(400);
+  const overPicture = await page.evaluate(() => !document.getElementById("mag").hidden);
+  // Then over the strip between that picture and the tile's edge.
   await page.mouse.move(spot.x - 3, spot.y);
   await page.mouse.move(spot.x, spot.y);
   await page.waitForTimeout(400);
@@ -307,7 +323,7 @@ async function tileGapCase(page, url) {
     return Boolean(node && node.classList.contains("tile"));
   }, spot);
   const magHidden = await page.evaluate(() => document.getElementById("mag").hidden);
-  return { name: "a pointer move over the strip between tiles", inGap, magHidden };
+  return { name: "a pointer move over the strip between tiles", overPicture, inGap, magHidden };
 }
 
 function magHash(page) {
@@ -511,7 +527,7 @@ async function main() {
     .concat(dragProblems(result.drags), stepProblems(result.steps), faultProblems(result.empty, result.thrown),
       noPictureProblems(result.faulted, result.gap));
   console.log(`${result.faulted.name}: fault ${JSON.stringify(result.faulted.fault)}, hidden readout ${result.faulted.readHidden} cross ${result.faulted.crossHidden} magnifier ${result.faulted.magHidden}, ${result.faulted.posts} POST /value`);
-  console.log(`${result.gap.name}: in the gap ${result.gap.inGap}, magnifier ${result.gap.magHidden ? "hidden" : "shown"}`);
+  console.log(`${result.gap.name}: over tile 1's picture first ${result.gap.overPicture}, in the gap ${result.gap.inGap}, magnifier ${result.gap.magHidden ? "hidden" : "shown"}`);
   if (problems.length) {
     for (const problem of problems) console.error(problem);
     process.exitCode = 1;
