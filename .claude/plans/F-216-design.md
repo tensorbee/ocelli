@@ -511,3 +511,7 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 
 - **Waiters are admitted in arrival order.** A request that must wait takes a place in one queue when it first fails to fit. A waiting request is admitted only when it is at the head of the queue and fits under the existing rules, so a frame over the design size still draws alone. A request that fits at once and finds the queue empty is admitted without queueing. A request that already holds room is never queued behind anything. No other hold-back rule remains.
 - **The resident bound is stated for frames within the design size.** Documents say a frame over the design size draws alone and can raise resident memory above the bound, without a figure, and say nothing about adding exactly one frame's grey.
+
+### Lead ruling on review pass 6 S1, carried through pass 7
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call. The cap absorbs the workers' returned grey buffers: a kept grey counts against the cap for as long as it is kept, so the cap and the per-permit grey byte are not two names for one set of bytes. The documents say which bytes each term of the bound counts, as the code does it, and nothing more.
