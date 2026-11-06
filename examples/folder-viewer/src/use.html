@@ -362,7 +362,7 @@ function onFrame() {
   requestAnimationFrame(onFrame);
 }
 requestAnimationFrame(onFrame);</code></pre>
-    <p>The ring carries six kinds today, in <code>RING_EVENT_KIND</code>: evicted, displaced, refused, pressure, budget changed and presented. <code>decodeNamedEvent</code> names them <code>cache.evicted</code>, <code>cache.displaced</code>, <code>cache.refused</code>, <code>cache.pressure</code>, <code>cache.budgetChanged</code> and <code>frame.presented</code>. <code>OCELLI_EVENTS</code> lists the rest of the catalogue, including pointer, key, touch, tool and annotation names that the shell raises itself. <code>CORNERSTONE_EVENT_MAP</code> maps the cornerstone3D 5.8.2 event names onto these, and <code>UNMAPPED_EVENTS</code> names the ones with no counterpart.</p>
+    <p>The ring carries seven kinds today, in <code>RING_EVENT_KIND</code>: evicted, displaced, refused, pressure, budget changed, presented and released. <code>decodeNamedEvent</code> names them <code>cache.evicted</code>, <code>cache.displaced</code>, <code>cache.refused</code>, <code>cache.pressure</code>, <code>cache.budgetChanged</code>, <code>frame.presented</code> and <code>cache.released</code>. <code>OCELLI_EVENTS</code> lists the rest of the catalogue, including pointer, key, touch, tool and annotation names that the shell raises itself. <code>CORNERSTONE_EVENT_MAP</code> maps the cornerstone3D 5.8.2 event names onto these, and <code>UNMAPPED_EVENTS</code> names the ones with no counterpart.</p>
 
     <h3 id="js-state"><span class="num">5.4</span>Reading state</h3>
     <p><code>copy_state()</code> returns a copied 96 byte block. <code>readViewportState</code> reads it into plain numbers and returns <code>null</code> for any other length.</p>

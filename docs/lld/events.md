@@ -35,11 +35,12 @@ The numbers are `RING_EVENT_KIND` in the generated module.
 | 4 | `cache.pressure` | tier `u8`, used `u64`, budget `u64`, entries `u32`, evicted `u32`, refused `u32` |
 | 5 | `cache.budgetChanged` | tier `u8`, budget `u64`, evicted bytes `u64`, evicted `u32`, dropped `u32` |
 | 6 | `frame.presented` | generation `u32`, drawn width `u32`, drawn height `u32`, flags `u32` |
+| 7 | `cache.released` | series `u64`, frames `u32`, bytes `u64` |
 
 Offsets are little-endian and come from `CacheEvent::encode`,
 `TelemetryEvent::encode` and `push_presented`. Pressure and budget leave
 three bytes after the tier. A short payload or a tier outside 0, 1 and 2
-decodes as null. Kind 0 and any kind above 6 do too.
+decodes as null. Kind 0 and any kind above 7 do too.
 
 `cache.displaced`, `cache.refused` and `cache.budgetChanged` have no 5.8.2
 name. They are `UNMAPPED_EVENTS`. `viewport.resized` is the shell
