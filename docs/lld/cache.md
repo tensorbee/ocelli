@@ -189,12 +189,11 @@ before they are read. `GET /held` reports `free`, the bytes of sample buffers
 on the free list, beside `used`.
 
 Every grey byte the folder viewer holds counts against one fixed cap of
-17,400,000 bytes. That is `P * N_max` in the resident bound, with `N_max` the
-3000 by 2900 frame the bound is stated for. A reply holds its grey, by
-capacity, from the moment its render is admitted until it is written. Each
-decode thread keeps at most one written grey to render into next. Both count
-inside the cap, so nothing is counted twice and nothing is outside it. A
-decode thread frees the grey it kept while any preview waits for room, and
+17,400,000 bytes, which is the resident bound's grey term `P * N_max`, with
+`N_max` the 3000 by 2900 frame the bound is stated for. A reply's grey counts,
+by capacity, from the moment its render is admitted until it is written. Each
+decode thread keeps at most one written grey to render into next, and that
+grey counts for as long as it is kept. A decode thread frees the grey it kept while any preview waits for room, and
 before it renders a grey less than half that size. A written reply's grey is
 freed rather than kept while a preview waits. A frame of more than 17,400,000
 pixels, whose grey alone is over the cap, draws alone. Its grey is admitted

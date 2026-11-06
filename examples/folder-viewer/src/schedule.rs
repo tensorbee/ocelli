@@ -837,4 +837,52 @@ mod tests {
         }
         Ok(())
     }
+
+    /// A written grey its worker keeps holds room under the cap for as long
+    /// as it is kept, and freeing it gives the room back.
+    #[test]
+    fn a_kept_grey_holds_room_until_it_is_freed() -> Result<(), String> {
+        let gate = test_gate();
+        let cap = gate.cap();
+        let scheduler = Scheduler::start(Arc::clone(&gate));
+        let permit = scheduler
+            .acquire_decode(Some(0), &mut || true)
+            .ok_or("no decode slot")?;
+        let claim = gate.reserve(cap).ok_or("no grey room")?;
+        let home = permit.finish(claim);
+        home.restore_grey(Vec::with_capacity(cap));
+        // Jobs on one worker run in order, so the grey is kept after this.
+        call_worker(&scheduler.inner, 0, || ()).ok_or("worker 0 is gone")?;
+
+        // Kept, it fills the cap. One more grey byte, rendered by a worker
+        // that keeps nothing, is refused.
+        let waiter = match gate.admit(None, 1, 0) {
+            Ok(_) => return Err("one grey byte was admitted beside a kept cap".to_owned()),
+            Err(waiter) => waiter,
+        };
+        if gate.held() != (0, cap) {
+            return Err(format!("the kept grey held {:?}", gate.held()));
+        }
+
+        // A waiting request makes the worker free what it kept, and the
+        // waiter is admitted into the room that frees.
+        let started = std::time::Instant::now();
+        let admitted = loop {
+            if let Some(admitted) = gate.wait_turn(&waiter, WAIT) {
+                break admitted;
+            }
+            if started.elapsed() > Duration::from_secs(5) {
+                return Err(format!("the room never came back, {:?}", gate.held()));
+            }
+        };
+        if gate.held() != (1, 0) {
+            return Err(format!("after the free the gate held {:?}", gate.held()));
+        }
+        drop(admitted);
+        drop(waiter);
+        if gate.held() != (0, 0) {
+            return Err(format!("at the end the gate held {:?}", gate.held()));
+        }
+        Ok(())
+    }
 }

@@ -369,7 +369,9 @@ fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// plan's bound of 528,194,192 bytes is computed for.
 pub(crate) const N_MAX_PIXELS: usize = 3000 * 2900;
 
-/// The grey cap in bytes, `P * N_max` at one grey byte per pixel.
+/// The grey cap in bytes, the resident bound's grey term `P * N_max` at one
+/// grey byte per pixel. A reply's grey counts from admission until it is
+/// written, and a worker's kept grey counts for as long as it is kept.
 pub(crate) const GREY_CAP: usize = PERMITS * N_MAX_PIXELS;
 
 /// Every grey byte the process server holds, under one fixed cap.

@@ -3011,8 +3011,9 @@ mod tests {
     }
 
     /// Grey-sized bytes the two workspaces may hold: each keeps native bytes
-    /// of two greys and four bytes of scratch per pixel, and the cap holds
-    /// every grey besides, the returned buffers and the replies included.
+    /// of two greys and four bytes of scratch per pixel, twelve in all, and
+    /// the cap holds two more, every grey a reply took from a worker and
+    /// every grey a worker kept.
     const WORKSPACE_GREYS: usize = 14;
 
     /// Twenty clients that stop reading hold at most the cap's grey bytes,
