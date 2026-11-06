@@ -1369,6 +1369,7 @@ async function postHeaders(file) {
 
 function togglePanel(name) {
   const on = !document.body.classList.contains(name);
+  leavePointer();
   document.body.classList.toggle(name, on);
   try { localStorage.setItem("ocelli." + name, on ? "1" : "0"); } catch {}
   syncPanels();
@@ -3104,6 +3105,15 @@ function tilePoint(node, event) {
   return { x, y, width: node.width, height: node.height };
 }
 
+// The readout, the cross and the magnifier as if the pointer had left. The
+// readout's generation moves, so a reply still on its way is dropped.
+function leavePointer() {
+  resetValue();
+  valueState.cell = -1;
+  hideCross();
+  mag.hidden = true;
+}
+
 function resetValue() {
   valueState.generation += 1;
   valueState.key = "";
@@ -4393,14 +4403,9 @@ function setLayout(columns, rows) {
     vp.prefetchAbort.abort();
     vp.tileAbort.abort();
   }
-  // A readout for a hidden cell goes, and so does a reply still on its way
-  // for it, because resetValue moves the generation the reply carries.
-  if (valueState.cell >= count) {
-    resetValue();
-    valueState.cell = -1;
-    hideCross();
-    mag.hidden = true;
-  }
+  // Every cell may have moved, so nothing placed under the pointer for the
+  // previous layout is kept. The next pointer move paints it again.
+  leavePointer();
   if (activeCell >= count) setActive(0);
   syncActiveOutline();
   fillCells();

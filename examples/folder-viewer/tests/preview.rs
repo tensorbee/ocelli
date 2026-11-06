@@ -402,10 +402,9 @@ fn the_page_has_viewport_cells() -> Result<(), String> {
     if !page.contains("Drag a series here.") {
         return Err("an empty cell does not say what to do".to_owned());
     }
-    // AC13. The layout picker and the tile mode are reached from the
-    // keyboard only through `G` and `Shift G`, and otherwise only through
-    // their own buttons. This pins what F-208 owns and nothing about the
-    // other keys, so F-213 may bind the digits to window rows.
+    // AC13. `G` opens the layout picker and `Shift G` toggles tile mode,
+    // through the two branch texts below and the two `data-key` attributes.
+    // Nothing here is about any other key, so F-213 may bind the digits.
     for needle in [
         "data-key=\"G\"",
         "data-key=\"Shift G\"",
@@ -416,13 +415,10 @@ fn the_page_has_viewport_cells() -> Result<(), String> {
             return Err(format!("the layout keys are not bound: {needle}"));
         }
     }
-    // Inside `onKey`, including its `clicks` and `map` literals, those two
-    // branches are the only route to the picker or the tile mode, whatever
-    // key or spelling another branch would use. A branch reaching them by
-    // name, by the buttons' ids or nodes, or by the picker's own buttons is
-    // counted. The Escape branch that closes the picker names
-    // `layoutPicker.hidden`, `closeLayoutPicker` and `layoutButton.focus`,
-    // which open nothing.
+    // In the text of `onKey`, including its `clicks` and `map` literals,
+    // `toggleTileMode(` and `openLayoutPicker(` each appear exactly once,
+    // and each other token in this list appears zero times. That is the
+    // whole check. A route that uses none of these tokens is not seen.
     let key_at = page
         .find("function onKey(event) {")
         .ok_or_else(|| "the page has no key handler".to_owned())?;
@@ -453,10 +449,9 @@ fn the_page_has_viewport_cells() -> Result<(), String> {
             ));
         }
     }
-    // Across the page, `setLayout` is called only by the picker's buttons
-    // and the start-up layout, and the picker and the tile mode are opened
-    // only by their buttons and the two key branches. A second key path
-    // added through a helper function adds a call site here.
+    // In the whole page, `setLayout(`, `openLayoutPicker(` and
+    // `toggleTileMode` each appear exactly 3 times, which is their
+    // definition and their two uses today.
     for (token, expected) in [
         ("setLayout(", 3),
         ("openLayoutPicker(", 3),
