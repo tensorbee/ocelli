@@ -141,14 +141,15 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   compiles to a fused multiply-add, so tier A can differ from `LutChain` by up
   to eight f32 units at the top of the range, not the two F-041 recorded. In a
   window one unit wide this drew the 99th percentile black on tier A and white
-  on tier C. F-227 now accepts a window only with a 16 unit margin, so its own
-  windows hold. Any other narrow window on tier A is still exposed. The choice
+  on tier C. F-227 now accepts a window only with a 16 unit margin, which covers a
+  shader rescale within 16 units of the CPU value. Any other narrow window on tier A is still exposed. The choice
   is a story that makes the shader's rescale match `LutChain` on every tier, or
   a recorded divergence with a minimum window width.
   F-227's fifth review found a second case: where `stored * slope` nearly
   cancels the intercept, the fused rounding error reaches hundreds of millions
   of units and flips greys at any window width, in 15,879 of 800,000 adversarial
-  draws. A minimum window width cannot cover that case.
+  draws. A minimum window width cannot cover that case, and F-227's own
+  constant window is exposed to it too.
 
 ## What is carried in
 
