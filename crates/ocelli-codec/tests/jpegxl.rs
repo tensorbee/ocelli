@@ -625,14 +625,30 @@ fn declared_icc_refuses_unsupported_before_any_parse() -> TestResult {
         assert_refused(decoder, &crafted, &desc, CodecError::UnsupportedPixelFormat)?;
     }
 
+    // Review pass 5 S1. The same stream in an exact-size jxlc box and split
+    // across jxlp boxes. Both containers are exact, so the walk accepts them
+    // and the pre-check is the only thing that refuses before `jxl-oxide`
+    // parses. They are the container route's detectors of the pre-check's
+    // removal: with the pre-check run for bare codestreams only,
+    // `read_header`'s `try_init` resizes to the declared `enc_size` and
+    // refuses `InvalidCodestream` instead, so both cases go red by kind.
+    let exact = container(&[&container_box(b"jxlc", &crafted)?])?;
+    for decoder in [&JpegXlDecoder::general(), &JpegXlDecoder::lossless()] {
+        assert_refused(decoder, &exact, &desc, CodecError::UnsupportedPixelFormat)?;
+    }
+    let split = jxlp_container(&crafted, 7)?;
+    for decoder in [&JpegXlDecoder::general(), &JpegXlDecoder::lossless()] {
+        assert_refused(decoder, &split, &desc, CodecError::UnsupportedPixelFormat)?;
+    }
+
     // The same stream in a jxlc box that declares 1000 bytes more than are
     // present, review pass 2 D2. The box lies about its size. Review pass 4
     // D1 has the walk refuse a box whose declared size runs past the end of
     // the input, never shortened to fit, so this container is refused
     // `InvalidCodestream` by the walk before the pre-check runs and before
     // `jxl-oxide` streams the partial box or reaches the resize. The bare
-    // stream above is the pre-check's own detector, and the kind here is the
-    // walk's.
+    // stream and the exact-size containers above are the pre-check's
+    // detectors, and the kind here is the walk's.
     let mut container = Vec::new();
     container.extend_from_slice(b"\x00\x00\x00\x0cJXL \x0d\x0a\x87\x0a");
     let box_len = u32::try_from(crafted.len() + 8 + 1000).map_err(|_| "box length")?;
@@ -830,9 +846,17 @@ fn containers_that_break_the_extraction_rules_refuse() -> TestResult {
     // one, and jxlp boxes without the last flag are refused before the
     // decode. The last one would decode if the rule were absent, because the
     // pieces carry a complete codestream, so it detects the rule's removal
-    // and not only its kind. The other rules are mostly hidden behind a
-    // second rule here, so each of them has a case only it catches in the
-    // four tests that follow this one.
+    // and not only its kind. The duplicate jxlc here detects the two-jxlc
+    // rule the same way, review pass 5 D1: with the rule deleted the walk
+    // concatenates the two copies and the decode succeeds, and the rule's
+    // case only it catches is `two_jxlc_boxes_refuse` below. The out of
+    // order case here cannot tell the index rule from the no-last-flag
+    // rule, neither piece is flagged last, so the index rule's case only it
+    // catches is `jxlp_index_order_refuses_out_of_order_indexes`. The
+    // no-codestream rule has no case that sees its removal by kind: without
+    // the rule the walk extracts an empty codestream, and `check_header`
+    // refuses an empty codestream with the same `InvalidCodestream`, so the
+    // case here pins the walk's own refusal.
     let codestream = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
     let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
 
@@ -1009,6 +1033,28 @@ fn jxlc_after_a_final_jxlp_refuses() -> TestResult {
     assert_refused(
         &JpegXlDecoder::general(),
         &jxlp_then_jxlc,
+        &desc,
+        CodecError::InvalidCodestream,
+    )
+}
+
+#[test]
+fn two_jxlc_boxes_refuse() -> TestResult {
+    // Review pass 5 D1, the rule that a container holds one jxlc box, not
+    // two. Each box carries half of the codestream, so no other extraction
+    // rule sees a defect: there is no jxlp box, so no index, flag or
+    // partial check applies, and a codestream is present. With the rule
+    // deleted the walk concatenates the two payloads back to the complete
+    // codestream and the container decodes, so the test detects the rule's
+    // removal and not only its kind.
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+    let two_jxlc = container(&[
+        &container_box(b"jxlc", first_codestream_half()?)?,
+        &container_box(b"jxlc", second_codestream_half()?)?,
+    ])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &two_jxlc,
         &desc,
         CodecError::InvalidCodestream,
     )
