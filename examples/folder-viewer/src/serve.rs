@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use ocelli_pixel::VoiFunction;
 
 use crate::held::{
-    BodyPermit, CacheHandle, FileId, GreyHome, PreviewSource, Viewer, ViewerConfig, detach_grey,
-    retire_bytes, with_decode_workspace,
+    BodyPermit, CacheHandle, CachedFrame, FileId, GreyGate, GreyHome, PreviewSource, Viewer,
+    ViewerConfig, detach_grey, retire_bytes, with_decode_workspace,
 };
 use crate::preview::{
     decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, phases, profiling,
@@ -170,7 +170,7 @@ fn start_census_log(viewer: &Arc<Viewer>) {
     std::thread::spawn(move || {
         let started = Instant::now();
         let _ = file.write_all(
-            b"ms decode_threads peak_decodes decodes_now body_threads peak_bodies bodies_now used inflight workspace free files frames peak_used peak_inflight peak_workspace peak_files peak_frames\n",
+            b"ms decode_threads peak_decodes decodes_now body_threads peak_bodies bodies_now used inflight grey workspace free files frames peak_used peak_inflight peak_workspace peak_files peak_frames\n",
         );
         loop {
             let memory = viewer.memory_census();
@@ -179,10 +179,11 @@ fn start_census_log(viewer: &Arc<Viewer>) {
             let (peak_used, peak_inflight, peak_workspace, peak_files, peak_frames) =
                 viewer.census_peaks();
             let line = format!(
-                "{ms} {decode_threads} {peak_decodes} {decodes_now} {body_threads} {peak_bodies} {bodies_now} {used} {inflight} {workspace} {free} {files} {frames} {peak_used} {peak_inflight} {peak_workspace} {peak_files} {peak_frames}\n",
+                "{ms} {decode_threads} {peak_decodes} {decodes_now} {body_threads} {peak_bodies} {bodies_now} {used} {inflight} {grey} {workspace} {free} {files} {frames} {peak_used} {peak_inflight} {peak_workspace} {peak_files} {peak_frames}\n",
                 ms = started.elapsed().as_millis(),
                 used = memory.pressure.used,
                 inflight = memory.inflight,
+                grey = memory.grey,
                 workspace = memory.workspace,
                 free = memory.free,
                 files = memory.files,
@@ -330,7 +331,14 @@ fn connection_session(
         let write_started = profiling().then(Instant::now);
         let written = write_reply(&mut stream, &reply, !close);
         if let Some(home) = home {
-            home.restore_grey(std::mem::take(&mut reply.body));
+            let grey = std::mem::take(&mut reply.body);
+            // The reservation was `width * height`, so the release is too.
+            let reserved = reply
+                .grey
+                .as_ref()
+                .map_or(grey.len(), |shown| grey_bytes(shown.width, shown.height));
+            viewer.release_grey(reserved);
+            home.restore_grey(grey);
         } else if reply.grey.is_some() {
             viewer.recycle_grey(std::mem::take(&mut reply.body));
         }
@@ -360,7 +368,11 @@ fn route(
         );
     }
     match (request.method.as_str(), request.path.as_str()) {
-        ("GET", _) => (get_reply(viewer, &request), None),
+        ("GET", _) => {
+            let reply = get_reply(viewer, &request);
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
         ("POST", "/preview") => preview_route(viewer, request, stream, charge),
         ("POST", "/file") => (file_route(viewer, request, charge), None),
         ("POST", "/inspect") => {
@@ -491,15 +503,72 @@ fn preview_route(
     };
     let body_retire = charge.slot.as_ref().map(BodyPermit::retire);
     let inflight = viewer.inflight_counter();
+    let gate = viewer.grey_gate();
     let cache = viewer.cache_handle();
     let frame = request.frame;
     let body = BodyHome {
         body: Some(body),
         retire: body_retire,
     };
-    let Some(work) = permit.call(move || pooled_body_preview(body, frame, &inflight, &cache))
+    let job_gate = Arc::clone(&gate);
+    let job_cache = cache.clone();
+    let job_inflight = Arc::clone(&inflight);
+    let Some(outcome) =
+        permit.call(move || pooled_body_preview(body, frame, &job_inflight, &job_gate, &job_cache))
     else {
         return (busy_reply(), None);
+    };
+    let work = match outcome {
+        PooledOutcome::Ready(work) => work,
+        PooledOutcome::Congested(congested) => {
+            let grey_len = congested.input.grey_len();
+            let sample_charge = congested.sample_charge;
+            // The samples stay charged as in flight until they are recycled,
+            // on every path out of this branch.
+            let settle = |samples: Option<Vec<u8>>| {
+                if let Some(samples) = samples {
+                    cache.recycle_sample_buffer(samples);
+                }
+                if sample_charge > 0 {
+                    Viewer::release_counter(&inflight, sample_charge);
+                }
+            };
+            let RenderInput::Decoded(held) = congested.input else {
+                // The body form only defers a frame it decoded.
+                settle(None);
+                return (grey_busy_reply(), None);
+            };
+            // The decode slot is free while the reply waits for the cap. The
+            // body slot is kept, so at most four body-form previews wait with
+            // their samples.
+            drop(permit);
+            if !wait_for_grey(&gate, grey_len, stream) {
+                settle(Some(held.samples));
+                return (grey_busy_reply(), None);
+            }
+            let Some(permit) = viewer.acquire_decode(None, &mut live) else {
+                viewer.release_grey(grey_len);
+                settle(Some(held.samples));
+                return (busy_reply(), None);
+            };
+            let job_gate = Arc::clone(&gate);
+            let Some((preview, held, phase)) =
+                permit.call(move || render_decoded(held, request.frame, &job_gate))
+            else {
+                viewer.release_grey(grey_len);
+                settle(None);
+                return (busy_reply(), None);
+            };
+            merge_worker_phases(phase);
+            settle(Some(held.samples));
+            let mut reply = from_preview(preview);
+            if reply.status == 200 {
+                reply.source = Some("body");
+                let home = permit.finish();
+                return (reply, Some(home));
+            }
+            return (reply, None);
+        }
     };
     merge_worker_phases(work.phase);
     let mut reply = from_preview(work.preview);
@@ -539,21 +608,21 @@ impl Drop for BodyHome {
     }
 }
 
-struct BodyWork {
-    preview: Result<Preview, PreviewError>,
-    phase: crate::preview::PhaseRecord,
-}
-
 /// Decode a body-form preview on a decode worker.
 ///
-/// The sample bytes are charged as in flight until the job ends, and the
-/// buffer goes back to the free list because no frame is stored.
+/// The sample bytes are charged as in flight until the job ends. The decode
+/// takes a parked buffer of its length when there is one, and allocates
+/// otherwise. It never evicts a cached entry and never steals a cached
+/// frame, because no frame is stored. After the render the buffer returns to
+/// the free list when cached bytes plus free bytes fit the budget, and is
+/// freed otherwise.
 fn pooled_body_preview(
     body: BodyHome,
     request: FrameRequest,
     inflight: &std::sync::atomic::AtomicUsize,
+    gate: &GreyGate,
     cache: &CacheHandle,
-) -> BodyWork {
+) -> PooledOutcome {
     let mut samples = Vec::new();
     let mut sample_charge = 0_usize;
     let decoded = with_decode_workspace(|workspace| {
@@ -566,23 +635,55 @@ fn pooled_body_preview(
                 sample_charge = capacity;
                 inflight.fetch_add(capacity, std::sync::atomic::Ordering::Relaxed);
             },
-            &mut |len| cache.claim_sample_buffer(len),
+            &mut |len| cache.claim_parked_buffer(len),
         )
     });
-    let preview = match decoded {
-        Ok(held) => with_decode_workspace(|workspace| {
-            render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
-        }),
-        Err(error) => Err(error),
-    };
-    if sample_charge > 0 {
-        Viewer::release_counter(inflight, sample_charge);
+    match decoded {
+        Ok(held) => {
+            let grey_len = grey_bytes(held.width, held.height);
+            if !gate.reserve(grey_len) {
+                drop(body);
+                return PooledOutcome::Congested(Box::new(CongestedWork {
+                    input: RenderInput::Decoded(Box::new(held)),
+                    sample_charge,
+                }));
+            }
+            let preview = with_decode_workspace(|workspace| {
+                render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
+            });
+            if preview.is_err() {
+                gate.release(grey_len);
+            }
+            samples = held.samples;
+            if sample_charge > 0 {
+                Viewer::release_counter(inflight, sample_charge);
+            }
+            cache.recycle_sample_buffer(samples);
+            detach_grey(grey_capacity(&preview));
+            let phase = phases();
+            drop(body);
+            PooledOutcome::Ready(Box::new(PooledWork {
+                gone: false,
+                preview,
+                fresh: false,
+                phase,
+                decoded: None,
+            }))
+        }
+        Err(error) => {
+            if sample_charge > 0 {
+                Viewer::release_counter(inflight, sample_charge);
+            }
+            drop(body);
+            PooledOutcome::Ready(Box::new(PooledWork {
+                gone: false,
+                preview: Err(error),
+                fresh: false,
+                phase: phases(),
+                decoded: None,
+            }))
+        }
     }
-    cache.recycle_sample_buffer(samples);
-    detach_grey(grey_capacity(&preview));
-    let phase = phases();
-    drop(body);
-    BodyWork { preview, phase }
 }
 
 fn busy_reply() -> Reply {
@@ -683,6 +784,113 @@ struct DecodedWork {
     sample_charge: usize,
 }
 
+/// A frame waiting to be rendered, held by the connection that owns the grey.
+enum RenderInput {
+    /// A cached frame. Its grey is `width * height` bytes.
+    Hit(Arc<CachedFrame>),
+    /// A decoded frame that no cache entry holds yet. Its sample bytes stay
+    /// charged to inflight until the caller stores or recycles them.
+    Decoded(Box<crate::preview::HeldFrame>),
+}
+
+impl RenderInput {
+    fn grey_len(&self) -> usize {
+        let (width, height) = match self {
+            Self::Hit(held) => (held.width, held.height),
+            Self::Decoded(held) => (held.width, held.height),
+        };
+        grey_bytes(width, height)
+    }
+}
+
+/// What one decode worker job returned.
+enum PooledOutcome {
+    /// The grey cap had room and the render ran.
+    Ready(Box<PooledWork>),
+    /// The grey would exceed the cap, so nothing was rendered. The input is
+    /// returned unharmed and nothing is counted except the input's own charge.
+    Congested(Box<CongestedWork>),
+}
+
+/// A render the grey cap deferred.
+struct CongestedWork {
+    input: RenderInput,
+    /// Inflight charge on decoded samples, released when they are consumed.
+    sample_charge: usize,
+}
+
+/// Grey bytes for one frame: one display byte per pixel.
+fn grey_bytes(width: u32, height: u32) -> usize {
+    usize::try_from(width)
+        .unwrap_or(0)
+        .saturating_mul(usize::try_from(height).unwrap_or(0))
+}
+
+/// Wait for grey cap room, up to the write timeout, while the client waits.
+///
+/// `false` means the client is gone or the cap stayed full to the deadline.
+fn wait_for_grey(gate: &GreyGate, len: usize, stream: Option<&TcpStream>) -> bool {
+    let deadline = Instant::now() + WRITE_TIMEOUT;
+    let live = || stream.is_none_or(peer_open);
+    loop {
+        if gate.reserve(len) {
+            return true;
+        }
+        if !live() {
+            return false;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        gate.wait_slice(
+            deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(50)),
+        );
+    }
+}
+
+/// Render a body-form frame the cap delayed, on whichever worker is free.
+///
+/// The caller already holds the grey reservation. A refused render releases
+/// it here. The frame comes back either way, so its samples are recycled.
+fn render_decoded(
+    held: Box<crate::preview::HeldFrame>,
+    request: FrameRequest,
+    gate: &GreyGate,
+) -> (
+    Result<Preview, PreviewError>,
+    Box<crate::preview::HeldFrame>,
+    crate::preview::PhaseRecord,
+) {
+    let preview = with_decode_workspace(|workspace| {
+        render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
+    });
+    if preview.is_err() {
+        gate.release(grey_bytes(held.width, held.height));
+    }
+    detach_grey(grey_capacity(&preview));
+    (preview, held, phases())
+}
+
+/// Use the grey reservation this request already waited for, or take one.
+///
+/// A reservation of another length is returned before the new one is tried.
+fn take_grey(gate: &GreyGate, reserved: usize, len: usize) -> bool {
+    if reserved == len {
+        return true;
+    }
+    if reserved > 0 {
+        gate.release(reserved);
+    }
+    gate.reserve(len)
+}
+
+fn grey_busy_reply() -> Reply {
+    text_reply(503, Some("busy"), "the grey reply cap has no room")
+}
+
 fn preview_held_on_worker(
     viewer: &Viewer,
     id: FileId,
@@ -697,74 +905,174 @@ fn preview_held_on_worker(
     if let Some(started) = lookup_started {
         note_lookup(started.elapsed().as_micros());
     }
-    let home = match &found {
-        PreviewSource::Hit(frame) => frame.worker(),
-        PreviewSource::Shared(bytes) => bytes.worker(),
-        PreviewSource::Gone => return (gone(), None),
-    };
-    let mut live = || stream.is_none_or(peer_open);
-    let Some(permit) = viewer.acquire_decode(home, &mut live) else {
-        return (busy_reply(), None);
-    };
+    let gate = viewer.grey_gate();
     let inflight = viewer.inflight_counter();
-    let worker = permit.worker();
-    let retire = permit.retire();
     let cache = viewer.cache_handle();
-    let Some(work) = permit.call(move || pooled_preview(found, request, &inflight, &cache)) else {
-        return (busy_reply(), None);
-    };
-    if work.gone {
-        return (gone(), None);
-    }
-    merge_worker_phases(work.phase);
-    if let Some(decoded) = work.decoded {
-        let _kept =
-            viewer.store_frame_with(id, request.frame, decoded.held, Some(worker), Some(retire));
-        if decoded.sample_charge > 0 {
-            viewer.leave_inflight(decoded.sample_charge);
+    let mut live = || stream.is_none_or(peer_open);
+    // Grey bytes this request already waited for, and whether any round
+    // decoded the frame.
+    let mut reserved = 0_usize;
+    let mut decoded_here = false;
+    let mut found = Some(found);
+    for _ in 0..GREY_ROUNDS {
+        let found = match found.take() {
+            Some(found) => found,
+            None => viewer.preview_source(id, request.frame),
+        };
+        let home = match &found {
+            PreviewSource::Hit(frame) => frame.worker(),
+            PreviewSource::Shared(bytes) => bytes.worker(),
+            PreviewSource::Gone => {
+                release_reserved(&gate, reserved);
+                return (gone(), None);
+            }
+        };
+        let Some(permit) = viewer.acquire_decode(home, &mut live) else {
+            release_reserved(&gate, reserved);
+            return (busy_reply(), None);
+        };
+        let worker = permit.worker();
+        let retire = permit.retire();
+        let job_gate = Arc::clone(&gate);
+        let job_cache = cache.clone();
+        let job_inflight = Arc::clone(&inflight);
+        let Some(outcome) = permit.call(move || {
+            pooled_preview(
+                found,
+                request,
+                reserved,
+                &job_inflight,
+                &job_gate,
+                &job_cache,
+            )
+        }) else {
+            // The job did not run, so the reservation is still this request's.
+            release_reserved(&gate, reserved);
+            return (busy_reply(), None);
+        };
+        // The job took over the reservation: it is in the reply, or released.
+        // Every path below returns or takes a new reservation.
+        let work = match outcome {
+            PooledOutcome::Ready(work) => work,
+            PooledOutcome::Congested(congested) => {
+                let grey_len = congested.input.grey_len();
+                // The frame goes into the cache before the wait, so a waiting
+                // request holds no frame and no permit. After the wait it
+                // looks the frame up again.
+                if let RenderInput::Decoded(held) = congested.input {
+                    decoded_here = true;
+                    let _kept = viewer.store_frame_with(
+                        id,
+                        request.frame,
+                        *held,
+                        Some(worker),
+                        Some(retire),
+                    );
+                }
+                if congested.sample_charge > 0 {
+                    viewer.leave_inflight(congested.sample_charge);
+                }
+                drop(permit);
+                if !wait_for_grey(&gate, grey_len, stream) {
+                    return (grey_busy_reply(), None);
+                }
+                reserved = grey_len;
+                continue;
+            }
+        };
+        if work.gone {
+            return (gone(), None);
         }
-        #[cfg(test)]
-        viewer.trace_inflight("frame");
+        merge_worker_phases(work.phase);
+        if let Some(decoded) = work.decoded {
+            let _kept = viewer.store_frame_with(
+                id,
+                request.frame,
+                decoded.held,
+                Some(worker),
+                Some(retire),
+            );
+            if decoded.sample_charge > 0 {
+                viewer.leave_inflight(decoded.sample_charge);
+            }
+            #[cfg(test)]
+            viewer.trace_inflight("frame");
+        }
+        let mut reply = from_preview(work.preview);
+        if reply.status == 200 {
+            reply.source = Some(if work.fresh || decoded_here {
+                "decoded"
+            } else {
+                "held"
+            });
+            // The grey is ready, so the permit ends with the decode. The slot
+            // is free before the reply is written, and the grey goes back to
+            // its worker by message after the write.
+            let home = permit.finish();
+            return (reply, Some(home));
+        }
+        return (reply, None);
     }
-    let mut reply = from_preview(work.preview);
-    if reply.status == 200 {
-        reply.source = Some(if work.fresh { "decoded" } else { "held" });
-        // The grey is ready, so the permit ends with the decode. The slot is
-        // free before the reply is written, and the grey goes back to its
-        // worker by message after the write.
-        let home = permit.finish();
-        return (reply, Some(home));
-    }
-    (reply, None)
+    release_reserved(&gate, reserved);
+    (grey_busy_reply(), None)
 }
 
+/// Rounds a held preview may wait for grey room. The second round already
+/// holds a reservation of the frame's length, so a third is not reached.
+const GREY_ROUNDS: usize = 3;
+
+fn release_reserved(gate: &GreyGate, reserved: usize) {
+    if reserved > 0 {
+        gate.release(reserved);
+    }
+}
+
+/// One held preview on a decode worker.
+///
+/// `reserved` is grey room the caller already waited for. The job takes it
+/// over: it is in the reply's grey, or released here, on every outcome.
 fn pooled_preview(
     found: PreviewSource,
     request: FrameRequest,
+    reserved: usize,
     inflight: &std::sync::atomic::AtomicUsize,
+    gate: &GreyGate,
     cache: &CacheHandle,
-) -> PooledWork {
+) -> PooledOutcome {
     let before = decode_ticks();
     match found {
-        PreviewSource::Gone => PooledWork {
-            gone: true,
-            preview: Err(PreviewError::Frame),
-            fresh: false,
-            phase: phases(),
-            decoded: None,
-        },
+        PreviewSource::Gone => {
+            release_reserved(gate, reserved);
+            PooledOutcome::Ready(Box::new(PooledWork {
+                gone: true,
+                preview: Err(PreviewError::Frame),
+                fresh: false,
+                phase: phases(),
+                decoded: None,
+            }))
+        }
         PreviewSource::Hit(held) => {
+            let grey_len = grey_bytes(held.width, held.height);
+            if !take_grey(gate, reserved, grey_len) {
+                return PooledOutcome::Congested(Box::new(CongestedWork {
+                    input: RenderInput::Hit(held),
+                    sample_charge: 0,
+                }));
+            }
             let preview = with_decode_workspace(|workspace| {
                 render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
             });
+            if preview.is_err() {
+                gate.release(grey_len);
+            }
             detach_grey(grey_capacity(&preview));
-            PooledWork {
+            PooledOutcome::Ready(Box::new(PooledWork {
                 gone: false,
                 preview,
                 fresh: false,
                 phase: phases(),
                 decoded: None,
-            }
+            }))
         }
         PreviewSource::Shared(bytes) => {
             let mut samples = Vec::new();
@@ -785,11 +1093,21 @@ fn pooled_preview(
             drop(bytes);
             match decoded {
                 Ok(held) => {
+                    let grey_len = grey_bytes(held.width, held.height);
+                    if !take_grey(gate, reserved, grey_len) {
+                        return PooledOutcome::Congested(Box::new(CongestedWork {
+                            input: RenderInput::Decoded(Box::new(held)),
+                            sample_charge,
+                        }));
+                    }
                     let preview = with_decode_workspace(|workspace| {
                         render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
                     });
+                    if preview.is_err() {
+                        gate.release(grey_len);
+                    }
                     detach_grey(grey_capacity(&preview));
-                    PooledWork {
+                    PooledOutcome::Ready(Box::new(PooledWork {
                         gone: false,
                         fresh: decode_ticks() != before,
                         phase: phases(),
@@ -798,20 +1116,21 @@ fn pooled_preview(
                             sample_charge,
                         }),
                         preview,
-                    }
+                    }))
                 }
                 Err(error) => {
+                    release_reserved(gate, reserved);
                     cache.recycle_sample_buffer(std::mem::take(&mut samples));
                     if sample_charge > 0 {
                         Viewer::release_counter(inflight, sample_charge);
                     }
-                    PooledWork {
+                    PooledOutcome::Ready(Box::new(PooledWork {
                         gone: false,
                         preview: Err(error),
                         fresh: false,
                         phase: phases(),
                         decoded: None,
-                    }
+                    }))
                 }
             }
         }
@@ -2443,5 +2762,267 @@ mod tests {
             }
         }
         None
+    }
+
+    /// One Part 10 monochrome frame of `rows` by `columns`, 16-bit.
+    fn grey_file(rows: u16, columns: u16) -> Result<Vec<u8>, String> {
+        let short = |group: u16, element: u16, vr: [u8; 2], value: &[u8]| {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&group.to_le_bytes());
+            bytes.extend_from_slice(&element.to_le_bytes());
+            bytes.extend_from_slice(&vr);
+            bytes.extend_from_slice(&u16::try_from(value.len()).unwrap_or(0).to_le_bytes());
+            bytes.extend_from_slice(value);
+            bytes
+        };
+        let long = |group: u16, element: u16, vr: [u8; 2], value: &[u8]| {
+            let mut bytes = Vec::new();
+            bytes.extend_from_slice(&group.to_le_bytes());
+            bytes.extend_from_slice(&element.to_le_bytes());
+            bytes.extend_from_slice(&vr);
+            bytes.extend_from_slice(&[0, 0]);
+            bytes.extend_from_slice(&u32::try_from(value.len()).unwrap_or(0).to_le_bytes());
+            bytes.extend_from_slice(value);
+            bytes
+        };
+        let pad = |text: &[u8]| {
+            let mut text = text.to_vec();
+            if !text.len().is_multiple_of(2) {
+                text.push(b' ');
+            }
+            text
+        };
+        let ui = |text: &[u8]| {
+            let mut text = text.to_vec();
+            if !text.len().is_multiple_of(2) {
+                text.push(0);
+            }
+            text
+        };
+        let mut data = Vec::new();
+        data.extend(short(
+            0x0008,
+            0x0016,
+            *b"UI",
+            &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+        ));
+        data.extend(short(0x0008, 0x0018, *b"UI", &ui(b"2.25.216")));
+        data.extend(short(0x0008, 0x0060, *b"CS", &pad(b"CT")));
+        data.extend(short(0x0028, 0x0002, *b"US", &1_u16.to_le_bytes()));
+        data.extend(short(0x0028, 0x0004, *b"CS", &pad(b"MONOCHROME2")));
+        data.extend(short(0x0028, 0x0010, *b"US", &rows.to_le_bytes()));
+        data.extend(short(0x0028, 0x0011, *b"US", &columns.to_le_bytes()));
+        data.extend(short(0x0028, 0x0100, *b"US", &16_u16.to_le_bytes()));
+        data.extend(short(0x0028, 0x0101, *b"US", &16_u16.to_le_bytes()));
+        data.extend(short(0x0028, 0x0102, *b"US", &15_u16.to_le_bytes()));
+        data.extend(short(0x0028, 0x0103, *b"US", &0_u16.to_le_bytes()));
+        data.extend(short(0x0028, 0x1050, *b"DS", &pad(b"40")));
+        data.extend(short(0x0028, 0x1051, *b"DS", &pad(b"400")));
+        data.extend(short(0x0028, 0x1052, *b"DS", &pad(b"0")));
+        data.extend(short(0x0028, 0x1053, *b"DS", &pad(b"1")));
+        data.extend(short(0x0028, 0x1056, *b"CS", &pad(b"LINEAR")));
+        let pixels = vec![50_u8; usize::from(rows) * usize::from(columns) * 2];
+        data.extend(long(0x7FE0, 0x0010, *b"OW", &pixels));
+        let mut meta = Vec::new();
+        meta.extend(long(0x0002, 0x0001, *b"OB", &[0, 1]));
+        meta.extend(short(
+            0x0002,
+            0x0002,
+            *b"UI",
+            &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+        ));
+        meta.extend(short(0x0002, 0x0003, *b"UI", &ui(b"2.25.216")));
+        meta.extend(short(0x0002, 0x0010, *b"UI", &ui(b"1.2.840.10008.1.2.1")));
+        meta.extend(short(0x0002, 0x0012, *b"UI", &ui(b"2.25.217")));
+        let mut bytes = vec![0_u8; 128];
+        bytes.extend_from_slice(b"DICM");
+        bytes.extend(short(
+            0x0002,
+            0x0000,
+            *b"UL",
+            &u32::try_from(meta.len()).unwrap_or(0).to_le_bytes(),
+        ));
+        bytes.extend_from_slice(&meta);
+        bytes.extend_from_slice(&data);
+        Ok(bytes)
+    }
+
+    fn send_late(addr: std::net::SocketAddr, headers: &str) -> Result<TcpStream, String> {
+        let mut late = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+        late.set_read_timeout(Some(Duration::from_secs(15)))
+            .map_err(|error| error.to_string())?;
+        late.write_all(headers.as_bytes())
+            .map_err(|error| error.to_string())?;
+        Ok(late)
+    }
+
+    /// Read one reply whole, failing past 15 s from `started`.
+    fn read_late(
+        mut late: TcpStream,
+        started: std::time::Instant,
+        name: &str,
+    ) -> Result<String, String> {
+        let mut reply = Vec::new();
+        let mut chunk = [0_u8; 64 * 1024];
+        loop {
+            match late.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let Some(got) = chunk.get(..n) else {
+                        return Err(format!("{name} read was short"));
+                    };
+                    reply.extend_from_slice(got);
+                }
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        || error.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    return Err(format!("{name} was never answered"));
+                }
+                Err(error) => return Err(error.to_string()),
+            }
+            if started.elapsed() > Duration::from_secs(15) {
+                return Err(format!("{name} answered too late"));
+            }
+        }
+        Ok(String::from_utf8_lossy(&reply).into_owned())
+    }
+
+    /// Grey-sized bytes the two workspaces may hold beside the cap: each
+    /// keeps native bytes of two greys, four bytes of scratch per pixel and
+    /// one returned grey, and the cap is two more.
+    const WORKSPACE_GREYS: usize = 16;
+
+    /// Twenty clients that stop reading hold at most the cap's grey bytes,
+    /// and a later preview is answered, never left waiting without end.
+    #[test]
+    fn twenty_stalled_readers_never_exceed_the_grey_cap() -> Result<(), String> {
+        let file = grey_file(3000, 2900)?;
+        let grey_len = preview_frame(&file, FrameRequest::default())
+            .map_err(|error| format!("the file did not decode: {error}"))?
+            .grey
+            .len();
+        // The stalled replies must be past two socket buffers to block.
+        if grey_len <= 8 * 1024 * 1024 {
+            return Err(format!("the grey was only {grey_len} bytes"));
+        }
+        // The cap is the formula's grey term: twice the largest grey.
+        let cap = 2 * grey_len;
+
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let viewer = Arc::new(Viewer::server(ViewerConfig {
+            cache_bytes: 64 * 1024 * 1024,
+        }));
+        let serving = Arc::clone(&viewer);
+        std::thread::spawn(move || {
+            let _ = serve_on(listener, serving);
+        });
+        let preview_headers = |id: &str| {
+            format!(
+                "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+        };
+        let posted = post_bytes(addr, &file)?;
+        if !status_is(&posted, 200) {
+            return Err("the file was not accepted".to_owned());
+        }
+        let id = header_value(&posted, "X-Ocelli-File")
+            .ok_or("the file id was missing")?
+            .trim()
+            .to_owned();
+        let headers = preview_headers(&id);
+
+        // Twenty clients ask and never read. Their greys would be twenty
+        // times the cap without it.
+        let mut stalls = Vec::new();
+        for _ in 0..20 {
+            let mut stall = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+            stall
+                .write_all(headers.as_bytes())
+                .map_err(|error| error.to_string())?;
+            stalls.push(stall);
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        // The decodes and renders are done long before this point.
+        std::thread::sleep(Duration::from_secs(2));
+        for _ in 0..20 {
+            let census = viewer.memory_census();
+            if census.grey > cap {
+                return Err(format!(
+                    "the replies held {} grey bytes over {cap}",
+                    census.grey
+                ));
+            }
+            // `workspace` counts every grey a reply took from a worker, so
+            // it sees greys the gate's own counter would miss. Twenty
+            // unbounded replies would be twenty greys here.
+            if census.workspace > WORKSPACE_GREYS * grey_len {
+                return Err(format!(
+                    "the workspaces held {} bytes, over {WORKSPACE_GREYS} greys",
+                    census.workspace
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        // A second file, posted now, has no decoded frame yet. Its preview
+        // decodes and then meets the full cap. While it waits, its frame is
+        // in the cache and nothing it decoded is in flight.
+        let before = viewer.memory_census();
+        let fresh_posted = post_bytes(addr, &file)?;
+        let fresh_id = header_value(&fresh_posted, "X-Ocelli-File")
+            .ok_or("the second file id was missing")?
+            .trim()
+            .to_owned();
+        let started = std::time::Instant::now();
+        let late = send_late(addr, &headers)?;
+        let late_fresh = send_late(addr, &preview_headers(&fresh_id))?;
+        let mut waited = None;
+        for _ in 0..100 {
+            std::thread::sleep(Duration::from_millis(50));
+            let census = viewer.memory_census();
+            if census.frames > before.frames {
+                waited = Some(census);
+                break;
+            }
+        }
+        let waiting = waited.ok_or("the second frame never reached the cache")?;
+        std::thread::sleep(Duration::from_millis(300));
+        let waiting_now = viewer.memory_census();
+        if waiting_now.inflight != before.inflight || waiting.inflight != before.inflight {
+            return Err(format!(
+                "a waiting preview kept {} bytes in flight, against {} before",
+                waiting_now.inflight, before.inflight
+            ));
+        }
+        // Capacity frees only once the stalled writes fail.
+        drop(stalls);
+        for (name, stream) in [
+            ("the later preview", late),
+            ("the fresh preview", late_fresh),
+        ] {
+            let text = read_late(stream, started, name)?;
+            if !text.starts_with("HTTP/1.1 200 ") && !text.starts_with("HTTP/1.1 503 ") {
+                return Err(format!(
+                    "{name} answered {}",
+                    text.lines().next().unwrap_or("")
+                ));
+            }
+        }
+        // Every reply is written or abandoned now, so no reservation is
+        // left. A reservation leaked on any path above stays counted.
+        let settled = std::time::Instant::now();
+        loop {
+            let held = viewer.memory_census().grey;
+            if held == 0 {
+                break;
+            }
+            if held > cap || settled.elapsed() > Duration::from_secs(5) {
+                return Err(format!("after every reply the gate still held {held}"));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Ok(())
     }
 }

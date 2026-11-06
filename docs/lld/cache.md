@@ -178,14 +178,21 @@ keyed by its exact byte length when cached bytes plus free bytes still fit
 the budget, and is freed otherwise. The free list is inside the 256 MiB
 budget, with the cached files and frames, and the cache evicts to make room
 for either. A decode takes a parked buffer of its length when there is one.
-When no free buffer has the length, the decode takes the samples of the
-oldest cached frame of that length only when no reply is still reading that
-frame, and allocates otherwise, so the free list is often empty under a
-steady scroll. A buffer handed out
-is owned by that decode. Its old bytes are overwritten before they are read.
-`GET /held` reports `free`,
-the bytes of sample buffers on the free list, beside `used`.
-A decode copy is in flight until the frame is in the cache.
+When no free buffer has the length and a held file's frame does not fit
+beside the cached and free bytes, its decode takes the samples of the least
+recently used cached frame of that length only when no reply is still
+reading that frame, and allocates otherwise, so the free list is often empty
+under a steady scroll. A preview that carries the file's bytes never evicts
+and never takes a cached frame's samples, because its frame is not stored. A
+buffer handed out is owned by that decode. Its old bytes are overwritten
+before they are read. `GET /held` reports `free`, the bytes of sample buffers
+on the free list, beside `used`.
+
+Grey bytes in replies not yet written count against one cap, twice the
+largest grey so far, which is the grey term of the resident bound. A preview
+past the cap waits up to the 60 second write timeout and then answers 503
+busy. A waiting preview holds no decode permit. A held frame it decoded is
+in the cache before it waits.
 
 The folder viewer binary uses mimalloc as its global allocator. The pin is
 exact in the workspace manifest and the crate keeps its default features.

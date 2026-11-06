@@ -1,11 +1,12 @@
 //! Two long-lived decode workers. Every decode the process server runs is a
 //! job here, including a preview that carries the file's bytes, and every
-//! pooled request body is read and freed on these two threads.
+//! pooled request body is allocated and freed on these two threads. The
+//! connection thread reads the body into the buffer a worker allocated.
 //!
 //! `P` in the resident formula is 2, so there are two threads. The `4` in
 //! `4 * S_max` is the most request bodies those threads keep at once. The
 //! count does not follow the host core count. A pooled body is freed by the
-//! worker that read it. A decoded frame's sample buffer that leaves the
+//! worker that allocated it. A decoded frame's sample buffer that leaves the
 //! cache is parked on the free list only when cached bytes plus free bytes
 //! fit the budget, and is freed otherwise.
 
@@ -142,6 +143,7 @@ impl Scheduler {
             &self.inner.body_ready,
             &self.inner.shut,
             live,
+            None,
             |_| true,
         )?;
         let now = self
@@ -167,13 +169,25 @@ impl Scheduler {
         home: Option<u8>,
         live: &mut dyn FnMut() -> bool,
     ) -> Option<DecodePermit> {
+        self.acquire_decode_within(home, HOME_WAIT, live)
+    }
+
+    /// [`Self::acquire_decode`] with the home wait as an argument, so a test
+    /// can hold a waiter on its home for longer than a slot return takes.
+    fn acquire_decode_within(
+        &self,
+        home: Option<u8>,
+        home_wait: Duration,
+        live: &mut dyn FnMut() -> bool,
+    ) -> Option<DecodePermit> {
         let want = home.map(usize::from);
-        let deadline = std::time::Instant::now() + HOME_WAIT;
+        let deadline = std::time::Instant::now() + home_wait;
         let worker = wait_slot(
             &self.inner.decode_free,
             &self.inner.decode_ready,
             &self.inner.shut,
             live,
+            Some(deadline),
             |slot| match want {
                 Some(home) => slot == home || std::time::Instant::now() >= deadline,
                 None => true,
@@ -325,11 +339,19 @@ fn post_job(inner: &Inner, worker: usize, job: impl FnOnce() + Send + 'static) -
     sender.send(Job::Run(Box::new(job))).is_ok()
 }
 
+/// Take a slot from `free` once `accept` allows it.
+///
+/// `deadline` bounds the wait for a slot the caller prefers: the sleep ends
+/// at the time left, not at a whole `WAIT`, so a home preference is
+/// abandoned on time. A waiter woken by a return that `accept` declines goes
+/// back to sleep, and every waiter is woken on every return so a declined
+/// return cannot starve the waiter that wanted that slot.
 fn wait_slot(
     free: &Mutex<VecDeque<usize>>,
     ready: &Condvar,
     shut: &AtomicBool,
     live: &mut dyn FnMut() -> bool,
+    deadline: Option<std::time::Instant>,
     accept: impl Fn(usize) -> bool,
 ) -> Option<usize> {
     let mut slots = lock_mutex(free);
@@ -343,8 +365,15 @@ fn wait_slot(
         if !live() {
             return None;
         }
+        let wait = match deadline {
+            Some(at) => {
+                let left = at.saturating_duration_since(std::time::Instant::now());
+                if left.is_zero() { WAIT } else { left.min(WAIT) }
+            }
+            None => WAIT,
+        };
         let (guard, _) = ready
-            .wait_timeout(slots, WAIT)
+            .wait_timeout(slots, wait)
             .unwrap_or_else(|poison| poison.into_inner());
         slots = guard;
         if shut.load(Ordering::Acquire) || !live() {
@@ -355,7 +384,7 @@ fn wait_slot(
 
 fn return_slot(free: &Mutex<VecDeque<usize>>, ready: &Condvar, slot: usize) {
     lock_mutex(free).push_back(slot);
-    ready.notify_one();
+    ready.notify_all();
 }
 
 fn release_count(slot: &AtomicUsize) {
@@ -571,11 +600,115 @@ mod tests {
         if fallback.worker() != 1 {
             return Err(format!("the fallback ran on {}", fallback.worker()));
         }
-        if started.elapsed() < HOME_WAIT {
+        let elapsed = started.elapsed();
+        if elapsed < HOME_WAIT {
             return Err("the fallback did not wait for the home worker".to_owned());
+        }
+        // The wait ends at the time left, not at a whole WAIT. The fallback
+        // takes about HOME_WAIT, not ten times that.
+        if elapsed > HOME_WAIT + Duration::from_millis(20) {
+            return Err(format!(
+                "the fallback took {:.1} ms, about ten times the home wait",
+                elapsed.as_secs_f64() * 1000.0
+            ));
         }
         drop(first);
         drop(fallback);
+        Ok(())
+    }
+
+    /// A slot that returns while a waiter declines it still reaches a waiter
+    /// that accepts it.
+    ///
+    /// Four waiters want worker 0 for two seconds, so they decline worker 1.
+    /// They wait first. A waiter with no home waits last. When worker 1
+    /// returns, waking only one waiter wakes a decliner, and the waiter with
+    /// no home sleeps a whole `WAIT` beside a free slot.
+    #[test]
+    fn a_returned_slot_reaches_a_waiter_that_accepts_it() -> Result<(), String> {
+        let scheduler = Scheduler::start();
+        let on_zero = scheduler
+            .acquire_decode(Some(0), &mut || true)
+            .ok_or("worker 0 was not granted")?;
+        let on_one = scheduler
+            .acquire_decode(Some(1), &mut || true)
+            .ok_or("worker 1 was not granted")?;
+        let stop = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            let mut decliners = Vec::new();
+            for _ in 0..4 {
+                let scheduler = &scheduler;
+                let stop = &stop;
+                decliners.push(scope.spawn(move || {
+                    let permit = scheduler.acquire_decode_within(
+                        Some(0),
+                        Duration::from_secs(2),
+                        &mut || !stop.load(Ordering::Acquire),
+                    );
+                    drop(permit);
+                }));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+            let (tx, rx) = mpsc::channel();
+            let shared = &scheduler;
+            let accepter = scope.spawn(move || {
+                let permit = shared.acquire_decode(None, &mut || true);
+                let _ = tx.send(std::time::Instant::now());
+                permit.map(|permit| permit.worker())
+            });
+            std::thread::sleep(Duration::from_millis(20));
+            let returned = std::time::Instant::now();
+            drop(on_one);
+            let granted = rx.recv_timeout(Duration::from_secs(2));
+            let worker = accepter
+                .join()
+                .map_err(|_| "the waiter panicked".to_owned());
+            stop.store(true, Ordering::Release);
+            drop(on_zero);
+            for decliner in decliners {
+                let _ = decliner.join();
+            }
+            let granted = granted.map_err(|_| "the waiter was never granted".to_owned())?;
+            if worker? != Some(1) {
+                return Err("the waiter did not take the returned slot".to_owned());
+            }
+            let waited = granted.saturating_duration_since(returned);
+            if waited > Duration::from_millis(25) {
+                return Err(format!(
+                    "the waiter sat {:.1} ms beside a free slot",
+                    waited.as_secs_f64() * 1000.0
+                ));
+            }
+            Ok::<(), String>(())
+        })
+    }
+
+    /// Shutdown wakes a waiter that would otherwise wait for its home.
+    #[test]
+    fn a_waiting_decode_ends_at_shutdown() -> Result<(), String> {
+        let scheduler = Scheduler::start();
+        let on_zero = scheduler
+            .acquire_decode(Some(0), &mut || true)
+            .ok_or("worker 0 was not granted")?;
+        let on_one = scheduler
+            .acquire_decode(Some(1), &mut || true)
+            .ok_or("worker 1 was not granted")?;
+        let started = std::time::Instant::now();
+        let ended = std::thread::scope(|scope| {
+            let waiter = scope.spawn(|| scheduler.acquire_decode(Some(0), &mut || true).is_some());
+            std::thread::sleep(Duration::from_millis(20));
+            scheduler.inner.shut.store(true, Ordering::Release);
+            scheduler.inner.decode_ready.notify_all();
+            waiter.join().map_err(|_| "the waiter panicked".to_owned())
+        })?;
+        if ended {
+            return Err("a decode was granted after shutdown".to_owned());
+        }
+        if started.elapsed() > Duration::from_millis(500) {
+            return Err("the waiter did not end at shutdown".to_owned());
+        }
+        drop(on_zero);
+        drop(on_one);
         Ok(())
     }
 }

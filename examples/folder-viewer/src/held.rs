@@ -365,6 +365,71 @@ fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
+/// Grey bytes held by replies that are not yet written, under one cap.
+///
+/// The cap is the resident formula's grey term, `P * N_max`: at most
+/// [`PERMITS`] times the largest grey admitted so far, where a grey is one
+/// byte per pixel. A preview whose grey would exceed the cap waits for
+/// capacity, up to the write timeout, and then answers 503. `held` never
+/// exceeds the cap.
+pub(crate) struct GreyGate {
+    state: Mutex<GreyState>,
+    ready: Condvar,
+}
+
+struct GreyState {
+    /// Grey bytes a reply holds from its reservation to its write.
+    held: usize,
+    /// The largest grey admitted so far, in bytes.
+    max: usize,
+}
+
+impl GreyGate {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(GreyState { held: 0, max: 0 }),
+            ready: Condvar::new(),
+        }
+    }
+
+    /// Count `len` grey bytes from now until the reply is written.
+    ///
+    /// `false` means the cap has no room and the caller waits.
+    pub(crate) fn reserve(&self, len: usize) -> bool {
+        let mut state = lock_mutex(&self.state);
+        let cap = PERMITS.saturating_mul(state.max.max(len));
+        if state.held.saturating_add(len) > cap {
+            return false;
+        }
+        state.held += len;
+        if len > state.max {
+            state.max = len;
+        }
+        true
+    }
+
+    /// The reply was written or abandoned, so its grey counts no longer.
+    pub(crate) fn release(&self, len: usize) {
+        let mut state = lock_mutex(&self.state);
+        state.held = state.held.saturating_sub(len);
+        drop(state);
+        self.ready.notify_all();
+    }
+
+    pub(crate) fn held(&self) -> usize {
+        lock_mutex(&self.state).held
+    }
+
+    /// Sleep until a release or `slice`, whichever first.
+    pub(crate) fn wait_slice(&self, slice: Duration) {
+        let guard = lock_mutex(&self.state);
+        let _ = self
+            .ready
+            .wait_timeout(guard, slice)
+            .unwrap_or_else(|poison| poison.into_inner());
+    }
+}
+
 fn bump_peak(slot: &AtomicUsize, value: usize) {
     let mut current = slot.load(Ordering::Relaxed);
     while value > current {
@@ -385,6 +450,8 @@ pub(crate) struct MemoryCensus {
     pub(crate) frames: usize,
     /// Body bytes being read and decode sample bytes not yet in the cache.
     pub(crate) inflight: usize,
+    /// Grey bytes held by replies that are not yet written, under the cap.
+    pub(crate) grey: usize,
     /// Permit scratch, native copies, grey replies and returned grey buffers.
     pub(crate) workspace: usize,
     /// Decoded sample bytes on the free list.
@@ -417,6 +484,8 @@ pub struct Viewer {
     permits: PermitPool,
     /// Bytes of a body being read, or of a decode sample buffer not yet cached.
     inflight: Arc<AtomicUsize>,
+    /// Grey bytes held by replies that are not yet written.
+    grey_gate: Arc<GreyGate>,
     connections: AtomicUsize,
     connection_cap: usize,
     /// Request bodies being read or still held by the request that read them.
@@ -447,9 +516,10 @@ impl Viewer {
         Self::with_connection_cap(config, CONNECTION_CAP)
     }
 
-    /// The process server. Request bodies are read and freed on the `P`
-    /// workers, and every decode runs there too, under a decode permit. `P`
-    /// is 2.
+    /// The process server. Request bodies are allocated and freed on the `P`
+    /// workers, and every decode runs there too, under a decode permit. The
+    /// connection thread reads a body into the buffer a worker allocated.
+    /// `P` is 2.
     ///
     /// At most four request bodies are live. That is the coefficient of `S_max`.
     #[must_use]
@@ -497,6 +567,7 @@ impl Viewer {
                 out: AtomicUsize::new(0),
             },
             inflight: Arc::new(AtomicUsize::new(0)),
+            grey_gate: Arc::new(GreyGate::new()),
             connections: AtomicUsize::new(0),
             connection_cap: cap,
             bodies_now: AtomicUsize::new(0),
@@ -557,6 +628,7 @@ impl Viewer {
             files,
             frames,
             inflight: self.inflight.load(Ordering::Relaxed),
+            grey: self.grey_gate.held(),
             workspace,
             free,
         };
@@ -638,6 +710,16 @@ impl Viewer {
 
     pub(crate) fn inflight_counter(&self) -> Arc<AtomicUsize> {
         Arc::clone(&self.inflight)
+    }
+
+    /// The grey reply cap, shared with the decode jobs.
+    pub(crate) fn grey_gate(&self) -> Arc<GreyGate> {
+        Arc::clone(&self.grey_gate)
+    }
+
+    /// The reply stopped holding its grey.
+    pub(crate) fn release_grey(&self, len: usize) {
+        self.grey_gate.release(len);
     }
 
     pub(crate) fn enter_inflight(&self, bytes: usize) {
@@ -973,6 +1055,18 @@ impl CacheHandle {
     /// by this decode and is not shared with the cache.
     pub(crate) fn claim_sample_buffer(&self, len: usize) -> Vec<u8> {
         lock_mutex(&self.inner).claim_buffer(len)
+    }
+
+    /// A parked free buffer of `len` bytes, for a decode that stores no frame.
+    ///
+    /// This is a pop from the free list and nothing else. It never steals a
+    /// cached frame and never evicts, because the caller's frame is never
+    /// stored and no room is needed for it. An empty buffer means the caller
+    /// allocates.
+    pub(crate) fn claim_parked_buffer(&self, len: usize) -> Vec<u8> {
+        let mut state = lock_mutex(&self.inner);
+        state.drain_recycled();
+        state.pop_free(len).unwrap_or_default()
     }
 
     pub(crate) fn recycle_sample_buffer(&self, buffer: Vec<u8>) {

@@ -1,9 +1,12 @@
 //! A client that stops reading holds no decode permit.
 //!
-//! One client requests a large grey and never reads it. Six previews of the
-//! same frame must still answer. On the tree before F-216 pass 4 remediation
-//! the permit came back only after the reply was written, so the six waited
-//! for the stalled write.
+//! Two clients request the same large grey and never read it, one per
+//! decode worker: the second falls back to the other worker because the
+//! first holds its home through the stalled write. Six previews of a frame
+//! whose grey is larger still must all answer. On the tree before F-216
+//! pass 4 remediation the permit came back only after the reply was
+//! written, so with two stalled readers both workers stayed held and the
+//! six waited for the stalled writes.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -12,8 +15,14 @@ use std::time::{Duration, Instant};
 
 use ocelli_folder_viewer::{FrameRequest, Viewer, ViewerConfig, preview_frame, serve_on};
 
-const ROWS: u16 = 3000;
-const COLUMNS: u16 = 2900;
+/// One stalled grey is 8.7 MB, past two socket buffers, so its write blocks.
+const STALL_ROWS: u16 = 3000;
+const STALL_COLUMNS: u16 = 2900;
+/// The six answers carry a grey twice that size. Beside the two stalled
+/// greys, one of these still fits the grey cap's second slot, and the rest
+/// follow as each written reply frees its grey.
+const SIX_ROWS: u16 = 3000;
+const SIX_COLUMNS: u16 = 5800;
 /// Answers must arrive well inside the stalled write's own bound.
 const DEADLINE: Duration = Duration::from_secs(5);
 
@@ -59,7 +68,7 @@ fn long(group: u16, element: u16, vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, 
     Ok(bytes)
 }
 
-fn large_part10() -> Result<Vec<u8>, String> {
+fn large_part10(rows: u16, columns: u16) -> Result<Vec<u8>, String> {
     let mut meta = Vec::new();
     meta.extend(long(0x0002, 0x0001, *b"OB", &[0, 1])?);
     meta.extend(short(
@@ -93,8 +102,8 @@ fn large_part10() -> Result<Vec<u8>, String> {
     data.extend(short(0x0008, 0x0060, *b"CS", &text_pad(b"CT"))?);
     data.extend(short(0x0028, 0x0002, *b"US", &1_u16.to_le_bytes())?);
     data.extend(short(0x0028, 0x0004, *b"CS", &text_pad(b"MONOCHROME2"))?);
-    data.extend(short(0x0028, 0x0010, *b"US", &ROWS.to_le_bytes())?);
-    data.extend(short(0x0028, 0x0011, *b"US", &COLUMNS.to_le_bytes())?);
+    data.extend(short(0x0028, 0x0010, *b"US", &rows.to_le_bytes())?);
+    data.extend(short(0x0028, 0x0011, *b"US", &columns.to_le_bytes())?);
     data.extend(short(0x0028, 0x0100, *b"US", &16_u16.to_le_bytes())?);
     data.extend(short(0x0028, 0x0101, *b"US", &16_u16.to_le_bytes())?);
     data.extend(short(0x0028, 0x0102, *b"US", &15_u16.to_le_bytes())?);
@@ -104,7 +113,7 @@ fn large_part10() -> Result<Vec<u8>, String> {
     data.extend(short(0x0028, 0x1052, *b"DS", &text_pad(b"0"))?);
     data.extend(short(0x0028, 0x1053, *b"DS", &text_pad(b"1"))?);
     data.extend(short(0x0028, 0x1056, *b"CS", &text_pad(b"LINEAR"))?);
-    let pixels = vec![50_u8; usize::from(ROWS) * usize::from(COLUMNS) * 2];
+    let pixels = vec![50_u8; usize::from(rows) * usize::from(columns) * 2];
     data.extend(long(0x7FE0, 0x0010, *b"OW", &pixels)?);
     bytes.extend_from_slice(&data);
     Ok(bytes)
@@ -151,61 +160,116 @@ fn status_is(response: &[u8], status: u16) -> bool {
     response.starts_with(format!("HTTP/1.1 {status} ").as_bytes())
 }
 
+fn header_value(response: &[u8], name: &str) -> Option<String> {
+    let text = String::from_utf8_lossy(response);
+    text.lines()
+        .find_map(|line| line.strip_prefix(name))
+        .map(|value| value.trim().to_owned())
+}
+
 #[test]
 fn a_reader_that_stops_does_not_hold_the_decode_permit() -> Result<(), String> {
-    let file = large_part10()?;
-    let fresh = preview_frame(&file, FrameRequest::default())
-        .map_err(|error| format!("the large file did not decode: {error}"))?;
-    let grey_len = fresh.grey.len();
-    // macOS autotunes one socket's buffers to about 4 MiB, so the reply must
-    // be larger than two socket buffers can hold for the write to block.
-    if grey_len <= 8 * 1024 * 1024 {
-        return Err(format!("the grey was only {grey_len} bytes"));
+    let stall_file = large_part10(STALL_ROWS, STALL_COLUMNS)?;
+    let six_file = large_part10(SIX_ROWS, SIX_COLUMNS)?;
+    let stall_grey = preview_frame(&stall_file, FrameRequest::default())
+        .map_err(|error| format!("the stall file did not decode: {error}"))?
+        .grey
+        .len();
+    let six_grey = preview_frame(&six_file, FrameRequest::default())
+        .map_err(|error| format!("the six file did not decode: {error}"))?
+        .grey
+        .len();
+    // macOS autotunes one socket's buffers to about 4 MiB, so a stalled
+    // reply must be larger than two socket buffers can hold for the write
+    // to block.
+    if stall_grey <= 8 * 1024 * 1024 {
+        return Err(format!("the stall grey was only {stall_grey} bytes"));
+    }
+
+    // The six grey must be at least twice the stalled grey, so that beside
+    // the two stalled greys one six grey still fits the cap's second slot.
+    if six_grey < 2 * stall_grey {
+        return Err(format!(
+            "the six grey was {six_grey} against a stalled grey of {stall_grey}"
+        ));
     }
 
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
     let addr = listener.local_addr().map_err(|error| error.to_string())?;
     let viewer = Arc::new(Viewer::server(ViewerConfig {
-        cache_bytes: 64 * 1024 * 1024,
+        cache_bytes: 128 * 1024 * 1024,
     }));
     let serving = Arc::clone(&viewer);
     std::thread::spawn(move || {
         let _ = serve_on(listener, serving);
     });
 
-    let file_post_headers = format!(
-        "POST /file HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        file.len()
-    );
-    let posted = post(addr, &file_post_headers, &file, "the file post")?;
+    let post_headers = |file: &[u8]| {
+        format!(
+            "POST /file HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            file.len()
+        )
+    };
+    let preview_headers = |id: &str| {
+        format!(
+            "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+    };
+    let posted = post(
+        addr,
+        &post_headers(&stall_file),
+        &stall_file,
+        "the stall post",
+    )?;
     if !status_is(&posted, 200) {
-        return Err("the file was not accepted".to_owned());
+        return Err("the stall file was not accepted".to_owned());
     }
     let header_text = String::from_utf8_lossy(&posted).into_owned();
-    let id = header_text
+    let stall_id = header_text
         .split("\r\n")
         .find_map(|line| line.strip_prefix("X-Ocelli-File: "))
-        .ok_or("the file id was missing")?
+        .ok_or("the stall file id was missing")?
         .trim()
         .to_owned();
+    let posted_six = post(addr, &post_headers(&six_file), &six_file, "the six post")?;
+    if !status_is(&posted_six, 200) {
+        return Err("the six file was not accepted".to_owned());
+    }
+    let six_id =
+        header_value(&posted_six, "X-Ocelli-File: ").ok_or("the six file id was missing")?;
 
-    // One client asks for the grey and never reads the reply. The decode
-    // finishes and the write blocks.
-    let stall_headers = format!(
-        "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-    );
-    let stall = TcpStream::connect(addr).map_err(|error| error.to_string())?;
-    let mut stall = stall;
-    stall
-        .write_all(stall_headers.as_bytes())
-        .map_err(|error| error.to_string())?;
-    // The stalled socket is never read from.
-    std::thread::sleep(Duration::from_millis(2000));
+    // Decode the six frame once, so the six later previews are renders and
+    // not six debug decodes of a 34.8 MB frame.
+    let warm = post(
+        addr,
+        &preview_headers(&six_id),
+        &[],
+        "the six frame warm-up",
+    )?;
+    if !status_is(&warm, 200) {
+        return Err("the six frame warm-up did not answer".to_owned());
+    }
 
-    // Six previews of the same frame must all answer within the deadline.
+    // Two clients ask for the stall grey and never read. The first decode
+    // lands on its home worker; the second falls back to the other, so one
+    // stalled write sits on each worker.
+    let stall_headers = preview_headers(&stall_id);
+    let mut stalls = Vec::new();
+    for _ in 0..2 {
+        let mut stall = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+        stall
+            .write_all(stall_headers.as_bytes())
+            .map_err(|error| error.to_string())?;
+        stalls.push(stall);
+        // The stalled sockets are never read from.
+        std::thread::sleep(Duration::from_millis(2000));
+    }
+
+    // Six previews of the larger frame must all answer within the deadline.
+    let six_headers = preview_headers(&six_id);
     let mut readers = Vec::new();
     for index in 0..6 {
-        let headers = stall_headers.clone();
+        let headers = six_headers.clone();
         readers.push(std::thread::spawn(move || {
             let started = Instant::now();
             let reply = post(addr, &headers, &[], &format!("preview {index}"))?;
@@ -234,8 +298,8 @@ fn a_reader_that_stops_does_not_hold_the_decode_permit() -> Result<(), String> {
             Err(_) => failures.push(format!("preview {index} thread panicked")),
         }
     }
-    // The stalled client is closed only after the others have been judged.
-    drop(stall);
+    // The stalled clients are closed only after the others have been judged.
+    drop(stalls);
     if let Some(first) = failures.first() {
         return Err(first.clone());
     }

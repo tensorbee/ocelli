@@ -482,3 +482,11 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 
 - **A body-form preview never evicts or steals.** Its decode takes a free buffer of the right length when one is parked, and otherwise allocates. It never evicts a cached entry or steals a cached frame, because its frame is never stored.
 - **Grey reply bytes are bounded by a cap, not by the permits.** Grey bytes held by replies that are not yet written count against one fixed cap equal to the formula's existing grey term. A preview whose grey would exceed it waits for capacity, up to the write timeout, then answers `503 busy`. The bound and its formula do not change.
+
+### Lead rulings on the pass 5 remediation
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, on questions the implementer raised.
+
+- **The grey cap is `PERMITS` times the largest grey admitted so far.** That is the formula's `P * N_max` with `N_max` taken from frames actually seen, never above the design `N_max`, so the bound holds.
+- **Each worker's one returned grey buffer counts under the per-permit term.** The cap governs grey bytes held by unwritten replies. The returned buffer per worker is the existing per-permit allowance of the formula.
+- **A waiting body-form preview keeps its body slot.** With four such waiters, a `/file` post can wait up to the 60 s write timeout. This is accepted degradation under a client that stops reading, and the user documents say so.
