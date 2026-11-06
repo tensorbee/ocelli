@@ -210,7 +210,9 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    back to a series restores the image you left. With one viewport there is
    no outline.
 4. Drag a series row onto a viewport to open it there, or click or
-   double-click a row to open it in the outlined viewport. Opening a folder
+   double-click a row to open it in the outlined viewport. A click on the
+   series already open there starts its window and fit again, and a drop of
+   that series keeps its view. Opening a folder
    puts the series with the most images in the first viewport and the next
    series in list order into each other viewport. A viewport with no series
    reads "Drag a series here."

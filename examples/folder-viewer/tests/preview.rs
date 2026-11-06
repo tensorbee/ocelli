@@ -414,10 +414,49 @@ fn the_page_has_viewport_cells() -> Result<(), String> {
             return Err(format!("the layout keys are not bound: {needle}"));
         }
     }
-    for bound in ["\"1\": \"grid-1\"", "\"2\": \"grid-2\""] {
-        if page.contains(bound) {
-            return Err(format!("a digit still chooses a layout: {bound}"));
+    // The two key maps in `onKey` are object literals on one line each. No
+    // bare digit may be a key in either, so no digit reaches a layout, the
+    // tile mode or any other control.
+    for map in ["const clicks = {", "const map = {"] {
+        let at = page
+            .find(map)
+            .ok_or_else(|| format!("the page has no key map {map}"))?;
+        let literal = page
+            .get(at..)
+            .and_then(|rest| rest.find("};").and_then(|end| rest.get(..end)))
+            .ok_or_else(|| format!("the key map {map} does not close"))?;
+        for digit in '0'..='9' {
+            for key in [
+                format!("\"{digit}\":"),
+                format!("'{digit}':"),
+                format!(" {digit}:"),
+            ] {
+                if literal.contains(&key) {
+                    return Err(format!("a digit is bound in {map}: {key}"));
+                }
+            }
         }
+    }
+    // `0` stays Fit. No branch of `onKey` tests a digit from 1 to 9.
+    let key_at = page
+        .find("function onKey(event) {")
+        .ok_or_else(|| "the page has no key handler".to_owned())?;
+    let handler = page
+        .get(key_at..)
+        .and_then(|rest| rest.find("\n}\n").and_then(|end| rest.get(..end)))
+        .ok_or_else(|| "the key handler does not close".to_owned())?;
+    for digit in '1'..='9' {
+        let branch = format!("event.key === \"{digit}\"");
+        if handler.contains(&branch) {
+            return Err(format!("a digit is bound in onKey: {branch}"));
+        }
+    }
+    // AC4. A cell accepts a drag only when it carries the series type, on
+    // both the dragover and the drop.
+    if !page.contains("return types.includes(SERIES_TYPE);")
+        || page.matches("if (!carriesSeries(event)) return;").count() != 2
+    {
+        return Err("a cell accepts a drag without the series type".to_owned());
     }
     Ok(())
 }

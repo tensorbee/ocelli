@@ -1734,15 +1734,12 @@ function greyAspect(facts) {
 }
 
 // Opens a series in one viewport at the image last shown for that series.
-// The viewport's fit, window and preset start again. A viewport already
-// showing that series keeps its image and view.
+// The viewport's fit, window and preset start again, as a click on the open
+// series row did before viewports. Only a drop keeps the view of a viewport
+// that already shows the series, which `onCellDrop` decides.
 function loadSeries(vp, key) {
   const series = seriesByKey.get(key);
   if (!vp || !series) return;
-  if (vp.seriesKey === key) {
-    syncSeriesRows();
-    return;
-  }
   if (vp.cell === activeCell) {
     stopPlay();
     selected = null;
@@ -1865,8 +1862,10 @@ async function showIndex(vp, next) {
       selected = null;
       cancelDraft();
     }
-    resetValue();
-    paintValue();
+    if (valueState.cell === vp.cell) {
+      resetValue();
+      paintValue();
+    }
   }
   vp.liveToken += 1;
   if (vp.tileMode && !gridAllowed(vp)) setTileMode(vp, false, true);
@@ -3090,6 +3089,9 @@ function tilePoint(node, event) {
 // reply is shown only for the cell and the image it was asked for.
 const valueState = {
   generation: 0,
+  // The viewport the readout is for. Another viewport changing its image
+  // leaves this readout alone.
+  cell: -1,
   key: "",
   base: "",
   busy: false,
@@ -3120,9 +3122,10 @@ function requestValue(vp, point, column, row) {
   const image = currentImage(vp);
   if (!image || !image.info.monochrome) return;
   const key = noteKey(image);
-  if (valueState.key !== key) {
+  if (valueState.key !== key || valueState.cell !== vp.cell) {
     resetValue();
     valueState.key = key;
+    valueState.cell = vp.cell;
   }
   valueState.column = column;
   valueState.row = row;
@@ -4344,6 +4347,11 @@ function onCellDrop(vp, event) {
   const key = event.dataTransfer.getData(SERIES_TYPE);
   if (!seriesByKey.has(key) || !cellShown(vp)) return;
   setActive(vp.cell);
+  // Dropping the series a viewport already shows keeps its image and view.
+  if (vp.seriesKey === key) {
+    syncSeriesRows();
+    return;
+  }
   loadSeries(vp, key);
 }
 

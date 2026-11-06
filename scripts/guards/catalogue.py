@@ -739,6 +739,14 @@ def _aspect_check_accepts_any_ratio(box: Sandbox) -> None:
     )
 
 
+def _aspect_check_accepts_no_canvas(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/aspect.mjs",
+        "  if (!Array.isArray(readings) || readings.length === 0) {",
+        "  if (false) {",
+    )
+
+
 def _missing_packaged_apache_licence(box: Sandbox) -> None:
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
     _write_packaged_licences(box, omit="LICENSE-APACHE")
@@ -13303,9 +13311,25 @@ GUARDS: tuple[Guard, ...] = (
                 "aspect check accepted a swapped aspect",
                 level=1,
             ),
+            Probe(
+                "viewer-browser.aspect-no-canvas",
+                _aspect_check_accepts_no_canvas,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { aspectProblems } from "
+                    "'./examples/folder-viewer/tests/browser/aspect.mjs';\n"
+                    "const problems = aspectProblems([]);\n"
+                    "if (problems.includes('no canvas was measured')) "
+                    "process.exit(0);\n"
+                    "console.error('aspect check accepted a run with no "
+                    "canvas'); process.exit(1);",
+                ),
+                "aspect check accepted a run with no canvas",
+                level=1,
+            ),
         ),
-        limit="The probe drives the ratio check with the swapped spacing "
-              "reading. The measurement itself needs Chromium and a release "
+        limit="The probes drive the ratio check with the swapped spacing "
+              "reading and the empty-run check with no reading. The measurement itself needs Chromium and a release "
               "build of the viewer, which a disposable sandbox does not have, "
               "so the browser half is watched by the `viewer-browser` gate "
               "and its CI job rather than by this harness.",
