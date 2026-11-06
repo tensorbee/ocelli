@@ -156,6 +156,11 @@ struct Spacing {
 /// the factor. Imager Pixel Spacing alone is the `detector` row, which is
 /// not a `select_calibration` source and keeps the raw pair. No spacing at
 /// all is `uncalibrated`. A present source that cannot be used refuses.
+///
+/// F-195 takes the first present source, so the inputs are read in that
+/// order and only as far as the source that is chosen. A present Pixel
+/// Spacing decides alone, and a later Imager Pixel Spacing or factor that
+/// cannot be used is never read.
 fn choose_spacing(inputs: &CalibrationInputs) -> Result<Spacing, PreviewError> {
     let pair = |input: SpacingInput| match input {
         SpacingInput::Absent => Ok(None),
@@ -163,11 +168,15 @@ fn choose_spacing(inputs: &CalibrationInputs) -> Result<Spacing, PreviewError> {
         SpacingInput::Pair { row, column } => Ok(Some(SpacingMm { row, column })),
     };
     let pixel_spacing = pair(inputs.pixel_spacing)?;
-    let imager_spacing = pair(inputs.imager_spacing)?;
-    let factor = match inputs.magnification {
-        FactorInput::Absent => None,
-        FactorInput::Unusable => return Err(PreviewError::Calibration),
-        FactorInput::Value(value) => Some(value),
+    let (imager_spacing, factor) = if pixel_spacing.is_some() {
+        (None, None)
+    } else {
+        let factor = match inputs.magnification {
+            FactorInput::Absent => None,
+            FactorInput::Unusable => return Err(PreviewError::Calibration),
+            FactorInput::Value(value) => Some(value),
+        };
+        (pair(inputs.imager_spacing)?, factor)
     };
     if pixel_spacing.is_none()
         && factor.is_none()

@@ -765,6 +765,10 @@ const MEASURE_SHAPE = {
   contour: "freeform"
 };
 const TOO_LARGE = "This region is larger than the local process measures.";
+// The local process measures a freeform of at most this many points and
+// refuses a longer one with code `points`.
+const OUTLINE_CAP = 4000;
+const OUTLINE_LONG = "This outline has more than 4000 points, so it is not measured.";
 const NAV = ["scroll", "pan", "zoom", "wl"];
 const TOOLS = NAV.concat(DRAW);
 const SENTENCE = {
@@ -3156,7 +3160,9 @@ async function askMeasure(shape, points, image) {
     if (!response.ok) {
       const code = response.headers.get("X-Ocelli-Error") || "";
       const message = await response.text();
-      return { result: null, error: code === "too-large" ? TOO_LARGE : (message || "not measured") };
+      if (code === "too-large") return { result: null, error: TOO_LARGE };
+      if (code === "points" && shape === "contour" && points.length > OUTLINE_CAP) return { result: null, error: OUTLINE_LONG };
+      return { result: null, error: message || "not measured" };
     }
     const reply = await response.json();
     if (shape === "probe") {

@@ -6,6 +6,8 @@
 //! that centre is inside the shape or on its boundary. The polygon rule is
 //! the F-085 rule of `ocelli-seg`, even-odd plus the boundary.
 
+use alloc::vec::Vec;
+
 use ocelli_core::{Index, Pt};
 
 use crate::GeomError;
@@ -228,12 +230,25 @@ fn lower_bound(extent: u32, holds: impl Fn(u32) -> bool) -> Option<u32> {
     (low < extent).then_some(low)
 }
 
-/// Whether two edges of the closed ring that share no vertex index cross.
+/// Whether the closed ring touches or crosses itself anywhere but at the
+/// shared vertex of two neighbouring edges.
 ///
 /// Edge `i` runs from vertex `i` to vertex `i + 1`, and the last edge closes
-/// the ring. A crossing is proper: each edge has the other's endpoints
-/// strictly on opposite sides, so a touch at a vertex or a collinear overlap
-/// is not one. The test is every non-adjacent pair, quadratic in the count.
+/// the ring. Zero-length edges, from a repeated consecutive vertex, are
+/// skipped, and two edges are neighbours when they are consecutive among
+/// the rest. The ring is refused when:
+///
+/// - two edges that are not neighbours share any point, a proper crossing,
+///   an edge through a vertex, a touch at a repeated vertex or a collinear
+///   overlap, or
+/// - two neighbours are collinear and fold back over each other beyond
+///   their shared vertex.
+///
+/// Neighbours that only meet at their shared vertex, including a straight
+/// continuation, are not refused. On such a ring the shoelace area and the
+/// even-odd samples describe the same region. The test is every pair of
+/// edges, quadratic in the count. It allocates one list of the edges that
+/// have a length, unlike [`region_contains`] and [`region_bounds`].
 ///
 /// # Errors
 ///
@@ -242,26 +257,86 @@ fn lower_bound(extent: u32, holds: impl Fn(u32) -> bool) -> Option<u32> {
 pub fn polygon_crosses_itself(points: &[Pt<Index>]) -> Result<bool, GeomError> {
     ring(points)?;
     let count = points.len();
-    for first in 0..count {
-        let a = point_at(points, first)?;
-        let b = point_at(points, first.saturating_add(1) % count)?;
-        for second in first.saturating_add(2)..count {
-            // The last edge shares vertex 0 with the first edge.
-            if first == 0 && second.saturating_add(1) == count {
+    // The edges that have a length, by their start index.
+    let mut edges: Vec<(Pt<Index>, Pt<Index>)> = Vec::with_capacity(count);
+    for index in 0..count {
+        let start = point_at(points, index)?;
+        let end = point_at(points, index.saturating_add(1) % count)?;
+        if !(same_number(start.x, end.x) && same_number(start.y, end.y)) {
+            edges.push((start, end));
+        }
+    }
+    let kept = edges.len();
+    if kept < 2 {
+        return Ok(false);
+    }
+    for first in 0..kept {
+        let Some(&(a, b)) = edges.get(first) else {
+            continue;
+        };
+        for second in first.saturating_add(1)..kept {
+            let Some(&(c, d)) = edges.get(second) else {
                 continue;
-            }
-            let c = point_at(points, second)?;
-            let d = point_at(points, second.saturating_add(1) % count)?;
-            let abc = orientation(a, b, c)?;
-            let abd = orientation(a, b, d)?;
-            let cda = orientation(c, d, a)?;
-            let cdb = orientation(c, d, b)?;
-            if opposite(abc, abd) && opposite(cda, cdb) {
+            };
+            let next = second == first.saturating_add(1);
+            let wraps = first == 0 && second.saturating_add(1) == kept;
+            let hit = if next {
+                // `b` is the shared vertex.
+                folds_back(a, b, d)?
+            } else if wraps {
+                // `a` is the shared vertex, the end of edge `second`.
+                folds_back(c, a, b)?
+            } else {
+                segments_touch(a, b, c, d)?
+            };
+            if hit {
                 return Ok(true);
             }
         }
     }
     Ok(false)
+}
+
+/// Whether `before -> shared -> after` turns straight back on itself.
+///
+/// Collinear, and the second edge points against the first.
+fn folds_back(before: Pt<Index>, shared: Pt<Index>, after: Pt<Index>) -> Result<bool, GeomError> {
+    if !same_number(orientation(before, shared, after)?, 0.0) {
+        return Ok(false);
+    }
+    let dot =
+        (shared.x - before.x) * (after.x - shared.x) + (shared.y - before.y) * (after.y - shared.y);
+    if !dot.is_finite() {
+        return Err(GeomError::Frame);
+    }
+    Ok(dot < 0.0)
+}
+
+/// Whether segments `a b` and `c d` share any point.
+fn segments_touch(
+    a: Pt<Index>,
+    b: Pt<Index>,
+    c: Pt<Index>,
+    d: Pt<Index>,
+) -> Result<bool, GeomError> {
+    let abc = orientation(a, b, c)?;
+    let abd = orientation(a, b, d)?;
+    let cda = orientation(c, d, a)?;
+    let cdb = orientation(c, d, b)?;
+    if opposite(abc, abd) && opposite(cda, cdb) {
+        return Ok(true);
+    }
+    Ok((same_number(abc, 0.0) && within(a, b, c))
+        || (same_number(abd, 0.0) && within(a, b, d))
+        || (same_number(cda, 0.0) && within(c, d, a))
+        || (same_number(cdb, 0.0) && within(c, d, b)))
+}
+
+/// Whether `point`, already collinear with `start` and `end`, lies between them.
+fn within(start: Pt<Index>, end: Pt<Index>, point: Pt<Index>) -> bool {
+    let (low_x, high_x) = ordered(start.x, end.x);
+    let (low_y, high_y) = ordered(start.y, end.y);
+    low_x <= point.x && point.x <= high_x && low_y <= point.y && point.y <= high_y
 }
 
 /// The sign of the turn from `a` to `b` to `c`, as the cross product.

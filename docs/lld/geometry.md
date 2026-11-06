@@ -1,7 +1,7 @@
 # Geometry
 
 **F-IDs that contributed:** F-070, F-073, F-074, F-075, F-076, F-077, F-079, F-195, F-211
-**Last updated:** 2026-11-04
+**Last updated:** 2026-11-06
 
 Hit-testing, projection and measurement in `ocelli-geom`. The HLD names the
 crate and does not give the formulas. The rules below are the local
@@ -147,12 +147,19 @@ The polygon count is checked before finiteness, as in F-085. A non-finite
 input, a non-finite edge product, or a product of two non-zero deltas that
 flushed to zero is `Frame`.
 
-`polygon_crosses_itself` tests every pair of edges that share no vertex for
-a proper crossing, where each edge has the other's endpoints strictly on
-opposite sides. A touch at a vertex and a collinear overlap are not
-crossings. The shoelace area and the even-odd samples disagree on a ring
-that crosses, which is why the folder viewer refuses one. Fewer than three
-points is `Degenerate` and a non-finite orientation is `Frame`.
+`polygon_crosses_itself` refuses a ring that touches or crosses itself
+anywhere but at the shared vertex of two neighbouring edges. Zero-length
+edges, from a repeated consecutive vertex, are skipped, and two edges are
+neighbours when they are consecutive among the rest. Two edges that are not
+neighbours are refused when they share any point: a proper crossing, an edge
+through a vertex, a touch at a repeated vertex, or a collinear overlap. Two
+neighbours are refused when they are collinear and fold back over each other
+beyond their shared vertex. A straight continuation is not refused. On a ring
+that passes, the shoelace area and the even-odd samples describe the same
+region, which is why the folder viewer refuses every other ring. The test is
+every pair of edges and allocates one list of the edges that have a length.
+Fewer than three points is `Degenerate` and a non-finite orientation is
+`Frame`.
 
 ## Polygon and spline
 

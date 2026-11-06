@@ -345,19 +345,81 @@ fn a_figure_of_eight_crosses_itself() -> Result<(), String> {
             return Err(format!("the {name} was called crossing"));
         }
     }
-    // Two edges that only touch at a vertex are not a proper crossing. The
-    // bow (0, 0), (2, 2), (4, 0), (4, 4), (2, 2), (0, 4) meets itself at
-    // (2, 2) and no two edges cross through their interiors.
-    let bow = [
+    // F-211 review pass 1, D1. Any contact between two edges that are not
+    // neighbours is a crossing, and so is a pair of neighbours that fold
+    // back over each other. Only the shared vertex of two neighbours may
+    // touch.
+    let refused: [(&str, &[Pt<Index>]); 5] = [
+        // Edge (4, 0) to (0, 4) passes through vertex (2, 2), so one
+        // orientation is 0 and the ring is still a bow-tie.
+        (
+            "an edge through a vertex",
+            &[
+                at(0.0, 0.0),
+                at(2.0, 2.0),
+                at(4.0, 4.0),
+                at(4.0, 0.0),
+                at(0.0, 4.0),
+            ],
+        ),
+        // The pinched bow meets itself at (2, 2), where edges (0, 0) to
+        // (2, 2) and (4, 4) to (2, 2) touch and are not neighbours.
+        (
+            "a touch at a repeated vertex",
+            &[
+                at(0.0, 0.0),
+                at(2.0, 2.0),
+                at(4.0, 0.0),
+                at(4.0, 4.0),
+                at(2.0, 2.0),
+                at(0.0, 4.0),
+            ],
+        ),
+        // Edge (4, 0) to (2, 0) lies along edge (0, 0) to (6, 0) and the two
+        // are not neighbours: a collinear overlap.
+        (
+            "a collinear overlap",
+            &[
+                at(0.0, 0.0),
+                at(6.0, 0.0),
+                at(6.0, 2.0),
+                at(4.0, 0.0),
+                at(2.0, 0.0),
+                at(2.0, -2.0),
+            ],
+        ),
+        // Neighbours (0, 0) to (4, 0) and (4, 0) to (2, 0) fold back over
+        // each other beyond their shared vertex. Edge (2, 0) to (2, 3) also
+        // starts on edge (0, 0) to (4, 0), a non-neighbour touch.
+        (
+            "neighbours that fold back",
+            &[at(0.0, 0.0), at(4.0, 0.0), at(2.0, 0.0), at(2.0, 3.0)],
+        ),
+        // A flat ring of three collinear points has three edges and every
+        // pair is neighbours, so only the fold rule can refuse it. Its
+        // shoelace area is 0 while the even-odd rule keeps the samples on
+        // the line from (0, 0) to (4, 0).
+        (
+            "a flat ring that folds back",
+            &[at(0.0, 0.0), at(4.0, 0.0), at(2.0, 0.0)],
+        ),
+    ];
+    for (name, ring) in refused {
+        if polygon_crosses_itself(ring) != Ok(true) {
+            return Err(format!("{name} was not refused"));
+        }
+    }
+    // Neighbours that continue in a straight line touch only at the shared
+    // vertex: (0, 0), (2, 0), (4, 0), (4, 4), (0, 4) is a simple square.
+    let straight = [
         at(0.0, 0.0),
-        at(2.0, 2.0),
+        at(2.0, 0.0),
         at(4.0, 0.0),
         at(4.0, 4.0),
-        at(2.0, 2.0),
         at(0.0, 4.0),
     ];
-    if polygon_crosses_itself(&bow) != Ok(false) {
-        return Err("a touch at a vertex was called a crossing".to_owned());
+    if polygon_crosses_itself(&straight) != Ok(false) {
+        return Err("a straight run of neighbours was called crossing".to_owned());
     }
     let two = [at(0.0, 0.0), at(1.0, 0.0)];
     if polygon_crosses_itself(&two) != Err(GeomError::Degenerate) {

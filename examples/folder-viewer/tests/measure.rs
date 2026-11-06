@@ -541,6 +541,32 @@ fn measure_calibration_provenance() -> Result<(), String> {
             name,
         )?;
     }
+    // F-211 review pass 1, D2. F-195 takes the first present source. A
+    // usable Pixel Spacing 0.5\0.5 is chosen, so a later source that cannot
+    // be used is never read and cannot refuse it. Four columns are
+    // 4 * 0.5 = 2.0 mm.
+    for (name, file) in [
+        (
+            "an unusable factor after Pixel Spacing",
+            spaced(&[
+                (PIXEL_SPACING, "0.5\\0.5"),
+                (IMAGER_SPACING, "0.2\\0.2"),
+                (MAGNIFICATION, "two"),
+            ])?,
+        ),
+        (
+            "a one-value imager pair after Pixel Spacing",
+            spaced(&[(PIXEL_SPACING, "0.5\\0.5"), (IMAGER_SPACING, "0.2")])?,
+        ),
+    ] {
+        let json = measured(&file, MeasureShape::Length, &segment, name)?;
+        contains(
+            &json,
+            "\"calibration\":{\"source\":\"pixel-spacing\",\"row_mm\":0.5,\"column_mm\":0.5}",
+            name,
+        )?;
+        contains(&json, "\"text\":\"2.0 mm\"", name)?;
+    }
     if PreviewError::Calibration.code() != "calibration" {
         return Err("the calibration refusal has the wrong code".to_owned());
     }
@@ -613,6 +639,23 @@ fn measure_refuses_a_crossing_outline() -> Result<(), String> {
     {
         return Err("the crossing refusal has the wrong code or sentence".to_owned());
     }
+    // F-211 review pass 1, D1. Index (0, 0), (2, 2), (4, 4), (4, 0),
+    // (0, 4): the edge (4, 0) to (0, 4) passes through the vertex (2, 2).
+    // Its shoelace area is 0 while the even-odd rule keeps 17 samples, so it
+    // is refused like any other crossing.
+    expect_refusal(
+        &file,
+        MeasureShape::Freeform,
+        &[
+            at(0.5, 0.5),
+            at(2.5, 2.5),
+            at(4.5, 4.5),
+            at(4.5, 0.5),
+            at(0.5, 4.5),
+        ],
+        PreviewError::SelfIntersecting,
+        "an edge through a vertex",
+    )?;
     // The convex square through the same corners in ring order is measured.
     // Index (0, 0) to (4, 4) holds all 25 samples, area 16 px².
     let json = measured(
