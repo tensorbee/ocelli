@@ -50,11 +50,11 @@ nothing to notice. Reading it once makes `used` the sum of the live entries'
 admitted bytes, which `tests/invariants.rs` asserts after every operation of a
 random sequence.
 
-Three unit tests hold that down with a value that reports a different size after
-admission, one for each place bytes are given back: `remove`, an eviction, and
-the replacement of a live key. They exist because every other value in the suite
-is immutable, so no number of random cases can tell a cache that kept the
-admitted number from one that re-reads it.
+Four unit tests hold that down with a value that reports a different size after
+admission, one for each place bytes are given back: `remove`, an eviction, the
+replacement of a live key, and `remove_range`. They exist because every other
+value in the suite is immutable, so no number of random cases can tell a cache
+that kept the admitted number from one that re-reads it.
 
 ## What `insert` returns, and why it is not section 20's vector
 
@@ -162,11 +162,15 @@ the evictions in least recently used order. `release_series` adds `Released`.
 **The four variants are never collapsed.**
 
 `CacheEvent::encode` writes the event into section 17.3's `RingEvent`: kind
-1, 2 and 3 for evicted, displaced and refused, `viewport` as `u32::MAX`
-because an eviction belongs to no viewport and zero is a valid viewport id,
-and a payload of series, instance, frame and bytes, little-endian, with the
-last eight bytes reserved and zero. The numbers are the wire contract until
-F-103 decides whether event kinds get a registry, so a test pins each one.
+1, 2 and 3 for evicted, displaced and refused and kind 7 for a released
+series, `viewport` as `u32::MAX` because an eviction belongs to no viewport
+and zero is a valid viewport id, and a payload that is little-endian with
+the last eight bytes reserved and zero. Kinds 1, 2 and 3 carry the series
+as `u64`, the instance and the frame as `u32` and the bytes as `u64`. Kind
+7 carries the series as `u64`, `frames` as `u32`, a zero `u32` where the
+frame sits, and the bytes as `u64`, so every kind keeps `bytes` at offset
+16. The numbers are the wire contract until F-103 decides whether event
+kinds get a registry, so a test pins each one.
 
 **This crate still does not own a ring and still does not reach JavaScript.**
 F-101's `EventRing` lives in `ocelli-viewport` and reuses this `RingEvent`
@@ -280,9 +284,11 @@ HLD section 20's first bullet forbids allocation in the render loop, and its own
 not a render-loop call.** Insertion happens on the decode and upload paths, and
 the render loop's cache interaction is `get`.
 
-**`insert` and `set_budget` are the methods on `Lru` that allocate.** A shrink
-allocates when it pushes an eviction. A grow and a repeated budget push
-nothing. The other methods do not build a `Vec`.
+**`insert`, `set_budget` and `remove_range` are the methods on `Lru` that
+allocate.** A shrink allocates when it pushes an eviction. A grow and a
+repeated budget push nothing. `remove_range` builds the key collection and
+the pairs it returns, which is why it is a release call and not a
+render-loop call. The remaining methods do not build a `Vec`.
 
 **`insert` can allocate**, and the doc comment on it says so, because the
 sentence a later story needs is the one that stops it calling this per frame.

@@ -355,9 +355,8 @@ impl CacheEvent {
 /// The events one `ImageCache::insert` or `ImageCache::release_series`
 /// produced, in the order they happened.
 ///
-/// Built on the insert and release paths, which are decode-path calls and not
-/// render-loop calls, so building this value allocates as `Lru::insert` already
-/// does.
+/// Built on the insert and release paths, which are not render-loop calls, so
+/// building this value allocates as `Lru::insert` already does.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CacheEvents {
     events: Vec<CacheEvent>,

@@ -386,11 +386,14 @@ fn one_insert_can_displace_and_evict_with_displaced_first() -> Result<(), ocelli
 
 #[test]
 fn release_series_releases_one_series() -> Result<(), ocelli_pixel::PixelError> {
-    // The state table's first three rows, hand-computed. Series 5 holds
-    // five frames of 32 bytes at (5, 0, 0), (5, 1, 0), (5, 2, 0), (5, 3, 0)
-    // and (5, u32::MAX, u32::MAX), and series 6 holds one, so 6 * 32 = 192
-    // fills a 192-byte budget. The release takes series 5's 5 * 32 = 160
-    // and leaves series 6's 32.
+    // The state table's first three rows plus a frame at each end of the
+    // series range, so the range ends are tested. Series 5 holds five
+    // frames of 32 bytes at (5, 0, 0), (5, 1, 0), (5, 2, 0), (5, 3, 0) and
+    // (5, u32::MAX, u32::MAX), the outer two being the range's own end
+    // keys, and series 6 holds one, so 6 * 32 = 192 fills a 192-byte
+    // budget. The expected frames and bytes are this fixture's,
+    // hand-computed, and not the state table's figures: the release takes
+    // series 5's 5 * 32 = 160 and leaves series 6's 32.
     let mut cache = ImageCache::new(192);
     assert!(
         cache

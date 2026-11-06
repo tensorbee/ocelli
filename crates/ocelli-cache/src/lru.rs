@@ -10,10 +10,13 @@
 //! `Vec`, which are only compatible if insertion happens on the decode and
 //! upload paths. The render loop's cache interaction is `get`.
 //!
-//! **`insert` and `set_budget` are the methods here that allocate.** A shrink
-//! pushes one eviction at a time onto the returned `Admission`, which is the
-//! same allocation `insert` already makes, and a grow or a no-op pushes
-//! nothing. `docs/lld/cache.md` carries the measurement for `insert`.
+//! **`insert`, `set_budget` and `remove_range` are the methods here that
+//! allocate.** A shrink pushes one eviction at a time onto the returned
+//! `Admission`, which is the same allocation `insert` already makes, and a
+//! grow or a no-op pushes nothing. A range release builds the key collection
+//! and the pairs it returns, which is why it is a release call and not a
+//! render-loop call. `docs/lld/cache.md` carries the measurement for
+//! `insert`.
 
 use core::ops::Bound;
 
@@ -396,6 +399,8 @@ impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use core::cell::Cell;
     use core::ops::Bound;
 
@@ -417,7 +422,7 @@ mod tests {
     /// A value that reports a different size after admission, which is the case
     /// `Entry::bytes` exists to survive. Nothing in this crate can stop a `V`
     /// doing this, so the cache reads `bytes` once and keeps the number, and
-    /// the three tests below check each site that gives bytes back.
+    /// the four tests below check each site that gives bytes back.
     struct Shifting(Cell<usize>);
 
     impl Budgeted for Shifting {
@@ -604,6 +609,30 @@ mod tests {
     }
 
     #[test]
+    fn remove_range_releases_the_bytes_admitted_and_not_the_bytes_reported_now() {
+        let mut cache: Lru<&str, Shifting> = Lru::new(CacheTier::Decoded, BUDGET);
+        let admission = cache.insert("a", Shifting::new(100));
+        assert!(admission.refused.is_none());
+        let admission = cache.insert("b", Shifting::new(100));
+        assert!(admission.refused.is_none());
+        assert_eq!(cache.pressure().used, 200);
+
+        // "a" now says 250 where it was admitted at 100. The budget is kept in
+        // what it was admitted at, so nothing moves until it leaves. The
+        // restatement is asserted, because a fixture that quietly failed to
+        // change anything would make this test pass against either behaviour.
+        assert!(restate(&mut cache, "a", 250));
+        assert_eq!(cache.get(&"a").map(Budgeted::bytes), Some(250));
+        assert_eq!(cache.pressure().used, 200);
+
+        // The range release gives back the admitted 100 and not the 250 the
+        // value reports now. Re-reading would saturate `used` to zero and
+        // leave the survivor unaccounted for.
+        assert_eq!(cache.remove_range("a"..="a").len(), 1);
+        assert_eq!(cache.pressure().used, 100);
+    }
+
+    #[test]
     fn contains_key_is_not_a_use() {
         let mut cache = filled();
 
@@ -729,6 +758,55 @@ mod tests {
         assert_eq!(cache.len(), 2);
         assert!(cache.contains_key(&3));
         assert!(cache.contains_key(&4));
+    }
+
+    #[test]
+    fn a_release_over_every_bound_shape_returns_exactly_the_keys_named() {
+        // Every `Bound` pair that can name keys, with the keys each range
+        // holds written out from the bounds alone against live keys 1 to 6.
+        // Each row runs on a fresh cache, so one release cannot colour the
+        // next. The adjacent excluded pair names nothing, and the equal
+        // excluded and inverted shapes are the empty cases the test above
+        // covers.
+        let shapes: &[(Bound<u8>, Bound<u8>, &[u8])] = &[
+            (Bound::Included(3), Bound::Included(3), &[3]),
+            (Bound::Included(2), Bound::Excluded(4), &[2, 3]),
+            (Bound::Excluded(2), Bound::Included(4), &[3, 4]),
+            (Bound::Excluded(2), Bound::Excluded(4), &[3]),
+            (Bound::Included(3), Bound::Excluded(4), &[3]),
+            (Bound::Excluded(3), Bound::Included(4), &[4]),
+            (Bound::Excluded(3), Bound::Excluded(4), &[]),
+            (Bound::Unbounded, Bound::Unbounded, &[1, 2, 3, 4, 5, 6]),
+            (Bound::Unbounded, Bound::Included(4), &[1, 2, 3, 4]),
+            (Bound::Included(3), Bound::Unbounded, &[3, 4, 5, 6]),
+            (Bound::Unbounded, Bound::Excluded(4), &[1, 2, 3]),
+            (Bound::Excluded(3), Bound::Unbounded, &[4, 5, 6]),
+        ];
+        for &(start, end, expected) in shapes {
+            let mut cache: Lru<u8, Block> = Lru::new(CacheTier::Decoded, 1000);
+            for key in 1_u8..=6 {
+                let admission = cache.insert(key, Block(100));
+                assert!(admission.evicted.is_empty());
+            }
+            assert_eq!(cache.pressure().used, 600);
+
+            let released = cache.remove_range((start, end));
+            let keys: Vec<u8> = released.iter().map(|(key, _)| *key).collect();
+            assert_eq!(keys, expected, "bounds {start:?}..{end:?}");
+            assert_eq!(
+                cache.pressure().used,
+                100 * (6 - expected.len()),
+                "bounds {start:?}..{end:?}"
+            );
+            assert_eq!(cache.len(), 6 - expected.len());
+            for key in 1_u8..=6 {
+                assert_eq!(
+                    cache.contains_key(&key),
+                    !expected.contains(&key),
+                    "bounds {start:?}..{end:?} after the release"
+                );
+            }
+        }
     }
 
     #[test]

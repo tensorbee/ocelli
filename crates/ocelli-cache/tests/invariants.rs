@@ -35,8 +35,9 @@ enum Op {
     Get(u8),
     Remove(u8),
     /// Release every key between the two bounds, inclusive. The bounds are
-    /// drawn unsorted, so an inverted range reaches the cache and must come
-    /// back as an empty release.
+    /// drawn unsorted, so an inverted range reaches the cache, and the arm
+    /// asserts the keys returned are the model's live keys inside the
+    /// bounds, none for an inverted draw.
     RemoveRange(u8, u8),
     /// Move the budget. The model tracks the caller's last word.
     SetBudget(u16),
@@ -47,9 +48,10 @@ fn op() -> impl Strategy<Value = Op> {
         (0u8..8, 0usize..1200).prop_map(|(key, bytes)| Op::Insert(key, bytes)),
         (0u8..8).prop_map(Op::Get),
         (0u8..8).prop_map(Op::Remove),
-        // Unsorted on purpose. An inverted range must release nothing and
-        // change nothing, and a range over absent keys removes nothing, so
-        // both reach the cache the way a caller's computed range would.
+        // Unsorted on purpose. An inverted range reaches the cache the way
+        // a caller's computed range would, and the arm below asserts the
+        // release returns exactly the model's live keys inside the bounds,
+        // which is none for an inverted draw.
         (0u8..8, 0u8..8).prop_map(|(lo, hi)| Op::RemoveRange(lo, hi)),
         (0u16..2000).prop_map(Op::SetBudget),
     ]
@@ -57,9 +59,10 @@ fn op() -> impl Strategy<Value = Op> {
 
 proptest! {
     /// `used` is the sum of the live entries' admitted bytes, and it never
-    /// exceeds the budget. A range removal reports each key at the bytes the
-    /// model held for it, exactly once, so a double release goes red here
-    /// against the accounting as well.
+    /// exceeds the budget. A range removal reports exactly the model's live
+    /// keys inside its bounds, each at the bytes the model held for it, so a
+    /// range judged empty that holds keys and a double release both go red
+    /// here.
     #[test]
     fn used_is_the_sum_of_the_live_entries_and_never_exceeds_the_budget(
         budget in 0usize..2000,
@@ -90,7 +93,19 @@ proptest! {
                     }
                 }
                 Op::RemoveRange(lo, hi) => {
-                    for (removed_key, block) in cache.remove_range(lo..=hi) {
+                    // The keys the release must report, from the model alone
+                    // and not from `BTreeMap::range`, so a range judged empty
+                    // that holds keys cannot agree with itself. An inverted
+                    // draw expects none.
+                    let expected: Vec<u8> = live
+                        .keys()
+                        .copied()
+                        .filter(|key| *key >= lo && *key <= hi)
+                        .collect();
+                    let released = cache.remove_range(lo..=hi);
+                    let returned: Vec<u8> = released.iter().map(|(key, _)| *key).collect();
+                    prop_assert_eq!(returned, expected);
+                    for (removed_key, block) in released {
                         prop_assert_eq!(live.get(&removed_key).copied(), Some(block.bytes));
                         live.remove(&removed_key);
                     }
@@ -166,7 +181,19 @@ proptest! {
                     prop_assert!(!cache.contains_key(&key));
                 }
                 Op::RemoveRange(lo, hi) => {
-                    for (removed_key, removed) in cache.remove_range(lo..=hi) {
+                    // The same model check as the property above: the keys
+                    // returned are the model's live keys inside the bounds,
+                    // computed without `BTreeMap::range`, none for an
+                    // inverted draw.
+                    let expected: Vec<u8> = live
+                        .keys()
+                        .copied()
+                        .filter(|key| *key >= lo && *key <= hi)
+                        .collect();
+                    let released = cache.remove_range(lo..=hi);
+                    let returned: Vec<u8> = released.iter().map(|(key, _)| *key).collect();
+                    prop_assert_eq!(returned, expected);
+                    for (removed_key, removed) in released {
                         prop_assert_eq!(live.get(&removed_key).copied(), Some(removed.bytes));
                         live.remove(&removed_key);
                         prop_assert!(!cache.contains_key(&removed_key));
