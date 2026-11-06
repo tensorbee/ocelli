@@ -375,3 +375,7 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 
 - **The scanner's string rule is fixed in this story.** `scripts/unsafe_allowlist_check.py`'s string pattern must not treat a Rust string continuation as the end of a string, so code after it is scanned. A test pins it, and the fix must leave every tracked file's count unchanged.
 - **The audit's scope is a named commit.** The section names base commit `4165d1e8` rather than a merge-base command, and says that neither `ocelli-wasm` nor `ocelli-native` reaches `ocelli-codec`, so the shipped modules do not carry this closure today.
+
+### Lead rulings after review pass 8
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-229-working-pass-8.md`. The sentence naming which builds compile the closure for wasm32 is deleted, because no build passes `+simd128` to the closure's crates and step 2 of `bin/ocelli.sh native` also compiles it. The scanner's remaining blind spots, after a `'"'` character literal, a raw string holding a quote and a line comment with an unpaired quote, predate this story and change no audit count, so they leave F-229 and go to their own story with a real lexer, recorded for the operator.

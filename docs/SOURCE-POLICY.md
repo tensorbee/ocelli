@@ -406,10 +406,7 @@ reaches `ocelli-codec`, which
 `cargo tree -p ocelli-wasm -i ocelli-codec --target all` and the same command
 for `ocelli-native` both answer as a package that matches nothing in their
 graphs, and the reverse tree names `ocelli-folder-viewer` and
-`ocelli-oracle`. The closure's wasm32 compilations today are the verification
-examples of `bin/ocelli.sh native` steps 7 and 10, whose plain builds compile
-the 138 and whose `+simd128` builds the fifty more, and the oracle and
-folder-viewer consumers compile it natively. The other **346 are compiled out
+`ocelli-oracle`. The other **346 are compiled out
 of a wasm32 build**: the `x86_64` and `aarch64` specialisations,
 `brotli-decompressor`'s ffi and `unsafe`-feature code, `alloc-stdlib`'s unsafe
 allocator, the four `src/bin` files with their nine constructs, `once_cell`'s
