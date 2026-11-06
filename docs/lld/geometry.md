@@ -1,6 +1,6 @@
 # Geometry
 
-**F-IDs that contributed:** F-070, F-073, F-074, F-075, F-076, F-077, F-079, F-195
+**F-IDs that contributed:** F-070, F-073, F-074, F-075, F-076, F-077, F-079, F-195, F-211
 **Last updated:** 2026-11-04
 
 Hit-testing, projection and measurement in `ocelli-geom`. The HLD names the
@@ -10,8 +10,9 @@ decisions in `.claude/plans/F-070-design.md`,
 `.claude/plans/F-075-design.md`,
 `.claude/plans/F-076-design.md`,
 `.claude/plans/F-077-design.md` and
-`.claude/plans/F-079-design.md` and
-`.claude/plans/F-195-design.md`.
+`.claude/plans/F-079-design.md`,
+`.claude/plans/F-195-design.md` and
+`.claude/plans/F-211-design.md`.
 
 The functions take `Pt<S>`. They do not convert spaces. A canvas point is
 measured in canvas units and a world point in millimetres. The caller
@@ -114,6 +115,44 @@ time is zero. A non-finite input or a non-finite result is
 `SuvError::Unavailable` is 403. `suv_lbm`, `suv_bsa`, spacing provenance,
 length ratio and contour volume are specified in
 [calibration.md](calibration.md). `suv_bw` is unchanged.
+
+## Region inclusion
+
+`region_contains` and `region_bounds` take a `RegionShape` in index space:
+a rectangle from two corners, an axis-aligned ellipse from a centre and two
+radii, or a polygon of three or more vertices closed from the last to the
+first. `z` is ignored. Nothing is allocated.
+
+The pixel-centre rule. A sample at column `c` and row `r` has its centre at
+the index point `(c, r)`, and it belongs to the region when that centre is
+inside the shape or on its boundary. A rectangle keeps
+`min(x0, x1) <= c <= max(x0, x1)` and the same for `r`. An ellipse keeps
+`((c - cx) * ry)^2 + ((r - cy) * rx)^2 <= (rx * ry)^2`, which is
+`((c - cx) / rx)^2 + ((r - cy) / ry)^2 <= 1` for non-zero radii, written
+without a division so that half-pixel inputs tie exactly. The radii are
+absolute, as in `ellipse`. A polygon keeps a centre by the even-odd rule,
+and a centre on an edge is inside. That is the F-085 rule of
+`ocelli-seg`'s `inside_polygon`, copied here with its treatment of the two
+zeros, and `region_matches_the_f085_rule` in
+`crates/ocelli-seg/tests/contour_edit.rs` holds the two equal.
+
+`region_bounds` returns inclusive column and row bounds clipped to the grid,
+or `None` when they hold no sample. A rectangle and a polygon use their
+exact extent. An ellipse uses `cx - rx ..= cx + rx` and the same for rows,
+widened by one sample on each side, so a rounded extent never drops a
+sample `region_contains` keeps.
+
+A zero ellipse radius and a polygon under three points are `Degenerate`.
+The polygon count is checked before finiteness, as in F-085. A non-finite
+input, a non-finite edge product, or a product of two non-zero deltas that
+flushed to zero is `Frame`.
+
+`polygon_crosses_itself` tests every pair of edges that share no vertex for
+a proper crossing, where each edge has the other's endpoints strictly on
+opposite sides. A touch at a vertex and a collinear overlap are not
+crossings. The shoelace area and the even-odd samples disagree on a ring
+that crosses, which is why the folder viewer refuses one. Fewer than three
+points is `Degenerate` and a non-finite orientation is `Frame`.
 
 ## Polygon and spline
 

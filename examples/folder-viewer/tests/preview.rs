@@ -242,6 +242,54 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
             return Err(format!("the page computes a modality value: {arithmetic}"));
         }
     }
+    // F-211 AC17. The five new tools exist with their keys, every length,
+    // angle, area and statistic comes from `/measure` by file id, and a
+    // reply is kept only for the revision it was asked for.
+    for (tool, key) in [
+        ("Angle", "Q"),
+        ("Cobb", "J"),
+        ("Bidirectional", "B"),
+        ("Arrow", "U"),
+        ("Probe", "X"),
+    ] {
+        if !page.contains(&format!(">{tool}<"))
+            || !page.contains(&format!(
+                "data-key=\"{key}\"><svg class=\"i\"><use href=\"#i-"
+            ))
+        {
+            return Err(format!("the page has no {tool} tool on {key}"));
+        }
+    }
+    let measure_at = page
+        .find("fetch(\"/measure\"")
+        .ok_or_else(|| "the page does not ask for a measurement".to_owned())?;
+    let measure_call = page
+        .get(measure_at..)
+        .and_then(|rest| rest.find("});").and_then(|end| rest.get(..end)))
+        .ok_or_else(|| "the measure call does not close".to_owned())?;
+    if !measure_call.contains("\"X-Ocelli-File\": id")
+        || !measure_call.contains("body: pointsAttr(points)")
+    {
+        return Err(format!(
+            "the measure call is not by id with the points: {measure_call}"
+        ));
+    }
+    for sentence in [
+        "\"tool-rect\": \"A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. It is not saved.\"",
+        "\"tool-ellipse\": \"A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. It is not saved.\"",
+        "\"tool-contour\": \"A freehand region with at least three points. The local process reports its area and statistics. An outline that crosses itself is not measured. It is not saved.\"",
+        "\"tool-length\": \"The distance between the two points, from the local process. Millimetres from Pixel Spacing, or from Imager Pixel Spacing with a magnification factor, millimetres at the detector from Imager Pixel Spacing alone, and pixels when the file gives no spacing. It is not saved.\"",
+    ] {
+        if !page.contains(sentence) {
+            return Err(format!("the page lacks the sentence {sentence}"));
+        }
+    }
+    if page.contains("Math.hypot(dCol * facts.column") || page.contains("lengthText") {
+        return Err("the page keeps its own length formula".to_owned());
+    }
+    if !page.contains("if (!live || live.revision !== revision) return;") {
+        return Err("a measure reply is applied without the revision check".to_owned());
+    }
     // PS3.3 10.7.1.3: the first Pixel Spacing value is the row spacing, the
     // vertical distance between rows, and the second is the column spacing.
     // The display stretches x by the column spacing and y by the row spacing.

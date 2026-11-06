@@ -695,6 +695,7 @@ let mm = distance(a, b)?;
 
 let stats = roi_statistics(&amp;samples, area_mm2)?;   // count, mean, sd, min, max, area</code></pre>
     <p>The full set is <code>distance</code>, <code>length</code>, <code>polyline_length</code>, <code>height</code>, <code>angle_at</code>, <code>cobb</code>, <code>bidirectional</code>, <code>rectangle</code>, <code>circle</code>, <code>ellipse</code>, <code>polygon_area</code>, <code>spline_point</code>, <code>hit_segment</code>, <code>project_onto_segment</code> and <code>project_onto_plane</code>. Statistics are <code>roi_statistics</code> and <code>histogram</code>. PET SUV is <code>suv_bw</code>, <code>suv_lbm</code> and <code>suv_bsa</code>. Refusals are <code>GeomError</code> and <code>SuvError</code>.</p>
+    <p>Which samples a region holds is <code>region_contains</code> and <code>region_bounds</code>, over a <code>RegionShape</code> of a rectangle, an axis-aligned ellipse or a polygon in index space. A sample belongs to a region when its pixel centre, the index point <code>(c, r)</code>, is inside the shape or on its boundary, and the polygon rule is the same even-odd and on-edge rule <code>ocelli-seg</code> paints a contour with. <code>polygon_crosses_itself</code> says whether a ring crosses itself.</p>
     <p><code>livewire_path</code>, <code>livewire_mask</code> and <code>redact_rect</code> live here too.</p>
   </section>
 
