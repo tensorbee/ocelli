@@ -59,10 +59,15 @@ export const USAGE = `bin/ocelli.sh bench [options]
                          that has a runner
   --story <F-ID>         the story a re-baseline belongs to
   --why <text>           what moved, and why. Required, and not decoration
-  --tolerance <fraction> the tolerance to record with a new baseline entry
-  --tolerance-why <text> where that tolerance came from. Required with it, in
-                         the shape ci/tier-thresholds.json states per figure:
-                         measured, derived from something named, or absent
+  --tolerance <fraction> the tolerance to record with a new baseline entry, for
+                         every subject no per-subject form names. Once only
+  --tolerance <subject id>=<fraction>
+                         the tolerance for that one subject. Repeatable, once
+                         per subject, and the subject must be in this run
+  --tolerance-why <text> where those tolerances came from. Required with either
+                         form, in the shape ci/tier-thresholds.json states per
+                         figure: measured, derived from something named, or
+                         absent
   --out <dir>            where the run record goes (default tools/bench/out)
   --no-build             do not rebuild the wasm artefact first. The record is
                          then marked pre-existing and --accept refuses it
@@ -81,6 +86,7 @@ export function parseArgs(argv) {
     story: null,
     why: null,
     tolerance: null,
+    tolerances: {},
     toleranceWhy: null,
     out: DEFAULT_OUT,
     build: true,
@@ -105,14 +111,42 @@ export function parseArgs(argv) {
       case "--why": options.why = value(++index, arg); break;
       case "--tolerance": {
         const raw = value(++index, arg);
-        const parsed = Number(raw);
+        // `<subject id>=<fraction>` names one subject. A bare fraction is for
+        // every subject no per-subject form names. Subject ids carry no `=`.
+        const equals = raw.indexOf("=");
+        const subjectId = equals === -1 ? null : raw.slice(0, equals);
+        const fraction = equals === -1 ? raw : raw.slice(equals + 1);
+        if (subjectId === "") {
+          throw new Error(
+            `--tolerance ${JSON.stringify(raw)} names no subject. The ` +
+              "per-subject form is <subject id>=<fraction>.",
+          );
+        }
+        const parsed = fraction === "" ? Number.NaN : Number(fraction);
         if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1) {
           throw new Error(
             `--tolerance takes a fraction above 0 and at most 1, not ` +
               `${JSON.stringify(raw)}`,
           );
         }
-        options.tolerance = parsed;
+        if (subjectId === null) {
+          if (options.tolerance !== null) {
+            throw new Error(
+              "--tolerance takes one bare fraction. A second would silently " +
+                "replace the first. Name a subject with " +
+                "--tolerance <subject id>=<fraction> instead.",
+            );
+          }
+          options.tolerance = parsed;
+        } else {
+          if (Object.hasOwn(options.tolerances, subjectId)) {
+            throw new Error(
+              `--tolerance names ${subjectId} twice. A second would silently ` +
+                "replace the first.",
+            );
+          }
+          options.tolerances[subjectId] = parsed;
+        }
         break;
       }
       case "--tolerance-why": options.toleranceWhy = value(++index, arg); break;
@@ -134,14 +168,16 @@ export function parseArgs(argv) {
         "number readable a year later.",
     );
   }
-  if (options.tolerance !== null && !options.toleranceWhy) {
+  const anyTolerance = options.tolerance !== null ||
+    Object.keys(options.tolerances).length > 0;
+  if (anyTolerance && !options.toleranceWhy) {
     throw new Error(
       "--tolerance needs --tolerance-why. A tolerance is a derived figure " +
         "and ci/tier-thresholds.json states the provenance of each figure " +
         "separately for exactly this reason.",
     );
   }
-  if (options.toleranceWhy && options.tolerance === null) {
+  if (options.toleranceWhy && !anyTolerance) {
     throw new Error("--tolerance-why only means something with --tolerance");
   }
   if (options.accept && !options.build) {
@@ -155,6 +191,37 @@ export function parseArgs(argv) {
     throw new Error("--subject only means something with --accept");
   }
   return options;
+}
+
+/**
+ * The registry rows this run will take, refused before anything runs.
+ *
+ * A per-subject tolerance must name a subject the run records. One naming a
+ * subject outside it, or outside `--subject`, would be accepted and silently
+ * applied to nothing.
+ */
+export function resolveRun(loaded, options) {
+  let resolved = loaded;
+  if (options.only.length > 0) {
+    const known = new Set(loaded.map((row) => row.subject.id));
+    const missing = options.only.filter((id) => !known.has(id));
+    if (missing.length > 0) {
+      throw new Error(`unknown subject ${missing.join(", ")}`);
+    }
+    const wanted = new Set(options.only);
+    resolved = loaded.filter((row) => wanted.has(row.subject.id));
+  }
+  const inRun = new Set(resolved.map((row) => row.subject.id)
+    .filter((id) => options.subject === null || id === options.subject));
+  for (const id of Object.keys(options.tolerances)) {
+    if (!inRun.has(id)) {
+      throw new Error(
+        `--tolerance names ${id}, which is not in this run, so the ` +
+          "tolerance would be recorded against nothing.",
+      );
+    }
+  }
+  return resolved;
 }
 
 /** The tools the figures were taken with, compared alongside the host class. */
@@ -253,17 +320,12 @@ export async function main(argv) {
     return 0;
   }
 
-  const loaded = loadRegistry();
-  let resolved = loaded;
-  if (options.only.length > 0) {
-    const known = new Set(loaded.map((row) => row.subject.id));
-    const missing = options.only.filter((id) => !known.has(id));
-    if (missing.length > 0) {
-      process.stderr.write(`unknown subject ${missing.join(", ")}\n`);
-      return 2;
-    }
-    const wanted = new Set(options.only);
-    resolved = loaded.filter((row) => wanted.has(row.subject.id));
+  let resolved;
+  try {
+    resolved = resolveRun(loadRegistry(), options);
+  } catch (error) {
+    process.stderr.write(`${String(error?.message ?? error)}\n`);
+    return 2;
   }
 
   if (options.list) {
@@ -346,6 +408,7 @@ export async function main(argv) {
       story: options.story,
       why: options.why,
       tolerance: options.tolerance,
+      tolerances: options.tolerances,
       toleranceWhy: options.toleranceWhy,
       today: new Date().toISOString().slice(0, 10),
     });

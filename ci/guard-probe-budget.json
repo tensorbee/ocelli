@@ -263,7 +263,7 @@
     "bench.page": 2,
     "bench.record": 7,
     "bench.registry": 13,
-    "bench.runner": 9,
+    "bench.runner": 14,
     "bench.session": 16,
     "bench.session.page": 4,
     "bench.session.worker": 5,

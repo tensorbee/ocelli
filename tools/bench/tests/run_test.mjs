@@ -14,6 +14,9 @@ import { pathToFileURL } from "node:url";
 import * as command from "../run.mjs";
 import { runnerPath, repoPath } from "../src/paths.mjs";
 import { cineRate, cpuFraction, runBrowserSession } from "../src/browser_session.mjs";
+import { acceptRecord } from "../src/record.mjs";
+import { hostClassKey } from "../src/hostclass.mjs";
+import { MEASURED } from "../src/state.mjs";
 
 const ARGUMENT_REFUSALS = [
   [["--out"], /--out needs a value/],
@@ -27,6 +30,21 @@ const ARGUMENT_REFUSALS = [
     /--accept refuses --no-build/],
   [["--subject", "wasm.cold_start"],
     /--subject only means something with --accept/],
+  // The per-subject form, `--tolerance <subject id>=<fraction>`. A malformed
+  // value, a duplicate and a second bare form are refused before any run.
+  [["--tolerance", "viewer.open=zero", "--tolerance-why", "x"],
+    /takes a fraction above 0 and at most 1/],
+  [["--tolerance", "viewer.open=1.5", "--tolerance-why", "x"],
+    /takes a fraction above 0 and at most 1/],
+  [["--tolerance", "viewer.open=", "--tolerance-why", "x"],
+    /takes a fraction above 0 and at most 1/],
+  [["--tolerance", "=0.1", "--tolerance-why", "x"],
+    /names no subject/],
+  [["--tolerance", "viewer.open=0.1", "--tolerance", "viewer.open=0.2",
+    "--tolerance-why", "x"], /--tolerance names viewer\.open twice/],
+  [["--tolerance", "0.1", "--tolerance", "0.2", "--tolerance-why", "x"],
+    /--tolerance takes one bare fraction/],
+  [["--tolerance", "viewer.open=0.1"], /--tolerance needs --tolerance-why/],
 ];
 
 test("parseArgs keeps subject ids to run", () => {
@@ -39,6 +57,82 @@ for (const [argv, expected] of ARGUMENT_REFUSALS) {
     assert.throws(() => command.parseArgs(argv), expected);
   });
 }
+
+test("parseArgs keeps a bare tolerance beside per-subject ones", () => {
+  const options = command.parseArgs([
+    "--tolerance", "viewer.open=0.06",
+    "--tolerance", "0.25",
+    "--tolerance", "viewer.resident_memory=0.12",
+    "--tolerance-why", "stated",
+  ]);
+  assert.equal(options.tolerance, 0.25);
+  assert.deepEqual(options.tolerances,
+    { "viewer.open": 0.06, "viewer.resident_memory": 0.12 });
+});
+
+const REGISTRY = ["viewer.open", "viewer.first_image", "viewer.scroll_rate"]
+  .map((id) => ({ subject: { id } }));
+
+test("a per-subject tolerance for a subject not in the run is refused", () => {
+  assert.equal(typeof command.resolveRun, "function",
+    "resolveRun must be the exported production seam main calls before a run");
+  const tolerate = (extra) => command.parseArgs([
+    ...extra, "--tolerance", "viewer.open=0.06", "--tolerance-why", "stated",
+  ]);
+  assert.throws(() => command.resolveRun(REGISTRY, tolerate(["viewer.first_image"])),
+    /--tolerance names viewer\.open, which is not in this run/);
+  assert.throws(() => command.resolveRun(REGISTRY, tolerate([
+    "--accept", "--story", "F-000", "--why", "probe",
+    "--subject", "viewer.first_image",
+  ])), /--tolerance names viewer\.open, which is not in this run/);
+  assert.throws(() => command.resolveRun(REGISTRY, command.parseArgs([
+    "--tolerance", "viewer.absent=0.1", "--tolerance-why", "stated",
+  ])), /--tolerance names viewer\.absent, which is not in this run/);
+  assert.throws(() => command.resolveRun(REGISTRY, command.parseArgs([
+    "viewer.absent",
+  ])), /unknown subject viewer\.absent/);
+  assert.deepEqual(
+    command.resolveRun(REGISTRY, tolerate(["viewer.open", "viewer.scroll_rate"]))
+      .map((row) => row.subject.id),
+    ["viewer.open", "viewer.scroll_rate"]);
+  assert.equal(command.resolveRun(REGISTRY, tolerate([])).length, 3);
+});
+
+test("--accept records each named tolerance and the bare one for the rest", () => {
+  const host = { platform: "darwin", release: "1", arch: "arm64",
+    cpu_model: "m", cpu_count: 1, memory_bytes: 1 };
+  const run = {
+    host_class: host, instrument: { node: "v1", playwright: null, chromium: null },
+    conditions: {},
+    subjects: ["viewer.open", "viewer.first_image", "viewer.resident_memory"]
+      .map((id, index) => ({ id, unit: "ms", state: MEASURED, value: index + 1,
+        detail: { profile: "release" } })),
+  };
+  const before = { host_classes: { [hostClassKey(host)]: { host_class: host,
+    subjects: { "viewer.first_image": { value: 9, unit: "ms", tolerance: 0.5,
+      tolerance_provenance: "older" } } } } };
+  const options = command.parseArgs([
+    "--tolerance", "viewer.open=0.06", "--tolerance", "viewer.resident_memory=0.12",
+    "--tolerance-why", "stated",
+  ]);
+  const entries = (after) => after.host_classes[hostClassKey(host)].subjects;
+  const shared = { story: "F-000", why: "probe", today: "2026-11-06",
+    toleranceWhy: options.toleranceWhy, tolerances: options.tolerances };
+  let after = entries(acceptRecord(before, run, { ...shared, tolerance: null }));
+  assert.equal(after["viewer.open"].tolerance, 0.06);
+  assert.equal(after["viewer.open"].tolerance_provenance, "stated");
+  assert.equal(after["viewer.resident_memory"].tolerance, 0.12);
+  assert.equal(after["viewer.first_image"].tolerance, 0.5,
+    "a subject no tolerance names keeps its previous one");
+  assert.equal(after["viewer.first_image"].tolerance_provenance, "older");
+  after = entries(acceptRecord(before, run, { ...shared, tolerance: 0.25 }));
+  assert.equal(after["viewer.open"].tolerance, 0.06);
+  assert.equal(after["viewer.first_image"].tolerance, 0.25,
+    "the bare form keeps its meaning for every subject not named");
+  assert.equal(after["viewer.first_image"].tolerance_provenance, "stated");
+  assert.throws(() => acceptRecord(before, run, { ...shared, tolerance: null,
+    toleranceWhy: null }), /a new tolerance needs its own reason/);
+});
 
 test("subject execution refuses a runner for a pending subject", async () => {
   assert.equal(

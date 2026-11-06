@@ -416,14 +416,14 @@
       },
       "subjects": {
         "viewer.open": {
-          "value": 1020,
+          "value": 1018,
           "unit": "ms",
-          "tolerance": 0.0784,
-          "tolerance_provenance": "The largest value at four decimal places that keeps the recorded 1,020 ms times 1 plus the tolerance at or below the operator's answered 1,100 ms budget in the F-216 design, Open question A. Not a calibrated spread. The 0.25 first recording headroom would allow 1,275 ms.",
+          "tolerance": 0.06,
+          "tolerance_provenance": "viewer.open at 0.06 and viewer.resident_memory at 0.12 are set so that the recorded value times 1 plus the tolerance stays at or below the operator's answered budget in the F-216 design, Open question A, which is 1,100 ms to open and the 528,194,192 byte resident bound. viewer.first_image, viewer.scroll_rate and viewer.window_step keep the 0.25 carried from the 2026-11-05 first recording as headroom. None of the five is a calibrated spread.",
           "provenance": "measured",
           "recorded": "2026-11-06",
           "story": "F-216",
-          "why": "F-216 re-recording of the folder viewer subjects on this host at commit 171804b, release build. It replaces the 2026-11-05 figures, which came from an older uncommitted tree.",
+          "why": "F-216 re-recording of the five folder viewer subjects in one run of bin/ocelli.sh bench --accept on this host, release build, at commit 2e3b42c with the uncommitted per-subject --tolerance change to tools/bench/run.mjs and tools/bench/src/record.mjs, which no runner imports. It replaces the 2026-11-06 entries that a script outside the harness wrote from a saved run record.",
           "host_class": {
             "platform": "darwin",
             "release": "27.0.0",
@@ -439,40 +439,40 @@
           },
           "conditions": {
             "load_average": [
-              9.28515625,
-              7.568359375,
-              8.2744140625
+              6.02880859375,
+              5.89208984375,
+              7.16064453125
             ],
-            "free_memory_bytes": 1342078976,
-            "uptime_seconds": 528520
+            "free_memory_bytes": 1027129344,
+            "uptime_seconds": 529279
           },
           "detail": {
             "profile": "release",
             "samples_ms": [
-              1033,
-              1021,
-              1020,
-              1016,
-              1015,
+              1066,
+              1011,
               1023,
+              1018,
+              1014,
+              1019,
+              1015,
               1020,
-              1024,
-              1019
+              1014
             ],
             "threshold_ms": 1100,
             "thresholds_met": true
           },
-          "replaced": 1013
+          "replaced": 1020
         },
         "viewer.first_image": {
-          "value": 8.800000011920929,
+          "value": 9.699999988079071,
           "unit": "ms",
           "tolerance": 0.25,
-          "tolerance_provenance": "Carried from the 2026-11-05 first recording as headroom, not a calibrated spread. The recorded value at this tolerance stays within the operator's answered budget in the F-216 design, Open question A.",
+          "tolerance_provenance": "viewer.open at 0.06 and viewer.resident_memory at 0.12 are set so that the recorded value times 1 plus the tolerance stays at or below the operator's answered budget in the F-216 design, Open question A, which is 1,100 ms to open and the 528,194,192 byte resident bound. viewer.first_image, viewer.scroll_rate and viewer.window_step keep the 0.25 carried from the 2026-11-05 first recording as headroom. None of the five is a calibrated spread.",
           "provenance": "measured",
           "recorded": "2026-11-06",
           "story": "F-216",
-          "why": "F-216 re-recording of the folder viewer subjects on this host at commit 171804b, release build. It replaces the 2026-11-05 figures, which came from an older uncommitted tree.",
+          "why": "F-216 re-recording of the five folder viewer subjects in one run of bin/ocelli.sh bench --accept on this host, release build, at commit 2e3b42c with the uncommitted per-subject --tolerance change to tools/bench/run.mjs and tools/bench/src/record.mjs, which no runner imports. It replaces the 2026-11-06 entries that a script outside the harness wrote from a saved run record.",
           "host_class": {
             "platform": "darwin",
             "release": "27.0.0",
@@ -488,54 +488,54 @@
           },
           "conditions": {
             "load_average": [
-              9.28515625,
-              7.568359375,
-              8.2744140625
+              6.02880859375,
+              5.89208984375,
+              7.16064453125
             ],
-            "free_memory_bytes": 1342078976,
-            "uptime_seconds": 528520
+            "free_memory_bytes": 1027129344,
+            "uptime_seconds": 529279
           },
           "detail": {
             "profile": "release",
             "ct_ms": [
-              10,
-              8.200000047683716,
-              8.600000023841858,
+              11.699999988079071,
+              9.899999976158142,
+              10.599999964237213,
+              10.099999964237213,
+              9.300000011920929,
               8.800000011920929,
-              11.399999976158142,
-              10,
-              8.899999976158142,
-              8.799999952316284,
-              8.800000011920929
+              7.800000011920929,
+              9.200000047683716,
+              9.699999988079071
             ],
             "dx_ms": [
-              33,
-              33.19999998807907,
-              38.19999998807907,
-              30.399999976158142,
-              31.5,
-              28.69999998807907,
-              28.69999998807907,
-              28.600000023841858,
-              28.5
+              41.700000047683716,
+              33.60000002384186,
+              28.5,
+              30,
+              30.5,
+              31.599999964237213,
+              29.599999964237213,
+              34,
+              31.19999998807907
             ],
-            "dx_median_ms": 30.399999976158142,
+            "dx_median_ms": 31.19999998807907,
             "ct_threshold_ms": 20,
             "dx_threshold_ms": 250,
             "restart_recovered": true,
             "thresholds_met": true
           },
-          "replaced": 16.400000035762787
+          "replaced": 8.800000011920929
         },
         "viewer.scroll_rate": {
-          "value": 109.0305043793416,
+          "value": 109.0832175024478,
           "unit": "frames_per_second",
           "tolerance": 0.25,
-          "tolerance_provenance": "Carried from the 2026-11-05 first recording as headroom, not a calibrated spread. The recorded value at this tolerance stays within the operator's answered budget in the F-216 design, Open question A.",
+          "tolerance_provenance": "viewer.open at 0.06 and viewer.resident_memory at 0.12 are set so that the recorded value times 1 plus the tolerance stays at or below the operator's answered budget in the F-216 design, Open question A, which is 1,100 ms to open and the 528,194,192 byte resident bound. viewer.first_image, viewer.scroll_rate and viewer.window_step keep the 0.25 carried from the 2026-11-05 first recording as headroom. None of the five is a calibrated spread.",
           "provenance": "measured",
           "recorded": "2026-11-06",
           "story": "F-216",
-          "why": "F-216 re-recording of the folder viewer subjects on this host at commit 171804b, release build. It replaces the 2026-11-05 figures, which came from an older uncommitted tree.",
+          "why": "F-216 re-recording of the five folder viewer subjects in one run of bin/ocelli.sh bench --accept on this host, release build, at commit 2e3b42c with the uncommitted per-subject --tolerance change to tools/bench/run.mjs and tools/bench/src/record.mjs, which no runner imports. It replaces the 2026-11-06 entries that a script outside the harness wrote from a saved run record.",
           "host_class": {
             "platform": "darwin",
             "release": "27.0.0",
@@ -551,42 +551,42 @@
           },
           "conditions": {
             "load_average": [
-              9.28515625,
-              7.568359375,
-              8.2744140625
+              6.02880859375,
+              5.89208984375,
+              7.16064453125
             ],
-            "free_memory_bytes": 1342078976,
-            "uptime_seconds": 528520
+            "free_memory_bytes": 1027129344,
+            "uptime_seconds": 529279
           },
           "detail": {
             "profile": "release",
             "rates": [
-              108.9588377723971,
-              109.0305043793416,
-              109.02062633971563,
-              109.0305043793416,
-              109.23174680099376
+              109.5575328373906,
+              109.27473059613594,
+              109.0832175024478,
+              109.02721150188732,
+              109.02721149992468
             ],
-            "keys": 1804,
+            "keys": 1806,
             "blank_samples": 0,
             "debug_blank_samples": 0,
             "threshold_frames_per_second": 55,
-            "timer_ceiling_per_second": 51.38280187396101,
+            "timer_ceiling_per_second": 51.27586414856917,
             "timer_ceiling_dispatches": 170,
-            "timer_ceiling_seconds": 3.3085,
+            "timer_ceiling_seconds": 3.315400000035763,
             "thresholds_met": true
           },
-          "replaced": 51.282051282051285
+          "replaced": 109.0305043793416
         },
         "viewer.window_step": {
-          "value": 2.5,
+          "value": 2.400000035762787,
           "unit": "ms",
           "tolerance": 0.25,
-          "tolerance_provenance": "Carried from the 2026-11-05 first recording as headroom, not a calibrated spread. The recorded value at this tolerance stays within the operator's answered budget in the F-216 design, Open question A.",
+          "tolerance_provenance": "viewer.open at 0.06 and viewer.resident_memory at 0.12 are set so that the recorded value times 1 plus the tolerance stays at or below the operator's answered budget in the F-216 design, Open question A, which is 1,100 ms to open and the 528,194,192 byte resident bound. viewer.first_image, viewer.scroll_rate and viewer.window_step keep the 0.25 carried from the 2026-11-05 first recording as headroom. None of the five is a calibrated spread.",
           "provenance": "measured",
           "recorded": "2026-11-06",
           "story": "F-216",
-          "why": "F-216 re-recording of the folder viewer subjects on this host at commit 171804b, release build. It replaces the 2026-11-05 figures, which came from an older uncommitted tree.",
+          "why": "F-216 re-recording of the five folder viewer subjects in one run of bin/ocelli.sh bench --accept on this host, release build, at commit 2e3b42c with the uncommitted per-subject --tolerance change to tools/bench/run.mjs and tools/bench/src/record.mjs, which no runner imports. It replaces the 2026-11-06 entries that a script outside the harness wrote from a saved run record.",
           "host_class": {
             "platform": "darwin",
             "release": "27.0.0",
@@ -602,54 +602,54 @@
           },
           "conditions": {
             "load_average": [
-              9.28515625,
-              7.568359375,
-              8.2744140625
+              6.02880859375,
+              5.89208984375,
+              7.16064453125
             ],
-            "free_memory_bytes": 1342078976,
-            "uptime_seconds": 528520
+            "free_memory_bytes": 1027129344,
+            "uptime_seconds": 529279
           },
           "detail": {
             "profile": "release",
             "ct_ms": [
-              2.699999988079071,
-              3.100000023841858,
-              2.600000023841858,
-              2.900000035762787,
-              2.5,
-              2.5,
+              2.700000047683716,
+              2.399999976158142,
               2.400000035762787,
+              2.399999976158142,
               2.300000011920929,
-              2.5
+              2.200000047683716,
+              2.5,
+              2.5,
+              3
             ],
             "dx_ms": [
-              19.900000035762787,
-              20.5,
-              16.900000035762787,
-              17.5,
-              19.80000001192093,
-              19.400000035762787,
-              19.600000023841858,
-              19.5,
-              19.100000023841858
+              16.80000001192093,
+              16.69999998807907,
+              18.5,
+              18.19999998807907,
+              18.299999952316284,
+              17.600000023841858,
+              18.900000035762787,
+              18,
+              17.5
             ],
-            "dx_median_ms": 19.5,
+            "dx_median_ms": 18,
             "preview_bodies": 0,
             "ct_threshold_ms": 5,
             "dx_threshold_ms": 70,
             "thresholds_met": true
           },
-          "replaced": 8.5
+          "replaced": 2.5
         },
         "viewer.resident_memory": {
-          "value": 462241792,
+          "value": 445956096,
           "unit": "bytes",
-          "tolerance": 0.1426,
-          "tolerance_provenance": "The largest value at four decimal places that keeps the recorded peak times 1 plus the tolerance at or below the 528,194,192 byte resident bound stated in the F-216 design. Not a calibrated spread. The 0.25 first recording headroom would allow 577,802,240 bytes.",
+          "tolerance": 0.12,
+          "tolerance_provenance": "viewer.open at 0.06 and viewer.resident_memory at 0.12 are set so that the recorded value times 1 plus the tolerance stays at or below the operator's answered budget in the F-216 design, Open question A, which is 1,100 ms to open and the 528,194,192 byte resident bound. viewer.first_image, viewer.scroll_rate and viewer.window_step keep the 0.25 carried from the 2026-11-05 first recording as headroom. None of the five is a calibrated spread.",
           "provenance": "measured",
           "recorded": "2026-11-06",
           "story": "F-216",
-          "why": "F-216 re-recording of the folder viewer subjects on this host at commit 171804b, release build. It replaces the 2026-11-05 figures, which came from an older uncommitted tree.",
+          "why": "F-216 re-recording of the five folder viewer subjects in one run of bin/ocelli.sh bench --accept on this host, release build, at commit 2e3b42c with the uncommitted per-subject --tolerance change to tools/bench/run.mjs and tools/bench/src/record.mjs, which no runner imports. It replaces the 2026-11-06 entries that a script outside the harness wrote from a saved run record.",
           "host_class": {
             "platform": "darwin",
             "release": "27.0.0",
@@ -665,17 +665,17 @@
           },
           "conditions": {
             "load_average": [
-              9.28515625,
-              7.568359375,
-              8.2744140625
+              6.02880859375,
+              5.89208984375,
+              7.16064453125
             ],
-            "free_memory_bytes": 1342078976,
-            "uptime_seconds": 528520
+            "free_memory_bytes": 1027129344,
+            "uptime_seconds": 529279
           },
           "detail": {
             "profile": "release",
-            "peak_rss_bytes": 462241792,
-            "samples": 1870,
+            "peak_rss_bytes": 445956096,
+            "samples": 1856,
             "held": {
               "build": "release",
               "budget": 268435456,
@@ -691,24 +691,24 @@
             "held_at_peak": {
               "build": "release",
               "budget": 268435456,
-              "used": 250948688,
-              "files": 441,
-              "frames": 5,
-              "inflight": 0,
-              "workspace": 8962144,
+              "used": 268187780,
+              "files": 511,
+              "frames": 0,
+              "inflight": 1574488,
+              "workspace": 524288,
               "free": 0,
-              "grey": 8962144,
+              "grey": 524288,
               "grey_replies": 0
             },
             "held_peaks": {
-              "used": 268268110,
+              "used": 268268204,
               "free": 0,
               "inflight": 2099324,
               "workspace": 17400000
             },
-            "js_heap_bytes": 98123775,
+            "js_heap_bytes": 98123815,
             "js_heap_collections": 3,
-            "js_heap_before_gc": 125011568,
+            "js_heap_before_gc": 125024216,
             "canvases": [
               [
                 2900,
@@ -719,7 +719,7 @@
             "heap_bound_bytes": 118686080,
             "thresholds_met": true
           },
-          "replaced": 566099968
+          "replaced": 462241792
         }
       }
     }
