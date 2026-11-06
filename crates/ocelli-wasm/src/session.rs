@@ -3529,9 +3529,11 @@ mod tests {
 
         #[test]
         fn a_burst_over_the_ring_capacity_counts_the_dropped() {
-            // AC11's session half. 300 commits of one index displace 300
-            // events into an empty ring of 256: 256 are pushed and 44 are
-            // counted in dropped, which drain_events reports in its header.
+            // AC11's session half. 300 commits of one index into an empty
+            // ring of 256 push 300 events: the first is an insert whose
+            // pressure crossing is one event, and the other 299 displace.
+            // 256 are held and 44 are counted in dropped, which drain_events
+            // reports in its header.
             let (mut session, epoch) = cached_session(&[key(5, 0)]);
             with_budget(&mut session, 4);
             for _ in 0..300 {

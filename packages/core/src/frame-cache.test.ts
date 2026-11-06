@@ -3,8 +3,8 @@
  *
  * The stub records every call, which is what makes the refusals of AC15
  * checkable: a bad input must throw before any export call, so the record
- * has to still be empty. The bigint passthrough of AC14 and AC15 is the
- * other half: a u64 that reached the export truncated would read back
+ * has to still be empty. The bigint passthrough of AC13 is the other
+ * half: a u64 that reached the export truncated would read back
  * differently than it went in.
  */
 import { describe, expect, it } from "vitest";

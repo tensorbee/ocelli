@@ -412,8 +412,8 @@ writeFrame({ memory: session.memory }, sessionBulkSink(session), sampleBytes, {
 // and at the selected index a miss or a stale entry returns false.
 const slot = { index: 0, epoch, content, columns: 512, rows: 512 };
 if (showResident(session, slot)) {
-  // The frame is displayed. frameResident asks without showing, and a
-  // mismatched show returns false and removes the entry.
+  // The frame is displayed. frameResident asks without showing, and at
+  // the selected index a mismatched show returns false and removes the entry.
 }</code></pre>
 
     <h3 id="js-dicomweb"><span class="num">5.6</span>DICOMweb</h3>
