@@ -7,13 +7,14 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use ocelli_pixel::VoiFunction;
 
 use crate::held::{
-    BodyPermit, CacheHandle, DecodePermit, FileId, PreviewSource, Viewer, ViewerConfig,
-    set_detached, with_decode_workspace,
+    BodyPermit, CacheHandle, FileId, GreyHome, PreviewSource, Viewer, ViewerConfig, detach_grey,
+    retire_bytes, with_decode_workspace,
 };
 use crate::preview::{
     decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, phases, profiling,
@@ -324,12 +325,12 @@ fn connection_session(
             counted: request.body_counted,
             slot: request.body_slot.take(),
         };
-        let (mut reply, restore) = route(viewer, request, Some(&stream), &mut charge);
+        let (mut reply, home) = route(viewer, request, Some(&stream), &mut charge);
         drop(charge);
         let write_started = profiling().then(Instant::now);
         let written = write_reply(&mut stream, &reply, !close);
-        if let Some(permit) = restore {
-            let _ = permit.restore_grey(std::mem::take(&mut reply.body));
+        if let Some(home) = home {
+            home.restore_grey(std::mem::take(&mut reply.body));
         } else if reply.grey.is_some() {
             viewer.recycle_grey(std::mem::take(&mut reply.body));
         }
@@ -350,8 +351,9 @@ fn route(
     request: Request,
     stream: Option<&TcpStream>,
     charge: &mut BodyCharge<'_>,
-) -> (Reply, Option<DecodePermit>) {
+) -> (Reply, Option<GreyHome>) {
     if request.method == "POST" && request.body.len() > BODY_CAP {
+        retire_request_body(charge, request.body);
         return (
             text_reply(400, Some("body"), "the preview request is too large"),
             None,
@@ -359,14 +361,34 @@ fn route(
     }
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", _) => (get_reply(viewer, &request), None),
-        ("POST", "/preview") => preview_route(viewer, &request, stream),
+        ("POST", "/preview") => preview_route(viewer, request, stream, charge),
         ("POST", "/file") => (file_route(viewer, request, charge), None),
-        ("POST", "/inspect") => (
-            json_or_error(inspect_json(&request.body, request.frame.frame)),
-            None,
-        ),
-        ("POST", "/headers") => (headers_route(viewer, &request), None),
-        _ => (text_reply(404, None, "not found"), None),
+        ("POST", "/inspect") => {
+            let reply = json_or_error(inspect_json(&request.body, request.frame.frame));
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
+        ("POST", "/headers") => {
+            let reply = headers_route(viewer, &request);
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
+        _ => {
+            retire_request_body(charge, request.body);
+            (text_reply(404, None, "not found"), None)
+        }
+    }
+}
+
+/// Free a request body on the thread that allocated it.
+///
+/// A pooled body was allocated by a worker, so its bytes go back there
+/// through the retire channel. A body the connection thread allocated is
+/// dropped here, which is the same thread.
+fn retire_request_body(charge: &BodyCharge<'_>, body: Vec<u8>) {
+    match charge.slot.as_ref() {
+        Some(slot) => retire_bytes(&slot.retire(), body),
+        None => drop(body),
     }
 }
 
@@ -426,10 +448,12 @@ fn html_page(page: &str) -> Reply {
 
 fn preview_route(
     viewer: &Viewer,
-    request: &Request,
+    request: Request,
     stream: Option<&TcpStream>,
-) -> (Reply, Option<DecodePermit>) {
+    charge: &mut BodyCharge<'_>,
+) -> (Reply, Option<GreyHome>) {
     if request.file_id.is_some() && !request.body.is_empty() {
+        retire_request_body(charge, request.body);
         return (
             text_reply(
                 400,
@@ -442,11 +466,123 @@ fn preview_route(
     if let Some(id) = request.file_id {
         return preview_held(viewer, id, request.frame, stream);
     }
-    let mut reply = from_preview(preview_frame(&request.body, request.frame));
+    let body = request.body;
+    if !viewer.schedules() {
+        // The direct path decodes on the caller, which is the thread that
+        // allocated the body here.
+        let mut reply = from_preview(preview_frame(&body, request.frame));
+        if reply.status == 200 {
+            reply.source = Some("body");
+        }
+        retire_request_body(charge, body);
+        return (reply, None);
+    }
+    // The scheduled server decodes every preview on a decode worker, the
+    // body form included. No connection thread decodes.
+    if let Err(error) = validate_frame_request(request.frame) {
+        retire_request_body(charge, body);
+        return (error_reply(error), None);
+    }
+    let home = charge.slot.as_ref().map(BodyPermit::worker);
+    let mut live = || stream.is_none_or(peer_open);
+    let Some(permit) = viewer.acquire_decode(home, &mut live) else {
+        retire_request_body(charge, body);
+        return (busy_reply(), None);
+    };
+    let body_retire = charge.slot.as_ref().map(BodyPermit::retire);
+    let inflight = viewer.inflight_counter();
+    let cache = viewer.cache_handle();
+    let frame = request.frame;
+    let body = BodyHome {
+        body: Some(body),
+        retire: body_retire,
+    };
+    let Some(work) = permit.call(move || pooled_body_preview(body, frame, &inflight, &cache))
+    else {
+        return (busy_reply(), None);
+    };
+    merge_worker_phases(work.phase);
+    let mut reply = from_preview(work.preview);
     if reply.status == 200 {
         reply.source = Some("body");
+        let home = permit.finish();
+        return (reply, Some(home));
     }
     (reply, None)
+}
+
+/// A pooled request body inside a decode job.
+///
+/// The decode runs on whichever decode worker is free, and the body was
+/// allocated by another worker. Drop sends the bytes back to that worker, so
+/// the body is freed where it was allocated. A dead worker drops them here
+/// instead, as [`retire_bytes`] does.
+struct BodyHome {
+    body: Option<Vec<u8>>,
+    retire: Option<Sender<Vec<u8>>>,
+}
+
+impl BodyHome {
+    fn as_slice(&self) -> &[u8] {
+        self.body.as_deref().unwrap_or(&[])
+    }
+}
+
+impl Drop for BodyHome {
+    fn drop(&mut self) {
+        if let Some(bytes) = self.body.take() {
+            match &self.retire {
+                Some(tx) => retire_bytes(tx, bytes),
+                None => drop(bytes),
+            }
+        }
+    }
+}
+
+struct BodyWork {
+    preview: Result<Preview, PreviewError>,
+    phase: crate::preview::PhaseRecord,
+}
+
+/// Decode a body-form preview on a decode worker.
+///
+/// The sample bytes are charged as in flight until the job ends, and the
+/// buffer goes back to the free list because no frame is stored.
+fn pooled_body_preview(
+    body: BodyHome,
+    request: FrameRequest,
+    inflight: &std::sync::atomic::AtomicUsize,
+    cache: &CacheHandle,
+) -> BodyWork {
+    let mut samples = Vec::new();
+    let mut sample_charge = 0_usize;
+    let decoded = with_decode_workspace(|workspace| {
+        decode_held(
+            body.as_slice(),
+            request.frame,
+            &mut workspace.native,
+            &mut samples,
+            &mut |capacity| {
+                sample_charge = capacity;
+                inflight.fetch_add(capacity, std::sync::atomic::Ordering::Relaxed);
+            },
+            &mut |len| cache.claim_sample_buffer(len),
+        )
+    });
+    let preview = match decoded {
+        Ok(held) => with_decode_workspace(|workspace| {
+            render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
+        }),
+        Err(error) => Err(error),
+    };
+    if sample_charge > 0 {
+        Viewer::release_counter(inflight, sample_charge);
+    }
+    cache.recycle_sample_buffer(samples);
+    detach_grey(grey_capacity(&preview));
+    let phase = phases();
+    drop(body);
+    BodyWork { preview, phase }
 }
 
 fn busy_reply() -> Reply {
@@ -552,7 +688,7 @@ fn preview_held_on_worker(
     id: FileId,
     request: FrameRequest,
     stream: Option<&TcpStream>,
-) -> (Reply, Option<DecodePermit>) {
+) -> (Reply, Option<GreyHome>) {
     if let Err(error) = validate_frame_request(request) {
         return (error_reply(error), None);
     }
@@ -593,8 +729,11 @@ fn preview_held_on_worker(
     let mut reply = from_preview(work.preview);
     if reply.status == 200 {
         reply.source = Some(if work.fresh { "decoded" } else { "held" });
-        // The permit stays held until the grey bytes are back on this worker.
-        return (reply, Some(permit));
+        // The grey is ready, so the permit ends with the decode. The slot is
+        // free before the reply is written, and the grey goes back to its
+        // worker by message after the write.
+        let home = permit.finish();
+        return (reply, Some(home));
     }
     (reply, None)
 }
@@ -618,7 +757,7 @@ fn pooled_preview(
             let preview = with_decode_workspace(|workspace| {
                 render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
             });
-            set_detached(grey_capacity(&preview));
+            detach_grey(grey_capacity(&preview));
             PooledWork {
                 gone: false,
                 preview,
@@ -649,7 +788,7 @@ fn pooled_preview(
                     let preview = with_decode_workspace(|workspace| {
                         render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
                     });
-                    set_detached(grey_capacity(&preview));
+                    detach_grey(grey_capacity(&preview));
                     PooledWork {
                         gone: false,
                         fresh: decode_ticks() != before,
@@ -666,7 +805,6 @@ fn pooled_preview(
                     if sample_charge > 0 {
                         Viewer::release_counter(inflight, sample_charge);
                     }
-                    set_detached(0);
                     PooledWork {
                         gone: false,
                         preview: Err(error),
@@ -692,7 +830,7 @@ fn preview_held(
     id: FileId,
     request: FrameRequest,
     stream: Option<&TcpStream>,
-) -> (Reply, Option<DecodePermit>) {
+) -> (Reply, Option<GreyHome>) {
     if viewer.schedules() {
         return preview_held_on_worker(viewer, id, request, stream);
     }
@@ -805,7 +943,9 @@ fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) ->
         }
         Err(error) => {
             if let Some(slot) = charge.slot.as_ref() {
-                let _ = slot.call(move || drop(body));
+                retire_bytes(&slot.retire(), body);
+            } else {
+                drop(body);
             }
             error_reply(error)
         }
@@ -1857,6 +1997,85 @@ mod tests {
                 "concurrent previews were not both 200\n{first_reply}\n{second_reply}"
             ));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn a_reply_reading_a_frame_keeps_it_cached_for_the_next_preview() -> Result<(), String> {
+        // Slice 0 is 96 by 128 and slice 1 is the same 24576 sample bytes with
+        // different rows of pixels. Both are single-frame objects, so the
+        // encoded bytes leave when the frame is stored.
+        let mut file_a = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let mut file_b = slice(1).ok_or("synthetic slice 1 was absent")?;
+        file_a.shrink_to_fit();
+        file_b.shrink_to_fit();
+        let file_b_cap = file_b.capacity();
+        let file_b_copy = file_b.clone();
+        let probe = Viewer::new(ViewerConfig {
+            cache_bytes: 64 * 1024 * 1024,
+        });
+        let probe_id = probe
+            .insert_file(file_a.clone())
+            .ok_or("the probe file was refused")?;
+        let (probe_reply, _) = preview_held(&probe, probe_id, FrameRequest::default(), None);
+        if probe_reply.status != 200 {
+            return Err(format!(
+                "the probe preview status was {}",
+                probe_reply.status
+            ));
+        }
+        let frame_used = probe.pressure().used;
+        if frame_used == 0 {
+            return Err("the probe frame cost nothing".to_owned());
+        }
+        // The budget holds file B's bytes beside frame A, and leaves frame A
+        // one byte short of also holding frame B's claim. The claim for B then
+        // reaches the steal, finds A's frame being read, and must leave it.
+        let budget = frame_used
+            .saturating_mul(2)
+            .saturating_add(file_b_cap)
+            .saturating_sub(1);
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let id_a = viewer.insert_file(file_a).ok_or("file A was refused")?;
+        let (first, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
+        if first.status != 200 {
+            return Err(format!("preview A status was {}", first.status));
+        }
+        // A reply is reading frame A: the Arc a render holds while it works.
+        let reading = match viewer.preview_source(id_a, 0) {
+            PreviewSource::Hit(frame) => frame,
+            PreviewSource::Shared(_) | PreviewSource::Gone => {
+                return Err("frame A was not cached after its preview".to_owned());
+            }
+        };
+        let id_b = viewer.insert_file(file_b).ok_or("file B was refused")?;
+        let fresh = preview_frame(&file_b_copy, FrameRequest::default())
+            .map_err(|error| format!("a fresh decode of B failed: {error}"))?;
+        let (second, _) = preview_held(&viewer, id_b, FrameRequest::default(), None);
+        if second.status != 200 {
+            return Err(format!("preview B status was {}", second.status));
+        }
+        if second.body != fresh.grey {
+            return Err("preview B differed from a fresh decode".to_owned());
+        }
+        // The image on screen is still served from the cache. A 410 would
+        // make the page re-post the file.
+        let (again, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
+        if again.status != 200 {
+            return Err(format!(
+                "the frame being read answered {}: the page would re-post",
+                again.status
+            ));
+        }
+        if again.body != first.body {
+            return Err("the frame being read changed its grey".to_owned());
+        }
+        if again.source != Some("held") {
+            return Err("the frame being read was not served from the cache".to_owned());
+        }
+        drop(reading);
         Ok(())
     }
 

@@ -1,10 +1,13 @@
-//! Two long-lived workers allocate every request body and every decoded frame.
+//! Two long-lived decode workers. Every decode the process server runs is a
+//! job here, including a preview that carries the file's bytes, and every
+//! pooled request body is read and freed on these two threads.
 //!
 //! `P` in the resident formula is 2, so there are two threads. The `4` in
 //! `4 * S_max` is the most request bodies those threads keep at once. The
-//! count does not follow the host core count. A request body is freed on the
-//! worker that allocated it. A decoded frame's sample buffer that leaves the
-//! cache waits on the free list.
+//! count does not follow the host core count. A pooled body is freed by the
+//! worker that read it. A decoded frame's sample buffer that leaves the
+//! cache is parked on the free list only when cached bytes plus free bytes
+//! fit the budget, and is freed otherwise.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashSet, VecDeque};
@@ -21,6 +24,11 @@ const WORKERS: usize = 2;
 /// Request bodies in flight. This is the coefficient of `S_max`.
 const BODY_SLOTS: usize = 4;
 const WAIT: Duration = Duration::from_millis(50);
+/// How long a decode waits for its home worker before any worker takes the
+/// job. Long enough to keep the home heap when the home worker is free, and
+/// short enough that a busy home worker does not hold a preview while the
+/// other worker is idle.
+const HOME_WAIT: Duration = Duration::from_millis(5);
 
 thread_local! {
     static WORKSPACE: RefCell<Workspace> = RefCell::new(Workspace::default());
@@ -149,19 +157,27 @@ impl Scheduler {
         })
     }
 
-    /// Prefer `home` so the frame reuses the posted bytes' heap.
+    /// Take a decode slot. `home` is a preference, not a requirement.
+    ///
+    /// The caller waits for the home worker for a bounded time, and then
+    /// either decode thread takes the job. A busy home worker therefore
+    /// cannot hold a preview while the other worker is idle.
     pub(super) fn acquire_decode(
         &self,
         home: Option<u8>,
         live: &mut dyn FnMut() -> bool,
     ) -> Option<DecodePermit> {
         let want = home.map(usize::from);
+        let deadline = std::time::Instant::now() + HOME_WAIT;
         let worker = wait_slot(
             &self.inner.decode_free,
             &self.inner.decode_ready,
             &self.inner.shut,
             live,
-            |slot| want.is_none_or(|home| slot == home),
+            |slot| match want {
+                Some(home) => slot == home || std::time::Instant::now() >= deadline,
+                None => true,
+            },
         )?;
         Some(DecodePermit {
             inner: Arc::clone(&self.inner),
@@ -228,18 +244,45 @@ impl DecodePermit {
         call_worker(&self.inner, self.worker, job)
     }
 
+    /// End the permit and keep the way home for the grey reply.
+    ///
+    /// A decode permit ends with the decode. The grey bytes are ready, so
+    /// the slot is free again before the reply is written, and a client that
+    /// stops reading holds no permit.
+    pub(crate) fn finish(self) -> GreyHome {
+        let home = GreyHome {
+            inner: Arc::clone(&self.inner),
+            worker: self.worker,
+        };
+        drop(self);
+        home
+    }
+}
+
+/// The worker that allocated a finished decode's grey reply.
+///
+/// The permit has ended. This value only carries the worker, so the reply
+/// can be returned after it is written.
+pub(crate) struct GreyHome {
+    inner: Arc<Inner>,
+    worker: usize,
+}
+
+impl GreyHome {
     /// Put the grey reply back on the worker that allocated it.
-    pub(crate) fn restore_grey(self, grey: Vec<u8>) -> Option<()> {
-        let worker = self.worker;
-        let inner = Arc::clone(&self.inner);
-        // Keep the permit until the grey is back, so the next decode cannot
-        // allocate a second reply buffer on this worker.
-        let done = call_worker(&inner, worker, move || {
+    ///
+    /// The job is queued and not awaited, so the connection thread never
+    /// blocks on a worker that is busy decoding. If that worker is gone the
+    /// grey is dropped here, as [`retire_bytes`] does for a dead worker.
+    pub(crate) fn restore_grey(self, grey: Vec<u8>) {
+        let capacity = grey.capacity();
+        // The closure owns the grey. If the worker is gone the job is
+        // dropped unsent and the grey is dropped with it.
+        let _ = post_job(&self.inner, self.worker, move || {
             with_decode_workspace(|workspace| workspace.grey = grey);
-            set_detached(0);
+            reattach_grey(capacity);
         });
         drop(self);
-        done
     }
 }
 
@@ -272,6 +315,14 @@ fn call_worker<T: Send + 'static>(
     let sender = inner.txs.get(worker)?;
     sender.send(Job::Run(task)).ok()?;
     rx.recv().ok()
+}
+
+/// Queue a job and do not wait for it. `false` means the worker is gone.
+fn post_job(inner: &Inner, worker: usize, job: impl FnOnce() + Send + 'static) -> bool {
+    let Some(sender) = inner.txs.get(worker) else {
+        return false;
+    };
+    sender.send(Job::Run(Box::new(job))).is_ok()
 }
 
 fn wait_slot(
@@ -363,9 +414,14 @@ pub(crate) fn with_decode_workspace<T>(body: impl FnOnce(&mut Workspace) -> T) -
     WORKSPACE.with(|workspace| body(&mut workspace.borrow_mut()))
 }
 
-/// Grey bytes moved out of the workspace and not yet returned.
-pub(crate) fn set_detached(bytes: usize) {
-    DETACHED.with(|cell| cell.set(bytes));
+/// Count grey bytes that just left the workspace for a reply.
+pub(crate) fn detach_grey(bytes: usize) {
+    DETACHED.with(|cell| cell.set(cell.get().saturating_add(bytes)));
+}
+
+/// Grey bytes came back to the workspace, so they are detached no longer.
+pub(crate) fn reattach_grey(bytes: usize) {
+    DETACHED.with(|cell| cell.set(cell.get().saturating_sub(bytes)));
 }
 
 /// Send `bytes` to the worker that allocated them. A dead worker drops them here.
@@ -496,6 +552,30 @@ mod tests {
         drop(tx);
         drop(first);
         drop(second);
+        Ok(())
+    }
+
+    #[test]
+    fn a_busy_home_worker_hands_the_job_to_the_other_worker() -> Result<(), String> {
+        let scheduler = Scheduler::start();
+        let first = scheduler
+            .acquire_decode(Some(0), &mut || true)
+            .ok_or("worker 0 was not granted")?;
+        if first.worker() != 0 {
+            return Err("worker 0 was not the home worker".to_owned());
+        }
+        let started = std::time::Instant::now();
+        let fallback = scheduler
+            .acquire_decode(Some(0), &mut || true)
+            .ok_or("no slot was granted after the home wait")?;
+        if fallback.worker() != 1 {
+            return Err(format!("the fallback ran on {}", fallback.worker()));
+        }
+        if started.elapsed() < HOME_WAIT {
+            return Err("the fallback did not wait for the home worker".to_owned());
+        }
+        drop(first);
+        drop(fallback);
         Ok(())
     }
 }

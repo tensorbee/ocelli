@@ -3,9 +3,10 @@
 //! One `Lru` accounts both. Encoded bytes leave by `Lru::remove` once every
 //! frame of that file is held. The tier is `CacheTier::Decoded` because the
 //! frames are what the budget is for. A decoded frame's sample buffer that
-//! leaves the cache waits on a free list keyed by its exact byte length.
-//! Cached frames and free buffers share one budget. The next decode of that
-//! length takes the buffer instead of allocating.
+//! leaves the cache is parked on a free list keyed by its exact byte length
+//! when cached bytes plus free bytes fit the budget, and is freed otherwise.
+//! Cached frames and free buffers share one budget. A decode of that length
+//! takes a parked buffer when there is one, and allocates otherwise.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -22,7 +23,8 @@ use crate::preview::HeldFrame;
 #[path = "schedule.rs"]
 mod schedule;
 
-pub(crate) use schedule::{BodyPermit, DecodePermit, set_detached, with_decode_workspace};
+pub(crate) use schedule::with_decode_workspace;
+pub(crate) use schedule::{BodyPermit, DecodePermit, GreyHome, detach_grey, retire_bytes};
 
 const DEFAULT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 const CONNECTION_CAP: usize = 32;
@@ -211,8 +213,8 @@ impl std::ops::Deref for PostedBytes {
     }
 }
 
-/// A cached frame. When it leaves the cache its sample buffer waits on the
-/// free list, keyed by exact length, instead of being freed.
+/// A cached frame. When it leaves the cache its sample buffer is parked on
+/// the free list only if the budget still fits it, and is freed otherwise.
 pub(crate) struct CachedFrame {
     inner: HeldFrame,
     worker: Option<u8>,
@@ -445,7 +447,9 @@ impl Viewer {
         Self::with_connection_cap(config, CONNECTION_CAP)
     }
 
-    /// The process server. Bodies and decodes run on `P` workers, and `P` is 2.
+    /// The process server. Request bodies are read and freed on the `P`
+    /// workers, and every decode runs there too, under a decode permit. `P`
+    /// is 2.
     ///
     /// At most four request bodies are live. That is the coefficient of `S_max`.
     #[must_use]

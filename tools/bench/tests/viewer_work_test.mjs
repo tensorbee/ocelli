@@ -182,10 +182,15 @@ test("assertPageHooks with no arguments uses the page globals", () => {
   const request = globalThis.requestGrey;
   const draw = globalThis.drawGrey;
   try {
+    // Each refusal below has exactly one hook missing, so replacing either
+    // global lookup alone in assertPageHooks turns one of them green.
     delete globalThis.requestGrey;
     delete globalThis.drawGrey;
+    globalThis.drawGrey = () => {};
     refuses(() => assertPageHooks(), "the page did not expose requestGrey and drawGrey");
+    delete globalThis.drawGrey;
     globalThis.requestGrey = () => {};
+    refuses(() => assertPageHooks(), "the page did not expose requestGrey and drawGrey");
     globalThis.drawGrey = () => {};
     assert.doesNotThrow(() => assertPageHooks());
   } finally {

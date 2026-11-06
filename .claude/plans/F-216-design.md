@@ -475,3 +475,10 @@ Made by the sprint lead on 2026-11-05 under the operator's delegation of the qua
 - **Every decode runs on the two decode threads.** A preview that carries the file's bytes is decoded by the same scheduler as one that names a held id, under a decode permit and charged as in flight. No connection thread decodes.
 - **A decode permit ends with the decode.** The permit is released when the grey bytes are ready, before the reply is written, so a client that stops reading holds no decode permit. Either decode thread takes the next job.
 - **A buffer leaving the cache waits on the free list only when it fits.** When cached bytes plus free bytes would exceed the budget, the buffer is freed instead. The steal takes the oldest cached frame of that length only when no reply holds it, and otherwise allocates.
+
+### Lead amendments after review pass 5
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-5.md`.
+
+- **A body-form preview never evicts or steals.** Its decode takes a free buffer of the right length when one is parked, and otherwise allocates. It never evicts a cached entry or steals a cached frame, because its frame is never stored.
+- **Grey reply bytes are bounded by a cap, not by the permits.** Grey bytes held by replies that are not yet written count against one fixed cap equal to the formula's existing grey term. A preview whose grey would exceed it waits for capacity, up to the write timeout, then answers `503 busy`. The bound and its formula do not change.
