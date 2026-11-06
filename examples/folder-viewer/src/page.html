@@ -3111,7 +3111,10 @@ function pointReadout(event) {
   }
   const tile = vp.tileMode ? event.target.closest(".tiles canvas") : null;
   lastPointer = { clientX: event.clientX, clientY: event.clientY, tile };
-  const point = tile ? tilePoint(tile, event) : imagePoint(vp, event);
+  // A point is mapped only through a picture on screen: a tile under the
+  // pointer, or the single view while its stage shows. A faulted cell and
+  // the strip between tiles give none, so no cross, readout or magnifier.
+  const point = tile ? tilePoint(tile, event) : (vp.tileMode || vp.dom.stage.hidden ? null : imagePoint(vp, event));
   if (showCross && point && !vp.tileMode) {
     const local = wrap.getBoundingClientRect();
     const box = vp.dom.cell.getBoundingClientRect();

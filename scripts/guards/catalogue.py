@@ -13358,7 +13358,9 @@ GUARDS: tuple[Guard, ...] = (
                 "leaves the magnifier on the previous image, a tile emptied "
                 "under the pointer that leaves the magnifier on its old "
                 "image, a throw inside a drag's layout after which a zoom "
-                "no longer clears, and a run that observed no change.",
+                "no longer clears, a pointer over a faulted cell or between "
+                "tiles that shows the cross, the readout or the magnifier, "
+                "and a run that observed no change.",
         claims=(),
         silent="The file is under examples/, which scripts/guards/discover.py "
                "does not scan, so the census finds no refusal site to claim. "
@@ -13391,8 +13393,9 @@ GUARDS: tuple[Guard, ...] = (
               "stayed. The observation itself needs Chromium and a release "
               "build of the viewer, which a disposable sandbox does not have, "
               "so it is watched by the `viewer-browser` gate and its CI job. "
-              "The no-change, no-repaint, drag, image-step, empty-tile and "
-              "thrown-layout branches have no probe.",
+              "The no-change, no-repaint, drag, image-step, empty-tile, "
+              "thrown-layout, faulted-cell and tile-gap branches have no "
+              "probe.",
     ),
     Guard(
         id="bench.cold-start",

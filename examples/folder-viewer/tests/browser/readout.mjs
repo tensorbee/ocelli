@@ -27,6 +27,11 @@
 //            keep image 4's pixels.
 //   throw    a pan drag whose last layout throws. Afterwards `=` with the
 //            pointer still must still hide the readout and the magnifier.
+//   fault    the main preview fails after ArrowRight, so the cell shows a
+//            fault. A pointer move over it must show no cross, readout or
+//            magnifier and send no POST /value.
+//   gap      in Four images, a pointer move over the strip between tile 1's
+//            picture and tile 2's must show no magnifier.
 //
 // It runs on the synthetic study, starts the viewer with OCELLI_PORT=0,
 // reads the URL it prints and stops it by its PID, through tools/bench's
@@ -120,6 +125,34 @@ export function stepProblems(steps) {
  * `empty` is `{ name, before, after, magHidden }`, magnifier pixel hashes.
  * `thrown` is `{ name, threw, before, after }`, readout states.
  */
+/**
+ * `faulted` is `{ name, fault, readHidden, crossHidden, magHidden, posts }`.
+ * `gap` is `{ name, inGap, magHidden }`.
+ */
+export function noPictureProblems(faulted, gap) {
+  const problems = [];
+  if (!faulted || !gap) {
+    problems.push("the faulted-cell or the tile-gap case was not observed");
+    return problems;
+  }
+  if (!faulted.fault) {
+    problems.push(`${faulted.name}: the cell did not show a fault, so the case shows nothing`);
+  } else {
+    if (!faulted.readHidden || !faulted.crossHidden || !faulted.magHidden) {
+      problems.push(`${faulted.name}: a pointer over a fault showed the cross, readout or magnifier`);
+    }
+    if (faulted.posts !== 0) {
+      problems.push(`${faulted.name}: a pointer over a fault sent ${faulted.posts} POST /value`);
+    }
+  }
+  if (!gap.inGap) {
+    problems.push(`${gap.name}: the pointer was not between the tiles' pictures, so the case shows nothing`);
+  } else if (!gap.magHidden) {
+    problems.push(`${gap.name}: the magnifier showed over the strip between tiles`);
+  }
+  return problems;
+}
+
 export function faultProblems(empty, thrown) {
   const problems = [];
   if (!empty || !thrown) {
@@ -214,6 +247,69 @@ async function thrownLayoutCase(page, url) {
   return { name: "a zoom after a throw inside a pan drag", threw, before, after };
 }
 
+async function faultedCellCase(page, url) {
+  await openSynthetic(page, url);
+  await page.keyboard.press("c");
+  await page.keyboard.press("m");
+  const start = await centreOf(page, 0);
+  await pointAt(page, start, ["readout", "magnifier"]);
+  await page.evaluate(() => {
+    window.requestGrey = () => Promise.reject(new Error("injected main failure"));
+    dropCache();
+  });
+  await page.keyboard.press("ArrowRight");
+  await page.waitForFunction(() => {
+    const fault = document.querySelector('.cell[data-cell="0"] .fault');
+    return fault && !fault.hidden;
+  });
+  let posts = 0;
+  const count = (request) => { if (request.url().endsWith("/value")) posts += 1; };
+  page.on("request", count);
+  await page.mouse.move(start.x + 30, start.y + 20);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.move(start.x + 1, start.y);
+  await page.waitForTimeout(600);
+  page.off("request", count);
+  const seen = await state(page);
+  const fault = await page.evaluate(() => {
+    const node = document.querySelector('.cell[data-cell="0"] .fault');
+    return node && !node.hidden ? node.textContent : "";
+  });
+  return {
+    name: "a pointer move over a faulted cell",
+    fault,
+    readHidden: seen.readHidden,
+    crossHidden: seen.crossHidden,
+    magHidden: seen.magHidden,
+    posts,
+  };
+}
+
+async function tileGapCase(page, url) {
+  await openSynthetic(page, url);
+  await page.keyboard.press("m");
+  await page.keyboard.press("Shift+G");
+  await page.waitForFunction(() => {
+    const node = document.querySelector('.cell[data-cell="0"] canvas[data-tile="0"]');
+    return node && node.width > 1;
+  });
+  const spot = await page.evaluate(() => {
+    const tile = document.querySelector('.cell[data-cell="0"] .tile');
+    const picture = tile.querySelector("canvas").getBoundingClientRect();
+    const box = tile.getBoundingClientRect();
+    return { x: (picture.right + box.right) / 2, y: picture.top + picture.height / 2, room: box.right - picture.right };
+  });
+  await page.mouse.move(spot.x - 3, spot.y);
+  await page.mouse.move(spot.x, spot.y);
+  await page.waitForTimeout(400);
+  const inGap = spot.room > 4 && await page.evaluate(({ x, y }) => {
+    const node = document.elementFromPoint(x, y);
+    return Boolean(node && node.classList.contains("tile"));
+  }, spot);
+  const magHidden = await page.evaluate(() => document.getElementById("mag").hidden);
+  return { name: "a pointer move over the strip between tiles", inGap, magHidden };
+}
+
 function magHash(page) {
   return page.evaluate(() => {
     const node = document.getElementById("mag");
@@ -301,8 +397,16 @@ async function pointAt(page, point, expect) {
   }, { wantsReadout: expect.includes("readout"), wantsMag: expect.includes("magnifier"), pattern: VALUE_SHOWN.source });
 }
 
-async function observe(page, name, shown, again, change, cell = 0) {
-  const point = await centreOf(page, cell);
+// The centre of a cell's top-left quarter. In Four images that is the
+// middle of tile 1's picture, and in the single view it is on the image.
+async function quarterOf(page, cell) {
+  const box = await page.locator(`.cell[data-cell="${cell}"]`).boundingBox();
+  return { x: box.x + box.width / 4, y: box.y + box.height / 4 };
+}
+
+async function observe(page, name, shown, again, change, where = centreOf) {
+  const cell = 0;
+  const point = await where(page, cell);
   try {
     await pointAt(page, point, shown);
   } catch (error) {
@@ -312,7 +416,7 @@ async function observe(page, name, shown, again, change, cell = 0) {
   await change();
   await page.waitForTimeout(400);
   const after = await state(page);
-  const next = await centreOf(page, cell);
+  const next = await where(page, cell);
   let moved;
   try {
     await pointAt(page, { x: next.x + 3, y: next.y + 2 }, again);
@@ -348,8 +452,8 @@ export async function observeReadout(url, chromium) {
     observations.push(await observe(page, "zoom with =", both, both, () => page.keyboard.press("=")));
     observations.push(await observe(page, "window resize", both, both,
       () => page.setViewportSize({ width: 1200, height: 800 })));
-    observations.push(await observe(page, "tile mode on", both, mag, () => page.keyboard.press("Shift+G")));
-    observations.push(await observe(page, "tile mode off", mag, both, () => page.keyboard.press("Shift+G")));
+    observations.push(await observe(page, "tile mode on", both, mag, () => page.keyboard.press("Shift+G"), quarterOf));
+    observations.push(await observe(page, "tile mode off", mag, both, () => page.keyboard.press("Shift+G"), quarterOf));
     drags.push(await dragCase(page, "pan by right-button drag", "right"));
     drags.push(await dragCase(page, "zoom by middle-button drag", "middle"));
     steps.push(await stepCase(page, "ArrowRight", () => page.keyboard.press("ArrowRight")));
@@ -369,7 +473,13 @@ export async function observeReadout(url, chromium) {
     const thrownPage = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
     thrownPage.setDefaultTimeout(30000);
     const thrown = await thrownLayoutCase(thrownPage, url);
-    return { observations, drags, steps, empty, thrown, chromium: browser.version() };
+    const faultPage = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    faultPage.setDefaultTimeout(30000);
+    const faulted = await faultedCellCase(faultPage, url);
+    const gapPage = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    gapPage.setDefaultTimeout(30000);
+    const gap = await tileGapCase(gapPage, url);
+    return { observations, drags, steps, empty, thrown, faulted, gap, chromium: browser.version() };
   } finally {
     await browser.close();
   }
@@ -398,13 +508,16 @@ async function main() {
   console.log(`${result.empty.name}: magnifier ${result.empty.before} before, ${result.empty.after} after${result.empty.magHidden ? ", hidden" : ", shown"}`);
   console.log(`${result.thrown.name}: threw ${result.thrown.threw}, before ${JSON.stringify(result.thrown.before.read)}, after hidden ${result.thrown.after.readHidden}/${result.thrown.after.magHidden}`);
   const problems = readoutProblems(result.observations)
-    .concat(dragProblems(result.drags), stepProblems(result.steps), faultProblems(result.empty, result.thrown));
+    .concat(dragProblems(result.drags), stepProblems(result.steps), faultProblems(result.empty, result.thrown),
+      noPictureProblems(result.faulted, result.gap));
+  console.log(`${result.faulted.name}: fault ${JSON.stringify(result.faulted.fault)}, hidden readout ${result.faulted.readHidden} cross ${result.faulted.crossHidden} magnifier ${result.faulted.magHidden}, ${result.faulted.posts} POST /value`);
+  console.log(`${result.gap.name}: in the gap ${result.gap.inGap}, magnifier ${result.gap.magHidden ? "hidden" : "shown"}`);
   if (problems.length) {
     for (const problem of problems) console.error(problem);
     process.exitCode = 1;
     return;
   }
-  console.log(`all ${result.observations.length} changes hid the readout and a move showed it again, ${result.drags.length} drags kept it, ${result.steps.length} image steps reached the magnifier, an emptied tile and a thrown layout left nothing stale`);
+  console.log(`all ${result.observations.length} changes hid the readout and a move showed it again, ${result.drags.length} drags kept it, ${result.steps.length} image steps reached the magnifier, an emptied tile and a thrown layout left nothing stale, a faulted cell and a tile gap showed nothing`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
