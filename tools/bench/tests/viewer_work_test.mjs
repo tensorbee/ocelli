@@ -2,6 +2,7 @@
 // here, not copied from a run. The file does not launch a browser.
 
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 

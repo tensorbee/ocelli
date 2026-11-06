@@ -5,6 +5,7 @@
 // without a browser install.
 
 import { spawn, execFile } from "node:child_process";
+import { Buffer } from "node:buffer";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
