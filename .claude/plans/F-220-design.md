@@ -244,3 +244,30 @@ None open.
 - Q4, the Rust standard library. Answered: lead decision under the operator's delegation of 2026-11-05. The toolchain's own notice, pinned, decision 7.
 
 One finding for the operator, outside this story's scope: `docs/RELEASE.md` item 6 says the wasm module must be in `@ocelli/core`, and today's tarball has none (fact 7). `/release` would refuse on that item. No story in S46 builds the wasm into the package.
+
+### Lead amendments after review pass 1
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-220-working-pass-1.md`.
+
+- **A pinned standard text is a template, never a notice.** `ci/notices/spdx/` holds licence terms with no copyright line and no sign-off of any project. The MIT and Zlib templates carry one marked copyright line, and the generator fills it per crate. A pinned file that still carries another project's holder, or an unfilled placeholder in the output, is a refusal.
+- **A crate whose package ships no licence file takes its upstream notice.** The generator uses a licence file pinned from the crate's own repository at the tag or commit matching its locked version, stored under `ci/notices/crates/<name>-<version>/` with its source URL and SHA-256 in `ci/notices/sources.toml`. Fetching happens only when a pin is added, never at gate time. Only when the upstream repository carries no licence file does the notice fall back to the template, with the copyright line naming the crate's declared authors, or "the <name> authors" and its declared repository when none are declared. Each fallback is listed in `sources.toml` with that reason. No year is invented.
+- **Every copied source has its row.** choosealicense, apache.org, the zlib repository, rust-docs, each upstream crate repository used under the rule above, and the refused SPDX license-list-data each get the row `docs/SOURCE-POLICY.md` requires, under "Extensions to the table". `sources.toml` calls a source only what it is.
+
+### Lead amendments after review pass 2
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-220-working-pass-2.md`.
+
+- **A pin comes from the package's published commit, and the gate checks it.** The commit is read offline from the package's `.cargo_vcs_info.json` in the registry cache. A pin whose URL names any other commit is a refusal, and a level-1 probe watches it. A licence file added upstream after that commit is never used for the locked version.
+- **The objc2 family takes `LICENSE.md` and the fallback.** At each published commit the repository holds only `LICENSE.md`, which states the licence expressions and names no holder. The notice reproduces that `LICENSE.md`, then the elected template under the fallback rule, with the crate's declared authors or "the <name> authors" and its repository as the holder. The section sentence says neither the package nor its repository at that commit carries licence text, and the reason is recorded per crate in `sources.toml`.
+- **The four MIT-only objc2 crates also name Steven Sheldon.** The repository's root `LICENSE.txt` read `Copyright (c) Steven Sheldon` until commit `cfb19922`. That file is pinned from the commit before it and reproduced for those crates. Naming an earlier holder is the cautious direction.
+- **Apache-2.0 stays exactly as published.** Its appendix line is instructions to a licensor, not a notice, and the generator never fills it.
+- **Each source is recorded under the licence of what was copied.** choosealicense content, including `_licenses/mit.txt`, is CC BY 3.0. Its row says so and gives the attribution that licence requires.
+
+### Lead amendments after review pass 4
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-220-working-pass-4.md`, and corrected after pass 6.
+
+- **The `binaries` section stays offline.** It reads no network and no pin is fetched at gate time. It checks each file pinned under `ci/notices/` against its recorded SHA-256 and each crate pin's commit against the package's `.cargo_vcs_info.json`.
+- **`verify-upstream` is a separate command, part of no gate.** `python3 scripts/licence_check.py verify-upstream` re-fetches every crate pin and every earlier pin from its recorded URL at its recorded commit and refuses a byte difference or a missing file.
+- **Outside this story.** The `rust` section's `cargo deny` call from F-217 runs without `--offline`, so on an empty `CARGO_HOME` it downloads the registry.
+- **What neither checks.** Nothing checks that an earlier row's commit is the parent of `cfb19922`. An earlier row re-pointed at another commit whose file has the same bytes passes both the gate and `verify-upstream`.

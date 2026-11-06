@@ -11,6 +11,8 @@ import {
   type WasmMemory,
 } from "./bulk.js";
 import { DicomwebClient } from "./dicomweb.js";
+import { OcelliError } from "./ocelli-error.js";
+import { WADO_INSTANCE_REQUEST_KEYS, refuseUnknownOptions } from "./options.js";
 
 export interface WadoInstanceRequest {
   readonly studiesServiceUrl: string;
@@ -25,6 +27,7 @@ export interface WadoInstanceRequest {
 const PAGE = 65536;
 
 export async function postWadoInstance(request: WadoInstanceRequest): Promise<void> {
+  refuseUnknownOptions("WadoInstanceRequest", request, WADO_INSTANCE_REQUEST_KEYS);
   const memory = new WebAssembly.Memory({ initial: 1, maximum: 1024 });
   const wasm: WasmMemory = { memory };
   let held: Uint8Array | null = null;
@@ -66,7 +69,7 @@ export async function postWadoInstance(request: WadoInstanceRequest): Promise<vo
     request.instanceUid,
   );
   if (held === null) {
-    throw new Error("the instance body was not committed");
+    throw new OcelliError("CommitRefused", "the instance body was not committed");
   }
   request.post(held, boundary);
 }

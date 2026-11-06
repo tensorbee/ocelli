@@ -44,7 +44,9 @@ artefact ships inside `@ocelli/core`, so publishing it to crates.io would offer
 a crate nobody can use from Rust. `ocelli-native` is `publish = false` for as
 long as it stays stubbed, because publishing it would claim Phase 2 and Phase 3
 entry points that do not exist yet. The milestone that ships them lifts the
-flag and adds it to the crates.io list above. `ocelli-oracle` is
+flag and adds it to the crates.io list above. That milestone also ships a
+native archive carrying `LICENSE`, `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE`,
+`THIRD_PARTY_NOTICES` and `THIRD_PARTY_LICENSES`. `ocelli-oracle` is
 `publish = false` too, being test infrastructure, and
 `@ocelli/example-viewer` is private. `grep -rn '^publish' crates/*/Cargo.toml
 tools/oracle/Cargo.toml` prints the whole set.
@@ -93,7 +95,9 @@ changelog means one of the two is lying and there is no way to tell which.
    than registry placeholders. A dry run uploads nothing.
 6. `npm pack` for each published package, with its contents listed. The wasm
    module must be present in `@ocelli/core` and must be the one this HEAD
-   builds, not a stale artefact from a previous build.
+   builds, not a stale artefact from a previous build. The tarball that
+   carries that module must also carry `THIRD_PARTY_LICENSES` and
+   `THIRD_PARTY_NOTICES`. `gate packages` refuses a `.wasm` file without both.
 7. The `CHANGELOG.md` section for the exact tag exists and `--check` passes.
 8. `docs/hld/DEVIATIONS.md` has no row whose "Why" is a temporary measure that
    has since expired. A deviation shipped in a 1.x release is a supported

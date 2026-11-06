@@ -176,6 +176,16 @@ def check_tarball(name: str, manifest: dict, names: list[str]) -> list[str]:
                 f"@ocelli/{name} advertises {field} = {target!r} and the "
                 f"tarball has no {relative}. This installs cleanly and fails "
                 f"at the consumer's first import.")
+
+    # A wasm file is the shipped module, so the notices travel with it.
+    # A tarball that carries no wasm file is not asked for them.
+    wasm = [path for path in names if path.endswith(".wasm")]
+    if wasm:
+        for required in ("THIRD_PARTY_LICENSES", "THIRD_PARTY_NOTICES"):
+            if required not in present:
+                problems.append(
+                    f"@ocelli/{name} tarball carries {wasm[0]} and has no "
+                    f"{required}")
     return problems
 
 

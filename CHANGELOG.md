@@ -538,3 +538,18 @@ Repository bootstrap. Nothing is published.
 - The `@ocelli/core` and `@ocelli/react` tarballs no longer ship compiled
   test files. Core packs 140 entries and react 17. The packages check
   refuses any test file in a published tarball.
+- `THIRD_PARTY_LICENSES` lists the licence text of every third-party crate
+  compiled into the wasm module and the native binaries, with the Rust
+  standard library's notice. The licences gate checks that it matches the
+  lockfile, offline.
+
+### Changed
+
+- Every public options and request object in `@ocelli/core` now refuses an
+  unknown key with `OcelliError` code `UnknownOption`, naming the key, before
+  any fetch or write. A misspelt option used to be ignored.
+- Errors the shell raises are `OcelliError` with a string `code`.
+  `DicomwebError` is a subclass and keeps its codes. An engine `RangeError`
+  or `TypeError` from a view over wasm memory still passes through.
+- `loadCore` returns `Promise<true>` and rejects with `CoreLoadFailed`, with
+  the initialiser's error as `cause`. It used to resolve `false`.

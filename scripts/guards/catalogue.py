@@ -7549,7 +7549,7 @@ GUARDS: tuple[Guard, ...] = (
         id="licences",
         file="scripts/licence_check.py",
         gate="licences licences-wheels",
-        spec="F-217 and SPDX 2.3 Annex D",
+        spec="F-217, F-220 and SPDX 2.3 Annex D",
         refuses="A dependency whose licence is not on the one allowlist, "
                 "an exception or a file waiver that is stale, incomplete, "
                 "out of scope or in a published runtime closure, a lead "
@@ -7558,7 +7558,20 @@ GUARDS: tuple[Guard, ...] = (
                 "expression, a Python package with no recorded row, a bundled "
                 "wheel file that carries a copyleft marker or an unrecorded "
                 "library, a third-party notice that drifts, and a holder or "
-                "manifest SPDX line that drifts.",
+                "manifest SPDX line that drifts. A shipped binary notice that "
+                "is absent or drifts from the lockfile, a pinned notice byte "
+                "that does not match its digest, a toolchain channel that "
+                "does not match the pinned standard library notice, and an "
+                "expression-only crate with no pinned text are refused as well. "
+                "A pinned template that names another project's holder, an "
+                "unfilled placeholder in the generated notice, a crate with "
+                "no packaged file and no recorded upstream notice, an "
+                "expression with no allowlisted licence, a licence path that "
+                "leaves the crate root, an absent licence file, a crate with "
+                "no file and no expression, a --write of any section "
+                "other than binaries, and a crate pin whose URL commit "
+                "differs from the package's published commit are refused "
+                "as well.",
         claims=("*",),
         probes=(
             Probe("licences.npm-copyleft", _plant_npm_copyleft,
@@ -7701,6 +7714,435 @@ GUARDS: tuple[Guard, ...] = (
                     "bad = l.synthetic_installed_problems('clean')\n"
                     "print('\\n'.join(bad))\n"
                     "sys.exit(1 if bad else 0)\n")),
+            Probe(
+                "licences.binaries-no-text", None,
+                python_snippet(
+                    "licence_check.render_notices, no pinned text",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='BSD-3-Clause', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'MIT-STANDARD\\nCopyright (c) <copyright-holder>\\n'}\n"
+                    "allow = {'mit', 'bsd-3-clause'}\n"
+                    "try:\n"
+                    "    l.render_notices([crate], pins, b'<std>', '1.97.1', allow)\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "has no pinned text for BSD-3-Clause",
+                level=1,
+                control=python_snippet(
+                    "licence_check.render_notices, MIT pin",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'MIT-STANDARD\\nCopyright (c) <copyright-holder>\\n'}\n"
+                    "allow = {'mit', 'bsd-3-clause'}\n"
+                    "l.render_notices([crate], pins, b'<std>', '1.97.1', allow)\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. BSD-3-Clause is allowlisted and has no pinned "
+                     "text, and the crate ships no licence file. The MIT pin "
+                     "carries the copyright marker so the holder check is not "
+                     "what refuses. The control renders MIT against that pin "
+                     "and exits 0. Neither call runs cargo."),
+            Probe(
+                "licences.binaries-pin",
+                lambda box: box.append("ci/notices/spdx/MIT.txt", "\n"),
+                script("python3", "scripts/licence_check.py", "binaries"),
+                "sha256 is",
+                needs="cargo", profile="deep",
+                note="One extra newline in ci/notices/spdx/MIT.txt. binaries "
+                     "refuses on the digest. The check is the binaries entry "
+                     "point. Dropping pinned_digest_problems from "
+                     "binaries_problems leaves this probe exiting 1. The "
+                     "harness reports \"got the exit status it wanted, but "
+                     "not at the declared refusal: nothing in the output "
+                     "contains 'sha256 is'. A run that went the right way "
+                     "for another reason proves nothing about this guard.\" "
+                     "The guard output is \"FAIL: licence check\" and "
+                     "\"THIRD_PARTY_LICENSES does not match the lockfile\"."),
+            Probe(
+                "licences.binaries-elect", None,
+                python_snippet(
+                    "licence_check.elect_terms, no allowlisted disjunct",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "try:\n"
+                    "    l.elect_terms('GPL-3.0-only', {'mit'})\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "has no allowlisted licence",
+                level=1,
+                control=python_snippet(
+                    "licence_check.elect_terms, MIT",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "l.elect_terms('MIT', {'mit'})\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. GPL-3.0-only is not on the probe allowlist. "
+                     "The control elects MIT and exits 0."),
+            Probe(
+                "licences.binaries-escape", None,
+                python_snippet(
+                    "licence_check.collect_licence_files, escape",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "from pathlib import Path\n"
+                    "try:\n"
+                    "    l.collect_licence_files(Path('.'), '../secret')\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "escapes the crate root",
+                level=1,
+                control=python_snippet(
+                    "licence_check.collect_licence_files, no named file",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "from pathlib import Path\n"
+                    "l.collect_licence_files(Path('.'), None)\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. The named path contains '..'. The control "
+                     "scans the sandbox root and names no extra file."),
+            Probe(
+                "licences.binaries-absent", None,
+                python_snippet(
+                    "licence_check.collect_licence_files, absent",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "from pathlib import Path\n"
+                    "try:\n"
+                    "    l.collect_licence_files(Path('.'), 'MISSING-LICENCE.txt')\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "is absent",
+                level=1,
+                control=python_snippet(
+                    "licence_check.collect_licence_files, absent control",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "from pathlib import Path\n"
+                    "l.collect_licence_files(Path('.'), None)\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. The named file is not in the crate root. The "
+                     "control names no extra file."),
+            Probe(
+                "licences.binaries-no-expression", None,
+                python_snippet(
+                    "licence_check.render_notices, no expression",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='', authors=(), files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "try:\n"
+                    "    l.render_notices([crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "has no licence file and no licence expression",
+                level=1,
+                control=python_snippet(
+                    "licence_check.render_notices, expression control",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "l.render_notices([crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. Empty files and an empty expression. The "
+                     "control renders MIT against a marked pin."),
+            Probe(
+                "licences.binaries-write-section", None,
+                python_snippet(
+                    "licence_check.main, write holder",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "sys.exit(l.main(['--write', 'holder']))\n"),
+                "--write regenerates the binaries section only",
+                level=1,
+                control=python_snippet(
+                    "licence_check.main, holder",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "sys.exit(l.main(['holder']))\n"),
+                note="Level 1. --write is the binaries regenerator. holder "
+                     "is a check section. The control runs that check."),
+            Probe(
+                "licences.binaries-foreign-holder", None,
+                python_snippet(
+                    "licence_check.render_notices, foreign holder",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='Zlib', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {\n"
+                    "    'zlib': b'Copyright (C) 1995 Jean-loup Gailly\\n',\n"
+                    "    'mit': b'Copyright (c) <copyright-holder>\\n',\n"
+                    "}\n"
+                    "try:\n"
+                    "    l.render_notices([crate], pins, b'<std>', '1.97.1', {'zlib'})\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "names another project's holder",
+                level=1,
+                control=python_snippet(
+                    "licence_check.render_notices, marker holder",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='Zlib', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'zlib': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "l.render_notices([crate], pins, b'<std>', '1.97.1', {'zlib'})\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. The Zlib pin names a holder that is not the "
+                     "marker. The control carries only the marker."),
+            Probe(
+                "licences.binaries-placeholder", None,
+                python_snippet(
+                    "licence_check.render_notices, unfilled placeholder",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\nSee [year] [fullname].\\n'}\n"
+                    "try:\n"
+                    "    l.render_notices([crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "unfilled placeholder",
+                level=1,
+                control=python_snippet(
+                    "licence_check.render_notices, filled marker",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "l.render_notices([crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. The marker is filled and [year] stays in the "
+                     "output. The control pin has only the marker."),
+            Probe(
+                "licences.binaries-no-pin", None,
+                python_snippet(
+                    "licence_check.crate_from_package, no pin",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "import tempfile\n"
+                    "from pathlib import Path\n"
+                    "root = Path(tempfile.mkdtemp())\n"
+                    "(root / 'Cargo.toml').write_text('x\\n', encoding='utf-8')\n"
+                    "try:\n"
+                    "    l.crate_from_package({\n"
+                    "        'name': 'probe-gap', 'version': '0.0.0',\n"
+                    "        'license': 'MIT', 'authors': [],\n"
+                    "        'repository': 'https://example.com/probe-gap',\n"
+                    "        'manifest_path': str(root / 'Cargo.toml'),\n"
+                    "        'source': 'registry+https://github.com/rust-lang/crates.io-index',\n"
+                    "    })\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "no pinned upstream notice",
+                level=1,
+                control=python_snippet(
+                    "licence_check.crate_from_package, packaged file",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "import tempfile\n"
+                    "from pathlib import Path\n"
+                    "root = Path(tempfile.mkdtemp())\n"
+                    "(root / 'Cargo.toml').write_text('x\\n', encoding='utf-8')\n"
+                    "(root / 'LICENSE').write_text('granted\\n', encoding='utf-8')\n"
+                    "l.crate_from_package({\n"
+                    "    'name': 'probe-ok', 'version': '0.0.0',\n"
+                    "    'license': 'MIT', 'authors': ['Ann <ann@example.com>'],\n"
+                    "    'repository': 'https://example.com/probe-ok',\n"
+                    "    'manifest_path': str(root / 'Cargo.toml'),\n"
+                    "    'source': 'registry+https://github.com/rust-lang/crates.io-index',\n"
+                    "})\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. The package has no licence file and sources.toml "
+                     "has no pin for it. The control package ships LICENSE."),
+            Probe(
+                "licences.binaries-published-commit", None,
+                python_snippet(
+                    "licence_check.published_commit_problems, other commit",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "rows = [{\n"
+                    "    'name': 'block2', 'version': '0.6.2',\n"
+                    "    'url': 'https://raw.githubusercontent.com/madsmtm/objc2/'\n"
+                    "           'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/LICENSE.md',\n"
+                    "}]\n"
+                    "bad = l.published_commit_problems(rows)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "differs from the published commit",
+                level=1,
+                control=python_snippet(
+                    "licence_check.published_commit_problems, real pins",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.published_commit_problems()\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1. The pin URL names a commit that is not block2 "
+                     "0.6.2's published sha1. The check reads "
+                     ".cargo_vcs_info.json from the registry cache and does "
+                     "not use the network. The control checks the crate pins "
+                     "in sources.toml. Replacing published_commit_problems "
+                     "with a function that returns nothing makes this probe "
+                     "exit 0. The harness then reports that the guard it aims "
+                     "at did not fire."),
+            Probe(
+                "licences.binaries-attribution", None,
+                python_snippet(
+                    "licence_check.attribution_problems, paragraph removed",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "blob = l.render_notices(\n"
+                    "    [crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "stripped = blob.replace(l._CC_BY_ATTRIBUTION.encode(), b'')\n"
+                    "bad = l.attribution_problems(stripped)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "attribution paragraph is absent",
+                level=1,
+                control=python_snippet(
+                    "licence_check.attribution_problems, paragraph kept",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "blob = l.render_notices(\n"
+                    "    [crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "bad = l.attribution_problems(blob)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1. The rendered notice has the CC BY paragraph "
+                     "removed. The control keeps the paragraph and exits 0. "
+                     "Neither call runs cargo."),
+            Probe(
+                "licences.binaries-earlier-commit", None,
+                python_snippet(
+                    "licence_check.earlier_commit_problems, file absent",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "commit = 'e' * 40\n"
+                    "rows = [{\n"
+                    "    'name': 'block2', 'version': '0.6.2',\n"
+                    "    'path': 'ci/notices/crates/objc2-earlier/LICENSE.txt',\n"
+                    "    'url': 'https://raw.githubusercontent.com/madsmtm/objc2/'\n"
+                    "           + commit + '/LICENSE.txt',\n"
+                    "    'sha256': 'ab' * 32,\n"
+                    "    'commit': commit,\n"
+                    "}]\n"
+                    "bad = l.earlier_commit_problems(\n"
+                    "    rows, blob_at=lambda _url: None)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "is absent at commit",
+                level=1,
+                control=python_snippet(
+                    "licence_check.earlier_commit_problems, pinned bytes",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "rows = l._table_rows(\n"
+                    "    l._load_sources(), 'earlier', required=False)\n"
+                    "def blob_at(url):\n"
+                    "    for row in rows:\n"
+                    "        if str(row.get('url') or '') == url:\n"
+                    "            return (l.ROOT / str(row['path'])).read_bytes()\n"
+                    "    return None\n"
+                    "bad = l.earlier_commit_problems(rows, blob_at=blob_at)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1. The earlier pin URL names a commit and blob_at "
+                     "reports that LICENSE.txt is absent there. The control "
+                     "returns the pinned bytes for the rows in sources.toml "
+                     "and exits 0. Neither call uses the network."),
+            Probe(
+                "licences.binaries-toolchain",
+                lambda box: box.substitute(
+                    "rust-toolchain.toml", 'channel = "1.97.1"',
+                    'channel = "1.98.0"'),
+                script("python3", "scripts/licence_check.py", "binaries"),
+                "rustup component add rust-docs",
+                needs="cargo", profile="deep",
+                note="The channel becomes 1.98.0. binaries names the "
+                     "rust-docs regenerate instruction. The check reads the "
+                     "channel before it asks cargo for the closure."),
+            Probe(
+                "licences.binaries-drift",
+                lambda box: box.append("THIRD_PARTY_LICENSES", "\n"),
+                script("python3", "scripts/licence_check.py", "binaries"),
+                "THIRD_PARTY_LICENSES does not match the lockfile",
+                needs="cargo", profile="deep",
+                note="One extra newline in THIRD_PARTY_LICENSES. binaries "
+                     "refuses because the bytes no longer match the lockfile."),
         ),
     ),
 
@@ -10570,7 +11012,7 @@ GUARDS: tuple[Guard, ...] = (
         id="packages",
         file="scripts/package_check.py",
         gate="packages",
-        spec="story E1.3 and `docs/RELEASE.md`",
+        spec="story E1.3, F-220 and `docs/RELEASE.md`",
         refuses="A published package whose version skews from the workspace, "
                 "an advertised exports path absent from the tarball, a "
                 "tarball carrying sources, build state or a test file, a "
@@ -10578,7 +11020,9 @@ GUARDS: tuple[Guard, ...] = (
                 "published, and an unreachable package the consumer resolves "
                 "at another version, loads during the smoke import, or names "
                 "from another package's file. A resolve trace that does not "
-                "record the dcmjs ES entry is refused as well.",
+                "record the dcmjs ES entry is refused as well. A tarball that "
+                "carries a wasm file without THIRD_PARTY_LICENSES or "
+                "THIRD_PARTY_NOTICES is refused.",
         claims=("*",),
         probes=(
             Probe(
@@ -10768,6 +11212,43 @@ GUARDS: tuple[Guard, ...] = (
                     _SMOKE_WIRING_HEALTHY),
                 note="module.register does not record a require from "
                      "createRequire. The control reads the real hook text."),
+            Probe(
+                "packages.wasm-without-notices", None,
+                python_snippet(
+                    "package_check.check_tarball, wasm without notices",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "m = {'name': '@ocelli/core', 'version': '0.1.0'}\n"
+                    "names = ['package.json', 'README.md', 'LICENSE-MIT',\n"
+                    "         'LICENSE-APACHE', 'NOTICE',\n"
+                    "         'dist/ocelli_wasm_bg.wasm']\n"
+                    "bad = p.check_tarball('core', m, names)\n"
+                    "print('\\n'.join(bad))\n"
+                    "wanted = ('THIRD_PARTY_LICENSES', 'THIRD_PARTY_NOTICES')\n"
+                    "ok = all(any(item in problem for problem in bad)\n"
+                    "         for item in wanted)\n"
+                    "sys.exit(1 if ok else 0)\n"),
+                "has no THIRD_PARTY_LICENSES",
+                level=1,
+                control=python_snippet(
+                    "package_check.check_tarball, wasm with notices",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "m = {'name': '@ocelli/core', 'version': '0.1.0'}\n"
+                    "names = ['package.json', 'README.md', 'LICENSE-MIT',\n"
+                    "         'LICENSE-APACHE', 'NOTICE',\n"
+                    "         'dist/ocelli_wasm_bg.wasm',\n"
+                    "         'THIRD_PARTY_LICENSES', 'THIRD_PARTY_NOTICES']\n"
+                    "bad = p.check_tarball('core', m, names)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1. The name list carries dist/ocelli_wasm_bg.wasm "
+                     "and the files every tarball needs, and it lacks both "
+                     "notice files. The control is that list plus both files "
+                     "and returns none. A tarball with no wasm file is not "
+                     "asked for them."),
         ),
         limit="The consumer install, node import, two tsc resolutions and "
               "publish dry run need an npm install. `node_modules` is ignored "
@@ -10783,7 +11264,10 @@ GUARDS: tuple[Guard, ...] = (
               "the real hook, so removing the dcmjs require or registerHooks "
               "turns those probes red. `packages.test-file-in-tarball` calls "
               "check_tarball for core and for react on the four test paths, "
-              "and its control is the healthy list.",
+              "and its control is the healthy list. "
+              "`packages.wasm-without-notices` calls check_tarball with a "
+              "wasm path and no third-party notice file, and its control is "
+              "that list with both notice files.",
     ),
     Guard(
         id="advisories",

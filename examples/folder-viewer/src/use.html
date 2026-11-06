@@ -276,19 +276,22 @@ npm run dev                    # the example viewer on http://localhost:5173</co
     <p>Everything in this chapter is exported from <code>packages/core/src/index.ts</code>. The wasm functions it talks to are the <code>wasm_bindgen</code> exports in <code>crates/ocelli-wasm/src/session.rs</code> and <code>canvas.rs</code>, and the panic record exports <code>install_panic_hook</code>, <code>panic_record_ptr</code> and <code>panic_record_len</code> in <code>lib.rs</code>.</p>
 
     <h3 id="js-load"><span class="num">5.1</span>Load the core in a worker</h3>
-    <p><code>loadCore</code> runs your initialiser once per realm. It resolves <code>true</code> only after the initialiser returns, and <code>coreAvailable()</code> stays <code>false</code> until then. A thrown initialiser resolves <code>false</code> and leaves the flag false.</p>
+    <p><code>loadCore</code> runs your initialiser once per realm. It resolves <code>true</code> only after the initialiser returns, and <code>coreAvailable()</code> stays <code>false</code> until then. A thrown initialiser rejects with <code>OcelliError</code> code <code>CoreLoadFailed</code>. <code>error.cause</code> is the value the initialiser threw, and the flag stays false.</p>
 <pre><span class="file">worker.js</span><code>import init, * as wasm from "./pkg/ocelli_wasm.js";
 import { coreAvailable, loadCore } from "@ocelli/core";
 
 let memory = null;
 
-const loaded = await loadCore(async () =&gt; {
-  const output = await init();     // wasm-bindgen's default export
-  memory = output.memory;
-  wasm.install_panic_hook();
-});
-
-if (loaded &amp;&amp; coreAvailable()) {
+try {
+  await loadCore(async () =&gt; {
+    const output = await init();     // wasm-bindgen's default export
+    memory = output.memory;
+    wasm.install_panic_hook();
+  });
+} catch (error) {
+  // error.code is CoreLoadFailed. error.cause is the initialiser failure.
+}
+if (coreAvailable()) {
   const tier = await wasm.resolvedTier();   // "A", "B" or "C"
 }</code></pre>
     <p>The session the worker drives is the module's exports plus its memory. This is the shape <code>@ocelli/react</code> calls <code>OcelliSession</code>.</p>
@@ -400,7 +403,7 @@ writeFrame({ memory }, sessionBulkSink(session), sampleBytes, {
       </tbody>
     </table></div>
     <p>Each method validates its UIDs, fetches with the right <code>Accept</code> header, checks the content type and copies the body into memory once. It resolves to nothing. The body reaches you through the sink, with a <code>kind</code> object whose <code>type</code> is <code>qido-json</code>, <code>wado-uri-part10</code>, <code>wado-rs-instances</code> or <code>wado-rs-frames</code>.</p>
-<pre><code>import { DicomwebClient, DicomwebError, exportDecodedFrame } from "@ocelli/core";
+<pre><code>import { DicomwebClient, DicomwebError, OcelliError, exportDecodedFrame } from "@ocelli/core";
 
 const memory = new WebAssembly.Memory({ initial: 1, maximum: 1024 });
 const wasm = { memory };
@@ -434,6 +437,9 @@ try {
   if (error instanceof DicomwebError) {
     // error.code is InvalidRequest, Network, Aborted, HttpStatus or ContentType.
     // error.status is set for HttpStatus. No URL, header or body is kept.
+  } else if (error instanceof OcelliError) {
+    // Any other shell error. For an unknown option key, error.code is
+    // UnknownOption and error.option names the key.
   }
 }</code></pre>
     <p>That sink is the caller's, because the wasm session has no <code>commit_dicomweb_response</code> export yet. The Rust parser for these bodies exists as <code>ocelli_dicom::DicomwebSource</code>, shown in the Rust chapter, but no wasm export joins the two today.</p>
@@ -806,7 +812,7 @@ if (!isUsable(status)) {
 }
 
 describeError(ERROR_CODE.Unavailable);  // the human text. Match on the code, never the text.</code></pre>
-    <p><code>nextStatus</code> is a latch. Once fatal, a status stays fatal, so a retry can never mark a poisoned instance as healthy. Event records decode through <code>decodeRecord</code>, with <code>SEVERITY</code> and <code>LOG_LEVEL</code>. <code>DicomwebError</code> keeps a code and an HTTP status and nothing else.</p>
+    <p><code>nextStatus</code> is a latch. Once fatal, a status stays fatal, so a retry can never mark a poisoned instance as healthy. Event records decode through <code>decodeRecord</code>, with <code>SEVERITY</code> and <code>LOG_LEVEL</code>. <code>DicomwebError</code> keeps a code and an HTTP status and nothing else. <code>OcelliError</code> is the shell error. Its string codes are not the numeric ring codes.</p>
   </section>
 
   <section class="chapter" id="testing">

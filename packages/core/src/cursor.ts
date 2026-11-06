@@ -9,7 +9,8 @@
  * `.claude/plans/F-072-design.md`.
  */
 
-import type { StackCommand } from "./generated.js";
+import { STACK_COMMANDS, type StackCommand } from "./generated.js";
+import { CURSOR_CONTROLLER_OPTION_KEYS, refuseUnknownOptions } from "./options.js";
 import type {
   ModeChange,
   PointerBinding,
@@ -157,6 +158,10 @@ export function createToolState(
  * Primary wins. Otherwise the first active tool in registration order wins.
  */
 export function createCursorController(options: CursorControllerOptions): CursorController {
+  refuseUnknownOptions("CursorControllerOptions", options, CURSOR_CONTROLLER_OPTION_KEYS);
+  if (options.cursors !== undefined) {
+    refuseUnknownOptions("CursorControllerOptions.cursors", options.cursors, STACK_COMMANDS);
+  }
   const table: Record<StackCommand, CursorPair> = { ...COMMAND_CURSORS };
   if (options.cursors !== undefined) {
     for (const command of Object.keys(options.cursors) as StackCommand[]) {

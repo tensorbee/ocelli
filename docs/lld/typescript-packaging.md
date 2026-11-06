@@ -1,6 +1,6 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218, F-221
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218, F-221, F-230
 **Last updated:** 2026-11-05
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
@@ -42,6 +42,8 @@ F-035's `exportDecodedFrame`, `acceptTransferredFrame` and
 | `snapshot.ts` | F-050's JSON parser and the session snapshot adapter |
 | `events.ts` | F-103's catalogue, delivery classes and payload decoders |
 | `errors.ts` | The error-code mirror, the message table, `decodeRecord` |
+| `ocelli-error.ts` | F-230's `OcelliError` class and its closed string `OcelliErrorCode` union |
+| `options.ts` | F-230's per-type option key lists and `refuseUnknownOptions` |
 | `panic.ts` | `readPanicRecord`, and the panic record's layout |
 | `fatal.ts` | `CoreStatus` and the never-returns-to-ok latch |
 | `capabilities.ts` | The shell-side probes `wasmSimd128Supported` and `sharedMemoryAvailable`, and the committed SIMD module they validate |
@@ -115,7 +117,7 @@ worker transfer, and the view exists only for that copy.
 `acceptTransferredFrame` is the render-worker side of the same hop. It uses
 `writeFrame`'s order, which is `alloc`, then a view, then `set`, then
 `commit_frame`. A buffer length that disagrees with `meta.bytes` throws
-before that copy. `transferredFrameMessage` returns the section 24 frame
+`OcelliError` code `LengthMismatch` before that copy. `transferredFrameMessage` returns the section 24 frame
 message and the transfer list `[buffer]`. It does not call `postMessage` and
 it does not build a view. A third production file is still not granted, so
 none of these moved out of `bulk.ts`.
@@ -251,9 +253,17 @@ does not touch it.
 ## The absent-core seam
 
 `packages/core/src/index.ts` exports `coreAvailable()` and `loadCore()`.
-`coreAvailable()` stays false until `loadCore` resolves true.
-A clean clone has no built wasm core. The example page stays on "core not built"
-when that load resolves false.
+`loadCore(initialise)` returns `Promise<true>`. It resolves `true` once the
+initialiser resolves, and only then does `coreAvailable()` turn true. A thrown or
+rejected initialiser rejects with `OcelliError` code `CoreLoadFailed`, message
+"The imaging core did not load.", and `cause` set to the value the initialiser
+threw or rejected with. The flag stays false and a later call retries. Concurrent calls share
+one pending load, and a call after success does not run the initialiser again.
+A clean clone has no built wasm core.
+`examples/viewer-react/src/core-worker.ts` awaits `loadCore` inside `try`. Its
+`catch` logs the error's `code`, or the raw value when it is not an
+`OcelliError`, and posts a status with an empty tier and `available` false, so
+the example page stays on "core not built".
 A test that imports `coreAvailable` and does not call `loadCore` still expects
 false.
 
