@@ -697,6 +697,178 @@ fn container_header_cut_short_refuses_before_jxl_oxide() -> TestResult {
     )
 }
 
+/// The twelve byte signature box of a JPEG XL container.
+const CONTAINER_SIGNATURE: &[u8] = b"\x00\x00\x00\x0cJXL \x0d\x0a\x87\x0a";
+
+/// One ISO BMFF style box, a 32 bit size followed by the type and payload.
+fn container_box(box_type: &[u8; 4], payload: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+    let length = u32::try_from(payload.len() + 8).map_err(|_| "box length")?;
+    let mut out = length.to_be_bytes().to_vec();
+    out.extend_from_slice(box_type);
+    out.extend_from_slice(payload);
+    Ok(out)
+}
+
+/// A container of whole boxes after the signature box.
+fn container(boxes: &[&[u8]]) -> Result<Vec<u8>, Box<dyn Error>> {
+    let mut out = CONTAINER_SIGNATURE.to_vec();
+    for box_bytes in boxes {
+        out.extend_from_slice(box_bytes);
+    }
+    Ok(out)
+}
+
+/// Wraps a codestream in `jxlp` boxes carrying `chunk` bytes each.
+///
+/// Indexes count from zero and the last box sets the high flag bit, the
+/// container format's own shape.
+fn jxlp_container(codestream: &[u8], chunk: usize) -> Result<Vec<u8>, Box<dyn Error>> {
+    let count = codestream.chunks(chunk).count();
+    let mut boxes: Vec<Vec<u8>> = Vec::new();
+    for (index, piece) in codestream.chunks(chunk).enumerate() {
+        let last = index + 1 == count;
+        let mut raw = u32::try_from(index).map_err(|_| "jxlp index")?;
+        if last {
+            raw |= 0x8000_0000;
+        }
+        let mut content = raw.to_be_bytes().to_vec();
+        content.extend_from_slice(piece);
+        boxes.push(container_box(b"jxlp", &content)?);
+    }
+    let refs: Vec<&[u8]> = boxes.iter().map(Vec::as_slice).collect();
+    container(&refs)
+}
+
+#[test]
+fn brob_box_beside_a_codestream_is_ignored() -> TestResult {
+    // Review pass 3 D2. jxl-oxide 0.12.6 `aux_box.rs:72` inflates a brob box
+    // into an unbounded Vec. The review's 1129 byte container, a brob box
+    // carrying 841 bytes of Brotli naming 1 GiB of zeros beside the lossless
+    // RGB codestream, decoded with a peak resident set of 1095647232 bytes
+    // before the extraction. With the codestream extracted it decodes to the
+    // reference and that container measured 2818048 bytes, so the payload is
+    // never inflated. The committed form makes the brotli invalid: if the box
+    // reached the dependency's auxiliary box reader, the feed would refuse
+    // and this test would be red.
+    let codestream = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
+    let container = container(&[
+        &container_box(b"brob", b"Exif this is not a brotli stream")?,
+        &container_box(b"jxlc", codestream)?,
+    ])?;
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+    let mut out = vec![0xa5; desc.output_len()];
+    JpegXlDecoder::general().decode(&container, &desc, &mut out)?;
+    assert_eq!(
+        out.as_slice(),
+        include_bytes!("fixtures/jpegxl_reference_rgb8.raw")
+    );
+    Ok(())
+}
+
+#[test]
+fn jbrd_box_beside_a_codestream_is_ignored() -> TestResult {
+    // Review pass 3 D2. jxl-jbr 0.2.1 `lib.rs:59` inflates a jbrd box's data
+    // section through the same unbounded writer. A jbrd payload that parses
+    // as neither header nor brotli refuses inside the dependency's auxiliary
+    // box reader, so a reference match here proves the box was never parsed.
+    // The review's bomb, a valid jbrd header naming 1 GiB of zeros, measured
+    // 1095254016 bytes of resident set before the extraction while refusing,
+    // and 2850816 bytes after it while decoding to the reference.
+    let codestream = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
+    let container = container(&[
+        &container_box(b"jbrd", b"garbage that is neither header nor brotli")?,
+        &container_box(b"jxlc", codestream)?,
+    ])?;
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+    let mut out = vec![0xa5; desc.output_len()];
+    JpegXlDecoder::general().decode(&container, &desc, &mut out)?;
+    assert_eq!(
+        out.as_slice(),
+        include_bytes!("fixtures/jpegxl_reference_rgb8.raw")
+    );
+    Ok(())
+}
+
+#[test]
+fn containers_that_break_the_extraction_rules_refuse() -> TestResult {
+    // Review pass 3 D2. A container with no codestream, two jxlc boxes, a
+    // jxlc beside jxlp boxes, jxlp boxes out of order, a jxlp after the final
+    // one, and jxlp boxes without the last flag are refused before the
+    // decode. The last one would decode if the rule were absent, because the
+    // pieces carry a complete codestream, so it detects the rule's removal
+    // and not only its kind.
+    let codestream = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+
+    let no_codestream = container(&[&container_box(b"ftyp", b"\x00\x00\x00\x00jxlc jxlp")?])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &no_codestream,
+        &desc,
+        CodecError::InvalidCodestream,
+    )?;
+
+    let duplicate = container(&[
+        &container_box(b"jxlc", codestream)?,
+        &container_box(b"jxlc", codestream)?,
+    ])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &duplicate,
+        &desc,
+        CodecError::InvalidCodestream,
+    )?;
+
+    let beside_later = container(&[
+        &container_box(b"jxlc", codestream)?,
+        &container_box(b"jxlp", &[0, 0, 0, 0])?,
+    ])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &beside_later,
+        &desc,
+        CodecError::InvalidCodestream,
+    )?;
+
+    let out_of_order = container(&[
+        &container_box(b"jxlp", &[0, 0, 0, 0])?,
+        &container_box(b"jxlp", &[0, 0, 0, 2])?,
+    ])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &out_of_order,
+        &desc,
+        CodecError::InvalidCodestream,
+    )?;
+
+    let after_final = container(&[
+        &container_box(b"jxlp", &[0x80, 0, 0, 0])?,
+        &container_box(b"jxlp", &[0x80, 0, 0, 1])?,
+    ])?;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &after_final,
+        &desc,
+        CodecError::InvalidCodestream,
+    )?;
+
+    let mut flagged = jxlp_container(codestream, 16)?;
+    // The final jxlp box is the last 28 bytes, a size and type, a four byte
+    // index and a 16 byte piece. Clear the flag bit at the top of its index.
+    let index_at = flagged.len() - 28 + 8;
+    let byte = flagged
+        .get_mut(index_at)
+        .ok_or("container shorter than the final jxlp box")?;
+    assert_eq!(*byte & 0x80, 0x80, "the final jxlp index is not flagged");
+    *byte &= 0x7f;
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &flagged,
+        &desc,
+        CodecError::InvalidCodestream,
+    )
+}
+
 #[test]
 fn container_trailing_byte_is_trailing_data() -> TestResult {
     // An ISO BMFF container stops at the box, so a following byte is
@@ -720,6 +892,246 @@ fn container_trailing_byte_is_trailing_data() -> TestResult {
         &desc,
         CodecError::TrailingData,
     )
+}
+
+/// Appends `value` in the `U64` coding `jxl_bitstream`'s `read_u64` reads.
+fn push_u64(writer: &mut BitWriter, value: u64) {
+    if value == 0 {
+        writer.push_bits(0, 2);
+    } else if value <= 16 {
+        writer.push_bits(1, 2);
+        writer.push_bits(u32::try_from(value - 1).unwrap_or(0), 4);
+    } else if value <= 272 {
+        writer.push_bits(2, 2);
+        writer.push_bits(u32::try_from(value - 17).unwrap_or(0), 8);
+    } else {
+        writer.push_bits(3, 2);
+        writer.push_bits((value & 0xfff) as u32, 12);
+        let mut rest = value >> 12;
+        let mut shift = 12u32;
+        loop {
+            if shift == 60 {
+                writer.push_bits((rest & 0xf) as u32, 4);
+                break;
+            }
+            let byte = (rest & 0xff) as u32;
+            rest >>= 8;
+            writer.push_bit(true);
+            writer.push_bits(byte, 8);
+            shift += 8;
+            if rest == 0 {
+                writer.push_bit(false);
+                break;
+            }
+        }
+    }
+}
+
+/// Rewrites the header of `jpegxl_lossless_rgb8.jxl` so that it is longer
+/// than the first probe window: `default_m 0`, `cw_mask 7`, and 280 zero
+/// upsampling weights. The weights are parsed and then unused, because the
+/// frame does not upsample. The rewriter asserts the fixture's header shape
+/// first, so a changed fixture fails here instead of producing a silently
+/// corrupt stream.
+fn rewrite_long_default_m_header(fixture: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+    let expected_prefix = [false, false, false, false, false, true, false, false, false];
+    for (index, bit) in expected_prefix.iter().enumerate() {
+        assert_eq!(
+            fixture_bit(fixture, 25 + index)?,
+            *bit,
+            "fixture header changed shape at bit {}",
+            25 + index
+        );
+    }
+    assert!(
+        fixture_bit(fixture, 34)?,
+        "bit 34 is not the colour encoding all_default bit"
+    );
+    assert!(
+        !fixture_bit(fixture, 35)? && !fixture_bit(fixture, 36)?,
+        "bits 35 and 36 are not the zero extensions selector"
+    );
+    assert!(
+        fixture_bit(fixture, 37)?,
+        "bit 37 is not a set default_m bit"
+    );
+    assert!(
+        !fixture_bit(fixture, 38)? && !fixture_bit(fixture, 39)?,
+        "bits 38 and 39 are not zero header padding"
+    );
+
+    let mut writer = BitWriter::new();
+    writer.append_bits_from(fixture, 0, 37)?;
+    writer.push_bit(false);
+    writer.push_bits(7, 3);
+    for _ in 0..(15 + 55 + 210) {
+        writer.push_bits(0, 16);
+    }
+    writer.pad_to_byte();
+    writer.append_bits_from(fixture, 40, fixture.len() * 8 - 40)?;
+    Ok(writer.finish())
+}
+
+#[test]
+fn header_longer_than_the_first_probe_window_decodes() -> TestResult {
+    // Review pass 3 S1. No fixture has a header longer than the first 64
+    // byte probe window, so the window growth that keeps such a header
+    // decodable was executed by no test. The rewrite is a valid stream whose
+    // header is 566 bytes. It must decode to the reference, bare and split
+    // over 16 byte jxlp boxes, so the pre-check's probe windows and
+    // read_header's feed windows both grow past the first one. Replacing
+    // either growth with a refusal turns this red.
+    let fixture = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
+    let long = rewrite_long_default_m_header(fixture)?;
+    let header_bytes: usize = (37usize + 1 + 3 + 280 * 16).div_ceil(8);
+    assert_eq!(
+        long.len(),
+        header_bytes + fixture.len() - 5,
+        "the rewritten header is not the recorded length"
+    );
+    assert!(header_bytes > 64, "the rewritten header is not long");
+    let reference = include_bytes!("fixtures/jpegxl_reference_rgb8.raw");
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+    let mut out = vec![0xa5; desc.output_len()];
+    JpegXlDecoder::lossless().decode(&long, &desc, &mut out)?;
+    assert_eq!(out.as_slice(), reference.as_slice());
+
+    let wrapped = jxlp_container(&long, 16)?;
+    let mut out = vec![0xa5; desc.output_len()];
+    JpegXlDecoder::lossless().decode(&wrapped, &desc, &mut out)?;
+    assert_eq!(out.as_slice(), reference.as_slice());
+    Ok(())
+}
+
+/// Rewrites the header of `jpegxl_lossless_rgb8.jxl` so that one unknown
+/// extension carries `skip_bits` skipped bits. The extension data is skipped
+/// in constant time and no extra channel is declared, so the header is valid
+/// and passes the pre-check, and its length comes only from the skip.
+fn rewrite_extension_skip_header(
+    fixture: &[u8],
+    skip_bits: usize,
+) -> Result<Vec<u8>, Box<dyn Error>> {
+    let expected_prefix = [false, false, false, false, false, true, false, false, false];
+    for (index, bit) in expected_prefix.iter().enumerate() {
+        assert_eq!(
+            fixture_bit(fixture, 25 + index)?,
+            *bit,
+            "fixture header changed shape at bit {}",
+            25 + index
+        );
+    }
+    assert!(
+        fixture_bit(fixture, 34)?,
+        "bit 34 is not the colour encoding all_default bit"
+    );
+    let mut writer = BitWriter::new();
+    writer.append_bits_from(fixture, 0, 35)?;
+    push_u64(&mut writer, 1);
+    push_u64(
+        &mut writer,
+        u64::try_from(skip_bits).map_err(|_| "skip length")?,
+    );
+    for _ in 0..skip_bits {
+        writer.push_bit(false);
+    }
+    writer.push_bit(true);
+    writer.pad_to_byte();
+    writer.append_bits_from(fixture, 40, fixture.len() * 8 - 40)?;
+    Ok(writer.finish())
+}
+
+#[test]
+fn header_with_a_long_extension_decodes() -> TestResult {
+    // Review pass 3 D1. Extra channels are refused in the pre-check, so no
+    // named header reaches read_header any more. A header can still be long
+    // without them, and this one is 275010 bytes of extension skip. It must
+    // decode to the reference, bare and over 4 KiB jxlp boxes, so read_header
+    // feeds the codestream in doubling windows and the decode stays linear in
+    // the header length.
+    let fixture = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
+    let long = rewrite_extension_skip_header(fixture, 2_200_000)?;
+    let reference = include_bytes!("fixtures/jpegxl_reference_rgb8.raw");
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+    let mut out = vec![0xa5; desc.output_len()];
+    JpegXlDecoder::lossless().decode(&long, &desc, &mut out)?;
+    assert_eq!(out.as_slice(), reference.as_slice());
+
+    let wrapped = jxlp_container(&long, 4096)?;
+    let mut out = vec![0xa5; desc.output_len()];
+    JpegXlDecoder::lossless().decode(&wrapped, &desc, &mut out)?;
+    assert_eq!(out.as_slice(), reference.as_slice());
+    Ok(())
+}
+
+/// Builds a header only bare codestream whose header carries `channels`
+/// extra channels, each named with `name_len` bytes, the review's 69 KB and
+/// 275 KB shapes. The names are the header's own length, and the stream has
+/// no frame, because the pre-check refuses it before one is read.
+fn extra_channel_header(channels: usize, name_len: usize) -> Result<Vec<u8>, Box<dyn Error>> {
+    let fixture = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
+    if channels < 2 {
+        return Err("the num_extra coding needs at least two channels".into());
+    }
+    if !(48..=48 + 1023).contains(&name_len) {
+        return Err("the name length needs the 48 + u(10) coding".into());
+    }
+    let mut writer = BitWriter::new();
+    writer.append_bits_from(fixture, 0, 25)?;
+    writer.push_bit(false);
+    writer.push_bit(false);
+    writer.push_bit(false);
+    writer.push_bits(0, 2);
+    writer.push_bit(true);
+    if channels < 2 + 16 {
+        writer.push_bits(2, 2);
+        writer.push_bits(u32::try_from(channels - 2).map_err(|_| "channels")?, 4);
+    } else {
+        writer.push_bits(3, 2);
+        writer.push_bits(u32::try_from(channels - 1).map_err(|_| "channels")?, 12);
+    }
+    for _ in 0..channels {
+        writer.push_bit(false);
+        push_small_enum(&mut writer, 1);
+        writer.push_bit(false);
+        writer.push_bits(0, 2);
+        writer.push_bits(0, 2);
+        writer.push_bits(3, 2);
+        writer.push_bits(u32::try_from(name_len - 48).map_err(|_| "name length")?, 10);
+        for _ in 0..name_len {
+            writer.push_bits(u32::from(b'a'), 8);
+        }
+    }
+    writer.push_bit(false);
+    writer.push_bit(true);
+    writer.push_bits(0, 2);
+    writer.push_bit(true);
+    Ok(writer.finish())
+}
+
+#[test]
+fn extra_channel_header_refuses_before_the_reparse() -> TestResult {
+    // Review pass 3 D1. A header whose length comes from extra channel names
+    // is valid and has no ICC flag, so before the pre-check refusal it
+    // reached read_header and was re-parsed once per fed byte. The review
+    // measured 7.21 seconds for 64 channels and 108.4 seconds for 256. On
+    // 2026-11-06 the same shapes measured 10.29 and 163.80 seconds here
+    // before the pre-check refusal, and 882.125 microseconds and 3.564
+    // milliseconds after it. The bound is far under the reparse cost and far
+    // over the refusal cost, so removing the refusal turns this red through
+    // time and not through kind.
+    let crafted = extra_channel_header(256, 1071)?;
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
+    let mut out = vec![0xa5; desc.output_len()];
+    let start = std::time::Instant::now();
+    let result = JpegXlDecoder::general().decode(&crafted, &desc, &mut out);
+    let elapsed = start.elapsed();
+    assert_eq!(result, Err(CodecError::UnsupportedPixelFormat));
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "the extra channel header took {elapsed:?}, the pre-check refusal is not in front"
+    );
+    Ok(())
 }
 
 #[test]
@@ -909,9 +1321,10 @@ fn fixtures() -> Result<Vec<Case>, Box<dyn Error>> {
             desc: colour(8, 8, 8, 8, "RGB")?,
         },
         // The recompression file under `.112`. `.112` renders a frame that
-        // carries reconstruction data, and loading its container feeds the
-        // `jbrd` box to `jxl-jbr`'s parser. Reconstruction itself is never
-        // called, so this case scans the parse half of `jxl-jbr` only.
+        // carries reconstruction data. Since the pass 3 extraction, the
+        // container is stripped to its codestream before the dependency sees
+        // it, so the `jbrd` box is not fed to `jxl-jbr`'s parser and this
+        // case scans the codestream parse alone.
         Case {
             name: "jpegxl_recompression.jxl as .112",
             decoder: JpegXlDecoder::general(),

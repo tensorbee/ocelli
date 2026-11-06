@@ -11,9 +11,14 @@
 //!
 //! Allocation is bounded by [`ALLOC_LIMIT_NUMERATOR`] times the descriptor's
 //! output length. The numerator is the measured peak ratio, doubled. The
-//! measurement is recorded on that constant. A codestream that declares an
-//! embedded ICC profile, and any header that cannot be read to the ICC flag,
-//! is refused before any parsing by [`crate::jpegxl_icc`].
+//! measurement is recorded on that constant. Before any parsing, a container
+//! is stripped to its codestream by [`crate::jpegxl_icc`], a header that
+//! declares an embedded ICC profile or extra channels is refused, and any
+//! header that cannot be read to those fields is refused. Two bounds sit
+//! outside the tracker by measurement and are recorded there: the extracted
+//! codestream copy of a container, at most the input length, and the extra
+//! channel vector the header parser grows for a header that declares them,
+//! constant bounded by the format's own limits.
 
 use std::sync::Arc;
 
@@ -51,6 +56,11 @@ const GENERAL_UIDS: &[&str] = &[JPEGXL_UID];
 /// doubled limit returns [`CodecError::DecoderFailure`] and does not write
 /// `out`.
 const ALLOC_LIMIT_NUMERATOR: usize = 26;
+
+/// The first feed window of [`read_header`], and the factor each later
+/// window grows by. The same shape as the pre-check's probe windows in
+/// [`crate::jpegxl_icc`].
+const FIRST_FEED_BYTES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -211,16 +221,23 @@ impl JpegXlDecoder {
         out: &mut [u8],
         limit: usize,
     ) -> Result<(), CodecError> {
-        // Before `jxl-oxide` parses anything: a header declaring an embedded
-        // ICC profile refuses as an unsupported pixel format, and a header
-        // that cannot be read to the ICC flag refuses rather than reaching a
+        // Before `jxl-oxide` parses anything: a container is stripped to its
+        // codestream, a header declaring an embedded ICC profile or extra
+        // channels refuses as an unsupported pixel format, and a header that
+        // cannot be read to those fields refuses rather than reaching a
         // parser that would size a buffer from its own declaration.
-        crate::jpegxl_icc::check_before_parse(src)?;
-        let (mut image, header_end) = read_header(src, limit)?;
+        let prepared = crate::jpegxl_icc::prepare(src)?;
+        let codestream = prepared.codestream();
+        let (mut image, header_end) = read_header(codestream, limit)?;
         validate_header(self.mode, &image, desc)?;
-        let consumed = load_rest(&mut image, src, header_end)?;
-        let trailing = src.get(consumed..).ok_or(CodecError::DecoderFailure)?;
+        let consumed = load_rest(&mut image, codestream, header_end)?;
+        let trailing = codestream
+            .get(consumed..)
+            .ok_or(CodecError::DecoderFailure)?;
         refuse_trailing(trailing, consumed)?;
+        if let Some((tail, container_consumed)) = prepared.container_tail() {
+            refuse_trailing(tail, container_consumed)?;
+        }
         if image.num_loaded_keyframes() != 1 {
             return Err(CodecError::FrameMismatch);
         }
@@ -251,25 +268,43 @@ fn validate_descriptor(desc: &FrameDesc) -> Result<(), CodecError> {
 /// Parse the image header without feeding the frame bytes that follow it.
 ///
 /// A declared size is refused before `render_frame`, and before the frame
-/// grids are allocated. The returned offset is the number of source bytes the
-/// container parser consumed to reach a header.
+/// grids are allocated. The returned offset is the number of codestream bytes
+/// [`UninitializedJxlImage::feed_bytes`] consumed to reach a header, which is
+/// where [`load_rest`] resumes.
+///
+/// The window grows geometrically rather than one byte at a time. Each
+/// `try_init` re-parses the header over the whole window, so one byte at a
+/// time makes the cost quadratic in the header length. A header whose length
+/// comes from extra channel names measured 10.29 seconds for 64 channels and
+/// 163.80 seconds for 256 channels on 2026-11-06 under one byte windows,
+/// against microseconds under doubling windows. The extra channels are
+/// refused in the pre-check, so a named header no longer reaches here, and
+/// the geometric growth keeps any other long header linear.
 ///
 /// The parser keeps a short signature until the next byte shows whether the
 /// stream is a bare codestream or a box. A feed that consumes nothing is
 /// presented again with one more byte, which is what `JxlImage::read` does
-/// with its own buffer. Bytes past the header are not fed, so `try_init` does
-/// not load a frame grid.
+/// with its own buffer. Once the signature resolves, a bare codestream is
+/// consumed whole, so each later feed presents only the new bytes. Bytes past
+/// the header that a wider window carries are held by the dependency and fed
+/// to the image inside `try_init`, under the same `AllocTracker`, so no byte
+/// is fed twice and no byte is lost.
 fn read_header(src: &[u8], limit: usize) -> Result<(JxlImage, usize), CodecError> {
     let tracker = AllocTracker::with_limit(limit);
     let mut uninit = JxlImage::builder().alloc_tracker(tracker).build_uninit();
     let mut start = 0usize;
     let mut end = 0usize;
     loop {
-        if end == start {
-            if end >= src.len() {
+        if end <= start {
+            if start >= src.len() {
                 return Err(CodecError::InvalidCodestream);
             }
-            end = end.checked_add(1).ok_or(CodecError::DecoderFailure)?;
+            end = if end == 0 {
+                FIRST_FEED_BYTES
+            } else {
+                end.saturating_mul(2)
+            };
+            end = end.min(src.len());
         }
         let window = src.get(start..end).ok_or(CodecError::InvalidCodestream)?;
         let consumed = uninit.feed_bytes(window).map_err(map_jxl)?;

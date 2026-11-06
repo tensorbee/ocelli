@@ -175,13 +175,13 @@ sha2 = "0.10"
 # is direct because `jxl-oxide` does not re-export `ImageBuffer`.
 jxl-oxide = { version = "=0.12.6", default-features = false }
 jxl-render = { version = "=0.12.4", default-features = false }
-# F-229, lead amendment after review pass 2. The ICC pre-check parses the
-# header with the dependency's own parser instead of a hand-written walk.
-# `jxl-oxide` re-exports `ImageHeader` but not the `Bitstream` it parses from
-# or the `Bundle` trait that defines `parse`, so `jxl-bitstream` and
-# `jxl-oxide-common` are direct too. All three are already locked as
-# `jxl-oxide` dependencies at these versions, so the closure does not change.
-jxl-image = { version = "=0.13.0", default-features = false }
+# F-229, lead amendment after review pass 3. The pre-check parses the header
+# with the dependency's own parser, reached through `jxl-oxide`'s own
+# re-export of `ImageHeader`, so `jxl-image` is not direct. `jxl-oxide` does
+# not re-export the `Bitstream` that header is parsed from or the `Bundle`
+# trait that defines `parse`, so `jxl-bitstream` and `jxl-oxide-common` are
+# direct. Both are already locked as `jxl-oxide` dependencies at these
+# versions, so the closure does not change.
 jxl-bitstream = { version = "=1.1.0", default-features = false }
 jxl-oxide-common = { version = "=1.0.0", default-features = false }
 

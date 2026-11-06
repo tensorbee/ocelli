@@ -1169,7 +1169,6 @@ version = "0.1.0"
 dependencies = [
  "jpeg-decoder",
  "jxl-bitstream",
- "jxl-image",
  "jxl-oxide",
  "jxl-oxide-common",
  "jxl-render",
