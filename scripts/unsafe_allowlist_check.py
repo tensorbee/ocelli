@@ -68,7 +68,16 @@ UNSAFE = re.compile(r"(?<![\w])unsafe(?![\w])")
 # than the direction that hides a defect, but it is still a bug.
 LINE_COMMENT = re.compile(r"//.*$", re.M)
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
-STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+# re.S matters, and the failure it prevents HIDES a defect rather than
+# reporting one. A Rust string continuation is a backslash immediately before
+# a newline inside a string literal, and without re.S the `\\.` alternative
+# cannot cross that newline. A literal containing one then fails to match at
+# its opening quote, and the regex re-pairs from that literal's closing quote
+# to the next literal's opening quote, blanking the code in between as though
+# it were a string. That silenced an ungated `unsafe` block in tracing-core
+# 0.1.36 src/callsite.rs and a `not(debug_assertions)` block in its
+# src/metadata.rs, found by the F-229 review's pass 7.
+STRING = re.compile(r'"(?:[^"\\]|\\.)*"', re.S)
 
 
 def strip_noise(text: str) -> str:
