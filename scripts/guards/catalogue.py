@@ -747,6 +747,14 @@ def _aspect_check_accepts_no_canvas(box: Sandbox) -> None:
     )
 
 
+def _readout_check_accepts_a_survivor(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/readout.mjs",
+        "    if (!seen.after.readHidden || !seen.after.crossHidden || !seen.after.magHidden) {",
+        "    if (false) {",
+    )
+
+
 def _missing_packaged_apache_licence(box: Sandbox) -> None:
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
     _write_packaged_licences(box, omit="LICENSE-APACHE")
@@ -13333,6 +13341,53 @@ GUARDS: tuple[Guard, ...] = (
               "build of the viewer, which a disposable sandbox does not have, "
               "so the browser half is watched by the `viewer-browser` gate "
               "and its CI job rather than by this harness.",
+    ),
+    Guard(
+        id="viewer-browser.readout",
+        file="examples/folder-viewer/tests/browser/readout.mjs",
+        gate="viewer-browser",
+        spec="F-208 design, the cross, its readout and the magnifier are "
+             "positioned from the cell under the pointer, and the lead's "
+             "pass 4 ruling that they are cleared whenever that view "
+             "geometry can change",
+        refuses="A layout change, a window resize, a zoom with `=` or a tile "
+                "toggle, made with the pointer still, that leaves the readout, "
+                "the cross or the magnifier showing, a pointer move after it "
+                "that does not show them again, and a run that observed no "
+                "change.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `readoutProblems`, which the script prints and "
+               "exits 1 on, and the probe below drives its survival branch.",
+        probes=(
+            Probe(
+                "viewer-browser.readout-survives",
+                _readout_check_accepts_a_survivor,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { readoutProblems } from "
+                    "'./examples/folder-viewer/tests/browser/readout.mjs';\n"
+                    "const shown = { read: 'C 1  R 1  40 HU', readHidden: "
+                    "false, crossHidden: false, magHidden: false };\n"
+                    "const problems = readoutProblems([{ name: 'kept', "
+                    "before: shown, after: shown, moved: shown, shown: "
+                    "['readout', 'magnifier'], again: ['readout', "
+                    "'magnifier'] }]);\n"
+                    "if (problems.some((line) => line.includes('survived the "
+                    "change'))) process.exit(0);\n"
+                    "console.error('readout check accepted a readout that "
+                    "survived'); process.exit(1);",
+                ),
+                "readout check accepted a readout that survived",
+                level=1,
+            ),
+        ),
+        limit="The probe drives the survival branch with a readout that "
+              "stayed. The observation itself needs Chromium and a release "
+              "build of the viewer, which a disposable sandbox does not have, "
+              "so it is watched by the `viewer-browser` gate and its CI job. "
+              "The no-change and no-repaint branches have no probe.",
     ),
     Guard(
         id="bench.cold-start",

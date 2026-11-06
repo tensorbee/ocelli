@@ -1191,7 +1191,12 @@ window.addEventListener("resize", relayout);
 const cellResize = new ResizeObserver(relayout);
 cellResize.observe(wrap);
 
+// The view geometry may have changed for every cell: a window resize, a
+// resized grid, a side panel, full screen or a new layout. The readout,
+// the cross and the magnifier were placed for the old geometry, so they go
+// until the next pointer move places them again.
 function relayout() {
+  leavePointer();
   for (const vp of shownViewports()) {
     vp.layoutDirty = true;
     layoutViewport(vp);
@@ -1369,7 +1374,6 @@ async function postHeaders(file) {
 
 function togglePanel(name) {
   const on = !document.body.classList.contains(name);
-  leavePointer();
   document.body.classList.toggle(name, on);
   try { localStorage.setItem("ocelli." + name, on ? "1" : "0"); } catch {}
   syncPanels();
@@ -1820,6 +1824,9 @@ function gridAllowed(vp) {
 
 function setTileMode(vp, on, silent) {
   const next = Boolean(on) && gridAllowed(vp);
+  // The cell changes between one picture and four, so a readout placed over
+  // it goes.
+  if (next !== vp.tileMode) leavePointerFor(vp);
   vp.tileMode = next;
   if (!next) {
     vp.tileToken += 1;
@@ -2382,6 +2389,9 @@ function layoutViewport(vp) {
     + ":" + (vp.flipV ? 1 : 0)
     + ":" + window.devicePixelRatio;
   if (!vp.layoutDirty && stamp === vp.layoutStamp) return;
+  // Zoom, pan, fit, rotation, a flip or a new image size moves this cell's
+  // picture, so a readout placed over it for the old geometry goes.
+  leavePointerFor(vp);
   if (vp.fitMode) {
     vp.scale = fitScale(vp);
     vp.panX = 0;
@@ -3105,13 +3115,22 @@ function tilePoint(node, event) {
   return { x, y, width: node.width, height: node.height };
 }
 
-// The readout, the cross and the magnifier as if the pointer had left. The
-// readout's generation moves, so a reply still on its way is dropped.
+// Hides the readout, the cross and the magnifier and clears the readout's
+// value and its cell. Unlike the pointer leaving #wrap, it also moves the
+// readout's generation, so a reply still on its way is dropped. The next
+// pointer move places all three again.
 function leavePointer() {
   resetValue();
   valueState.cell = -1;
   hideCross();
   mag.hidden = true;
+  mag.dataset.cell = "";
+}
+
+// The same, when one viewport's view geometry changes and the readout or
+// the magnifier is placed over that viewport.
+function leavePointerFor(vp) {
+  if (valueState.cell === vp.cell || mag.dataset.cell === String(vp.cell)) leavePointer();
 }
 
 function resetValue() {
@@ -3242,6 +3261,7 @@ function updateMag(vp, event, tile, point) {
   mag.style.left = left + "px";
   mag.style.top = top + "px";
   mag.hidden = false;
+  mag.dataset.cell = String(vp.cell);
   if (point.x < 0 || point.y < 0 || point.x > width || point.y > height) mag.hidden = true;
 }
 
@@ -4405,6 +4425,7 @@ function setLayout(columns, rows) {
   }
   // Every cell may have moved, so nothing placed under the pointer for the
   // previous layout is kept. The next pointer move paints it again.
+  // `relayout` at the end does the same for every geometry change.
   leavePointer();
   if (activeCell >= count) setActive(0);
   syncActiveOutline();

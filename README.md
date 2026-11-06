@@ -244,7 +244,11 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    unit: HU on a CT whose Rescale Type is HU, or is absent on a CT that is
    not multi-energy, `unspecified` for Rescale Type `US`, the Units
    attribute on a PET, `padding` for a padded sample, and `not held`
-   for a file the process could not hold.
+   for a file the process could not hold. The cross, its readout and the
+   magnifier hide when the picture moves under a still pointer, after a
+   zoom, a fit, a turn or flip, Four images, a layout change, a side
+   panel, full screen or a window resize, and come back with the next
+   pointer move.
 9. Every number on a mark comes from the local process, and the page prints
    its text. Probe asks `POST /value`, and every other mark asks `POST
    /measure`. Length, Angle, Cobb and Bidirectional are in millimetres from

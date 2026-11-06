@@ -42,7 +42,7 @@ export function aspectProblems(readings, expected = EXPECTED_ASPECT, tolerance =
   return problems;
 }
 
-async function loadPlaywright() {
+export async function loadPlaywright() {
   const require = createRequire(new URL("../../../../tools/bench/package.json", import.meta.url));
   const loaded = await import(pathToFileURL(require.resolve("playwright")).href);
   // The package is CommonJS, so its names may arrive only on `default`.
@@ -115,7 +115,7 @@ export async function measureAspects(url, chromium) {
   }
 }
 
-function stopByPid(pid) {
+export function stopByPid(pid) {
   return new Promise((resolve) => {
     try {
       process.kill(pid, "SIGTERM");
