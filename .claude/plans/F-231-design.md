@@ -384,3 +384,11 @@ None open.
 - Q5, where `ContentId` is computed. Answered: lead decision under the operator's delegation of 2026-11-05. In Rust through `content_id`, decision 8.
 - Q6, study release. Answered: lead decision under the operator's delegation of 2026-11-05. The caller's list of series, decision 9.
 - Q7, order. Answered: lead decision under the operator's delegation of 2026-11-05. F-230, F-226, F-224, F-231, recorded under Dependencies.
+
+### Lead rulings after review pass 1
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-231-working-pass-1.md`.
+
+- **`show_resident` shows only the selected slice.** An index that is not the viewport's selected index is refused with the same `Selection` refusal `commit_selected_frame` gives, and nothing is drawn. AC5 and AC13 are corrected to that.
+- **A content id needs its stack position.** A commit that carries `content` without both `stackIndex` and `stackEpoch` is refused with the coded error, so a content id is never accepted and then ignored, and `content` is always validated as a `u64`.
+- **Pressure readings carry real counts.** `evicted`, `evicted_bytes` and `refused` are the counts since the previous reading, kept by F-034's `TierCounters`, never a constant zero.
