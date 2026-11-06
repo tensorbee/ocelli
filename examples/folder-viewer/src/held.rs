@@ -1498,8 +1498,8 @@ impl CacheState {
     /// Claim a sample buffer of `len` bytes for a decode.
     ///
     /// Every route makes room for the whole `frame_sample_cost` of the buffer
-    /// it returns: a parked buffer, a buffer stolen from the oldest unread
-    /// frame of the same length, and a fresh one. A stolen frame may have
+    /// it returns: a parked buffer, a buffer stolen from the oldest frame of
+    /// the same length when no reply reads it, and a fresh one. A stolen frame may have
     /// charged less than the new frame will, so its freed bytes alone are not
     /// the room.
     fn claim_buffer(&mut self, len: usize) -> Vec<u8> {
@@ -1739,11 +1739,7 @@ impl CacheState {
             self.frame_order.push_back(tracked);
             let admission = self.lru.insert(key, Held::Frame(arc));
             for (evicted_key, evicted) in admission.evicted {
-                self.forget_frame(&evicted_key);
-                match evicted_key {
-                    HeldKey::File(_) => self.files = self.files.saturating_sub(1),
-                    HeldKey::Frame(_, _) => self.frames = self.frames.saturating_sub(1),
-                }
+                self.forget_evicted(&evicted_key);
                 self.discard_held(evicted);
             }
             if let Some((_, refused)) = admission.refused {
@@ -1766,11 +1762,7 @@ impl CacheState {
         }
         let displaced = admission.displaced.is_some();
         for (evicted_key, held) in admission.evicted {
-            self.forget_frame(&evicted_key);
-            match evicted_key {
-                HeldKey::File(_) => self.files = self.files.saturating_sub(1),
-                HeldKey::Frame(_, _) => self.frames = self.frames.saturating_sub(1),
-            }
+            self.forget_evicted(&evicted_key);
             self.reclaim_held(held);
         }
         if let Some(held) = admission.displaced {
@@ -2128,6 +2120,57 @@ mod tests {
                 pressure.used
             ));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn a_claim_passes_over_every_frame_being_read() -> Result<(), String> {
+        // R1 and R2 are frames of 64 sample bytes that replies hold, at the
+        // oldest end. U is an unread frame of 64 behind them. A claim for 4
+        // bytes matches no cached length, so it steals nothing and must make
+        // room for frame_sample_cost(4). The budget is the two readers plus
+        // that cost, so evicting U alone is enough, and the claim has to look
+        // past both readers to find it. The 4-byte frame then stores within
+        // the budget and both readers stay held.
+        let reader_charge = Held::Frame(Arc::new(CachedFrame::plain(minimal_frame(
+            vec![0_u8; 64],
+            1,
+            32,
+        )?)))
+        .bytes();
+        let budget = reader_charge
+            .saturating_mul(2)
+            .saturating_add(frame_sample_cost(4));
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let id = |serial: u64| FileId {
+            generation: viewer.generation,
+            serial,
+        };
+        let first = viewer.store_frame(id(1), 0, minimal_frame(vec![0_u8; 64], 1, 32)?);
+        let second = viewer.store_frame(id(2), 0, minimal_frame(vec![0_u8; 64], 1, 32)?);
+        drop(viewer.store_frame(id(3), 0, minimal_frame(vec![0_u8; 64], 1, 32)?));
+        let mut samples = viewer.cache_handle().claim_sample_buffer(4);
+        samples.clear();
+        samples.resize(4, 0);
+        drop(viewer.store_frame(id(4), 0, minimal_frame(samples, 1, 2)?));
+        for (name, serial) in [("R1", 1), ("R2", 2)] {
+            if !matches!(viewer.lookup_frame(id(serial), 0), Lookup::Hit(_)) {
+                return Err(format!("{name} was evicted while a reply read it"));
+            }
+        }
+        if matches!(viewer.lookup_frame(id(3), 0), Lookup::Hit(_)) {
+            return Err("the unread frame U was kept".to_owned());
+        }
+        let census = viewer.memory_census();
+        if census.pressure.used.saturating_add(census.free) > budget {
+            return Err(format!(
+                "used {} free {} budget {budget}",
+                census.pressure.used, census.free
+            ));
+        }
+        drop((first, second));
         Ok(())
     }
 

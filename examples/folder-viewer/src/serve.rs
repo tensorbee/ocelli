@@ -2792,7 +2792,15 @@ mod tests {
                 return Err("frame A was not cached after its preview".to_owned());
             }
         };
+        let (reused_before, fresh_before) = viewer.buffer_claims();
         previewed(&viewer, file_b, "B")?;
+        let (reused_after, fresh_after) = viewer.buffer_claims();
+        if reused_after != reused_before + 1 || fresh_after != fresh_before {
+            return Err(format!(
+                "B's claim went from reused {reused_before} fresh {fresh_before} to reused \
+                 {reused_after} fresh {fresh_after}, so it did not steal X's buffer"
+            ));
+        }
         let (again, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
         if again.status != 200 || again.source != Some("held") {
             return Err(format!(
@@ -2800,11 +2808,11 @@ mod tests {
                 again.status, again.source
             ));
         }
-        // The steal happened: X's frame left and its bytes had already gone.
+        // X's frame left with its buffer, and its bytes had already gone.
         let (stolen, _) = preview_held(&viewer, id_x, FrameRequest::default(), None);
         if stolen.status != 410 {
             return Err(format!(
-                "frame X answered {}, so it was not stolen",
+                "frame X answered {} after its buffer was stolen",
                 stolen.status
             ));
         }
