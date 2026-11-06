@@ -152,8 +152,8 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   constant window is exposed to it too.
 - **The unsafe guard has blind spots.** F-229's eighth review found that
   `scripts/unsafe_allowlist_check.py`'s string pattern opens a false string
-  after a `'"'` character literal, after a raw string holding a quote and after
-  a line comment with an unpaired quote, and blanks the code that follows. An
+  after a `'"'` character literal, after a raw string holding a quote or
+  ending in a backslash, and after a line comment with an unpaired quote, and blanks the code that follows. An
   `unsafe` block planted at `crates/ocelli-dicom/src/dicomweb.rs:418` passed the
   guard. No audited count changes. The choice is a story that gives the guard a
   real Rust lexer, or a recorded limit on the guard.
