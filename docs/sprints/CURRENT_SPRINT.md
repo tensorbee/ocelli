@@ -150,6 +150,18 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   of units and flips greys at any window width, in 15,879 of 800,000 adversarial
   draws. A minimum window width cannot cover that case, and F-227's own
   constant window is exposed to it too.
+- **The unsafe guard has blind spots.** F-229's eighth review found that
+  `scripts/unsafe_allowlist_check.py`'s string pattern opens a false string
+  after a `'"'` character literal, after a raw string holding a quote and after
+  a line comment with an unpaired quote, and blanks the code that follows. An
+  `unsafe` block planted at `crates/ocelli-dicom/src/dicomweb.rs:418` passed the
+  guard. No audited count changes. The choice is a story that gives the guard a
+  real Rust lexer, or a recorded limit on the guard.
+- **No build compiles the jxl-oxide SIMD code.** The same review found that
+  `bin/ocelli.sh native` passes `+simd128` after `cargo rustc --`, which reaches
+  only the final example crate, so the SIMD code of its dependencies is never
+  built. D-22's F-X013 SIMD check is built the same way and may not test what it
+  says.
 
 ## What is carried in
 
