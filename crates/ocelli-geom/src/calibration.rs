@@ -26,6 +26,10 @@ pub enum CalibrationSource {
     PixelSpacing,
     /// Imager Pixel Spacing divided by the magnification factor.
     ImagerSpacing,
+    /// Imager Pixel Spacing at the detector plane, not corrected for
+    /// magnification. Chosen when Pixel Spacing equals Imager Pixel Spacing
+    /// (PS3.3 10.7.1.1) and no usable magnification factor is present.
+    Detector,
     /// Ultrasound physical deltas supplied as a row and column pair.
     Ultrasound,
     /// A caller-entered pair.
@@ -39,6 +43,7 @@ impl CalibrationSource {
         match self {
             Self::PixelSpacing => "pixel-spacing",
             Self::ImagerSpacing => "imager-spacing",
+            Self::Detector => "detector",
             Self::Ultrasound => "ultrasound",
             Self::Manual => "manual",
         }
@@ -86,6 +91,15 @@ pub struct Calibration {
 /// The order is pixel spacing, imager spacing with the magnification
 /// factor, ultrasound deltas, then manual.
 ///
+/// One exception, PS3.3 10.7.1.1: a Pixel Spacing equal to the Imager
+/// Pixel Spacing has not been calibrated for geometric magnification, so
+/// the imager path decides. A finite, strictly positive factor gives
+/// [`CalibrationSource::ImagerSpacing`], the imager spacing divided by the
+/// factor. Without one, an absent, non-finite or non-positive factor,
+/// the result is [`CalibrationSource::Detector`], the raw imager spacing at
+/// the detector plane. A Pixel Spacing that differs in either half decides
+/// on its own, and the later sources are not read.
+///
 /// # Errors
 ///
 /// [`SuvError::Frame`] when a present number is not finite, including a
@@ -94,6 +108,11 @@ pub struct Calibration {
 /// magnitude is not strictly positive, or the imager pair is incomplete.
 pub fn select_calibration(request: CalibrationRequest) -> Result<Calibration, SuvError> {
     if let Some(spacing) = request.pixel_spacing {
+        if let Some(imager) = request.imager_spacing
+            && same_pair(spacing, imager)
+        {
+            return detector_plane(imager, request.estimated_radiographic_magnification_factor);
+        }
         return accept(CalibrationSource::PixelSpacing, spacing, None);
     }
     if request.imager_spacing.is_some()
@@ -128,6 +147,22 @@ pub fn select_calibration(request: CalibrationRequest) -> Result<Calibration, Su
         return accept(CalibrationSource::Manual, spacing, None);
     }
     Err(SuvError::Unavailable)
+}
+
+/// Both halves are the same number. `total_cmp` keeps this exact without a
+/// float equality, and a validity check follows in [`accept`].
+fn same_pair(left: SpacingMm, right: SpacingMm) -> bool {
+    left.row.total_cmp(&right.row).is_eq() && left.column.total_cmp(&right.column).is_eq()
+}
+
+/// The imager path of an equal pair, PS3.3 10.7.1.1 and C.8.7.5.
+fn detector_plane(imager: SpacingMm, factor: Option<f64>) -> Result<Calibration, SuvError> {
+    match factor {
+        Some(factor) if factor.is_finite() && factor.total_cmp(&0.0).is_gt() => {
+            accept(CalibrationSource::ImagerSpacing, imager, Some(factor))
+        }
+        Some(_) | None => accept(CalibrationSource::Detector, imager, None),
+    }
 }
 
 /// `select_calibration` also rejects a non-finite imager half before calling

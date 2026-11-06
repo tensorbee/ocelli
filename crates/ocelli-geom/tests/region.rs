@@ -186,6 +186,29 @@ fn ellipse_includes_its_boundary() -> Result<(), String> {
 }
 
 #[test]
+fn ellipse_bounds_keep_a_rounded_boundary_sample() -> Result<(), String> {
+    // F-211 review pass 1, N1. Centre (2.2, 2), radii 1.2 across and 1.7
+    // down. Column 1 of row 2 is 2.2 - 1.2 = 1 from the centre, exactly on
+    // the boundary, so the pixel-centre rule keeps it. In f64,
+    // 2.2 - 1.2 = 1.0000000000000002, so bounds taken from cx - rx alone
+    // would start at column 2 and drop that sample. The one-sample widening
+    // keeps it.
+    let shape = RegionShape::Ellipse {
+        center: at(2.2, 2.0),
+        rx: 1.2,
+        ry: 1.7,
+    };
+    if region_contains(&shape, 1, 2) != Ok(true) {
+        return Err("the boundary sample (1, 2) was not inside".to_owned());
+    }
+    let samples = inside(&shape)?;
+    if !samples.contains(&21.0) || samples != inside_whole_grid(&shape)? {
+        return Err(format!("the bounds dropped a sample: {samples:?}"));
+    }
+    Ok(())
+}
+
+#[test]
 fn polygon_includes_its_edges() -> Result<(), String> {
     // AC3. Triangle (0, 0), (4, 0), (0, 4). A centre is inside when
     // c + r <= 4, which is 5 + 4 + 3 + 2 + 1 = 15 samples. Their values sum

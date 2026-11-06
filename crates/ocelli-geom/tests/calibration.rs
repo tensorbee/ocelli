@@ -80,6 +80,67 @@ fn pixel_spacing_wins_over_a_present_imager_pair() {
 }
 
 #[test]
+fn equal_pixel_and_imager_spacing_is_the_detector_plane() {
+    // F-211, the operator answer after review pass 1. PS3.3 10.7.1.1: when
+    // Pixel Spacing is present and the image has not been calibrated for
+    // geometric magnification, its values are the same as Imager Pixel
+    // Spacing. So an equal pair is detector-plane spacing and the imager
+    // path decides. With a usable factor 2 the patient spacing is
+    // 0.2 / 2 = 0.1 (C.8.7.5). Without one, the raw 0.2 is reported as the
+    // detector plane and is not corrected.
+    let equal = Some(pair(0.2, 0.2));
+    let corrected = select_calibration(CalibrationRequest {
+        pixel_spacing: equal,
+        imager_spacing: equal,
+        estimated_radiographic_magnification_factor: Some(2.0),
+        ..empty()
+    });
+    assert!(corrected.is_ok());
+    let Ok(corrected) = corrected else {
+        unreachable!("asserted immediately above")
+    };
+    assert_eq!(corrected.source, CalibrationSource::ImagerSpacing);
+    assert_eq!(bits(corrected.spacing.row), bits(0.1));
+    assert_eq!(bits(corrected.spacing.column), bits(0.1));
+    // No factor, a non-finite factor and a factor that is not strictly
+    // positive all leave the detector plane, uncorrected.
+    for factor in [None, Some(f64::NAN), Some(0.0), Some(-2.0)] {
+        let detector = select_calibration(CalibrationRequest {
+            pixel_spacing: equal,
+            imager_spacing: equal,
+            estimated_radiographic_magnification_factor: factor,
+            ..empty()
+        });
+        assert!(detector.is_ok(), "factor {factor:?}");
+        let Ok(detector) = detector else {
+            unreachable!("asserted immediately above")
+        };
+        assert_eq!(
+            detector.source,
+            CalibrationSource::Detector,
+            "factor {factor:?}"
+        );
+        assert_eq!(detector.source.name(), "detector");
+        assert_eq!(bits(detector.spacing.row), bits(0.2));
+        assert_eq!(bits(detector.spacing.column), bits(0.2));
+    }
+    // A pair that differs in one half is a corrected Pixel Spacing and
+    // decides on its own, whatever the factor.
+    let differs = select_calibration(CalibrationRequest {
+        pixel_spacing: Some(pair(0.2, 0.18)),
+        imager_spacing: equal,
+        estimated_radiographic_magnification_factor: Some(f64::NAN),
+        ..empty()
+    });
+    assert!(differs.is_ok());
+    let Ok(differs) = differs else {
+        unreachable!("asserted immediately above")
+    };
+    assert_eq!(differs.source, CalibrationSource::PixelSpacing);
+    assert_eq!(bits(differs.spacing.column), bits(0.18));
+}
+
+#[test]
 fn imager_spacing_divided_by_the_magnification_factor_is_one_tenth() {
     // PS3.3 C.8.11.4 and C.8.7.5. 0.2 / 2 = 0.1. 0.4 / 2 = 0.2.
     let selected = select_calibration(CalibrationRequest {

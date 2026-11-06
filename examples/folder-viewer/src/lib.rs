@@ -14,7 +14,7 @@ mod held;
 #[cfg(not(target_arch = "wasm32"))]
 mod serve;
 
-pub use measure::{MeasureShape, measure_frame};
+pub use measure::{FREEFORM_POINT_CAP, MeasureShape, measure_frame};
 pub use preview::{
     FrameFacts, FrameRequest, Preview, PreviewError, headers_json, inspect_json,
     preview_first_frame, preview_frame, window_function_from_token, window_preset_from_token,

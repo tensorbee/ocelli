@@ -681,6 +681,7 @@ let calibration = select_calibration(CalibrationRequest {
 let source = calibration.source.name();     // "imager-spacing"
 let mm = calibration.spacing;               // patient spacing</code></pre>
     <p>The order is pixel spacing, then imager spacing with the magnification factor, then ultrasound deltas, then a manual pair. A present but invalid source is an error and does not fall through.</p>
+    <p>A Pixel Spacing equal to the Imager Pixel Spacing has not been calibrated for geometric magnification, PS3.3 10.7.1.1, so the imager path decides. With a usable magnification factor the source is <code>"imager-spacing"</code>. Without one it is <code>"detector"</code>, the imager spacing at the detector plane and not a patient spacing. A Pixel Spacing that differs decides on its own.</p>
   </section>
 
   <section class="chapter" id="measure">

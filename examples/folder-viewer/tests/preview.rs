@@ -287,6 +287,21 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     if page.contains("Math.hypot(dCol * facts.column") || page.contains("lengthText") {
         return Err("the page keeps its own length formula".to_owned());
     }
+    // The page's outline cap is the server's, so an outline over it gets the
+    // page's own sentence exactly when the route refuses it.
+    let cap = format!(
+        "const OUTLINE_CAP = {};",
+        ocelli_folder_viewer::FREEFORM_POINT_CAP
+    );
+    if !page.contains(&cap) {
+        return Err(format!("the page's outline cap is not {cap}"));
+    }
+    if !page.contains(&format!(
+        "This outline has more than {} points, so it is not measured.",
+        ocelli_folder_viewer::FREEFORM_POINT_CAP
+    )) {
+        return Err("the outline sentence does not name the server's cap".to_owned());
+    }
     if !page.contains("if (!live || live.revision !== revision) return;") {
         return Err("a measure reply is applied without the revision check".to_owned());
     }

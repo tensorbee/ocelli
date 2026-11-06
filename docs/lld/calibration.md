@@ -1,9 +1,11 @@
 # Calibration and body-size SUV
 
-**F-IDs that contributed:** F-195
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-195, F-211
+**Last updated:** 2026-11-06
 
 `select_calibration` in `ocelli-geom` chooses one spacing pair. The order is pixel spacing, then imager pixel spacing divided by the estimated radiographic magnification factor, then ultrasound physical deltas, then a manual pair. An earlier source that is present but invalid is an error. It does not fall through. Either half of the imager pair counts as present, so a lone factor or lone imager spacing does not reach ultrasound or a manual pair. Pixel spacing is DICOM PS3.3 C.7.6.2, row then column. Imager pixel spacing is PS3.3 C.8.11.4, in millimetres at the detector housing, and it is not adjusted for geometric magnification. The magnification factor is PS3.3 C.8.7.5, the ratio of source image receptor distance over source object distance, and the patient spacing is the imager spacing divided by that factor. Ultrasound deltas are the caller's pair in that same row and column order. PS3.3 C.8.5.5.1.17 defines Physical Delta X and Physical Delta Y as increments per pixel. PS3.3 C.8.5.5.1.15 names their units, and 0003H is centimetres. The caller converts a length unit into positive millimetres and maps Physical Delta Y to the row and Physical Delta X to the column. This crate does not read those tags or the unit code.
+
+F-211, by the operator's answer after its review pass 1, adds one exception to that order. PS3.3 10.7.1.1 says a Pixel Spacing that has not been calibrated for geometric magnification has the same values as Imager Pixel Spacing. So when both are present and equal in both halves, the imager path decides. A finite, strictly positive factor gives `ImagerSpacing`, the imager spacing divided by the factor. An absent, non-finite or non-positive factor gives `CalibrationSource::Detector`, named `detector`, the raw imager spacing at the detector plane, not corrected for magnification. It is the only source that is not a patient spacing. A Pixel Spacing that differs in either half decides on its own, as before, and the later sources are not read.
 
 A non-finite value on a present field is `SuvError::Frame` (402), including a non-finite half of the imager pair. A missing source, an incomplete imager pair, or a magnitude that is not strictly positive is `SuvError::Unavailable` (403).
 

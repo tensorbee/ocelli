@@ -567,6 +567,55 @@ fn measure_calibration_provenance() -> Result<(), String> {
         )?;
         contains(&json, "\"text\":\"2.0 mm\"", name)?;
     }
+    // The operator answer after review pass 1, PS3.3 10.7.1.1. Pixel
+    // Spacing equal to Imager Pixel Spacing has not been corrected for
+    // magnification, so the imager path decides. Four columns:
+    // with factor 2, 4 * 0.2 / 2 = 0.4 mm. Without a usable factor, the
+    // detector plane 4 * 0.2 = 0.8 mm at the detector. A pair that differs
+    // is Pixel Spacing, 4 * 0.5 = 2.0 mm.
+    let equal = "0.2\\0.2";
+    for (name, file, calibration, text) in [
+        (
+            "equal with a factor",
+            spaced(&[
+                (PIXEL_SPACING, equal),
+                (IMAGER_SPACING, equal),
+                (MAGNIFICATION, "2"),
+            ])?,
+            "\"calibration\":{\"source\":\"imager-spacing\",\"row_mm\":0.1,\"column_mm\":0.1}",
+            "\"text\":\"0.4 mm\"",
+        ),
+        (
+            "equal without a factor",
+            spaced(&[(PIXEL_SPACING, equal), (IMAGER_SPACING, equal)])?,
+            "\"calibration\":{\"source\":\"detector\",\"row_mm\":0.2,\"column_mm\":0.2}",
+            "\"text\":\"0.8 mm at the detector\"",
+        ),
+        (
+            "equal with an unusable factor",
+            spaced(&[
+                (PIXEL_SPACING, equal),
+                (IMAGER_SPACING, equal),
+                (MAGNIFICATION, "two"),
+            ])?,
+            "\"calibration\":{\"source\":\"detector\",\"row_mm\":0.2,\"column_mm\":0.2}",
+            "\"text\":\"0.8 mm at the detector\"",
+        ),
+        (
+            "unequal",
+            spaced(&[
+                (PIXEL_SPACING, "0.5\\0.5"),
+                (IMAGER_SPACING, equal),
+                (MAGNIFICATION, "2"),
+            ])?,
+            "\"calibration\":{\"source\":\"pixel-spacing\",\"row_mm\":0.5,\"column_mm\":0.5}",
+            "\"text\":\"2.0 mm\"",
+        ),
+    ] {
+        let json = measured(&file, MeasureShape::Length, &segment, name)?;
+        contains(&json, calibration, name)?;
+        contains(&json, text, name)?;
+    }
     if PreviewError::Calibration.code() != "calibration" {
         return Err("the calibration refusal has the wrong code".to_owned());
     }

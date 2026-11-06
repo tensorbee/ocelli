@@ -36,7 +36,7 @@ const REGION_SAMPLE_CAP: u64 = 4096 * 4096;
 /// `region_contains` is evaluated per sample and is linear in the vertices.
 const FREEFORM_WORK_CAP: u64 = 1 << 28;
 /// Most vertices a freeform may have.
-pub(crate) const FREEFORM_POINT_CAP: usize = 4000;
+pub const FREEFORM_POINT_CAP: usize = 4000;
 
 /// Which measurement a request asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,15 +152,19 @@ struct Spacing {
 
 /// Choose the spacing, the F-211 calibration table.
 ///
-/// `select_calibration` decides Pixel Spacing and Imager Pixel Spacing with
-/// the factor. Imager Pixel Spacing alone is the `detector` row, which is
-/// not a `select_calibration` source and keeps the raw pair. No spacing at
-/// all is `uncalibrated`. A present source that cannot be used refuses.
+/// `select_calibration` decides whenever Pixel Spacing is present, and
+/// whenever Imager Pixel Spacing comes with the factor. It also decides the
+/// PS3.3 10.7.1.1 case, a Pixel Spacing equal to the Imager Pixel Spacing,
+/// which takes the imager path and is `detector` without a usable factor.
+/// Imager Pixel Spacing alone, with no Pixel Spacing and no factor, is this
+/// example's own `detector` row, which keeps the raw pair. No spacing at all
+/// is `uncalibrated`. A present source that is chosen and cannot be used
+/// refuses.
 ///
 /// F-195 takes the first present source, so the inputs are read in that
 /// order and only as far as the source that is chosen. A present Pixel
-/// Spacing decides alone, and a later Imager Pixel Spacing or factor that
-/// cannot be used is never read.
+/// Spacing that differs from the imager pair decides alone, and a later
+/// Imager Pixel Spacing or factor that cannot be used is never read.
 fn choose_spacing(inputs: &CalibrationInputs) -> Result<Spacing, PreviewError> {
     let pair = |input: SpacingInput| match input {
         SpacingInput::Absent => Ok(None),
@@ -169,7 +173,17 @@ fn choose_spacing(inputs: &CalibrationInputs) -> Result<Spacing, PreviewError> {
     };
     let pixel_spacing = pair(inputs.pixel_spacing)?;
     let (imager_spacing, factor) = if pixel_spacing.is_some() {
-        (None, None)
+        // Only an equal imager pair can change the choice, and then an
+        // unusable factor leaves the detector plane, so neither refuses.
+        let imager = match inputs.imager_spacing {
+            SpacingInput::Pair { row, column } => Some(SpacingMm { row, column }),
+            SpacingInput::Absent | SpacingInput::Unusable => None,
+        };
+        let factor = match inputs.magnification {
+            FactorInput::Value(value) => Some(value),
+            FactorInput::Absent | FactorInput::Unusable => None,
+        };
+        (imager, factor)
     } else {
         let factor = match inputs.magnification {
             FactorInput::Absent => None,
@@ -185,12 +199,7 @@ fn choose_spacing(inputs: &CalibrationInputs) -> Result<Spacing, PreviewError> {
         if !raw.row.is_finite() || !raw.column.is_finite() || raw.row <= 0.0 || raw.column <= 0.0 {
             return Err(PreviewError::Calibration);
         }
-        return Ok(Spacing {
-            source: "detector",
-            mm: Some(raw),
-            length_unit: "mm at the detector",
-            area_unit: "mm² at the detector",
-        });
+        return Ok(detector(raw));
     }
     if pixel_spacing.is_none() && imager_spacing.is_none() && factor.is_none() {
         return Ok(Spacing {
@@ -208,18 +217,26 @@ fn choose_spacing(inputs: &CalibrationInputs) -> Result<Spacing, PreviewError> {
         manual: None,
     })
     .map_err(|_| PreviewError::Calibration)?;
-    let source = match chosen.source {
-        CalibrationSource::PixelSpacing | CalibrationSource::ImagerSpacing => chosen.source.name(),
-        CalibrationSource::Ultrasound | CalibrationSource::Manual => {
-            return Err(PreviewError::Calibration);
-        }
-    };
-    Ok(Spacing {
-        source,
-        mm: Some(chosen.spacing),
-        length_unit: "mm",
-        area_unit: "mm²",
-    })
+    match chosen.source {
+        CalibrationSource::PixelSpacing | CalibrationSource::ImagerSpacing => Ok(Spacing {
+            source: chosen.source.name(),
+            mm: Some(chosen.spacing),
+            length_unit: "mm",
+            area_unit: "mm²",
+        }),
+        CalibrationSource::Detector => Ok(detector(chosen.spacing)),
+        CalibrationSource::Ultrasound | CalibrationSource::Manual => Err(PreviewError::Calibration),
+    }
+}
+
+/// Detector-plane spacing, not corrected for magnification.
+fn detector(raw: SpacingMm) -> Spacing {
+    Spacing {
+        source: CalibrationSource::Detector.name(),
+        mm: Some(raw),
+        length_unit: "mm at the detector",
+        area_unit: "mm² at the detector",
+    }
 }
 
 /// Decode one frame and measure one shape on it.
