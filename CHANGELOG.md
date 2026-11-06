@@ -547,6 +547,10 @@ Repository bootstrap. Nothing is published.
   than its design size on its own. Previews that wait are admitted in the
   order they first waited. Open, first image, scroll, window step and
   resident memory have recorded budgets on the operator's machine.
+- The local folder viewer shows the modality value and its unit under the
+  pointer, HU on a CT that states HU or states no unit and is not
+  multi-energy, and Units on a PET. The local process computes it from the
+  held frame, and `ocelli-dicom` gains `read_padding`.
 
 ### Changed
 

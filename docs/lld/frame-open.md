@@ -1,7 +1,7 @@
 # Frame open
 
-**F-IDs that contributed:** F-191
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-191, F-210
+**Last updated:** 2026-11-06
 
 `open_frame` reads one Part 10 object and returns the inputs `LutChain`
 already accepts. It does not map samples. The example helper maps the

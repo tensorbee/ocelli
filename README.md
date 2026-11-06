@@ -227,8 +227,9 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    year-month-day. Edge letters show the patient direction and hide
    while the picture is flipped or rotated. The pointer cross shows the
    column, the row and the modality value of the pixel under it with its
-   unit, HU on a CT that names no other unit and is not multi-energy, the
-   Units attribute on a PET, `padding` for a padded sample, and `not held`
+   unit: HU on a CT whose Rescale Type is HU, or is absent on a CT that is
+   not multi-energy, `unspecified` for Rescale Type `US`, the Units
+   attribute on a PET, `padding` for a padded sample, and `not held`
    for a file the process could not hold.
 8. Every number on a mark comes from the local process, and the page prints
    its text. Probe asks `POST /value`, and every other mark asks `POST

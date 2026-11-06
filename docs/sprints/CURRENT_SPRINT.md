@@ -10,7 +10,7 @@
 | F-119 | E30.1 | Brick decomposition and multiscale pyramid generation | Rust | 10w | done |
 | F-208 | E38.18 | Folder viewer viewports: layouts from 1 by 1 to 3 by 3, per-viewport series and view state, an active viewport, a series dragged from its thumbnail onto a cell, and the four-image view kept as a tile mode | TS | 6w | pending |
 | F-209 | E38.19 | Folder viewer linked viewports: scroll by position in a shared frame of reference, synced window and zoom, and reference lines from the library | TS | 4w | pending |
-| F-210 | E38.20 | Folder viewer value at the pointer: the modality value and its unit from the modality stage of the LUT chain, HU on CT, returned by the local process | Rust | 3w | pending |
+| F-210 | E38.20 | Folder viewer value at the pointer: the modality value and its unit from the modality stage of the LUT chain, HU on CT, returned by the local process | Rust | 3w | done |
 | F-211 | E38.21 | Folder viewer measurements: angle, Cobb angle, bidirectional, arrow and probe, region area with mean, SD, minimum and maximum in modality units, editable handles and a measurement list | All | 6w | pending |
 | F-212 | E38.22 | Folder viewer four corners at parity: birth date, sex, age, study time, institution, slice location and thickness, kVp and mAs, TR and TE, a scale bar, and edge letters from Patient Orientation on projection images | All | 4w | pending |
 | F-213 | E38.23 | Folder viewer window presets by modality on number keys, every VOI window in the file listed by its explanation, and a region window from the library | All | 3w | pending |
@@ -150,6 +150,18 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   of units and flips greys at any window width, in 15,879 of 800,000 adversarial
   draws. A minimum window width cannot cover that case, and F-227's own
   constant window is exposed to it too.
+- **The unsafe guard has blind spots.** F-229's eighth review found that
+  `scripts/unsafe_allowlist_check.py`'s string pattern opens a false string
+  after a `'"'` character literal, after a raw string holding a quote or
+  ending in a backslash, and after a line comment with an unpaired quote, and blanks the code that follows. An
+  `unsafe` block planted at `crates/ocelli-dicom/src/dicomweb.rs:418` passed the
+  guard. No audited count changes. The choice is a story that gives the guard a
+  real Rust lexer, or a recorded limit on the guard.
+- **No build compiles the jxl-oxide SIMD code.** The same review found that
+  `bin/ocelli.sh native` passes `+simd128` after `cargo rustc --`, which reaches
+  only the final example crate, so the SIMD code of its dependencies is never
+  built. D-22's F-X013 SIMD check is built the same way and may not test what it
+  says.
 
 ## What is carried in
 

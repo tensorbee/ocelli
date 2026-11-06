@@ -5319,3 +5319,31 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The operator chose mimalloc in the viewer, recycled frame buffers, and that a frame over the design size draws alone. The lead ruled that waiters are admitted in arrival order, that the resident bound is stated for frames within the design size, that a kept grey counts against the cap, and that `--tolerance` takes a per-subject form so the baseline is still written only by `--accept`. All are recorded in the plan. Implemented first by an external coding agent and then by Claude implementer agents. Fourteen review passes.
 
 **Notes for future sessions.** One client that stops reading while holding half the grey cap, with one large frame queued behind it, delays later previews until its 60 s write deadline. A per-subject tolerance for a subject the run cannot measure is dropped without a refusal, which no tracked registry row reaches today.
+
+## F-210, Folder viewer value at the pointer, completed 2026-11-06
+
+**What was built.** `POST /value` on the local folder viewer answers the modality value and its unit at a list of image points for a held file id, with no Part 10 bytes in the body. Stage 1 is the held frame's own modality recipe, so the value and the preview share one modality stage and an attribute the value never reads cannot refuse it. The unit is HU on a CT whose Rescale Type is HU, or that names none and is not multi-energy, Units on a PET, the file's Rescale Type otherwise, and unspecified when nothing names one. A padded sample reports padding and no number. A point outside the image, a Modality LUT Sequence and a non-finite value are refused. The value's facts are charged to F-216's cache budget, every claim route makes room for its whole cost including the longest legal unit, and a frame a reply is reading is passed over rather than evicted. The page asks for the value under the pointer and sends no pixels, slope or intercept. `ocelli-dicom` gains `read_padding`, the reader `open_frame` already used.
+
+**HLD sections implemented.** The modality stage of section 18 as a readout, through `ocelli-pixel`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/folder-viewer`, `crates/ocelli-dicom`.
+
+**Tests added.** A hand-computed value fixture per acceptance row citing PS3.3 C.11.1 and C.8.2.1, PS3.5 8.1.1 and PS3.3 C.7.6.3.3 for masking and sign extension, and C.7.5.1.1.2 for padding, route tests on the in-process viewer and the process server for every refusal and for the in-flight charge, and cache tests for every claim route.
+
+**Fixture provenance.** Every expected value is hand-computed with its working in the test, citing the PS3.3 or PS3.5 section it follows.
+
+**Verification.** Feature profile on the worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 8368232.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. The value is computed on the local process from the held frame and drawn as text.
+
+**LLD updated.** `docs/lld/frame-open.md` for `read_padding`, and its `docs/lld/README.md` index row. The plan's LLD impact said none, which `read_padding` made stale.
+
+**User-facing documentation.** `README.md` step 7 gives the value under the pointer and its unit rule. The Use book names `read_padding`. The More page needed no change.
+
+**Deviations from the design plan.** Lead rulings recorded in the plan: corrected transcriptions of C.8.2.1, C.8.9.4 and C.11.1.1.2 against PS3.3 2026d, no assumed unit for a multi-energy CT, Units deciding on a PET, stage 1 from the held recipe, the value's facts charged to the budget, and the claim covering the longest LO unit. Implemented by Claude implementer agents. Five review passes.
+
+**Notes for future sessions.** AC16, the browser check, and AC17, the pydicom check, are left for sprint close. On a cache within a few hundred bytes of full, the steal route's full-cost room can evict one more entry than before.

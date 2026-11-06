@@ -786,6 +786,53 @@ fn value_reports_padding_without_a_number() -> Result<(), String> {
 }
 
 #[test]
+fn value_refuses_a_malformed_padding_range() -> Result<(), String> {
+    // PS3.3 C.7.5.1.1.2. Pixel Padding Range Limit (0028,0121) is used only
+    // with a Pixel Padding Value (0028,0120), and in MONOCHROME2 the value is
+    // the low end of the inclusive range. A limit alone, or value 10 above
+    // limit 0, names no range, so the value cannot say which samples are
+    // padding and is refused `attribute`. Stored 5 is otherwise 5 (C.11.1).
+    let us = |tag: (u16, u16), value: u16| -> Result<((u16, u16), Vec<u8>), String> {
+        Ok((tag, short_le(tag, *b"US", &value.to_le_bytes())?))
+    };
+    let cases = [
+        ("a limit without a value", vec![us((0x0028, 0x0121), 10)?]),
+        (
+            "a reversed MONOCHROME2 range",
+            vec![us((0x0028, 0x0120), 10)?, us((0x0028, 0x0121), 0)?],
+        ),
+    ];
+    for (name, extra) in cases {
+        let mut spec = Spec::mono(1, &[5]);
+        spec.modality = Some("MR");
+        spec.rescale = Some(("1", "0"));
+        spec.extra = extra;
+        expect_refusal(
+            value_frame(&build(spec)?, 0, &[at(0.5, 0.5)]),
+            PreviewError::Attribute,
+            name,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn value_refuses_a_value_outside_f32() -> Result<(), String> {
+    // PS3.3 C.11.1: 65535 * 1e38 + 0 = 6.5535e42, above the largest finite
+    // f32, 3.4028235e38 (IEEE 754 binary32), so the modality value is not a
+    // number this route can print. It is refused `attribute`, because the
+    // rescale attributes are the cause and no window is involved.
+    let mut spec = Spec::mono(1, &[65_535]);
+    spec.modality = Some("MR");
+    spec.rescale = Some(("1e38", "0"));
+    expect_refusal(
+        value_frame(&build(spec)?, 0, &[at(0.5, 0.5)]),
+        PreviewError::Attribute,
+        "slope 1e38",
+    )
+}
+
+#[test]
 fn value_refuses_a_modality_lut_sequence() -> Result<(), String> {
     // PS3.3 C.11.1. A Modality LUT Sequence replaces rescale. This route does
     // not apply one, so it refuses with the preview's `window` code.
@@ -942,6 +989,102 @@ fn ask(addr: SocketAddr, id: &str, extra: &str) -> Result<(String, String), Stri
 fn refused_with(reply: &(String, String), status: &str, code: &str) -> bool {
     reply.0.starts_with(&format!("HTTP/1.1 {status} "))
         && header_line(&reply.0, "X-Ocelli-Error").as_deref() == Some(code)
+}
+
+/// `inflight` from `GET /held`, the sample bytes a decode still charges.
+fn inflight(addr: SocketAddr) -> Result<usize, String> {
+    let (header, body) = split_http(&exchange(
+        addr,
+        b"GET /held HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+    )?)?;
+    if !header.starts_with("HTTP/1.1 200 ") {
+        return Err(header);
+    }
+    let rest = body
+        .split_once("\"inflight\":")
+        .ok_or_else(|| format!("the census omitted inflight: {body}"))?
+        .1;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits
+        .parse::<usize>()
+        .map_err(|_| format!("the census inflight was not a number: {body}"))
+}
+
+#[test]
+fn value_route_refusals_are_400_and_release_their_charge() -> Result<(), String> {
+    // A refusal is not 410, which the page reads as "post the file again".
+    // Slice 0 has one frame and 128 columns, so frame 3 is `frame` and
+    // x = 200.5 is `point`. A Modality LUT Sequence object decodes and is
+    // refused `window` (PS3.3 C.11.1). A one-pixel-row object whose Pixel
+    // Data holds one of its two samples is refused after the sample buffer
+    // is charged. Every decode, answered or refused, leaves no bytes in
+    // flight.
+    let file = slice(0).ok_or_else(|| "no synthetic slice".to_owned())?;
+    let mut lut = Spec::mono(1, &[50]);
+    lut.rescale = Some(("1", "0"));
+    lut.extra
+        .push(((0x0028, 0x3000), long_le((0x0028, 0x3000), *b"SQ", &[])?));
+    let lut = build(lut)?;
+    let mut short = Spec::mono(2, &[]);
+    short.pixels = 7_u16.to_le_bytes().to_vec();
+    let short = build(short)?;
+    for (name, addr) in both_viewers()? {
+        let id = post_file(addr, &file)?;
+        let cases = [
+            (
+                "frame 3",
+                id.clone(),
+                "X-Ocelli-Frame: 3\r\nX-Ocelli-Points: 0.5,0.5\r\n",
+                "400",
+                "frame",
+            ),
+            (
+                "outside point",
+                id.clone(),
+                "X-Ocelli-Frame: 0\r\nX-Ocelli-Points: 200.5,0.5\r\n",
+                "400",
+                "point",
+            ),
+            (
+                "Modality LUT",
+                post_file(addr, &lut)?,
+                "X-Ocelli-Points: 0.5,0.5\r\n",
+                "400",
+                "window",
+            ),
+        ];
+        for (case, target, extra, status, code) in cases {
+            let reply = ask(addr, &target, extra)?;
+            if !refused_with(&reply, status, code) {
+                return Err(format!("{name} {case}: {}", reply.0));
+            }
+            let left = inflight(addr)?;
+            if left != 0 {
+                return Err(format!("{name} {case}: {left} bytes left in flight"));
+            }
+        }
+        let short_id = post_file(addr, &short)?;
+        let reply = ask(addr, &short_id, "X-Ocelli-Points: 0.5,0.5\r\n")?;
+        if !reply.0.starts_with("HTTP/1.1 400 ") {
+            return Err(format!("{name} short pixel data: {}", reply.0));
+        }
+        let left = inflight(addr)?;
+        if left != 0 {
+            return Err(format!(
+                "{name} short pixel data: {left} bytes left in flight"
+            ));
+        }
+        let fresh = post_file(addr, &slice(1).ok_or_else(|| "no slice 1".to_owned())?)?;
+        let reply = ask(addr, &fresh, "X-Ocelli-Points: 0.5,0.5\r\n")?;
+        if !reply.0.starts_with("HTTP/1.1 200 ") {
+            return Err(format!("{name} decoded value: {}", reply.0));
+        }
+        let left = inflight(addr)?;
+        if left != 0 {
+            return Err(format!("{name} decoded value: {left} bytes left in flight"));
+        }
+    }
+    Ok(())
 }
 
 #[test]
