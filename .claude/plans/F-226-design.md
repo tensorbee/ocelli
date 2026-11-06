@@ -317,3 +317,7 @@ None. Section 17.3 lists no kinds, so kind 7 fills an unspecified slot. Section 
 - Q3, one event per series. Answered: lead decision under the operator's delegation of 2026-11-05. Decision 3.
 - Q4, the forget route, its race and its timing. Answered: lead decision under the operator's delegation of 2026-11-05. Decisions 5 to 8.
 - Q5, order. Answered: lead decision under the operator's delegation of 2026-11-05. After F-208, before F-224, recorded under Dependencies.
+
+### Lead amendment after review pass 2
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-226-working-pass-2.md`. AC3's fixture holds the state table's first three rows plus a frame at each end of the series range, so the range ends are tested. Its expected frames and bytes follow from that fixture and are hand-computed in the test, and they are not the state table's figures.
