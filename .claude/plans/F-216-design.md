@@ -504,3 +504,10 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 Given by the operator on 2026-11-06, after sizing the grey cap to the design `N_max` made a frame over 3000 by 2900, a 4740 by 5928 mammogram for example, refused outright where it had been drawn.
 
 - **A frame over the design size draws alone.** Its grey is admitted only when the gate holds no other grey, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. It is never refused for size alone below the library's `MAX_PIXELS`. The documented resident bound adds that one frame's grey above the design term, and the measured workload's bound is unchanged.
+
+### Lead ruling after review pass 7
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-7.md`, which showed that holding back every new request while an oversized grey waits lets a stream of oversized previews starve a normal one until its 503.
+
+- **Waiters are admitted in arrival order.** A request that must wait takes a place in one queue when it first fails to fit. A waiting request is admitted only when it is at the head of the queue and fits under the existing rules, so a frame over the design size still draws alone. A request that fits at once and finds the queue empty is admitted without queueing. A request that already holds room is never queued behind anything. No other hold-back rule remains.
+- **The resident bound is stated for frames within the design size.** Documents say a frame over the design size draws alone and can raise resident memory above the bound, without a figure, and say nothing about adding exactly one frame's grey.
