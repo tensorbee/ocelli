@@ -12,6 +12,7 @@ import type { CursorControllerOptions } from "./cursor.js";
 import type { DicomwebClientOptions, QidoSearchOptions } from "./dicomweb.js";
 import type { WadoInstanceRequest } from "./instance-bytes.js";
 import type { PointerDispatchOptions } from "./pointer.js";
+import type { ResidentFrameRequest } from "./frame-cache.js";
 import type { SecondaryCaptureRequest } from "./secondary-capture.js";
 import type { KeyObjectRequest } from "./tid2010.js";
 
@@ -129,6 +130,7 @@ export const FRAME_COMMIT_META_KEYS = [
   "generation",
   "stackIndex",
   "stackEpoch",
+  "content",
 ] as const satisfies readonly (keyof FrameCommitMeta)[];
 
 type MissingFrameCommit = Exclude<
@@ -136,6 +138,20 @@ type MissingFrameCommit = Exclude<
   (typeof FRAME_COMMIT_META_KEYS)[number]
 >;
 const frameCommitComplete: [MissingFrameCommit] extends [never] ? true : never = true;
+
+export const RESIDENT_FRAME_REQUEST_KEYS = [
+  "index",
+  "epoch",
+  "content",
+  "columns",
+  "rows",
+] as const satisfies readonly (keyof ResidentFrameRequest)[];
+
+type MissingResidentFrame = Exclude<
+  keyof ResidentFrameRequest,
+  (typeof RESIDENT_FRAME_REQUEST_KEYS)[number]
+>;
+const residentFrameComplete: [MissingResidentFrame] extends [never] ? true : never = true;
 
 /** True when every key list names every field of its type. */
 export const OPTION_LISTS_COMPLETE =
@@ -146,7 +162,8 @@ export const OPTION_LISTS_COMPLETE =
   wadoInstanceComplete &&
   keyObjectComplete &&
   secondaryCaptureComplete &&
-  frameCommitComplete;
+  frameCommitComplete &&
+  residentFrameComplete;
 
 /** Type name to the keys `refuseUnknownOptions` allows for that type. */
 export const OPTION_KEY_LISTS: Readonly<Record<string, readonly string[]>> = {
@@ -158,6 +175,7 @@ export const OPTION_KEY_LISTS: Readonly<Record<string, readonly string[]>> = {
   KeyObjectRequest: KEY_OBJECT_REQUEST_KEYS,
   SecondaryCaptureRequest: SECONDARY_CAPTURE_REQUEST_KEYS,
   FrameCommitMeta: FRAME_COMMIT_META_KEYS,
+  ResidentFrameRequest: RESIDENT_FRAME_REQUEST_KEYS,
 };
 
 function shownKey(key: string | symbol): string {

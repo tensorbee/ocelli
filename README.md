@@ -304,6 +304,14 @@ let _keep = parsed;
 that boundary. The shell sends typed commands down and drains one event ring
 per animation frame.
 
+The wasm session keeps committed frames in a cache whose budget the caller
+sets, and the default is zero, which is off. `setFrameBudget(wasm, bytes)`
+moves it. A commit that carries a `content` id fills the cache, and
+`frameResident` and `showResident` read it back without the bytes crossing
+the boundary again. `releaseSeries` and `releaseStudy` empty it, one event
+per series through the ring. The displayed frame is outside the cache and
+stays on screen through a release.
+
 In a browser, use the workspace packages `@ocelli/core` and `@ocelli/react`.
 
 `@ocelli/core` depends on dcmjs 0.52.2, which declares adm-zip 0.5.17 as a

@@ -18,6 +18,11 @@
 //! F-224 adds the decoded tier's frame identity: `ContentId`, `FrameSource`
 //! and `FrameLookup` in `image`, so a held frame is served only for the
 //! bytes it was decoded from.
+//!
+//! F-231 adds the committed tier: `CommittedFrame` and `CommittedSource`,
+//! and `ImageCache` becomes generic over its value with `DecodedFrame` as
+//! the default, so the wasm session reuses this cache instead of a second
+//! one. The two tiers share the `Lru`, the events and the stale rule.
 
 #![cfg_attr(not(test), no_std)]
 
@@ -35,9 +40,9 @@ pub use brick::{
     VolumeId,
 };
 pub use image::{
-    CacheEvent, CacheEvents, ContentId, DecodedFrame, FrameKey, FrameLookup, FrameSource,
-    HandoffError, HandoffMeta, ImageCache, KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED,
-    KIND_PRESSURE, KIND_REFUSED, KIND_RELEASED, RingEvent, SeriesId,
+    CacheEvent, CacheEvents, CommittedFrame, CommittedSource, ContentId, DecodedFrame, FrameKey,
+    FrameLookup, FrameSource, HandoffError, HandoffMeta, ImageCache, KIND_BUDGET_CHANGED,
+    KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, KIND_RELEASED, RingEvent, SeriesId,
 };
 pub use lru::{Admission, Budgeted, Lru};
 pub use profile::{LoadProfile, LoadSpec, profile_load};

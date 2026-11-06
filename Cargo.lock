@@ -958,6 +958,7 @@ name = "ocelli-cache"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "ocelli-core",
  "ocelli-pixel",
  "proptest",
 ]

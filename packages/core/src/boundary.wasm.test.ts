@@ -22,30 +22,36 @@ import {
   acceptTransferredFrame,
   COLORMAP_BYTE,
   COMMAND_ID,
+  contentId,
+  decodeNamedEvent,
   drainRing,
   EVENT_HEADER_BYTES,
   EVENT_STRIDE,
   FLAG_INVERT,
+  frameResident,
   INVERT_BYTE,
+  releaseSeries,
+  RING_EVENT_KIND,
+  sessionBulkSink,
+  sessionCommandSink,
+  setFrameBudget,
+  showResident,
+  restoreSessionSnapshot,
+  sessionSnapshot,
+  sessionSnapshotError,
   SNAPSHOT_ERROR,
   SNAPSHOT_MAGIC,
   packCommands,
   parseSnapshot,
   PRESET_BYTE,
   readViewportState,
-  RING_EVENT_KIND,
-  sessionBulkSink,
-  sessionCommandSink,
-  restoreSessionSnapshot,
-  sessionSnapshot,
-  sessionSnapshotError,
   submitCommands,
   VOI_FUNCTION_BYTE,
   writeFrame,
   writeCommands,
   writeStack,
 } from "./index.js";
-import type { PackedCommand } from "./index.js";
+import type { CacheReleasedPayload, PackedCommand } from "./index.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const MODULE = env.OCELLI_BOUNDARY_MODULE ?? "crates/ocelli-wasm/target/boundary-wasm";
@@ -82,6 +88,34 @@ interface BuiltExports {
     rows: number,
     generation: number,
   ): number;
+  set_frame_budget(bytes: number): number;
+  commit_cached_frame(
+    ticket: number,
+    len: number,
+    viewport: number,
+    columns: number,
+    rows: number,
+    index: number,
+    epoch: number,
+    content: bigint,
+  ): number;
+  frame_resident(
+    index: number,
+    epoch: number,
+    content: bigint,
+    columns: number,
+    rows: number,
+  ): number;
+  show_resident(
+    index: number,
+    epoch: number,
+    content: bigint,
+    columns: number,
+    rows: number,
+  ): number;
+  release_series(series: bigint): number;
+  request_frame_pressure(): number;
+  content_id(ticket: number, len: number, uidLen: number, tsLen: number): bigint | undefined;
   [name: string]: unknown;
 }
 
@@ -140,6 +174,16 @@ async function loadModule(): Promise<BuiltExports> {
     snapshot: glue.snapshot,
     snapshot_error: glue.snapshot_error,
     restore_snapshot: glue.restore_snapshot,
+    // The F-231 exports are re-taken from the glue like the ones above:
+    // the raw export of an Option<u64> is a flag and value pair, and the
+    // wrapped name is the one the public surface answers with.
+    set_frame_budget: glue.set_frame_budget,
+    commit_cached_frame: glue.commit_cached_frame,
+    frame_resident: glue.frame_resident,
+    show_resident: glue.show_resident,
+    release_series: glue.release_series,
+    request_frame_pressure: glue.request_frame_pressure,
+    content_id: glue.content_id,
   } as BuiltExports;
 }
 
@@ -666,4 +710,125 @@ describe("wasm session boundary", () => {
     const tier = await glue.resolvedTier();
     expect(["A", "B", "C"]).toContain(tier);
   });
+
+  it("hashes a content id in the core, drops the slot, and answers the pinned FNV value", async () => {
+    // F-231 AC12. The value is F-224 AC2's, recomputed by hand from the
+    // FNV-1a definition with the length prefixes over "1.2.3",
+    // "1.2.840.10008.1.2.1" and [0, 1, 2, 3]. A TypeScript re-implementation
+    // of the hash, or a slot the export left outstanding, goes red here.
+    const wasm = await loadModule();
+    const id = contentId(wasm, "1.2.3", "1.2.840.10008.1.2.1", new Uint8Array([0, 1, 2, 3]));
+    expect(id).toBe(0x49e8_b650_ff1c_d3f1n);
+    expect(wasm.bulk_ticket()).toBe(0);
+    // The slot is gone, so the next allocation is accepted.
+    expect(wasm.alloc(4)).not.toBe(0);
+    wasm.release_bulk(wasm.bulk_ticket());
+    expect(wasm.bulk_ticket()).toBe(0);
+  });
+
+  it("caches, shows, reports and releases committed frames with bigint identities", async () => {
+    // F-231 AC13, the built module over the public helpers. The series and
+    // the contents carry bits above the 32-bit half, so a u64 argument
+    // truncated to u32 at any export collides these with their low halves
+    // and fails a step below.
+    const wasm = await loadModule();
+    const series = 0x1_0000_0005n;
+    const first = 0x1_0000_0001n;
+    const second = 0x1_0000_0002n;
+    const third = 0x1_0000_0003n;
+    const fourth = 0x1_0000_0004n;
+    const contents = [first, second, third, fourth];
+    const keys = [0, 1, 2, 3].map((instance) => ({ series, instance, frame: 0 }));
+    const epoch = writeStack(wasm, keys);
+    expect(epoch).toBeGreaterThan(0);
+    setFrameBudget(wasm, 3_145_728);
+    // The budget change is setup, not the observation.
+    drainRing(wasm.drain_events());
+
+    const sink = sessionBulkSink(wasm);
+    const frame = new Uint8Array(1_048_576);
+    for (let index = 0; index < 4; index += 1) {
+      if (index > 0) {
+        expect(
+          writeCommands(wasm, sessionCommandSink(wasm), packCommands(1, [{ kind: "Scroll", step: 1 }])),
+        ).toBe(1);
+      }
+      writeFrame(wasm, sink, frame, {
+        viewport: 1,
+        columns: 512,
+        rows: 512,
+        generation: 0,
+        stackIndex: index,
+        stackEpoch: epoch,
+        content: contents[index],
+      });
+    }
+
+    // AC2's order on the built module: pressure, pressure, evicted, with
+    // the evicted payload naming the full-width series, index 0's key and
+    // 1,048,576 bytes. The fourth commit is what evicted that entry.
+    const drained = drainRing(wasm.drain_events());
+    expect(drained.dropped).toBe(0);
+    const named = drained.events.map((raw) => decodeNamedEvent(raw));
+    expect(named.map((row) => row?.name)).toEqual([
+      "cache.pressure",
+      "cache.pressure",
+      "cache.evicted",
+    ]);
+    const evicted = named[2]?.payload;
+    if (evicted === undefined || !("instance" in evicted)) {
+      throw new Error("the evicted payload was missing");
+    }
+    expect(evicted.series).toBe(series);
+    expect(evicted.instance).toBe(0);
+    expect(evicted.bytes).toBe(1_048_576n);
+
+    // AC4: residency of a surviving entry's matching triple, and not of a
+    // content that differs only above the 32-bit half, nor of another
+    // extent. The queries keep the entry.
+    const request = { index: 3, epoch, content: fourth, columns: 512, rows: 512 };
+    expect(frameResident(wasm, request)).toBe(true);
+    expect(frameResident(wasm, { ...request, content: 0x2_0000_0004n })).toBe(false);
+    expect(frameResident(wasm, { ...request, columns: 511 })).toBe(false);
+    expect(frameResident(wasm, { ...request, rows: 513 })).toBe(false);
+    expect(frameResident(wasm, request)).toBe(true);
+
+    // AC5: a matching show answers, a mismatch is refused and removes.
+    expect(
+      showResident(wasm, { index: 1, epoch, content: second, columns: 512, rows: 512 }),
+    ).toBe(true);
+    expect(
+      showResident(wasm, { index: 1, epoch, content: 0x3_0000_0002n, columns: 512, rows: 512 }),
+    ).toBe(false);
+    expect(
+      frameResident(wasm, { index: 1, epoch, content: second, columns: 512, rows: 512 }),
+    ).toBe(false);
+
+    // Put the removed entry back so the release below has three frames of
+    // the series again, and drain the crossings along the way.
+    expect(
+      writeCommands(wasm, sessionCommandSink(wasm), packCommands(1, [{ kind: "Scroll", step: -2 }])),
+    ).toBe(1);
+    writeFrame(wasm, sink, frame, {
+      viewport: 1,
+      columns: 512,
+      rows: 512,
+      generation: 0,
+      stackIndex: 1,
+      stackEpoch: epoch,
+      content: second,
+    });
+    drainRing(wasm.drain_events());
+
+    // AC7: the release returns the series' three frames and emits one
+    // released event naming the full-width series, then a pressure reading.
+    expect(releaseSeries(wasm, series)).toBe(3);
+    const released = drainRing(wasm.drain_events());
+    const releasedNamed = released.events.map((raw) => decodeNamedEvent(raw));
+    expect(releasedNamed.map((row) => row?.name)).toEqual(["cache.released", "cache.pressure"]);
+    const payload = releasedNamed[0]?.payload as CacheReleasedPayload | undefined;
+    expect(payload?.series).toBe(series);
+    expect(payload?.frames).toBe(3);
+    expect(payload?.bytes).toBe(3_145_728n);
+});
 });

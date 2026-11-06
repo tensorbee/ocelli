@@ -19,10 +19,17 @@
 //! [`ContentId`] of the bytes it was decoded from, and a lookup answers only
 //! when that identity, the description and the plane match what the caller
 //! presents.
+//!
+//! F-231 adds the committed tier beside it. [`CommittedFrame`] is what the
+//! wasm session caches: columns, rows and stored samples, with no
+//! description and no plane, because the session never receives them.
+//! [`ImageCache`] is generic over the value and the two tiers share the
+//! `Lru`, the events and the stale rule.
 
 use alloc::vec::Vec;
 
 use bytemuck::{Pod, Zeroable};
+use ocelli_core::Stored;
 use ocelli_pixel::{ImagePlane, StoredPixelDescription};
 
 use crate::lru::{Budgeted, Lru};
@@ -276,6 +283,75 @@ impl Budgeted for DecodedFrame {
     }
 }
 
+/// One committed frame, the tier the wasm session caches.
+///
+/// The session receives stored samples and the extent the commit named, and
+/// no `StoredPixelDescription` and no `ImagePlane`. Building a
+/// [`DecodedFrame`] would mean fabricating a geometry, so this value carries
+/// what the commit itself carried and nothing more. There is no `PartialEq`,
+/// because the samples are `Stored` and that type compares by nothing.
+#[derive(Clone, Debug)]
+pub struct CommittedFrame {
+    columns: u32,
+    rows: u32,
+    samples: Vec<Stored>,
+}
+
+impl CommittedFrame {
+    /// Assemble one committed frame from its extent and its samples.
+    pub fn new(columns: u32, rows: u32, samples: Vec<Stored>) -> Self {
+        Self {
+            columns,
+            rows,
+            samples,
+        }
+    }
+
+    /// The columns the commit named.
+    #[must_use]
+    pub const fn columns(&self) -> u32 {
+        self.columns
+    }
+
+    /// The rows the commit named.
+    #[must_use]
+    pub const fn rows(&self) -> u32 {
+        self.rows
+    }
+
+    /// The stored samples.
+    pub fn samples(&self) -> &[Stored] {
+        &self.samples
+    }
+}
+
+impl Budgeted for CommittedFrame {
+    /// The size of the sample vector, `size_of::<Stored>()` per sample.
+    ///
+    /// The product saturates at `usize::MAX`, so a sample count no buffer
+    /// could hold is a value rather than a panic.
+    fn bytes(&self) -> usize {
+        self.samples
+            .len()
+            .saturating_mul(core::mem::size_of::<Stored>())
+    }
+}
+
+/// What a committed lookup presents: the identity of the bytes and the
+/// extent the commit named.
+///
+/// There is no description and no plane here, because a committed frame has
+/// neither. The extent is compared exactly, like the decoded tier's metadata.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommittedSource {
+    /// The content id of the committed bytes.
+    pub content: ContentId,
+    /// The columns the commit named.
+    pub columns: u32,
+    /// The rows the commit named.
+    pub rows: u32,
+}
+
 /// One thing an insert or a release did to the decoded tier.
 ///
 /// One per `Admission` field, which is the whole reason deviation D-24
@@ -450,9 +526,9 @@ pub struct FrameSource {
 
 /// The three answers a lookup can give.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum FrameLookup<'a> {
+pub enum FrameLookup<'a, V = DecodedFrame> {
     /// The frame under the key answers for the presented source.
-    Hit(&'a DecodedFrame),
+    Hit(&'a V),
     /// No frame is held under the key.
     Miss,
     /// A frame from other bytes or metadata was held and has been removed.
@@ -461,62 +537,48 @@ pub enum FrameLookup<'a> {
     Stale { bytes: usize },
 }
 
-/// One held frame and the identity of the bytes it was decoded from.
+/// One held value and the identity of the bytes it came from.
 ///
-/// This is the `Lru`'s value type, so [`Budgeted::bytes`] is the frame's own
+/// This is the `Lru`'s value type, so [`Budgeted::bytes`] is the value's own
 /// byte count and every admitted size and event payload is what it was
 /// before the identity moved into the lookup.
-struct HeldFrame {
+struct HeldValue<V> {
     content: ContentId,
-    frame: DecodedFrame,
+    value: V,
 }
 
-impl HeldFrame {
-    /// Whether this frame answers for `source`: the same bytes' identity,
-    /// the same description and the same plane.
-    fn matches(&self, source: &FrameSource) -> bool {
-        self.content == source.content
-            && self.frame.description() == source.description
-            && self.frame.plane() == source.plane
-    }
-}
-
-impl Budgeted for HeldFrame {
-    /// The allocated size of the sample buffer.
+impl<V: Budgeted> Budgeted for HeldValue<V> {
+    /// The allocated size of the held value.
     fn bytes(&self) -> usize {
-        self.frame.bytes()
+        self.value.bytes()
     }
 }
 
-/// The decoded tier: decoded frames in an `Lru` sized by the caller.
+/// The decoded and committed tiers: frames in an `Lru` sized by the caller.
 ///
-/// Each held frame carries the [`ContentId`] of the bytes it was decoded
-/// from, and a lookup answers only when that identity, the description and
-/// the plane match what the caller presents.
-pub struct ImageCache {
-    decoded: Lru<FrameKey, HeldFrame>,
+/// Each held value carries the [`ContentId`] of the bytes it came from, and
+/// a lookup answers only when that identity and the value's own metadata
+/// match what the caller presents. The decoded tier's metadata is the
+/// description and the plane. The committed tier's is the extent.
+pub struct ImageCache<V: Budgeted = DecodedFrame> {
+    decoded: Lru<FrameKey, HeldValue<V>>,
 }
 
-impl ImageCache {
-    /// An empty decoded tier holding at most `budget` bytes.
+impl<V: Budgeted> ImageCache<V> {
+    /// An empty tier holding at most `budget` bytes.
     pub fn new(budget: usize) -> Self {
         Self {
             decoded: Lru::new(CacheTier::Decoded, budget),
         }
     }
 
-    /// Insert a frame decoded from bytes whose identity is `content`, and
-    /// return the events the caller must emit.
+    /// Insert a value from bytes whose identity is `content`, and return the
+    /// events the caller must emit.
     ///
     /// The evicted entries are converted in the order `Admission` returned
     /// them, least recently used first.
-    pub fn insert(
-        &mut self,
-        key: FrameKey,
-        content: ContentId,
-        frame: DecodedFrame,
-    ) -> CacheEvents {
-        let admission = self.decoded.insert(key, HeldFrame { content, frame });
+    pub fn insert(&mut self, key: FrameKey, content: ContentId, value: V) -> CacheEvents {
+        let admission = self.decoded.insert(key, HeldValue { content, value });
         let mut events = CacheEvents::default();
         if let Some(displaced) = admission.displaced {
             events.events.push(CacheEvent::Displaced {
@@ -539,45 +601,21 @@ impl ImageCache {
         events
     }
 
-    /// Read the frame under `key` that answers for `source`.
+    /// Move the budget and return the evictions only, in F-034's order: the
+    /// caller emits these first and a budget-changed event after them.
     ///
-    /// Reading is a use, so a hit becomes the most recently used. A frame
-    /// held under the key from other bytes or other metadata is removed and
-    /// reported as [`FrameLookup::Stale`] with the sample length it was
-    /// admitted at. The removal is explicit and emits no event. Validation
-    /// precedes the return, so a lookup never serves a frame that does not
-    /// answer for the source it was given.
-    pub fn get(&mut self, key: &FrameKey, source: &FrameSource) -> FrameLookup<'_> {
-        let entry = self.decoded.get(key);
-        let Some(held) = entry else {
-            return FrameLookup::Miss;
-        };
-        let stale = !held.matches(source);
-        let bytes = held.frame.bytes();
-        // The reference is not used past this line, so on the stale path the
-        // map is free to take back. The reference that escapes on the hit
-        // path is taken by a second read, because a loan that may escape
-        // into the return cannot be the one the removal ended.
-        if stale {
-            self.decoded.remove(key);
-            return FrameLookup::Stale { bytes };
+    /// A control does not displace and nothing is refused by a shrink, so
+    /// the `Admission` carries evictions and nothing else.
+    pub fn set_budget(&mut self, budget: usize) -> CacheEvents {
+        let admission = self.decoded.set_budget(budget);
+        let mut events = CacheEvents::default();
+        for (evicted_key, evicted) in admission.evicted {
+            events.events.push(CacheEvent::Evicted {
+                key: evicted_key,
+                bytes: evicted.bytes(),
+            });
         }
-        match self.decoded.get(key) {
-            Some(held) => FrameLookup::Hit(&held.frame),
-            None => FrameLookup::Miss,
-        }
-    }
-
-    /// Whether the key is live. This is not a use, so it does not change
-    /// which frame leaves next.
-    #[must_use]
-    pub fn contains(&self, key: &FrameKey) -> bool {
-        self.decoded.contains_key(key)
-    }
-
-    /// Explicitly release a frame. Not an eviction, and emits no event.
-    pub fn remove(&mut self, key: &FrameKey) -> Option<DecodedFrame> {
-        self.decoded.remove(key).map(|held| held.frame)
+        events
     }
 
     /// Release every frame of `series`. One `Released` event, or none when
@@ -603,9 +641,120 @@ impl ImageCache {
         events
     }
 
-    /// The decoded tier's pressure signal. Telemetry, not a use.
+    /// Whether the key is live. This is not a use, so it does not change
+    /// which frame leaves next.
+    #[must_use]
+    pub fn contains(&self, key: &FrameKey) -> bool {
+        self.decoded.contains_key(key)
+    }
+
+    /// Explicitly release a frame. Not an eviction, and emits no event.
+    pub fn remove(&mut self, key: &FrameKey) -> Option<V> {
+        self.decoded.remove(key).map(|held| held.value)
+    }
+
+    /// The tier's pressure signal. Telemetry, not a use.
     pub fn pressure(&self) -> Pressure {
         self.decoded.pressure()
+    }
+
+    /// The number of live entries.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.decoded.len()
+    }
+
+    /// Whether the tier holds nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.decoded.is_empty()
+    }
+
+    /// The lookup under `key` for a `matches` predicate, shared by the two
+    /// tiers.
+    ///
+    /// Reading is a use, so a hit becomes the most recently used. A value
+    /// held under the key that does not match is removed and reported as
+    /// [`FrameLookup::Stale`] with the byte count it was admitted at. The
+    /// removal is explicit and emits no event. Validation precedes the
+    /// return, so a lookup never serves a value that does not answer for
+    /// the source it was given.
+    fn lookup(
+        &mut self,
+        key: &FrameKey,
+        matches: impl FnOnce(&HeldValue<V>) -> bool,
+    ) -> FrameLookup<'_, V> {
+        let entry = self.decoded.get(key);
+        let Some(held) = entry else {
+            return FrameLookup::Miss;
+        };
+        let bytes = held.bytes();
+        if !matches(held) {
+            self.decoded.remove(key);
+            return FrameLookup::Stale { bytes };
+        }
+        match self.decoded.get(key) {
+            Some(held) => FrameLookup::Hit(&held.value),
+            None => FrameLookup::Miss,
+        }
+    }
+}
+
+impl ImageCache<DecodedFrame> {
+    /// Read the frame under `key` that answers for `source`.
+    pub fn get(&mut self, key: &FrameKey, source: &FrameSource) -> FrameLookup<'_, DecodedFrame> {
+        self.lookup(key, |held| {
+            held.content == source.content
+                && held.value.description() == source.description
+                && held.value.plane() == source.plane
+        })
+    }
+}
+
+impl ImageCache<CommittedFrame> {
+    /// Read the committed frame under `key` that answers for `source`.
+    pub fn get(
+        &mut self,
+        key: &FrameKey,
+        source: &CommittedSource,
+    ) -> FrameLookup<'_, CommittedFrame> {
+        self.lookup(key, |held| {
+            held.content == source.content
+                && held.value.columns() == source.columns
+                && held.value.rows() == source.rows
+        })
+    }
+
+    /// Whether the key holds a frame that answers for `source`.
+    ///
+    /// A query is not a use: it moves no recency and removes no mismatch,
+    /// because a query is telemetry. The answer is exact in all three
+    /// fields, so a frame from other bytes or another extent is not
+    /// resident even though its key is held.
+    #[must_use]
+    pub fn is_resident(&self, key: &FrameKey, source: &CommittedSource) -> bool {
+        match self.decoded.peek(key) {
+            Some(held) => {
+                held.content == source.content
+                    && held.value.columns() == source.columns
+                    && held.value.rows() == source.rows
+            }
+            None => false,
+        }
+    }
+}
+
+impl<V: Budgeted> core::fmt::Debug for ImageCache<V> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // Written out because the `Lru` this wraps has no `Debug`, and a
+        // derived one would demand one of the value too.
+        let pressure = self.pressure();
+        f.debug_struct("ImageCache")
+            .field("tier", &pressure.tier)
+            .field("used", &pressure.used)
+            .field("budget", &pressure.budget)
+            .field("entries", &self.len())
+            .finish()
     }
 }
 

@@ -9,10 +9,21 @@
 use std::collections::BTreeMap;
 
 use ocelli_cache::{
-    Budgeted, CacheEvent, CacheTier, ContentId, DecodedFrame, FrameKey, FrameLookup, FrameSource,
-    ImageCache, KIND_DISPLACED, KIND_EVICTED, KIND_REFUSED, KIND_RELEASED, Lru, RingEvent,
-    SeriesId, TierCounters,
+    Budgeted, CacheEvent, CacheTier, CommittedFrame, CommittedSource, ContentId, DecodedFrame,
+    FrameKey, FrameLookup, FrameSource, ImageCache, KIND_DISPLACED, KIND_EVICTED, KIND_REFUSED,
+    KIND_RELEASED, Lru, RingEvent, SeriesId, TierCounters,
 };
+use ocelli_core::Stored;
+
+/// The samples' little-endian bytes, so a comparison is byte-exact and
+/// never a float comparison.
+fn sample_bytes(samples: &[Stored]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(samples.len().saturating_mul(4));
+    for stored in samples {
+        out.extend_from_slice(&stored.0.to_le_bytes());
+    }
+    out
+}
 use ocelli_pixel::{
     ImageDimensions, ImageOrientationPatient, ImagePlane, ImagePositionPatient,
     PhotometricInterpretation, PixelRepresentation, PixelSpacing, SampleLayout, StoredBits,
@@ -842,4 +853,153 @@ proptest! {
             prop_assert_eq!(admitted_bytes - live_bytes, left_bytes);
         }
     }
+}
+
+#[test]
+fn a_committed_frame_counts_its_samples_at_four_bytes() {
+    // F-231 decision 2. `Budgeted::bytes` for a committed frame is
+    // `samples.len() * size_of::<Stored>()`, and `Stored` is one `f32`, so
+    // the factor is 4. A 512 by 512 monochrome frame holds 512 * 512 =
+    // 262,144 stored samples, DICOM PS3.3 C.7.6.3.1 Rows and Columns, which
+    // is 262,144 * 4 = 1,048,576 bytes. A 4 by 4 interleaved RGB frame holds
+    // 4 * 4 * 3 = 48 samples, which is 48 * 4 = 192 bytes.
+    let mono = CommittedFrame::new(512, 512, vec![Stored(0.0); 512 * 512]);
+    assert_eq!(mono.bytes(), 1_048_576);
+    assert_eq!(mono.columns(), 512);
+    assert_eq!(mono.rows(), 512);
+    assert_eq!(mono.samples().len(), 512 * 512);
+    let rgb = CommittedFrame::new(4, 4, vec![Stored(0.0); 48]);
+    assert_eq!(rgb.bytes(), 192);
+}
+
+#[test]
+fn a_committed_cache_answers_for_its_own_content_and_extent() {
+    // The committed tier's lookup. The slot holds 4 by 4, 48 samples, 192
+    // bytes against a budget of exactly that. A source naming other bytes,
+    // other columns or other rows is stale and removes the entry, and the
+    // bytes the lookup reports are the 192 it was admitted at.
+    let mut cache = ImageCache::new(192);
+    let frame_key = key(9, 0, 0);
+    let content = ContentId::of(b"1.2.3", b"1.2.840.10008.1.2.1", b"committed");
+    assert!(
+        cache
+            .insert(
+                frame_key,
+                content,
+                CommittedFrame::new(4, 4, vec![Stored(7.0); 48])
+            )
+            .is_empty()
+    );
+    assert_eq!(cache.pressure().used, 192);
+    assert_eq!(cache.len(), 1);
+    let own = CommittedSource {
+        content,
+        columns: 4,
+        rows: 4,
+    };
+    match cache.get(&frame_key, &own) {
+        FrameLookup::Hit(frame) => {
+            assert_eq!(frame.columns(), 4);
+            assert_eq!(frame.rows(), 4);
+            // The samples are compared as their little-endian bytes, never
+            // as floats.
+            let mut expected = Vec::with_capacity(48 * 4);
+            for _ in 0..48 {
+                expected.extend_from_slice(&7.0_f32.to_le_bytes());
+            }
+            assert_eq!(sample_bytes(frame.samples()), expected);
+        }
+        other => unreachable!("the frame is live for its own source: {other:?}"),
+    }
+
+    // Other bytes under the same key are stale and leave nothing. The
+    // stale answer is matched by shape, because a committed frame compares
+    // by nothing.
+    let other = CommittedSource {
+        content: ContentId::of(b"1.2.3", b"1.2.840.10008.1.2.1", b"other bytes"),
+        columns: 4,
+        rows: 4,
+    };
+    assert!(matches!(
+        cache.get(&frame_key, &other),
+        FrameLookup::Stale { bytes: 192 }
+    ));
+    assert_eq!(cache.pressure().used, 0);
+    assert!(!cache.is_resident(&frame_key, &own));
+
+    // Other columns and other rows are stale too, each on a fresh entry.
+    let refill = || CommittedFrame::new(4, 4, vec![Stored(7.0); 48]);
+    assert!(cache.insert(frame_key, content, refill()).is_empty());
+    let wide = CommittedSource {
+        content,
+        columns: 5,
+        rows: 4,
+    };
+    assert!(matches!(
+        cache.get(&frame_key, &wide),
+        FrameLookup::Stale { bytes: 192 }
+    ));
+    assert!(cache.insert(frame_key, content, refill()).is_empty());
+    let tall = CommittedSource {
+        content,
+        columns: 4,
+        rows: 5,
+    };
+    assert!(matches!(
+        cache.get(&frame_key, &tall),
+        FrameLookup::Stale { bytes: 192 }
+    ));
+}
+
+#[test]
+fn residency_on_the_committed_tier_is_not_a_use() {
+    // `is_resident` answers without moving recency and without removing a
+    // mismatched entry. Two 192-byte frames fill the 384-byte budget, so the
+    // third insert must evict the least recently used one. A residency query
+    // that marked a use would move the first frame above the second and the
+    // victim would be the second key instead.
+    let mut cache = ImageCache::new(384);
+    let first = key(9, 0, 0);
+    let second = key(9, 1, 0);
+    let third = key(9, 2, 0);
+    let content = ContentId::of(b"1.2.3", b"1.2.840.10008.1.2.1", b"committed");
+    let own = CommittedSource {
+        content,
+        columns: 4,
+        rows: 4,
+    };
+    let frame = || CommittedFrame::new(4, 4, vec![Stored(7.0); 48]);
+    assert!(cache.insert(first, content, frame()).is_empty());
+    assert!(cache.insert(second, content, frame()).is_empty());
+    assert_eq!(cache.len(), 2);
+
+    // Matching, mismatching on the extent, and matching again: the
+    // mismatching query kept the entry.
+    assert!(cache.is_resident(&first, &own));
+    assert!(!cache.is_resident(
+        &first,
+        &CommittedSource {
+            content,
+            columns: 5,
+            rows: 4,
+        }
+    ));
+    assert!(cache.is_resident(&first, &own));
+
+    // The budget is full, so the third insert evicts exactly the least
+    // recently used frame. The queries ticked nothing, so that is `first`
+    // and not `second`.
+    let events = cache.insert(third, content, frame());
+    assert_eq!(
+        events.events(),
+        [CacheEvent::Evicted {
+            key: first,
+            bytes: 192,
+        }]
+    );
+    assert_eq!(cache.len(), 2);
+    assert!(!cache.contains(&first));
+    assert!(cache.contains(&second));
+    assert!(cache.contains(&third));
+    assert_eq!(cache.pressure().used, 384);
 }
