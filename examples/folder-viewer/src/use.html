@@ -406,11 +406,13 @@ writeFrame({ memory: session.memory }, sessionBulkSink(session), sampleBytes, {
   content,
 });
 
-// Later, with no bytes crossing again:
+// Later, with no bytes crossing again. A show answers only for the slice
+// the viewport has selected: another index throws the coded
+// CommitRefused, and a miss returns false.
 const slot = { index: 0, epoch, content, columns: 512, rows: 512 };
 if (showResident(session, slot)) {
   // The frame is displayed. frameResident asks without showing, and a
-  // mismatched show refuses and removes the entry.
+  // mismatched show returns false and removes the entry.
 }</code></pre>
 
     <h3 id="js-dicomweb"><span class="num">5.6</span>DICOMweb</h3>

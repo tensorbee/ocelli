@@ -31,6 +31,7 @@ import {
   FLAG_LOADING,
   frameResident,
   INVERT_BYTE,
+  OcelliError,
   releaseSeries,
   RING_EVENT_KIND,
   sessionBulkSink,
@@ -796,15 +797,24 @@ describe("wasm session boundary", () => {
 
     // D1's reproduction on the built module. Index 1 is cached and the
     // selection is index 3. Scrolled back to slice 0, a show of index 1 is
-    // refused and leaves the state the scroll left, loading flag included.
-    // Before the fix it returned true, adopted index 1's samples and
-    // cleared the loading flag while copy_state still reported slice 0.
+    // the coded CommitRefused refusal and leaves the state the scroll
+    // left, loading flag included. Before the fix it returned true,
+    // adopted index 1's samples and cleared the loading flag while
+    // copy_state still reported slice 0, and before the ruling it answered
+    // false instead of throwing.
     expect(
       writeCommands(wasm, sessionCommandSink(wasm), packCommands(1, [{ kind: "Scroll", step: -3 }])),
     ).toBe(1);
-    expect(
-      showResident(wasm, { index: 1, epoch, content: second, columns: 512, rows: 512 }),
-    ).toBe(false);
+    let unselected: unknown;
+    try {
+      showResident(wasm, { index: 1, epoch, content: second, columns: 512, rows: 512 });
+    } catch (error) {
+      unselected = error;
+    }
+    if (!(unselected instanceof OcelliError)) {
+      throw new Error("the unselected show did not refuse");
+    }
+    expect(unselected.code).toBe("CommitRefused");
     const refused = readViewportState(wasm.copy_state());
     expect(refused?.sliceIndex).toBe(0);
     expect(refused !== null && (refused.flags & FLAG_LOADING) !== 0).toBe(true);
@@ -852,5 +862,52 @@ describe("wasm session boundary", () => {
     expect(payload?.series).toBe(series);
     expect(payload?.frames).toBe(3);
     expect(payload?.bytes).toBe(3_145_728n);
+  });
+
+  it("showResident throws the coded CommitRefused for an unselected index and answers false only for a miss", async () => {
+    // The lead ruling after review pass 2. Index 0 is cached and the
+    // selection moves to slice 1, so a show of index 0 is the Selection
+    // refusal and throws, while a miss at the selected index answers false.
+    // Against the module before the ruling the unselected show answered
+    // false and this went red.
+    const wasm = await loadModule();
+    const series = 0x1_0000_0006n;
+    const keys = [0, 1].map((instance) => ({ series, instance, frame: 0 }));
+    const epoch = writeStack(wasm, keys);
+    expect(epoch).toBeGreaterThan(0);
+    setFrameBudget(wasm, 1_048_576);
+    drainRing(wasm.drain_events());
+
+    const sink = sessionBulkSink(wasm);
+    const frame = new Uint8Array(1_048_576);
+    writeFrame(wasm, sink, frame, {
+      viewport: 1,
+      columns: 512,
+      rows: 512,
+      generation: 0,
+      stackIndex: 0,
+      stackEpoch: epoch,
+      content: 0x1_0000_0007n,
+    });
+    drainRing(wasm.drain_events());
+    expect(
+      writeCommands(wasm, sessionCommandSink(wasm), packCommands(1, [{ kind: "Scroll", step: 1 }])),
+    ).toBe(1);
+
+    let caught: unknown;
+    try {
+      showResident(wasm, { index: 0, epoch, content: 0x1_0000_0007n, columns: 512, rows: 512 });
+    } catch (error) {
+      caught = error;
+    }
+    if (!(caught instanceof OcelliError)) {
+      throw new Error("the unselected show did not refuse");
+    }
+    expect(caught.code).toBe("CommitRefused");
+
+    // A miss at the selected index answers false and throws nothing.
+    expect(
+      showResident(wasm, { index: 1, epoch, content: 0x2_0000_0007n, columns: 512, rows: 512 }),
+    ).toBe(false);
   });
 });

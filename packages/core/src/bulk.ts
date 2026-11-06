@@ -88,7 +88,9 @@ export interface BulkSink {
 
 /** The four integers the numeric `commit_frame` export stores, plus the
  * selected-frame and cached-frame route fields. `content` is the identity
- * of the committed bytes and routes the commit to `commit_cached_frame`.
+ * of the committed bytes and routes the commit to `commit_cached_frame`,
+ * which takes both `stackIndex` and `stackEpoch` beside it: a `content`
+ * without both is refused with `InvalidValue` and commits nothing.
  */
 export interface FrameCommitMeta {
   readonly viewport: number;

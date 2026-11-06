@@ -7,8 +7,10 @@
  * carries a content id with its stack positions through `writeFrame` fills
  * the cache, one without both is refused, and {@link frameResident} and
  * {@link showResident} read it back without bytes crossing the boundary
- * again. {@link releaseSeries} and {@link releaseStudy} empty it, one
- * event per series through the ring.
+ * again. {@link releaseSeries} and {@link releaseStudy} release the named
+ * series only, one `cache.released` per series that held frames, a series
+ * with nothing cached emits no event, and a release that crosses a
+ * pressure band pushes `cache.pressure` after `cache.released`.
  *
  * Every function here refuses before any export call. A bad number is an
  * `OcelliError` `InvalidValue` and an unknown option key is `UnknownOption`,
@@ -114,18 +116,32 @@ export function frameResident(
 
 /**
  * Show the cached frame at `request.index` when it answers for
- * `request.content` at `request.columns` by `request.rows`. A mismatch
- * removes the entry and leaves the displayed frame unchanged.
+ * `request.content` at `request.columns` by `request.rows`. The index
+ * must be the slice the viewport has selected, the rule `writeFrame`
+ * commits under: another index throws the coded `CommitRefused` with
+ * nothing drawn. A mismatched entry is removed and leaves the displayed
+ * frame unchanged. `false` is a miss, a stale entry or a wrong epoch
+ * only.
  */
 export function showResident(
   wasm: FrameCacheExports,
   request: ResidentFrameRequest,
 ): boolean {
   const fields = residentRequest(request);
-  return (
-    wasm.show_resident(fields.index, fields.epoch, fields.content, fields.columns, fields.rows) ===
-    1
+  const answer = wasm.show_resident(
+    fields.index,
+    fields.epoch,
+    fields.content,
+    fields.columns,
+    fields.rows,
   );
+  if (answer === 2) {
+    throw new OcelliError(
+      "CommitRefused",
+      "show refused: index is not the selected slice",
+    );
+  }
+  return answer === 1;
 }
 
 /** Release every cached frame of `series` and return the frame count. */

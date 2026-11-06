@@ -1355,7 +1355,7 @@ pub(crate) mod bind {
     use ocelli_viewport::ring::RING_CAPACITY;
     use wasm_bindgen::prelude::wasm_bindgen;
 
-    use super::{FrameMeta, Session};
+    use super::{FrameMeta, Session, SessionError};
 
     thread_local! {
         static SESSION: RefCell<Option<Session>> = const { RefCell::new(None) };
@@ -1507,15 +1507,18 @@ pub(crate) mod bind {
         )
     }
 
-    /// 1 shown, 0 on a miss, a stale entry, a wrong epoch or an index that
-    /// is not the selected one.
+    /// 1 shown, 0 on a miss, a stale entry or a wrong epoch, and 2 when the
+    /// index is not the selected one, which `showResident` answers with the
+    /// coded `CommitRefused`.
     #[wasm_bindgen(js_name = show_resident)]
     pub fn show_resident(index: u32, epoch: u32, content: u64, columns: u32, rows: u32) -> u32 {
-        with_session(|session| {
-            session
-                .show_resident(index, epoch, content, columns, rows)
-                .unwrap_or(0)
-        })
+        with_session(
+            |session| match session.show_resident(index, epoch, content, columns, rows) {
+                Ok(shown) => shown,
+                Err(SessionError::Selection) => 2,
+                Err(_) => 0,
+            },
+        )
         .unwrap_or(0)
     }
 
@@ -2772,8 +2775,8 @@ mod tests {
     /// C.7.6.3.1.
     mod session_cache {
         use ocelli_cache::{
-            FrameKey, ImageCache, KIND_BUDGET_CHANGED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED,
-            KIND_RELEASED, SeriesId,
+            FrameKey, ImageCache, KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE,
+            KIND_REFUSED, KIND_RELEASED, SeriesId,
         };
         use ocelli_core::Stored;
 
@@ -3433,6 +3436,93 @@ mod tests {
             assert_eq!(kinds(&ring), [KIND_PRESSURE]);
             assert_eq!(super::read_u32(&ring, 16 + 16 + 24), 0);
             assert_eq!(super::read_u32(&ring, 16 + 16 + 28), 0);
+        }
+
+        #[test]
+        fn displaced_and_released_frames_are_not_counted_as_evictions() {
+            // S1. The review's zz_probe_d3 walk on 4-byte frames against an
+            // 8-byte budget: the evicting commit's reading reports evicted 1
+            // at payload offset 24, a repeat commit of the same content
+            // displaces and the next reading reports 0, a stale removal
+            // pushes a crossing reading with 0, and the release pushes one
+            // with 0 too. Counting a Displaced or a Released event as an
+            // eviction in note_counters goes red here.
+            let keys: Vec<FrameKey> = (0..3).map(|instance| key(5, instance)).collect();
+            let (mut session, epoch) = cached_session(&keys);
+            with_budget(&mut session, 8);
+            for (index, (content, sample)) in
+                CONTENTS.iter().zip([10.0_f32, 20.0, 30.0]).enumerate()
+            {
+                if index > 0 {
+                    scroll(&mut session, 1);
+                }
+                commit_at(
+                    &mut session,
+                    u32::try_from(index).unwrap_or(0),
+                    epoch,
+                    *content,
+                    1,
+                    1,
+                    &[sample],
+                );
+            }
+            assert_eq!(session.frame_cache_pressure().used, 8);
+            // The walk itself: two band crossings and index 0's eviction.
+            assert_eq!(
+                kinds(&drain(&mut session)),
+                [KIND_PRESSURE, KIND_PRESSURE, KIND_EVICTED]
+            );
+
+            // The evicting commit's reading reports it at payload offset 24.
+            assert_eq!(session.request_frame_pressure(), 1);
+            let ring = drain(&mut session);
+            assert_eq!(kinds(&ring), [KIND_PRESSURE]);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 24), 1);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 28), 0);
+
+            // The reading resets, so the next one starts from zero.
+            assert_eq!(session.request_frame_pressure(), 1);
+            let ring = drain(&mut session);
+            assert_eq!(kinds(&ring), [KIND_PRESSURE]);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 24), 0);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 28), 0);
+
+            // A repeat commit of the same content at the resident index 1
+            // displaces and is not an eviction. The selection moves back one
+            // first, because a cached commit refuses another index.
+            scroll(&mut session, -1);
+            commit_at(&mut session, 1, epoch, CONTENTS[1], 1, 1, &[20.0]);
+            assert_eq!(kinds(&drain(&mut session)), [KIND_DISPLACED]);
+            assert_eq!(session.request_frame_pressure(), 1);
+            let ring = drain(&mut session);
+            assert_eq!(kinds(&ring), [KIND_PRESSURE]);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 24), 0);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 28), 0);
+
+            // A stale removal at the selected index emits no event at all,
+            // and the crossing reading it pushes counts nothing.
+            assert_eq!(
+                session.show_resident(1, epoch, CONTENTS[1] ^ 1, 1, 1),
+                Ok(0)
+            );
+            let ring = drain(&mut session);
+            assert_eq!(kinds(&ring), [KIND_PRESSURE]);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 24), 0);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 28), 0);
+            assert_eq!(session.request_frame_pressure(), 1);
+            let ring = drain(&mut session);
+            assert_eq!(kinds(&ring), [KIND_PRESSURE]);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 24), 0);
+
+            // The release pushes its released event and a crossing reading,
+            // and neither is an eviction. The reading is the second event,
+            // so its counts are read at 16 + 48 into the ring.
+            assert_eq!(session.release_series(5), 1);
+            let ring = drain(&mut session);
+            assert_eq!(kinds(&ring), [KIND_RELEASED, KIND_PRESSURE]);
+            let second = 16 + 48;
+            assert_eq!(super::read_u32(&ring, second + 16 + 24), 0);
+            assert_eq!(super::read_u32(&ring, second + 16 + 28), 0);
         }
 
         #[test]

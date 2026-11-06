@@ -105,6 +105,16 @@ describe("frame cache calls", () => {
     expect(showResident(wasm, REQUEST)).toBe(false);
   });
 
+  it("turns an unselected-index refusal into the coded CommitRefused", () => {
+    // The lead ruling after review pass 2. The bind answers 2 for the
+    // Selection refusal and 0 for a miss, so a caller can tell the refusal
+    // from a miss. Before the ruling the 2 answered false.
+    expect(codeOf(() => showResident(stub({ show_resident: () => 2 }), REQUEST))).toBe(
+      "CommitRefused",
+    );
+    expect(showResident(stub({ show_resident: () => 0 }), REQUEST)).toBe(false);
+  });
+
   it("releases one series and returns the frame count", () => {
     const wasm = stub();
     expect(releaseSeries(wasm, 0x1_0000_0005n)).toBe(1);
