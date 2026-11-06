@@ -42,8 +42,10 @@ Offsets are little-endian and come from `CacheEvent::encode`,
 three bytes after the tier. A short payload or a tier outside 0, 1 and 2
 decodes as null. Kind 0 and any kind above 7 do too.
 
-`cache.displaced`, `cache.refused` and `cache.budgetChanged` have no 5.8.2
-name. They are `UNMAPPED_EVENTS`. `viewport.resized` is the shell
+`cache.displaced`, `cache.refused`, `cache.budgetChanged` and `cache.released`
+have no 5.8.2 name. They are `UNMAPPED_EVENTS`. `cache.released` reports one
+release per series, where 5.8.2 reports a removed image per image.
+`viewport.resized` is the shell
 ResizeObserver and is unmapped for the same reason. Pairing one of them with
 a different cornerstone event would name the wrong observation.
 

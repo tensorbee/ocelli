@@ -15,6 +15,8 @@
 //! same allocation `insert` already makes, and a grow or a no-op pushes
 //! nothing. `docs/lld/cache.md` carries the measurement for `insert`.
 
+use core::ops::Bound;
+
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
@@ -123,6 +125,22 @@ pub(crate) fn admits(budget: usize, bytes: usize) -> bool {
     budget > 0 && bytes <= budget
 }
 
+/// Whether a range's bounds name nothing, inverted or equal and excluded.
+///
+/// `BTreeMap::range` panics on an inverted range and on an equal key excluded
+/// from both sides, and HLD section 23 leaves no exported path a panic can
+/// reach. `remove_range` compares the bounds first, so a range a caller
+/// computed wrong comes back as an empty release instead of a panic.
+fn bounds_are_empty<K: Ord>(start: Bound<&K>, end: Bound<&K>) -> bool {
+    match (start, end) {
+        (Bound::Included(lo), Bound::Included(hi)) => lo > hi,
+        (Bound::Included(lo), Bound::Excluded(hi)) => lo >= hi,
+        (Bound::Excluded(lo), Bound::Included(hi)) => lo >= hi,
+        (Bound::Excluded(lo), Bound::Excluded(hi)) => lo >= hi,
+        _ => false,
+    }
+}
+
 impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
     /// An empty cache over one tier, holding at most `budget` bytes.
     pub fn new(tier: CacheTier, budget: usize) -> Self {
@@ -219,7 +237,13 @@ impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
     /// The keys are collected before anything is removed, because the range
     /// borrows the map. This allocates the return and the collection, which
     /// is why it is a release call and not a render-loop call.
+    ///
+    /// An empty or inverted range, including an equal key excluded on both
+    /// sides, releases nothing and returns an empty `Vec`.
     pub fn remove_range<R: core::ops::RangeBounds<K>>(&mut self, range: R) -> Vec<(K, V)> {
+        if bounds_are_empty(range.start_bound(), range.end_bound()) {
+            return Vec::new();
+        }
         let keys: Vec<K> = self
             .entries
             .range(range)
@@ -373,6 +397,7 @@ impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
 #[cfg(test)]
 mod tests {
     use core::cell::Cell;
+    use core::ops::Bound;
 
     use super::{Admission, Budgeted, Lru};
     use crate::tier::CacheTier;
@@ -678,6 +703,32 @@ mod tests {
         let admission = cache.insert(10, Block(600));
         assert_eq!(admission.evicted, [(2, Block(2)), (7, Block(64))]);
         assert_eq!(cache.pressure().used, 985);
+    }
+
+    #[test]
+    fn an_inverted_or_equal_excluded_range_releases_nothing_and_changes_nothing() {
+        // Keys 3 and 4 are live. `5..=3` is inverted and
+        // `(Excluded(4), Excluded(4))` names nothing. Neither may panic the
+        // map, and neither may move a byte or a tick. The inverted bounds
+        // are runtime values, because a literal `5..=3` is clippy's
+        // `reversed_empty_ranges`, and the inversion is the case under test.
+        let mut cache: Lru<u8, Block> = Lru::new(CacheTier::Decoded, 300);
+        let admission = cache.insert(3, Block(100));
+        assert!(admission.evicted.is_empty());
+        let admission = cache.insert(4, Block(100));
+        assert!(admission.evicted.is_empty());
+        assert_eq!(cache.pressure().used, 200);
+
+        let (lo, hi) = (5_u8, 3);
+        assert_eq!(cache.remove_range(lo..=hi), []);
+        assert_eq!(
+            cache.remove_range((Bound::Excluded(4), Bound::Excluded(4))),
+            []
+        );
+        assert_eq!(cache.pressure().used, 200);
+        assert_eq!(cache.len(), 2);
+        assert!(cache.contains_key(&3));
+        assert!(cache.contains_key(&4));
     }
 
     #[test]

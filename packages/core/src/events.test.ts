@@ -211,6 +211,10 @@ describe("F-103 event catalogue", () => {
       frames: 2695938256,
       bytes: 524288n,
     });
+    // Exactly RELEASED_BYTES decodes, so a boundary moved to 25 or 32 refuses it.
+    expect(
+      decodeNamedEvent(event(RING_EVENT_KIND.released, released.subarray(0, 24))),
+    ).not.toBeNull();
   });
 
   it("refuses_a_short_or_unknown_payload", () => {

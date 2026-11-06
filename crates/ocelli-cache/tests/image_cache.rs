@@ -387,10 +387,16 @@ fn one_insert_can_displace_and_evict_with_displaced_first() -> Result<(), ocelli
 #[test]
 fn release_series_releases_one_series() -> Result<(), ocelli_pixel::PixelError> {
     // The state table's first three rows, hand-computed. Series 5 holds
-    // three frames of 32 bytes and series 6 holds one, so 4 * 32 = 128
-    // fills a 128-byte budget. The release takes series 5's 3 * 32 = 96
+    // five frames of 32 bytes at (5, 0, 0), (5, 1, 0), (5, 2, 0), (5, 3, 0)
+    // and (5, u32::MAX, u32::MAX), and series 6 holds one, so 6 * 32 = 192
+    // fills a 192-byte budget. The release takes series 5's 5 * 32 = 160
     // and leaves series 6's 32.
-    let mut cache = ImageCache::new(128);
+    let mut cache = ImageCache::new(192);
+    assert!(
+        cache
+            .insert(key(5, 0, 0), make_frame(1, 1, 8, vec![0_u8; 32])?)
+            .is_empty()
+    );
     for instance in 1_u32..=3 {
         assert!(
             cache
@@ -400,28 +406,40 @@ fn release_series_releases_one_series() -> Result<(), ocelli_pixel::PixelError> 
     }
     assert!(
         cache
+            .insert(
+                key(5, u32::MAX, u32::MAX),
+                make_frame(1, 1, 8, vec![0_u8; 32])?
+            )
+            .is_empty()
+    );
+    assert!(
+        cache
             .insert(key(6, 0, 0), make_frame(1, 1, 8, vec![0_u8; 32])?)
             .is_empty()
     );
-    assert_eq!(cache.pressure().used, 128);
+    assert_eq!(cache.pressure().used, 192);
 
     let events = cache.release_series(SeriesId(5));
     assert_eq!(
         events.events(),
         [CacheEvent::Released {
             series: SeriesId(5),
-            frames: 3,
-            bytes: 96,
+            frames: 5,
+            bytes: 160,
         }]
     );
     assert_eq!(cache.pressure().used, 32);
     // Series 6's first key is exactly the key an end bound of
     // (series + 1, 0, 0) inclusive would take, so this is the contains
-    // that rejects it.
+    // that rejects it. The extreme keys are the ones an end bound of
+    // (series, 3, 0) or (series, u32::MAX, 0), or a start bound of
+    // (series, 1, 0), would leave behind.
     assert!(cache.contains(&key(6, 0, 0)));
+    assert!(!cache.contains(&key(5, 0, 0)));
     assert!(!cache.contains(&key(5, 1, 0)));
     assert!(!cache.contains(&key(5, 2, 0)));
     assert!(!cache.contains(&key(5, 3, 0)));
+    assert!(!cache.contains(&key(5, u32::MAX, u32::MAX)));
 
     // A repeat finds nothing held and emits nothing.
     let events = cache.release_series(SeriesId(5));
@@ -434,10 +452,10 @@ fn release_series_releases_one_series() -> Result<(), ocelli_pixel::PixelError> 
     assert_eq!(cache.pressure().used, 32);
 
     // Series 6's frame is the only survivor and leaves by nothing but a
-    // later eviction. 32 + 97 = 129 is one over the budget, so the next
+    // later eviction. 32 + 161 = 193 is one over the budget, so the next
     // insert evicts it. A range that bled into series 6 would have
     // released it here already and evicted nothing.
-    let events = cache.insert(key(7, 1, 0), make_frame(1, 1, 8, vec![0_u8; 97])?);
+    let events = cache.insert(key(7, 1, 0), make_frame(1, 1, 8, vec![0_u8; 161])?);
     assert_eq!(
         events.events(),
         [CacheEvent::Evicted {

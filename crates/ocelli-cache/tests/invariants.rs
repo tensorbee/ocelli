@@ -34,7 +34,9 @@ enum Op {
     Insert(u8, usize),
     Get(u8),
     Remove(u8),
-    /// Release every key between the two bounds, inclusive.
+    /// Release every key between the two bounds, inclusive. The bounds are
+    /// drawn unsorted, so an inverted range reaches the cache and must come
+    /// back as an empty release.
     RemoveRange(u8, u8),
     /// Move the budget. The model tracks the caller's last word.
     SetBudget(u16),
@@ -45,10 +47,10 @@ fn op() -> impl Strategy<Value = Op> {
         (0u8..8, 0usize..1200).prop_map(|(key, bytes)| Op::Insert(key, bytes)),
         (0u8..8).prop_map(Op::Get),
         (0u8..8).prop_map(Op::Remove),
-        // Sorted so the range is never empty. An empty range is covered by
-        // the random keys anyway, since a range over absent keys removes
-        // nothing.
-        (0u8..8, 0u8..8).prop_map(|(lo, hi)| Op::RemoveRange(lo.min(hi), lo.max(hi))),
+        // Unsorted on purpose. An inverted range must release nothing and
+        // change nothing, and a range over absent keys removes nothing, so
+        // both reach the cache the way a caller's computed range would.
+        (0u8..8, 0u8..8).prop_map(|(lo, hi)| Op::RemoveRange(lo, hi)),
         (0u16..2000).prop_map(Op::SetBudget),
     ]
 }

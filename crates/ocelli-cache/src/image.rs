@@ -1,10 +1,12 @@
-//! The decoded tier's value type, its cache, and the events an insert emits.
+//! The decoded tier's value type, its cache, and the events an insert or a
+//! release emits.
 //!
 //! HLD section 8: "Decoded frames sit in an LRU sized by the caller." F-031
 //! built the `Lru` and deviation D-24 widened its return to `Admission`, so the
 //! three outcomes stay distinguishable. This module is the caller section 20
-//! means: it converts an `Admission` into one `CacheEvent` per outcome, and it
-//! encodes an event into section 17.3's 48-byte envelope.
+//! means: it converts an `Admission` into one `CacheEvent` per outcome, a
+//! release into `Released`, and it encodes an event into section 17.3's
+//! 48-byte envelope.
 //!
 //! **No ring is built here and nothing reaches JavaScript.** Section 17.3's
 //! ring is F-101 in S16. This story stops at the tested encoding, which the
@@ -223,11 +225,11 @@ impl Budgeted for DecodedFrame {
     }
 }
 
-/// One thing an insert did to the decoded tier.
+/// One thing an insert or a release did to the decoded tier.
 ///
-/// Three variants because `Admission` has three fields, which is the whole
-/// reason deviation D-24 exists. Collapsing them throws away what F-031 was
-/// built to preserve.
+/// One per `Admission` field, which is the whole reason deviation D-24
+/// exists, and `Released` from `release_series`. Collapsing them throws
+/// away what F-031 was built to preserve.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CacheEvent {
     /// A live entry removed to make room for another.
@@ -265,9 +267,9 @@ pub enum CacheEvent {
     },
 }
 
-/// Event kind for [`CacheEvent::Evicted`]. One range for this crate's kinds,
-/// with F-034's telemetry kinds beside these. No registry this sprint, which
-/// the S12 design round decided for F-032 and F-034 together.
+/// Event kind for [`CacheEvent::Evicted`]. This crate's kinds are 1 to 5 and
+/// 7, with the viewport's presented kind 6 between. No registry this sprint,
+/// which the S12 design round decided for F-032 and F-034 together.
 pub const KIND_EVICTED: u32 = 1;
 /// Event kind for [`CacheEvent::Displaced`].
 pub const KIND_DISPLACED: u32 = 2;
@@ -297,7 +299,8 @@ pub struct RingEvent {
     pub viewport: u32,
     /// The ring-wide sequence number the caller assigned.
     pub seq: u64,
-    /// The event payload. For a cache event, the key and byte count.
+    /// The event payload. For a keyed cache event, the key and byte count,
+    /// and for `Released`, the series, frames and bytes.
     pub payload: [u8; 32],
 }
 
@@ -349,10 +352,12 @@ impl CacheEvent {
     }
 }
 
-/// The events one `ImageCache::insert` produced, in the order they happened.
+/// The events one `ImageCache::insert` or `ImageCache::release_series`
+/// produced, in the order they happened.
 ///
-/// Built on the insert path, which is a decode-path call and not a render-loop
-/// call, so building this value allocates as `Lru::insert` already does.
+/// Built on the insert and release paths, which are decode-path calls and not
+/// render-loop calls, so building this value allocates as `Lru::insert` already
+/// does.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CacheEvents {
     events: Vec<CacheEvent>,
@@ -365,12 +370,12 @@ impl CacheEvents {
         &self.events
     }
 
-    /// Whether the insert displaced, evicted and refused nothing.
+    /// Whether nothing was displaced, evicted, refused or released.
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()
     }
 
-    /// How many events the insert produced.
+    /// How many events the insert or release produced.
     pub fn len(&self) -> usize {
         self.events.len()
     }

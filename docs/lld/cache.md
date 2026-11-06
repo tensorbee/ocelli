@@ -22,7 +22,7 @@ crate links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
 | `Pressure` | One tier's reading: the tier, the bytes used and the budget |
 | `DecodedFrame` | F-032. The decoded tier's value type. Its `bytes` is the sample buffer length |
 | `ImageCache` | F-032. An `Lru<FrameKey, DecodedFrame>` fixed to the decoded tier, returning events |
-| `CacheEvent` | F-032. One variant per `Admission` field: `Evicted`, `Displaced`, `Refused` |
+| `CacheEvent` | F-032 and F-226. One variant per `Admission` field: `Evicted`, `Displaced`, `Refused`, plus `Released` from a series release |
 | `RingEvent` | F-032. Section 17.3's 48-byte event envelope, `#[repr(C)]` and `Pod` |
 | `HandoffMeta` | F-035. Frame identity plus the sample length a section 24 transfer must match. `#[repr(C)]`, little-endian, no samples |
 | `HandoffError` | F-035. `Length` when the buffer length is not `HandoffMeta.bytes` |
@@ -158,8 +158,8 @@ dependency here: this crate never sees a texture, only its size.
 
 `ImageCache::insert` converts the `Admission` into `CacheEvents`, displaced
 first because `Lru` releases the previous value before eviction begins, then
-the evictions in least recently used order. **The three variants are never
-collapsed.**
+the evictions in least recently used order. `release_series` adds `Released`.
+**The four variants are never collapsed.**
 
 `CacheEvent::encode` writes the event into section 17.3's `RingEvent`: kind
 1, 2 and 3 for evicted, displaced and refused, `viewport` as `u32::MAX`
@@ -170,7 +170,8 @@ F-103 decides whether event kinds get a registry, so a test pins each one.
 
 **This crate still does not own a ring and still does not reach JavaScript.**
 F-101's `EventRing` lives in `ocelli-viewport` and reuses this `RingEvent`
-layout. Kind 6 is Presented. Kinds 1 to 5 are unchanged. This story stops at
+layout. Kind 6 is Presented. Kinds 1 to 5 are unchanged and kind 7 is a
+release. This story stops at
 the tested encoding, which the
 S12 design round decided for F-032 and F-034 together, and `CacheEvents`
 wraps a `Vec` that allocates on the insert path as `Lru::insert` does. One

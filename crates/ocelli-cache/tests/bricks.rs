@@ -407,9 +407,11 @@ fn float_bricks_take_the_sixteen_bit_edge() {
 
 #[test]
 fn release_volume_releases_every_level_and_leaves_other_volumes() {
-    // Hand-computed. Volume 2 holds 8 and 16 bytes on level 0 and 32 bytes
-    // on level 1, so the release is 3 entries and 8 + 16 + 32 = 56 bytes.
-    // Volume 3 holds 64 bytes and keeps them, 120 - 56 = 64.
+    // Hand-computed. Volume 2 holds 8, 16, 4, 32 and 64 bytes across level
+    // 0, level 1 and level u32::MAX, with the level 0 brick [0, 1, 1] and
+    // the top brick [u32::MAX; 3] held so the range's ends are occupied.
+    // The release is 5 entries and 8 + 16 + 4 + 32 + 64 = 124 bytes.
+    // Volume 3 holds 64 bytes and keeps them, 188 - 124 = 64.
     let mut cache = BrickCache::new(200);
     let _ = cache.insert(
         BrickKey {
@@ -430,10 +432,26 @@ fn release_volume_releases_every_level_and_leaves_other_volumes() {
     let _ = cache.insert(
         BrickKey {
             volume: VolumeId(2),
+            level: 0,
+            brick: [0, 1, 1],
+        },
+        brick_bytes(4),
+    );
+    let _ = cache.insert(
+        BrickKey {
+            volume: VolumeId(2),
             level: 1,
             brick: [0, 0, 0],
         },
         brick_bytes(32),
+    );
+    let _ = cache.insert(
+        BrickKey {
+            volume: VolumeId(2),
+            level: u32::MAX,
+            brick: [u32::MAX; 3],
+        },
+        brick_bytes(64),
     );
     let level_zero = BrickGrid::new([64, 64, 64], BrickWidth::EightBit);
     let _ = cache.insert(
@@ -444,14 +462,14 @@ fn release_volume_releases_every_level_and_leaves_other_volumes() {
         },
         brick_bytes(64),
     );
-    assert_eq!(cache.pressure().used, 120);
+    assert_eq!(cache.pressure().used, 188);
 
     let summary = cache.release_volume(VolumeId(2));
     assert_eq!(
         summary,
         ReleaseSummary {
-            entries: 3,
-            bytes: 56
+            entries: 5,
+            bytes: 124
         }
     );
     assert_eq!(cache.pressure().used, 64);
