@@ -24,6 +24,30 @@
       "errorContains": "Array buffer allocation failed",
       "rows": ["syntax/deflated_explicit_vr_le.dcm"],
       "why": "PS3.5 A.5: in Deflated Explicit VR Little Endian the whole data set after the File Meta group is deflated. cornerstone3D 5.8.2's default loader path, `loadImageFromNaturalizedMetadata`, hands the bytes to the reader in `@cornerstonejs/metadata` without inflating them first, so the reader parses compressed bytes as a data set. The console shows it reading nonsense element headers (`Invalid vr type ]Q - using UN`) and then asking for a buffer sized from a garbage length, which throws `RangeError: Array buffer allocation failed`. The package does carry an inflater, `imageLoader/wadouri/parseDicomWithInflater.js`, but it is only reached from the deprecated `useLegacyMetadataProvider` path. The harness runs the default path, because the default is what a cornerstone3D 5.8.2 user gets and therefore what the reference is."
+    },
+    {
+      "transferSyntax": "1.2.840.10008.1.2.4.110",
+      "feature": "JPEG XL Lossless",
+      "boundary": "decoded",
+      "errorContains": "No decoder for transfer syntax 1.2.840.10008.1.2.4.110",
+      "rows": ["syntax/jpegxl_lossless.dcm", "syntax/jpegxl_lossless_rgb8.dcm"],
+      "why": "F-229 design plan fact 12: `tools/oracle/node_modules/@cornerstonejs/` holds `codec-charls`, `codec-libjpeg-turbo-8bit`, `codec-openjpeg` and `codec-openjph`, and `dicom-image-loader` 5.8.2's `dist` contains none of the three JPEG XL UIDs. 1.2.840.10008.1.2.4.110, JPEG XL Lossless, therefore matches no case of the transfer syntax switch in `dicom-image-loader/dist/esm/imageLoader/decodeImageFrame.js` and reaches its final rejection, `No decoder for transfer syntax ${transferSyntax}`, so the load rejects at decode and no reference frame exists. These rows are checked instead by the lossless round trip against the uncompressed synthetic source that the design plan's decision 14 names, which libjxl encoded and is independent of `jxl-oxide`."
+    },
+    {
+      "transferSyntax": "1.2.840.10008.1.2.4.111",
+      "feature": "JPEG XL JPEG Recompression",
+      "boundary": "decoded",
+      "errorContains": "No decoder for transfer syntax 1.2.840.10008.1.2.4.111",
+      "rows": ["syntax/jpegxl_recompression_rgb8.dcm"],
+      "why": "F-229 design plan fact 12: `tools/oracle/node_modules/@cornerstonejs/` holds `codec-charls`, `codec-libjpeg-turbo-8bit`, `codec-openjpeg` and `codec-openjph`, and `dicom-image-loader` 5.8.2's `dist` contains none of the three JPEG XL UIDs. 1.2.840.10008.1.2.4.111, JPEG XL JPEG Recompression, therefore matches no case of the transfer syntax switch in `dicom-image-loader/dist/esm/imageLoader/decodeImageFrame.js` and reaches its final rejection, `No decoder for transfer syntax ${transferSyntax}`, so the load rejects at decode and no reference frame exists. Ocelli reports this syntax unavailable too, under the operator's ruling in the design plan, so neither side renders this row today."
+    },
+    {
+      "transferSyntax": "1.2.840.10008.1.2.4.112",
+      "feature": "JPEG XL",
+      "boundary": "decoded",
+      "errorContains": "No decoder for transfer syntax 1.2.840.10008.1.2.4.112",
+      "rows": ["syntax/jpegxl_lossy.dcm", "syntax/jpegxl_xyb_rgb8.dcm"],
+      "why": "F-229 design plan fact 12: `tools/oracle/node_modules/@cornerstonejs/` holds `codec-charls`, `codec-libjpeg-turbo-8bit`, `codec-openjpeg` and `codec-openjph`, and `dicom-image-loader` 5.8.2's `dist` contains none of the three JPEG XL UIDs. 1.2.840.10008.1.2.4.112, JPEG XL, therefore matches no case of the transfer syntax switch in `dicom-image-loader/dist/esm/imageLoader/decodeImageFrame.js` and reaches its final rejection, `No decoder for transfer syntax ${transferSyntax}`, so the load rejects at decode and no reference frame exists. This is a capability beyond the cornerstone3D 5.8.2 parity surface, so the rows have no reference to be measured against."
     }
   ]
 }

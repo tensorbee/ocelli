@@ -1,8 +1,8 @@
 # The oracle, reference half
 
 **F-IDs that contributed:** F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008,
-F-X009, F-X012, F-X013, F-X003, F-026, F-X021
-**Last updated:** 2026-11-01
+F-X009, F-X012, F-X013, F-X003, F-026, F-X021, F-229
+**Last updated:** 2026-11-06
 
 HLD section 11 names cornerstone3D as the reference the differential harness
 measures against, and decision D7 makes the oracle the thing that exists before
@@ -578,7 +578,7 @@ one that covers 90 and reports 92.
 
 ### What cornerstone3D 5.8.2 could not render, measured
 
-Two rows of ninety-two. Both are in `unsupported.json` with the full reasoning.
+The rows below. Every one is in `unsupported.json` with the full reasoning.
 
 - **`synthetic/us_ybr_full_422.dcm`**, uncompressed YBR_FULL_422. PS3.3
   C.7.6.3.1.2 subsamples chroma two to one horizontally, so the frame is
@@ -595,6 +595,12 @@ Two rows of ninety-two. Both are in `unsupported.json` with the full reasoning.
   `useLegacyMetadataProvider` path reaches it. The harness runs the default,
   because the default is what a cornerstone3D 5.8.2 user gets and is therefore
   what the reference is.
+- **The five `syntax/jpegxl_*.dcm` rows**, JPEG XL Lossless, JPEG XL JPEG
+  Recompression and JPEG XL. `dicom-image-loader` 5.8.2 carries no JPEG XL
+  codec and its `dist` names none of the three UIDs, which is fact 12 of the
+  F-229 design plan. Each load rejects at decode with `No decoder for transfer
+  syntax` and the UID. The three entries, one per syntax, carry the error as
+  `--report-unsupported` printed it.
 
 **This does not answer Appendix A gates A1 or A2, and it is worth being exact
 about why.** A1 asks whether HTJ2K decodes correctly "in openjp2 under wasm32,
