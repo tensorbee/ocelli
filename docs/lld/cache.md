@@ -172,8 +172,8 @@ and zero is a valid viewport id, and a payload that is little-endian with
 the last eight bytes reserved and zero. Kinds 1, 2 and 3 carry the series
 as `u64`, the instance and the frame as `u32` and the bytes as `u64`. Kind
 7 carries the series as `u64`, `frames` as `u32`, a zero `u32` where the
-frame sits, and the bytes as `u64`, so every kind keeps `bytes` at offset
-16. The numbers are the wire contract until F-103 decides whether event
+frame sits, and the bytes as `u64`, so every kind `encode` writes keeps
+`bytes` at offset 16. The numbers are the wire contract until F-103 decides whether event
 kinds get a registry, so a test pins each one.
 
 **This crate still does not own a ring and still does not reach JavaScript.**

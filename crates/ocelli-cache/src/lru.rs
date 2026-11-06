@@ -736,11 +736,14 @@ mod tests {
 
     #[test]
     fn an_inverted_or_equal_excluded_range_releases_nothing_and_changes_nothing() {
-        // Keys 3 and 4 are live. `5..=3` is inverted and
-        // `(Excluded(4), Excluded(4))` names nothing. Neither may panic the
-        // map, and neither may move a byte or a tick. The inverted bounds
-        // are runtime values, because a literal `5..=3` is clippy's
-        // `reversed_empty_ranges`, and the inversion is the case under test.
+        // Keys 3 and 4 are live. Each of the four arms of
+        // `bounds_are_empty` is driven inverted, start 5 against end 3 as
+        // `Included..=Included`, `Included..Excluded`, `Excluded..Included`
+        // and `Excluded..Excluded`, and `(Excluded(4), Excluded(4))` names
+        // nothing. None may panic the map, and none may move a byte or a
+        // tick. The inverted bounds are runtime values, because a literal
+        // `5..=3` is clippy's `reversed_empty_ranges`, and the inversion is
+        // the case under test.
         let mut cache: Lru<u8, Block> = Lru::new(CacheTier::Decoded, 300);
         let admission = cache.insert(3, Block(100));
         assert!(admission.evicted.is_empty());
@@ -750,6 +753,18 @@ mod tests {
 
         let (lo, hi) = (5_u8, 3);
         assert_eq!(cache.remove_range(lo..=hi), []);
+        assert_eq!(
+            cache.remove_range((Bound::Included(lo), Bound::Excluded(hi))),
+            []
+        );
+        assert_eq!(
+            cache.remove_range((Bound::Excluded(lo), Bound::Included(hi))),
+            []
+        );
+        assert_eq!(
+            cache.remove_range((Bound::Excluded(lo), Bound::Excluded(hi))),
+            []
+        );
         assert_eq!(
             cache.remove_range((Bound::Excluded(4), Bound::Excluded(4))),
             []
@@ -765,9 +780,9 @@ mod tests {
         // Every `Bound` pair that can name keys, with the keys each range
         // holds written out from the bounds alone against live keys 1 to 6.
         // Each row runs on a fresh cache, so one release cannot colour the
-        // next. The adjacent excluded pair names nothing, and the equal
-        // excluded and inverted shapes are the empty cases the test above
-        // covers.
+        // next. The adjacent excluded pair names nothing. The test above
+        // covers the empty cases, every one of the four bounded pairs
+        // inverted and the equal excluded pair.
         let shapes: &[(Bound<u8>, Bound<u8>, &[u8])] = &[
             (Bound::Included(3), Bound::Included(3), &[3]),
             (Bound::Included(2), Bound::Excluded(4), &[2, 3]),

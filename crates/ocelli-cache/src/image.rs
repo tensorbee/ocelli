@@ -362,7 +362,8 @@ impl CacheEvent {
     /// `u32`, and `bytes` as `u64`, little-endian, in that order, with the
     /// last eight bytes reserved and zeroed. `Released` carries `series` as
     /// `u64`, `frames` as `u32`, a zero `u32` where `frame` sits, and
-    /// `bytes` as `u64`, so every kind keeps `bytes` at offset 16.
+    /// `bytes` as `u64`, so every kind `encode` writes keeps `bytes` at
+    /// offset 16.
     /// Little-endian is not a choice: wasm32 is little-endian and section
     /// 17.1 says the wire format is.
     pub fn encode(&self, seq: u64) -> RingEvent {
