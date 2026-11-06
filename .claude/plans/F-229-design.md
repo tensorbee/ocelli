@@ -360,3 +360,11 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 - **The pre-check refuses on the ICC flag, not on a size.** Every codestream that declares an embedded ICC profile is refused anyway (AC13, `UnsupportedPixelFormat`), so the pre-check refuses as soon as it reads `want_icc`, with no size comparison.
 - **Prefer the library's own header parser.** If `jxl-image`'s `ImageHeader::parse` reads the header up to and including `want_icc` without allocating the profile, the pre-check calls it and the hand-written walker is deleted. `jxl-image` is then pinned exactly beside `jxl-oxide` and `jxl-render`, and D-28 names it. If it cannot be used without the allocation, the walker stays and a seeded differential test against `ImageHeader::parse` must show zero disagreements on whether `want_icc` is set.
 - **The pre-check fails closed.** Any header it cannot read to `want_icc`, a container box whose size runs past the input included, is refused before `jxl-oxide` sees a byte.
+
+### Lead amendments after review pass 3
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-229-working-pass-3.md`, which found that a 1,129 byte container with a compressed `brob` box makes `jxl-oxide` allocate 1 GiB outside the `AllocTracker` and then decode successfully.
+
+- **`jxl-oxide` receives the codestream alone.** For a container, the pre-check extracts the codestream from the `jxlc` box or the `jxlp` boxes in order, and passes only those bytes. No other box (`brob`, `jbrd`, `Exif`, `xml `, `jumb` or any other) ever reaches `jxl-oxide`. A container with no codestream, two `jxlc` boxes, a `jxlc` beside `jxlp` boxes, or `jxlp` boxes out of order or missing the last flag is refused before decode.
+- **A header that declares extra channels is refused in the pre-check.** Extra channels are refused later anyway, so the pre-check refuses a non-empty `ec_info` with `UnsupportedPixelFormat` before any parse that could grow with the header. `read_header` also grows its window geometrically rather than one byte at a time, so its cost is linear in the header length.
+- **`jxl-image` is not a direct dependency.** `jxl-oxide` re-exports the crate, so only `jxl-bitstream` and `jxl-oxide-common` stay direct, and D-28 says so.

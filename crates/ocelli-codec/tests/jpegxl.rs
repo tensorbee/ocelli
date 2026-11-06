@@ -608,26 +608,87 @@ fn crafted_oversized_icc_declaration() -> Result<Vec<u8>, Box<dyn Error>> {
 }
 
 #[test]
-fn declared_icc_larger_than_the_codestream_refuses() -> TestResult {
-    // D-21: `jxl-color` sizes the encoded ICC buffer from the header's own
-    // field, up to `1 << 28` bytes, outside the `AllocTracker`. Measured on
-    // 2026-11-05: unguarded, this 26 byte stream refused with a peak resident
-    // set of 270974976 bytes. The declaration must be backed by codestream
-    // bytes, so the decode refuses before `jxl-oxide` parses anything.
+fn declared_icc_refuses_unsupported_before_any_parse() -> TestResult {
+    // AC13 and the pass 2 lead amendment. A header that declares an embedded
+    // ICC profile refuses `UnsupportedPixelFormat` before `jxl-oxide` sees a
+    // byte, whatever `enc_size` it declares and whatever follows it. The
+    // crafted stream declares `1 << 28` encoded bytes into a 26 byte
+    // codestream. Unguarded, `jxl-color` resizes its ICC buffer to that
+    // declaration before reading it, a measured peak resident set of
+    // 270811136 bytes on 2026-11-06, and then refuses `InvalidCodestream`
+    // because the entropy data is zeros. The refusal kind is the detector:
+    // removing the pre-check call from `decode_limited` turns this test red,
+    // which is review pass 2 D4.
     let crafted = crafted_oversized_icc_declaration()?;
     let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
-    assert_refused(
-        &JpegXlDecoder::general(),
-        &crafted,
-        &desc,
-        CodecError::InvalidCodestream,
-    )?;
+    for decoder in [&JpegXlDecoder::general(), &JpegXlDecoder::lossless()] {
+        assert_refused(decoder, &crafted, &desc, CodecError::UnsupportedPixelFormat)?;
+    }
+
+    // The same stream in a jxlc box that declares 1000 bytes more than are
+    // present, review pass 2 D2. The box lies about its size. The pre-check
+    // reads the header from the bytes that exist and refuses, so `jxl-oxide`
+    // never streams the partial box and never reaches the resize. Removing
+    // the pre-check call turns this red too, through the same kind change.
     let mut container = Vec::new();
     container.extend_from_slice(b"\x00\x00\x00\x0cJXL \x0d\x0a\x87\x0a");
-    let box_len = u32::try_from(crafted.len() + 8).map_err(|_| "box length")?;
+    let box_len = u32::try_from(crafted.len() + 8 + 1000).map_err(|_| "box length")?;
     container.extend_from_slice(&box_len.to_be_bytes());
     container.extend_from_slice(b"jxlc");
     container.extend_from_slice(&crafted);
+    assert_eq!(container.len(), 46, "the review's 46 byte container");
+    assert_refused(
+        &JpegXlDecoder::general(),
+        &container,
+        &desc,
+        CodecError::UnsupportedPixelFormat,
+    )
+}
+
+#[test]
+fn libjxl_icc_profile_refuses_unavailable() -> TestResult {
+    // Review pass 2 D3, AC13. libjxl 0.12.0 embedded the Display P3 profile
+    // with a zero filled private tag, so the codestream is 286 bytes and
+    // declares 4417 encoded ICC bytes into the 2223 bits that follow the
+    // declaration, and `jxl-oxide` reads it and renders. A size comparison
+    // refuses such a stream as `InvalidCodestream`, which reports a valid
+    // file as corrupt. The colour encoding is an ICC profile, so the refusal
+    // is `UnsupportedPixelFormat` under both UIDs. Removing the pre-check
+    // keeps this green, because `validate_header` refuses the same kind
+    // later. The red conditions are the size comparison of review pass 2 and
+    // any pre-check that refuses a different kind.
+    let desc = colour(8, 8, 8, 8, "RGB")?;
+    for decoder in [&JpegXlDecoder::general(), &JpegXlDecoder::lossless()] {
+        assert_refused(
+            decoder,
+            include_bytes!("fixtures/jpegxl_icc_compressed.jxl"),
+            &desc,
+            CodecError::UnsupportedPixelFormat,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn container_header_cut_short_refuses_before_jxl_oxide() -> TestResult {
+    // The pass 2 lead amendment, fail closed. The box declares 1000 bytes
+    // more than are present and the codestream stops inside the header, so
+    // the pre-check cannot read to the ICC flag. It refuses before
+    // `jxl-oxide` sees a byte, with the same `InvalidCodestream` the decode
+    // returns for a truncated header, so this test does not detect the
+    // pre-check's removal. What it locks is the refusal kind and that a
+    // header no parser can read never reaches the dependency. The allocation
+    // bound itself is the measured peak resident set recorded in the module
+    // documentation of `jpegxl_icc`.
+    let crafted = crafted_oversized_icc_declaration()?;
+    let mut container = Vec::new();
+    container.extend_from_slice(b"\x00\x00\x00\x0cJXL \x0d\x0a\x87\x0a");
+    let box_len = u32::try_from(crafted.len() + 8 + 1000).map_err(|_| "box length")?;
+    container.extend_from_slice(&box_len.to_be_bytes());
+    container.extend_from_slice(b"jxlc");
+    let partial = crafted.get(..5).ok_or("crafted shorter than 5")?;
+    container.extend_from_slice(partial);
+    let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
     assert_refused(
         &JpegXlDecoder::general(),
         &container,
@@ -815,6 +876,12 @@ fn fixtures() -> Result<Vec<Case>, Box<dyn Error>> {
             name: "jpegxl_icc.jxl",
             decoder: JpegXlDecoder::general(),
             bytes: include_bytes!("fixtures/jpegxl_icc.jxl"),
+            desc: colour(8, 8, 8, 8, "RGB")?,
+        },
+        Case {
+            name: "jpegxl_icc_compressed.jxl",
+            decoder: JpegXlDecoder::general(),
+            bytes: include_bytes!("fixtures/jpegxl_icc_compressed.jxl"),
             desc: colour(8, 8, 8, 8, "RGB")?,
         },
         Case {

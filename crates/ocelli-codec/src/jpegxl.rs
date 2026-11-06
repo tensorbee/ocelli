@@ -11,9 +11,9 @@
 //!
 //! Allocation is bounded by [`ALLOC_LIMIT_NUMERATOR`] times the descriptor's
 //! output length. The numerator is the measured peak ratio, doubled. The
-//! measurement is recorded on that constant. The encoded ICC profile size a
-//! codestream may declare is bounded separately, before any parsing, by
-//! [`crate::jpegxl_icc`].
+//! measurement is recorded on that constant. A codestream that declares an
+//! embedded ICC profile, and any header that cannot be read to the ICC flag,
+//! is refused before any parsing by [`crate::jpegxl_icc`].
 
 use std::sync::Arc;
 
@@ -211,12 +211,11 @@ impl JpegXlDecoder {
         out: &mut [u8],
         limit: usize,
     ) -> Result<(), CodecError> {
-        // Before `jxl-oxide` parses anything: a header declaring an encoded
-        // ICC profile the codestream cannot supply would have the dependency
-        // size its buffer from the declaration alone.
-        if crate::jpegxl_icc::declared_icc_exceeds_codestream(src) {
-            return Err(CodecError::InvalidCodestream);
-        }
+        // Before `jxl-oxide` parses anything: a header declaring an embedded
+        // ICC profile refuses as an unsupported pixel format, and a header
+        // that cannot be read to the ICC flag refuses rather than reaching a
+        // parser that would size a buffer from its own declaration.
+        crate::jpegxl_icc::check_before_parse(src)?;
         let (mut image, header_end) = read_header(src, limit)?;
         validate_header(self.mode, &image, desc)?;
         let consumed = load_rest(&mut image, src, header_end)?;

@@ -7,9 +7,9 @@ the existing `jpegls_corpus_reference_u16le.raw` file, SHA-256
 and RGB references are read from the ignored corpus and written here as raw
 bytes so the Rust tests do not open that directory.
 
-Orientation 6, an ICC profile and a lossy modular frame are not parameters of
-`jpegxl_encode`. Those three fixtures are written with the libjxl 0.12.0 dylib already shipped in the
-imagecodecs wheel. No new tool is downloaded.
+Orientation 6, ICC profiles and a lossy modular frame are not parameters of
+`jpegxl_encode`. Those four fixtures are written with the libjxl 0.12.0 dylib
+already shipped in the imagecodecs wheel. No new tool is downloaded.
 
 Run without arguments to check the tracked bytes, or pass `--write` to rebuild
 them. Rebuilding needs the ignored corpus and imagecodecs.
@@ -53,12 +53,13 @@ SHARED_REFERENCE_SHA256 = (
 ICC_SHA256 = "0ff6958f98684c61f6bbdce1368ddeaf3873baf84545baba482e920d92a914c0"
 ICC_PATH = Path("/System/Library/ColorSync/Profiles/Display P3.icc")
 
-# These three files are produced by the wheel's libjxl, not by jpegxl_encode.
+# These four files are produced by the wheel's libjxl, not by jpegxl_encode.
 # Check mode compares the tracked bytes to these digests and does not read
 # the system profile or call the dylib.
 LIBJXL_FIXTURE_SHA256 = {
     "jpegxl_orient6.jxl": "f625509eeb75c11ad34af6c808c70e870cc4c5d24e7ef5f2d63e86bebd20fe4d",
     "jpegxl_icc.jxl": "f30490729e995c84a3f20ee8468abbcee3ae2a59b54ab263575f890b298d5fe5",
+    "jpegxl_icc_compressed.jxl": "462ae7367fd089a36019d040742525a50c523cbf3f6003df1e21ef80b9f61629",
     "jpegxl_modular_xyb.jxl": "aabaf3d7fe2ca9d6aea6c85f06e19c1f58e0310c630ea79a16344c10fa199df1",
 }
 
@@ -346,8 +347,24 @@ def build() -> tuple[dict[str, bytes], int]:
     return artefacts, error
 
 
+def icc_with_zero_tag(icc: bytes, tag_size: int) -> bytes:
+    """Display P3 plus one zero-filled private `zzzz` tag.
+
+    ICC private tags are opaque to every reader, and a run of zeros entropy
+    codes to far less than one bit per byte, so libjxl declares an `enc_size`
+    that outruns the codestream bits that follow it while the stream stays
+    decodable. Review pass 2 D3. The profile grows by the 12 byte tag entry
+    and `tag_size` zero bytes.
+    """
+    if len(icc) < 132:
+        raise SystemExit("profile is too short for a tag table")
+    count = int.from_bytes(icc[128:132], "big")
+    entry = b"zzzz" + len(icc).to_bytes(4, "big") + tag_size.to_bytes(4, "big")
+    return icc[:128] + (count + 1).to_bytes(4, "big") + icc[132:] + entry + bytes(tag_size)
+
+
 def libjxl_fixtures() -> dict[str, bytes]:
-    """Encode orientation 6, the ICC frame and lossy modular XYB. Rebuilds need the system profile."""
+    """Encode orientation 6, the ICC frames and lossy modular XYB. Rebuilds need the system profile."""
     icc = ICC_PATH.read_bytes()
     if sha256(icc) != ICC_SHA256:
         raise SystemExit("Display P3 profile digest changed, so the ICC fixture would drift")
@@ -358,6 +375,14 @@ def libjxl_fixtures() -> dict[str, bytes]:
         orientation=1,
         icc=icc,
     )
+    # The compressible profile of review pass 2 D3: 536 plus 12 plus 4012 is a
+    # 4560 byte profile whose encoded form is far larger than the codestream
+    # bits that follow it, and `jxl-oxide` still reads it.
+    icc_compressed = encode_with_libjxl(
+        np.arange(8 * 8 * 3, dtype=np.uint8).reshape(8, 8, 3),
+        orientation=1,
+        icc=icc_with_zero_tag(icc, 4012),
+    )
     modular_xyb = encode_with_libjxl(
         np.arange(8 * 8 * 3, dtype=np.uint8).reshape(8, 8, 3),
         orientation=1,
@@ -367,6 +392,7 @@ def libjxl_fixtures() -> dict[str, bytes]:
     return {
         "jpegxl_orient6.jxl": orient,
         "jpegxl_icc.jxl": icc_frame,
+        "jpegxl_icc_compressed.jxl": icc_compressed,
         "jpegxl_modular_xyb.jxl": modular_xyb,
     }
 
