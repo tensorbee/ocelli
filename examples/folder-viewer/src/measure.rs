@@ -155,7 +155,8 @@ struct Spacing {
 /// `select_calibration` decides whenever Pixel Spacing is present, and
 /// whenever Imager Pixel Spacing comes with the factor. It also decides the
 /// PS3.3 10.7.1.1 case, a Pixel Spacing equal to the Imager Pixel Spacing,
-/// which takes the imager path and is `detector` without a usable factor.
+/// which takes the imager path: `detector` with no factor, and refused when
+/// a present factor cannot be used, as without Pixel Spacing.
 /// Imager Pixel Spacing alone, with no Pixel Spacing and no factor, is this
 /// example's own `detector` row, which keeps the raw pair. No spacing at all
 /// is `uncalibrated`. A present source that is chosen and cannot be used
@@ -173,15 +174,18 @@ fn choose_spacing(inputs: &CalibrationInputs) -> Result<Spacing, PreviewError> {
     };
     let pixel_spacing = pair(inputs.pixel_spacing)?;
     let (imager_spacing, factor) = if pixel_spacing.is_some() {
-        // Only an equal imager pair can change the choice, and then an
-        // unusable factor leaves the detector plane, so neither refuses.
+        // Only an equal imager pair can change the choice, and only then is
+        // the factor read. An unparseable factor goes in as a present
+        // non-finite one, which `select_calibration` refuses on the imager
+        // path and never reads beside a Pixel Spacing that differs.
         let imager = match inputs.imager_spacing {
             SpacingInput::Pair { row, column } => Some(SpacingMm { row, column }),
             SpacingInput::Absent | SpacingInput::Unusable => None,
         };
         let factor = match inputs.magnification {
             FactorInput::Value(value) => Some(value),
-            FactorInput::Absent | FactorInput::Unusable => None,
+            FactorInput::Unusable => Some(f64::NAN),
+            FactorInput::Absent => None,
         };
         (imager, factor)
     } else {

@@ -93,12 +93,13 @@ pub struct Calibration {
 ///
 /// One exception, PS3.3 10.7.1.1: a Pixel Spacing equal to the Imager
 /// Pixel Spacing has not been calibrated for geometric magnification, so
-/// the imager path decides. A finite, strictly positive factor gives
+/// the imager path decides. A factor gives
 /// [`CalibrationSource::ImagerSpacing`], the imager spacing divided by the
-/// factor. Without one, an absent, non-finite or non-positive factor,
-/// the result is [`CalibrationSource::Detector`], the raw imager spacing at
-/// the detector plane. A Pixel Spacing that differs in either half decides
-/// on its own, and the later sources are not read.
+/// factor. No factor gives [`CalibrationSource::Detector`], the raw imager
+/// spacing at the detector plane. A present factor that cannot be used
+/// refuses with the codes below, as it does without Pixel Spacing. A Pixel
+/// Spacing that differs in either half decides on its own, and the later
+/// sources are not read.
 ///
 /// # Errors
 ///
@@ -156,12 +157,13 @@ fn same_pair(left: SpacingMm, right: SpacingMm) -> bool {
 }
 
 /// The imager path of an equal pair, PS3.3 10.7.1.1 and C.8.7.5.
+///
+/// [`accept`] refuses a present factor that is not finite or not strictly
+/// positive, the same refusal the imager path gives without Pixel Spacing.
 fn detector_plane(imager: SpacingMm, factor: Option<f64>) -> Result<Calibration, SuvError> {
     match factor {
-        Some(factor) if factor.is_finite() && factor.total_cmp(&0.0).is_gt() => {
-            accept(CalibrationSource::ImagerSpacing, imager, Some(factor))
-        }
-        Some(_) | None => accept(CalibrationSource::Detector, imager, None),
+        Some(factor) => accept(CalibrationSource::ImagerSpacing, imager, Some(factor)),
+        None => accept(CalibrationSource::Detector, imager, None),
     }
 }
 

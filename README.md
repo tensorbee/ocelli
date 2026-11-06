@@ -238,29 +238,30 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    Imager Pixel Spacing alone, and in pixels when the file gives no spacing. A
    Pixel Spacing equal to the Imager Pixel Spacing has not been corrected for
    magnification, PS3.3 10.7.1.1, so it is divided by the factor when the file
-   has a usable one and is millimetres at the detector otherwise. An angle
-   without spacing says square pixels are assumed. A Pixel Spacing that is
-   present but not usable is not measured. Angle is a drag along the first arm
-   to the vertex and a click at the end of the second arm. Cobb is two drags,
-   one per line, and reports the acute angle between them. Bidirectional is a
-   drag along the long axis, with a short axis placed across its middle at
-   half its length, and reports both lengths as drawn. Rectangle, Ellipse and
-   Freeform report the area of the drawn shape and the mean, SD, minimum and
-   maximum of the modality values whose pixel centres are inside it. Padding
-   pixels are left out. A freeform that crosses or touches itself is not
-   measured, and neither is one of more than 4000 points. Freeform keeps an
-   outline of three or more points. Probe is a click and reports the modality
-   value of that pixel. Arrow is a drag from the tail to the head with an
-   optional note. Text places a note. Click, type, and press Enter to keep it.
-   Escape drops the draft. Leaving the field keeps the note. Size and colour
-   can be changed after the note exists. The marks list shows each mark with
-   its numbers, `measuring` while the reply is on its way, or the reason it
-   was not measured. Click a mark to select it. A selected mark shows a handle
-   on each of its points. Drag a handle to move that point, and the mark is
-   measured again on release. While a drawing tool is active, drag moves the
-   whole mark. Press Delete, Backspace or Remove to remove it. Marks last
-   until you reload the page. They are drawings on that image. They are not
-   written back into the file.
+   has one and is millimetres at the detector when it has none. A factor that
+   is present but cannot be used is not measured, with or without Pixel
+   Spacing. An angle without spacing says square pixels are assumed. A Pixel
+   Spacing that is present but not usable is not measured. Angle is a drag
+   along the first arm to the vertex and a click at the end of the second arm.
+   Cobb is two drags, one per line, and reports the acute angle between them.
+   Bidirectional is a drag along the long axis, with a short axis placed
+   across its middle at half its length, and reports both lengths as drawn.
+   Rectangle, Ellipse and Freeform report the area of the drawn shape and the
+   mean, SD, minimum and maximum of the modality values whose pixel centres
+   are inside it. Padding pixels are left out. A freeform that crosses or
+   touches itself is not measured, and neither is one of more than 4000
+   points. Freeform keeps an outline of three or more points. Probe is a click
+   and reports the modality value of that pixel. Arrow is a drag from the tail
+   to the head with an optional note. Text places a note. Click, type, and
+   press Enter to keep it. Escape drops the draft. Leaving the field keeps the
+   note. Size and colour can be changed after the note exists. The marks list
+   shows each mark with its numbers, `measuring` while the reply is on its
+   way, or the reason it was not measured. Click a mark to select it. A
+   selected mark shows a handle on each of its points. Drag a handle to move
+   that point, and the mark is measured again on release. While a drawing tool
+   is active, drag moves the whole mark. Press Delete, Backspace or Remove to
+   remove it. Marks last until you reload the page. They are drawings on that
+   image. They are not written back into the file.
 
 The top of the page offers Synthetic study or Folder. Synthetic study is a
 generated CT and it is not a patient. More names library behaviour this image

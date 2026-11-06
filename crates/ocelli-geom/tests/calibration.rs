@@ -86,8 +86,10 @@ fn equal_pixel_and_imager_spacing_is_the_detector_plane() {
     // geometric magnification, its values are the same as Imager Pixel
     // Spacing. So an equal pair is detector-plane spacing and the imager
     // path decides. With a usable factor 2 the patient spacing is
-    // 0.2 / 2 = 0.1 (C.8.7.5). Without one, the raw 0.2 is reported as the
-    // detector plane and is not corrected.
+    // 0.2 / 2 = 0.1 (C.8.7.5). With no factor, the raw 0.2 is reported as
+    // the detector plane and is not corrected. A present factor that cannot
+    // be used refuses, as it does on the imager path without Pixel Spacing
+    // (the lead ruling after F-211 review pass 1).
     let equal = Some(pair(0.2, 0.2));
     let corrected = select_calibration(CalibrationRequest {
         pixel_spacing: equal,
@@ -102,27 +104,40 @@ fn equal_pixel_and_imager_spacing_is_the_detector_plane() {
     assert_eq!(corrected.source, CalibrationSource::ImagerSpacing);
     assert_eq!(bits(corrected.spacing.row), bits(0.1));
     assert_eq!(bits(corrected.spacing.column), bits(0.1));
-    // No factor, a non-finite factor and a factor that is not strictly
-    // positive all leave the detector plane, uncorrected.
-    for factor in [None, Some(f64::NAN), Some(0.0), Some(-2.0)] {
-        let detector = select_calibration(CalibrationRequest {
-            pixel_spacing: equal,
-            imager_spacing: equal,
-            estimated_radiographic_magnification_factor: factor,
-            ..empty()
-        });
-        assert!(detector.is_ok(), "factor {factor:?}");
-        let Ok(detector) = detector else {
-            unreachable!("asserted immediately above")
-        };
-        assert_eq!(
-            detector.source,
-            CalibrationSource::Detector,
-            "factor {factor:?}"
-        );
-        assert_eq!(detector.source.name(), "detector");
-        assert_eq!(bits(detector.spacing.row), bits(0.2));
-        assert_eq!(bits(detector.spacing.column), bits(0.2));
+    // No factor leaves the detector plane, uncorrected.
+    let detector = select_calibration(CalibrationRequest {
+        pixel_spacing: equal,
+        imager_spacing: equal,
+        ..empty()
+    });
+    assert!(detector.is_ok());
+    let Ok(detector) = detector else {
+        unreachable!("asserted immediately above")
+    };
+    assert_eq!(detector.source, CalibrationSource::Detector);
+    assert_eq!(detector.source.name(), "detector");
+    assert_eq!(bits(detector.spacing.row), bits(0.2));
+    assert_eq!(bits(detector.spacing.column), bits(0.2));
+    // A present factor that cannot be used refuses with the F-195 codes: a
+    // non-finite factor is `Frame`, and one that is not strictly positive is
+    // `Unavailable`. The same factors refuse without Pixel Spacing.
+    for (factor, want) in [
+        (f64::NAN, SuvError::Frame),
+        (0.0, SuvError::Unavailable),
+        (-2.0, SuvError::Unavailable),
+    ] {
+        for pixel_spacing in [equal, None] {
+            let refused = select_calibration(CalibrationRequest {
+                pixel_spacing,
+                imager_spacing: equal,
+                estimated_radiographic_magnification_factor: Some(factor),
+                ..empty()
+            });
+            assert!(
+                matches!(refused, Err(error) if error == want),
+                "factor {factor}, pixel spacing {pixel_spacing:?}: {refused:?}"
+            );
+        }
     }
     // A pair that differs in one half is a corrected Pixel Spacing and
     // decides on its own, whatever the factor.
