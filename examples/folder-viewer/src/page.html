@@ -2331,6 +2331,7 @@ async function paintTiles(vp) {
       node.height = 1;
       node.dataset.aspect = "1";
       sizeTile(node);
+      if (lastPointer && lastPointer.tile === node) refreshMag(vp);
       continue;
     }
     try {
@@ -2354,6 +2355,7 @@ async function paintTiles(vp) {
       node.width = 1;
       node.height = 1;
       sizeTile(node);
+      if (lastPointer && lastPointer.tile === node) refreshMag(vp);
     }
   }
 }
@@ -2518,10 +2520,9 @@ function assignEdge(node, hide, value) {
 
 function showFault(vp, message) {
   const dom = vp.dom;
-  if (mag.dataset.cell === String(vp.cell)) {
-    mag.hidden = true;
-    mag.dataset.cell = "";
-  }
+  // A cell showing a fault shows no picture, so no readout or magnifier
+  // stays over it.
+  leavePointerFor(vp);
   dom.fault.hidden = false;
   dom.fault.textContent = message;
   dom.stage.hidden = true;
@@ -2878,15 +2879,21 @@ function onPointerMove(event) {
     drag.x = event.clientX;
     drag.y = event.clientY;
     pointerPlaces = true;
-    layoutViewport(vp);
-    pointerPlaces = false;
+    try {
+      layoutViewport(vp);
+    } finally {
+      pointerPlaces = false;
+    }
     pointReadout(event);
   } else if (mode === "zoom") {
     const factor = Math.exp(-(event.clientY - drag.y) * 0.01);
     drag.y = event.clientY;
     pointerPlaces = true;
-    zoomAt(vp, drag.originX, drag.originY, factor);
-    pointerPlaces = false;
+    try {
+      zoomAt(vp, drag.originX, drag.originY, factor);
+    } finally {
+      pointerPlaces = false;
+    }
     pointReadout(event);
   } else if (mode === "scroll") {
     drag.moved += event.clientY - drag.y;

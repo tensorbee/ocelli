@@ -471,8 +471,9 @@ const config = tseslint.config(
   {
     // F-208's browser checks of the folder viewer, the displayed aspect and
     // the pointer readout. They run under node and hand Playwright callbacks
-    // that read the page's DOM and call two of the page's own top-level
-    // functions by name.
+    // that read the page's DOM and call three of the page's own top-level
+    // functions by name. The readout check wraps `paintSelection` to inject
+    // a throw.
     files: ["examples/folder-viewer/tests/browser/**/*.mjs"],
     languageOptions: {
       globals: {
@@ -483,6 +484,9 @@ const config = tseslint.config(
         document: "readonly",
         imageToClient: "readonly",
         activeViewport: "readonly",
+        paintSelection: "readonly",
+        Event: "readonly",
+        window: "readonly",
       },
     },
   },

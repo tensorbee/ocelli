@@ -251,7 +251,7 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    pointer move. In Four images only the magnifier comes back, because the
    cross is drawn in the single view only. During a pan or zoom drag they
    stay with the pointer. When the image under a still pointer changes, by
-   a key, the wheel or Play, the magnifier shows the new image.
+   a key, the wheel or Play, the magnifier shows the new image, or hides.
 9. Every number on a mark comes from the local process, and the page prints
    its text. Probe asks `POST /value`, and every other mark asks `POST
    /measure`. Length, Angle, Cobb and Bidirectional are in millimetres from

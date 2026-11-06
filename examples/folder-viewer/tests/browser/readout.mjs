@@ -20,6 +20,14 @@
 //   step     ArrowRight
 //   play     Space, about 1 s of Play, Space
 //
+// Two more cases, each on a fresh page:
+//
+//   empty    in Four images with the pointer on tile 4, the scrubber moves
+//            to image 10, so tile 4 has no image. The magnifier must not
+//            keep image 4's pixels.
+//   throw    a pan drag whose last layout throws. Afterwards `=` with the
+//            pointer still must still hide the readout and the magnifier.
+//
 // It runs on the synthetic study, starts the viewer with OCELLI_PORT=0,
 // reads the URL it prints and stops it by its PID, through tools/bench's
 // pinned Playwright. `bin/ocelli.sh gate viewer-browser` runs it after
@@ -106,6 +114,104 @@ export function stepProblems(steps) {
     }
   }
   return problems;
+}
+
+/**
+ * `empty` is `{ name, before, after, magHidden }`, magnifier pixel hashes.
+ * `thrown` is `{ name, threw, before, after }`, readout states.
+ */
+export function faultProblems(empty, thrown) {
+  const problems = [];
+  if (!empty || !thrown) {
+    problems.push("the empty-tile or the thrown-layout case was not observed");
+    return problems;
+  }
+  if (!empty.magHidden && empty.after === empty.before) {
+    problems.push(`${empty.name}: the magnifier kept the pixels of an image the tile no longer shows`);
+  }
+  if (!thrown.threw) {
+    problems.push(`${thrown.name}: the injected throw did not happen, so the case shows nothing`);
+  } else if (thrown.before.readHidden || thrown.before.magHidden) {
+    problems.push(`${thrown.name}: nothing was shown before the change`);
+  } else if (!thrown.after.readHidden || !thrown.after.magHidden) {
+    problems.push(`${thrown.name}: after a throw inside a drag, a zoom left the readout or magnifier showing`);
+  }
+  return problems;
+}
+
+async function openSynthetic(page, url) {
+  await page.goto(url);
+  await page.locator("#source-synthetic").click();
+  await page.waitForFunction(
+    (text) => (document.getElementById("status").textContent || "").startsWith(text),
+    SYNTHETIC_STATUS,
+  );
+  await page.waitForFunction(() => {
+    const stage = document.querySelector('.cell[data-cell="0"] .stage');
+    return stage && !stage.hidden;
+  });
+}
+
+async function emptyTileCase(page, url) {
+  await openSynthetic(page, url);
+  await page.keyboard.press("m");
+  await page.keyboard.press("Shift+G");
+  const tile = page.locator('.cell[data-cell="0"] canvas[data-tile="3"]');
+  await page.waitForFunction(() => {
+    const node = document.querySelector('.cell[data-cell="0"] canvas[data-tile="3"]');
+    return node && node.width > 1;
+  });
+  const box = await tile.boundingBox();
+  const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(point.x + 3, point.y);
+  await page.mouse.move(point.x, point.y);
+  await page.waitForFunction(() => !document.getElementById("mag").hidden);
+  await page.waitForTimeout(300);
+  const before = await magHash(page);
+  await page.evaluate(() => {
+    const scrub = document.getElementById("scrub");
+    scrub.value = "9";
+    scrub.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.waitForTimeout(1200);
+  const after = await magHash(page);
+  const magHidden = await page.evaluate(() => document.getElementById("mag").hidden);
+  return { name: "tile 4 empties in Four images", before, after, magHidden };
+}
+
+async function thrownLayoutCase(page, url) {
+  await openSynthetic(page, url);
+  await page.keyboard.press("c");
+  await page.keyboard.press("m");
+  const start = await centreOf(page, 0);
+  await pointAt(page, start, ["readout", "magnifier"]);
+  await page.evaluate(() => {
+    const original = paintSelection;
+    window.__threw = false;
+    window.paintSelection = function throwing(...args) {
+      if (window.__throwOnce) {
+        window.__throwOnce = false;
+        window.__threw = true;
+        throw new Error("injected by readout.mjs");
+      }
+      return original.apply(this, args);
+    };
+  });
+  await page.mouse.down({ button: "right" });
+  for (let step = 1; step <= 4; step += 1) {
+    if (step === 4) await page.evaluate(() => { window.__throwOnce = true; });
+    await page.mouse.move(start.x + step * 4, start.y + step * 3);
+    await page.waitForTimeout(60);
+  }
+  await page.mouse.up({ button: "right" });
+  const threw = await page.evaluate(() => window.__threw === true);
+  await page.mouse.move(start.x + 20, start.y + 14);
+  await page.waitForTimeout(500);
+  const before = await state(page);
+  await page.keyboard.press("=");
+  await page.waitForTimeout(400);
+  const after = await state(page);
+  return { name: "a zoom after a throw inside a pan drag", threw, before, after };
 }
 
 function magHash(page) {
@@ -257,7 +363,13 @@ export async function observeReadout(url, chromium) {
       await page.locator('#layout-picker [data-columns="2"][data-rows="1"]').focus();
       await page.keyboard.press("Enter");
     }));
-    return { observations, drags, steps, chromium: browser.version() };
+    const fresh = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    fresh.setDefaultTimeout(30000);
+    const empty = await emptyTileCase(fresh, url);
+    const thrownPage = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
+    thrownPage.setDefaultTimeout(30000);
+    const thrown = await thrownLayoutCase(thrownPage, url);
+    return { observations, drags, steps, empty, thrown, chromium: browser.version() };
   } finally {
     await browser.close();
   }
@@ -283,14 +395,16 @@ async function main() {
   for (const step of result.steps) {
     console.log(`${step.name}: magnifier ${step.before} before, ${step.after} after, ${step.fresh} fresh${step.magHidden ? ", hidden" : ""}`);
   }
+  console.log(`${result.empty.name}: magnifier ${result.empty.before} before, ${result.empty.after} after${result.empty.magHidden ? ", hidden" : ", shown"}`);
+  console.log(`${result.thrown.name}: threw ${result.thrown.threw}, before ${JSON.stringify(result.thrown.before.read)}, after hidden ${result.thrown.after.readHidden}/${result.thrown.after.magHidden}`);
   const problems = readoutProblems(result.observations)
-    .concat(dragProblems(result.drags), stepProblems(result.steps));
+    .concat(dragProblems(result.drags), stepProblems(result.steps), faultProblems(result.empty, result.thrown));
   if (problems.length) {
     for (const problem of problems) console.error(problem);
     process.exitCode = 1;
     return;
   }
-  console.log(`all ${result.observations.length} changes hid the readout and a move showed it again, ${result.drags.length} drags kept it, ${result.steps.length} image steps reached the magnifier`);
+  console.log(`all ${result.observations.length} changes hid the readout and a move showed it again, ${result.drags.length} drags kept it, ${result.steps.length} image steps reached the magnifier, an emptied tile and a thrown layout left nothing stale`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
