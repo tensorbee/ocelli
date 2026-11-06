@@ -145,6 +145,10 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   windows hold. Any other narrow window on tier A is still exposed. The choice
   is a story that makes the shader's rescale match `LutChain` on every tier, or
   a recorded divergence with a minimum window width.
+  F-227's fifth review found a second case: where `stored * slope` nearly
+  cancels the intercept, the fused rounding error reaches hundreds of millions
+  of units and flips greys at any window width, in 15,879 of 800,000 adversarial
+  draws. A minimum window width cannot cover that case.
 
 ## What is carried in
 
